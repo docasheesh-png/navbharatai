@@ -49019,3 +49019,42 @@ repo, never a twin) and writes one too. No migration is possible and none is pre
 `npm run build` ok · `npm run test:bundle` within budget · `npm run boot:check` PASS ·
 `npx vitest run` **1,556 files / 21,262 passed / 1 skipped / 0 failed** (15 new), log grepped for
 `FAIL` — none.
+
+### 2026-09-12 — alert flapping: one mail per episode, two at most, the second 48 hours later
+
+The admin forwarded their inbox: `ALERT → Resolved → Warning → ALERT → Resolved` for ONE condition
+inside two hours, with *"yeh alert to user ko bhaga dega"*. They are right, and a monitor nobody reads
+is worse than none — it trains the reader to ignore the one mail that mattered.
+
+**Two independent bugs, compounding.**
+
+1. **Resolving DELETED the state entry, so the cooldown was bypassed by the very thing it existed to
+   survive.** `nextState` was built only from currently-firing alerts, so a metric hovering at its
+   threshold resolved, forgot it had ever fired, and the next crossing hit the `!seen` branch — a brand
+   new alert, announced immediately, with no quiet period at any point. The six-hour cooldown had
+   literally never applied to a flapping alert. Fixed with an EPISODE model: a condition that stops
+   firing enters a cooling period and re-firing inside it is the same episode, silent.
+2. **`SLOW_BUILD_MIN_SAMPLE` was 3.** One slow build among three owns the hour's mean. Raised to
+   `ALERT_MIN_SAMPLE` (10) — the file's own existing constant, not an invented number. The old comment
+   ("latency shows up in fewer builds than a failure rate") is true of a human watching builds and
+   false of a mean.
+
+**The budget is now hard:** two mails per episode maximum, cooldown 6 h → 48 h, and an escalation
+spends the second slot rather than being exempt from the cap.
+
+**Two test premises were reversed on purpose** and say so in the files rather than being quietly
+rewritten: "resolves on the first quiet sweep and forgets it" (that instant forgetting WAS the bug) and
+"the slow-build floor is lower than the rate floor". The admin's exact sequence — fire, dip at 45 min,
+re-fire at 60 min — is now a regression test asserting **zero** mails after the first.
+
+**The sibling, fixed in the same change (rule 3).** The per-user "your site is down" mail had the
+identical root cause: recovery set `alerted = false`, and the next outage then took the
+`!prev.alerted` branch, which never consults the cooldown — so a flapping host mailed its owner on
+every transition. `SUCCESSES_BEFORE_CLEAR = 2` makes a recovery hold for two good probes, symmetric
+with the two bad ones that raise the alarm. A genuine outage after a genuine recovery still alerts
+immediately, which is exactly why the fix is a confirmed recovery and not a longer cooldown.
+
+**Open root cause (rule 6): the 10-minute threshold itself.** Whether 10 min is abnormal for this
+engine needs the real distribution of build durations, which nobody has measured — `maxBuildSeconds`
+defaults to 30 min, so the line may simply sit below normal. Fixing the sample removes the flapping;
+changing the threshold on a guess would replace a noisy alert with a quiet wrong one.

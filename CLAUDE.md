@@ -992,6 +992,39 @@ the code (it is actually read somewhere) on 2026-07-11.
   shown a green "Alerts reach you by app and email" while the provider rejected every send. Fixed the
   same day — the sender's SHAPE is now validated (`senderAddress`, both `a@b.c` and `Name <a@b.c>`
   accepted) and anything else is refused by name. Test-locked in `alertEmail.test.ts`.
+- **🔴 ALERT NOISE — ONE MAIL PER EPISODE, TWO AT MOST, THE SECOND 48 h LATER (admin-mandated
+  2026-09-12).** The admin's inbox showed `ALERT → Resolved → Warning → ALERT → Resolved` for ONE
+  condition inside two hours, and said plainly: *"yeh alert to user ko bhaga dega… ek information ke
+  liye bas 1 mail only. agar jyada jaruri hai, to maximum 2 — woh bhi 48hr baad."* Two independent
+  bugs produced it, and both are fixed in `monitorAlerts.ts` / `metricsAlerts.ts`:
+  **(1) Resolving DELETED the alert's state, so the cooldown was bypassed by the very thing it existed
+  to survive.** A metric hovering at its threshold resolved, forgot it had ever fired, and the next
+  crossing was a BRAND NEW alert that announced itself immediately — two mails per wobble, no quiet
+  period at any point. A condition that stops firing now enters a COOLING period
+  (`MONITOR_ALERT_RESOLVE_AFTER_MINUTES`, default **120** — twice the one-hour metric window, so a
+  wobble inside one window cannot end an episode); re-firing inside it is the SAME episode and says
+  **nothing at all**. `0` is refused and falls back to the default, because zero is precisely the bug.
+  **(2) `SLOW_BUILD_MIN_SAMPLE` was 3.** Three builds is not a sample: with a 30-minute build ceiling
+  ONE slow build among three drags the hour's mean over the 10-minute line by itself, and the next
+  hour drops it back. Raised to `ALERT_MIN_SAMPLE` (**10**) — this file's own existing answer to "how
+  many points before a mean is worth waking someone for", not a new invention.
+  **The budget is now hard:** `MAX_NOTIFICATIONS_PER_EPISODE = 2`, and `MONITOR_ALERT_COOLDOWN_MINUTES`
+  defaults to **48 h** (was 6 h; the ceiling rose 24 h → 7 days so 48 can actually be set). ⚠️ An
+  ESCALATION (warning → critical) now SPENDS the second slot instead of being exempt — "maximum 2" is
+  the instruction, and an exemption is how a cap quietly becomes a suggestion. A condition nobody fixes
+  therefore costs exactly two mails, ever. `MONITOR_ALERT_RESOLVED=off` drops the all-clear mails too.
+  🔎 **THE SIBLING, FIXED IN THE SAME CHANGE (rule 3):** the per-user "your site is down" mail had the
+  IDENTICAL root cause. Recovery set `alerted = false`, and the next outage then took the
+  `!prev.alerted` branch — **which never consults the cooldown** — so a flapping host mailed its owner
+  on every single transition. `SUCCESSES_BEFORE_CLEAR = 2` now makes a recovery hold for two good
+  probes, symmetrically with the two bad ones that raise the alarm. A genuine outage after a genuine
+  recovery still alerts at once, which is why the fix is a confirmed recovery rather than a longer
+  cooldown.
+  ⚠️ **OPEN, AND DELIBERATELY NOT GUESSED: the 10-minute threshold itself.** Whether 10 min is actually
+  abnormal for this engine needs the real distribution of build durations, which nobody has measured
+  (`maxBuildSeconds` alone defaults to 30 min, so it may simply be set below normal). Replacing a noisy
+  alert with a quiet one that is wrong would be worse — so the sample was fixed and the threshold is
+  recorded here as an open question.
 - **Site uptime alerts for connected domains (shipped 2026-09-10, ROADMAP §13 item 1.8):**
   `SITE_UPTIME_SWEEP` (kill switch — **default ON**; `off` stops the 15-minute probe of every connected
   custom domain), `SITE_UPTIME_COOLDOWN_HOURS` (default 6, clamped 1–72 — one "down" message per outage,

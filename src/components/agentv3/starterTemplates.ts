@@ -90,6 +90,17 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
     prompt: 'Build a polished login and signup page: email and password fields with inline validation, a show/hide password toggle, a "remember me" option, social-login buttons, and a smooth switch between Login and Sign up. Front-end UI with light/dark mode.',
   },
 
+  // INDIA-FIRST (2026-09-12). These two are the MOAT on the FREE tier: a GST bill with the CGST/SGST
+  // split a shop actually has to print, and a mock test with sections and negative marking. Both are
+  // one screen over plain React state, which is why the weak tier ships them whole.
+  {
+    id: 'gst-bill', label: 'GST bill', icon: '🏪', category: 'Business', tier: 'simple',
+    prompt: 'Build a GST billing app for a shop: keep a list of items each with a price and a GST slab (0/5/12/18/28%), add items to a bill with quantities, and show the bill with taxable value, the CGST and SGST split per slab, and the final total in rupees. Auto-increment the bill number, allow a customer name, support printing the bill, and save the item list in the browser. Mobile-first with large tappable item buttons and light/dark mode.',
+  },
+  {
+    id: 'exam-prep', label: 'Mock test', icon: '✍️', category: 'Personal', tier: 'simple',
+    prompt: 'Build a mock test app for Indian competitive exam practice: a sectioned paper (General Knowledge, Reasoning, Quantitative Aptitude, English), one timer for the whole paper, four options per question, mark-for-review, a question palette to jump between questions, and negative marking of 0.25 for every wrong answer. Show a result screen with the section-wise score and a review of every question, and keep past attempts in the browser. Mobile-first, light/dark mode.',
+  },
   // ══════════════════════════════════════════════════════════════════════════════════════════════════
   // PRO — ambitious, multi-part apps (roles, backends, realtime, payments). Great on a paid tier; they
   // flail on the weak tier. Shown fully to unlocked users; a curated `showcase` few appear LOCKED to free
@@ -163,6 +174,16 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
   {
     id: 'expense', label: 'Expenses', icon: '💸', category: 'Personal', tier: 'pro',
     prompt: 'Build a personal finance app: add income and expenses by category, monthly budgets with progress, charts of spending trends, and a dashboard with balance and top categories. Clean, reassuring UI.',
+  },
+  // INDIA-FIRST, pro tier: both are several LINKED records (flats to dues, students to batches to
+  // fees), which is exactly the shape a weak model half-builds.
+  {
+    id: 'society', label: 'Society', icon: '🏢', category: 'Business', tier: 'pro', showcase: true,
+    prompt: 'Build a housing society and RWA management app: flats with owner name, phone and block; monthly maintenance dues per flat that can be raised for the whole society in one action and then marked paid; a notice board; and resident complaints with open, in-progress and closed status. A dashboard showing total flats, amount collected this month, amount pending and open complaints. Rupee amounts throughout, a mobile-friendly sidebar layout, and light/dark mode.',
+  },
+  {
+    id: 'coaching', label: 'Coaching', icon: '📚', category: 'Business', tier: 'pro',
+    prompt: 'Build a coaching class management app: batches with subject, timing and monthly fee; students assigned to a batch with a phone number; daily attendance taken batch by batch with an attendance percentage per student; and monthly fees raised for every student at their own batch rate, marked paid or pending. A dashboard showing students, batches, fees collected this month, fees pending and any student below 75% attendance. Rupee amounts throughout, a mobile-friendly sidebar layout, and light/dark mode.',
   },
 ];
 

@@ -17,6 +17,7 @@ import { goldenBaseFiles } from './base';
 import { todoAppTsx, calculatorAppTsx, stopwatchAppTsx, pomodoroAppTsx, tipSplitAppTsx } from './appsA';
 import { unitConverterAppTsx, qrMakerAppTsx, quickNotesAppTsx, passwordGenAppTsx, loginPageAppTsx } from './appsB';
 import { memoryAppTsx, puzzleAppTsx, arcadeAppTsx } from './games';
+import { gstBillAppTsx, examPrepAppTsx, societyAppTsx, coachingAppTsx } from './indiaApps';
 import { proUiTsx, proStoreTs } from './proShell';
 import { saasDashboardAppTsx, crmAppTsx, storeAppTsx } from './proApps';
 import { restaurantAppTsx, socialFeedAppTsx } from './proAppsB';
@@ -63,6 +64,8 @@ export const GOLDEN_SCAFFOLDS: readonly GoldenScaffold[] = [
   { id: 'login-page', label: 'Login page', title: 'Login', appTsx: loginPageAppTsx, tier: 'simple' },
   { id: 'memory', label: 'Memory match', title: 'Memory Match', appTsx: memoryAppTsx, tier: 'simple' },
   { id: 'puzzle', label: 'Merge puzzle', title: 'Merge Puzzle', appTsx: puzzleAppTsx, tier: 'simple' },
+  { id: 'gst-bill', label: 'GST bill maker', title: 'GST Bill', appTsx: gstBillAppTsx, tier: 'simple' },
+  { id: 'exam-prep', label: 'Exam mock test', title: 'Mock Test', appTsx: examPrepAppTsx, tier: 'simple' },
   // ── PRO tier: a compile-proven architecture the builder extends ──
   // The arcade game is the one PRO scaffold that is a finished app rather than an architecture: a game
   // loop is not furniture the builder decorates, it is the thing that must already be correct.
@@ -82,6 +85,8 @@ export const GOLDEN_SCAFFOLDS: readonly GoldenScaffold[] = [
   { id: 'community', label: 'Community forum', title: 'Community Forum', appTsx: communityAppTsx, tier: 'pro' },
   { id: 'events', label: 'Event platform', title: 'Events', appTsx: eventsAppTsx, tier: 'pro' },
   { id: 'lms', label: 'Learning platform', title: 'Learning Platform', appTsx: lmsAppTsx, tier: 'pro' },
+  { id: 'society', label: 'Society / RWA', title: 'Society', appTsx: societyAppTsx, tier: 'pro' },
+  { id: 'coaching', label: 'Coaching class', title: 'Coaching', appTsx: coachingAppTsx, tier: 'pro' },
 ];
 
 /**

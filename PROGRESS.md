@@ -48690,3 +48690,92 @@ PASS · `npx vitest run` **1,556 files / 21,247 passed / 1 skipped / 0 failed**,
 The designated branch's remote tip was `9309413` (the Play-billing work), squash-merged to `main` long
 ago — all four of its files are on `main` today, and the branch was otherwise ~46k lines behind. It was
 subsumed with a `-s ours` merge rather than force-discarded, so the history survives.
+
+---
+
+## 2026-09-12 — India-first starters: the part of the library nobody else carries
+
+**What shipped.** Four starter buttons and four compile-proven golden scaffolds, on the branch
+`feat/india-starters`:
+
+| Button | Tier | What it actually is |
+|---|---|---|
+| 🏪 **GST bill** | simple (FREE) | shop billing with the **CGST/SGST split per slab** (0/5/12/18/28%), the slab on the ITEM, auto-incrementing bill number, print |
+| ✍️ **Mock test** | simple (FREE) | sectioned competitive-exam paper, one clock for the whole paper, question palette, mark-for-review, **negative marking 0.25** |
+| 🏢 **Society** | pro (showcase) | flats → monthly maintenance dues raised for the whole society in ONE action, notice board, complaints with status |
+| 📚 **Coaching** | pro | batches → students → daily attendance (% per student) → monthly fees **at each student's own batch rate** |
+
+**Why these and not four more generic templates.** Every other starter in the library is a shape a
+competitor also ships — a to-do list, a CRM, a store. These four are the only ones that are obviously
+Indian, and each is the app its user currently keeps in a paper notebook. A kirana owner does not want
+an "invoice"; they need a bill with CGST and SGST printed separately, at the slab that belongs to that
+item, because rice and a cold drink are not taxed alike.
+
+### The tier split is the decision, not a default
+
+**Two of the four are FREE on purpose.** The moat is worth nothing if a free user only ever sees it
+behind a lock, so the GST biller and the mock test were designed as the shape the weak tier ships whole:
+one screen, plain React state, localStorage, no backend. The society and coaching apps are pro because
+they are several LINKED records — flats→dues, students→batches→fees — which is precisely where a weak
+model produces half an app. That promise is now pinned by a test rather than a comment:
+`tests/indiaFirstStarters.test.ts` asserts that `partitionStarters(false)` offers exactly `gst-bill` and
+`exam-prep`. **Verified it bites** — flipping `gst-bill` to `pro` fails with
+`expected [ 'exam-prep' ] to deeply equal [ 'exam-prep', 'gst-bill' ]`.
+
+### What the new test pins, and why each line is there
+
+Every assertion is a property a later "simplification" could remove with nothing else failing:
+
+- **CGST *and* SGST both present.** A single merged tax line still produces a working app and a useless
+  bill.
+- **The slab lives on the item** (`gst:` per item, all five slabs present). One app-wide rate is the
+  usual shortcut and it is simply wrong.
+- **`₹` and `en-IN` formatting.** An app printing `$` for an Indian shop is a wrong app.
+- **Negative marking is really applied** (`correct - wrong * NEGATIVE`). Without it a practice score is
+  not comparable to the real exam, which is the only thing the user is practising for.
+- **`clearInterval` present.** A timer left running after submission keeps waking the tab.
+- **Both pro apps bill a whole month in one action AND skip anyone already billed.** Billing one by one
+  is the friction that sends a treasurer back to paper; billing twice is the bug that ends their trust.
+  Both are one line of code each and both are now pinned.
+- **Coaching bills at `b ? b.fee : 0`** — the student's OWN batch rate, so two batches at different fees
+  bill correctly and an already-issued receipt is not silently rewritten when a batch fee changes.
+
+All 12 exam questions were worked through by hand before shipping; a practice app with a wrong answer
+key teaches the wrong answer. (Article 17, Odisha, the Speaker, forests, 38, XPSE, his sister, 24 years,
+30, 7.5 s, Occurrence, Forsake.)
+
+### A compliance decision, recorded because the safe path is not the obvious one
+
+**A clinic / pharmacy template was on the shortlist and was deliberately NOT built.** It is a strong
+India-first candidate and purely CRUD — patients, appointments, stock — with no medical advice in it. But
+this developer account has already taken one Play policy strike on medical features, and `CLAUDE.md` is
+explicit that `MEDICAL_PROFESSIONAL_IDS` may not be touched until the organization account is live AND
+the Health-apps declaration is filed. Adding a health-shaped surface to the Android app before that is a
+risk measured in the whole account, against a gain of one template. The remaining candidates (courier,
+wedding RSVP, NGO, school ERP) are unblocked and cost nothing to defer, so the clinic template waits for
+the org account rather than being argued into safety.
+
+### Honest limit, stated plainly
+
+When I proposed this work I said each template would be tested "by running a real build". **I cannot run
+a production v5 build from this session, and I did not.** The golden scaffold is the substitute and for
+this purpose it is the stronger guarantee: the app a user receives on tapping the chip is the exact file
+set CI has proven parses under esbuild, compiles under the in-browser Babel preview, ships the complete
+runnable file set, and mounts. What it does NOT prove is how the builder then CUSTOMISES a pro scaffold
+on a real prompt — that still wants a real build, and it is the first thing to check on the next one.
+
+### Also in this change
+
+- `AppKnowledgeBase.ts` updated in the same commit, per the standing rule — the new buttons are named in
+  the template entry, and the keyword list now carries the words a user actually types (`kirana`,
+  `dukaan ka app`, `cgst sgst`, `sarkari exam`, `negative marking`, `rwa`, `flat maintenance`, `hajiri`,
+  `tuition app`, `khel banao`). A button nobody can find by asking for it may as well not exist.
+
+### Still open, deliberately not done here
+
+- **The picker is now 31 buttons.** That is approaching a wall even as small pills. Two weak performers
+  ("Converter", "Password") are the obvious trim, and the admin did delegate the button set. I have not
+  removed them in this PR: deleting user-facing capability deserves its own explicit decision rather
+  than riding along inside an additive change.
+- Output formats (.apk, desktop, extension, MCP) still sit in the picker; they belong on the publish
+  screen, which is where a user is when they want them.

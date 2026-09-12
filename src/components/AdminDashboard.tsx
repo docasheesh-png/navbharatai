@@ -154,7 +154,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [costSummary, setCostSummary] = useState<CostLadderSummary | null>(null);
   const [costLoading, setCostLoading] = useState(false);
   // T1-admin-dashboard — build-failure analytics (overall failure rate + spike dates).
-  const [failureReport, setFailureReport] = useState<{ overall: { totalBuilds: number; failedBuilds: number; failureRate: number }; spikeDates: string[] } | null>(null);
+  const [failureReport, setFailureReport] = useState<{
+    overall: { totalBuilds: number; failedBuilds: number; failureRate: number };
+    spikeDates: string[];
+    /** WHY they failed, ranked by what each cause cost US. Null when the ledger could not be read. */
+    causes?: {
+      builds: number; usd: number; headline: string;
+      causes: Array<{ category: string; builds: number; usd: number; shareOfBuilds: number; avgSeconds: number }>;
+      frameworks: Array<{ framework: string; builds: number }>;
+    } | null;
+    /** False means the read FAILED — not that nothing went wrong. */
+    causesComplete?: boolean;
+  } | null>(null);
 
   // P-MON.6 — FinOps recommendations (real, from /api/admin/finops).
   const [finops, setFinops] = useState<any>(null);
@@ -1843,6 +1854,41 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         {failureReport.spikeDates.length > 0 && (
                           <div className="text-[10px] text-red-400 font-bold mt-2">
                             ⚠️ Failure-rate spike on: {failureReport.spikeDates.join(', ')}
+                          </div>
+                        )}
+                        {/*
+                          WHY they failed. A rate is a number nobody can act on; a ranked cause with
+                          rupees against it is a morning's work. The money is OUR OWN spend on builds
+                          that produced nothing — a failed build is never charged to the user — so this
+                          card is admin-only, like every other cost figure on this screen.
+                        */}
+                        {failureReport.causes && failureReport.causes.causes.length > 0 && (
+                          <div className="mt-3 border-t border-white/5 pt-3">
+                            <div className="text-[9px] font-black uppercase tracking-widest text-[#8b949e]">Why they failed — ranked by what it cost us</div>
+                            <div className="text-[10px] text-[#8b949e] mt-1 leading-relaxed">{failureReport.causes.headline}</div>
+                            <div className="mt-2 space-y-1">
+                              {failureReport.causes.causes.slice(0, 6).map((c) => (
+                                <div key={c.category} className="flex items-center justify-between text-[10px]">
+                                  <span className={c.category === 'unknown' ? 'text-amber-400 font-bold' : 'text-[#c9d1d9]'}>
+                                    {c.category}
+                                  </span>
+                                  <span className="text-[#8b949e]">
+                                    {c.builds} build{c.builds === 1 ? '' : 's'} · {(c.shareOfBuilds * 100).toFixed(0)}% · ${c.usd.toFixed(4)} · {c.avgSeconds}s avg
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                            {failureReport.causes.frameworks.length > 0 && (
+                              <div className="text-[10px] text-[#8b949e] mt-2">
+                                Mostly in: {failureReport.causes.frameworks.slice(0, 4).map((f) => `${f.framework} (${f.builds})`).join(', ')}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {/* An unreadable ledger is NOT a clean week, and it says so rather than showing nothing. */}
+                        {failureReport.causesComplete === false && (
+                          <div className="text-[10px] text-amber-400 mt-2">
+                            The cause ledger could not be read, so the reasons below are missing — this is not a clean record.
                           </div>
                         )}
                       </div>

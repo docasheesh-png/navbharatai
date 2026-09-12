@@ -50061,3 +50061,49 @@ composite index this project does not create. `firestoreIndexSafe` fails CI on e
 because such a query does not error in a test; it errors in production on the day somebody opens the
 screen. It now scans the most recent records and filters in memory, and returns `complete` so the
 caller knows it got "the absorbed days among the last N", not "every absorbed day".
+## 2026-09-12 — "Why do builds fail?" — the half of the number the admin could act on
+
+The dashboard could already say **29% of builds failed**, flag a bad day, and show the money. It could
+not say **why**, or what each reason cost. That is the difference between a number and a decision:
+*"29% fail"* is something to worry about; *"dependency resolution: 41 builds, $2.10 of our own money"*
+is a Monday morning's work.
+
+The pieces were all there and none of them met. `BuildRetrospectiveEngine` already classifies a failed
+build from its real error text and is honest when it cannot (`unknown`, never a confident wrong label).
+`buildFailureAnalytics` already computes the daily rate and spikes. But the retrospective was written
+into **the workspace's own memory and nowhere else** — so the platform learned nothing across builds,
+and `relevantWarnings(history, …)`, which takes a history, had no history to be given.
+
+### Where it records, and why not where the retrospective already runs
+
+At the **settle**, not at the retrospective. The retrospective runs before the provider ledger is
+reconciled, so it knows the cause and has no idea what the build **cost** — and a cause with no money
+against it cannot be ranked against the others, which is the whole point. At the settle both halves
+exist, and the cost comes from `realProviderCostUsd(providerLedger.entries(), realCostRemainder)` — the
+*same call that decides the bill*, so the ledger and the invoice can never price one build differently.
+
+🔒 **The rupees are OURS.** A failed build is never charged to the user and this does not touch that;
+what is recorded is what NavBharatAI itself spent producing nothing, plus the VM. Admin-only, like every
+other cost figure on that screen.
+
+### The one design decision worth arguing about
+
+**`unknown` is a category, not a gap to tidy away** — and when it leads the ranking the headline says so
+*in those words*, because that is a statement about our classifier rather than about the builds. A
+neutral headline over an unclassified majority would have every reader treat the second row as the
+biggest real problem, when the truth is that we cannot yet name the biggest one. If `unknown` turns out
+to lead, that is the finding: the classifier needs a pattern for whatever those errors are.
+
+### Bounded by construction
+
+One document per calendar day, folded in a transaction (several builds finish at once, and a
+read-modify-write without one would drop exactly the counts this exists to measure). Framework names are
+free text from a build, so they are normalised into safe Firestore keys and **capped at 40** — past the
+cap they land in `other`, and a test asserts no build is lost in the process. Retention 400 days, so
+year-over-year comparison survives. A read failure returns `complete: false` and the card says the
+reasons are missing — *"this is not a clean record"* — rather than rendering an empty, reassuring space.
+
+21 tests, including that the ranking is by money with count as the tie-break, that six decimals survive
+(a build can genuinely cost a fraction of a cent, and rounding those to zero would make the
+cheapest-but-most-frequent failure look free), and that the admin can actually SEE it — a measurement
+nobody can read is not a measurement.

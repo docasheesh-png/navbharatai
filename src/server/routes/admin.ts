@@ -32,6 +32,7 @@ import { usdInrRate } from '../lib/UsdInrRate';
 import { agentV3CostTelemetry, buildUsageReport } from '../AgentV3/AgentV3CostTelemetry';
 import { assistantSpendStore } from '../lib/AssistantSpendStore';
 import { summarizeBuildFailures } from '../AgentV3/buildFailureAnalytics';
+import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
 import { listAdminBuildReports, getAdminBuildReport, markAdminBuildReport, deleteAdminBuildReport, deleteAllAdminBuildReports } from '../AgentV3/AdminBuildReportStore';
 import { listAllDiagnostics, listBuildFacts, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { resolveUserIdentities, identityFrom, identityLabel } from '../lib/adminUserLookup';
@@ -672,7 +673,21 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     try {
       const days = Math.min(Math.max(parseInt(String(req.query.days ?? '30'), 10) || 30, 1), 365);
       const history = await agentV3CostTelemetry.list(days);
-      res.json(summarizeBuildFailures(history));
+      /**
+       * THE RATE, AND NOW THE REASON. `summarizeBuildFailures` answers "how many failed and on which
+       * days"; the ledger answers "why, and what did it cost us" — which is the half an admin can
+       * actually act on. "29% fail" is a number nobody can do anything with; "dependency resolution:
+       * 41 builds, $2.10 of our own money" is a morning's work.
+       *
+       * 🔒 `causesComplete: false` means the read failed, NOT that nothing went wrong. A Firestore
+       * hiccup must read as "we could not tell you" rather than as a perfect week.
+       */
+      const causes = await failureLedgerStore.ranking(days).catch(() => null);
+      res.json({
+        ...summarizeBuildFailures(history),
+        causes: causes?.ranking ?? null,
+        causesComplete: causes?.complete === true,
+      });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to build AgentV3 failure analytics.' });
     }

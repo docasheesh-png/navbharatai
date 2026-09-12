@@ -225,7 +225,8 @@ import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxChec
 import { designHealDecision, designHealGuardNote } from '../AgentV3/designHealGuard';
 import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findCircularDependencies, findUnusedDependencies, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
 import { detectBackendPresence } from '../AgentV3/BackendPresence';
-import { planDeployment, deployDecision } from '../AgentV3/deployPlan';
+import { planDeployment, deployDecision, choosePublishRoute } from '../AgentV3/deployPlan';
+import { recordHostedDeployment } from '../AgentV3/hostedDeploymentRecord';
 import { analyzeApiWiring, buildEnvForSplit, buildEnvForWhole, mergeEnvFile } from '../AgentV3/apiWiring';
 import { repoAvailableForDeploy, resolveDeployRepo, ownRepoMemoryPatch, renameStorageRepoPatch } from '../AgentV3/deployRepoMemory';
 import { githubGateVerdict, githubGateMessage, githubGateCode, GITHUB_GATE_CODE } from '../../lib/publishGithubGate';
@@ -4545,6 +4546,11 @@ async function noteBuildOutcome(
         res.status(status).json({ ok: false, reason: result.reason, error: result.message });
         return;
       }
+      // A hosted app IS a published app — recorded so it appears in "Your published apps" and, above
+      // all, so "Take offline" has a row to act on. See hostedDeploymentRecord.ts.
+      await recordHostedDeployment({
+        workspaceId, userId, url: result.url, fileCount: Object.keys(files).length,
+      });
       res.json({
         ok: true, url: result.url, service: result.service, ready: result.ready,
         ...(result.envNote ? { envNote: result.envNote } : {}),
@@ -7944,6 +7950,116 @@ async function noteBuildOutcome(
         }
         if (!plan.staticHostingSufficient) {
           /**
+           * ONE BUTTON (ROADMAP §11 slice 5 / §13 item 2.4).
+           *
+           * 🔴 WHAT THIS REPLACES, counted in the user's own steps. An app with a server was refused
+           * here and invited to: put the code in GitHub, open Render, make an account, generate an
+           * API key, paste it back, press "Deploy backend". Five steps through two other websites, to
+           * do the thing they pressed one button for. When NavBharat Cloud can genuinely run this app
+           * right now, publish simply runs it — and the Render/BYO path below stays exactly as it is
+           * for everyone it cannot.
+           *
+           * 🔒 THE ADMIN CHECK USES THE VERIFIED IDENTITY, NEVER `req.body.email`. This handler takes
+           * its user from the body, which is fine for the feature gate it was written for and is NOT
+           * fine here: hosting is admin-only until metering ships, so a claimed email deciding it
+           * would be a one-line bypass of that gate. Resolved from the token, and a resolution that
+           * fails means NOT an admin — the safe direction, and the same fail-closed rule the
+           * diagnostics report uses.
+           *
+           * 🔒 IT COSTS AN ORDINARY PUBLISH NOTHING. Everything here is inside the branch an app only
+           * reaches when static hosting is genuinely insufficient — a normal website never resolves an
+           * identity, never asks about hosting and never touches Google.
+           */
+          /**
+           * ONE READ, TWO PATHS. The workspace's durable record names the app (for the hosted
+           * service) and its repository (for the split-backend lookup below), so it is read here,
+           * once, rather than by each branch — the same "read it once" invariant `deployFlowAudit`
+           * and `publishSeedWiring` already pin for the files and for this record.
+           */
+          const durableRepoRec = await getConversationStore().get(workspaceId).catch(() => null);
+          let containerHostingAvailable = false;
+          try {
+            // `verifyFirebaseIdentity` and NOT `resolveReadIdentity`: the latter falls back to the
+            // claimed body identity when there is no token, which is right for a feature gate and
+            // wrong for an admin one. No token ⇒ null ⇒ not an admin.
+            const identity = await verifyFirebaseIdentity(req).catch(() => null);
+            containerHostingAvailable = hostingAvailability({ isAdmin: isReportAdmin(identity?.email ?? null) }).available;
+          } catch { /* unresolvable ⇒ not available ⇒ today's Render path, unchanged */ }
+
+          if (choosePublishRoute(plan, { containerHostingAvailable }) === 'container') {
+            /**
+             * 🔒 THIS BRANCH ALWAYS RESPONDS AND ALWAYS RETURNS, and that is load-bearing. The whole
+             * planner sits inside a `catch` that deliberately falls through to the ordinary static
+             * publish — the right behaviour for a classifier that failed, and the WRONG behaviour
+             * here: falling through would upload a Node server to a CDN and report success, which is
+             * the precise bug (`mitrify.com`, 2026-08-23) the planner was written to end.
+             */
+            try {
+              /**
+               * 🔒 `src` OR AN HONEST REFUSAL — never a re-read, and never an empty archive. The files
+               * were already loaded a few lines above (that load is what produced this plan), so a
+               * second read would double the cost of every hosted publish for no new information.
+               * And passing `{}` instead would reach `hostAppOnNavBharatCloud`'s "there are no app
+               * files yet — build your app first", which is the WRONG reason: the app exists, we just
+               * could not read it.
+               */
+              if (!src) {
+                res.status(503).json({ error: 'Your app\u2019s files could not be read just now, so nothing was published. Please try again in a moment.', code: 'needs-server-hosting', shape: plan.shape });
+                return;
+              }
+              const hostFiles = src;
+              const vaultForHost = userId ? await loadUserVaultSecrets(userId, workspaceId).catch(() => null) : null;
+              const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+              const hostToken = await auth.getAccessToken().catch(() => null);
+              if (!hostToken) {
+                res.status(503).json({ error: 'Hosting could not authenticate with Google Cloud just now. Nothing was changed.', code: 'needs-server-hosting', shape: plan.shape });
+                return;
+              }
+              const hosted = await hostAppOnNavBharatCloud({
+                workspaceId,
+                appName: durableRepoRec?.appName || durableRepoRec?.title || null,
+                files: hostFiles,
+                vaultSecrets: vaultForHost,
+                token: String(hostToken),
+              });
+              if (!hosted.ok) {
+                // The provider's own words stay ADMIN-side (the white-label law); the user gets ours.
+                if (hosted.detail) console.error(`[publish→host] ${workspaceId} ${hosted.reason}: ${hosted.detail}`);
+                const status = hosted.reason === 'unavailable' ? 503
+                  : hosted.reason === 'no-source' || hosted.reason === 'unpackable' ? 422
+                  : 502;
+                res.status(status).json({ error: hosted.message, code: 'needs-server-hosting', shape: plan.shape });
+                return;
+              }
+              await recordHostedDeployment({
+                workspaceId, userId, url: hosted.url, fileCount: Object.keys(hostFiles).length,
+              });
+              /**
+               * `ready` is Cloud Run's own word for "a revision is serving", never inferred from a
+               * 200 — so a URL that exists but is not answering yet is reported as exactly that
+               * rather than as a finished publish.
+               */
+              res.json({
+                ok: true,
+                url: hosted.url,
+                message: hosted.ready
+                  ? 'Your app is live — website and server together, hosted on NavBharatAI.'
+                  : 'Your app was deployed and its address is ready; it may take another moment to answer its first request.',
+                ...(hosted.envNote ? { warning: hosted.envNote } : {}),
+                ...(firstPublish ? { firstPublish: true } : {}),
+              });
+              void (async () => { await noteBuildOutcome(workspaceId, { invested: true }, await outcomeIdentity(req)); })();
+              return;
+            } catch (e) {
+              res.status(502).json({
+                error: `Hosting failed: ${e instanceof Error ? e.message : String(e)}`,
+                code: 'needs-server-hosting',
+                shape: plan.shape,
+              });
+              return;
+            }
+          }
+          /**
            * Resolve what we can ACTUALLY do about the backend — the user's own Render key first, the
            * server's only as a fallback, exactly as the deploy-backend route does. Resolved here and
            * passed in, so `deployDecision` stays pure and a second backend host later changes only
@@ -7979,7 +8095,6 @@ async function noteBuildOutcome(
            * then publish". The repository is what the host matches on; it comes from the workspace's
            * durable record (deployRepoMemory.ts), with the repo name as the name fallback.
            */
-          const durableRepoRec = await getConversationStore().get(workspaceId).catch(() => null);
           let wiredToBackend = false;
           if (wiring?.strategy === 'split' && key) {
             const splitRepo = resolveDeployRepo(undefined, durableRepoRec);
@@ -8016,7 +8131,7 @@ async function noteBuildOutcome(
            * The workspace's OWN durable record is consulted too; see deployRepoMemory.ts for why an
            * empty client claim never overrides a durable yes.
            */
-          // `durableRepoRec` was read above, before the split lookup — one read serves both.
+          // `durableRepoRec` was read at the top of this branch — one read serves every path in it.
           const hasRepo = repoAvailableForDeploy(
             { hasRepo: typeof req.body?.hasRepo === 'boolean' ? req.body.hasRepo : false },
             durableRepoRec,

@@ -442,9 +442,11 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     //
     // ⚠️ THE COMMENT ABOVE IS TRUE OF THE ORDINARY MESSAGE AND FALSE OF THE GROUNDED ONE, and the
     // difference is the whole reason for the status below. This await sits BEFORE the model is allowed
-    // to speak: a search bounded at 6 s followed by a page read bounded at 2.5 s, i.e. up to eight and
-    // a half seconds in which the user sees NOTHING. The grounding itself is right — stale answers are
-    // worse than slow ones — so what is removed here is the silence, not the lookup.
+    // to speak: a search bounded at 6 s followed by a page read bounded at 4 s, i.e. up to ten seconds
+    // in which the user sees NOTHING. The grounding itself is right — stale answers are worse than slow
+    // ones, and the admin made that the standing rule for chat on 2026-09-12 — so what is removed here
+    // is the silence, not the lookup. (The page budget was briefly 2.5 s; reverting it is what the rule
+    // required, and the two pages now read concurrently cost no extra wall-clock.)
     //
     // The stream is opened FIRST and says what is happening, so the first thing on screen arrives in a
     // fraction of a second. `s` is a status field the answer never contains; a client that does not

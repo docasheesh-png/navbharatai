@@ -144,7 +144,6 @@ export function useSessionManager(deps: SessionManagerDeps) {
     }
     
     const targetAgent = targetSession.agent || 'navbharatai';
-    const isVishwakarma = targetAgent.startsWith('vishwakarma');
     
     // Build combined list of old messages to collapse (dedup by id + sort by time)
     const uniqueHistory = dedupAndSortMessages([...asMessageArray(targetSession.restoredMessages), ...asMessageArray(targetSession.messages)]);
@@ -161,12 +160,12 @@ export function useSessionManager(deps: SessionManagerDeps) {
       text: `${greetingText}\n\n*Previous workspace context has been successfully loaded. We are continuing our dynamic session with total context memory.*`,
       sender: 'ai',
       timestamp: new Date().toISOString(),
-      modelUsed: isVishwakarma ? targetAgent.replace('_', ' ').toUpperCase() : 'navBharatAI Cognitive Layer'
+      modelUsed: 'navBharatAI Cognitive Layer'
     };
     
     const updatedSession: ChatSession = {
       ...targetSession,
-      currentAgent: isVishwakarma ? targetAgent : 'navbharatai',
+      currentAgent: 'navbharatai',
       agent: targetAgent,
       messages: [continuationGreeting],
       restoredMessages: uniqueHistory,
@@ -188,8 +187,7 @@ export function useSessionManager(deps: SessionManagerDeps) {
     
     // Detect target tab — use saved tab field first, then broad agent/mode detection
     const savedTab = (targetSession as any).meta?.tab as ViewType | undefined;
-    const isVishwakarmaAgent = targetAgent.startsWith('vishwakarma');
-    const { isProSession, isAscSession, isSdaSession, targetTab } = resolveSessionSurface(targetAgent, savedTab);
+    const { isProSession, isSdaSession, targetTab } = resolveSessionSurface(targetAgent, savedTab);
 
     // Show the last 40 messages from previous conversation so user can scroll up and see context,
     // then append the continuation greeting at the bottom.
@@ -223,9 +221,10 @@ export function useSessionManager(deps: SessionManagerDeps) {
     // Navigate to the correct chat tab — never open preview
     toggleTab(targetTab);
 
-    // Restore activeAgent to match the session
-    if (isVishwakarmaAgent || isAscSession) setActiveAgent(targetAgent);
-    else if (isProSession) setActiveAgent('navbharatai-pro');
+    // Restore activeAgent to match the session. A LEGACY session stored against the removed
+    // Vishwakarma agent resolves to a Pro session (see resolveSessionSurface), so it opens as
+    // NavBharatAI Pro rather than re-arming an agent id nothing answers any more.
+    if (isProSession) setActiveAgent('navbharatai-pro');
     else setActiveAgent('navbharatai');
 
     addLog(`UCI resumed: ${uciToFind}`, 'info');

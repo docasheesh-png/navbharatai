@@ -3,24 +3,21 @@ import axios from 'axios';
 // payment_transactions / promo_redemptions, all server-only under navbharat-prod's rules.
 import { doc, getDoc, updateDoc, runTransaction, getServerDb as getDb } from './serverDb';
 import { getSecretValue } from './secrets';
-import { TOKENS_PER_RUPEE, VISHWAKARMA_PASS_PRICE_INR } from '../../lib/walletPricing';
+import { TOKENS_PER_RUPEE } from '../../lib/walletPricing';
 import { professionalPassStore } from '../professionals/ProfessionalPassStore';
 import {
   professionalPassPriceInr, passEntitlementForPayment, MAX_PASS_PERIODS,
 } from '../professionals/professionalPaid';
 
-// SECURITY (audit C4 — CRITICAL, financial): the vishwakarma order's paid amount is
-// `tokenAmount₹ + (buyPass ? pass : 0)` (client: createVishwakarmaOrder in App.tsx). The credit path
-// used to mint `client tokenAmount × 100` tokens — a value NEVER bound to what was actually paid — so
-// a `{amount: 1, tokenAmount: 1_000_000}` order paid ₹1 and minted 100M tokens. We now DERIVE the
-// creditable tokens from the VERIFIED paid amount instead: tokens = (paid − pass) × TOKENS_PER_RUPEE.
-// (The standard, non-vishwakarma path already binds to paid ₹ via balanceAdded.) Pass price + rate must
-// match the client's createVishwakarmaOrder; change both together if pricing ever changes.
-// RE-EXPORTED, NOT REDECLARED (2026-09-10). These two numbers are also printed on purchase screens,
-// and keeping a server copy is what let the pass price drift to ₹50 in the chooser modal while this
-// file charged ₹100. One home: src/lib/walletPricing.ts. The names here are unchanged, so every
-// existing importer is unaffected.
-export const VISHWAKARMA_PASS_PRICE_RUPEES = VISHWAKARMA_PASS_PRICE_INR;
+// SECURITY (audit C4 — CRITICAL, financial) — WHY THE CREDIT IS DERIVED FROM THE PAID AMOUNT.
+// The credit path once minted `client tokenAmount × 100` tokens, a value never bound to what was
+// actually paid, so a `{amount: 1, tokenAmount: 1_000_000}` order paid ₹1 and minted 100M tokens.
+// Every credit now derives from the VERIFIED paid amount. That invariant OUTLIVES the Vishwakarma
+// entry pass it was written for (deleted 2026-09-12) and is the reason the one remaining credit path
+// reads `balanceAdded` — the net the server itself computed — and never a client-supplied token count.
+//
+// RE-EXPORTED, NOT REDECLARED (2026-09-10): the ₹→token rate is also printed on purchase screens, and
+// a server copy is what let a price drift between them. One home: src/lib/walletPricing.ts.
 export { TOKENS_PER_RUPEE };
 
 /**
@@ -73,20 +70,17 @@ export function inrToDebitTokens(inr: number): number {
   return Math.round(inr * TOKENS_PER_RUPEE * 1e6) / 1e6; // exact to a millionth of a token
 }
 
-/** Tokens a vishwakarma order may credit, derived ONLY from the amount actually paid. Pure + tested. */
-export function creditableVishwakarmaTokens(amountPaidRupees: unknown, buyPass: boolean): number {
-  const paid = Number(amountPaidRupees);
+/** Tokens a purchase credits, derived ONLY from the amount actually paid (net of our fee). Pure. */
+export function creditableTokens(netPaidRupees: unknown): number {
+  const paid = Number(netPaidRupees);
   if (!Number.isFinite(paid) || paid <= 0) return 0;
-  const tokenRupees = Math.max(0, paid - (buyPass ? VISHWAKARMA_PASS_PRICE_RUPEES : 0));
-  return Math.round(tokenRupees * TOKENS_PER_RUPEE);
+  return Math.round(paid * TOKENS_PER_RUPEE);
 }
 
 export interface WalletCreditTx {
   userId: string;
   amountPaid: number;
   balanceAdded: number;
-  isVishwakarmaOrder?: boolean;
-  buyPass?: boolean;
   /**
    * The platform fee this payment carried, in ₹ — written by the route that CREATED the order, from
    * the rate that was disclosed to the user on that screen. Absent on a transaction created before
@@ -130,8 +124,6 @@ export function computeCreditedWallet(
 ): { wallet: Record<string, any>; promoApplied: boolean } {
   const w = current || {};
   const n = (v: any): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
-  const isVishwakarmaOrder = !!txData.isVishwakarmaOrder;
-  const buyPass = !!txData.buyPass;
   const amountPaid = n(txData.amountPaid);
   const balanceAdded = n(txData.balanceAdded);
   // THE PLATFORM FEE (see platformFee.ts). The wallet is credited the NET of the payment; the fee is
@@ -141,56 +133,63 @@ export function computeCreditedWallet(
   const netPaid = Math.round((amountPaid - platformFee) * 100) / 100;
   // SECURITY C4 stands: the tokens still derive from the VERIFIED paid amount, only now net of our
   // own server-written fee — never from anything the client sent.
-  const tokensToCredit = creditableVishwakarmaTokens(netPaid, buyPass);
+  //
+  // 🔴 ONE CREDIT PATH (2026-09-12, when the Vishwakarma entry pass was deleted). There used to be
+  // two, chosen by `isVishwakarmaOrder`, and the only thing that genuinely differed between them was
+  // the pass: the Vishwakarma branch subtracted ₹100 before minting tokens. With the pass gone the
+  // two were arithmetically IDENTICAL, and that was verified rather than assumed, both ways:
+  //   • web recharge — `amountPaid` is GROSS and `balanceAdded` is the net the route computed, so
+  //     `netPaid = amountPaid − platformFee === balanceAdded`;
+  //   • Play / Apple top-up — carries no `platformFeeInr` (the store's cut is taken before payout and
+  //     recorded separately as `storeNetInr`), so `recordedPlatformFee` returns 0 and
+  //     `netPaid === amountPaid === balanceAdded`.
+  // Collapsing them removes the duplicated money arithmetic this file's own header warns about: a
+  // money rule with two homes is free to drift between them, which is exactly how the pass price came
+  // to read ₹50 on one screen and ₹100 on another.
+  const tokensToCredit = creditableTokens(netPaid);
 
   const update: Record<string, any> = {};
-  let promoApplied = false;
-  if (promo) {
-    update.unlockedModes = [...(w.unlockedModes || []), promo.mode];
-    update.hasVishwakarmaPass = true;
-    update.vishwakarmaPassActivatedAt = now;
-    update.tokenBalance = n(w.tokenBalance) + 1000; // 1000 promo tokens
-    promoApplied = true;
-  }
 
-  if (isVishwakarmaOrder) {
-    if (buyPass) {
-      update.hasVishwakarmaPass = true;
-      update.vishwakarmaPassActivatedAt = now;
-    }
-    if (!promoApplied) update.tokenBalance = n(w.tokenBalance) + tokensToCredit;
-    update.totalTokensPurchased = n(w.totalTokensPurchased) + (promoApplied ? 1000 : tokensToCredit);
-    update.totalMoneySpent = n(w.totalMoneySpent) + amountPaid;
-    update.lastRechargeAt = now;
-    const ledgerEntry = {
-      type: 'purchase',
-      amountCoinsOrTokens: promoApplied ? 1000 : tokensToCredit,
-      moneySpent: amountPaid,
-      timestamp: now,
-      description: `Bought ${tokensToCredit.toLocaleString()} tokens${buyPass ? ` + Lifetime Pass Activated (₹${VISHWAKARMA_PASS_PRICE_RUPEES})` : ''}${promoApplied ? ' + Promo 1000 Tokens' : ''}`,
-    };
-    update.walletLedger = [...(w.walletLedger || []), ledgerEntry];
-    update.remaining_balance = n(w.remaining_balance) + netPaid;
-    update.total_balance = n(w.total_balance) + netPaid;
-  } else {
-    const tokensToCreditFallback = balanceAdded * 100;
-    if (!promoApplied) update.tokenBalance = n(w.tokenBalance) + tokensToCreditFallback;
-    update.totalTokensPurchased = n(w.totalTokensPurchased) + (promoApplied ? 10000 : tokensToCreditFallback);
-    update.totalMoneySpent = n(w.totalMoneySpent) + amountPaid;
-    update.lastRechargeAt = now;
-    const ledgerEntry = {
-      type: 'purchase',
-      amountCoinsOrTokens: promoApplied ? 10000 : tokensToCreditFallback,
-      moneySpent: amountPaid,
-      timestamp: now,
-      // The fee is NAMED in the user's own ledger when there was one — a deduction the user can see
-      // in their history is a disclosure; one they can only infer from a smaller number is not.
-      description: `Standard wallet recharge: ₹${amountPaid}${platformFee > 0 ? ` (₹${platformFee.toFixed(2)} platform fee)` : ''} (${tokensToCreditFallback.toLocaleString()} tokens added)${promoApplied ? ' + Promo 100₹ Tokens' : ''}`,
-    };
-    update.walletLedger = [...(w.walletLedger || []), ledgerEntry];
-    update.remaining_balance = n(w.remaining_balance) + balanceAdded;
-    update.total_balance = n(w.total_balance) + balanceAdded;
-  }
+  // THE PENDING-PROMO BRANCH, and what was cut out of it.
+  //
+  // It used to ALSO grant `hasVishwakarmaPass` and push `promo.mode` onto `unlockedModes` — both
+  // Vishwakarma entitlements, both now meaningless, so both removed. The promo itself still credits
+  // its tokens, so the mechanism survives its dead reward.
+  //
+  // ⚠️ IT IS UNREACHABLE TODAY, and that is recorded rather than relied on: the only thing that ever
+  // wrote `promo_redemptions/promo_pending_*` would have been `/api/payment/validate-mode-promo`, a
+  // route that never existed on the server (see usePaymentEngine.ts, which removed its caller for
+  // exactly that reason). The branch is kept because the read costs one Firestore get inside a
+  // transaction that already does two, and because a future promo can hook into it honestly. The
+  // LIVE coupon path is `/api/payment/redeem-coupon` and is untouched by any of this.
+  //
+  // It also had a real arithmetic bug worth naming: it credited 1,000 tokens while recording 10,000
+  // in `totalTokensPurchased` and in the user's own ledger line. One number now drives all three.
+  const PROMO_TOKENS = 1000;
+  const promoApplied = !!promo;
+  if (promoApplied) update.tokenBalance = n(w.tokenBalance) + PROMO_TOKENS;
+
+  // ── ONE credit path for every purchase: web recharge, Play pack, Apple pack ──
+  const creditedTokens = promoApplied ? PROMO_TOKENS : tokensToCredit;
+  if (!promoApplied) update.tokenBalance = n(w.tokenBalance) + tokensToCredit;
+  update.totalTokensPurchased = n(w.totalTokensPurchased) + creditedTokens;
+  // GROSS here on purpose: "how much has this user paid us" is the full amount, fee included.
+  update.totalMoneySpent = n(w.totalMoneySpent) + amountPaid;
+  update.lastRechargeAt = now;
+  const ledgerEntry = {
+    type: 'purchase',
+    amountCoinsOrTokens: creditedTokens,
+    moneySpent: amountPaid,
+    timestamp: now,
+    // The fee is NAMED in the user's own ledger when there was one — a deduction the user can see in
+    // their history is a disclosure; one they can only infer from a smaller number is not.
+    description: `Wallet recharge: ₹${amountPaid}${platformFee > 0 ? ` (₹${platformFee.toFixed(2)} platform fee)` : ''} (${creditedTokens.toLocaleString()} tokens added)${promoApplied ? ' — promo credit' : ''}`,
+  };
+  update.walletLedger = [...(w.walletLedger || []), ledgerEntry];
+  // NET here, and it must stay net: this is the ₹ view of the same balance `tokenBalance` holds, so
+  // crediting gross on one and net on the other is how the wallet's two views drift apart.
+  update.remaining_balance = n(w.remaining_balance) + balanceAdded;
+  update.total_balance = n(w.total_balance) + balanceAdded;
 
   update.updatedAt = now;
   return { wallet: { ...w, ...update }, promoApplied };
@@ -343,9 +342,7 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
       const promoRef = doc(db, 'promo_redemptions', `promo_pending_${txData.userId}`);
       const DEFAULT_WALLET: Record<string, any> = {
         userId: txData.userId,
-        hasVishwakarmaPass: false,
         unlockedModes: [],
-        vishwakarmaPassActivatedAt: null,
         tokenBalance: 0,
         totalTokensPurchased: 0,
         totalTokensUsed: 0,
@@ -382,8 +379,7 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
         data: {
           balanceAdded: txData.balanceAdded,
           currentBalance: integratedWallet.remaining_balance,
-          tokenBalance: integratedWallet.tokenBalance,
-          hasVishwakarmaPass: integratedWallet.hasVishwakarmaPass
+          tokenBalance: integratedWallet.tokenBalance
         }
       };
     }

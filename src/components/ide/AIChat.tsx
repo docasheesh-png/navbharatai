@@ -143,7 +143,7 @@ export const SecretQuickFill: React.FC<SecretQuickFillProps> = ({ providerId, us
           <div className="p-1.5 bg-indigo-500/20 rounded-lg text-indigo-400">
             <Lock className="w-3.5 h-3.5 animate-pulse" />
           </div>
-          <span className="text-[10px] font-black uppercase tracking-widest text-[#8b949e]">Vishwakarma Key Assistant</span>
+          <span className="text-[10px] font-black uppercase tracking-widest text-[#8b949e]">API Key Assistant</span>
         </div>
         {currentProvData.link && (
           <a
@@ -295,7 +295,6 @@ interface AIChatProps {
   memorySummary?: string;
   wallet?: any;
   onGoToMain?: () => void;
-  onUnlockVishwakarma?: () => void;
   onAttachmentsChange?: (files: File[]) => void;
   buildProgress?: BuildProgressState | null;
   onBuildStepToggle?: (index: number) => void;
@@ -349,7 +348,6 @@ export const AIChat: React.FC<AIChatProps> = ({
   memorySummary = '',
   wallet = null,
   onGoToMain,
-  onUnlockVishwakarma,
   onAttachmentsChange,
   buildProgress = null,
   onBuildStepToggle,
@@ -611,7 +609,6 @@ export const AIChat: React.FC<AIChatProps> = ({
   };
 
     const getDisplayIntent = (intent: string) => {
-      // Removed Vishwakarma agent specialized intent labels.
 
       switch(intent) {
          case 'greeting': return { label: 'Social Assistant', icon: Heart, color: 'text-rose-400 bg-rose-500/10' };

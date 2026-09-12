@@ -1411,7 +1411,6 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
           totalTokensUsed: u.total_output_tokens_used || 0,
           remainingBalance: u.remaining_balance || 0,
           moneySpent: u.total_money_spent || 0,
-          hasPro: u.hasVishwakarmaPass || false,
           banned: u.banned || false,
           createdAt: u.updatedAt || u.createdAt || '',
           joinedAt: joined.atMs,
@@ -1539,7 +1538,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       //     by the delta. The 2026-08-03 fix it replaced was right about the SYMPTOM — a gifted wallet
       //     showing ₹0 could not build — but an assignment silently rewrites a balance whenever the two
       //     views legitimately differ, and they DO: a Pass purchase credits `remaining_balance +=
-      //     netPaid` while `creditableVishwakarmaTokens` subtracts the Pass price from the token figure
+      //     netPaid` while the token figure was computed separately from the paid amount
       //     first. So every Pass buyer's views differ by exactly the Pass price, permanently — and a
       //     "+1 token" adjustment on such an account would have wiped that ₹ the user had really paid.
       //     In the other direction (a wallet credited in ₹ only, as the coupon path used to do) the same
@@ -2052,18 +2051,18 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
   });
 
-  // ── Grant / revoke Pro access ─────────────────────────────────────────────
-  app.post('/api/admin/users/:userId/pro', verifyAdminToken, async (req: Request, res: Response) => {
-    const db = getDb() as any;
-    const { userId } = req.params;
-    const { grant } = req.body;
-    try {
-      const walletRef = doc(db, 'user_token_wallets', userId);
-      await setDoc(walletRef, { hasVishwakarmaPass: !!grant, vishwakarmaPassActivatedAt: grant ? new Date().toISOString() : null }, { merge: true });
-      audit(grant ? 'ADMIN_PRO_GRANTED' : 'ADMIN_PRO_REVOKED', { userId, ip: req.ip });
-      res.json({ ok: true, hasPro: !!grant });
-    } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
-  });
+  // ── "Grant / revoke Pro access" — DELETED 2026-09-12, and worth recording why ───────────────
+  //
+  // This route wrote `hasVishwakarmaPass` on the user's wallet, and the admin dashboard had a
+  // Pro / Revoke button wired to it. Nothing in the codebase ever READ that field as an access check:
+  // it was shown back on the user list and in a problem report, and that was all. So the button
+  // granted nothing and revoking it took nothing away — a control that looks like it does something
+  // and does not, which is precisely what the second absolute rule forbids shipping.
+  //
+  // The field itself is gone with Vishwakarma. Any user who actually paid the old ₹100 entry pass
+  // still has it recorded where money belongs — their wallet ledger entry names the pass and the
+  // amount, and `totalMoneySpent` carries the rupees — so nothing about a real payment is lost.
+  // If a genuine Pro entitlement is ever wanted, it needs a real access check first, not a flag.
 
   // ── Settings (pricing, feature flags, maintenance) ────────────────────────
   app.get('/api/admin/settings', verifyAdminToken, (_req: Request, res: Response) => {

@@ -55,7 +55,6 @@ export interface ChatEngineDeps {
   setMode: (v: any) => void;
   setShowAuth: Dispatch<SetStateAction<boolean>>;
   setUser: (v: any) => void;
-  setShowVishwakarmaUnlockModal: Dispatch<SetStateAction<boolean>>;
   setGithubToken: (v: any) => void;
   setGithubRepoContext: (v: any) => void;
   setFiles: Dispatch<SetStateAction<FileSystem>>;
@@ -77,7 +76,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
     errorContext, preferredLanguage, user, keys, invalidKeys, selectedModel, apnapanProfile,
     hasGeneratedCode, generatedCode, pendingGHEdit, githubToken, files, FREE_DAILY_MESSAGES, isFreeLimitReached,
     setMessages, setInput, setIsLoading, setActiveIntent, setErrorContext, setIsSearching, setPreferredLanguage,
-    setMode, setShowAuth, setUser, setShowVishwakarmaUnlockModal, setGithubToken, setGithubRepoContext,
+    setMode, setShowAuth, setUser, setGithubToken, setGithubRepoContext,
     setFiles, setHasGeneratedCode, setIsDeployed, setIsAppBuilt,
     addLog, addToast, incrementDailyUsage, handleGHConfirmPush, learnFromMessage, updatePreview,
   } = deps;
@@ -150,9 +149,9 @@ export function useChatEngine(deps: ChatEngineDeps) {
       else if (error.message.includes('timeout')) errMsg = "Vertex AI inference timeout.";
       else errMsg = error.response?.data?.error || error.message || "Application runtime error detected.";
 
-      if (error.response?.status === 402 || error.response?.data?.requirePass) {
-        setShowVishwakarmaUnlockModal(true);
-      }
+      // A 402 used to open the ₹100 Vishwakarma entry-pass modal. That pass is deleted, and no server
+      // route ever sent the `requirePass` flag this also watched for, so the honest response to a 402
+      // here is the error message itself rather than a purchase prompt for something that is gone.
       throw new Error(errMsg);
     }
   };
@@ -450,16 +449,10 @@ export function useChatEngine(deps: ChatEngineDeps) {
           headers['x-user-name'] = user.displayName || 'NavBharat Client';
         }
 
-        let endpoint = '/api/chat';
-        if (currentAgent === 'navbharatai') {
-          endpoint = '/api/chat/navbharat';
-        } else if (currentAgent === 'vishwakarma_basic') {
-          endpoint = '/api/chat/vishwakarma-basic';
-        } else if (currentAgent === 'vishwakarma_pro') {
-          endpoint = '/api/chat/vishwakarma-pro';
-        } else if (currentAgent === 'vishwakarma_vip') {
-          endpoint = '/api/chat/vip';
-        }
+        // One chat endpoint. The three Vishwakarma/VIP endpoints were deleted with Vishwakarma on
+        // 2026-09-12, and a LEGACY session whose stored agent id is still `vishwakarma_*` now falls
+        // through to the general chat rather than posting to a route that would 404.
+        const endpoint = currentAgent === 'navbharatai' ? '/api/chat/navbharat' : '/api/chat';
 
         // TELLING IT A VIAL is stored HERE, on the device, before the message goes anywhere — the vial
         // is a fact about this cot side and belongs on this phone, not on a server. The server sends
@@ -513,9 +506,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
           if (response.status === 429) {
             throw new Error('Too many requests. Please wait a moment before sending again.');
           }
-          if (response.status === 402 || (errData as any).requirePass) {
-            setShowVishwakarmaUnlockModal(true);
-          }
+          // See the 402 note above: the pass this used to sell no longer exists.
           throw new Error((errData as any).error || `HTTP Error ${response.status}`);
         }
 
@@ -700,9 +691,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
                addLog('Workspace synced with AI generated code.', 'success');
                setHasGeneratedCode(true);
                setIsDeployed(true);
-               if (currentAgent.startsWith('vishwakarma')) {
-                 setIsAppBuilt(true);
-               }
+               setIsAppBuilt(true);
              }
              return newFiles;
            });

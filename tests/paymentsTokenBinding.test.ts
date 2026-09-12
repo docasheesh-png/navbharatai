@@ -1,33 +1,48 @@
 import { describe, it, expect } from 'vitest';
-import { creditableVishwakarmaTokens, VISHWAKARMA_PASS_PRICE_RUPEES, TOKENS_PER_RUPEE } from '../src/server/lib/payments';
+import { creditableTokens, TOKENS_PER_RUPEE } from '../src/server/lib/payments';
 
-describe('creditableVishwakarmaTokens — C4: tokens bound to the amount actually paid', () => {
-  it('THE EXPLOIT: paying ₹1 mints only ₹1 worth of tokens, not a client-claimed million', () => {
-    // Old bug: client sent {amount:1, tokenAmount:1_000_000} → 100M tokens for ₹1.
-    // Now tokens derive from the ₹1 actually paid → 100 tokens. Client tokenAmount is irrelevant.
-    expect(creditableVishwakarmaTokens(1, false)).toBe(1 * TOKENS_PER_RUPEE);
+/**
+ * C4 — tokens are bound to the amount actually paid. The invariant OUTLIVED its occasion.
+ *
+ * It was written for the Vishwakarma entry-pass order, whose paid amount was `tokens₹ + pass₹`, and the
+ * bug was that the credit came from a CLIENT-supplied `tokenAmount`: `{amount: 1, tokenAmount: 1000000}`
+ * paid ₹1 and minted 100M tokens. The pass was deleted on 2026-09-12 and the helper no longer knows
+ * anything about it — but the rule it enforces is the one that stops that exploit, so it is still here,
+ * still tested, and now covers the single credit path every purchase takes.
+ */
+describe('creditableTokens — tokens derive from the amount actually paid', () => {
+  it('THE EXPLOIT: paying ₹1 mints only ₹1 worth of tokens, whatever a client claimed', () => {
+    expect(creditableTokens(1)).toBe(1 * TOKENS_PER_RUPEE);
   });
-  it('credits the full paid amount when no pass is bought', () => {
-    expect(creditableVishwakarmaTokens(500, false)).toBe(50000);
+
+  it('credits the full net paid amount', () => {
+    expect(creditableTokens(500)).toBe(50000);
+    expect(creditableTokens(99)).toBe(9900);
   });
-  it('subtracts the pass price before crediting tokens when buyPass is true', () => {
-    // amount = tokenAmount₹ (50) + pass (100) = 150 → 50 × 100 = 5000 tokens
-    expect(creditableVishwakarmaTokens(150, true)).toBe(50 * TOKENS_PER_RUPEE);
-    // pass-only purchase (amount = 100, no tokens) → 0 tokens
-    expect(creditableVishwakarmaTokens(VISHWAKARMA_PASS_PRICE_RUPEES, true)).toBe(0);
+
+  it('never credits on non-positive or non-numeric input', () => {
+    expect(creditableTokens(0)).toBe(0);
+    expect(creditableTokens(-100)).toBe(0);
+    // A numeric STRING legitimately coerces: amountPaid is the SERVER-reconciled figure, already
+    // verified against the real charge, so it represents money actually paid — not a spoofable field.
+    expect(creditableTokens('250')).toBe(25000);
+    expect(creditableTokens('abc')).toBe(0);
+    expect(creditableTokens(undefined)).toBe(0);
+    expect(creditableTokens(null)).toBe(0);
+    expect(creditableTokens(NaN)).toBe(0);
+    expect(creditableTokens(Infinity)).toBe(0);
   });
-  it('never returns negative (paid < pass price) or credits on non-positive/non-numeric input', () => {
-    expect(creditableVishwakarmaTokens(50, true)).toBe(0);   // paid 50 < 100 pass → 0, not negative
-    expect(creditableVishwakarmaTokens(0, false)).toBe(0);
-    expect(creditableVishwakarmaTokens(-100, false)).toBe(0);
-    // A truly non-numeric value → 0 (guard). Note: amountPaid is the SERVER-reconciled paid amount
-    // (already verified against the real Cashfree charge), so a numeric string legitimately coerces —
-    // it represents money actually paid, not a spoofable client field.
-    expect(creditableVishwakarmaTokens('abc', false)).toBe(0);
-    expect(creditableVishwakarmaTokens(undefined, false)).toBe(0);
-    expect(creditableVishwakarmaTokens(NaN, true)).toBe(0);
-  });
+
   it('rounds fractional rupees deterministically', () => {
-    expect(creditableVishwakarmaTokens(1.005, false)).toBe(Math.round(1.005 * 100));
+    expect(creditableTokens(1.005)).toBe(Math.round(1.005 * 100));
+    expect(creditableTokens(0.001)).toBe(0);
+  });
+
+  it('🔒 the pass price is GONE from the money model, not merely unused', async () => {
+    // The helper cannot subtract a pass any more because it takes no such argument. Asserted through
+    // the module's public surface so a re-introduced pass constant fails here rather than in a bill.
+    const mod = await import('../src/server/lib/payments');
+    expect(Object.keys(mod)).not.toContain('VISHWAKARMA_PASS_PRICE_RUPEES');
+    expect(Object.keys(mod)).not.toContain('creditableVishwakarmaTokens');
   });
 });

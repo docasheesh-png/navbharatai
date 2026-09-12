@@ -110,8 +110,6 @@ export function mergeWallets(into: Wallet, other: Wallet, nowIso: string): Merge
     totalTokensUsed: num(into.totalTokensUsed) + num(other.totalTokensUsed),
     total_output_tokens_used: outputUsed,
     total_money_spent: moneySpent,
-    hasVishwakarmaPass: !!(into.hasVishwakarmaPass || other.hasVishwakarmaPass),
-    vishwakarmaPassActivatedAt: pickEarlier(into.vishwakarmaPassActivatedAt, other.vishwakarmaPassActivatedAt),
     lastRechargeAt: pickLater(into.lastRechargeAt, other.lastRechargeAt),
     walletLedger: ledger,
     updatedAt: nowIso,

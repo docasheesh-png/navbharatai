@@ -56,13 +56,13 @@ export function isValidCashfreeSignature(opts: {
 export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitRequestHandler): void {
   app.post('/api/payment/create-order', paymentLimiter, async (req: Request, res: Response) => {
     const db = getDb() as any;
-    const { amount, userEmail, userName, userPhone, isVishwakarmaOrder, buyPass, tokenAmount, productType, passPlan, passDays } = req.body;
+    const { amount, userEmail, userName, userPhone, productType, passPlan, passDays } = req.body;
 
     // SECURITY (money, 2026-07-27 — going to real production): the order's owner is the VERIFIED token
     // identity, never the body's `userId`. This route used to take the uid straight from the request, so
     // anyone could mint payment_transactions rows against any account, and every entitlement downstream
-    // was keyed on a value the caller chose. All three real callers (wallet recharge, Vishwakarma,
-    // Professional Pass) are signed-in flows, so requiring the token costs a legitimate user nothing.
+    // was keyed on a value the caller chose. Both real callers (wallet recharge, Professional Pass)
+    // are signed-in flows, so requiring the token costs a legitimate user nothing.
     // (VITEST accepts a body userId so the route stays unit-testable without a live token — the same
     // convention /api/payment/redeem-coupon already uses for its H1 identity fix.)
     const userId = process.env.VITEST
@@ -121,9 +121,6 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         balanceAdded: feeSplit.creditInr,
         platformFeeInr: feeSplit.feeInr,
         platformFeePct: platformFeePct(),
-        isVishwakarmaOrder: !!isVishwakarmaOrder,
-        buyPass: !!buyPass,
-        tokenAmount: tokenAmount ? parseFloat(tokenAmount) : 0,
         // Professional Pass product (fulfilment grants a pass instead of crediting wallet tokens).
         productType: isProfessionalPass ? 'professional_pass' : 'wallet',
         ...(isProfessionalPass ? { passPlan: String(passPlan || 'monthly'), passDays: Number(passDays) || 0 } : {}),
@@ -611,8 +608,6 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         storePriceInr: pack.priceInr,
         storeFeePct: storeFeePct(),
         storeNetInr: netAfterStoreFee(pack.priceInr),
-        isVishwakarmaOrder: true,   // the wallet-credit shape every top-up uses
-        buyPass: false,
         paymentProvider: platform === 'apple' ? 'APPLE_IAP' : 'GOOGLE_PLAY',
         paymentStatus: 'SUCCESS',
         paymentReference: verified.transactionId,

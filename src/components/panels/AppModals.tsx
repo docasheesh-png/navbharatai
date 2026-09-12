@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'motion/react';
-import { ExternalLink, ShieldCheck, Sparkles, X, CreditCard, Clock, Link as LinkIcon, AlertCircle, Settings, Globe, Lock } from 'lucide-react';
+import { ExternalLink, ShieldCheck, Sparkles, X, Clock, Link as LinkIcon, AlertCircle, Settings, Globe, Lock } from 'lucide-react';
 import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
@@ -7,8 +7,6 @@ import { AuthComponent } from '../AuthComponent';
 import { PROVIDER_CONFIG } from '../../types';
 import { triggerCashfreeCheckout } from '../../services/paymentService';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { TOKENS_PER_RUPEE, VISHWAKARMA_PASS_PRICE_INR } from '../../lib/walletPricing';
-import { splitPaymentAtPct, DEFAULT_PLATFORM_FEE_PCT } from '../../lib/platformFee';
 
 export interface AppModalsProps {
   // Auth
@@ -20,23 +18,6 @@ export interface AppModalsProps {
   githubRedirectingMessage: string | null;
   githubDebugData: { oauthUrl?: string; redirectUri?: string; currentDomain?: string; callbackUrl?: string } | null;
   setGithubRedirectingMessage: (v: string | null) => void;
-  // Vishwakarma unlock modal
-  showVishwakarmaUnlockModal: boolean;
-  setShowVishwakarmaUnlockModal: (v: boolean) => void;
-  wallet: any;
-  /**
-   * Kept on the props for App.tsx's existing call, but NO LONGER read here. It used to pick the pass
-   * price (`vkMode === 'pro' ? 100 : 50`) — and since `setVkMode` is never called anywhere, it was
-   * permanently 'basic', so every buyer was shown ₹50 and charged the server's real ₹100. The price
-   * now comes from walletPricing.ts, which is what the server charges.
-   */
-  vkMode: 'basic' | 'pro' | 'vip';
-  couponError: string;
-  couponSuccess: string;
-  vkTokenInput: string;
-  setVkTokenInput: (v: string) => void;
-  isRecharging: boolean;
-  createVishwakarmaOrder: (buyPass: boolean, tokens: number) => void;
   // UCI continuation modal
   showContinueModal: boolean;
   setShowContinueModal: (v: boolean) => void;
@@ -73,16 +54,11 @@ export interface AppModalsProps {
   // Preview failure popup
   previewBuildError: string | null;
   setPreviewBuildError: (v: string | null) => void;
-  /** The wallet-recharge platform fee, in percent, as this server actually charges it. */
-  platformFeePct?: number;
 }
 
 export function AppModals({
   showAuth, auth, setUser, onCloseAuth,
   githubRedirectingMessage, githubDebugData, setGithubRedirectingMessage,
-  showVishwakarmaUnlockModal, setShowVishwakarmaUnlockModal,
-  wallet, couponError, couponSuccess, vkTokenInput, setVkTokenInput,
-  isRecharging, createVishwakarmaOrder,
   showContinueModal, setShowContinueModal, setRestoreUciError, setResumeUciInputState,
   resumeUciInputState, restoreUciError, handleRestoreByUci, isRestoringUci,
   firebaseOauthError, setFirebaseOauthError,
@@ -92,19 +68,7 @@ export function AppModals({
   workspacePrepError, setWorkspacePrepError,
   isPreviewBuilding, previewBuildStage, detectedFramework,
   previewBuildError, setPreviewBuildError,
-  platformFeePct = DEFAULT_PLATFORM_FEE_PCT,
 }: AppModalsProps) {
-  // THE VISHWAKARMA ORDER, priced exactly as the server will settle it.
-  //
-  // `createVishwakarmaOrder` sends `pass + tokens` as ONE payment, the platform fee applies to that
-  // whole payment, and the server then mints `(net − pass) × TOKENS_PER_RUPEE`. So the tokens a user
-  // gets are the tokens their money buys AFTER both the pass and the fee come out — which is what
-  // these three values say, in the same order the totals box prints them.
-  const vkPassInr = wallet?.hasVishwakarmaPass ? 0 : VISHWAKARMA_PASS_PRICE_INR;
-  const vkTokenInr = parseFloat(vkTokenInput) || 0;
-  const vkTotalPayableInr = vkPassInr + vkTokenInr;
-  const vkSplit = splitPaymentAtPct(vkTotalPayableInr, platformFeePct);
-  const vkTokensEstimate = Math.max(0, Math.floor((vkSplit.creditInr - vkPassInr) * TOKENS_PER_RUPEE));
   return (
     <>
       {/* Auth Modal */}
@@ -191,193 +155,6 @@ export function AppModals({
                     Dismiss
                   </button>
                 </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Agent Vishwakarma Premium Access Modal */}
-      <AnimatePresence>
-        {showVishwakarmaUnlockModal && (
-          // `nb-sheet-over-nav`: z-9999 is above the global tab bar's z-150, so this modal covers the
-          // bar rather than sitting under it, and must not reserve a strip for it.
-          <div className="nb-sheet-overlay nb-sheet-over-nav fixed inset-0 bg-[#0d1117]/95 backdrop-blur-md flex items-start md:items-center justify-center p-3 pt-24 md:pt-4 z-[9999] overflow-y-auto modal-scroll-lock">
-            <motion.div
-              initial={{ scale: 0.96, y: 15, opacity: 0 }}
-              animate={{ scale: 1, y: 0, opacity: 1 }}
-              exit={{ scale: 0.96, y: 15, opacity: 0 }}
-              className="nb-sheet w-full max-w-md md:max-w-[400px] bg-[#161b22] border border-amber-500/35 rounded-2xl p-4 sm:p-5 space-y-4 shadow-2xl relative flex flex-col overflow-hidden"
-            >
-              <div className="flex justify-between items-center shrink-0 border-b border-white/5 pb-2.5">
-                <div className="flex items-center gap-1.5 text-amber-500 font-bold uppercase tracking-wider text-[9px] sm:text-[10px] font-mono">
-                  <ShieldCheck className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
-                  Premium Sec-Ops Active Workspace
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowVishwakarmaUnlockModal(false)}
-                  className="p-1 px-2 bg-white/5 hover:bg-amber-500 hover:text-black rounded-lg text-[#8b949e] border border-white/10 hover:border-amber-500 transition-all font-mono text-[9px] sm:text-[10px] uppercase font-bold flex items-center gap-1 cursor-pointer select-none"
-                >
-                  <X className="w-3.5 h-3.5 shrink-0" />
-                  Close
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto space-y-4 scrollbar-thin scrollbar-thumb-white/10 pr-0.5">
-                <div className="flex gap-3 items-center bg-amber-500/5 hover:bg-amber-500/10 border border-amber-500/15 p-3 rounded-xl transition-all">
-                  <div className="p-2 bg-amber-500/10 text-amber-400 rounded-lg border border-amber-500/20 shrink-0">
-                    <Sparkles className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-black text-white tracking-tight uppercase leading-none">
-                      🔥 Unlock Agent Vishwakarma
-                    </h3>
-                    <p className="text-[10px] text-[#8b949e] mt-1 leading-normal">
-                      Your portal is locked. Complete checkout to activate dynamic modeling access.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="bg-white/5 rounded-xl p-3 border border-white/5 space-y-1.5">
-                  <h4 className="text-[9px] font-mono font-bold text-amber-400 tracking-wider uppercase mb-0.5">
-                    ✓ Core System Capabilities
-                  </h4>
-                  <div className="space-y-1 text-[11px] text-[#8b949e]">
-                    <div className="flex items-center gap-2 text-white">
-                      <span className="text-emerald-400 font-extrabold">✓</span>
-                      <span>Full Codebase Creations & Visual Design</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-white">
-                      <span className="text-emerald-400 font-extrabold">✓</span>
-                      <span>OWASP Defenses & Exploit Scanning</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-white">
-                      <span className="text-emerald-400 font-extrabold">✓</span>
-                      <span>Sovereign Multi-Model Reasoning Layers</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between p-3 bg-white/5 border border-white/5 rounded-xl">
-                    <div>
-                      <span className="text-[11px] font-bold text-white block uppercase tracking-wide">
-                        Lifetime Entry Pass
-                      </span>
-                      <span className="text-[9px] text-[#8b949e]">
-                        Mandatory one-time gateway fee
-                      </span>
-                    </div>
-                    <div className="text-right">
-                      {wallet?.hasVishwakarmaPass ? (
-                        <span className="text-[9px] font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/10">
-                          Activated
-                        </span>
-                      ) : (
-                        <span className="text-xs font-mono font-black text-amber-500 block">
-                          ₹{VISHWAKARMA_PASS_PRICE_INR.toFixed(2)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* The "Have a promo code?" box that stood here was removed 2026-08-21: it posted to
-                      /api/payment/validate-mode-promo, which exists nowhere on the server, so every code
-                      came back "Validation failed" — the message blamed the user's code for a route we
-                      never built. Promo redemption that genuinely works lives in Wallet & Billing
-                      (POST /api/payment/redeem-coupon). See usePaymentEngine.ts for the full reasoning. */}
-
-                  <div className="space-y-1 p-3 bg-white/5 border border-white/5 rounded-xl relative">
-                    <label className="text-[11px] font-bold text-white block uppercase tracking-wide">
-                      Advance AI Tokens (₹)
-                    </label>
-                    <span className="text-[9px] text-[#8b949e] block leading-none font-mono">
-                      Formula: ₹1.00 = {TOKENS_PER_RUPEE} AI Tokens (Min: ₹10)
-                    </span>
-
-                    <div className="flex items-center gap-1.5 mt-1">
-                      <span className="text-white font-mono font-bold text-xs">₹</span>
-                      <input
-                        type="number"
-                        placeholder="Enter amount (e.g. 50)"
-                        value={vkTokenInput}
-                        onChange={(e) => setVkTokenInput(e.target.value)}
-                        className="w-full bg-[#0d1117] border border-white/10 rounded-lg p-1.5 px-2 text-xs font-mono text-white placeholder:text-[#484f58] focus:border-amber-500 outline-none transition-all shadow-inner"
-                      />
-                    </div>
-
-                    <div className="mt-1 text-right">
-                      <span className="text-[9px] font-mono text-amber-400 bg-amber-500/10 border border-amber-500/25 px-2 py-0.5 rounded-full">
-                        Estimated: {vkTokensEstimate.toLocaleString('en-IN')} Tokens
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="p-3 bg-[#0d1117] border border-white/5 rounded-xl space-y-1 text-[11px]">
-                    <div className="flex justify-between text-[#8b949e]">
-                      <span>Entry Pass Fee:</span>
-                      <span>{wallet?.hasVishwakarmaPass ? '₹0.00 (Owned)' : `₹${VISHWAKARMA_PASS_PRICE_INR.toFixed(2)}`}</span>
-                    </div>
-                    <div className="flex justify-between text-[#8b949e]">
-                      <span>Tokens Purchase Amount:</span>
-                      <span>₹{parseFloat(vkTokenInput) ? parseFloat(vkTokenInput).toFixed(2) : '0.00'}</span>
-                    </div>
-                    {vkSplit.feeInr > 0 && (
-                      <div className="flex justify-between text-[#8b949e]">
-                        <span>Platform fee ({platformFeePct}%):</span>
-                        <span>₹{vkSplit.feeInr.toFixed(2)}</span>
-                      </div>
-                    )}
-                    <div className="border-t border-white/5 pt-1.5 flex justify-between text-xs font-black text-white tracking-tight">
-                      <span>TOTAL PAYABLE AMOUNT:</span>
-                      <span className="text-amber-500 font-mono">
-                        ₹{vkTotalPayableInr.toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="shrink-0 space-y-2 border-t border-white/5 pt-3">
-                <button
-                  type="button"
-                  disabled={isRecharging || (
-                    wallet?.hasVishwakarmaPass
-                      ? !(parseFloat(vkTokenInput) >= 10 && parseFloat(vkTokenInput) <= 999999)
-                      : (vkTokenInput.trim() !== '' && !(parseFloat(vkTokenInput) >= 10 && parseFloat(vkTokenInput) <= 999999))
-                  )}
-                  onClick={() => {
-                    const buyPass = !wallet?.hasVishwakarmaPass;
-                    const tokens = parseFloat(vkTokenInput) || 0;
-                    createVishwakarmaOrder(buyPass, tokens);
-                  }}
-                  className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-500 via-amber-600 to-amber-500 hover:from-amber-400 hover:to-amber-500 text-black font-black uppercase text-[11px] tracking-[0.1em] transition-all duration-200 active:scale-[0.98] shadow-lg shadow-amber-500/10 disabled:opacity-30 disabled:pointer-events-none flex items-center justify-center gap-2 cursor-pointer relative overflow-hidden group"
-                >
-                  <span className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
-                  {isRecharging ? (
-                    <>
-                      <TirangaLoader className="w-3.5 h-3.5" />
-                      Connecting Gateway...
-                    </>
-                  ) : wallet?.hasVishwakarmaPass ? (
-                    <>
-                      <CreditCard className="w-4 h-4" />
-                      Recharge Tokens (₹{(parseFloat(vkTokenInput) || 0).toFixed(2)})
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-4 h-4 animate-bounce" />
-                      Buy Pass & Activate Vishwakarma (₹{vkTotalPayableInr.toFixed(2)})
-                    </>
-                  )}
-                </button>
-              </div>
-
-              <div className="text-[8px] text-center text-[#8b949e] font-mono leading-relaxed select-none shrink-0 border-t border-white/5 pt-2">
-                By purchasing, you accept our sovereign pay-and-use SLA terms.
-                <br />
-                Secured dynamically by navBharat SRE billing stack.
               </div>
             </motion.div>
           </div>

@@ -126,7 +126,6 @@ export const GitPanel: React.FC<GitPanelProps> = ({
   const [syncLogs, setSyncLogs] = useState<string[]>([]);
   const [successfullySyncedProject, setSuccessfullySyncedProject] = useState<any>(null);
   
-  // Vishwakarma Selection Toggles
   const [showModeModal, setShowModeModal] = useState(false);
 
   // Load cloud projects securely on change
@@ -2078,7 +2077,6 @@ export const GitPanel: React.FC<GitPanelProps> = ({
           </div>
         )}
 
-        // Removed Vishwakarma multi-model action tiers modal
         <AnimatePresence>
           {showModeModal && (
             <div className="fixed inset-0 bg-[#0d1117]/85 backdrop-blur-md z-[2000] flex flex-col justify-center p-6 select-none animate-in fade-in duration-200">

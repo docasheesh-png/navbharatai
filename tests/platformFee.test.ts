@@ -20,7 +20,7 @@ import {
 } from '../src/lib/platformFee';
 import { platformFeePct, splitPayment, platformFeeNotice } from '../src/server/lib/platformFee';
 import { computeCreditedWallet, recordedPlatformFee, type WalletCreditTx } from '../src/server/lib/payments';
-import { TOKENS_PER_RUPEE, VISHWAKARMA_PASS_PRICE_INR } from '../src/lib/walletPricing';
+import { TOKENS_PER_RUPEE } from '../src/lib/walletPricing';
 
 const T = '2026-09-10T00:00:00.000Z';
 const EMPTY = { tokenBalance: 0, totalTokensPurchased: 0, totalMoneySpent: 0, remaining_balance: 0, total_balance: 0, walletLedger: [] };
@@ -112,22 +112,21 @@ describe('crediting the wallet', () => {
     expect(String(wallet.walletLedger[0].description)).toContain('platform fee');
   });
 
-  it('a vishwakarma order mints tokens from the NET, not the gross — the fee cannot be bypassed', () => {
-    // The security note in payments.ts derives tokens from the VERIFIED paid amount rather than
+  it('tokens are minted from the NET, not the gross — the fee cannot be bypassed', () => {
+    // The security note in payments.ts derives tokens from the VERIFIED paid amount rather than from
     // balanceAdded, so a fee applied only to balanceAdded would have leaked straight past it.
     const paid = 150;
     const fee = 3;
-    const tx: WalletCreditTx = { userId: 'u1', amountPaid: paid, balanceAdded: paid - fee, isVishwakarmaOrder: true, buyPass: true, platformFeeInr: fee };
+    const tx: WalletCreditTx = { userId: 'u1', amountPaid: paid, balanceAdded: paid - fee, platformFeeInr: fee };
     const { wallet } = computeCreditedWallet(EMPTY, tx, null, T);
-    expect(wallet.tokenBalance).toBe((paid - fee - VISHWAKARMA_PASS_PRICE_INR) * TOKENS_PER_RUPEE);
+    expect(wallet.tokenBalance).toBe((paid - fee) * TOKENS_PER_RUPEE);
     expect(wallet.remaining_balance).toBe(paid - fee);
-    expect(wallet.hasVishwakarmaPass).toBe(true);
   });
 
   it('a transaction with NO fee field credits in full — legacy rows and store packs are untouched', () => {
     // A pending order created before the fee existed was SOLD at rupee-for-rupee, and a Play pack is
     // priced with its fee already inside. Both must credit exactly what they promised.
-    const tx: WalletCreditTx = { userId: 'u1', amountPaid: 99, balanceAdded: 99, isVishwakarmaOrder: true };
+    const tx: WalletCreditTx = { userId: 'u1', amountPaid: 99, balanceAdded: 99 };
     const { wallet } = computeCreditedWallet(EMPTY, tx, null, T);
     expect(wallet.tokenBalance).toBe(99 * TOKENS_PER_RUPEE);
     expect(wallet.remaining_balance).toBe(99);
@@ -189,14 +188,28 @@ const modals = readFileSync(join(__dirname, '..', 'src/components/panels/AppModa
 // ₹50 price was wrong necessarily quotes it, and a naive search cannot tell the record from the bug.
 const modalsCode = modals.split('\n').filter((l) => !l.trim().startsWith('//') && !l.trim().startsWith('*')).join('\n');
 
-describe('the vishwakarma chooser shows the price the server will actually charge', () => {
-  it('uses the ONE pass price, never the old ₹50/₹100 split that drifted from the server', () => {
-    expect(modals).toContain('VISHWAKARMA_PASS_PRICE_INR');
-    expect(modalsCode).not.toContain("vkMode === 'pro' ? 100 : 50");
+describe('the pass-purchase surface is GONE, not merely hidden', () => {
+  // It charged ₹100 for a "Lifetime Entry Pass" to Vishwakarma, a feature whose menu entry had already
+  // been removed — so it could take real money for something a user could not then open. Deleted
+  // 2026-09-12. These assertions exist so it cannot come back by a revert or a copy-paste.
+  it('no pass price, no pass order, no unlock modal anywhere in the client', () => {
+    for (const forbidden of [
+      'VISHWAKARMA_PASS_PRICE_INR', 'createVishwakarmaOrder', 'showVishwakarmaUnlockModal',
+      'Lifetime Entry Pass', 'vkTotalPayableInr',
+    ]) {
+      expect(modalsCode, forbidden).not.toContain(forbidden);
+    }
   });
 
-  it('estimates tokens from the amount left after BOTH the pass and the fee', () => {
-    expect(modals).toContain('vkSplit.creditInr - vkPassInr');
-    expect(modals).toContain('vkTotalPayableInr');
+  it('the server will not accept a pass order either', () => {
+    // CODE only. The words still appear in payments.ts in a historical note explaining why the two
+    // credit branches were collapsed, and that note is worth keeping — stripping comments is what
+    // makes this assertion about behaviour rather than about prose.
+    const code = readFileSync(join(__dirname, '..', 'src/server/lib/payments.ts'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+    for (const forbidden of ['isVishwakarmaOrder', 'hasVishwakarmaPass', 'buyPass', 'vishwakarmaPassActivatedAt']) {
+      expect(code, forbidden).not.toContain(forbidden);
+    }
   });
 });

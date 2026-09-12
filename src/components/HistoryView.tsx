@@ -37,6 +37,8 @@ const isAppSession = (session: any) =>
   (session.files && Object.keys(session.files).length > 0) ||
   (session.mode && (session.mode === 'build' || session.mode === 'app_builder')) ||
   isV3Session(session) ||
+  // `vishwakarma` is kept ONLY to recognise sessions saved before that surface was deleted
+  // (2026-09-12); without it an old builder session would stop being listed as a build session.
   (session.current_agent && (String(session.current_agent).includes('vishwakarma') || String(session.current_agent).includes('pro')));
 
 export const HistoryView = ({

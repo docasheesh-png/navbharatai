@@ -151,8 +151,8 @@ describe('rolling many small charges into one ledger row', () => {
   });
 
   it('leaves the rest of the wallet untouched', () => {
-    const { wallet } = charge({ ...FUNDED, hasVishwakarmaPass: true, keepMe: 'yes' }, 1);
-    expect(wallet.hasVishwakarmaPass).toBe(true);
+    const { wallet } = charge({ ...FUNDED, unrelatedFlag: true, keepMe: 'yes' }, 1);
+    expect(wallet.unrelatedFlag).toBe(true);
     expect(wallet.keepMe).toBe('yes');
   });
 });

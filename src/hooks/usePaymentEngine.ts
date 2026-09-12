@@ -17,7 +17,6 @@ import { isNativeApp } from '../lib/mobileNative';
 import { purchaseRail, type StoreConfig, type PurchaseOutcome } from '../lib/storePurchase';
 import { launchPlayPurchase, consumePlayPurchase, pendingPlayPurchases, playBillingAvailable, outcomeForNativeStatus } from '../lib/playBillingNative';
 import { fetchPlatformFeePct, DEFAULT_PLATFORM_FEE_PCT } from '../lib/platformFee';
-import { VISHWAKARMA_PASS_PRICE_INR } from '../lib/walletPricing';
 /** Free-tier daily message ceiling for anonymous (not-signed-in) users. */
 export const FREE_DAILY_MESSAGES = 10;
 
@@ -67,9 +66,6 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     localStorage.setItem('navbharat_my_referral', code);
     return code;
   });
-  const [showVishwakarmaChooser, setShowVishwakarmaChooser] = useState(false);
-  const [showVishwakarmaUnlockModal, setShowVishwakarmaUnlockModal] = useState(false);
-  const [vkTokenInput, setVkTokenInput] = useState<string>('50');
   /**
    * GOOGLE PLAY BILLING (admin 2026-09-06). `storeConfig` is the server's honest answer about
    * whether the Play rail can work at all; `playPluginReady` is whether THIS installed shell has the
@@ -104,8 +100,6 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
   const [couponError, setCouponError] = useState<string | null>(null);
   const [couponSuccess, setCouponSuccess] = useState<string | null>(null);
 
-  // NEW: Vishwakarma Promo
-  const [vkMode, setVkMode] = useState<'basic' | 'pro' | 'vip'>('basic');
 
   // iOS-style card balance states & limits
   const [reminderLimit, setReminderLimit] = useState<number>(() => {
@@ -183,16 +177,17 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
   };
 
   /**
-   * REMOVED 2026-08-21 — `redeemVishwakarmaPromo` posted to `/api/payment/validate-mode-promo`, a route
-   * that exists nowhere on the server (the only occurrence of that path in the whole repo was this
-   * call). So the "Have a promo code?" box in the Professional Pass modal answered every code — valid
-   * or not — with "Validation failed", blaming the user's code for a missing endpoint. Its success
-   * message also promised a ₹1 checkout that `create-order` knows nothing about, so wiring it would
-   * have meant inventing a pricing feature rather than restoring one.
+   * REMOVED 2026-08-21 — a mode-level promo redeemer posted to `/api/payment/validate-mode-promo`, a
+   * route that exists nowhere on the server (the only occurrence of that path in the whole repo was
+   * this call). So the "Have a promo code?" box answered every code — valid or not — with "Validation
+   * failed", blaming the user's code for a missing endpoint.
+   *
+   * Recorded because the server still carries the other half: `computeCreditedWallet` reads a pending
+   * `promo_redemptions/promo_pending_*` document that nothing has ever written, precisely because this
+   * was its only would-be writer.
    *
    * The working promo redemption is `redeemPromoCoupon` below (`POST /api/payment/redeem-coupon`,
-   * surfaced in Wallet & Billing) — a user with a code still has a real place to use it. A pass-level
-   * promo can come back the day a server route genuinely honours it.
+   * surfaced in Wallet & Billing) — a user with a code still has a real place to use it.
    */
 
   const createBillingOrder = async (amount: number) => {
@@ -205,38 +200,6 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
         amount,
         userEmail: user.email || '',
         userName: user.displayName || 'NavBharat Client'
-      }, { headers: await authedHeaders() });
-      setPaymentSession(res.data);
-      if (res.data.isSimulator) {
-        setShowCheckoutModal(true);
-        setRechargeStatus('Secure simulated checkout session active.');
-      } else {
-        setRechargeStatus('Handshaking with Cashfree secure gateway...');
-        triggerCashfreeCheckout(res.data.paymentSessionId, res.data.environment);
-      }
-    } catch (err: any) {
-      alert(`Checkout session initiation failed: ${err.response?.data?.error || err.message}`);
-    } finally {
-      setIsRecharging(false);
-    }
-  };
-
-  const createVishwakarmaOrder = async (buyPass: boolean, tokenAmount: number) => {
-    if (!user) return;
-    setIsRecharging(true);
-    setRechargeStatus('Requesting Cashfree checkout protocol for Vishwakarma...');
-    try {
-      // The ONE pass price (walletPricing.ts). It used to be a literal here while the chooser modal
-      // printed ₹50 — see that file's header for what that cost users.
-      const passPrice = VISHWAKARMA_PASS_PRICE_INR;
-      const amount = (buyPass ? passPrice : 0) + tokenAmount;
-      const res = await axios.post('/api/payment/create-order', {
-        amount,
-        userEmail: user.email || '',
-        userName: user.displayName || 'NavBharat Client',
-        isVishwakarmaOrder: true,
-        buyPass,
-        tokenAmount
       }, { headers: await authedHeaders() });
       setPaymentSession(res.data);
       if (res.data.isSimulator) {
@@ -583,10 +546,6 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     wallet, setWallet,
     dailyUsage, setDailyUsage, incrementDailyUsage, isFreeLimitReached,
     myReferralCode,
-    // modals / vishwakarma
-    showVishwakarmaChooser, setShowVishwakarmaChooser,
-    showVishwakarmaUnlockModal, setShowVishwakarmaUnlockModal,
-    vkTokenInput, setVkTokenInput,
     // billing data
     billingLogs, setBillingLogs,
     billingTransactions, setBillingTransactions,
@@ -604,7 +563,6 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     isRedeemingCoupon, setIsRedeemingCoupon,
     couponError, setCouponError,
     couponSuccess, setCouponSuccess,
-    vkMode, setVkMode,
     // limits + referral
     reminderLimit, setReminderLimit,
     budgetLimit, setBudgetLimit,
@@ -624,7 +582,6 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     platformFeePct,
     buyStorePack, buyingProductId,
     storePurchaseNotice, setStorePurchaseNotice,
-    createVishwakarmaOrder,
     verifyBillingPayment,
     redeemPromoCoupon,
   };

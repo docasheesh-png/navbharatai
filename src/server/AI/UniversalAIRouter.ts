@@ -42,7 +42,7 @@ export class UniversalAIRouter {
   async route(
     message: string,
     history: any[] = [],
-    tier: 'navbharat' | 'vishwakarma-basic' | 'vishwakarma-pro' | 'vip' | 'sda' | 'doctor' | 'professional' = 'navbharat',
+    tier: 'navbharat' | 'free' | 'sda' | 'doctor' | 'professional' = 'navbharat',
     traceContext?: TraceContext,
     systemPrompt?: string,
   ): Promise<string> {
@@ -58,7 +58,7 @@ export class UniversalAIRouter {
   async routeDetailed(
     message: string,
     history: any[] = [],
-    tier: 'navbharat' | 'vishwakarma-basic' | 'vishwakarma-pro' | 'vip' | 'sda' | 'doctor' | 'professional' = 'navbharat',
+    tier: 'navbharat' | 'free' | 'sda' | 'doctor' | 'professional' = 'navbharat',
     _traceContext?: TraceContext,
     systemPrompt?: string,
   ): Promise<RoutedCall> {
@@ -115,7 +115,9 @@ export class UniversalAIRouter {
   // state with them. FREE must never reach Claude.
   private namespaceFor(tier: string): 'free' | 'pro' | 'professional' {
     if (tier === 'sda' || tier === 'doctor' || tier === 'professional') return 'professional';
-    if (tier === 'vishwakarma-pro' || tier === 'vip') return 'pro';
+    // The 'pro' namespace is no longer reachable from a chat tier: the two tiers that mapped to it
+    // (vishwakarma-pro, vip) were deleted with Vishwakarma on 2026-09-12. The namespace itself is kept
+    // because it is generic machinery a future PRO chat surface would map straight onto.
     return 'free';
   }
 

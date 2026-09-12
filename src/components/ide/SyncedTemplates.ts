@@ -627,7 +627,7 @@ export default function App() {
             <div className="space-y-1">
               <h4 className="text-sm font-semibold text-white uppercase tracking-wider">Pipelines Console</h4>
               <p className="text-[10.5px] text-[#8b949e] max-w-md mx-auto leading-relaxed font-semibold">
-                CI/CD configuration established and managed by Vishwakarma DevOps orchestration layer naturally. There is no pending deployment queue.
+                CI/CD configuration established and managed by the NavBharatAI DevOps orchestration layer naturally. There is no pending deployment queue.
               </p>
             </div>
           </div>
@@ -701,7 +701,7 @@ export default function App() {
         <div className="max-w-5xl mx-auto px-6 space-y-8">
           <div className="border-b border-stone-800 pb-4">
             <h2 className="text-sm font-black uppercase text-white tracking-widest">Active Workspace Deployments</h2>
-            <p className="text-[11px] text-stone-500 mt-0.5">Explore digital products fully synchronised by the Vishwakarma platform.</p>
+            <p className="text-[11px] text-stone-500 mt-0.5">Explore digital products fully synchronised by the NavBharatAI platform.</p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

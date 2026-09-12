@@ -42,8 +42,6 @@ export function buildInitialWallet(i: NewWalletInput): Record<string, unknown> {
     remaining_balance: welcomeBalance,
     total_output_tokens_used: 0,
     total_money_spent: 0,
-    hasVishwakarmaPass: false,
-    vishwakarmaPassActivatedAt: null,
     tokenBalance: i.welcomeTokens,
     totalTokensPurchased: i.welcomeTokens,
     totalTokensUsed: 0,

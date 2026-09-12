@@ -50107,3 +50107,101 @@ reasons are missing — *"this is not a clean record"* — rather than rendering
 (a build can genuinely cost a fraction of a cent, and rounding those to zero would make the
 cheapest-but-most-frequent failure look free), and that the admin can actually SEE it — a measurement
 nobody can read is not a measurement.
+## 2026-09-12 — Vishwakarma deleted, permanently. And what the deletion found on the way out
+
+**The admin's instruction:** *"Vishwakarma ab delete karne layak hai, delete karne se kuch nahi ho to
+permanently delete kar do"* — plus explicit acceptance of the three cleanups I had proposed.
+
+### ⚠️ FIRST, A CORRECTION TO MY OWN REPORT, because it was wrong in the expensive direction
+
+I told the admin that `NAVBHARAT_OS_V2` and the three `getVishwakarma*Context` builders were **"0 live
+uses, ~800 lines of dead prompt"**. The three builders were genuinely dead. **`NAVBHARAT_OS_V2` was
+not — it is the FREE chat's entire system prompt**, interpolated by the live `getBharatContext()`.
+
+The mistake was mechanical and is exactly the one safeguard #6 describes: my grep **excluded
+`prompts.ts` itself**, and the constant is referenced inside its own file by template interpolation. A
+reference count taken with the defining file filtered out is not a reference count.
+
+What that meant in practice is worse than the wrong claim: the live FREE-chat system prompt still
+described *"Vishwakarma"* agents with Basic / Pro / VIP tiers and three *"SAKUNI"* modes, and its
+redirection rule told the model to say **"For app building, head over to Vishwakarma!"** — a place with
+no menu entry. Every user asking the free chat to build something was being sent nowhere.
+`tests/prompts.test.ts` now asserts that against the **rendered live prompt**, not against a
+reference count.
+
+### 🔴 THE FIND THAT MATTERED MOST: a live surface that could charge ₹100 for a deleted feature
+
+`showVishwakarmaUnlockModal` in `AppModals.tsx` was a **real Cashfree purchase surface** — *"Lifetime
+Entry Pass · Mandatory one-time gateway fee · ₹100"*, button *"Buy Pass & Activate Vishwakarma"* —
+wired through `createVishwakarmaOrder` → `/api/payment/create-order`. Vishwakarma's menu entry was
+already gone, so anyone who reached it would have paid ₹100 for something they then could not open.
+
+It was reachable on a **bare 402** from `useChatEngine` (the `requirePass` flag it also watched for was
+never sent by any route — verified). Deleted outright, and `tests/platformFee.test.ts` now fails if the
+price constant, the order function or the modal flag comes back.
+
+### `hasVishwakarmaPass` — a button that granted nothing
+
+`POST /api/admin/users/:userId/pro` wrote it and the admin dashboard had a **Pro / Revoke** button
+wired to it. **Nothing in the repo ever read it as an access check** — it was shown back on the user
+list and in a problem report, and that was all. A control that looks like it grants access and does
+not is what the second absolute rule forbids, so the route, the column and the button are gone.
+
+**Nobody's payment record is lost**, which is what made this safe: the ₹100 is recorded where money
+belongs — the wallet **ledger** entry names the pass and the amount, and `totalMoneySpent` carries the
+rupees. The boolean was never the receipt.
+
+### ONE credit path, and why collapsing two money branches was behaviour-preserving
+
+`computeCreditedWallet` had two branches chosen by `isVishwakarmaOrder`. The **only** thing that
+genuinely differed was the pass: that branch subtracted ₹100 before minting tokens. Verified, both
+ways, rather than assumed:
+
+* **web recharge** — `amountPaid` is GROSS and `balanceAdded` is the net the route computed, so
+  `netPaid = amountPaid − platformFee === balanceAdded`;
+* **Play / Apple top-up** — ⚠️ it *also* set `isVishwakarmaOrder: true` ("the wallet-credit shape every
+  top-up uses"), and carries no `platformFeeInr`, so `recordedPlatformFee` returns 0 and
+  `netPaid === amountPaid === balanceAdded`.
+
+So for every real purchase the two were arithmetically identical, and collapsing them removes the
+duplicated money arithmetic `walletPricing.ts`'s own header warns about. `creditableVishwakarmaTokens`
+became `creditableTokens`; the **C4 invariant it exists for — tokens derive from the VERIFIED paid
+amount, never a client-supplied count — outlived its occasion and is still tested.**
+
+Two dead things found in the same function: the **pending-promo branch** can never fire (nothing has
+ever written `promo_redemptions/promo_pending_*`; its only would-be writer posted to
+`/api/payment/validate-mode-promo`, a route that never existed), and it carried a real arithmetic bug —
+it credited **1,000** tokens while recording **10,000** in `totalTokensPurchased` and in the user's own
+ledger line. One number now drives all three. The branch is kept (minus its Vishwakarma reward) because
+a future promo can hook into it honestly; the LIVE coupon path `/api/payment/redeem-coupon` is
+untouched.
+
+### 🔒 THE NON-DESTRUCTIVE PART: old sessions must still OPEN
+
+Real users have sessions saved with `agent: 'vishwakarma_pro'` or a `savedTab` of `asc_chat`. Each chat
+surface owns **separate message state**, so dropping the branch without replacing it would have routed
+those sessions to the FREE chat and shown an **empty conversation** — indistinguishable, to the person
+looking at it, from their history having been deleted.
+
+A legacy builder session therefore resolves to the **Pro** surface — the honest mapping, since
+NavBharatAI Pro is what replaced Vishwakarma. Pinned in `tests/sessionRouting.test.ts` (including the
+saved-tab half) and `tests/agentGreetings.test.ts` (a legacy agent id still gets a real greeting rather
+than `undefined`, which would have opened the chat with a blank first message).
+
+### What went, in full
+
+Three `/api/chat/vishwakarma-*` + `/api/chat/vip` routes · the `vishwakarma-pro`/`vip` router tiers ·
+the ₹100 purchase modal and its order function · `hasVishwakarmaPass` / `vishwakarmaPassActivatedAt`
+everywhere (wallet default, backfill, merge, admin list, problem report) · the admin Pro grant route +
+dashboard control · `VISHWAKARMA_PASS_PRICE_INR` · the Basic/Pro/VIP greeting pools · the `asc_chat`
+surface, its sidebar handler and chooser state · the Vishwakarma and SAKUNI sections of the live system
+prompt · 340 lines of dead prompt builders (`prompts.ts`: 921 → 410 lines).
+
+**Gate on the final state:** typecheck 0, noUnusedImports clean, typecheck:server 0, build ok,
+test:bundle ok, boot:check PASS, **vitest 1574 files / 21,695 passed / 1 skipped / 0 failed**.
+
+**Still to do, deliberately as its own change:** the engine's user-facing name is still *"NavBharatAI
+Pro v5.0"* in ~69 files. The admin asked for plain *"NavBharatAI Pro"*. That is a separate PR because
+the internal identifiers (`AgentV3`, `/api/agentv3`, and above all the `AGENTV3_*` **Cloud Run env
+keys**) must NOT be renamed — renaming an env key that is set in Cloud Run breaks production instantly,
+with nothing in the code able to detect it.

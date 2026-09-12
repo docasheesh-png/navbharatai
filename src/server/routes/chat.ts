@@ -17,7 +17,7 @@ import { isFirstChatTurn, sessionGreetingRule } from '../lib/sessionGreeting';
 import { fetchPollinationsImage, imageMarkdown } from '../lib/imageGen';
 
 /**
- * Chat routes (general + Vishwakarma tiers) extracted from the server.ts monolith
+ * Chat routes (the general/FREE chat) extracted from the server.ts monolith
  * (Phase 1, AI-core step c). Hosts the prompt builders + chatHandler + /api/chat/*
  * tier endpoints. Behavior unchanged; the legacy /api/chat catch route stays
  * deprecated/removed. Routing to providers is delegated to the shared aiRouter.
@@ -230,7 +230,16 @@ HARD LIMITS:
 ${LANGUAGE_RULE}
 Be helpful, concise, and accurate. If the user wants to build an app, guide them.`;
 
-  const chatHandler = async (req: any, res: any, tier: 'navbharat' | 'vishwakarma-basic' | 'vishwakarma-pro' | 'vip') => {
+  // ONE tier reaches this handler now. The three Vishwakarma/VIP endpoints it also served were
+  // deleted on 2026-09-12 with Vishwakarma itself, so `tier` is narrowed to what actually arrives.
+  //
+  // ⚠️ A CONSEQUENCE WORTH NAMING RATHER THAN LEAVING FOR SOMEONE TO REDISCOVER: `isFree` below is now
+  // always true, which makes `hasCanvas`, `isBuildIntent`, SYSTEM_PROMPT_EDIT and buildDynamicPrompt
+  // unreachable from this route. They are deliberately NOT ripped out in the same change — this is the
+  // FREE chat every user touches, and the minimal edit (delete the dead endpoints, narrow the type)
+  // leaves the surviving path byte-identical, which is the property worth having. Removing that
+  // machinery is a separate, self-contained cleanup.
+  const chatHandler = async (req: any, res: any, tier: 'navbharat') => {
     // Stamped FIRST so the measurement below covers everything the user actually waits through — the
     // document extraction, the vision pass and the live lookup included, not just the model call.
     const requestStartedAt = Date.now();
@@ -600,7 +609,4 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
 
   app.post('/api/chat/navbharat',       chatLimiter, (req, res) => chatHandler(req, res, 'navbharat'));
   app.post('/api/chat/navbharatai',     chatLimiter, (req, res) => chatHandler(req, res, 'navbharat'));
-  app.post('/api/chat/vishwakarma-basic', chatLimiter, (req, res) => chatHandler(req, res, 'vishwakarma-basic'));
-  app.post('/api/chat/vishwakarma-pro', chatLimiter, (req, res) => chatHandler(req, res, 'vishwakarma-pro'));
-  app.post('/api/chat/vip',             chatLimiter, (req, res) => chatHandler(req, res, 'vip'));
 }

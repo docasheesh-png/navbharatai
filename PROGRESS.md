@@ -49977,3 +49977,87 @@ the branch and serves the hosted name *and* the split-backend lookup below it, a
 reuses the `src` that produced the plan. Where `src` is null — the files genuinely could not be read —
 the branch says so, because passing `{}` instead would have reached the hosting module's *"there are no
 app files yet, build your app first"*, which is the wrong reason: the app exists, we could not read it.
+
+---
+
+## 2026-09-12 — ROADMAP §11 slice 2.1: the daily hosting bill, and the rename bug it uncovered
+
+Slice 2 built every piece and deliberately wired none of them to a wallet — `readHostingUsage` measures
+from Google, `hostingCostUsd` prices D5's four lines, `hostingBillableUsd` applies the markup and the
+billing law's two conditions, and the admin route reported `wouldBill` so the switch would be flipped
+against real numbers rather than against a plan. This is the flip.
+
+**It is the gate on `NAVBHARAT_CLOUD_PUBLIC`.** Hosting is admin-only for exactly one reason, written
+into `CLAUDE.md`: with hosting open and no metering, every hosted app's Cloud Run bill lands on
+NavBharatAI with nothing recording it. Metering is this slice. (Opening hosting is still a separate
+decision — the rates are unset and nobody has read a real day of the report yet.)
+
+### The only way a billing job goes really wrong is by billing the same thing twice
+
+Both ways that happens are closed in the pure module rather than in the job:
+
+**An open-ended window.** "The last 24 hours", evaluated whenever the job happens to run, overlaps
+itself when a run is late or retried and under-counts when one is early. The window is a whole, closed,
+past UTC day, named by its date — asked for twice it returns the identical stretch of time, which is
+what makes an idempotency key mean anything at all. It never bills part of today.
+
+**A key that is not the window.** The guard is `hosting_billing/<workspaceId>_<YYYY-MM-DD>`, written
+with Firestore **`create`** — every other store here writes `{ merge: true }` because re-writing
+telemetry is harmless; this document *is* the proof that a real person has already been charged, and a
+`set` would cheerfully overwrite it. `create` failing when the document exists is the feature.
+
+**The reservation is written before the wallet moves**, and that ordering can only ever under-charge: a
+claim that lands with a debit that then fails means NavBharatAI absorbed one app-day, recorded and
+visible in `absorbed()`. The reverse order risks charging somebody twice, which is the one outcome the
+billing law never permits. The store is also the single **fail-closed** store on this path — the exact
+opposite of `jobLease`, which runs its job anyway when it cannot read its lease. A purge that runs twice
+costs reads; a charge that runs twice takes money from a real person twice.
+
+### D3, decided rather than deferred
+
+**There is no separate hosting allowance, and that is the decision.** THE ONE-WALLET LAW says a user has
+one balance and everything draws it down; the gifted welcome balance is already the free allowance for
+everything else they can do. A hosting-only second pot would be a second currency to explain, to top up
+and to keep in sync — the precise thing the one-wallet law exists to prevent.
+
+### The bug found while wiring it, and its sibling
+
+`serviceNameFor(workspaceId, appName)` folds the app's **name** into the Cloud Run service name — and an
+app can be renamed. Every later caller that re-derived the name would then address a service that does
+not exist:
+
+- the billing sweep would measure nothing and bill **₹0 for an app genuinely costing us money**, with no
+  error anywhere to reveal it; and
+- **the takedown would delete nothing while reporting the slot freed** — leaking a Cloud Run service out
+  of a hard per-project cap of **1,000 that Google does not raise**. Silent, permanent, and exactly the
+  leak that takedown path was written to prevent.
+
+Fixed at the source: the deploy now writes the service name it actually used onto the deployment record,
+and both callers read it, falling back to the derivation only for records made before the field existed —
+which is exactly as right as those records ever were.
+
+### One rename, because the name had become a lie
+
+`debitWalletForAiUsage` → `debitWalletRolledUp`. Nothing about it was ever AI-specific — the bucket and
+the ledger label are the caller's, which is what let hosting reuse it instead of opening a third money
+path. Leaving the old name would have made a daily hosting charge read as an AI charge to whoever next
+opened the file.
+
+### What it deliberately will not do
+
+It does not pause an app whose owner has run out of credit. `plan_paused` exists in the registry and
+would be the mechanism, but taking somebody's live site off the internet over a balance is a product
+decision with a real person on the other end of it — the admin's to make, not a sweep's to assume.
+Today the balance goes down, exactly as a build's does, and the report names any app whose owner could
+not pay. Recorded here as an open decision rather than implemented quietly.
+
+23 tests, including that the window does not move with the clock, that a charge rounding to nothing is
+nothing rather than a paisa, that the claim precedes the debit, and that the sweep contains no
+`setStatus` at all.
+
+**A third thing an existing guard caught.** `absorbed()` first asked Firestore for `debited == false`
+ordered by time — an equality filter chained into an `orderBy` on a different field, which needs a
+composite index this project does not create. `firestoreIndexSafe` fails CI on exactly that shape,
+because such a query does not error in a test; it errors in production on the day somebody opens the
+screen. It now scans the most recent records and filters in memory, and returns `complete` so the
+caller knows it got "the absorbed days among the last N", not "every absorbed day".

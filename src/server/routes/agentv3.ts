@@ -4549,7 +4549,7 @@ async function noteBuildOutcome(
       // A hosted app IS a published app — recorded so it appears in "Your published apps" and, above
       // all, so "Take offline" has a row to act on. See hostedDeploymentRecord.ts.
       await recordHostedDeployment({
-        workspaceId, userId, url: result.url, fileCount: Object.keys(files).length,
+        workspaceId, userId, url: result.url, fileCount: Object.keys(files).length, service: result.service,
       });
       res.json({
         ok: true, url: result.url, service: result.service, ready: result.ready,
@@ -7741,12 +7741,22 @@ async function noteBuildOutcome(
         const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
         const token = await auth.getAccessToken().catch(() => null);
         if (token) {
+          /**
+           * 🔴 THE RECORDED SERVICE NAME, not a re-derived one (2026-09-12, found while wiring the
+           * daily hosting bill). `serviceNameFor` folds the app's NAME into the service name, and an
+           * app can be renamed after it was hosted — after which this line deleted a service that does
+           * not exist, reported `hostedSlotFreed: true`, and left the REAL service holding one of the
+           * 1,000 slots Google will never raise. Silent, permanent, and exactly the kind of leak this
+           * takedown was written to prevent. The deploy now writes down the name it used; the
+           * derivation stays only for records made before it did.
+           */
           const convo = await getConversationStore().get(workspaceId).catch(() => null);
+          const recordedService = String(rec?.service ?? '').trim();
           const del = await deleteHostedService({
             token: String(token),
             projectId: project.projectId,
             region: appsRegion(),
-            service: serviceNameFor(workspaceId, convo?.appName || convo?.title || null),
+            service: recordedService || serviceNameFor(workspaceId, convo?.appName || convo?.title || null),
           });
           hostedSlotFreed = del.ok;
         }
@@ -8032,7 +8042,7 @@ async function noteBuildOutcome(
                 return;
               }
               await recordHostedDeployment({
-                workspaceId, userId, url: hosted.url, fileCount: Object.keys(hostFiles).length,
+                workspaceId, userId, url: hosted.url, fileCount: Object.keys(hostFiles).length, service: hosted.service,
               });
               /**
                * `ready` is Cloud Run's own word for "a revision is serving", never inferred from a

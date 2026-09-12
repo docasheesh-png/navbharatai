@@ -1028,6 +1028,37 @@ the code (it is actually read somewhere) on 2026-07-11.
   `pixelEventFor` fails CI until the policy is updated too** (verified to bite). Do not weaken it;
   it exists because the first drift produced no failure of any kind.
 
+- **Charging for NavBharat Cloud hosting (built 2026-09-12, ROADMAP §11 slice 2.1 — NOT live yet):**
+  `NAVBHARAT_BILL_HOSTING` (⚠️ **UNSET.** Unset means the daily job still MEASURES every hosted app and
+  writes an admin line, and charges **₹0** — NavBharatAI absorbs it, exactly as slice 2's admin route
+  already reported), `NAVBHARAT_HOSTING_MARKUP_PCT` (default **20**, admin decision D5), and the six
+  per-unit rates `NAVBHARAT_RATE_CPU_SECOND` · `_MEMORY_GIB_SECOND` · `_MILLION_REQUESTS` ·
+  `_EGRESS_GIB` · `_BUILD_MINUTE` · `_STORAGE_GIB_MONTH`.
+  🔴 **THERE ARE DELIBERATELY NO DEFAULT RATES, and this is the same law `sandboxCost.ts` obeys: a rate
+  that is not set bills ZERO for that line and the line is NAMED as unbilled.** Partial configuration
+  therefore UNDER-bills — the safe direction — and can never over-bill. The alternative (a plausible
+  placeholder) is precisely how `E2B_USD_PER_HOUR` came to charge half the real rate for a month while
+  looking deliberately configured.
+  ⚠️ **D5's condition is that all FOUR cost lines are metered, not just compute.** An app serving images
+  or video can have EGRESS dwarf its compute, so metering compute alone and adding 20% makes every
+  bandwidth-heavy app a LOSS. A later change that drops a line does not simplify the pricing; it
+  re-introduces the loss D5 was written to prevent.
+  🔒 **D3 — THE FREE ALLOWANCE IS THE WALLET, and that is the decision rather than an omission.** There
+  is no separate hosting pot: THE ONE-WALLET LAW says a user has one balance, and the gifted welcome
+  balance is already the free allowance for everything else. A hosting-only second currency would be
+  one more thing to explain, top up and keep in sync.
+  📅 The job is `hosting-daily-bill` (04:00 UTC, **exclusive**), and it bills the last COMPLETE UTC day —
+  never a partial one, because a partial day would be re-billed on the next run. Idempotency is a
+  Firestore **`create`** on `hosting_billing/<workspaceId>_<YYYY-MM-DD>`, written BEFORE the wallet
+  moves: a claim that lands with a debit that fails means we absorbed one app-day (visible in
+  `absorbed()`), which is the only direction the billing law permits being wrong in.
+  ⚠️ **It does NOT pause an app whose owner runs out of credit.** `plan_paused` exists and would be the
+  mechanism, but taking a live site off the internet over a balance is a product decision with a real
+  person on the other end — the admin's to make. Today the balance simply goes down, as a build's does.
+  🔒 **THIS JOB IS THE GATE ON `NAVBHARAT_CLOUD_PUBLIC`.** That key is unset because hosting without
+  metering puts every hosted app's Cloud Run bill on NavBharatAI with nothing recording it. This is the
+  metering. Opening hosting still needs the rates above to be set and a few real days of the admin
+  report read first — the switch is not a consequence of this code existing.
 - **Visitor analytics for published apps (shipped 2026-09-10, ROADMAP §13 item 1.1):**
   `AGENTV3_SITE_ANALYTICS` (kill switch — **default ON**; `off` stops the beacon being stamped at
   publish and the hit route recording; apps already published keep their script until republished,

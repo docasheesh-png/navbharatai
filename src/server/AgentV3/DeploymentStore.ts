@@ -58,6 +58,19 @@ export interface DeploymentRecord {
   updatedAt: number;
   /** Hosting provider id (e.g. 'firebase'). Present on records written after the Phase 0 quota wiring. */
   providerId?: string;
+  /**
+   * The Cloud Run service this app actually runs as — written at host time by the code that created
+   * it, never re-derived.
+   *
+   * 🔴 WHY IT IS STORED (2026-09-12). `serviceNameFor(workspaceId, appName)` folds the app's NAME into
+   * the service name, and an app can be renamed. Every later caller that re-derived the name would
+   * then address a service that does not exist: the daily billing sweep would measure nothing and bill
+   * ₹0 for an app really costing us money, and the takedown would delete nothing while reporting the
+   * slot freed — leaking a Cloud Run slot out of a hard per-project cap of 1,000. Recording the name
+   * the deploy actually used removes both, and a record written before this field existed falls back
+   * to the old derivation, which is exactly as right as it ever was.
+   */
+  service?: string;
   /** True when NavBharatAI paid for this deploy (first-party host). */
   firstParty?: boolean;
   /** Published bundle size in MB (2dp). */
@@ -110,7 +123,7 @@ class DeploymentStore {
     userId: string | null,
     url: string,
     fileCount: number,
-    extra?: { providerId?: string; firstParty?: boolean; sizeMb?: number; status?: DeploymentStatus; flagged?: boolean },
+    extra?: { providerId?: string; service?: string; firstParty?: boolean; sizeMb?: number; status?: DeploymentStatus; flagged?: boolean },
   ): Promise<void> {
     const db = this.getDb();
     if (!db || !workspaceId || !url) return;
@@ -122,6 +135,7 @@ class DeploymentStore {
           url,
           fileCount: Number.isFinite(fileCount) ? fileCount : 0,
           ...(extra?.providerId ? { providerId: extra.providerId } : {}),
+          ...(extra?.service ? { service: extra.service } : {}),
           ...(typeof extra?.firstParty === 'boolean' ? { firstParty: extra.firstParty } : {}),
           ...(typeof extra?.sizeMb === 'number' ? { sizeMb: extra.sizeMb } : {}),
           ...(typeof extra?.flagged === 'boolean' ? { flagged: extra.flagged } : {}),

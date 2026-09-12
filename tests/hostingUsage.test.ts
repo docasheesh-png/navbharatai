@@ -136,7 +136,7 @@ describe('🔒 the route — POST /api/agentv3/host-usage measures BEFORE anythi
     // ⚠️ Anchored on the real debit FUNCTIONS, not on the words: an earlier version of this test
     // matched /charge/i and failed on the handler's own prose ("without charging anyone"). A test that
     // reads comments is a test that blocks correct code.
-    for (const fn of ['debitWalletForBuild(', 'debitWalletForAiUsage(', 'chargeForAiTurn', 'computeDebitedWallet(']) {
+    for (const fn of ['debitWalletForBuild(', 'debitWalletRolledUp(', 'chargeForAiTurn', 'computeDebitedWallet(', 'chargeHostingForDay(']) {
       expect(handler, fn).not.toContain(fn);
     }
   });

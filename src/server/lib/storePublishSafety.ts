@@ -25,7 +25,11 @@
 //
 // PURE. The route supplies the files and applies the decision; nothing here touches a database.
 
-import { scanPublishedContent, publishScanBlocks, type ContentScanResult, type ContentScanFinding } from '../AgentV3/ContentSafetyScanner';
+import {
+  scanPublishedContent, publishScanBlocks, scannableText,
+  type ContentScanResult, type ContentScanFinding, type ContentFindingSeverity,
+} from '../AgentV3/ContentSafetyScanner';
+import { classifyPublishedText, illegalRefusal, type PublishContentClass } from '../AgentV3/illegalContentRules';
 
 /** What the publish route should do with this app. */
 export interface PublishSafetyDecision {
@@ -46,6 +50,22 @@ export interface PublishSafetyDecision {
   refusalMessage: string;
   /** One line for the audit log and the admin queue. '' when clean. */
   summary: string;
+  /**
+   * What the app IS, as opposed to what is wrong with it (Phase 5).
+   *
+   * `illegal` refuses unconditionally. `adult` is lawful and rides the creator's own +18 setting —
+   * their app is marked 18+ and hidden from viewers who have not turned that on. `general` is
+   * everything else and changes nothing.
+   */
+  contentClass: PublishContentClass;
+  /**
+   * True when the app carries adult content but the creator has NOT turned on the 18+ setting.
+   *
+   * Deliberately not a refusal: they are allowed to build it, they simply have not said they are an
+   * adult yet. The app publishes UNLISTED and a human decides, and the creator is told which switch
+   * would have made it ordinary.
+   */
+  adultWithoutOptIn: boolean;
 }
 
 /** At most this many findings travel onto the record — an admin acts on the first one anyway. */
@@ -69,22 +89,73 @@ export function refusalFor(finding: ContentScanFinding | undefined): string {
     + 'the Grievance Redressal page and a person will look at it.';
 }
 
-/** Decide, from a scan result. PURE, so the rule is testable without a publish. */
-export function decideFromScan(scan: ContentScanResult, blockMode: boolean): PublishSafetyDecision {
-  const findings = scan.findings.slice(0, MAX_RECORDED_FINDINGS);
-  const flagged = !scan.safe;
-  const summary = flagged
-    ? `${scan.findings.length} content-safety finding(s): ${scan.findings.map((f) => `${f.severity}:${f.rule}`).join(', ')}`
-    : '';
+/** What the caller knows about the publisher, for the adult tier. */
+export interface PublisherContext {
+  /** Has this creator turned on the 18+ setting? (src/lib/adultContent.ts) */
+  adultOptIn: boolean;
+}
+
+/**
+ * Decide, from a scan result. PURE, so the rule is testable without a publish.
+ *
+ * 🔒 THE ORDER IS THE POLICY. `illegal` is answered FIRST and ignores `blockMode` entirely — the
+ * admin's instruction was "sirf saaf-saaf wale cases par publish BLOCK karo", and a category that is
+ * unlawful for everyone must not be reachable by flipping an operations switch. `blockMode` continues
+ * to govern only the older, judgement-call rules (phishing shapes and the like), where a false
+ * positive costs an honest creator their app and caution is the right default.
+ */
+export function decideFromScan(
+  scan: ContentScanResult,
+  blockMode: boolean,
+  classified: ReturnType<typeof classifyPublishedText> = { findings: [], contentClass: 'general' },
+  publisher: PublisherContext = { adultOptIn: false },
+): PublishSafetyDecision {
+  const illegal = classified.findings.filter((f) => f.contentClass === 'illegal');
+  const adult = classified.contentClass === 'adult';
+  const adultWithoutOptIn = adult && !publisher.adultOptIn;
+
+  // Everything the admin queue shows, in one list. The illegal/adult findings carry NO matched text
+  // — see illegalContentRules.ts for why that differs from the phishing rules deliberately.
+  const findings: ContentScanFinding[] = [
+    ...classified.findings.map((f) => ({
+      severity: (f.contentClass === 'illegal' ? 'critical' : 'medium') as ContentFindingSeverity,
+      rule: f.id,
+      description: f.description,
+      matchSnippet: '',
+    })),
+    ...scan.findings,
+  ].slice(0, MAX_RECORDED_FINDINGS);
+
+  const flagged = !scan.safe || classified.findings.length > 0;
+  const parts: string[] = [];
+  if (classified.findings.length) parts.push(classified.findings.map((f) => `${f.contentClass}:${f.id}`).join(', '));
+  if (scan.findings.length) parts.push(scan.findings.map((f) => `${f.severity}:${f.rule}`).join(', '));
+
+  if (illegal.length > 0) {
+    return {
+      findings,
+      flagged: true,
+      refuse: true,               // unconditional — see the note above
+      forceUnlisted: true,
+      refusalMessage: illegalRefusal(illegal[0]),
+      summary: parts.join(' | '),
+      contentClass: 'illegal',
+      adultWithoutOptIn: false,
+    };
+  }
+
   return {
     findings,
     flagged,
-    refuse: flagged && blockMode,
-    // Note it is NOT gated on block mode: even in warn mode a flagged app must lose its listing.
-    // Publishing is allowed to continue; being featured is not.
+    refuse: !scan.safe && blockMode,
+    // NOT gated on block mode: a flagged app — including adult content published by somebody who has
+    // not turned the 18+ switch on — must lose its listing. Publishing is allowed; being featured is
+    // earned.
     forceUnlisted: flagged,
-    refusalMessage: flagged && blockMode ? refusalFor(scan.findings[0]) : '',
-    summary,
+    refusalMessage: !scan.safe && blockMode ? refusalFor(scan.findings[0]) : '',
+    summary: parts.join(' | '),
+    contentClass: classified.contentClass,
+    adultWithoutOptIn,
   };
 }
 
@@ -98,10 +169,20 @@ export function decideFromScan(scan: ContentScanResult, blockMode: boolean): Pub
 export function assessPublishSafety(
   files: Record<string, string>,
   blockMode: boolean = publishScanBlocks(),
+  publisher: PublisherContext = { adultOptIn: false },
 ): PublishSafetyDecision {
   try {
-    return decideFromScan(scanPublishedContent(filesForScan(files)), blockMode);
+    const scanned = filesForScan(files);
+    return decideFromScan(
+      scanPublishedContent(scanned),
+      blockMode,
+      classifyPublishedText(scannableText(scanned)),
+      publisher,
+    );
   } catch {
-    return { findings: [], flagged: false, refuse: false, forceUnlisted: false, refusalMessage: '', summary: '' };
+    return {
+      findings: [], flagged: false, refuse: false, forceUnlisted: false, refusalMessage: '',
+      summary: '', contentClass: 'general', adultWithoutOptIn: false,
+    };
   }
 }

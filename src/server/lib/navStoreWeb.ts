@@ -97,17 +97,26 @@ export interface WebStoreApp {
    */
   safetyFindings?: Array<{ severity: string; rule: string; description: string; matchSnippet: string }>;
   safetyScannedAt?: number;
+  /**
+   * What the app IS, from the publish-time classification (2026-09-12). `adult` earns the 18+ badge
+   * and hides the app from viewers who have not turned that setting on; absent means `general`.
+   *
+   * UNLIKE `safetyFindings`, this one IS public — a viewer has to be able to see that an app is 18+,
+   * which is the whole point of marking it.
+   */
+  contentClass?: 'general' | 'adult';
 }
 
 /** What a viewer may see. No uid, no password material, no internals. */
 export type PublicWebStoreApp = Pick<WebStoreApp,
-  'id' | 'name' | 'description' | 'iconDataUrl' | 'visibility' | 'fileCount' | 'runs' | 'remixes' | 'publishedAt' | 'version'
+  'id' | 'name' | 'description' | 'iconDataUrl' | 'visibility' | 'fileCount' | 'runs' | 'remixes' | 'publishedAt' | 'version' | 'contentClass'
 > & { requiresPassword: boolean; priceInr: number; apiVarsUsed: string[]; screenshotCount: number };
 
 export function toPublicWebApp(a: WebStoreApp): PublicWebStoreApp {
   return {
     id: a.id, name: a.name, description: a.description, iconDataUrl: a.iconDataUrl,
     visibility: a.visibility, fileCount: a.fileCount, runs: a.runs, remixes: a.remixes,
+    contentClass: a.contentClass ?? 'general',
     publishedAt: a.publishedAt, version: a.version,
     // So a browse card can show a "N screenshots" hint without shipping the images until the viewer
     // actually opens the app's detail (where getWebAppScreenshots serves them).

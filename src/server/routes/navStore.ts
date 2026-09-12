@@ -63,6 +63,9 @@ import { VirtualFileSystem } from '../project/ProjectModel';
 import { escapeHtml } from '../../lib/escapeHtml';
 import { bakeIsCurrent } from '../runtime/previewRuntimeSignature';
 import { assessPublishSafety } from '../lib/storePublishSafety';
+import { userProfileStore } from '../lib/UserProfileStore';
+import { adultPreferenceFrom, hiddenFromBrowse } from '../../lib/adultContent';
+import { isNativeRequest } from '../lib/cors';
 import { audit } from '../lib/audit';
 import { recordTakedown, hashContent } from '../lib/takedownLedger';
 import { hostingPlansEnabled, hostingPlanPriceInr, probeHostingPlan } from '../lib/hostingPlan';
@@ -697,13 +700,21 @@ export function registerNavStoreRoutes(app: Express): void {
        * having looked at it. See storePublishSafety.ts for the second hole this closes — an already
        * LISTED app being quietly rewritten into something else under its approved listing.
        */
-      const safety = assessPublishSafety(gate.files);
+      // The creator's own +18 setting decides the ADULT tier only — never the illegal one, which is
+      // refused for every account in every state (see illegalContentRules.ts). Unreadable ⇒ off, the
+      // safe direction, exactly as the setting itself resolves everywhere else.
+      const publisherAdult = adultPreferenceFrom(
+        await userProfileStore.get(me.uid)
+          .then((p) => ({ optedIn: p?.adultOptIn, optedInAt: p?.adultOptInAt }))
+          .catch(() => null),
+      );
+      const safety = assessPublishSafety(gate.files, undefined, { adultOptIn: publisherAdult.optedIn });
       if (safety.refuse) {
-        audit('STORE_PUBLISH_REFUSED', { uid: me.uid, workspaceId, findings: safety.summary });
+        audit('STORE_PUBLISH_REFUSED', { uid: me.uid, workspaceId, class: safety.contentClass, findings: safety.summary });
         return res.status(422).json({ error: safety.refusalMessage });
       }
       if (safety.flagged) {
-        audit('STORE_PUBLISH_FLAGGED', { uid: me.uid, workspaceId, findings: safety.summary });
+        audit('STORE_PUBLISH_FLAGGED', { uid: me.uid, workspaceId, class: safety.contentClass, findings: safety.summary });
       }
 
       // RE-PUBLISH = same listing, new version — one app id per (owner, workspace), so updating
@@ -758,6 +769,16 @@ export function registerNavStoreRoutes(app: Express): void {
         // publish (an empty array after a flagged version is the honest "this one came back clean").
         safetyFindings: safety.findings,
         safetyScannedAt: Date.now(),
+        /**
+         * What the app IS. `adult` gives it the 18+ badge and hides it from viewers who have not
+         * turned the setting on; `general` changes nothing.
+         *
+         * `illegal` cannot reach here — that publish was refused above, before anything was saved —
+         * and this narrows rather than casts, so a future reorder that broke that ordering would
+         * store `general` (harmless, reviewable) instead of silently persisting `illegal` on a
+         * record whose whole point is that it never exists.
+         */
+        contentClass: safety.contentClass === 'adult' ? 'adult' as const : 'general' as const,
         publishedAt: Date.now(),
         version: (existing?.version ?? 0) + 1,
       };
@@ -811,6 +832,14 @@ export function registerNavStoreRoutes(app: Express): void {
       webPlayerCache.delete(id); // the old version's compiled page must not survive the update
       res.json({
         ok: true, id, status: record.status, version: record.version, shareUrl: `/store/app/${id}`,
+        ...(safety.contentClass === 'adult' ? { contentClass: 'adult' as const } : {}),
+        // Not a refusal — they are allowed to build it, they simply have not said they are an adult
+        // yet. Saying which switch would have made this ordinary beats leaving them to guess why
+        // their app is waiting for review.
+        ...(safety.adultWithoutOptIn ? {
+          adultNotice: 'This app looks like it contains adult content, so it is waiting for review before it can be listed. '
+            + 'Turn on Settings → General Settings → Adult content (18+) to publish 18+ apps normally — they are then shown only to viewers who have turned it on too.',
+        } : {}),
         ...(resaleFloorPrice !== undefined && record.priceInr ? {
           priceInr: record.priceInr,
           priceNote: `This is a paid remix, so it lists at ₹${record.priceInr} — the rule is that a remix always costs more than the original. You can raise the price (never lower it below the original) under Nav App Store → My apps.`,
@@ -917,9 +946,30 @@ export function registerNavStoreRoutes(app: Express): void {
   });
 
   /** The browsable store — LISTED apps only (admin-curated discovery; links work from `unlisted`). */
-  app.get('/api/nav-store/web/apps', async (_req: Request, res: Response) => {
+  app.get('/api/nav-store/web/apps', async (req: Request, res: Response) => {
     try {
-      res.json({ apps: (await listListedWebApps()).map(toPublicWebApp) });
+      /**
+       * 18+ APPS ARE HIDDEN FROM BROWSE unless the viewer has turned the setting on (Phase 2 + 5).
+       *
+       * Filtered on the SERVER, not in the client's render: a client-side filter ships the listings
+       * to the browser and merely declines to draw them, which is not hiding. A signed-out or
+       * unreadable viewer is treated as OFF — the safe direction for this one, always.
+       *
+       * The app's own LINK still works: this governs discovery, which is what the setting promises.
+       */
+      const viewer = await verifyFirebaseToken(req)
+        .then((uid) => (uid ? userProfileStore.get(uid) : null))
+        .then((p) => adultPreferenceFrom({ optedIn: p?.adultOptIn, optedInAt: p?.adultOptInAt }))
+        .catch(() => adultPreferenceFrom(null));
+      const listed = (await listListedWebApps()).map(toPublicWebApp);
+      res.json({
+        apps: listed.filter((a) => !hiddenFromBrowse({ contentClass: a.contentClass }, {
+          optedIn: viewer.optedIn,
+          // The native shell never shows 18+ content at all — see adultContent.ts for why that is a
+          // Play-policy decision rather than a preference.
+          isNative: isNativeRequest(req),
+        })),
+      });
     } catch (e) {
       logStoreError('web/apps list', e);
       res.status(502).json({ error: 'Could not load the store.' });

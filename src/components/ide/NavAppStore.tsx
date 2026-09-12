@@ -8,6 +8,7 @@ import { WebAppPlayer } from './WebAppPlayer';
 import { authedHeaders } from '../../lib/authHeaders';
 import { resolveApiHref } from '../../lib/apiBase';
 import { isNativeApp } from '../../lib/mobileNative';
+import { adultBadge } from '../../lib/adultContent';
 import { mergeReviewQueue, pendingReviewCount, reviewStatusLabel, reviewActionsFor } from './storeReviewQueue';
 import { publishableApps, publishBlockedReason, type PublishableApp } from './publishablePicker';
 import { readStoreIcon, readStoreIconFromClipboard, type IconCheck } from '../../lib/appIcon';
@@ -83,6 +84,8 @@ interface WebApp {
   status?: 'unlisted' | 'listed' | 'removed';
   /** ADMIN-ONLY, from the publish-time content scan. Never sent to a viewer — see navStoreWeb.ts. */
   safetyFindings?: Array<{ severity: string; rule: string; description: string; matchSnippet: string }>;
+  /** PUBLIC, unlike the findings: a viewer has to be able to see that an app is 18+. */
+  contentClass?: 'general' | 'adult';
 }
 
 export interface NavAppStoreProps {
@@ -523,6 +526,14 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                       <p className="text-sm font-semibold truncate flex items-center gap-1.5">
                         {a.name}
                         {a.requiresPassword && <Lock size={11} className="text-white/40 flex-shrink-0" />}
+                        {/* The 18+ badge. Only ever seen by a viewer who turned the setting on — the
+                            server filters these out of the list for everyone else, so this labels
+                            what they chose to see rather than teasing what they cannot. */}
+                        {adultBadge(a.contentClass) && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-rose-500/15 text-rose-300 border border-rose-500/30 flex-shrink-0">
+                            {adultBadge(a.contentClass)}
+                          </span>
+                        )}
                       </p>
                       <p className="text-xs text-white/50 truncate">{a.description || 'A NavBharatAI-built app'}</p>
                       <p className="text-[11px] text-white/30 mt-1">

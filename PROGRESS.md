@@ -48609,3 +48609,68 @@ credentials (a to-do list app's `.env` carrying the user's Razorpay secret). Nex
 `npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
 `npm run build` ok · `npm run test:bundle` within budget · `npm run boot:check` PASS ·
 `npx vitest run` **1,553 files / 21,129 passed / 0 failed** (20 new), log grepped for `FAIL` — none.
+
+---
+
+## 2026-09-12 — One global CSS line was breaking `position: fixed` across the whole app
+
+The admin reported two things that looked unrelated, and a third small one:
+1. Opening a user's details from the **end** of the admin user list rendered the sheet far above the
+   screen — *"page ko scroll up kar ke dekhni padti hai"*.
+2. In App Mart, clicking an app showed details **cropped by the footer**.
+3. The Users tab's **Info** button is redundant — the name already opens the same sheet.
+
+### Root cause — (1) and (2) are the SAME bug, in neither file
+
+`src/index.css` promoted animated elements to their own GPU layer, and both rules listed
+`[class*="transition-"]`. That matches any element whose class attribute merely CONTAINS the
+substring — every `transition-all` / `transition-colors` in the app, and, fatally, `App.tsx`'s main
+view container, which carries `transition-all` and **is the page's scroll container**.
+
+`transform: translateZ(0)` and `will-change: transform` both make an element a **containing block for
+`position: fixed` descendants**. So every overlay inside that container stopped being viewport-relative:
+- the admin sheet was positioned against the **scrolled content box** — 1,200px down a list, it opened
+  1,200px off-screen (which is why only the LAST rows made it obvious);
+- the App Mart sheet's `inset-0` started below the header, so a `100dvh` bottom-anchored sheet ran its
+  own header-height BELOW the screen, putting its last ~56px under the tab bar.
+
+**Why it survived:** invisible in the views people use most. Chat/studio/preview give that same
+container `overflow-hidden` at viewport height, where both positioning bases coincide. Only a
+**scrolling** view, **scrolled down**, shows the difference.
+
+It was also the opposite of the "applied narrowly" its own comment claimed — ~113 files use a
+`transition-` utility, so it promoted many hundreds of elements, paying the over-promotion cost the
+comment warns against *with* the app's fixed positioning.
+
+### Fix + lock
+Promote by animation class only. `.animate-spin` keeps its `will-change` hint and stays EXCLUDED from
+the static `translateZ(0)` — that exclusion is what makes the spinners spin.
+`tests/fixedPositioningContainingBlock.test.ts` fails CI if any rule ever again applies
+`transform` / `will-change: transform` / `filter` / `backdrop-filter` / `perspective` by class
+substring. **Verified to bite:** re-adding the selector fails 2 of its 4 tests.
+
+No markup changed for either sheet — both were already correct and are now positioned as written.
+
+### The lesson, and it is not "check your selectors"
+**A perf hint is a layout change when the property is `transform`.** The two lines read as a pure
+GPU optimisation; nothing in them mentions positioning, and the dialogs they broke are in other files.
+The rule to carry forward: never apply a containing-block property (`transform`, `will-change:
+transform`, `filter`, `backdrop-filter`, `perspective`) by attribute substring, and never to a layout
+or scroll container — whoever later writes `transition-colors` on a wrapper has no way to know they
+are opting every dialog beneath it out of the viewport.
+
+### (3) Info button removed
+Admin: *"info button hata do"*. The account sheet opens by clicking the user's **name** — one way in,
+not two doing the same thing. The name keeps its hover underline and gains a tooltip so it still reads
+as clickable; the `Info` icon import goes with it.
+
+### Gate (CI-equivalent, run LAST, on the final state)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` within budget (CSS 47.5 KB / 55 KB) · `npm run boot:check`
+PASS · `npx vitest run` **1,556 files / 21,247 passed / 1 skipped / 0 failed**, log grepped for `FAIL`
+— only provider-fixture log lines, no failing test.
+
+### Branch note
+The designated branch's remote tip was `9309413` (the Play-billing work), squash-merged to `main` long
+ago — all four of its files are on `main` today, and the branch was otherwise ~46k lines behind. It was
+subsumed with a `-s ours` merge rather than force-discarded, so the history survives.

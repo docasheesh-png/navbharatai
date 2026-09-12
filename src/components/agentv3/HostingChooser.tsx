@@ -618,6 +618,9 @@ export function HostingChooser({
   const [dataGate, setDataGate] = useState<DatabaseReadiness | null>(null);
   const [dbBusy, setDbBusy] = useState(false);
   const [dbNote, setDbNote] = useState<string | null>(null);
+  /** True when the last attempt attached a database the user already had rather than creating one —
+   *  which is what makes "create a separate one instead" a relevant follow-up rather than clutter. */
+  const [dbReused, setDbReused] = useState(false);
   const [proceedAnyway, setProceedAnyway] = useState(false);
 
   useEffect(() => {
@@ -634,23 +637,37 @@ export function HostingChooser({
 
   const needsAnswer = !!dataGate?.needsDatabase && !dataGate.connected && !proceedAnyway;
 
-  const createDatabase = async () => {
+  /**
+   * Give this app a database.
+   *
+   * When the user already has one, the server attaches THAT database to this app instead of spending
+   * another of their two free Supabase project slots — and says so, because reporting it as "created"
+   * would be a fake success. `forceNew` is the escape hatch for an app whose data should stay apart.
+   */
+  const createDatabase = async (forceNew = false) => {
     if (!authedFetch) return;
-    setDbBusy(true); setDbNote(null);
+    setDbBusy(true); setDbNote(null); setDbReused(false);
     try {
       const res = await authedFetch('/api/integrations/supabase/provision', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspaceId: workspaceId ?? '' }),
+        body: JSON.stringify({ workspaceId: workspaceId ?? '', forceNew }),
       }, LONG_REQUEST_TIMEOUT_MS.provisionDatabase);
       const data = await res.json().catch(() => null);
       // The server words these to tell the user what to do next (plan full, still starting up,
       // reconnect); passing them through unchanged is more useful than any generic line here.
       if (!res.ok) { setDbNote(data?.error || 'Your database could not be created just now.'); return; }
       setDataGate((g) => (g ? { ...g, connected: true, provider: 'Supabase' } : g));
-      setDbNote(data?.schemaApplied === false
-        ? 'Database created and connected — its tables could not be set up yet, so ask me to run your migrations after publishing.'
-        : 'Database created in your own account and connected. You can publish now.');
+      if (data?.reused) {
+        // Nothing was created, so nothing was migrated — this line must not borrow the wording of the
+        // path that really did set tables up.
+        setDbReused(true);
+        setDbNote(`${data.reusedNote || 'This app now uses a database you already made.'} You can publish now.`);
+      } else {
+        setDbNote(data?.schemaApplied === false
+          ? 'Database created and connected — its tables could not be set up yet, so ask me to run your migrations after publishing.'
+          : 'Database created in your own account and connected. You can publish now.');
+      }
     } catch (e) {
       setDbNote(fetchFailureLine(e, PROVISION_DB_FAILURE));
     } finally {
@@ -1038,6 +1055,17 @@ export function HostingChooser({
                 Connect my own database
               </button>
             </div>
+            {dbReused && !dbBusy && (
+              /* Offered only AFTER a reuse, so it answers what just happened. A separate database is a
+                 real want — two apps that should not see each other's rows — and it spends one of the
+                 user's two free project slots, which is why it is not the first button. */
+              <button
+                onClick={() => void createDatabase(true)}
+                className="text-[11px] text-zinc-500 hover:text-zinc-300 self-start underline underline-offset-2"
+              >
+                Want this app to have its own separate database instead? Create a new one
+              </button>
+            )}
             {/* A question the user cannot answer "no" to is not a question. */}
             {!proceedAnyway && (
               <button

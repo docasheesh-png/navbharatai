@@ -97,6 +97,16 @@ describe('🔒 the provisioning path shares the same decision', () => {
   });
 
   it('writes its scope explicitly rather than leaving the field absent', () => {
-    expect(flow).toContain('workspace_id: null');
+    // This asserted `workspace_id: null` when it was written, because provisioning only ever wrote
+    // SHARED keys. It now writes the app it was asked for (databaseReuse.ts), so the assertion follows
+    // the property — a scope is always stated — rather than the value it used to have.
+    expect(flow).toContain('workspace_id: scope');
+    // Both the add and the update state it, so neither branch can leave a row with no scope at all.
+    expect(flow.match(/workspace_id: scope/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+  });
+
+  it('🔒 a provisioned database is scoped to the app it was made for', () => {
+    // The leak this closed: written shared, it landed in the .env of every app the user built after.
+    expect(flow).toContain('saveUserSecrets(uid, env, input.workspaceId)');
   });
 });

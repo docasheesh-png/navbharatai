@@ -207,18 +207,21 @@ export function secretCreatedAtMs(raw: unknown): number | null {
  * the user's real `user_secrets` documents are returned. Invalid env-var names and undecryptable/empty
  * values are dropped. Best-effort: any failure returns {} (the build just runs without injected secrets).
  */
-export async function loadUserVaultSecrets(
-  userId: string,
-  // WHICH APP IS THIS FOR? (admin 2026-08-17). Omit it and you get every key the user has, exactly as
-  // this function always behaved — so no existing caller changes. Pass it and the app receives only the
-  // keys it should: the user's SHARED keys plus the ones tied to this workspace. Only the build path
-  // passes it today, because the build is what writes `.env`, and until now that meant every app the
-  // user ever built carried every credential they had ever saved. See secretScope.ts.
-  workspaceId?: string | null,
-): Promise<Record<string, string>> {
-  if (!userId) return {};
+/**
+ * A user's vault as ROWS — each with its scope and its date, before anything is collapsed by name.
+ *
+ * `loadUserVaultSecrets` answers "what does this app get?", which is the right question almost
+ * everywhere and throws away the two facts a few callers genuinely need: WHICH app a key belongs to,
+ * and which of two keys of the same name is newer. Reusing a database the user already has needs both
+ * — it has to find a database belonging to a DIFFERENT app, and pick the newest when there are two.
+ *
+ * Server-side only: these rows carry decrypted values. There is one read path (this one) so the
+ * name-validation, the undecryptable-row skip and the date handling cannot drift between two copies.
+ */
+export async function loadUserVaultRows(userId: string): Promise<VaultSecretRow[]> {
+  if (!userId) return [];
   const db = getDb() as any;
-  if (!db) return {};
+  if (!db) return [];
   const rows: VaultSecretRow[] = [];
   try {
     const snap = await getDocs(query(collection(db, 'user_secrets'), where('user_id', '==', userId)));
@@ -238,11 +241,23 @@ export async function loadUserVaultSecrets(
       rows.push({ name, value, workspaceId: data.workspace_id ?? null, createdAt: secretCreatedAtMs(data.created_at) });
     }
   } catch (err) {
-    console.error('[loadUserVaultSecrets] failed:', err);
-    return {};
+    console.error('[loadUserVaultRows] failed:', err);
+    return [];
   }
+  return rows;
+}
+
+export async function loadUserVaultSecrets(
+  userId: string,
+  // WHICH APP IS THIS FOR? (admin 2026-08-17). Omit it and you get every key the user has, exactly as
+  // this function always behaved — so no existing caller changes. Pass it and the app receives only the
+  // keys it should: the user's SHARED keys plus the ones tied to this workspace. Only the build path
+  // passes it today, because the build is what writes `.env`, and until now that meant every app the
+  // user ever built carried every credential they had ever saved. See secretScope.ts.
+  workspaceId?: string | null,
+): Promise<Record<string, string>> {
   // The NEWEST row wins among equally-scoped duplicates; an app-specific key beats a shared one.
-  return resolveScopedSecrets(rows, workspaceId);
+  return resolveScopedSecrets(await loadUserVaultRows(userId), workspaceId);
 }
 
 /**

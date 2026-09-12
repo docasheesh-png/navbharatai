@@ -22,6 +22,7 @@ import { metricsStore } from '../lib/metricsStore';
 import { metricsTimeline } from '../lib/metricsTimeline';
 import { resolveEmailConfig } from '../lib/alertEmail';
 import { grievanceOfficer } from '../lib/grievanceOfficer';
+import { adultPreferenceFrom } from '../../lib/adultContent';
 import { officerIsNamed, OFFICER_MISSING_WARNING } from '../../content/legal/grievance';
 import { serverLoad } from '../lib/serverLoad';
 import { usdInrRate } from '../lib/UsdInrRate';
@@ -1359,6 +1360,44 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       // so the raw detail is fine here — the white-label law covers END-USER surfaces only.)
       console.error('[ADMIN] /users failed:', e?.message);
       res.status(500).json({ error: 'Failed to load users', detail: e?.message || String(e) });
+    }
+  });
+
+  /**
+   * WHO HAS TURNED ON +18 (admin 2026-09-12: "kis kis user ne on kiya hai, admin penal me dikhe").
+   *
+   * Its own endpoint rather than a column on the user list, because the user list reads WALLETS and
+   * this lives on PROFILES — joining them for every row would put a second collection scan behind a
+   * screen the admin refreshes constantly, to answer a question about a handful of accounts.
+   *
+   * 🔒 THIS IS A LIST OF SETTINGS, NOT OF CONTENT. It says who turned a switch on and when. It does
+   * not say what they built, and there is nothing here to read about anybody — the same line the
+   * account panel holds.
+   */
+  app.get('/api/admin/adult-optins', verifyAdminToken, async (_req: Request, res: Response) => {
+    const db = getDb() as any;
+    try {
+      const snap = await getDocs(collection(db, 'user_profiles'));
+      const rows = snap.docs
+        .map((d: any) => ({ userId: d.id, ...adultPreferenceFrom({ optedIn: d.data()?.adultOptIn, optedInAt: d.data()?.adultOptInAt }) }))
+        .filter((r: any) => r.optedIn)
+        .sort((a: any, b: any) => String(b.optedInAt).localeCompare(String(a.optedInAt)));
+      // Names come from the SAME wallet records the Users tab reads, so one person cannot appear
+      // under two different names on two admin screens (adminUserLookup.ts).
+      const identities = await resolveUserIdentities(rows.map((r: any) => r.userId), getDb() as any);
+      res.json({
+        ok: true,
+        users: rows.map((r: any) => ({
+          userId: r.userId,
+          optedInAt: r.optedInAt,
+          label: identityLabel(identities.get(r.userId) ?? identityFrom(r.userId, null)),
+        })),
+      });
+    } catch (e: any) {
+      // 🔒 A COUNT WE COULD NOT READ IS NOT ZERO. An empty list from a failed query would tell the
+      // admin nobody has this on — which is exactly the wrong thing to believe about this switch.
+      console.error('[ADMIN] /adult-optins failed:', e?.message);
+      res.status(500).json({ error: 'Could not read who has +18 turned on', detail: e?.message || String(e) });
     }
   });
 

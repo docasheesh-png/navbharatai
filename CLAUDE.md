@@ -1117,6 +1117,51 @@ the code (it is actually read somewhere) on 2026-07-11.
   an unchecked origin is `unknown`, and nothing in the system acts on an `unknown`. Exhausting the
   budget is never silent: it says so in the same `outboundNote` the admin already reads.
 
+- **NavBharat Cloud — the SEPARATE project user apps run in (admin did the five GCP steps 2026-09-12,
+  hand-to-hand with a session, so this entry is the record of what was actually created):**
+  ✅ **`NAVBHARAT_APPS_PROJECT` = `navbharatai-user-apps`** and ✅ **`NAVBHARAT_CLOUD` = `on`**, both set
+  in the PLATFORM's Cloud Run (`navbharat-ai-prod`). Together these unblock ROADMAP Phase 0.1, which
+  every item in Phase 2 was waiting on.
+  🔴 **THE PROJECT ID IS `navbharatai-user-apps`, NOT `navbharat-apps-prod`.** The roadmap's §11 step 1
+  says "suggested id `navbharat-apps-prod`" and a later reader will take that for the real one — it is
+  not. Project number `219549203609`; the ADMIN console shows it as `navbharatai-user-apps` in both the
+  name and the id.
+  🔒 **`NAVBHARAT_CLOUD_PUBLIC` IS DELIBERATELY UNSET, and must stay unset until metering ships.** With
+  the master flag on and this one off, hosting works for the ADMIN ONLY. Setting it opens hosting to
+  every user — and ROADMAP 2.1 (the wallet debit for hosting) does not exist yet, so every hosted app's
+  Cloud Run bill would land on NavBharatAI with nothing recording it. This is the one key in this whole
+  section whose absence is load-bearing.
+  **What else was created, none of which is an env var and all of which a publish needs:**
+  - **Billing: a SEPARATE billing account** (`NavBharatAI User Apps`, organisation `doc-asheesh-org`),
+    NOT the platform's. The apps project is linked to it alone; the platform's three projects were left
+    on the old account untouched. The point is blast radius: an abuse complaint or a billing suspension
+    on somebody's hosted app cannot take NavBharatAI down with it.
+  - **Cross-project IAM** — the platform's runtime identity
+    `950841184325-compute@developer.gserviceaccount.com` (the DEFAULT compute service account of
+    `gen-lang-client-0866594388`) holds, **in the apps project only**: Cloud Run Admin, Cloud Build
+    Editor, Service Account User, Artifact Registry Writer, Storage Admin, Monitoring Viewer. The first
+    three are §11's list; the last three are what `hostingPreflight.ts` actually exercises — an image
+    push, the build's staging bucket, and the usage read.
+  - ⚠️ **FOUR APIs, not three.** §11 names Cloud Run, Cloud Build and Artifact Registry. `hostingPreflight`
+    also calls **Cloud Monitoring**, and without it the "Usage metering" check fails. All four are enabled.
+  - ⚠️ **An Artifact Registry repository must EXIST — nothing creates it.** A **DOCKER** repo named
+    **`nbai-apps`** in **`asia-south1`**, matching `appsImageRepo()` and `appsRegion()`. `containerBuild.ts`
+    pushes to it and never creates it; the preflight's one 404 remedy names exactly this.
+  - **The other four env keys in §11's table were NOT set, on purpose.** `NAVBHARAT_APPS_REGION`
+    (`asia-south1`), `NAVBHARAT_APPS_IMAGE_REPO` (`nbai-apps`) and `NAVBHARAT_APPS_BUILD_BUCKET`
+    (`<project>_cloudbuild`, which Cloud Build creates itself) already have exactly those code defaults,
+    so setting them would only add three more values to keep in sync. Verified against
+    `cloudRunHosting.ts` and `containerBuild.ts` rather than taken from the doc.
+  **How to check it without guessing:** admin panel → home → **"Check app hosting setup"**
+  (`LoadBoard.tsx` → `GET /api/admin/hosting/preflight`). It makes the SAME Google calls a real publish
+  makes, and a check that could not run reports as skipped rather than ok.
+- ✅ **`NAVBHARAT_WEB_RISK` — the API is now ENABLED (admin 2026-09-12).** The key was set on 2026-09-10;
+  the Web Risk API itself was switched on in `gen-lang-client-0866594388` today, so outbound verdicts are
+  real instead of `unknown`. **Confirmed the same day: the console display name `navBharat ai real` IS
+  project `gen-lang-client-0866594388`** — the billing console's project list shows both side by side.
+  Recorded because a display name that looks nothing like the id is exactly how an API gets enabled in
+  the wrong project and nobody can tell.
+
 ### 🔎 FULL CLOUD RUN AUDIT — 84 keys read off the live console (admin screenshots, 2026-08-20)
 
 The admin sent the complete list of env-var NAMES from the live Cloud Run service, and every one was

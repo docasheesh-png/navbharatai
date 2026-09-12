@@ -18,7 +18,7 @@
 import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
 import { listEqNewestFirst, newestFirstBy } from './firestoreIndexSafe';
-import type { ReportContext, ReportStatus, ReportTarget, UserReport } from '../../lib/userReport';
+import type { ProblemKind, ReportContext, ReportStatus, ReportTarget, UserReport } from '../../lib/userReport';
 
 const COLLECTION = 'user_reports';
 const SHOT_SUB = 'shot';
@@ -133,6 +133,7 @@ export async function setReportStatus(id: string, status: ReportStatus, adminNot
 export function buildReport(input: {
   reporterUid: string;
   target: ReportTarget;
+  problemKind?: ProblemKind;
   message: string;
   hasScreenshot: boolean;
   context: ReportContext;
@@ -142,6 +143,7 @@ export function buildReport(input: {
     id: newReportId(),
     reporterUid: input.reporterUid,
     target: input.target,
+    ...(input.problemKind ? { problemKind: input.problemKind } : {}),
     message: input.message,
     hasScreenshot: input.hasScreenshot,
     context: input.context,

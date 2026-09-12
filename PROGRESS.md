@@ -49561,3 +49561,84 @@ nobody searches for "Panchang" when they want to know the rahu kaal.
 **Still open, and still the right next step:** no real v5 build report exists for any of the eleven templates
 added today. Four more India templates (courier, wedding RSVP, NGO, school ERP) stay deferred until one
 arrives — a report is the only thing that can say whether these scaffolds actually hold up through a build.
+
+---
+
+## 2026-09-12 — A report the admin could not act on, and the reporting system that caused it
+
+**The evidence.** A real user report arrived: *"App is not responsive and sometimes it does not work in
+Mobile phones. Some content goes outside the mobile."* — screen `home`, platform `android`, no
+screenshot. The admin: *"problem hi samajh nahi aa rahi fix kya karu? … aapne yeh aisa reporting system
+banaya hai ki user ki problem theek hi nahi ki ja sakti."*
+
+**They were right, and the fault was ours rather than the reporter's.** Every fact that report needed
+to be fixable was knowable BY THE APP at the moment Send was pressed — the viewport width, which
+element reached past the edge, which build was running, whether anything had just thrown. We captured
+**two** fields (`view`, `platform`), declared a third (`build`) that **the client never sent at all**,
+and asked a non-technical person to supply the rest from memory.
+
+**Root cause, stated as a class rather than an instance:** the report form collected the reporter's
+WORDS and almost none of the app's own OBSERVATIONS, so every report's usefulness was capped by how
+technical the reporter happened to be. That is a design defect in the channel, not a quality problem
+with the people using it.
+
+### What shipped
+
+**1. One tap before the text box (`PROBLEM_KINDS`).** Seven chips — looks broken / off-screen · slow,
+stuck or frozen · a button didn't work · it did the wrong thing · sign-in · payment · something else.
+The chosen kind also **changes the question the box asks** ("Which part goes off the screen, and on
+which page?" instead of a generic prompt), so the answer lands on the right thing. The sentence above
+could have meant a layout bug, a hang, or a dead button; one tap settles that before the ambiguity is
+created. 🔒 **Optional on the SERVER, required in the UI** — the Android app is bundled, so requiring
+it server-side would turn the one channel every older install has into a dead button.
+
+**2. The app measures what it can see (`reportDiagnostics.ts`).** Viewport, DPR, online state,
+connection type, language, the frontend build stamp, the native versionCode — and an **off-screen
+scan** that names the element reaching past the right edge and by how many pixels.
+- ⚠️ It measures against `documentElement.clientWidth`, **not** `innerWidth`: `innerWidth` includes the
+  vertical scrollbar, so an element overhanging by 10px inside a 17px scrollbar measures as clean and
+  the complaint looks imaginary. Test-locked.
+- 🔴 It blames the element that **introduces** the overflow, not every ancestor that inherits it. A
+  naive scan hands back `body`, `#root`, `div`, `div` — all true, none of them the thing to change.
+
+**3. The last few errors (`recentErrors.ts`).** A capped, in-memory ring buffer installed **before the
+app mounts**, because the errors most worth having are the ones from a boot that never completed.
+De-duplicated against the previous entry, so a render loop throwing 200 times cannot evict the error
+that started it. 🔒 Nothing leaves the device unless the user presses Send; this is not a logging
+pipeline and must not become one.
+
+**4. One shared native-build reader (`appBuildId.ts`).** Three places already asked `@capacitor/app`
+for the same fact and a fourth was about to be added, so the fourth is shared instead.
+
+**5. The admin screen shows all of it.** It previously printed two of the eleven things now known — a
+fact gathered and not shown is the same as a fact not gathered. Off-screen findings render in amber;
+browser errors in their own block.
+
+**6. THE HONESTY FIXES (rule 5), which were not optional.** Both the report sheet's footer and
+`AppKnowledgeBase.ts` ended with a flat claim that no other information was gathered. That became
+**false** the moment this snapshot was attached. Both now name every field, the Privacy Policy gains a
+paragraph under §2.1 stating exactly what is taken and that it is taken **only on Send, never in the
+background**, and a test fails if the footer's old promise returns.
+
+🔒 **"Not measured" and "measured, nothing found" are separate states end to end** — separate flags,
+separate sentences, separate tests. Collapsing them would send whoever reads the report hunting for a
+layout bug that was never checked for, which is worse than the vague report it replaced.
+
+**Tests: 51 new** across `reportDiagnostics.test.ts`, `recentErrors.test.ts` and `reportCapture.test.ts`
+— the parent-blame rule, the scrollbar trap, sub-pixel tolerance, the array caps (an unbounded list
+would make a report **fail to save** against Firestore's 1 MiB ceiling, not merely look untidy), the
+optional-kind rule, and the wiring. **Three were confirmed to fail when the behaviour is reverted**,
+including the not-measured/clean collapse and the Send-disabled rule.
+
+**What this does NOT do, stated plainly:** it does not let the admin ask the reporter a follow-up
+question. That is the other half of *"jisse uski help ho sake"* and it is the next slice — a reply
+thread on a report — recorded here as open rather than implied as done.
+
+**And the original report stays open.** It now has a shape (`layout`, on `home`, Android) but still no
+width, no element and no build, because it was filed under the old form. The honest position is that
+the next report of this class will name the element itself; this one cannot be root-caused from what
+it contains.
+
+Gate on the final state: `typecheck` 0 · `noUnusedImports` clean · `typecheck:server` 0 · `build` ok ·
+`test:bundle` within budget · `boot:check` PASS · `vitest run` **1,572 files / 21,665 passed / 1
+skipped / 0 failed**.

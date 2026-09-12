@@ -45,17 +45,62 @@ function identityDb() {
   }
 }
 
-/** Trim whatever the client sent about its own context — none of it is trusted, all of it is capped. */
-function readContext(raw: unknown): ReportContext {
+/**
+ * Trim whatever the client sent about its own context — none of it is trusted, all of it is capped.
+ *
+ * ⚠️ EVERY FIELD IS BOUNDED, INCLUDING THE NEW ARRAYS, and that is not defensive habit: this object
+ * goes straight into a Firestore document with a hard 1 MiB ceiling, so an unbounded list from a
+ * client would not be a validation nicety but a way to make a report FAIL TO SAVE — the exact silent
+ * dead end this whole feature exists to remove. The caps are chosen to stay far under it.
+ *
+ * A field that arrives malformed is DROPPED rather than rejected. The alternative is refusing a real
+ * problem report over a diagnostic detail nobody typed, which trades the user's one channel for our
+ * tidiness.
+ */
+export function readContext(raw: unknown): ReportContext {
   const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const s = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : undefined);
+  const b = (v: unknown) => (typeof v === 'boolean' ? v : undefined);
+  const n = (v: unknown) => {
+    const num = Number(v);
+    return Number.isFinite(num) && num > 0 && num < 100 ? Math.round(num * 100) / 100 : undefined;
+  };
+
+  const overflowRaw = Array.isArray(o.overflow) ? o.overflow.slice(0, MAX_OVERFLOW_FINDINGS) : [];
+  const overflow = overflowRaw
+    .map((f) => {
+      const row = (f && typeof f === 'object' ? f : {}) as Record<string, unknown>;
+      const element = s(row.element, 80);
+      const px = Number(row.overflowPx);
+      return element && Number.isFinite(px) ? { element, overflowPx: Math.round(px) } : null;
+    })
+    .filter((f): f is { element: string; overflowPx: number } => f !== null);
+
+  const errors = (Array.isArray(o.errors) ? o.errors.slice(0, MAX_ERROR_LINES) : [])
+    .map((e) => s(e, 200))
+    .filter((e): e is string => !!e);
+
   return {
     view: s(o.view, 60),
     build: s(o.build, 40),
+    appBuild: s(o.appBuild, 20),
     platform: s(o.platform, 20),
     userAgent: s(o.userAgent, 300),
+    viewport: s(o.viewport, 20),
+    dpr: n(o.dpr),
+    online: b(o.online),
+    connection: s(o.connection, 20),
+    language: s(o.language, 20),
+    ...(overflow.length ? { overflow } : {}),
+    overflowScanned: b(o.overflowScanned),
+    ...(o.overflowTruncated === true ? { overflowTruncated: true } : {}),
+    ...(errors.length ? { errors } : {}),
   };
 }
+
+/** The client already caps these; the server caps them again because the client is not the authority. */
+const MAX_OVERFLOW_FINDINGS = 5;
+const MAX_ERROR_LINES = 8;
 
 export function registerReportRoutes(app: Express): void {
   /**
@@ -76,6 +121,7 @@ export function registerReportRoutes(app: Express): void {
         targetKind: req.body?.targetKind,
         targetId: req.body?.targetId,
         screenshot: req.body?.screenshot,
+        problemKind: req.body?.problemKind,
       });
       if (!parsed.ok) return res.status(400).json({ error: parsed.error });
 
@@ -98,6 +144,7 @@ export function registerReportRoutes(app: Express): void {
         reporterUid: me.uid,
         target: { kind: parsed.kind, ...(parsed.targetId ? { id: parsed.targetId } : {}), ...(ownerUid ? { ownerUid } : {}) },
         message: parsed.message,
+        ...(parsed.problemKind ? { problemKind: parsed.problemKind } : {}),
         hasScreenshot: !!parsed.screenshot,
         context: readContext(req.body?.context),
       });

@@ -17,6 +17,8 @@ import type { Express, Request, Response } from 'express';
 import { renderLegalPageHtml } from '../lib/legalMarkdown';
 import { ACCOUNT_DELETION, ACCOUNT_DELETION_TITLE, ACCOUNT_DELETION_UPDATED } from '../../content/legal/accountDeletion';
 import { PUBLIC_LEGAL_ROUTES, DELETE_ACCOUNT_PATH, LEGAL_PATH_ALIASES } from '../lib/legalPaths';
+import { grievanceOfficer } from '../lib/grievanceOfficer';
+import { grievanceDoc, GRIEVANCE_TITLE, GRIEVANCE_UPDATED } from '../../content/legal/grievance';
 
 // Re-exported so existing importers (and the tests that pin these paths) keep one import site.
 export { PUBLIC_LEGAL_ROUTES, DELETE_ACCOUNT_PATH, LEGAL_PATH_ALIASES } from '../lib/legalPaths';
@@ -41,6 +43,22 @@ export function registerLegalRoutes(app: Express): void {
   for (const [path, docId] of Object.entries(PUBLIC_LEGAL_ROUTES)) {
     app.get(path, async (_req: Request, res: Response) => {
       try {
+        /**
+         * The grievance page is built HERE rather than read from the registry, because it is the one
+         * document whose contents depend on deployment configuration — the officer's real name and
+         * contact. The registry's copy is the unconfigured fallback (see content/legal/index.ts);
+         * this is the version an actual reader must get, and the words come from the same pure
+         * builder, so the two can differ only in the details they are given.
+         */
+        if (docId === 'legal_grievance') {
+          res.set('Cache-Control', 'public, max-age=600');
+          res.type('html').send(renderLegalPageHtml({
+            title: GRIEVANCE_TITLE,
+            updated: GRIEVANCE_UPDATED,
+            body: grievanceDoc(grievanceOfficer()),
+          }));
+          return;
+        }
         // Dynamic import for the same reason the client lazy-loads it: the five document bodies are
         // ~45 KB of text that nothing else needs in memory until somebody asks for one.
         const registry = await import('../../content/legal');

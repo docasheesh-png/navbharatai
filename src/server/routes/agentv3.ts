@@ -227,7 +227,7 @@ import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findC
 import { detectBackendPresence } from '../AgentV3/BackendPresence';
 import { planDeployment, deployDecision } from '../AgentV3/deployPlan';
 import { analyzeApiWiring, buildEnvForSplit, buildEnvForWhole, mergeEnvFile } from '../AgentV3/apiWiring';
-import { repoAvailableForDeploy, resolveDeployRepo } from '../AgentV3/deployRepoMemory';
+import { repoAvailableForDeploy, resolveDeployRepo, ownRepoMemoryPatch, renameStorageRepoPatch } from '../AgentV3/deployRepoMemory';
 import { decidePushBranch } from '../AgentV3/pushAppTarget';
 import { hostingAvailability, hostAppOnNavBharatCloud } from '../AgentV3/hostApp';
 import { appsProject, appsRegion, serviceNameFor, deleteHostedService } from '../AgentV3/cloudRunHosting';
@@ -436,8 +436,12 @@ import { buildServicesProbeCommand, parseProcessList, splitProcsSection, mergeSe
 import { findProjectInstructionPath, normalizeProjectInstructions, projectInstructionsBlock, projectInstructionsNotice } from '../AgentV3/projectInstructions';
 import { parseFileMentions, fileMentionsBlock, unresolvedMentionsNotice } from '../AgentV3/fileMentions';
 import { mcpServerStore } from '../AgentV3/McpServerStore';
+import { mcpLibraryStore, MAX_SAVED_SERVICES } from '../AgentV3/McpLibraryStore';
+import { serviceHealth, healthHeadline } from '../AgentV3/mcpHealth';
+import { allowAfterCooldown } from '../lib/callCooldown';
 import { listRemoteTools } from '../AgentV3/mcpTransport';
 import { externalToolDefs, externalToolsPreamble, canConnectServer, MAX_SERVERS_PER_WORKSPACE, type SafeMcpTool } from '../AgentV3/mcpClient';
+import { canUseConnectedServices, canRunConnectedServices, skippedServicesNotice, type McpPlanFacts } from '../AgentV3/mcpPlanGate';
 import { assertPublicHttpUrl } from '../lib/ssrfGuard';
 import { parseIgnoreFile, ignoreRulesBlock, IGNORE_FILE } from '../AgentV3/ignoreRules';
 import { terminalDailyLimitSeconds, decideTerminalAccess, type TerminalAccess } from '../AgentV3/terminalQuota';
@@ -466,6 +470,7 @@ import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '
 import { renderRescueEligible, renderRescueConfirmsSuccess } from '../AgentV3/renderRescue';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { analyzeDesignCoverage, designRepairInstruction, designCoverageSummary } from '../AgentV3/DesignCoverage';
+import { auditRlsInSql, rlsAuditSummary } from '../AppMakerLab/generator/RlsPolicy';
 import { buildServiceGraph } from '../AgentV3/serviceGraph';
 import { detectMonorepo } from '../AgentV3/monorepoAnalysis';
 import { unsendKeepCount } from '../AgentV3/unsend';
@@ -1716,6 +1721,11 @@ const MAX_BUILD_BUFFER = 4000;
 const lastDiagnostics = new Map<string, BuildDiagnosticsReport>();
 /** Free users already shown the weak-tier welcome notice this instance (once per user — see the send). */
 const weakNoticeShownFor = new Set<string>();
+
+/** Shortest gap between two "check my connected services" calls from one app. Each one fans out to
+ *  somebody else's servers, so a button must not be loopable. See callCooldown.ts. */
+export const MCP_CHECK_COOLDOWN_MS = 10_000;
+const mcpCheckCooldown = new Map<string, number>();
 
 /** Push an event into a build's replay buffer and fan it out to every subscriber. */
 function broadcastBuild(rb: RunningBuild, e: unknown): void {
@@ -3348,7 +3358,8 @@ export function registerAgentV3Routes(app: Express): void {
     const now = Date.now();
     try {
       await saveWorkspaceFiles(newWorkspaceId, files);
-      // Files + chat + name. Deliberately NOT: repoName, repoOwner, deployBranch, backendDomain,
+      // Files + chat + name. Deliberately NOT: repoName, deployRepoName, repoOwner, deployBranch,
+      // backendDomain,
       // pinned, or anything about hosting — see duplicateApp.ts.
       await store.create({ id: newSessionId, userId, workspaceId: newWorkspaceId, title: name, messages: source.messages ?? [], createdAt: now });
       await store.update(newSessionId, { appName: name, status: copyStatus(source.status), updatedAt: now, ...(source.framework ? { framework: source.framework } : {}) });
@@ -3379,7 +3390,10 @@ export function registerAgentV3Routes(app: Express): void {
       // `?? ''` is not a shrug: isEnumerableUserId('') is false, so a token-less identity yields an
       // empty list here by the same Phase-3.1 rule that protects the shared-anon bucket.
       const mine = await store.listByUser(userId ?? '', 200).catch(() => []);
-      let renamed: { id: string; repoName?: string } | null = null;
+      // `deployRepoName` travels with it because the rename rule needs BOTH names to decide whether
+      // the deploy repo is the one being moved — see renameStorageRepoPatch. `rec` itself is scoped to
+      // the loop below, so carrying the two fields is what keeps the rule readable at the call sites.
+      let renamed: { id: string; repoName?: string; deployRepoName?: string } | null = null;
       let forbidden = false;
       for (const cid of candidateConversationIds(req.params.id, userId)) {
         const rec = await store.get(cid).catch(() => null);
@@ -3403,6 +3417,7 @@ export function registerAgentV3Routes(app: Express): void {
         // this record's own identity.
         renamed = {
           id: cid,
+          deployRepoName: rec.deployRepoName,
           repoName: rec.repoName || repoNameForProject(userId, req.params.id, {
             appName: rec.title,
             createdAtMs: typeof rec.createdAt === 'number' && rec.createdAt > 0 ? rec.createdAt : Date.now(),
@@ -3425,19 +3440,19 @@ export function registerAgentV3Routes(app: Express): void {
       if (fromRepo === toRepo) {
         // Already called this. Pin it anyway: an app whose repo name is only ever DERIVED is one
         // rename away from ambiguity, and a fact costs nothing to record.
-        await store.update(renamed.id, { repoName: toRepo, updatedAt: Date.now() }).catch(() => { /* cosmetic */ });
+        await store.update(renamed.id, { ...renameStorageRepoPatch(renamed, toRepo), updatedAt: Date.now() }).catch(() => { /* cosmetic */ });
         repoNote = 'already-named';
       } else if (ghToken) {
         const out = await new UserGitHubClient(ghToken).renameRepo(fromRepo, toRepo);
         if (out.ok) {
           // Persist ONLY what GitHub confirmed — the name it reports, not the one we asked for.
-          await store.update(renamed.id, { repoName: out.name, updatedAt: Date.now() }).catch(() => { /* display rename already stands */ });
+          await store.update(renamed.id, { ...renameStorageRepoPatch(renamed, out.name), updatedAt: Date.now() }).catch(() => { /* display rename already stands */ });
           repoRenamed = true;
         } else if (out.status === 404) {
           // NOTHING TO MOVE — this app has never been pushed to GitHub. So pin the chosen name and the
           // repo is simply BORN with it on the first save. This is the common path for a rename right
           // after the first build, and pinning here is safe precisely because no repo exists to strand.
-          await store.update(renamed.id, { repoName: toRepo, updatedAt: Date.now() }).catch(() => { /* cosmetic */ });
+          await store.update(renamed.id, { ...renameStorageRepoPatch(renamed, toRepo), updatedAt: Date.now() }).catch(() => { /* cosmetic */ });
           repoNote = 'will-use-on-first-save';
         } else {
           // 422 is GitHub itself saying the name is taken — the authoritative duplicate check that no
@@ -4613,10 +4628,11 @@ async function noteBuildOutcome(
       // while a build event happens to be in flight — which is what made the panel ask for a repo the
       // user already had. It is ALSO how a client that stopped waiting learns the push landed: the
       // screen polls this record after its own timeout (see HostingChooser.awaitRepoFact).
-      await store.update(workspaceId, {
-        repoName, repoOwner: login, repoOwnedByUser: true, deployBranch: target.branch,
-        updatedAt: rec?.updatedAt ?? Date.now(),
-      }).catch(() => { /* the push is what mattered; a failed note only costs the shortcut */ });
+      const pushMemory = ownRepoMemoryPatch({ owner: login, repo: repoName, deployBranch: target.branch, storesCode: true });
+      if (pushMemory) {
+        await store.update(workspaceId, { ...pushMemory, updatedAt: rec?.updatedAt ?? Date.now() })
+          .catch(() => { /* the push is what mattered; a failed note only costs the shortcut */ });
+      }
 
       res.json({
         ok: true, fullName: repo.fullName || `${login}/${repoName}`, htmlUrl: repo.htmlUrl || '', owner: login, repo: repoName,
@@ -7132,6 +7148,31 @@ async function noteBuildOutcome(
    * or simply unreadable right now. A greyed-out button with no explanation reads as broken.
    */
   /** The services connected to this app. Credentials are NEVER returned — see McpServerStore. */
+  /**
+   * WHO IS ASKING, AND MAY THEY USE CONNECTED SERVICES? (admin 2026-09-12 — the paid-plan gate.)
+   *
+   * One helper for every MCP surface, so the list screen, the connect button and the build loop can
+   * never disagree about a user's entitlement. The decision itself is pure (`mcpPlanGate.ts`); this
+   * only gathers the three facts it needs.
+   */
+  async function mcpIdentity(req: Request): Promise<{ uid: string | null; facts: McpPlanFacts }> {
+    const identity = process.env.VITEST ? null : await verifyFirebaseIdentity(req);
+    const uid = identity?.uid || null;
+    const email = identity?.email || (uid ? await resolveVerifiedEmail(uid) : null);
+    const isFreeListed = isAgentV3FreeUser(uid, email);
+    if (!uid) return { uid: null, facts: { signedIn: false, hasActivePlan: false, planKnown: true, isFreeListed } };
+    const probe = await probeHostingPlan(uid).catch(() => ({ active: false, known: false }));
+    return {
+      uid,
+      facts: { signedIn: true, hasActivePlan: !!probe.active, planKnown: !!probe.known, isFreeListed },
+    };
+  }
+
+  /** The entitlement alone, for the call sites that have no use for the account id. */
+  async function mcpPlanFacts(req: Request): Promise<McpPlanFacts> {
+    return (await mcpIdentity(req)).facts;
+  }
+
   app.post('/api/agentv3/mcp/list', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     if (!workspaceId) { res.status(400).json({ error: 'No app selected.' }); return; }
@@ -7139,7 +7180,21 @@ async function noteBuildOutcome(
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
-    res.json({ servers: await mcpServerStore.listForDisplay(workspaceId), max: MAX_SERVERS_PER_WORKSPACE });
+    // The entitlement travels WITH the list, so the screen can show an honest locked state instead of
+    // a form that accepts a URL and then refuses it.
+    const { uid, facts } = await mcpIdentity(req);
+    const gate = canUseConnectedServices(facts);
+    // The account library rides along in the same answer, so the screen can offer "attach one you
+    // already saved" without a second round trip. Credentials are not in it — listForDisplay.
+    const saved = uid ? await mcpLibraryStore.listForDisplay(uid) : [];
+    res.json({
+      servers: await mcpServerStore.listForDisplay(workspaceId),
+      max: MAX_SERVERS_PER_WORKSPACE,
+      saved,
+      savedMax: MAX_SAVED_SERVICES,
+      canConnect: gate.allowed,
+      ...(gate.allowed ? {} : { lockedReason: gate.reason, lockedMessage: gate.message }),
+    });
   });
 
   /**
@@ -7166,6 +7221,15 @@ async function noteBuildOutcome(
       return;
     }
 
+    // The plan gate comes FIRST — before the SSRF probe and before we ask the service anything. A user
+    // who may not connect should not be able to make our server fetch a URL of their choosing.
+    const { uid: connectUid, facts: connectFacts } = await mcpIdentity(req);
+    const planGate = canUseConnectedServices(connectFacts);
+    if (!planGate.allowed) {
+      res.status(403).json({ error: planGate.message, reason: planGate.reason });
+      return;
+    }
+
     const urlCheck = await assertPublicHttpUrl(url).catch(() => ({ ok: false }));
     const existing = await mcpServerStore.listForDisplay(workspaceId);
     const verdict = canConnectServer({
@@ -7188,10 +7252,122 @@ async function noteBuildOutcome(
       res.status(500).json({ error: 'The connection could not be saved. Please try again.' });
       return;
     }
-    res.json({ ok: true, id, toolCount: probe.tools.length, tools: probe.tools.map((t) => t.remoteName) });
+    // Remember it for the user's NEXT app. Deliberately AFTER the app's own save and deliberately not
+    // awaited into the verdict: the connection this user asked for has already succeeded, and a
+    // library write that fails must not turn that into an error. Worst case they type it again.
+    const remembered = connectUid ? await mcpLibraryStore.save(connectUid, { id, url, headers }) : false;
+    res.json({
+      ok: true,
+      id,
+      toolCount: probe.tools.length,
+      tools: probe.tools.map((t) => t.remoteName),
+      remembered,
+    });
   });
 
-  /** Disconnect a service. Idempotent — already gone is success, not an error. */
+  /**
+   * IS EVERYTHING STILL WORKING? — re-probe this app's connected services and say so honestly.
+   *
+   * A connection is proven once, when it is made, and then trusted forever. Keys expire and services
+   * move, and until this existed the first place that showed up was in the middle of a build, as a
+   * service that quietly contributed nothing while the screen still said "connected".
+   *
+   * Deliberately NOT plan-gated: looking at the state of what you already have is not connecting
+   * something new, and a user whose plan lapsed still deserves to know why their build lost a tool.
+   *
+   * Bounded by construction — the per-app cap is 5, each probe carries the transport's own 15s
+   * timeout, and one workspace may run this once every 10 seconds, because each call fans out to
+   * somebody else's servers.
+   */
+  app.post('/api/agentv3/mcp/check', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) { res.status(400).json({ error: 'No app selected.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    if (!allowAfterCooldown(mcpCheckCooldown, workspaceId, Date.now(), MCP_CHECK_COOLDOWN_MS)) {
+      res.status(429).json({ error: 'Please wait a moment before checking your services again.' });
+      return;
+    }
+    const servers = await mcpServerStore.listFull(workspaceId);
+    if (servers.length === 0) { res.json({ results: [], headline: 'Nothing to check.' }); return; }
+    // In parallel: five services at 15s each would be over a minute in sequence, and the user is
+    // watching a spinner for all of it. A probe that throws is a FAILING service, never a failed check.
+    const results = (await Promise.all(servers.map(async (cfg) => {
+      const probe = await listRemoteTools(cfg).catch(() => ({ tools: [], error: 'It could not be reached just now.' }));
+      return serviceHealth({ id: cfg.id, toolCount: probe.tools.length, error: probe.error });
+    })));
+    res.json({ results, headline: healthHeadline(results, servers.length) });
+  });
+
+  /**
+   * ATTACH one of the user's SAVED services to this app — the one-tap half of the library.
+   *
+   * It re-proves the connection instead of trusting the saved record: a key can be revoked and a
+   * service can move, and listing a dead service as connected is the fake-success this codebase keeps
+   * rooting out. So this path is the connect path minus the typing, not a shortcut past its checks —
+   * same plan gate, same SSRF guard (a host that resolved publicly when it was saved can resolve
+   * elsewhere today), same per-app cap and duplicate rule.
+   */
+  app.post('/api/agentv3/mcp/attach', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const id = typeof req.body?.id === 'string' ? req.body.id.trim() : '';
+    if (!workspaceId || !id) { res.status(400).json({ error: 'Nothing to attach.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    const { uid, facts } = await mcpIdentity(req);
+    const gate = canUseConnectedServices(facts);
+    if (!gate.allowed) { res.status(403).json({ error: gate.message, reason: gate.reason }); return; }
+
+    const saved = uid ? await mcpLibraryStore.get(uid, id) : null;
+    if (!saved) { res.status(404).json({ error: 'That saved service could not be found. Connect it again.' }); return; }
+
+    const urlCheck = await assertPublicHttpUrl(saved.url).catch(() => ({ ok: false }));
+    const existing = await mcpServerStore.listForDisplay(workspaceId);
+    const verdict = canConnectServer({
+      serverId: saved.id,
+      urlIsValid: /^https?:\/\//i.test(saved.url),
+      urlIsPublic: !!urlCheck.ok,
+      existingIds: existing.map((e) => e.id),
+    });
+    if (!verdict.ok) { res.status(400).json({ error: verdict.message, reason: verdict.reason }); return; }
+
+    const probe = await listRemoteTools(saved);
+    if (probe.tools.length === 0) {
+      res.status(400).json({
+        error: probe.error
+          || 'That service did not answer with any tools just now, so it was not attached. Its key may have expired.',
+      });
+      return;
+    }
+    if (!(await mcpServerStore.add(workspaceId, saved))) {
+      res.status(500).json({ error: 'The connection could not be saved. Please try again.' });
+      return;
+    }
+    res.json({ ok: true, id: saved.id, toolCount: probe.tools.length });
+  });
+
+  /**
+   * FORGET a saved service — remove it from the account library.
+   *
+   * Deliberately NOT behind the plan gate, for the same reason disconnecting is not: a user whose plan
+   * lapsed must always be able to delete their own key from our storage. Asking them to pay to do that
+   * would be indefensible.
+   */
+  app.post('/api/agentv3/mcp/forget', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const id = typeof req.body?.id === 'string' ? req.body.id.trim() : '';
+    if (!id) { res.status(400).json({ error: 'Nothing to remove.' }); return; }
+    const { uid } = await mcpIdentity(req);
+    if (!uid) { res.status(401).json({ error: 'Sign in to manage your saved services.' }); return; }
+    const ok = await mcpLibraryStore.remove(uid, id);
+    res.json(ok ? { ok: true } : { ok: false, error: 'Could not remove that saved service right now.' });
+  });
+
+  /** Disconnect a service from THIS app. Idempotent — already gone is success, not an error.
+   *  The user's saved copy is untouched, so re-attaching it is one tap and needs no key again. */
   app.post('/api/agentv3/mcp/remove', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     const id = typeof req.body?.id === 'string' ? req.body.id : '';
@@ -8312,9 +8488,11 @@ async function noteBuildOutcome(
               // Remember it durably — this repo is in the user's own account, so it is exactly as
               // deployable as one made by "Put this app in my GitHub" (the 2026-09-06 memory rule).
               // Best-effort: an import that precedes any conversation record has nothing to update yet.
-              await getConversationStore().update(workspaceId, {
-                repoName, repoOwner: login, repoOwnedByUser: true, deployBranch: target.branch, updatedAt: Date.now(),
-              }).catch(() => { /* the backup itself is what mattered; a missing record only costs the shortcut */ });
+              const zipMemory = ownRepoMemoryPatch({ owner: login, repo: repoName, deployBranch: target.branch, storesCode: true });
+              if (zipMemory) {
+                await getConversationStore().update(workspaceId, { ...zipMemory, updatedAt: Date.now() })
+                  .catch(() => { /* the backup itself is what mattered; a missing record only costs the shortcut */ });
+              }
             }
           } catch { /* GitHub backup is a best-effort backstop — never blocks the import */ }
         } else {
@@ -8516,6 +8694,40 @@ async function noteBuildOutcome(
         }
       }
     } catch { /* abuse detection is best-effort — never blocks the turn */ }
+
+    /**
+     * CONTENT SAFETY TRIAGE (admin 2026-09-12, Phase 6) — a different question from the abuse
+     * detector above, which asks "is this person attacking the assistant?". This asks "is this
+     * request one NavBharatAI must not help with at all?".
+     *
+     * Three outcomes, and the third is almost always the answer: BLOCK refuses and records, FLAG
+     * proceeds and records, ALLOW proceeds and stores NOTHING — no document, no read, not a byte.
+     * That is what makes "we do not read your chats" true rather than aspirational: for a clean
+     * message there is nothing to read.
+     *
+     * The recording never blocks the user's turn; the DECISION is already made by then.
+     */
+    try {
+      const { triagePrompt, safetyExcerpt, blockMessage } = await import('../lib/promptSafety');
+      const triage = triagePrompt(prompt);
+      if (triage.verdict !== 'allow') {
+        const { buildSafetyFlag, recordSafetyFlag } = await import('../lib/safetyFlagStore');
+        const flaggedUid = userId || 'anon';
+        audit(
+          triage.verdict === 'block' ? 'PROMPT_BLOCKED' : 'PROMPT_FLAGGED',
+          { uid: flaggedUid, rule: triage.ruleId, class: triage.contentClass },
+          'warn',
+        );
+        void recordSafetyFlag(buildSafetyFlag({
+          uid: flaggedUid, triage, surface: 'build', excerpt: safetyExcerpt(prompt), at: Date.now(),
+        })).catch(() => { /* the decision stands either way — see recordSafetyFlag */ });
+        if (triage.verdict === 'block') {
+          res.status(403).json({ error: blockMessage() });
+          return;
+        }
+      }
+    } catch { /* triage is best-effort: an unavailable checker must never refuse a legitimate build */ }
+
     // Per-user monthly spend ceiling (R1 §3.1). When the admin has set a cap and this user
     // has reached it this month, deny new builds with an honest, specific message (HTTP 402).
     // Disabled by default and fails open on a store error, so it never locks users out wrongly.
@@ -11360,10 +11572,11 @@ async function noteBuildOutcome(
                  * deploy must never build from `navbharatai/work`, which can hold unreviewed,
                  * mid-session edits. See renderCreateService's branch wiring.
                  */
-                void getConversationStore().update(workspaceId, {
-                  repoOwner: target.owner, repoOwnedByUser: true, deployBranch: target.baseBranch,
-                  updatedAt: Date.now(),
-                }).catch(() => { /* best-effort — the live stream event above still reaches this session */ });
+                const ownRepoMemory = ownRepoMemoryPatch({ owner: target.owner, repo: target.repo, deployBranch: target.baseBranch, storesCode: false });
+                if (ownRepoMemory) {
+                  void getConversationStore().update(workspaceId, { ...ownRepoMemory, updatedAt: Date.now() })
+                    .catch(() => { /* best-effort — the live stream event above still reaches this session */ });
+                }
               } else {
                 // MIRROR (today's behaviour): a private per-project repo in the user's account.
                 const repo = await userClient.ensureRepo(repoName);
@@ -11384,10 +11597,13 @@ async function noteBuildOutcome(
                 });
                 // Same durable memory as the own-repo branch above — this repo IS the user's own
                 // account (userClient.ensureRepo created it there), so it is exactly as deployable.
-                void getConversationStore().update(workspaceId, {
-                  repoOwner: login, repoOwnedByUser: true, deployBranch: repoBranch,
-                  updatedAt: Date.now(),
-                }).catch(() => { /* best-effort — the live stream event above still reaches this session */ });
+                // `storesCode: true` — this mirror IS where the build pushes (ensureRepo created it in
+                // the user's own account just above), so the storage name is pinned with it.
+                const mirrorMemory = ownRepoMemoryPatch({ owner: login, repo: repoName, deployBranch: repoBranch, storesCode: true });
+                if (mirrorMemory) {
+                  void getConversationStore().update(workspaceId, { ...mirrorMemory, updatedAt: Date.now() })
+                    .catch(() => { /* best-effort — the live stream event above still reaches this session */ });
+                }
               }
             } catch { repoSync = undefined; prClient = undefined; ownRepoTarget = null; /* fall through to the platform store */ }
           }
@@ -12102,7 +12318,24 @@ async function noteBuildOutcome(
           // proceeds exactly as it does today. It must never be able to fail or delay a build.
           try {
             const servers = await mcpServerStore.listFull(workspaceId);
-            if (servers.length > 0) {
+            // THE PAID-PLAN GATE (admin 2026-09-12). Checked BEFORE the services are contacted, so a
+            // free account costs neither the network calls nor the tokens their descriptions would add
+            // to every model call of this build.
+            //
+            // 🔒 More forgiving than the connect gate on ONE case only: a plan we could not READ lets
+            // an existing integration keep working, because a billing-lookup blip must not silently
+            // change what a paying customer's app can do mid-build. See mcpPlanGate.ts.
+            const mcpFacts = await mcpPlanFacts(req).catch(
+              () => ({ signedIn: false, hasActivePlan: false, planKnown: true, isFreeListed: false }),
+            );
+            const mcpAllowed = canRunConnectedServices(mcpFacts);
+            if (servers.length > 0 && !mcpAllowed) {
+              // NEVER SILENT: a build that quietly stopped using a tool the user set up looks like the
+              // AI forgetting, which is worse than one plain sentence.
+              const notice = skippedServicesNotice(servers.length, mcpFacts);
+              if (notice) events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: `🔌 ${notice}` });
+            }
+            if (servers.length > 0 && mcpAllowed) {
               const lists = await Promise.all(servers.map((sv) => listRemoteTools(sv).catch(() => ({ tools: [] as SafeMcpTool[] }))));
               mcpTools = lists.flatMap((l) => l.tools);
               if (mcpTools.length > 0) {
@@ -14745,6 +14978,40 @@ async function noteBuildOutcome(
               }
             }
           } catch { /* the quality lint is advisory — it can never affect a build */ }
+
+          /**
+           * IS THE APP'S DATABASE CLOSED? (audit 2026-09-11, the admin's 12-layer diagram.)
+           *
+           * A `CREATE TABLE` in Postgres leaves the table readable and writable by every role that can
+           * reach it, and a NavBharatAI app that uses Supabase ships its public key INSIDE the browser
+           * bundle of every published copy. So an unsecured table is not a theoretical weakness — it is
+           * an open door handed to every visitor. The generator now closes tables at birth, but most
+           * real migrations are written by the builder itself, so generation alone is half a fix.
+           *
+           * Deterministic and free: string analysis over the SQL the workspace actually contains, no
+           * model call, so a clean build pays nothing. Advisory by construction — it records what it
+           * found and can never fail or block a build.
+           */
+          try {
+            const sqlFiles = [...writtenFiles.entries()].filter(([path]) => /\.sql$/i.test(path));
+            if (sqlFiles.length > 0) {
+              const supabaseApp = detectDatabaseProvider(Object.fromEntries(writtenFiles)) === 'Supabase';
+              const rls = auditRlsInSql(sqlFiles.map(([, content]) => content).join('\n'), { supabase: supabaseApp });
+              for (const finding of rls.findings.slice(0, 8)) {
+                buildDiag.record({
+                  phase: 'build',
+                  severity: finding.kind === 'no-rls' ? 'error' : 'warning',
+                  code: 'DATABASE_RLS',
+                  ...obs(finding.message),
+                });
+              }
+              // A clean pass is recorded too: a check that is only ever visible when it complains
+              // cannot be told apart from a check that never ran.
+              if (rls.findings.length === 0) {
+                buildDiag.record({ phase: 'build', severity: 'info', code: 'DATABASE_RLS', message: rlsAuditSummary(rls), autoResolved: true });
+              }
+            }
+          } catch { /* the database audit is advisory — it can never affect a build */ }
 
           const designFiles = Object.fromEntries(writtenFiles);
           const design = analyzeDesignCoverage(designFiles);

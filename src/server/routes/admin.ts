@@ -22,6 +22,9 @@ import { metricsStore } from '../lib/metricsStore';
 import { metricsTimeline } from '../lib/metricsTimeline';
 import { resolveEmailConfig } from '../lib/alertEmail';
 import { grievanceOfficer } from '../lib/grievanceOfficer';
+import { adultPreferenceFrom } from '../../lib/adultContent';
+import { recordTakedown, listTakedowns, TAKEDOWN_RETENTION_DAYS } from '../lib/takedownLedger';
+import { listSafetyFlags, SAFETY_FLAG_RETENTION_DAYS } from '../lib/safetyFlagStore';
 import { officerIsNamed, OFFICER_MISSING_WARNING } from '../../content/legal/grievance';
 import { serverLoad } from '../lib/serverLoad';
 import { usdInrRate } from '../lib/UsdInrRate';
@@ -57,6 +60,9 @@ import { saveNotification, normalizeTarget } from '../lib/AdminNotificationStore
 import { sonnetEquivalentUsd } from '../AgentV3/pricing';
 import { evaluateAlerts } from '../lib/metricsAlerts';
 import { computeHealthScore } from '../lib/HealthScore';
+import { summariseUsage, marginInr } from '../lib/usageLedger';
+import { realRateFor, usageCostUsd } from '../AgentV3/providerRates';
+import { usdToInr } from '../lib/UsdInrRate';
 import { analyzeFinOps } from '../lib/FinOpsAdvisor';
 import { generateInsights, generateOpsReport, answerMetricQuery } from '../lib/AiInsights';
 import { assessDeployRisk, analyzeIncident } from '../AppMakerLab/deployment/DeployRiskAdvisor';
@@ -366,7 +372,20 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       // Provider error rate + latency are real only once at least one AI call has run.
       errorRatePct: totalReq > 0 ? (totalErr / totalReq) * 100 : null,
       avgLatencyMs: totalReq > 0 ? latencyWeighted / totalReq : null,
-      uptimeSeconds: process.uptime(),
+      // 🔴 UPTIME IS NOT REPORTED, AND THAT IS THE FIX (2026-09-12).
+      //
+      // This passed `process.uptime()`, which `scoreUptime` divides by 24 HOURS. NavBharatAI deploys on
+      // every merge to main, and Cloud Run recycles instances on its own — so the process is routinely
+      // minutes old while nothing whatsoever is wrong. A server deployed 50 minutes ago scored 3.5/100
+      // on this component and, at its 15% weight, lost the platform ~14 health points for the crime of
+      // having shipped. That is how a healthy platform came to read CRITICAL.
+      //
+      // "Seconds since this process started" was never uptime on a serverless host; it is deploy
+      // recency wearing uptime's name. `computeHealthScore` already renormalises over the components
+      // it HAS and lists the rest under `missing`, so omitting it removes a misleading signal and
+      // claims nothing in its place — which is the honest state until a real uptime measurement
+      // (the outside-in probe `siteUptime.ts` already does for user domains) exists for the platform.
+      uptimeSeconds: null,
     };
     res.json({
       score: computeHealthScore(inputs),
@@ -375,7 +394,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         successRatePct: 'metrics.builds (live build outcomes)',
         errorRatePct: 'AIRouter provider circuit stats',
         avgLatencyMs: 'AIRouter provider circuit stats (request-weighted)',
-        uptimeSeconds: 'process.uptime()',
+        // Not fed at all — see the note on `uptimeSeconds` above. Process age is deploy recency,
+        // not uptime, and NavBharatAI deploys on every merge.
+        uptimeSeconds: 'not measured (process age is not uptime on a serverless host)',
       },
       generatedAt: Date.now(),
     });
@@ -539,7 +560,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         successRatePct: snapshot.builds.total > 0 ? snapshot.builds.successRate * 100 : null,
         errorRatePct: totalReq > 0 ? (totalErr / totalReq) * 100 : null,
         avgLatencyMs: totalReq > 0 ? latencyWeighted / totalReq : null,
-        uptimeSeconds: process.uptime(),
+        // Same reason as the live endpoint above: process age is deploy recency, and scoring it made a
+        // freshly-deployed platform read CRITICAL. Omitted rather than guessed.
+        uptimeSeconds: null,
       };
       return { score: computeHealthScore(inputs), inputs };
     });
@@ -1176,20 +1199,29 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         }
       });
 
-      let totalTokensUsed = 0;
-      let totalProviderCost = 0;
+      // WHAT THE AI REALLY COST (2026-09-12). This used to be
+      // `totalProviderCost += log.estimated_provider_cost || 0`, and the ONE line in the codebase that
+      // wrote that field wrote a hardcoded 0 — so the platform's AI cost was structurally zero, and
+      // "PLATFORM MARGIN" (revenue − cost) was revenue with a different label. It reported a profit on
+      // a loss-making window. Now the tokens a provider REALLY reported are priced with the same rate
+      // card a build is priced by, and calls that cannot be priced are COUNTED rather than treated as
+      // free — see usageLedger.ts, which is where the honesty rule lives.
+      const usage = summariseUsage(logs as any, (provider, model, u) =>
+        usageCostUsd(u, realRateFor(provider, model)));
+      const totalTokensUsed = usage.outputTokens;
+      const totalProviderCost = usdToInr(usage.costUsd);
       const modelWise: any = {};
       const providerWise: any = {};
 
       logs.forEach((log: any) => {
-        totalTokensUsed += log.outputTokens || 0;
-        totalProviderCost += log.estimated_provider_cost || 0;
-
+        const out = Number(log.outputTokens);
+        // Only MEASURED tokens are attributed. An old row carries no usage, and adding its absent
+        // tokens as 0 would make a real model look idle rather than unrecorded.
+        if (!(log.usageMeasured === true) || !Number.isFinite(out) || out < 0) return;
         const model = log.modelName || 'unknown-model';
-        modelWise[model] = (modelWise[model] || 0) + (log.outputTokens || 0);
-
+        modelWise[model] = (modelWise[model] || 0) + out;
         const provider = log.providerName || 'unknown-provider';
-        providerWise[provider] = (providerWise[provider] || 0) + (log.outputTokens || 0);
+        providerWise[provider] = (providerWise[provider] || 0) + out;
       });
 
       const clientIdSample = (process.env.CASHFREE_CLIENT_ID || process.env.CASHFREE_APP_ID)?.trim();
@@ -1262,14 +1294,32 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const recentPurchases = [...successfulPurchases]
         .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
         .slice(0, 10)
-        .map((tx: any) => ({ userId: tx.userId, amount: tx.amountPaid, tokens: tx.tokenAmount || 0, date: tx.createdAt }));
+        // 🔒 TOKENS COME FROM `balanceAdded`, WHICH IS WHAT THE CREDIT PATHS ACTUALLY WRITE.
+        // This read `tx.tokenAmount`, which is set only when an ORDER is created and never on a
+        // successful credit — so every real purchase displayed as "0 tokens". A ₹150 top-up that had
+        // genuinely credited 15,000 tokens appeared on the admin's screen as money taken for nothing,
+        // which is the worst possible thing for a dashboard to be wrong about. `tokenAmount` stays as
+        // the fallback so the oldest rows, which have nothing else, still render.
+        .map((tx: any) => ({
+          userId: tx.userId,
+          amount: tx.amountPaid,
+          tokens: Number.isFinite(Number(tx.balanceAdded)) && Number(tx.balanceAdded) > 0
+            ? Math.round(Number(tx.balanceAdded) * TOKENS_PER_RUPEE)
+            : (tx.tokenAmount || 0),
+          date: tx.createdAt,
+        }));
 
       // Live provider stats from AIRouter
       const liveProviderStats = getProviderStats();
 
       return res.json({
         totalUsers, totalRevenue, totalTokensUsed, totalProviderCost,
-        estimatedProfit: totalRevenue - totalProviderCost,
+        // HOW SURE ARE WE? `providerCostComplete` false ⇒ the cost above is a FLOOR (some calls could
+        // not be priced), so the profit below is an UPPER BOUND and the screen must say "at most".
+        providerCostComplete: usage.complete,
+        pricedCalls: usage.measuredCalls,
+        unpricedCalls: usage.unmeasuredCalls,
+        estimatedProfit: marginInr(totalRevenue, totalProviderCost, usage.complete).valueInr,
         failedRequests: serverStats.failedLogins,
         expensiveUsers, modelWise, providerWise, cashfreeStatus, burnRate: totalProviderCost / Math.max(1, logs.length),
         // New fields
@@ -1359,6 +1409,98 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       // so the raw detail is fine here — the white-label law covers END-USER surfaces only.)
       console.error('[ADMIN] /users failed:', e?.message);
       res.status(500).json({ error: 'Failed to load users', detail: e?.message || String(e) });
+    }
+  });
+
+  /**
+   * WHO HAS TURNED ON +18 (admin 2026-09-12: "kis kis user ne on kiya hai, admin penal me dikhe").
+   *
+   * Its own endpoint rather than a column on the user list, because the user list reads WALLETS and
+   * this lives on PROFILES — joining them for every row would put a second collection scan behind a
+   * screen the admin refreshes constantly, to answer a question about a handful of accounts.
+   *
+   * 🔒 THIS IS A LIST OF SETTINGS, NOT OF CONTENT. It says who turned a switch on and when. It does
+   * not say what they built, and there is nothing here to read about anybody — the same line the
+   * account panel holds.
+   */
+  app.get('/api/admin/adult-optins', verifyAdminToken, async (_req: Request, res: Response) => {
+    const db = getDb() as any;
+    try {
+      const snap = await getDocs(collection(db, 'user_profiles'));
+      const rows = snap.docs
+        .map((d: any) => ({ userId: d.id, ...adultPreferenceFrom({ optedIn: d.data()?.adultOptIn, optedInAt: d.data()?.adultOptInAt }) }))
+        .filter((r: any) => r.optedIn)
+        .sort((a: any, b: any) => String(b.optedInAt).localeCompare(String(a.optedInAt)));
+      // Names come from the SAME wallet records the Users tab reads, so one person cannot appear
+      // under two different names on two admin screens (adminUserLookup.ts).
+      const identities = await resolveUserIdentities(rows.map((r: any) => r.userId), getDb() as any);
+      res.json({
+        ok: true,
+        users: rows.map((r: any) => ({
+          userId: r.userId,
+          optedInAt: r.optedInAt,
+          label: identityLabel(identities.get(r.userId) ?? identityFrom(r.userId, null)),
+        })),
+      });
+    } catch (e: any) {
+      // 🔒 A COUNT WE COULD NOT READ IS NOT ZERO. An empty list from a failed query would tell the
+      // admin nobody has this on — which is exactly the wrong thing to believe about this switch.
+      console.error('[ADMIN] /adult-optins failed:', e?.message);
+      res.status(500).json({ error: 'Could not read who has +18 turned on', detail: e?.message || String(e) });
+    }
+  });
+
+  /**
+   * THE REMOVAL RECORD (admin 2026-09-12) — everything taken down, newest first.
+   *
+   * Admin-only, and it is a record of REMOVALS, not a copy of what was removed: what it was, from
+   * where, why, who published it, who decided, and a hash. Keeping the content itself in order to
+   * prove we removed it would be the same file in a different folder.
+   */
+  app.get('/api/admin/takedowns', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '200'), 10) || 200, 1), 500);
+      const rows = await listTakedowns(limit);
+      res.json({ ok: true, retentionDays: TAKEDOWN_RETENTION_DAYS, rows });
+    } catch (e: any) {
+      console.error('[ADMIN] /takedowns failed:', e?.message);
+      res.status(500).json({ error: 'Could not read the removal record', detail: e?.message || String(e) });
+    }
+  });
+
+  /**
+   * THE SAFETY QUEUE (admin 2026-09-12, Phase 6) — the messages the automatic check objected to.
+   *
+   * 🔒 THIS IS NOT A CHAT BROWSER, and the difference is structural rather than a matter of
+   * restraint: there is nothing else to browse. A clean message writes no document at all, so this
+   * collection contains ONLY what the check itself stopped or questioned. Each row carries the rule,
+   * the verdict, the surface and a hard-bounded excerpt with secrets and personal identifiers
+   * already stripped — enough to judge, far too little to be a transcript.
+   *
+   * Rows are grouped by account, because one flagged message is a maybe and six from one account is
+   * a pattern — and counting rows by hand is how a reviewer misses the second kind.
+   */
+  app.get('/api/admin/safety-flags', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '200'), 10) || 200, 1), 500);
+      const rows = await listSafetyFlags(limit);
+      const identities = await resolveUserIdentities(rows.map((r) => r.uid), getDb() as any);
+      const perUser = new Map<string, number>();
+      for (const r of rows) perUser.set(r.uid, (perUser.get(r.uid) ?? 0) + 1);
+      res.json({
+        ok: true,
+        retentionDays: SAFETY_FLAG_RETENTION_DAYS,
+        rows: rows.map((r) => ({
+          ...r,
+          label: identityLabel(identities.get(r.uid) ?? identityFrom(r.uid, null)),
+          flagsForThisAccount: perUser.get(r.uid) ?? 1,
+        })),
+      });
+    } catch (e: any) {
+      // 🔒 A QUEUE WE COULD NOT READ IS NOT AN EMPTY QUEUE. On this screen those two look identical
+      // and mean opposite things.
+      console.error('[ADMIN] /safety-flags failed:', e?.message);
+      res.status(500).json({ error: 'Could not read the safety queue', detail: e?.message || String(e) });
     }
   });
 
@@ -1467,6 +1609,24 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       await new FirebaseHostingDeployer().deleteChannel(workspaceId);
       const marked = await deploymentStore.setStatus(workspaceId, 'taken_down');
       audit('ADMIN_APP_TAKEDOWN', { workspaceId, reason: reason || '', ip: req.ip });
+      /**
+       * The 180-day record (IT Rules, 2021 Rule 3(1)(g)). Written only AFTER the channel is really
+       * gone, because this route's whole discipline is that it never claims a takedown it did not
+       * perform — and a ledger row for a removal that failed would be exactly that claim.
+       *
+       * No content hash: what was taken down here is a live Hosting channel, not a file map we hold.
+       * An honest '' beats a hash of the wrong thing.
+       */
+      const owner = await deploymentStore.get(workspaceId).catch(() => null);
+      await recordTakedown({
+        surface: 'navbharat_hosting',
+        contentId: workspaceId,
+        ownerUid: owner?.userId,
+        reason: typeof reason === 'string' ? reason : '',
+        actor: 'admin',
+        removedBy: 'admin',
+        removedAt: Date.now(),
+      });
       res.json({ ok: true, workspaceId, status: 'taken_down', registryUpdated: marked });
     } catch (e: any) {
       console.error('[ADMIN] Takedown error:', e?.message);

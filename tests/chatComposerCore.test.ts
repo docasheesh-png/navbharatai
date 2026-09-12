@@ -124,10 +124,31 @@ describe('VOICE — the money, and what the user reads before spending any of it
     for (const lang of ['en', 'hi'] as const) {
       const c = voiceConsent(lang);
       expect(c.body).toContain(String(VOICE_PAISE_PER_SECOND));
-      expect(c.body).toContain('1.2');       // the per-minute figure people think in
       expect(c.title.length).toBeGreaterThan(5);
       expect(c.confirm.length).toBeGreaterThan(2);
       expect(c.cancel.length).toBeGreaterThan(2);
+    }
+  });
+
+  it('🔴 the price is GENERATED, never typed — a hardcoded rate becomes a lie the day it changes', () => {
+    // This matters more now that the body is a single number shown in red: there is nothing else on
+    // the card for a reader to cross-check it against.
+    expect(voiceConsent('en', 7).body).toContain('7');
+    expect(voiceConsent('en', 7).body).not.toContain(String(VOICE_PAISE_PER_SECOND));
+    expect(voiceConsent('hi', 7).body).toContain('7');
+  });
+
+  it('🔴 the body is ONE SHORT LINE, because the long one was not being read', () => {
+    /**
+     * Admin 2026-09-12: "user bina padhe hi start kar deta hai". The card used to carry three
+     * sentences of true, useful information that informed nobody. A wall of text nobody reads is
+     * worse consent than one line everybody reads — so this pins the shortness itself, and a future
+     * edit that quietly grows the card back has to delete this test to do it.
+     */
+    for (const lang of ['en', 'hi'] as const) {
+      const body = voiceConsent(lang).body;
+      expect(body.length, lang).toBeLessThanOrEqual(40);
+      expect(body, lang).not.toContain('.');   // not a sentence — a price
     }
   });
 
@@ -140,11 +161,23 @@ describe('VOICE — the money, and what the user reads before spending any of it
     expect(hi.body).not.toContain('paise per second');
   });
 
-  it('the consent explains WHEN charging starts and stops, and that it is one balance', () => {
-    expect(voiceConsent('en').body).toMatch(/only while the call is connected/i);
-    expect(voiceConsent('en').body).toMatch(/same balance/i);
-    expect(voiceConsent('hi').body).toMatch(/कॉल जुड़ती है/);
-    expect(voiceConsent('hi').body).toMatch(/बैलेंस/);
+  it('WHEN charging starts and stops is shown by the LIVE METER, not by the card', () => {
+    /**
+     * This test used to assert that the consent card explained it in words. That explanation was
+     * REMOVED on 2026-09-12, deliberately — not lost. Showing somebody the meter while they talk is
+     * worth far more than telling them, before they start, that a meter exists; and the card's three
+     * sentences were the reason nobody read the price either.
+     *
+     * So the claim is re-pointed at where the information actually lands now. It is not weakened:
+     * the meter must still show BOTH the time and the money, in the user's own language.
+     */
+    expect(voiceRunningCostLabel(30)).toContain('₹');
+    expect(voiceRunningCostLabel(30)).toMatch(/sec|min/);
+    expect(voiceRunningCostLabel(30, 'hi')).toContain('₹');
+    expect(voiceRunningCostLabel(30, 'hi')).toMatch(/[ऀ-ॿ]/);
+    // And the title still tells the user, before anything starts, that this costs money.
+    expect(voiceConsent('en').title.toLowerCase()).toContain('paid');
+    expect(voiceConsent('hi').title).toContain('सशुल्क');
   });
 
   it('names no vendor — a consent popup is the most user-facing surface there is', () => {

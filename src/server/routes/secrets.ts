@@ -1,8 +1,10 @@
 import type { Express, Request, Response } from 'express';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Reads/writes user_secrets (owner-only).
 import { doc, getDoc, updateDoc, collection, addDoc, getDocs, query, where, getServerDb as getDb } from '../lib/serverDb';
-import { encrypt, loadUserVaultSecrets } from '../lib/secrets';
+import { encrypt, loadUserVaultSecrets, secretCreatedAtMs } from '../lib/secrets';
+import { planSecretWrite } from '../lib/secretScope';
 import { requireUserMatch, trackDevice } from '../lib/authMiddleware';
+import { allowAfterCooldown } from '../lib/callCooldown';
 import { probeCredentials, realProbeFetch } from '../AgentV3/credentialProbe';
 
 /** Shortest gap between two verify calls from one user. In-memory: a throttle, not an audit record. */
@@ -14,22 +16,13 @@ const verifyCooldown = new Map<string, number>();
 /**
  * May this user run a verification now, and what does the throttle look like afterwards?
  *
- * Extracted as a pure function because it is the only real decision in the route, and because both of
- * its edges matter: each call can fan out to several outbound provider requests, so a caller must not be
- * able to loop on it — and the map must not grow without limit on an instance that stays up for weeks.
- * Mutates and returns `state` so the caller keeps one map. PURE apart from that map.
+ * The rule itself now lives in `callCooldown.ts`, because a second route needed exactly the same one
+ * (re-probing a user's connected MCP services) and a second copy is how two implementations drift
+ * until only one of them carries the fix. This stays as the named, tested entry point for THIS route —
+ * the behaviour is unchanged and the tests below still pin it.
  */
 export function allowVerify(state: Map<string, number>, userId: string, now: number): boolean {
-  // `has`, not `?? 0`: a user who has never called must be distinguishable from one who called at
-  // timestamp 0. Collapsing the two makes "never verified" look like "just verified" and silently
-  // refuses a caller's very first request.
-  const last = state.get(userId);
-  if (last !== undefined && now - last < VERIFY_COOLDOWN_MS) return false;
-  // Clear rather than evict-oldest: this is a throttle whose worst case on a flush is that a few users
-  // may verify one extra time. Tracking insertion order to evict precisely would cost more than the bug.
-  if (state.size >= VERIFY_COOLDOWN_MAX_ENTRIES) state.clear();
-  state.set(userId, now);
-  return true;
+  return allowAfterCooldown(state, userId, now, VERIFY_COOLDOWN_MS, VERIFY_COOLDOWN_MAX_ENTRIES);
 }
 
 /**
@@ -77,14 +70,49 @@ export function registerSecretsRoutes(app: Express): void {
       // what every key saved before scoping existed is, and what the Settings screen still offers as an
       // option. A value here ties the key to one workspace, so the user's other apps never receive it.
       const scope = typeof workspace_id === 'string' && workspace_id.trim() ? workspace_id.trim() : null;
-      await addDoc(collection(db, 'user_secrets'), {
-        user_id: userId,
-        secret_name,
-        encrypted_secret_value: encryptedValue,
-        workspace_id: scope,
-        created_at: new Date()
-      });
-      res.json({ success: true });
+
+      // SAVING AN EXISTING NAME REPLACES IT (2026-09-12). This used to be an unconditional addDoc, so a
+      // user rotating a leaked key ended up with TWO rows and no rule about which one their build would
+      // get — Firestore returns documents in id order, and auto-ids are random. Now the save updates the
+      // row it is replacing and retires any duplicate already sitting there, so the pile collapses on the
+      // next save instead of growing. Rows of a DIFFERENT scope are never touched — see secretScope.ts.
+      const existing = await getDocs(query(
+        collection(db, 'user_secrets'),
+        where('user_id', '==', userId),
+        where('secret_name', '==', secret_name),
+      ));
+      const plan = planSecretWrite(
+        existing.docs.map((d: any) => ({
+          id: d.id,
+          workspaceId: d.data()?.workspace_id ?? null,
+          createdAt: secretCreatedAtMs(d.data()?.created_at),
+          deleted: !!d.data()?.deleted,
+        })),
+        scope,
+      );
+
+      if (plan.replace) {
+        await updateDoc(doc(db, 'user_secrets', plan.replace), {
+          encrypted_secret_value: encryptedValue,
+          workspace_id: scope,
+          // `created_at` is what "newest wins" reads, so a replacement must move it forward. Leaving it
+          // at the original date would make a freshly rotated key lose to an older duplicate.
+          created_at: new Date(),
+          deleted: false,
+        });
+        // Soft-delete, matching the DELETE route: the vault has never hard-deleted a user's secret, and
+        // a cleanup is not the place to start.
+        for (const id of plan.retire) await updateDoc(doc(db, 'user_secrets', id), { deleted: true });
+      } else {
+        await addDoc(collection(db, 'user_secrets'), {
+          user_id: userId,
+          secret_name,
+          encrypted_secret_value: encryptedValue,
+          workspace_id: scope,
+          created_at: new Date()
+        });
+      }
+      res.json({ success: true, replaced: !!plan.replace, duplicatesRetired: plan.retire.length });
     } catch (err) {
       res.status(500).json({ error: 'Failed to save secret' });
     }

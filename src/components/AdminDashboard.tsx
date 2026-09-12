@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell, Clock, Trash2, Flag, Info, Image as PictureIcon } from 'lucide-react';
+import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon } from 'lucide-react';
 import { TirangaLoader } from './ui/TirangaLoader';
 import { stampLabel, dayLabel, signInMethodWords } from '../lib/adminUserDisplay';
+import { adultOptInSummary } from '../lib/adultContent';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
 import { XSquare as BanIcon } from 'lucide-react';
 import { summarizeCostTelemetry, type CostLadderSummary } from '../lib/agentV3CostSummary';
@@ -294,6 +295,45 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       setLicenceRows(Array.isArray(d?.rows) ? d.rows : null);
       setLicenceHeadline(typeof d?.headline === 'string' ? d.headline : '');
     } catch (e) { console.error(e); setLicenceRows(null); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+  /**
+   * THE SAFETY QUEUE (admin 2026-09-12, Phase 6) — the messages the automatic check objected to.
+   * `null` = not read, kept distinct from an empty queue for the usual reason: on this screen those
+   * two look identical and mean opposite things.
+   */
+  const [safetyFlags, setSafetyFlags] = useState<Array<Record<string, any>> | null>(null);
+  const [safetyError, setSafetyError] = useState('');
+  const fetchSafetyFlags = useCallback(async () => {
+    setSafetyError('');
+    try {
+      const r = await fetch('/api/admin/safety-flags', { headers });
+      const d = await r.json();
+      if (!r.ok) { setSafetyFlags(null); setSafetyError(d?.error || 'Could not read the queue.'); return; }
+      setSafetyFlags(Array.isArray(d?.rows) ? d.rows : null);
+      if (!Array.isArray(d?.rows)) setSafetyError('Unexpected response from the server.');
+    } catch (e) { console.error(e); setSafetyFlags(null); setSafetyError('Could not reach the server.'); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+
+  /**
+   * WHO HAS TURNED ON +18 (admin 2026-09-12: "kis kis user ne on kiya hai, admin penal me dikhe").
+   *
+   * `null` means NOT READ, and it is kept distinct from an empty list on purpose: "nobody has this
+   * on" and "the query failed" must never look the same on the screen where the admin decides
+   * whether to worry about it.
+   */
+  const [adultOptIns, setAdultOptIns] = useState<Array<{ userId: string; optedInAt: string; label: string }> | null>(null);
+  const [adultError, setAdultError] = useState('');
+  const fetchAdultOptIns = useCallback(async () => {
+    setAdultError('');
+    try {
+      const r = await fetch('/api/admin/adult-optins', { headers });
+      const d = await r.json();
+      if (!r.ok) { setAdultOptIns(null); setAdultError(d?.error || 'Could not read the list.'); return; }
+      setAdultOptIns(Array.isArray(d?.users) ? d.users : null);
+      if (!Array.isArray(d?.users)) setAdultError('Unexpected response from the server.');
+    } catch (e) { console.error(e); setAdultOptIns(null); setAdultError('Could not reach the server.'); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken]);
   // M6-S6.1 — the speed signal: average / median / slowest build time across all reports.
@@ -879,7 +919,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     } catch (e) { console.error(e); setMfaStatus(null); }
   }, [adminToken]);
 
-  useEffect(() => { if (activeTab === 'security') { fetchMfaStatus(); fetchLicenceExposure(); } }, [activeTab, fetchMfaStatus, fetchLicenceExposure]);
+  useEffect(() => { if (activeTab === 'security') { fetchMfaStatus(); fetchLicenceExposure(); void fetchAdultOptIns(); void fetchSafetyFlags(); } }, [activeTab, fetchMfaStatus, fetchLicenceExposure, fetchAdultOptIns, fetchSafetyFlags]);
 
   const startMfaEnroll = async () => {
     setMfaBusy(true);
@@ -1072,7 +1112,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               {/* Row 2: 4 more metrics */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {statCard('Output Tokens', (analytics?.totalTokensUsed || 0).toLocaleString(), 'All providers combined', 'bg-amber-500', Zap)}
-                {statCard('Platform Margin', `₹${(analytics?.estimatedProfit || 0).toFixed(2)}`, 'Revenue minus AI cost', (analytics?.estimatedProfit || 0) >= 0 ? 'bg-emerald-500' : 'bg-red-500', TrendingUp)}
+                {/* 🔒 "AT MOST" WHEN THE COST IS A FLOOR. Some calls cannot be priced (a provider that
+                    reported no tokens, or a row written before usage was recorded), so the real cost is
+                    at least what we summed and the margin is at most what we show. This card used to
+                    read a flat "Platform Margin ₹155" while the engine-cost panel beside it showed
+                    ₹1,223 of spend — because cost was structurally zero and margin was revenue with a
+                    different label. Never again by accident: the word changes with the certainty. */}
+                {statCard(
+                  analytics?.providerCostComplete === false ? 'Platform Margin (at most)' : 'Platform Margin',
+                  `₹${(analytics?.estimatedProfit || 0).toFixed(2)}`,
+                  analytics?.providerCostComplete === false
+                    ? `Revenue minus AI cost · ${analytics?.unpricedCalls || 0} call(s) could not be priced`
+                    : 'Revenue minus AI cost',
+                  (analytics?.estimatedProfit || 0) >= 0 ? 'bg-emerald-500' : 'bg-red-500', TrendingUp)}
                 {statCard('Token Purchases', analytics?.tokenPurchaseCount || 0, 'Paid transactions', 'bg-pink-500', Tag)}
                 {statCard('Cost / Request', `₹${(analytics?.burnRate || 0).toFixed(5)}`, 'Direct provider cost', 'bg-orange-500', Cpu)}
               </div>
@@ -1314,7 +1366,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     )}
                   </div>
                   <div className="bg-black/30 rounded-xl p-3 space-y-1 font-mono text-xs border border-white/5">
-                    <div className="flex justify-between"><span className="text-[#8b949e]">Total Provider Cost</span><span className="text-orange-400 font-black">₹{(analytics?.totalProviderCost || 0).toFixed(4)}</span></div>
+                    <div className="flex justify-between">
+                      <span className="text-[#8b949e]">
+                        {analytics?.providerCostComplete === false ? 'Provider Cost (at least)' : 'Total Provider Cost'}
+                      </span>
+                      <span className="text-orange-400 font-black">₹{(analytics?.totalProviderCost || 0).toFixed(4)}</span>
+                    </div>
                     <div className="flex justify-between"><span className="text-[#8b949e]">Cashfree Gateway</span><span className="text-emerald-400">{analytics?.cashfreeStatus?.clientId || '–'}</span></div>
                   </div>
                 </div>
@@ -1408,7 +1465,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                           <td className="py-3 px-4">
                             {/* The same account sheet a report opens — one place where a person's whole
                                 picture lives, reachable from both surfaces rather than rebuilt in each. */}
-                            <button onClick={() => void openAccount(u.userId)} className="text-left group">
+                            <button onClick={() => void openAccount(u.userId)} title="Open this account — everything we hold about this user, read only" className="text-left group">
                               <div className="text-white font-bold text-[11px] group-hover:underline">{u.name}</div>
                               <div className="text-[#8b949e] text-[9px] font-mono group-hover:text-white/80">{u.email}</div>
                             </button>
@@ -1450,12 +1507,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                                 </div>
                               ) : (
                                 <>
-                                  {/* The account sheet was only reachable by clicking the NAME, which
-                                      nobody discovers. An explicit, labelled button (admin 2026-09-11:
-                                      "user ke samne ek info button bhi banao") — same sheet, findable. */}
-                                  <button onClick={() => void openAccount(u.userId)} title="Everything we hold about this user — read only" className="px-2 py-1 bg-sky-500/10 border border-sky-500/20 rounded-lg text-[9px] font-black text-sky-300 uppercase hover:bg-sky-500/20 transition-all inline-flex items-center gap-1">
-                                    <Info className="w-3 h-3" /> Info
-                                  </button>
+                                  {/* No "Info" button here on purpose (admin 2026-09-12: "info button
+                                      hata do"). The account sheet opens by clicking the user's NAME —
+                                      one way in, not two that do the same thing. The name carries the
+                                      hover underline and a tooltip so it still reads as clickable. */}
                                   <button onClick={() => { setSelectedUserId(u.userId); setTokenDelta(''); setTokenReason(''); }} className="px-2 py-1 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[9px] font-black text-amber-400 uppercase hover:bg-amber-500/20 transition-all">
                                     Tokens
                                   </button>
@@ -1644,8 +1699,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
             <div className="space-y-6">
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 {statCard('Total Revenue', `₹${(analytics?.totalRevenue || 0).toLocaleString('en-IN')}`, 'All time', 'bg-emerald-500', IndianRupee)}
-                {statCard('Provider Cost', `₹${(analytics?.totalProviderCost || 0).toFixed(4)}`, 'AI API cost', 'bg-red-500', Database)}
-                {statCard('Net Margin', `₹${(analytics?.estimatedProfit || 0).toFixed(2)}`, 'Revenue - cost', (analytics?.estimatedProfit || 0) >= 0 ? 'bg-emerald-500' : 'bg-red-500', TrendingUp)}
+                {statCard(
+                  analytics?.providerCostComplete === false ? 'Provider Cost (at least)' : 'Provider Cost',
+                  `₹${(analytics?.totalProviderCost || 0).toFixed(4)}`,
+                  analytics?.providerCostComplete === false
+                    ? `AI API cost · ${analytics?.pricedCalls || 0} priced, ${analytics?.unpricedCalls || 0} not`
+                    : 'AI API cost',
+                  'bg-red-500', Database)}
+                {statCard(
+                  analytics?.providerCostComplete === false ? 'Net Margin (at most)' : 'Net Margin',
+                  `₹${(analytics?.estimatedProfit || 0).toFixed(2)}`,
+                  analytics?.providerCostComplete === false ? 'Revenue - cost (cost is a floor)' : 'Revenue - cost',
+                  (analytics?.estimatedProfit || 0) >= 0 ? 'bg-emerald-500' : 'bg-red-500', TrendingUp)}
                 {statCard('Token Purchases', analytics?.tokenPurchaseCount || 0, 'Successful payments', 'bg-pink-500', Tag)}
                 {statCard('Cost / Request', `₹${(analytics?.burnRate || 0).toFixed(5)}`, 'Avg AI provider cost', 'bg-orange-500', Cpu)}
                 {statCard('Active Users', analytics?.activeUsers24h || 0, 'Using AI in 24h', 'bg-violet-500', UserCheck)}
@@ -1902,6 +1967,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       rows.push(['Profile', 'could not be read']);
                     }
                     if (a.authDisabled === true) rows.push(['Sign-in', 'Disabled in Firebase Auth']);
+                    // Shown only when it is ON: a row reading "Off" on every account is noise that
+                    // trains the eye to skip the whole block, including the times it says On.
+                    if (p.adult?.optedIn) {
+                      rows.push(['Adult content (18+)', adultOptInSummary(p.adult)]);
+                    }
                     return rows.map(([label, value], i) => (
                       <div key={`${label}-${i}`} className="flex items-start gap-3 text-[11px]">
                         <span className="text-white/40 w-32 shrink-0">{label}</span>
@@ -3036,6 +3106,112 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           {/* ── SECURITY TAB ── */}
           {activeTab === 'security' && (
             <div className="space-y-6">
+              {/* ── THE SAFETY QUEUE ───────────────────────────────────────────────────────────
+                  🔒 NOT a chat browser, and the difference is structural: a clean message writes no
+                  document at all, so there is nothing else here to browse. Each row is something the
+                  automatic check stopped or questioned, with secrets and personal identifiers already
+                  stripped from the extract. Kept 180 days, then deleted. */}
+              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-5 space-y-3">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <h3 className="flex items-center gap-2 text-sm font-black text-white uppercase tracking-tight">
+                    <AlertTriangle size={15} className="text-amber-400" /> Safety queue
+                    {Array.isArray(safetyFlags) && safetyFlags.length > 0 && (
+                      <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-amber-500/40 text-amber-300">
+                        {safetyFlags.length}
+                      </span>
+                    )}
+                  </h3>
+                  <button onClick={() => void fetchSafetyFlags()} className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-wider text-white hover:border-amber-500/40 transition-all">
+                    Refresh
+                  </button>
+                </div>
+                <p className="text-[11px] text-[#8b949e] leading-relaxed">
+                  Messages the automatic check stopped or questioned. A clean message stores nothing at
+                  all — this is the whole of what is kept, and only for 180 days.
+                </p>
+                {safetyError && (
+                  <p className="text-[11px] text-amber-300">{safetyError} <button onClick={() => void fetchSafetyFlags()} className="underline">Retry</button></p>
+                )}
+                {!safetyError && safetyFlags !== null && safetyFlags.length === 0 && (
+                  <p className="text-[11px] text-emerald-300">Nothing flagged.</p>
+                )}
+                {!safetyError && safetyFlags !== null && safetyFlags.length > 0 && (
+                  <div className="space-y-1.5">
+                    {safetyFlags.slice(0, 60).map((f: any) => (
+                      <button
+                        key={f.id}
+                        onClick={() => void openAccount(f.uid)}
+                        className={`w-full text-left rounded-lg border px-3 py-2 transition-colors ${
+                          f.verdict === 'block' ? 'border-rose-500/40 bg-rose-500/5 hover:border-rose-500/60' : 'border-amber-500/25 bg-amber-500/5 hover:border-amber-500/50'}`}
+                      >
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded ${f.verdict === 'block' ? 'bg-rose-500/20 text-rose-200' : 'bg-amber-500/20 text-amber-200'}`}>
+                            {f.verdict}
+                          </span>
+                          <span className="text-[10px] font-mono text-white/60">{f.ruleId}</span>
+                          <span className="text-[10px] text-white/35">· {f.surface}</span>
+                          <span className="text-[10px] text-white/35">· {new Date(f.at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                          {/* One flag is a maybe; six from one account is a pattern. Counting rows by
+                              hand is how a reviewer misses the second kind. */}
+                          {(f.flagsForThisAccount ?? 1) > 1 && (
+                            <span className="text-[10px] font-bold text-rose-300">· {f.flagsForThisAccount} flags on this account</span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-white/70 mt-1 truncate">{f.label}</p>
+                        <p className="text-[11px] text-white/45 mt-0.5 leading-relaxed">{f.description}</p>
+                        {f.excerpt && (
+                          <p className="text-[10px] text-white/30 mt-1 font-mono break-words">“{f.excerpt}”</p>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* ── WHO HAS +18 TURNED ON ──────────────────────────────────────────────────────
+                  A list of SETTINGS, not of content: who turned a switch on and when. It does not
+                  say what anybody built, and there is nothing here to read about a person — the same
+                  line the account panel holds. */}
+              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-5 space-y-3">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <h3 className="flex items-center gap-2 text-sm font-black text-white uppercase tracking-tight">
+                    <ShieldAlert size={15} className="text-rose-400" /> Adult content (18+) — who turned it on
+                  </h3>
+                  <button onClick={() => void fetchAdultOptIns()} className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-wider text-white hover:border-rose-500/40 transition-all">
+                    Refresh
+                  </button>
+                </div>
+                <p className="text-[11px] text-[#8b949e] leading-relaxed">
+                  Off for everyone by default. Turning it on allows lawful adult content in the user&apos;s own
+                  apps and shows them 18+ apps on App Mart — it never unlocks anything the Terms prohibit,
+                  and it is not available in the Android app at all.
+                </p>
+                {adultError && (
+                  /* NOT ZERO WHEN WE COULD NOT READ IT — an empty list from a failed query would tell
+                     the admin nobody has this on, which is the wrong thing to believe about it. */
+                  <p className="text-[11px] text-amber-300">{adultError} <button onClick={() => void fetchAdultOptIns()} className="underline">Retry</button></p>
+                )}
+                {!adultError && adultOptIns !== null && adultOptIns.length === 0 && (
+                  <p className="text-[11px] text-[#8b949e]">Nobody has turned it on.</p>
+                )}
+                {!adultError && adultOptIns !== null && adultOptIns.length > 0 && (
+                  <div className="space-y-1.5">
+                    {adultOptIns.map((u) => (
+                      <button
+                        key={u.userId}
+                        onClick={() => void openAccount(u.userId)}
+                        className="w-full flex items-center gap-3 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2 text-left hover:border-rose-500/30 transition-colors"
+                      >
+                        <span className="text-xs text-white truncate flex-1">{u.label}</span>
+                        <span className="text-[10px] text-[#8b949e] shrink-0">
+                          {u.optedInAt ? `since ${u.optedInAt.slice(0, 10)}` : 'on'}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* LICENCE EXPOSURE — the risks that were only ever written in a document.
                   Two runtime services run on free tiers their own terms reserve for NON-COMMERCIAL
                   use, while NavBharatAI charges money. Switching one off is a PAUSE; the fix is a

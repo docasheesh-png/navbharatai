@@ -20,6 +20,8 @@ import { userBuildHistoryStore, type BuildHistoryQuery } from '../lib/UserBuildH
 import { userCostStore } from '../lib/UserCostStore';
 import { buildCostAlertReport } from '../lib/CostAlertEngine';
 import { usdToInr } from '../lib/UsdInrRate';
+import { adultPreferenceFrom, ADULT_CONFIRMATIONS } from '../../lib/adultContent';
+import { audit } from '../lib/audit';
 
 export function registerProfileRoutes(app: Express): void {
   // ── GET /api/profile ──────────────────────────────────────────────────────────
@@ -44,6 +46,9 @@ export function registerProfileRoutes(app: Express): void {
         updatedAt: 0,
         createdAt: 0,
       },
+      // The +18 setting, normalised — the client never has to interpret a missing field, and an
+      // unreadable value arrives as OFF rather than as something the screen has to guess about.
+      adult: adultPreferenceFrom({ optedIn: profile?.adultOptIn, optedInAt: profile?.adultOptInAt }),
       wallet: walletSnap
         ? {
             remainingBalance: walletSnap.remaining_balance ?? 0,
@@ -93,6 +98,35 @@ export function registerProfileRoutes(app: Express): void {
 
     await userProfileStore.update(userId, { budgetLimitInr });
     return res.json({ ok: true, budgetLimitInr });
+  });
+
+  /**
+   * PUT /api/profile/adult — the +18 setting.
+   *
+   * ITS OWN ROUTE, not a field on PUT /api/profile, and that is deliberate: this one is a recorded
+   * CONSENT, not a preference. It demands an explicit confirmation, it is audited, and it stamps the
+   * date. Folding it in with display-name edits would mean a client that sends the whole profile
+   * back could flip it as a side effect of saving a bio.
+   *
+   * 🔒 It does not unlock anything unlawful, and cannot: the gate
+   * (src/lib/adultContent.ts) checks the content CLASS before this preference, so every
+   * always-refused category ignores it entirely. See that file for why the line is enforced there
+   * rather than described here.
+   */
+  app.put('/api/profile/adult', async (req: Request, res: Response) => {
+    const userId = await verifyFirebaseToken(req);
+    if (!userId) return res.status(401).json({ error: 'Authentication required.' });
+
+    const optedIn = req.body?.optedIn === true;
+    // Turning it ON requires the tick; turning it OFF never does — withdrawing consent must always
+    // be easier than giving it.
+    if (optedIn && req.body?.confirmed !== true) {
+      return res.status(400).json({ error: 'Please confirm you are 18 or older and have read what this allows.', confirmations: ADULT_CONFIRMATIONS });
+    }
+    const at = optedIn ? new Date().toISOString() : '';
+    await userProfileStore.update(userId, { adultOptIn: optedIn, adultOptInAt: at });
+    audit(optedIn ? 'ADULT_CONTENT_OPT_IN' : 'ADULT_CONTENT_OPT_OUT', { userId, ip: req.ip });
+    return res.json({ ok: true, adult: adultPreferenceFrom({ optedIn, optedInAt: at }) });
   });
 
   // ── GET /api/profile/cost-alerts ──────────────────────────────────────────────

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
+import { previewRuntimeSignature } from '../src/server/runtime/previewRuntimeSignature';
 
 /**
  * "App mart me app jaldi open ho" (admin 2026-08-25) — the open path, made fast and kept honest.
@@ -11,7 +12,10 @@ import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
  *
  * What these tests pin:
  *  1. open serves the baked page and never touches the file subcollection when a bake exists;
- *  2. the bake is version-checked — a re-publish must never serve its predecessor;
+ *  2. the bake is version-checked — a re-publish must never serve its predecessor. The CHECK moved
+ *     out of the reader on 2026-09-12 (the read now starts in parallel with the listing read, so a
+ *     cold open pays one round trip instead of two) and into the route, which is why this test now
+ *     stubs `readWebAppBake` and supplies a version for the route to judge;
  *  3. the NavData id tag is injected on the BAKED path too (it flips window.NavData from the
  *     per-device preview backend to the real shared rows — a baked chat app that silently lost it
  *     would "work" while talking to nobody);
@@ -23,20 +27,24 @@ import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
 const state: {
   app: Record<string, unknown> | null;
   baked: string | null;
-  bakedCalls: Array<{ id: string; version: number }>;
+  bakedCalls: string[];
+  /** What the stored bake claims. The ROUTE decides whether it is still current. */
+  bakedVersion: number;
   filesCalls: number;
   bakeSaves: Array<{ id: string; version: number }>;
   bakeThrows: boolean;
-} = { app: null, baked: null, bakedCalls: [], filesCalls: 0, bakeSaves: [], bakeThrows: false };
+} = { app: null, baked: null, bakedCalls: [], bakedVersion: 3, filesCalls: 0, bakeSaves: [], bakeThrows: false };
 
 vi.mock('../src/server/lib/navStoreWeb', async (importOriginal) => {
   const real = await importOriginal<Record<string, unknown>>();
   return {
     ...real,
     getWebApp: async () => state.app,
-    getWebAppBakedPage: async (id: string, version: number) => {
-      state.bakedCalls.push({ id, version });
-      return state.baked;
+    readWebAppBake: async (id: string) => {
+      state.bakedCalls.push(id);
+      // The real runtime signature, so the route's `bakeIsCurrent` judges only the VERSION here —
+      // a signature mismatch is its own case and has its own test below.
+      return state.baked === null ? null : { html: state.baked, version: state.bakedVersion, runtime: previewRuntimeSignature() };
     },
     getWebAppFiles: async () => {
       state.filesCalls++;
@@ -82,19 +90,46 @@ beforeEach(() => {
   state.app = { id: `app${seq}`, uid: 'u1', name: 'Racer', status: 'listed', visibility: 'public', version: 3, workspaceId: 'w1' };
   state.baked = null;
   state.bakedCalls = [];
+  state.bakedVersion = 3;
   state.filesCalls = 0;
   state.bakeSaves = [];
   state.bakeThrows = false;
 });
 
 describe('open — the baked fast path', () => {
-  it('serves the bake, asks for THIS version, and never reads the files', async () => {
+  it('serves the bake for this app, and never reads the files', async () => {
     state.baked = '<!doctype html><html><body><h1>baked</h1></body></html>';
     const res = mockRes();
     await open(mockReq({ params: { id: String(state.app!.id) }, body: {} }), res);
     expect(res.body?.html).toContain('baked');
-    expect(state.bakedCalls).toEqual([{ id: String(state.app!.id), version: 3 }]);
+    expect(state.bakedCalls).toEqual([String(state.app!.id)]);
     expect(state.filesCalls).toBe(0);
+  });
+
+  it('a bake for an OLDER version is discarded — a re-publish never serves its predecessor', () => {
+    // The check moved into the route; this is the test that proves it still happens.
+    state.baked = '<!doctype html><html><body><h1>baked</h1></body></html>';
+    state.bakedVersion = 2;                        // the listing says 3
+    const res = mockRes();
+    return open(mockReq({ params: { id: String(state.app!.id) }, body: {} }), res).then(() => {
+      expect(res.body?.html).toContain('compiled live');
+      expect(state.filesCalls).toBe(1);
+    });
+  });
+
+  it('a bake made by an OLDER RUNTIME is discarded too — the second staleness reason', async () => {
+    // This is the one that let a fixed preview keep serving broken pages to every viewer.
+    state.baked = '<!doctype html><html><body><h1>baked</h1></body></html>';
+    const res = mockRes();
+    // Override just for this open: a bake whose runtime signature is not ours.
+    const original = state.bakedVersion;
+    state.bakedVersion = 3;
+    const mod = await import('../src/server/lib/navStoreWeb');
+    const spy = vi.spyOn(mod, 'readWebAppBake').mockResolvedValueOnce({ html: state.baked, version: 3, runtime: 'some-older-runtime' });
+    await open(mockReq({ params: { id: String(state.app!.id) }, body: {} }), res);
+    expect(res.body?.html).toContain('compiled live');
+    spy.mockRestore();
+    state.bakedVersion = original;
   });
 
   it('injects the NavData id tag on the baked path', async () => {

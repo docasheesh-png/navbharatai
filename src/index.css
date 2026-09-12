@@ -419,11 +419,39 @@ button, [role='button'], nav, header, footer {
 
 /* K11: GPU-composited animations — promote key animated elements to their own
    compositing layer so CSS transforms and opacity run on the GPU, not the main thread.
-   Applied narrowly to avoid excessive memory use from over-promotion. */
+   Applied narrowly to avoid excessive memory use from over-promotion.
+
+   🔴 THE SELECTOR THAT USED TO BE HERE BROKE `position: fixed` ACROSS THE WHOLE APP
+   (root-caused 2026-09-12, from the admin's report that a dialog opened at the top of a long
+   admin page instead of on screen — "upscroll karna padta hai").
+
+   Both rules in this block once also listed `[class*="transition-"]`. That matches ANY element
+   whose class attribute merely CONTAINS the substring — `transition-all`, `transition-colors`,
+   `transition-transform`, every hover button in the app, and, fatally, App.tsx's main view
+   container, which carries `transition-all` and is the page's scroll container.
+
+   `will-change: transform` and `transform: translateZ(0)` BOTH make an element a containing block
+   for its `position: fixed` descendants. So every fixed overlay inside that container stopped being
+   viewport-relative and became relative to the scrolled CONTENT box: open a dialog while scrolled
+   1,200px down a list and it renders 1,200px above the screen, reachable only by scrolling back up.
+
+   It stayed hidden for so long because it is invisible in exactly the views people use most: the
+   chat/studio/preview views give that container `overflow-hidden` at viewport height, where a
+   content-box-relative fixed element and a viewport-relative one land in the same place. Only a
+   SCROLLING view, scrolled DOWN, shows the difference — which is why the admin user list, at its
+   last row, was the first place it was ever noticed.
+
+   It was also the opposite of "applied narrowly": ~113 files use a `transition-` utility, so the
+   rule promoted many hundreds of elements to their own GPU layer — the over-promotion the comment
+   above warns against, paid for with the app's fixed positioning.
+
+   THE RULE THIS LEAVES BEHIND: only genuinely, continuously animating elements are promoted here,
+   by their own animation class. Never promote by attribute substring, and never add `transform` or
+   `will-change: transform` to a layout/scroll container. `tests/fixedPositioningContainingBlock.test.ts`
+   fails CI if that comes back. */
 .animate-spin,
 .animate-pulse,
-.animate-bounce,
-[class*="transition-"] {
+.animate-bounce {
   will-change: transform;
 }
 /* `.animate-spin` gets the GPU hint (will-change) but MUST NOT get a static
@@ -434,11 +462,10 @@ button, [role='button'], nav, header, footer {
    interpolation is identity→identity and the spinner never visibly rotates
    (root cause of the app-wide "spinner doesn't spin" bug; verified in Chromium).
    Excluding `.animate-spin` here lets its `from` synthesise from `none`
-   (= rotate(0deg)) so it spins. pulse/bounce/transition define transforms at
-   both keyframe ends, so the static promotion is safe for them. */
+   (= rotate(0deg)) so it spins. pulse/bounce define transforms at both keyframe
+   ends, so the static promotion is safe for them. */
 .animate-pulse,
-.animate-bounce,
-[class*="transition-"] {
+.animate-bounce {
   transform: translateZ(0);
 }
 /* After animation completes, reset will-change to avoid persistent memory cost */

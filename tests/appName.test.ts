@@ -181,7 +181,10 @@ describe('🔒 the build cannot be disturbed by a rename — a property of the d
     const block = route.slice(at, at + 2200);
     // Confirmed move → persist what GitHub reported. Nothing there → pin the chosen name so the repo
     // is born with it. Name taken (422) → pin NOTHING, so the app keeps the repo it already has.
-    expect(block).toContain('repoName: out.name');
+    // ⚠️ The name now travels through `renameStorageRepoPatch` (2026-09-12), which decides whether
+    // the DEPLOY repo name follows the rename or stays put — see deployRepoMemory.ts. What this case
+    // asserts is unchanged: the name persisted is the one GitHub actually reported.
+    expect(block).toContain('renameStorageRepoPatch(renamed, out.name)');
     expect(block).toContain("repoNote = 'will-use-on-first-save'");
     expect(block).toContain("repoNote = out.status === 422 ? 'repo-name-taken' : 'repo-rename-failed'");
   });

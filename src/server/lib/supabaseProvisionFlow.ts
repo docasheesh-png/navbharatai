@@ -21,9 +21,12 @@ import {
 } from './supabaseProvision';
 import { getConnection, needsRefresh, updateTokens } from './supabaseConnectionStore';
 import { getServerDb } from './serverDb';
-import { encrypt } from './secrets';
+import { encrypt, secretCreatedAtMs, loadUserVaultRows } from './secrets';
+import { planSecretWrite } from './secretScope';
+import { appHasOwnDatabase, reusableDatabase } from './databaseReuse';
 import { audit } from './audit';
 import { loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import { projectRefFromUrl } from './supabaseData';
 
 /** Where a database is created when the caller expresses no preference. */
 export const DEFAULT_REGION = 'ap-south-1';
@@ -62,22 +65,56 @@ export async function freshAccessToken(
  * Uses the same `user_secrets` collection, the same names and the same encryption as the manual
  * Settings → Database flow, so the builder picks them up through a path that already works.
  */
-export async function saveUserSecrets(userId: string, values: Record<string, string>): Promise<boolean> {
+export async function saveUserSecrets(
+  userId: string,
+  values: Record<string, string>,
+  // WHICH APP ARE THESE FOR? (2026-09-12). Absent ⇒ shared with every app, which is what this function
+  // always did — so no existing caller changes. The provisioning path now passes the workspace, so a
+  // database written for one app stops appearing in the `.env` of every other app the user builds.
+  workspaceId?: string | null,
+): Promise<boolean> {
   const db = getServerDb() as any;
   if (!db) return false;
+  const scope = String(workspaceId ?? '').trim() || null;
   try {
     const col = db.collection('user_secrets');
     for (const [name, value] of Object.entries(values)) {
       if (!value) continue;
       // Replace rather than accumulate — a stale duplicate would make which key wins ambiguous.
+      //
+      // 🔒 SCOPE-AWARE SINCE 2026-09-12, and the old version was destructive. It deleted EVERY row of
+      // that name, so provisioning a database wiped a key the user had deliberately tied to one of
+      // their other apps. Only rows of the SAME scope are this write's to replace. One shared decision —
+      // `planSecretWrite` — governs both this path and the Settings save, so the two cannot drift.
       const dupes = await col.where('user_id', '==', userId).where('secret_name', '==', name).get();
-      await Promise.all(dupes.docs.map((d: { ref: { delete: () => Promise<unknown> } }) => d.ref.delete()));
-      await col.add({
-        user_id: userId,
-        secret_name: name,
-        encrypted_secret_value: encrypt(value),
-        created_at: new Date(),
-      });
+      const plan = planSecretWrite(
+        dupes.docs.map((d: any) => ({
+          id: d.id,
+          workspaceId: d.data()?.workspace_id ?? null,
+          createdAt: secretCreatedAtMs(d.data()?.created_at),
+          deleted: !!d.data()?.deleted,
+        })),
+        scope,
+      );
+      if (plan.replace) {
+        await col.doc(plan.replace).update({
+          encrypted_secret_value: encrypt(value),
+          workspace_id: scope,
+          created_at: new Date(),
+          deleted: false,
+        });
+        // Soft-delete, like every other path that retires a secret — the vault has never destroyed a
+        // user's stored key, and a cleanup is not the place to start.
+        for (const id of plan.retire) await col.doc(id).update({ deleted: true });
+      } else {
+        await col.add({
+          user_id: userId,
+          secret_name: name,
+          encrypted_secret_value: encrypt(value),
+          workspace_id: scope,
+          created_at: new Date(),
+        });
+      }
     }
     return true;
   } catch {
@@ -100,6 +137,17 @@ export interface ProvisionSuccess {
   schemaNote?: string;
   /** `direct` means no pooler was reported; that host is IPv6-only on new projects. */
   serverConnection: 'pooled' | 'direct';
+  /**
+   * TRUE when no project was created because the user already had a database and it was attached to
+   * this app instead. Reported rather than hidden: "created" would be a fake success, and the user
+   * needs to know their Supabase plan was not spent.
+   *
+   * `fromWorkspaceId` is the app it came from, NOT its name — resolving a name needs the conversation
+   * store, which lives with the routes, and a lib importing a route is the cycle that ends in an
+   * import nobody can untangle. The route turns it into a name the user recognises.
+   */
+  reused?: true;
+  fromWorkspaceId?: string;
 }
 
 export interface ProvisionFailure {
@@ -116,6 +164,14 @@ export interface ProvisionInput {
   region?: string;
   /** When given, the app's `migrations/*.sql` is applied so the database is not created empty. */
   workspaceId?: string;
+  /**
+   * Create a genuinely NEW project even though the user already has a database.
+   *
+   * The escape hatch for someone who wants this app's data kept apart. Off by default, because the
+   * common case is a user reaching for the data they already have, and a free Supabase plan has only
+   * two project slots to spend.
+   */
+  forceNew?: boolean;
 }
 
 /**
@@ -125,6 +181,50 @@ export interface ProvisionInput {
  * A caller with no grant gets a 400 telling the user to connect first; it must never pretend it asked.
  */
 export async function provisionDatabaseForUser(uid: string, input: ProvisionInput = {}): Promise<ProvisionSuccess | ProvisionFailure> {
+  // ── DO THEY ALREADY HAVE ONE? ───────────────────────────────────────────────────────────────────
+  //
+  // Asked BEFORE the OAuth grant is checked, and that order is deliberate: reusing a database the user
+  // already has needs no Supabase account access at all, so a user whose grant has since lapsed can
+  // still wire their existing database into a new app instead of meeting "connect Supabase first" for
+  // something that requires nothing from Supabase.
+  //
+  // 🔒 This is also where the leak is closed. A database used to be written SHARED, so every later app
+  // received it without asking. Now it reaches an app only when the user presses the button on THAT
+  // app — and pressing it hands them the one they have rather than spending a project slot.
+  const workspace = String(input.workspaceId ?? '').trim();
+  if (workspace && !input.forceNew) {
+    const rows = await loadUserVaultRows(uid).catch(() => []);
+    if (!appHasOwnDatabase(rows, workspace)) {
+      const existing = reusableDatabase(rows, workspace);
+      if (existing) {
+        // Copy it into THIS app's scope. The values are the user's own and never leave the server.
+        if (!await saveUserSecrets(uid, existing.env, workspace)) {
+          return {
+            ok: false,
+            status: 500,
+            error: 'Your database could not be attached to this app just now. Nothing was changed — please try again.',
+          };
+        }
+        try { audit('SUPABASE_DATABASE_REUSED', { userId: uid, ok: true }); } catch { /* audit never blocks */ }
+        return {
+          ok: true,
+          reused: true,
+          ...(existing.workspaceId ? { fromWorkspaceId: existing.workspaceId } : {}),
+          projectRef: projectRefFromUrl(existing.env.VITE_SUPABASE_URL) ?? '',
+          projectName: '',
+          url: existing.env.VITE_SUPABASE_URL,
+          env: existing.env,
+          // Nothing was created, so nothing was migrated. `null` is "not attempted", which is what the
+          // caller already renders as neither success nor failure — saying `true` would claim we set up
+          // tables we never touched.
+          schemaApplied: null,
+          serverConnection: existing.env.DATABASE_URL && existing.env.DATABASE_URL !== existing.env.DIRECT_URL
+            ? 'pooled' : 'direct',
+        };
+      }
+    }
+  }
+
   const conn = await getConnection(uid);
   if (!conn) return { ok: false, status: 400, error: 'Connect your Supabase account first, then create the database.' };
   if (!conn.orgId) return { ok: false, status: 400, error: 'No Supabase organization is linked. Please disconnect and connect again.' };
@@ -193,7 +293,9 @@ export async function provisionDatabaseForUser(uid: string, input: ProvisionInpu
     ...envForProject(creds.credentials),
     ...databaseEnvFor(created.project.id, dbPass, pooler),
   };
-  const saved = await saveUserSecrets(uid, env);
+  // Scoped to the app it was made for. Before this, a database created for one app was written shared
+  // and landed in the `.env` of every app the user built afterwards — see databaseReuse.ts.
+  const saved = await saveUserSecrets(uid, env, input.workspaceId);
   if (!saved) {
     // The project EXISTS in their account even though we could not record it — say so, so they do not
     // create a second one chasing a database they already have.

@@ -57,6 +57,18 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
   { collection: 'user_costs', key: { field: 'userId' } },
   { collection: 'user_build_history', key: { field: 'userId' } },
   { collection: 'chat_sessions', key: { field: 'userId' } },
+  /**
+   * 🔒 `takedown_records` IS DELIBERATELY ABSENT, and must stay absent.
+   *
+   * It looks like it belongs here — it carries a uid — and adding it would feel like completing the
+   * list. It would also destroy the one record the retention duty exists for: deleting an account
+   * must not erase why that account's app was taken down. It has its own 180-day TTL policy below
+   * instead, and the exception is disclosed in the Privacy Policy (§6) and on the Grievance page.
+   *
+   * 🔒 SO IS `safety_flags`, for the sharper version of the same reason: a record of abuse that the
+   * abuser can erase by pressing "delete my account" is not a record. It has its own 180-day policy
+   * and is disclosed in the same place.
+   */
 ];
 
 // ── TTL retention policies ────────────────────────────────────────────────────────────────────────
@@ -119,6 +131,24 @@ export function retentionBound(cutoffMs: number, kind: TimestampKind): Date | nu
  * See RETAINED_INDEFINITELY below for the collections that must never be on a timer, and why.
  */
 export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
+  /**
+   * Removal records — the OTHER half of the 180-day duty (IT Rules, 2021 Rule 3(1)(g)).
+   *
+   * The duty is two-sided and only one side gets remembered: the record must SURVIVE 180 days, and
+   * it must not be kept for ever. `takedownLedger.ts` keeps it out of USER_SCOPED_COLLECTIONS so an
+   * account deletion cannot erase it early; this policy is what stops it becoming a permanent file
+   * on somebody long after the law stopped asking for it.
+   *
+   * `removedAt: Date.now()` — a plain number, so `epochMs`. A wrong kind here would silently delete
+   * nothing for ever, which is exactly the defect that made this field required.
+   */
+  { collection: 'takedown_records', ttlDays: 180, timestampField: 'removedAt', timestampKind: 'epochMs' },
+  /**
+   * Flagged messages — the same 180-day story as the removal records above, and for the same reason:
+   * an abuse record must outlive the account (see the exclusion note in USER_SCOPED_COLLECTIONS) and
+   * must not become a permanent file. `at: Date.now()` ⇒ `epochMs`.
+   */
+  { collection: 'safety_flags', ttlDays: 180, timestampField: 'at', timestampKind: 'epochMs' },
   // `updatedAt: new Date()` — BuildJobManager. The original policy; its type is now stated rather
   // than assumed by the purge.
   { collection: 'build_jobs', ttlDays: 90, timestampField: 'updatedAt', timestampKind: 'date' },

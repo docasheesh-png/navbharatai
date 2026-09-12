@@ -86,17 +86,37 @@ export interface WebStoreApp {
   reviewedAt?: number;
   reviewedBy?: string;
   removedReason?: string;
+  /**
+   * What the content-safety scan found in THIS version (admin 2026-09-12). Recorded on every
+   * publish, so an empty array after a flagged version is the honest "this one came back clean"
+   * rather than an absence that could equally mean the scan never ran.
+   *
+   * 🔒 ADMIN-ONLY. Deliberately absent from `PublicWebStoreApp`: telling a publisher exactly which
+   * pattern caught them is a free tuning signal for the next attempt, and telling a VIEWER would
+   * publish an accusation about somebody's app that a human has not yet looked at.
+   */
+  safetyFindings?: Array<{ severity: string; rule: string; description: string; matchSnippet: string }>;
+  safetyScannedAt?: number;
+  /**
+   * What the app IS, from the publish-time classification (2026-09-12). `adult` earns the 18+ badge
+   * and hides the app from viewers who have not turned that setting on; absent means `general`.
+   *
+   * UNLIKE `safetyFindings`, this one IS public — a viewer has to be able to see that an app is 18+,
+   * which is the whole point of marking it.
+   */
+  contentClass?: 'general' | 'adult';
 }
 
 /** What a viewer may see. No uid, no password material, no internals. */
 export type PublicWebStoreApp = Pick<WebStoreApp,
-  'id' | 'name' | 'description' | 'iconDataUrl' | 'visibility' | 'fileCount' | 'runs' | 'remixes' | 'publishedAt' | 'version'
+  'id' | 'name' | 'description' | 'iconDataUrl' | 'visibility' | 'fileCount' | 'runs' | 'remixes' | 'publishedAt' | 'version' | 'contentClass'
 > & { requiresPassword: boolean; priceInr: number; apiVarsUsed: string[]; screenshotCount: number };
 
 export function toPublicWebApp(a: WebStoreApp): PublicWebStoreApp {
   return {
     id: a.id, name: a.name, description: a.description, iconDataUrl: a.iconDataUrl,
     visibility: a.visibility, fileCount: a.fileCount, runs: a.runs, remixes: a.remixes,
+    contentClass: a.contentClass ?? 'general',
     publishedAt: a.publishedAt, version: a.version,
     // So a browse card can show a "N screenshots" hint without shipping the images until the viewer
     // actually opens the app's detail (where getWebAppScreenshots serves them).
@@ -384,19 +404,44 @@ export async function saveWebAppBakedPage(id: string, version: number, html: str
  * fixed preview kept serving broken pages to every viewer of an already-published app.
  */
 export async function getWebAppBakedPage(id: string, version: number): Promise<string | null> {
+  const bake = await readWebAppBake(id);
+  return bake && bakeIsCurrent({ version: bake.version, runtime: bake.runtime }, version) ? bake.html : null;
+}
+
+/** A baked page as STORED — with the two facts that decide whether it is still usable. */
+export interface StoredBake { html: string; version: number; runtime: string }
+
+/**
+ * Read the bake WITHOUT judging it.
+ *
+ * ⚡ WHY THE VERSION CHECK IS NOT IN HERE (2026-09-12): the open route used to wait for the listing
+ * read just to learn which version to ask for, so a cold open paid two Firestore round trips end to
+ * end. The bake doc is addressed by id alone and already carries its own version and runtime — so
+ * the read can start immediately, in parallel with the listing read, and the CALLER applies
+ * `bakeIsCurrent` once it knows the current version.
+ *
+ * 🔒 THE STALENESS RULE STAYS IN EXACTLY ONE PLACE. `getWebAppBakedPage` above is now a thin wrapper
+ * around this, so there is still a single `bakeIsCurrent` decision and no second copy to drift — the
+ * bug that put broken pages in front of every viewer of an already-published app was precisely a
+ * staleness check that did not cover everything it should.
+ */
+export async function readWebAppBake(id: string): Promise<StoredBake | null> {
   const d = db();
   if (!d) return null;
   try {
     const doc = await d.collection(COLLECTION).doc(id).collection(BAKED_SUB).doc('page').get();
     if (!doc.exists) return null;
     const data = doc.data() as { version?: number; gz?: unknown; runtime?: string };
-    if (!bakeIsCurrent({ version: data.version, runtime: data.runtime }, version)) return null;
     // The admin SDK hands a bytes field back as a Buffer; anything else (a manually edited doc, an
     // emulator quirk) is treated as no bake rather than parsed hopefully.
     const raw = data.gz;
     const buf = Buffer.isBuffer(raw) ? raw : raw instanceof Uint8Array ? Buffer.from(raw) : null;
     if (!buf || buf.length === 0) return null;
-    return gunzipSync(buf).toString('utf8');
+    return {
+      html: gunzipSync(buf).toString('utf8'),
+      version: typeof data.version === 'number' ? data.version : -1,
+      runtime: typeof data.runtime === 'string' ? data.runtime : '',
+    };
   } catch {
     return null; // unreadable bake = no bake; the compile path serves
   }

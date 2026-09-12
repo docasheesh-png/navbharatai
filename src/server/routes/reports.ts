@@ -29,6 +29,7 @@ import { deploymentStore } from '../AgentV3/DeploymentStore';
 import { getServerDb } from '../lib/serverDb';
 import { audit } from '../lib/audit';
 import { activeHostingTier } from '../lib/hostingPlan';
+import { adultPreferenceFrom } from '../../lib/adultContent';
 import { professionalPassStore } from '../professionals/ProfessionalPassStore';
 import {
   fetchAuthMetadata, firebaseAuthBatch, resolveJoinedAt, resolveLastActiveAt,
@@ -264,7 +265,10 @@ export function registerReportRoutes(app: Express): void {
       // the other — that is the same "unread is not zero" rule the wallet card already follows.
       profile: (() => {
         const view = profileView(profile.data);
-        return view ? { ok: profile.ok, present: true, ...view } : { ok: profile.ok, present: false };
+        const base = view ? { ok: profile.ok, present: true, ...view } : { ok: profile.ok, present: false };
+        // The +18 setting belongs on the account sheet as well as the Security list: an admin who
+        // opens ONE person should not have to cross-reference a separate screen to see it.
+        return { ...base, adult: adultPreferenceFrom({ optedIn: (profile.data as Record<string, unknown> | null)?.adultOptIn, optedInAt: (profile.data as Record<string, unknown> | null)?.adultOptInAt }) };
       })(),
       activity: {
         ok: aiLogs.ok,

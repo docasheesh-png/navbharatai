@@ -110,6 +110,70 @@ export function problemKindAsk(v: unknown): string {
 
 export type ReportStatus = 'open' | 'reviewed' | 'actioned' | 'dismissed';
 
+/**
+ * One message in the conversation ON a report.
+ *
+ * ADMIN 2026-09-12, the other half of *"jisse uski help ho sake"*: capturing more facts told us WHAT
+ * a report meant; it still left no way to ASK the person anything. A report with no reply channel is
+ * a suggestion box — the reporter cannot be asked "which page?", cannot be told it is fixed, and
+ * learns nothing from having written in, which is exactly how people stop reporting.
+ */
+export interface ReportMessage {
+  /** Who wrote it. `admin` is shown to the user as NavBharatAI, never as a person's name. */
+  from: 'admin' | 'user';
+  text: string;
+  at: number;
+}
+
+/** Long enough for a real answer, short enough that the whole thread stays far under Firestore's cap. */
+export const REPLY_MAX = 1000;
+export const REPLY_MIN = 1;
+
+/**
+ * How many messages one report keeps.
+ *
+ * ⚠️ A CAP, NOT A PREFERENCE. The thread lives on the report DOCUMENT, which Firestore stops at
+ * 1 MiB — and the failure mode of an uncapped thread is not an untidy screen, it is a reply that
+ * silently refuses to save on a conversation that was going well.
+ */
+export const THREAD_MAX = 30;
+
+/** Shared by the sheet, both reply routes and the admin screen, so a refusal is never a surprise. */
+export function validateReply(text: unknown): { ok: true; text: string } | { ok: false; error: string } {
+  const t = (typeof text === 'string' ? text : '').trim();
+  if (t.length < REPLY_MIN) return { ok: false, error: 'Write something first.' };
+  if (t.length > REPLY_MAX) return { ok: false, error: `Please keep it under ${REPLY_MAX} characters.` };
+  return { ok: true, text: t };
+}
+
+/**
+ * Append a message and keep the thread bounded. PURE.
+ *
+ * 🔒 IT DROPS FROM THE FRONT, NEVER THE BACK. Losing the newest message would lose the one the person
+ * is reading right now; losing the oldest costs the opening line, which the report's own `message`
+ * field still holds. So the one irreplaceable thing is never what gets dropped.
+ */
+export function appendReportMessage(
+  existing: readonly ReportMessage[] | undefined,
+  message: ReportMessage,
+  max: number = THREAD_MAX,
+): ReportMessage[] {
+  const cap = Math.max(1, max);
+  const next = [...(existing ?? []), message];
+  return next.length > cap ? next.slice(next.length - cap) : next;
+}
+
+/**
+ * True when the reporter is owed an answer — the last word is theirs.
+ *
+ * This is what stops a conversation dying quietly: a report the user replied to must come BACK to
+ * the top of the admin's queue, not stay filed under whatever the admin marked it before.
+ */
+export function awaitingAdmin(messages: readonly ReportMessage[] | undefined): boolean {
+  const last = messages?.[messages.length - 1];
+  return !!last && last.from === 'user';
+}
+
 export interface UserReport {
   id: string;
   reporterUid: string;
@@ -125,6 +189,8 @@ export interface UserReport {
   /** What the admin wrote when they handled it. */
   adminNote?: string;
   handledAt?: number;
+  /** The conversation on this report, oldest first. Absent on every report filed before replies existed. */
+  messages?: ReportMessage[];
 }
 
 /** Enough to be actionable, short enough to store. */

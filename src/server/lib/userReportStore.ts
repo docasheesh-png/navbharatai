@@ -18,7 +18,11 @@
 import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
 import { listEqNewestFirst, newestFirstBy } from './firestoreIndexSafe';
-import type { ProblemKind, ReportContext, ReportStatus, ReportTarget, UserReport } from '../../lib/userReport';
+import {
+  appendReportMessage, THREAD_MAX,
+  type ProblemKind, type ReportContext, type ReportMessage, type ReportStatus, type ReportTarget,
+  type UserReport,
+} from '../../lib/userReport';
 
 const COLLECTION = 'user_reports';
 const SHOT_SUB = 'shot';
@@ -150,4 +154,64 @@ export function buildReport(input: {
     at: input.now ?? Date.now(),
     status: 'open',
   };
+}
+
+/**
+ * The reports this person filed themselves, newest first.
+ *
+ * 🔒 SCOPED BY THE CALLER'S OWN uid, WHICH THE ROUTE TAKES FROM THE VERIFIED TOKEN — never from a
+ * query parameter. A report contains somebody's device details and whatever they typed while upset;
+ * a list endpoint that accepted a uid would hand all of that to anyone who could guess one.
+ *
+ * Single-field equality plus an in-memory sort, through the shared index-safe helper — the same rule
+ * that already cost this repo a live publish outage.
+ */
+export async function listReportsByReporter(uid: string, limit = 20): Promise<UserReport[]> {
+  const d = db();
+  if (!d || !uid) return [];
+  try {
+    return await listEqNewestFirst<UserReport>(
+      d.collection(COLLECTION), [['reporterUid', uid]], 'at', Math.max(1, Math.min(50, limit)),
+      undefined,
+      (id, data) => ({ ...(data as UserReport), id }),
+    );
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Add one message to a report's conversation.
+ *
+ * ⚠️ A TRANSACTION, AND IT HAS TO BE. Read-modify-write on an array is exactly where a lost update
+ * hides: the admin answering while the user is typing would otherwise overwrite one of the two
+ * messages, and neither person would ever know a message had vanished.
+ *
+ * Returns the new thread, or null when the report does not exist or the write failed — so a caller
+ * can tell the user honestly instead of showing a message that was never stored.
+ */
+export async function addReportMessage(
+  id: string,
+  message: ReportMessage,
+  opts: { expectReporterUid?: string; reopen?: boolean } = {},
+): Promise<ReportMessage[] | null> {
+  const d = db();
+  if (!d || !id) return null;
+  const ref = d.collection(COLLECTION).doc(id);
+  try {
+    return await d.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) return null;
+      const report = snap.data() as UserReport;
+      // 🔒 The ownership check lives INSIDE the transaction, against the stored document — not
+      // against a copy the route read a moment earlier. Checking outside would leave a window, and
+      // the thing on the other side of that window is somebody else's conversation.
+      if (opts.expectReporterUid && report.reporterUid !== opts.expectReporterUid) return null;
+      const messages = appendReportMessage(report.messages, message, THREAD_MAX);
+      tx.set(ref, { messages, ...(opts.reopen ? { status: 'open' as ReportStatus } : {}) }, { merge: true });
+      return messages;
+    });
+  } catch {
+    return null;
+  }
 }

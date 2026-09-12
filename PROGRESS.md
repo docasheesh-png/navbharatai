@@ -49718,3 +49718,73 @@ it contains.
 Gate on the final state: `typecheck` 0 · `noUnusedImports` clean · `typecheck:server` 0 · `build` ok ·
 `test:bundle` within budget · `boot:check` PASS · `vitest run` **1,572 files / 21,665 passed / 1
 skipped / 0 failed**.
+
+---
+
+## 2026-09-12 — Slice 2: a report is now a conversation, not a suggestion box
+
+Slice 1 made a report **legible**. It left the other half of the admin's ask — *"jisse uski help ho
+sake"* — undone, and said so rather than implying otherwise. This is that half.
+
+**The gap, stated plainly:** the admin could read a report and had no way to ask the reporter
+anything. No "which page?", no "is it fixed now?", no way for the person who wrote in to learn that
+anyone had read it. A report box with no return path is a suggestion box, and people stop using one.
+
+### What shipped
+
+**The thread lives on the report** (`messages: ReportMessage[]`), bounded at 30.
+⚠️ **A cap, not a preference** — the thread is on the report DOCUMENT, which Firestore stops at
+1 MiB, and the failure of an uncapped thread is not an untidy screen but a reply that silently
+refuses to save on a conversation that was going well. 🔒 It drops from the **front**: losing the
+newest message would lose the one being read right now, while the oldest is the opening line, which
+the report's own `message` field still holds.
+
+**Three routes.** `GET /api/report/mine` (the reporter's own reports + threads),
+`POST /api/report/:id/reply` (reporter), `POST /api/admin/reports/:id/reply` (admin).
+
+**The user actually finds it.** The threads render at the **top of the Report sheet**, above the
+new-report form — the moment somebody wants to talk to us about a problem is the moment they open
+that sheet, and asking them to find a second screen is how an answer goes unread. An admin reply also
+rings the **bell they already have** (`saveNotification`, reusing the live notification system rather
+than inventing a second inbox).
+
+**A reply REOPENS the report,** and the admin list shows **"Replied — needs you"** — a badge that
+deliberately **outranks** the status badge. A report marked `reviewed` that the user then answered is
+owed a response; showing only `reviewed` is exactly how an answered question goes unread.
+
+### The security properties, each test-locked
+
+- 🔒 **The reporter's list is scoped to the VERIFIED uid, never a parameter.** A report carries device
+  details and whatever somebody typed while upset.
+- 🔒 **Ownership is checked INSIDE the transaction, against the stored document** — checking outside
+  leaves a window, and on the other side of it is somebody else's conversation.
+- 🔒 **"Not yours" and "does not exist" return the SAME answer** — otherwise anyone can probe which
+  report ids are real, and a report id is a handle on somebody else's complaint.
+- ⚠️ **The append is a real transaction.** Read-modify-write on an array is where a lost update
+  hides: the admin answering while the user types would otherwise silently delete one message, and
+  neither person would ever know.
+- 🔒 **White-label law:** the reporter's thread labels our side **NavBharatAI** — never a name, an
+  email, or which person answered. The admin sees the same message labelled "You (as NavBharatAI)".
+- The reporter's list deliberately ships **no screenshots** (they already have them; images in a list
+  is how a phone on a slow connection stops loading the page).
+
+### Honest about failure
+
+⚠️ **A failed notification does NOT fail the reply.** The message is stored first; if the bell fails
+the admin is told *"Saved — but the user could not be notified"*. Losing a typed answer to a bell
+failure would be the worse outcome, and a silent `ok` would leave the admin believing somebody had
+been told when they had not.
+
+**Tests: 24 new** (`reportConversation.test.ts`). **Two were confirmed to fail when the property is
+removed** — the in-transaction ownership check and the transaction itself — verified by actually
+removing each and watching it go red.
+
+`AppKnowledgeBase.ts` updated in the same change, so every AI in NavBharatAI can tell a user where
+their reply is.
+
+Gate on the final state: `typecheck` 0 · `noUnusedImports` clean · `typecheck:server` 0 · `build` ok ·
+`test:bundle` within budget · `boot:check` PASS · `vitest run` **1,575 files / 21,719 passed / 1
+skipped / 0 failed**.
+
+**Not built, and deliberately:** no `.aab` / `.ipa`. The admin's standing instruction is that a store
+build happens **only** when they ask — *"fir aab banane ka sochenge, bolu tab"*.

@@ -88,7 +88,7 @@ import { doc, setDoc, deleteDoc, collection, query, where, getDocs } from 'fireb
 import { authJsonHeaders } from '../../lib/authHeaders';
 
 /**
- * AgentV3Panel — NavBharatAI Pro v5.0 (Vargen 3.0), a Claude-Code-style chat
+ * AgentV3Panel — NavBharatAI Pro (Vargen 3.0), a Claude-Code-style chat
  * app builder. You chat with it (it replies to anything, even "hello"); when you
  * describe an app it builds it for real, and the workspace surfaces (preview,
  * files, diff, terminal, git) update live alongside. All activity is REAL engine
@@ -802,7 +802,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           owner, repo, files,
           visibility: 'private',
           branch: 'main',
-          message: pushCommitMsg.trim() || 'Update from NavBharatAI Pro v5.0',
+          message: pushCommitMsg.trim() || 'Update from NavBharatAI Pro',
         }),
       });
       const data = await res.json().catch(() => ({} as any));
@@ -3907,8 +3907,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               value in this header put together. "NavBharatAI" is already on the bar directly above, so
               the short form loses nothing a user can actually see — the full name returns at lg. */}
           <span className="font-semibold whitespace-nowrap">
-            <span className="lg:hidden">Pro v5.0</span>
-            <span className="hidden lg:inline">NavBharatAI Pro v5.0</span>
+            <span className="lg:hidden">Pro</span>
+            <span className="hidden lg:inline">NavBharatAI Pro</span>
           </span>
           <span className="text-[10px] uppercase tracking-wide bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded">beta</span>
           {/* Paid-public (billing PR 5): a live wallet-balance chip — shown ONLY when this user is
@@ -4216,7 +4216,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                         type="button"
                         onClick={openScreenshotGallery}
                         disabled={screenshotBusy || running}
-                        title="Pick a website/app screenshot from your gallery — v5.0 builds it"
+                        title="Pick a website/app screenshot from your gallery — NavBharatAI Pro builds it"
                         className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold text-white bg-gradient-to-r from-indigo-500 to-violet-500 ring-1 ring-indigo-300/40 shadow-[0_0_18px_rgba(99,102,241,0.6)] hover:shadow-[0_0_26px_rgba(99,102,241,0.9)] transition-shadow disabled:opacity-60 disabled:cursor-not-allowed"
                       >
                         {screenshotBusy ? <TirangaLoader className="w-4 h-4" /> : <Camera className="w-4 h-4" />}
@@ -6024,7 +6024,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-black text-white uppercase tracking-widest">{modalMode === 'push' ? 'Push to GitHub' : 'Import Project'}</h3>
-                <p className="text-[10px] text-[#8b949e] mt-0.5">{modalMode === 'push' ? 'Publish your current app to one of your GitHub repos' : 'Clone a GitHub repo into your v5.0 workspace'}</p>
+                <p className="text-[10px] text-[#8b949e] mt-0.5">{modalMode === 'push' ? 'Publish your current app to one of your GitHub repos' : 'Clone a GitHub repo into your NavBharatAI Pro workspace'}</p>
               </div>
               <button onClick={() => setShowImportModal(false)} className="text-zinc-500 hover:text-white">
                 <X className="w-4 h-4" />
@@ -6152,7 +6152,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   type="text"
                   value={pushCommitMsg}
                   onChange={e => setPushCommitMsg(e.target.value)}
-                  placeholder="Update from NavBharatAI Pro v5.0"
+                  placeholder="Update from NavBharatAI Pro"
                   className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-indigo-500/50"
                 />
                 <p className="text-[10px] text-[#484f58]">Secrets (.env, keys, service-account files) are never pushed. If a repo already has newer commits, we ask you to import first instead of overwriting.</p>

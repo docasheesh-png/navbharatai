@@ -8,7 +8,7 @@
 //      through the SAME navigation, so every engine, disclaimer, pass-gate and billing rule they have
 //      today applies untouched. A new door, never a side-door.
 //
-// NavBharatAI Pro v5.0 is deliberately NOT in this list — it has its own Home tile and its own surface
+// NavBharatAI Pro is deliberately NOT in this list — it has its own Home tile and its own surface
 // (the admin's exact instruction: "navbharatai pro v5 list se hata dena, uski puri alag tile hai").
 //
 // PLAY COMPLIANCE RIDES ALONG: inside the native shell the medical-class experts (Doctor AI,

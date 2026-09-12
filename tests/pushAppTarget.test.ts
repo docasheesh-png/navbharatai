@@ -95,7 +95,7 @@ describe('🔒 the wiring — the decision runs before the push, and the evidenc
     // Two literal copies of the string would drift; both clients must use the exported constant.
     expect(userClient).toContain('description: PLATFORM_REPO_DESCRIPTION');
     expect(appClient).toContain('description: PLATFORM_REPO_DESCRIPTION');
-    expect(userClient).not.toContain("description: 'Built with NavBharatAI Pro v5.0'");
-    expect(appClient).not.toContain("description: 'Built with NavBharatAI Pro v5.0'");
+    expect(userClient).not.toContain("description: 'Built with NavBharatAI Pro'");
+    expect(appClient).not.toContain("description: 'Built with NavBharatAI Pro'");
   });
 });

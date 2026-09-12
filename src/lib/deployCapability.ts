@@ -30,7 +30,7 @@ export function sanitizeZipName(name: string | undefined | null): string {
   return base.endsWith('.zip') ? base : `${base}.zip`;
 }
 
-// Platforms that NavBharatAI Pro v5.0's REAL build+deploy engine can publish to right now (each has a
+// Platforms that NavBharatAI Pro's REAL build+deploy engine can publish to right now (each has a
 // genuine server-side DeployProvider: Firebase/Vercel/Netlify/Cloudflare). Selecting one of these in
 // the Git panel hands off to v5's real pipeline (build in the sandbox → deploy → live URL), instead of
 // showing 'unavailable'. Token-gated per provider: without the provider's API token the real engine

@@ -15,13 +15,13 @@ const text = (id: string) => `${kb(id).description ?? ''} ${kb(id).howToUse ?? '
 describe('Refreshed descriptions no longer describe retired v2.0 internals', () => {
   it('unified-workspace: header tabs, not a right-docked panel', () => {
     expect(text('unified-workspace')).not.toMatch(/docks to the RIGHT|docks on the right/i);
-    expect(text('unified-workspace')).toMatch(/Pro v5\.0/);
+    expect(text('unified-workspace')).toMatch(/NavBharatAI Pro/);
   });
   it('unified-memory: durable v5.0 memory, not "Firestore pro_memories" / Engineer AI handoff', () => {
     const t = text('unified-memory');
     expect(t).not.toMatch(/pro_memories|ProEngineRunner/);
     expect(t).not.toMatch(/Engineer AI/);
-    expect(t).toMatch(/Pro v5\.0/);
+    expect(t).toMatch(/NavBharatAI Pro/);
   });
   it('pro_chat_session_memory: no raw Firestore internal', () => {
     expect(text('pro_chat_session_memory')).not.toMatch(/Firestore/);
@@ -38,7 +38,7 @@ describe('Provider names removed from these user-facing entries (White-Label Law
 describe('App Navigation Overview lists the REAL header tabs/menu', () => {
   it('describes the real nav (Pro v5.0 / Professionals), not the retired Pro Chat / Reports / Engineer AI tabs', () => {
     const d = kb('app_navigation').description!;
-    expect(d).toMatch(/Pro v5\.0/);
+    expect(d).toMatch(/NavBharatAI Pro/);
     expect(d).toMatch(/Professionals/);
     expect(d).not.toMatch(/Pro Chat/);
     expect(d).not.toMatch(/Reports \(Free Chat\)/);

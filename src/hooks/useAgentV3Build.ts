@@ -509,8 +509,8 @@ export function useAgentV3Build(): UseAgentV3Build {
       const sample = (rawSample || buffer).trim();
       setError(
         sample
-          ? `The server did not return v5.0 events. It replied with:\n${sample.slice(0, 300)}`
-          : 'No response from the v5.0 engine.',
+          ? `The server did not return NavBharatAI Pro events. It replied with:\n${sample.slice(0, 300)}`
+          : 'No response from the NavBharatAI Pro engine.',
       );
     }
   }, []);
@@ -1460,8 +1460,8 @@ export function useAgentV3Build(): UseAgentV3Build {
           const sample = (rawSample || buffer).trim();
           setError(
             sample
-              ? `The server did not return v5.0 events. It replied with:\n${sample.slice(0, 300)}`
-              : `No response from the v5.0 engine (HTTP ${res.status}). The backend may be unreachable, or v5.0 is not enabled on the server.`,
+              ? `The server did not return NavBharatAI Pro events. It replied with:\n${sample.slice(0, 300)}`
+              : `No response from the NavBharatAI Pro engine (HTTP ${res.status}). The backend may be unreachable, or NavBharatAI Pro is not enabled on the server.`,
           );
         }
       } catch (err) {

@@ -33,7 +33,7 @@ interface GitPanelProps {
   onToggleView?: (view: any) => void;
   onActivatePreview?: () => void;
   onActivateWorkspace?: (agent: string) => void;
-  /** Hand a real deploy off to NavBharatAI Pro v5.0's build+deploy pipeline for the given provider. */
+  /** Hand a real deploy off to NavBharatAI Pro's build+deploy pipeline for the given provider. */
   onDeployViaV5?: (provider: string) => void;
 }
 
@@ -796,7 +796,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
         if (isV5DeployProvider(selectedPlatform) && onDeployViaV5) {
           const name = DEPLOY_PLATFORMS.find(p => p.id === selectedPlatform)?.name || selectedPlatform;
           setDeployStatus('idle');
-          setDeployLogs([`[${new Date().toLocaleTimeString()}] 🚀 Handing off to NavBharatAI Pro v5.0 to build and deploy to ${name} — watch the live progress there.`]);
+          setDeployLogs([`[${new Date().toLocaleTimeString()}] 🚀 Handing off to NavBharatAI Pro to build and deploy to ${name} — watch the live progress there.`]);
           onDeployViaV5(selectedPlatform);
           return;
         }

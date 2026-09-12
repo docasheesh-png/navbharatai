@@ -527,6 +527,20 @@ import {
 import { adminRequestOk } from '../lib/adminAuth';
 import { previewFidelityCaveats, previewFidelityNotice } from '../AgentV3/previewFidelity';
 import { journeyUserSummary } from '../AgentV3/journeyUserSummary';
+
+/**
+ * The one user-facing sentence for "the builder is switched off on this server".
+ *
+ * It was written out 34 times as `'AgentV3 (v5.0) is not enabled.'` — two separate problems in one
+ * string. It told the USER our internal codename ("AgentV3") and a version number, and it was
+ * duplicated 34 times, so the next person to reword it would have fixed one copy and left 33 saying
+ * something else. Both are the same root cause: a user-facing sentence with no single home.
+ *
+ * The ROUTE PATHS, the `AGENTV3_*` env names and the `agentv3_*` collections deliberately KEEP their
+ * identifiers — production depends on them, and an installed Android build posts to those paths. Only
+ * the sentence a person reads changed.
+ */
+const ENGINE_DISABLED = 'NavBharatAI Pro is not enabled.';
 export { buildActuator };
 
 /**
@@ -1311,7 +1325,7 @@ export function userCostBreakdown(
     billedInr: Math.round(billedUsd * Math.max(0, rate) * 100) / 100,
     usdInrRate: Math.max(0, rate),
     tier: POWER_TIER_DISPLAY[key] ?? 'NavBharatAI',
-    engine: 'NavBharatAI Pro v5.0',
+    engine: 'NavBharatAI Pro',
     // Seconds without a charge are not shown: a "0 min — ₹0.00" line on every build is noise that
     // teaches the user to stop reading the breakdown, and the whole point of it is to be read.
     livePreviewSeconds: lpUsd > 0 ? lpSeconds : 0,
@@ -2113,7 +2127,7 @@ export function parseKeyPool(env: string | undefined): string[] {
 }
 
 /**
- * NavBharatAI Pro v5.0 — optional CHEAP BUILD FLOOR (admin cost-down lever, DEFAULT OFF).
+ * NavBharatAI Pro — optional CHEAP BUILD FLOOR (admin cost-down lever, DEFAULT OFF).
  *
  * Returns OpenAI-compatible build runners (GLM / Kimi) that LEAD the build chain ONLY when
  * `AGENTV3_CHEAP_FLOOR` is not "off" AND at least one provider's key is present. Otherwise it
@@ -3165,7 +3179,7 @@ export function registerAgentV3Routes(app: Express): void {
     // never a hard error). The anon bucket is likewise never enumerable (would leak every degraded session).
     if (!userId || userId === 'anon') { res.json({ conversations: [] }); return; }
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
     }
     try {
@@ -3204,7 +3218,7 @@ export function registerAgentV3Routes(app: Express): void {
   app.get('/api/agentv3/conversations/:id', async (req: Request, res: Response) => {
     const { userId, email } = await resolveReadIdentity(req); // SECURITY (C1 follow-up): verified token, not query.userId
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
     }
     try {
@@ -3259,7 +3273,7 @@ export function registerAgentV3Routes(app: Express): void {
   app.delete('/api/agentv3/conversations/:id', async (req: Request, res: Response) => {
     const { userId, email } = await resolveReadIdentity(req); // SECURITY (C1 follow-up): verified token, not query.userId
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
     }
     try {
@@ -3315,7 +3329,7 @@ export function registerAgentV3Routes(app: Express): void {
   app.post('/api/agentv3/conversations/:id/pin', async (req: Request, res: Response) => {
     const { userId, email } = await resolveReadIdentity(req); // verified token, not query.userId
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
     }
     const pinned = req.body?.pinned !== false; // default true; pass { pinned: false } to unpin
@@ -3382,7 +3396,7 @@ export function registerAgentV3Routes(app: Express): void {
   app.post('/api/agentv3/conversations/:id/duplicate', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const { userId, email } = await resolveReadIdentity(req); // verified token, never a body-supplied id
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
     }
     if (!userId || userId === 'anon') {
@@ -3431,7 +3445,7 @@ export function registerAgentV3Routes(app: Express): void {
   app.post('/api/agentv3/conversations/:id/name', async (req: Request, res: Response) => {
     const { userId, email } = await resolveReadIdentity(req); // verified token, never a body-supplied id
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
     }
     const validated = validateAppName(typeof req.body?.name === 'string' ? req.body.name : '');
@@ -3933,7 +3947,7 @@ async function noteBuildOutcome(
     const email = typeof req.query.email === 'string' ? req.query.email : null;
     const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
     }
     // SECURITY Phase 3.2 (IDOR) — a build report is PRIVATE. Until now this route had NO ownership
@@ -4120,7 +4134,7 @@ async function noteBuildOutcome(
     const email = typeof req.query.email === 'string' ? req.query.email : null;
     const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
     }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
@@ -4163,7 +4177,7 @@ async function noteBuildOutcome(
      * that: for EITHER value, no repo still means refused.
      */
     const githubConnectedHint = req.body?.githubConnected === true;
-    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
     if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
     // Only Render is a wired backend host today; others still use the config-inject + GitHub-connect path.
@@ -4509,7 +4523,7 @@ async function noteBuildOutcome(
     // exact hole every other gate in this file closes.
     const { userId, email } = await resolveReadIdentity(req);
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
-    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
     if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
 
@@ -4580,7 +4594,7 @@ async function noteBuildOutcome(
   app.post('/api/agentv3/host-usage', deployOpsRateLimiter(), async (req: Request, res: Response) => {
     const { userId, email } = await resolveReadIdentity(req);
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
-    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
     if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
     // Cost figures are OUR infrastructure spend, which the white-label law keeps admin-side. A user
@@ -4652,7 +4666,7 @@ async function noteBuildOutcome(
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     const serviceId = typeof req.body?.serviceId === 'string' ? req.body.serviceId.trim() : '';
     const serviceUrl = typeof req.body?.serviceUrl === 'string' ? req.body.serviceUrl.trim() : '';
-    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
     if (!serviceId) { res.status(400).json({ error: 'serviceId is required.' }); return; }
     // The same ownership check the deploy itself makes — a status is about someone's own service, and
@@ -4690,7 +4704,7 @@ async function noteBuildOutcome(
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     const githubToken = typeof req.body?.githubToken === 'string' ? req.body.githubToken.trim() : '';
-    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
     if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
     if (!githubToken) { res.status(401).json({ error: 'Connect GitHub first — we need your permission to create the repository in your account.' }); return; }
@@ -4757,7 +4771,7 @@ async function noteBuildOutcome(
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     const source: 'in-browser' | 'live' = req.body?.source === 'live' ? 'live' : 'in-browser';
     const message = typeof req.body?.message === 'string' ? req.body.message.slice(0, 4000) : '';
-    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
     if (!workspaceId || !message) { res.status(400).json({ error: 'workspaceId and message are required.' }); return; }
     if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
     // SECURITY (T0-9): the per-USER "latest report" slot is keyed off the VERIFIED uid, NEVER the claimed
@@ -4855,7 +4869,7 @@ async function noteBuildOutcome(
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     const framework = typeof req.body?.framework === 'string' ? req.body.framework : 'vite-react';
-    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
     if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
     // OPTION A — a PERSON pressing Diagnose / Restart / Wake up is evidence their app is not working.
@@ -5438,7 +5452,7 @@ async function noteBuildOutcome(
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     const framework = typeof req.body?.framework === 'string' ? req.body.framework : 'vite-react';
-    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
     if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
     try {
@@ -5660,7 +5674,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const stopWorkspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : null;
@@ -5712,7 +5726,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : null;
@@ -5793,7 +5807,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const message = sanitizeSteerMessage(req.body?.message);
@@ -5916,7 +5930,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     if (!ownRepoStorageEnabled()) {
@@ -5944,7 +5958,7 @@ async function noteBuildOutcome(
         head: WORK_BRANCH,
         base: access.defaultBranch,
         title: `NavBharatAI: ship ${repo}`,
-        body: `Merging \`${WORK_BRANCH}\` into \`${access.defaultBranch}\` — reviewed & shipped from NavBharatAI Pro v5.0.`,
+        body: `Merging \`${WORK_BRANCH}\` into \`${access.defaultBranch}\` — reviewed & shipped from NavBharatAI Pro.`,
       });
       res.json({
         merged: flow.merged,
@@ -5976,7 +5990,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     if (!ownRepoStorageEnabled()) {
@@ -6029,7 +6043,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     if (!ownRepoStorageEnabled()) {
@@ -6077,7 +6091,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     if (!ownRepoStorageEnabled()) {
@@ -6111,7 +6125,7 @@ async function noteBuildOutcome(
         return;
       }
       const firstLine = (head.message.split('\n')[0] || 'last change').slice(0, 120);
-      const revertSha = await client.createCommit(repo, `Revert "${firstLine}"\n\nReverted from NavBharatAI Pro v5.0.`, parentTree, [head.sha]);
+      const revertSha = await client.createCommit(repo, `Revert "${firstLine}"\n\nReverted from NavBharatAI Pro.`, parentTree, [head.sha]);
       if (!revertSha) {
         res.json({ reverted: false, note: 'Could not create the revert commit.' });
         return;
@@ -6133,7 +6147,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     // SECURITY T0-9: /attach replays a build's full LIVE transcript, so it must match the build under the
@@ -6190,7 +6204,7 @@ async function noteBuildOutcome(
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
     }
     const sinceSeq = Number.parseInt(typeof req.query.sinceSeq === 'string' ? req.query.sinceSeq : '0', 10) || 0;
@@ -6277,7 +6291,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -6306,7 +6320,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -6339,7 +6353,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -6382,7 +6396,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -6414,7 +6428,7 @@ async function noteBuildOutcome(
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
@@ -6452,7 +6466,7 @@ async function noteBuildOutcome(
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
@@ -6476,7 +6490,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -6509,7 +6523,7 @@ async function noteBuildOutcome(
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
@@ -6538,7 +6552,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -6583,7 +6597,7 @@ async function noteBuildOutcome(
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
@@ -6627,7 +6641,7 @@ async function noteBuildOutcome(
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
@@ -6836,7 +6850,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -6945,7 +6959,7 @@ async function noteBuildOutcome(
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
@@ -6979,7 +6993,7 @@ async function noteBuildOutcome(
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
@@ -7076,7 +7090,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -7099,7 +7113,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -7121,7 +7135,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -7145,7 +7159,7 @@ async function noteBuildOutcome(
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
@@ -7530,7 +7544,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -7554,7 +7568,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -7571,7 +7585,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -7591,7 +7605,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -7629,7 +7643,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -7685,7 +7699,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -7854,7 +7868,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -8296,7 +8310,7 @@ async function noteBuildOutcome(
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     // hasGithub is a boolean hint only — never accept a token in a GET query string.
@@ -8331,7 +8345,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -8360,7 +8374,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -8434,7 +8448,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -8540,7 +8554,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -8626,7 +8640,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -8741,7 +8755,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -8777,7 +8791,7 @@ async function noteBuildOutcome(
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -8856,7 +8870,7 @@ async function noteBuildOutcome(
       email = await resolveVerifiedEmail(verified.uid);
     }
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      res.status(404).json({ error: ENGINE_DISABLED });
       return;
     }
     // SECURITY Phase 1.3 (bill-or-refuse): a build spends NavBharatAI's paid model budget, so a
@@ -8867,7 +8881,7 @@ async function noteBuildOutcome(
     // this path, so a real signed-in user's transient blip self-heals on retry.
     if (buildRequiresSignIn(userId, email)) {
       res.status(401).json({
-        error: 'Please sign in to build with NavBharatAI Pro v5.0 — builds run on a real account so usage can be tracked.',
+        error: 'Please sign in to build with NavBharatAI Pro — builds run on a real account so usage can be tracked.',
         code: 'signin',
       });
       return;
@@ -10872,7 +10886,7 @@ async function noteBuildOutcome(
               const debitRes = await debitWalletForBuild(getDb() as any, userId, {
                 billedInr: watchdogBilledUsd * usdInrRate(),
                 buildRef: `${workspaceId}_${billingCtx.buildStartedAt}`,
-                description: 'NavBharatAI Pro v5.0 build (time-capped)',
+                description: 'NavBharatAI Pro build (time-capped)',
               });
               if (debitRes.ok) watchdogWalletDebit = { tokensDebited: debitRes.tokensDebited, tokenBalance: debitRes.tokenBalance };
             } catch { /* debit failure never blocks finalization (logged nowhere-critical) */ }
@@ -17818,7 +17832,7 @@ async function noteBuildOutcome(
                 const pr = await prClient.openPullRequest(
                   ownRepoTarget.repo, ownRepoTarget.workBranch, ownRepoTarget.baseBranch,
                   `NavBharatAI: update ${ownRepoTarget.repo}`,
-                  `Edits by NavBharatAI Pro v5.0 on \`${ownRepoTarget.workBranch}\`. Review and merge into \`${ownRepoTarget.baseBranch}\` when ready.`,
+                  `Edits by NavBharatAI Pro on \`${ownRepoTarget.workBranch}\`. Review and merge into \`${ownRepoTarget.baseBranch}\` when ready.`,
                 );
                 if (pr.number) {
                   prNote = `Saved your edits to ‘${ownRepoTarget.workBranch}’ and opened PR #${pr.number} → ‘${ownRepoTarget.baseBranch}’. Your ‘${ownRepoTarget.baseBranch}’ is untouched — review and merge when ready: ${pr.htmlUrl}`;
@@ -17832,7 +17846,7 @@ async function noteBuildOutcome(
             if (pushed.pushed) {
               const flow = await mergeViaPullRequest(prClient, repoNameRef, {
                 head: buildBranch, base: repoBranch, title: msg,
-                body: 'Automated build by NavBharatAI Pro v5.0.',
+                body: 'Automated build by NavBharatAI Pro.',
               });
               if (flow.note) {
                 events.emit({ type: 'narration', agent: 'architect', text: flow.note, ts: Date.now() });
@@ -18007,7 +18021,7 @@ async function noteBuildOutcome(
           const debitRes = await debitWalletForBuild(getDb() as any, userId, {
             billedInr: effectiveBilledUsd * usdInrRate(),
             buildRef: `${workspaceId}_${buildStartedAt}`,
-            description: 'NavBharatAI Pro v5.0 build',
+            description: 'NavBharatAI Pro build',
           });
           if (debitRes.ok) {
             walletDebit = { tokensDebited: debitRes.tokensDebited, tokenBalance: debitRes.tokenBalance };

@@ -76,7 +76,7 @@ describe('renderDocsHtml', () => {
   it('renders a searchable feature list including a known feature', () => {
     expect(html).toContain('id="q"'); // search box
     expect(html).toContain('data-search='); // client-side filter data
-    expect(html).toContain('NavBharatAI Pro v5.0');
+    expect(html).toContain('NavBharatAI Pro');
   });
 
   it('HTML-escapes content to prevent injection', () => {

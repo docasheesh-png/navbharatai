@@ -134,7 +134,7 @@ export function useSessionManager(deps: SessionManagerDeps) {
       v3ResumeInFlightRef.current = true; // resume, NOT a fresh open — suppress the new-chat bump so
                                           // toggleTab doesn't start a blank session over the resumed one
       toggleTab('nbi_pro_chat'); // v5.0 now lives in nbi_pro_chat
-      addToast('Resumed v5.0 session.', 'success');
+      addToast('Resumed NavBharatAI Pro session.', 'success');
       return true;
     }
 

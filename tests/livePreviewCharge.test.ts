@@ -44,7 +44,7 @@ describe('userCostBreakdown carries the live-preview charge', () => {
     for (const banned of ['e2b', 'sandbox', 'vm', 'firebase', 'aws', 'anthropic', 'claude', 'glm', 'kimi', 'gemini']) {
       expect(json).not.toContain(banned);
     }
-    expect(b.engine).toBe('NavBharatAI Pro v5.0');
+    expect(b.engine).toBe('NavBharatAI Pro');
   });
 });
 

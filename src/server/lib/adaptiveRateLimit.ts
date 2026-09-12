@@ -73,7 +73,7 @@ export function computePenaltyMs(violations: number, capMs = 30_000): number {
 
 /**
  * Default path predicate for the behavioural guard: protect the abuse-prone /api/ surface, but
- * EXEMPT the authenticated, credit-metered, interactive NavBharatAI Pro v5.0 endpoints. A single
+ * EXEMPT the authenticated, credit-metered, interactive NavBharatAI Pro endpoints. A single
  * legitimate build fires a BURST of /api/agentv3/* calls (the SSE build stream + reconnects, plus
  * status / preview-status / workspace-files / conversations / diagnostics polling) that easily
  * exceeds a behavioural burst threshold — so the guard was hard-blocking real users mid-build with

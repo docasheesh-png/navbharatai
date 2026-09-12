@@ -41,7 +41,7 @@ import { ModePickerSheet } from './components/chat/ModePickerSheet';
 import { isModeSurface, FREE_MODE_ID, NEW_FREE_MODE_ID } from './components/chat/modePicker';
 import { ReportSheet } from './components/ReportSheet';
 import { useShakeToReport } from './hooks/useShakeToReport';
-// EngineerAIChat retired — replaced by NavBharatAI Pro v5.0 (ProV3Surface).
+// EngineerAIChat retired — replaced by NavBharatAI Pro (ProV3Surface).
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { onAuthStateChanged, getRedirectResult, GithubAuthProvider, User as FirebaseUser } from 'firebase/auth';
 // One shared, tested describer for social sign-in outcomes (see socialSignInPolicy).
@@ -316,7 +316,7 @@ export default function App() {
 
   // hinglishMode → from useSettings() hook
   const [loadingUser, setLoadingUser] = useState(true);
-  // v5.0 continuity: a hard browser reload must land BACK in NavBharatAI Pro v5.0 with the same
+  // v5.0 continuity: a hard browser reload must land BACK in NavBharatAI Pro with the same
   // project restored (messages/files/preview) — not dumped to Home. We persist ONLY the v5.0 view
   // (narrow scope; other views still default to Home on reload) in sessionStorage so it survives a
   // reload within the same tab but not a brand-new tab. This restore path deliberately bypasses
@@ -1295,7 +1295,7 @@ export default function App() {
       addLog(
         view === 'security' ? 'Security Audit requires an active session. Please login.'
           : view === 'history' ? 'Chat history requires an active session. Please login.'
-          : `${view === 'sda_chat' ? 'Doctor AI' : 'NavBharatAI Pro v5.0'} is available for logged-in users only. Please sign in.`,
+          : `${view === 'sda_chat' ? 'Doctor AI' : 'NavBharatAI Pro'} is available for logged-in users only. Please sign in.`,
         'warn',
       );
       return;
@@ -1883,7 +1883,7 @@ export default function App() {
     void handleFilesRemoved(paths); // IndexedDB + v5.0 workspace (durable, best-effort)
   }, [activeFile, files, handleFilesRemoved]);
 
-  // Push the IDE workspace files into the NavBharatAI Pro v5.0 (AgentV3) workspace so v5.0 KNOWS
+  // Push the IDE workspace files into the NavBharatAI Pro (AgentV3) workspace so v5.0 KNOWS
   // which files exist (e.g. after a ZIP upload). Best-effort: needs a signed-in user; the server
   // also gates on v5.0 being enabled (returns 404 → no sandbox is spun) so this is a no-op for
   // non-v5.0 users. The workspace id is the SAME one the v5.0 chat panel uses (shared localStorage
@@ -1936,7 +1936,7 @@ export default function App() {
     }
     if (notEnabled || opts?.silent) return;
     if (failedChunks === 0) {
-      addToast(`Synced ${imported} file${imported === 1 ? '' : 's'} to v5.0 ✓${githubUrl ? ' — also backed up to GitHub' : ''}`, 'success');
+      addToast(`Synced ${imported} file${imported === 1 ? '' : 's'} to NavBharatAI Pro ✓${githubUrl ? ' — also backed up to GitHub' : ''}`, 'success');
     } else {
       addToast(`⚠️ Synced ${imported} file(s), but ${failedChunks} batch${failedChunks === 1 ? '' : 'es'} failed — check your connection and try importing again`, 'warning');
     }
@@ -2153,7 +2153,7 @@ export default function App() {
   const menuItems = useMemo(() => [
     { id: 'home',         label: 'Home',              icon: Bot },
     { id: 'nbi_chat',     label: 'NavBharatAI FREE',  icon: MessageSquare },
-    { id: 'nbi_pro_chat', label: 'NavBharatAI Pro v5.0', icon: Bot },
+    { id: 'nbi_pro_chat', label: 'NavBharatAI Pro', icon: Bot },
     { id: 'professionals', label: 'Professionals',    icon: Briefcase, status: 'New' },
     // Other AI opens its OWN header tab like Free/Pro/Professionals (admin 2026-07-23): without a menuItems
     // entry, TopNav's `if (!item) return null` silently dropped the tab, so opening Other AI showed no
@@ -2273,7 +2273,7 @@ export default function App() {
       setV3Resume({ sessionId: sid, messages: msgs, nonce: Date.now() });
       v3ResumeInFlightRef.current = true; // resume, not a fresh open — suppress the new-chat bump
       toggleTab('nbi_pro_chat'); // v5.0 now lives in nbi_pro_chat
-      addLog(`Resumed v5.0 session: ${session.title}`, 'info');
+      addLog(`Resumed NavBharatAI Pro session: ${session.title}`, 'info');
       return;
     }
 
@@ -3004,7 +3004,7 @@ export default function App() {
           <ReportSheet open={reportOpen} onClose={() => setReportOpen(false)} view={activeView} />
 
           {shouldRenderV3Surface(activeView, v3Preview.running === true, openTabs.includes('nbi_pro_chat')) && (
-            /* NavBharatAI Pro v5.0 — replaces the retired Pro v2.0 builder. ProV3Surface shows the
+            /* NavBharatAI Pro — replaces the retired Pro v2.0 builder. ProV3Surface shows the
                real v5.0 builder when it's enabled for this account, else an honest "rolling out"
                message (never a broken builder). The old ProChatPanel (v2.0) is retired.
 
@@ -3096,7 +3096,7 @@ export default function App() {
           {activeView === 'professionals' && (
             <ProfessionalsView onSelect={(id) => {
               if (id === 'sda_chat') toggleTab('sda_chat');
-              else if (id === 'nbi_pro_chat') toggleTab('nbi_pro_chat'); // NavBharatAI Pro v5.0 gate
+              else if (id === 'nbi_pro_chat') toggleTab('nbi_pro_chat'); // NavBharatAI Pro gate
               else if (id === 'engineer_ai') toggleTab('nbi_pro_chat'); // legacy id → Pro v5.0
               else if (id === 'teacher_ai') toggleTab('teacher_ai');
               else if (id === 'mentor_ai') toggleTab('mentor_ai');
@@ -3547,7 +3547,7 @@ export default function App() {
             </div>
           )}
 
-          {/* ── Engineer AI — RETIRED (replaced by NavBharatAI Pro v5.0). UI entry removed. ── */}
+          {/* ── Engineer AI — RETIRED (replaced by NavBharatAI Pro). UI entry removed. ── */}
 
                     {activeView === 'about' && (
             <AboutPanel
@@ -3716,7 +3716,7 @@ export default function App() {
           )}
 
           {/* Separate 'engine_builder' v5.0 view REMOVED — v5.0 is now reached only via the two
-              gates (sidebar "NavBharatAI Pro v5.0" = nbi_pro_chat, and Professionals → Pro v5.0),
+              gates (sidebar "NavBharatAI Pro" = nbi_pro_chat, and Professionals → Pro v5.0),
               both rendering ProV3Surface above. The floating launcher is removed too. */}
 
           {activeView === 'connect_domain' && (

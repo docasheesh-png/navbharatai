@@ -27,8 +27,8 @@ describe('The retired Engineer AI entry is an honest redirect', () => {
   it('is banner-marked RETIRED and points at NavBharatAI Pro v5.0', () => {
     const e = kb('engineer_ai');
     expect(e.path).toMatch(/RETIRED/);
-    expect(e.path).toMatch(/NavBharatAI Pro v5\.0/);
+    expect(e.path).toMatch(/NavBharatAI Pro/);
     expect(e.howToUse).toMatch(/retired/i);
-    expect(e.howToUse).toMatch(/App Builder v5\.0|NavBharatAI Pro v5\.0/);
+    expect(e.howToUse).toMatch(/NavBharatAI Pro/);
   });
 });

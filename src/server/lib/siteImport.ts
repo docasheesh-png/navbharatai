@@ -12,7 +12,7 @@
  *     action, form fields, colours, fonts, and whether the page has a login / payment / search. No
  *     model call, so it costs the user nothing and answers in a second — and the same page always
  *     produces the same spec.
- *   • The VISUAL half is delegated to the builder itself: NavBharatAI Pro v5.0 already runs a real
+ *   • The VISUAL half is delegated to the builder itself: NavBharatAI Pro already runs a real
  *     browser in its sandbox and can open a public site (`browser` tool). The spec tells it to look at
  *     the live page for proportions, spacing and imagery, and to fall back to the structure here if
  *     the page will not open. Markup gives the words and the skeleton; the browser gives the look.

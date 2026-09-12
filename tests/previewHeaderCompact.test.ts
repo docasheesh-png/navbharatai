@@ -78,8 +78,8 @@ describe('the product title no longer wraps to two lines on a phone', () => {
   it('shows a short title on small screens and the full one from lg up', () => {
     // The wrap cost more height than every padding value in that header combined. "NavBharatAI" is
     // already on the bar directly above, so the short form loses nothing the user cannot see.
-    expect(panel).toContain('<span className="lg:hidden">Pro v5.0</span>');
-    expect(panel).toContain('<span className="hidden lg:inline">NavBharatAI Pro v5.0</span>');
+    expect(panel).toContain('<span className="lg:hidden">Pro</span>');
+    expect(panel).toContain('<span className="hidden lg:inline">NavBharatAI Pro</span>');
     expect(panel).toContain('font-semibold whitespace-nowrap');
   });
 

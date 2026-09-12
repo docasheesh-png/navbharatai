@@ -12,7 +12,7 @@ interface MiniMsg {
 }
 
 /**
- * Code Studio's AI chat — literally NavBharatAI Pro v5.0 (AgentV3), not a separate chat AI. Root-caused
+ * Code Studio's AI chat — literally NavBharatAI Pro (AgentV3), not a separate chat AI. Root-caused
  * 2026-07-01 (admin request, "ek hi body ke alag organs"): this used to be wired to the Free-tier chat
  * endpoint, which cannot read or write files at all (server-side it's explicitly told never to
  * generate code) — so it could only talk ABOUT a file the user had open, never act on one.
@@ -107,7 +107,7 @@ export function AgentV3MiniChat({ userId, email, prefill }: { userId?: string; e
   if (!userId) {
     return (
       <div className="h-full flex items-center justify-center p-6 text-center">
-        <p className="text-xs text-zinc-500">Sign in to chat with NavBharatAI Pro v5.0 right here in Code Studio.</p>
+        <p className="text-xs text-zinc-500">Sign in to chat with NavBharatAI Pro right here in Code Studio.</p>
       </div>
     );
   }
@@ -116,14 +116,14 @@ export function AgentV3MiniChat({ userId, email, prefill }: { userId?: string; e
     <div className="flex flex-col h-full bg-[#0d1117]">
       <div className="px-3 py-2.5 border-b border-white/10 flex items-center gap-2 shrink-0">
         <Bot className="w-3.5 h-3.5 text-indigo-400" />
-        <span className="text-[10px] font-black uppercase tracking-widest text-indigo-400">NavBharatAI Pro v5.0</span>
+        <span className="text-[10px] font-black uppercase tracking-widest text-indigo-400">NavBharatAI Pro</span>
         <span className="text-[9px] text-zinc-600">— same project, same session</span>
       </div>
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
         {convo.length === 0 && !running && (
           <div className="text-xs text-zinc-500 leading-relaxed px-1">
-            Ask v5.0 to explain, edit, or extend this project — it can read and write your files here,
-            exactly like the main v5.0 chat.
+            Ask NavBharatAI Pro to explain, edit, or extend this project — it can read and write your files here,
+            exactly like the main NavBharatAI Pro chat.
           </div>
         )}
         {convo.map((m, i) => (
@@ -160,7 +160,7 @@ export function AgentV3MiniChat({ userId, email, prefill }: { userId?: string; e
             }
           }}
           disabled={running}
-          placeholder="Message v5.0…"
+          placeholder="Message NavBharatAI Pro…"
           className="flex-1 bg-zinc-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 disabled:opacity-50 focus:outline-none focus:border-indigo-500/50"
         />
         <button

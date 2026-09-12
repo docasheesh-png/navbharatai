@@ -10,7 +10,7 @@ import { cloneGuardrailsBlock } from './screenshotToPrompt';
  * Website → App — POST /api/site-import/to-prompt (ROADMAP §13, 4.2).
  *
  *   body: { url, style?, framework?, includeJs? }
- *   → { prompt, extracted, url }   the build spec the client hands to NavBharatAI Pro v5.0, plus the
+ *   → { prompt, extracted, url }   the build spec the client hands to NavBharatAI Pro, plus the
  *                                  structure it was derived from, so the user sees WHAT was read before
  *                                  pressing Build.
  *

@@ -5,7 +5,7 @@
 // document inherits the PARENT (platform) document's URL as its base — so an ABSOLUTE navigation inside the
 // generated app (`location.assign('/')`, an auth redirect, `<a href="/login">`, a GET form to '/') resolves
 // to the NavBharatAI platform origin and LOADS THE PLATFORM APP ITSELF into the preview. The user then sees
-// "NavBharatAI Pro v5.0" inside the preview instead of their app — intermittently, only for apps that
+// "NavBharatAI Pro" inside the preview instead of their app — intermittently, only for apps that
 // redirect (login/auth/role-gated dashboards).
 //
 // The guard, injected into every preview document, neutralizes exactly those cross-document navigations to

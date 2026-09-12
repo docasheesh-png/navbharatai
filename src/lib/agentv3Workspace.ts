@@ -1,4 +1,4 @@
-// Shared NavBharatAI Pro v5.0 (AgentV3) workspace identity for the IDE side.
+// Shared NavBharatAI Pro (AgentV3) workspace identity for the IDE side.
 //
 // The v5.0 engine keys every workspace as `agentv3-{uid}-{sessionId}` (server: deriveWorkspaceId),
 // and the v5.0 chat panel persists its `sessionId` in localStorage under `agentv3_session_{uid}`.

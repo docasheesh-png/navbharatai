@@ -37,7 +37,7 @@ export const PRIVACY_POLICY = `# Privacy Policy
 
 **Last updated: ${PRIVACY_POLICY_UPDATED}**
 
-This Privacy Policy explains how **NavBharatAI** ("NavBharatAI", "we", "us", "our") collects, uses, stores, shares and protects your information when you use the NavBharatAI website (navbharatai.com), the NavBharatAI mobile applications, and every product surface inside them — including NavBharatAI Free chat, NavBharatAI Pro v5.0 (the AI app builder), the Professionals assistants, the Nav App Store, and the developer tools (together, the "Platform").
+This Privacy Policy explains how **NavBharatAI** ("NavBharatAI", "we", "us", "our") collects, uses, stores, shares and protects your information when you use the NavBharatAI website (navbharatai.com), the NavBharatAI mobile applications, and every product surface inside them — including NavBharatAI Free chat, NavBharatAI Pro (the AI app builder), the Professionals assistants, the Nav App Store, and the developer tools (together, the "Platform").
 
 We have written this policy to be read by real people, not only by lawyers. Where a section has legal weight, we have still tried to say it plainly.
 
@@ -61,8 +61,8 @@ This mailbox also serves as our **Grievance contact** for the purposes of Indian
 ### 2.1 Information you give us directly
 
 - **Account information.** When you sign in with Google, Apple, or a mobile number (OTP), we receive your name, email address and/or phone number, and a profile picture if your sign-in provider supplies one. We do not see or store your Google or Apple password. Phone-number login is verified by a one-time password; we store the number, never the OTP.
-- **Chats and prompts.** The messages you type or dictate into any NavBharatAI chat (Free chat, Pro v5.0 build requests, Professionals assistants), including follow-up instructions, feedback and corrections.
-- **Files you upload.** Documents, images, spreadsheets, PDFs and archives you attach — for example a .zip of an app you import into Pro v5.0, a logo you add to a build, or a document you ask an assistant to analyse.
+- **Chats and prompts.** The messages you type or dictate into any NavBharatAI chat (Free chat, NavBharatAI Pro build requests, Professionals assistants), including follow-up instructions, feedback and corrections.
+- **Files you upload.** Documents, images, spreadsheets, PDFs and archives you attach — for example a .zip of an app you import into NavBharatAI Pro, a logo you add to a build, or a document you ask an assistant to analyse.
 - **Health-related documents and descriptions (web only).** The Doctor AI / Senior Doctor Assistant surface (available on the website, intended for qualified medical professionals) accepts clinical descriptions and documents such as lab reports. This is **sensitive information** and is treated under the stricter rules in Section 5.
 - **Payment identifiers.** When you buy tokens or a plan, the payment itself is processed by our payment provider (Section 7). We store the order identifiers, the amount, and the outcome — **we never see or store your full card number, UPI PIN or banking password**.
 - **Things you publish.** If you publish an app to the Nav App Store, the app package, its listing (name, description, icon) and your developer name become part of the store listing you asked us to create.

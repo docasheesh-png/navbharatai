@@ -337,13 +337,14 @@ export function SidebarNav({
                     <Globe className="w-4.5 h-4.5 text-indigo-400" />
                     <span className="text-sm font-bold tracking-tight">Connect my website</span>
                   </button>
-                  <button
-                    onClick={() => { toggleTab('engine_builder'); setIsMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all group ${activeView === 'engine_builder' ? 'bg-indigo-600 text-white' : 'text-[#8b949e] hover:bg-white/5 hover:text-white'}`}
-                  >
-                    <Info className="w-4.5 h-4.5 text-indigo-400" />
-                    <span className="text-sm font-bold tracking-tight">App Builder v5.0</span>
-                  </button>
+                  {/* The hardcoded "App Builder v5.0" row that stood here is DELETED (2026-09-12). It was a
+                      DEAD BUTTON: it navigated to the engine-builder view, which App.tsx stopped rendering
+                      long ago ("Separate 'engine_builder' v5.0 view REMOVED"), so tapping the most
+                      builder-looking entry in this menu rendered nothing at all. It was also a
+                      SECOND door to a place that already has one — `nbi_pro_chat` ("NavBharatAI Pro") is not in
+                      SIDEBAR_HIDDEN, so the real, working gate is already listed above from `menuItems`. Same
+                      reasoning as the Professionals/Preview/Files rows removed above, with the difference that
+                      this one was broken as well as redundant. */}
                   {/* Admin access moved to a dedicated URL (admin 2026-07-15): reach the admin login /
                       dashboard at /admin. It's intentionally NOT a menu item so the entry isn't
                       advertised in the UI. */}

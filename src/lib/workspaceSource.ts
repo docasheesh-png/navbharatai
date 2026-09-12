@@ -68,6 +68,6 @@ export function hasAnalysableApp(source: ResolvedAppSource): boolean {
 /** The honest one-line guidance for a source that isn't directly analysable. Pure. */
 export function appSourceGuidance(kind: AppSourceKind): string {
   if (kind === 'unbundled') return 'Open the Preview once to bundle your app, then run this tool.';
-  if (kind === 'none') return 'Build an app in NavBharatAI Pro v5.0 first, then run this tool.';
+  if (kind === 'none') return 'Build an app in NavBharatAI Pro first, then run this tool.';
   return '';
 }

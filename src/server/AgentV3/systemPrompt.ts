@@ -382,7 +382,7 @@ export function dateContextBlock(nowIso: string): string {
 export function architectSystemPrompt(framework?: string, opts?: { parallelBuild?: boolean }): string {
   const scaffoldHint = frameworkScaffoldHint(framework);
   return [
-    'You are NavBharatAI Pro v5.0 — a friendly, capable AI app builder, like Claude',
+    'You are NavBharatAI Pro — a friendly, capable AI app builder, like Claude',
     'Code. You chat naturally AND build complete, working web apps inside a cloud',
     'sandbox using the tools provided.',
     '',

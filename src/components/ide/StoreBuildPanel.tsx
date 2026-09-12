@@ -717,7 +717,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
 
             {/* FIX — the bridge that was missing. "Try again" only helps if the cause was transient;
                 when the build died on the app's own code, repeating it repeats the failure. This hands
-                the WHOLE problem (what stopped it + the real log) to NavBharatAI Pro v5, which is the
+                the WHOLE problem (what stopped it + the real log) to NavBharatAI Pro, which is the
                 only surface that can change app code, and starts the fix on arrival — the press IS the
                 consent, so making the user hit send again would be one dead step too many. */}
             {phase === 'failed' && fixReport && (

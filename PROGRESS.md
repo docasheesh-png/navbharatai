@@ -49446,3 +49446,118 @@ genuinely cannot do WebAuthn — that limit is unchanged by this work.
 Gate on the final state: `typecheck` 0 · `noUnusedImports` clean · `typecheck:server` 0 · `build` ok ·
 `test:bundle` within budget · `boot:check` PASS · `vitest run` **1,567 files / 21,540 passed / 1
 skipped / 0 failed**.
+## 2026-09-12 — The starter picker stops being a wall, and the India-first set reaches daily life and faith
+
+**What the admin asked for, in two steps.** First I offered two "tidying" suggestions: delete the Converter
+and Password chips because thirty-one buttons felt like a lot, and add four more India templates. The admin
+asked the right question — *"pahle mujhe hindi me samjhao, inko karne se hoga kya?"* — and the honest answer
+turned out to be that **both of my own suggestions were weak**, so I argued against them:
+
+* Deleting two chips makes nine lines of pills into eight. **No user feels that**, and whoever wanted the
+  converter is simply worse off. The problem was never the COUNT — it was the WALL.
+* Adding four more templates before any real v5 build report exists for the SEVEN shipped on 2026-09-12
+  would be building on unverified ground.
+
+The admin then approved the real fix and extended it: *"Shuru me sirf 10-12 buttons dikhao, neeche ek chhota
+'More templates'. … yeh banao, isi me indian apps daal dena (bhagwat geeta in hindi, quran in hindi,
+brahm_muhrats, ya panchang, kundali jaise apps … mera suggestion hai, aap isko real professional banana)"*.
+
+### Part 1 — twelve buttons, then "More templates (N)"
+
+`pickerSections(tappable, limit = 12)` (`starterTemplates.ts`) splits the picker; `AgentV3Panel.tsx` renders
+the first screen and one expander, collapsed by default, labelled with the number it is hiding.
+
+**`featured` is a FLAG on the data, not "the first twelve of the array"** — deliberately. The first screen is
+the most-seen surface in the product, so what lands on it is a decision; slicing the array would make it an
+ACCIDENT of insertion order, where adding a chip at the top silently pushes a curated one off with nothing
+failing to say so. Twelve are marked, nine of them `simple` so a FREE user's first screen is curated rather
+than topped up from array order.
+
+**The invariant the test pins, because it is the only way this can go wrong:** `initial ∪ more` is exactly
+the input and the two are disjoint. A chip in NEITHER half would be silently unreachable — no error, nothing
+on screen to notice — so `more` is a COMPLEMENT rather than its own hand-written list, and a chip nobody
+remembered to mark `featured` therefore appears in "More" instead of vanishing. The locked Pro showcases stay
+a separate row: folding the upgrade carrot into an expander would bury the one surface that earns revenue.
+**Nothing was deleted.** (`tests/starterPickerExpander.test.ts`, 17 assertions.)
+
+### Part 2 — four India-first templates, built to be REAL rather than to look complete
+
+`panchang`, `geeta`, `quran` (free/simple) and `kundali` (pro, showcase), with golden scaffolds in the new
+`goldenScaffolds/indiaFaith.ts` and `indiaPanchang.ts`.
+
+**The decision that shaped all four.** The easy version of each of these is the dishonest one: a panchang
+that prints a table of times somebody typed in for one city, a scripture reader that looks like the whole
+book while holding a handful of verses, a kundali that invents the planets it cannot compute. Every one of
+those *looks* identical to the real thing on the day it ships, and each is the "built but not really working"
+state the second absolute rule forbids — worst of all for a user planning a ceremony around those minutes.
+
+So:
+
+* **Panchang COMPUTES.** Sunrise, sunset and solar noon come from the standard NOAA solar-position algorithm
+  for the chosen latitude and longitude; Brahma Muhurat, Abhijit, Rahu Kaal, Gulika, Yamaganda and the eight
+  daytime Choghadiya are DERIVED from those by their documented traditional rules; tithi and nakshatra come
+  from the sun and moon longitudes with the Lahiri ayanamsa. 16 Indian cities plus manual lat/long. It states
+  its own accuracy (≈1 min for sunrise; ≈0.2° on the moon, so a tithi boundary can differ by half an hour
+  from a published panchang) and says the night choghadiya is deliberately not included.
+* **Gita and Quran COUNT what they hold.** "इस ऐप में N चुने हुए श्लोक हैं (कुल 700 में से)" on the first
+  screen; the Quran reader the same against 114 surahs, and it carries a **Hindi transliteration** so a reader
+  who cannot read Arabic can still recite — the feature that actually matters for an India-first reader. The
+  Devanagari and Arabic are the public-domain originals; the Hindi meanings are plain original paraphrase,
+  never a copied published translation. A chapter genuinely absent shows a real empty state rather than being
+  hidden, and says so.
+* **Kundali STOPS where honesty requires.** Lagna and the twelve bhava are exact spherical trigonometry
+  needing no ephemeris; the Sun (≈0.01°), Moon (≈0.2°) and the lunar nodes are genuinely computed; the chart
+  is the traditional North Indian diamond. **Mangal through Shani are NOT placed**, and the app says why on
+  the same screen as the table. The reason is recorded because it is the general rule: a table of orbital
+  elements written from memory into a scaffold is **untestable from a session**, and one wrong digit would put
+  a planet in the wrong rashi on every chart the app ever draws with nothing failing to say so. A wrong
+  kundali is worse than an incomplete one to the person reading it.
+
+### 🔴 The part worth carrying forward: the compile gate CANNOT tell a correct sunrise from a plausible one
+
+`goldenScaffolds.test.ts` proves every scaffold parses under esbuild and compiles under the preview Babel.
+Neither can evaluate a number. A grep for `Math.acos` would pass just as happily over maths that returned
+nonsense — and the maths lives inside a template-literal string, which is exactly the excuse for not testing
+it. **That excuse is wrong.** `tests/indiaAlmanacStarters.test.ts` lifts the astronomy out of the scaffold
+string, transpiles it with esbuild and RUNS it:
+
+* Delhi 21 Jun 2026 → 05:24 / 19:22 (published 05:23 / 19:21) · Delhi 22 Dec → 07:10 / 17:29 (exact) ·
+  Mumbai and Kolkata 12 Sep → within a minute. Tolerance 3 min.
+* Solar noon is exactly midway between sunrise and sunset (catches a sign error in the hour angle or the
+  equation of time); the June day is longer than the December day for every city it ships.
+* Sun at 0/90/180/270° within 1.5° of each equinox and solstice; moon moves 11–15.5°/day and returns in
+  27.32 days; Lahiri ayanamsa 24.18–24.28° for 2026 (published ≈24°14′).
+* Local sidereal time at the J2000 epoch = 99.9677° (textbook, to 0.01°); the ascendant is exactly
+  sidereal-time + 90° on the equator with zero obliquity; the Lagna sweeps all twelve rashis over 24 hours;
+  house 1 IS the Lagna rashi and the twelve houses are the twelve rashis exactly once; Ketu is exactly 180°
+  from Rahu every time; a malformed birth record returns `null`, never a chart of NaN.
+* A polar latitude where the sun does not set is REPORTED (`sunrise === null`), never faked.
+* The astronomy and city list are asserted **byte-identical** between the two apps. They are separate
+  generated apps — a golden scaffold must be one self-contained `App.tsx` — so drift between them would
+  otherwise be invisible; this is what makes the duplication safe rather than sloppy.
+
+**Lesson: "the code is inside a string" is a reason to extract and evaluate it, not a reason to test only
+that it compiles.** Every numeric claim in this entry is a test that could fail.
+
+### Two bugs found during the work, both by a check the previous step had skipped
+
+1. **`npx tsc --noEmit` does NOT typecheck `src/server/`.** A scaffold module with an unterminated string
+   (`"… label=\"x\"',` — opened with `"`, closed with `'`) passed the frontend typecheck silently; esbuild
+   caught it. The server files need `npm run typecheck:server`, which is why CLAUDE.md lists both.
+2. **`useCollection`'s `add()` mints its own id.** The kundali screen built a row with `newId()` and then
+   selected `b.id` — an id `add()` had already replaced, so "save and show the chart" would have selected a
+   profile that did not exist. It now uses what `add()` returns.
+
+Also normalised `indiaPanchang.ts` from joined string lines to the template-literal idiom every other
+scaffold module uses, verifying the rewritten module produces a **byte-identical** string to the version that
+had already been parse-checked.
+
+`AppKnowledgeBase.ts` updated in the same change: the chip roster, the "More templates" expander (so an AI
+tells a user hunting for the unit converter where it went), an honest description of each of the four new
+apps including what the kundali does not place, and the vocabulary a user actually types — `rahu kaal`,
+`choghadiya`, `suryoday`, `bhagwat geeta`, `shlok`, `surah`, `janam patri`, `kundli`, `jyotish` — because
+nobody searches for "Panchang" when they want to know the rahu kaal.
+
+**Still open, and still the right next step:** no real v5 build report exists for any of the eleven templates
+added today. Four more India templates (courier, wedding RSVP, NGO, school ERP) stay deferred until one
+arrives — a report is the only thing that can say whether these scaffolds actually hold up through a build.

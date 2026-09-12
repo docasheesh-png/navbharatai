@@ -1,4 +1,4 @@
-import { braveSearch, searchOrder, noteFreeServed, noteRescue, type SearchIntent } from '../lib/braveSearch';
+import { braveSearch, braveApiKey, searchOrder, noteFreeServed, noteRescue, type SearchIntent } from '../lib/braveSearch';
 
 export interface SearchResult {
   title: string;
@@ -67,7 +67,7 @@ export class WebSearchClient {
     intent: SearchIntent,
     htmlFetcher?: HtmlFetcher,
   ): Promise<SearchResult[]> {
-    const braveKey = process.env.BRAVE_API_KEY;
+    const braveKey = braveApiKey();
     const order = searchOrder(intent, !!braveKey);
     let last: SearchResult[] = [];
     for (let i = 0; i < order.length; i++) {

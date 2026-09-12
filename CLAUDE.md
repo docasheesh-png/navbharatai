@@ -832,6 +832,17 @@ the code (it is actually read somewhere) on 2026-07-11.
   `.catch(...)` each, test-locked in `tests/braveSearch.test.ts`). Worst case is today's behaviour, not
   an outage. The authoritative ceiling is Brave's own dashboard **Usage limits**, which is the one
   place a cap cannot drift; the code's job is to need it less often.
+  🔴 **HOW TO SET IT, AND THE ONE MISTAKE THAT WOULD BE INVISIBLE.** Cloud Run → the service → *Edit &
+  deploy new revision* → Variables & Secrets → the name is exactly **`BRAVE_API_KEY`** (never a `VITE_`
+  prefix — that is frozen at image build and would change nothing, silently), set ONCE (a duplicate
+  wins by being last, per the 2026-08-20 audit), value = Brave's subscription token, nothing else.
+  ⚠️ **A trailing space or newline used to be fatal AND silent** — the value goes straight into the
+  `X-Subscription-Token` header, Brave rejects it, and both callers fall back to DuckDuckGo with no
+  error anywhere: the console shows it configured and the paid engine simply never runs. Since
+  2026-09-12 `braveApiKey()` TRIMS it and treats whitespace-only as unset, and a rejected call logs
+  ONE admin-only line naming the status (`[BRAVE] search rejected — HTTP 403 … check BRAVE_API_KEY`)
+  instead of degrading in silence. **That log line is how to verify the key is really working** —
+  no line after real traffic means Brave is answering.
   🔀 **FREE FIRST WHERE IT IS SAFE, PAID FIRST WHERE IT MATTERS (admin asked 2026-09-12: "dono ko mila
   kar… jahan brave ki need na ho wahan duckduckgo").** `searchOrder(intent, hasKey)` is that rule. Note
   what it is NOT: merging both engines on every query would pay Brave EVERY time and cost strictly MORE

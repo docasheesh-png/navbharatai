@@ -7,6 +7,7 @@ import {
   cacheKey,
   cacheTtlMs,
   braveCacheEnabled,
+  braveApiKey,
   searchOrder,
   __resetBraveSearch,
   VOLATILE_TTL_MS,
@@ -29,6 +30,24 @@ const okResponse = (results: Array<{ title: string; url: string; description: st
   json: async () => ({ web: { results } }),
 });
 const ONE = [{ title: 'T', url: 'https://example.com', description: 'D' }];
+
+describe('braveApiKey — a key entered by hand must not silently not-work', () => {
+  it('🔒 trims, because a pasted key carries a trailing space or newline and the header would be rejected', () => {
+    expect(braveApiKey({ BRAVE_API_KEY: ' BSA-token ' } as never)).toBe('BSA-token');
+    expect(braveApiKey({ BRAVE_API_KEY: 'BSA-token\n' } as never)).toBe('BSA-token');
+    expect(braveApiKey({ BRAVE_API_KEY: '\tBSA-token' } as never)).toBe('BSA-token');
+  });
+
+  it('🔒 whitespace-only is UNSET, not a key — otherwise every search buys a guaranteed rejection', () => {
+    expect(braveApiKey({ BRAVE_API_KEY: '   ' } as never)).toBeUndefined();
+    expect(braveApiKey({ BRAVE_API_KEY: '' } as never)).toBeUndefined();
+    expect(braveApiKey({} as never)).toBeUndefined();
+  });
+
+  it('leaves a real key untouched', () => {
+    expect(braveApiKey({ BRAVE_API_KEY: 'BSA-abc_123' } as never)).toBe('BSA-abc_123');
+  });
+});
 
 describe('searchOrder — free first where it is safe, paid first where it matters', () => {
   it('no key ⇒ the free engine is the only engine, exactly as production behaves today', () => {
@@ -178,6 +197,19 @@ describe('braveSearch — paying once for the same question', () => {
     await expect(braveSearch('x', 5, 'k')).rejects.toThrow(/429/);
   });
 
+  it('🔒 a rejected key is LOUD in the admin log, once — a silent fallback is how a bad key hides', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    fetchMock.mockResolvedValue({ ok: false, status: 403 });
+    await expect(braveSearch('a', 5, 'k')).rejects.toThrow();
+    await expect(braveSearch('b', 5, 'k')).rejects.toThrow();
+    expect(warn).toHaveBeenCalledTimes(1); // once per status, not once per search
+    const line = String(warn.mock.calls[0][0]);
+    expect(line).toContain('BRAVE_API_KEY');
+    expect(line).toContain('403');
+    // It must also say the users are fine, so the log is actionable rather than alarming.
+    expect(line).toMatch(/nothing is broken for users/i);
+  });
+
   it('🔒 a failure is not cached either — the next question retries rather than inheriting an outage', async () => {
     fetchMock.mockRejectedValueOnce(new Error('network'));
     await expect(braveSearch('y', 5, 'k')).rejects.toThrow();
@@ -220,6 +252,13 @@ describe('wiring — ONE client, and both callers still fall back to the free pa
       // A throw is swallowed to [] so the loop can try the OTHER engine — never so the caller gets [].
       expect(src, name).toContain('await braveSearch(query, limit, braveKey).catch(() => [])');
       expect(src, name).toContain('if (i > 0) noteRescue();');
+    }
+  });
+
+  it('🔒 nobody reads the raw env any more — the trim lives in one place or it lives nowhere', () => {
+    for (const [name, src] of [['AgentV3', v3], ['EngineerAI', eng]] as const) {
+      expect(src, name).toContain('const braveKey = braveApiKey();');
+      expect(src, name).not.toContain('process.env.BRAVE_API_KEY');
     }
   });
 

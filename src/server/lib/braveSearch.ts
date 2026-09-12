@@ -91,6 +91,9 @@ export const MAX_CACHE_ENTRIES = 500;
 
 const SEARCH_TIMEOUT_MS = 10_000;
 
+/** HTTP statuses already reported, so one bad key logs one line rather than one per search. */
+const loggedStatuses = new Set<number>();
+
 /**
  * Words that mean the answer moves faster than the ordinary cache window. PURE.
  *
@@ -117,6 +120,23 @@ export function cacheKey(query: string, count: number): string {
   const q = String(query ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
   const n = Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
   return `${n}:${q}`;
+}
+
+/**
+ * The subscription token, or `undefined` when there is not a usable one. PURE.
+ *
+ * 🔴 THE TRIM IS THE WHOLE POINT, AND IT IS NOT TIDINESS. The key goes straight into the
+ * `X-Subscription-Token` header. A value pasted into a console with a trailing space or a newline —
+ * the single most likely way a key is entered by hand — would be sent WITH that whitespace, Brave
+ * would reject it, and both callers' `.catch()` would quietly fall back to DuckDuckGo. The result is
+ * the worst failure shape there is: the console shows the key configured, nothing errors, no user
+ * sees a problem, and the paid engine simply never runs. Same class as the malformed `ALERT_EMAIL_FROM`
+ * that read as configured for a day — so it is refused at the door instead, and a key that is only
+ * whitespace is treated exactly like an unset one.
+ */
+export function braveApiKey(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const raw = String(env.BRAVE_API_KEY ?? '').trim();
+  return raw ? raw : undefined;
 }
 
 /** The kill switch. Unset ⇒ the cache is ON, because a repeat call costs money for nothing. */
@@ -187,6 +207,7 @@ export function __resetBraveSearch(): void {
   meter.coalesced = 0;
   meter.freeServed = 0;
   meter.rescues = 0;
+  loggedStatuses.clear();
 }
 
 function readCache(key: string, ttl: number, now: number): BraveResult[] | null {
@@ -220,7 +241,25 @@ async function requestBrave(query: string, count: number, apiKey: string): Promi
       signal: controller.signal,
       headers: { Accept: 'application/json', 'Accept-Encoding': 'gzip', 'X-Subscription-Token': apiKey },
     });
-    if (!res.ok) throw new Error(`Brave Search: HTTP ${res.status}`);
+    if (!res.ok) {
+      // 🔒 ADMIN-ONLY server log, never a user surface (the White-Label Law governs what USERS see).
+      // Once per status, because a wrong key fails on every single call and would otherwise flood the
+      // log — and because a silent fall back to the free engine is precisely how a misconfigured key
+      // stays invisible. 401/403 names the key; 429 names the quota. Both are actionable in one line.
+      if (!loggedStatuses.has(res.status)) {
+        loggedStatuses.add(res.status);
+        console.warn(
+          `[BRAVE] search rejected — HTTP ${res.status}` +
+            (res.status === 401 || res.status === 403
+              ? ' (the key is missing, wrong, or the plan is not subscribed — check BRAVE_API_KEY)'
+              : res.status === 429
+                ? ' (rate limit or credits exhausted — the free engine is serving these searches)'
+                : '') +
+            '. Falling back to the free engine; nothing is broken for users.',
+        );
+      }
+      throw new Error(`Brave Search: HTTP ${res.status}`);
+    }
     const data = (await res.json()) as { web?: { results?: Array<{ title?: string; url?: string; description?: string }> } };
     const items = data?.web?.results || [];
     return items.slice(0, count).map((item) => ({

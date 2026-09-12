@@ -48466,3 +48466,22 @@ in that suite's `beforeEach`.
 
 **The meter now reports what the free engine saved** (`freeServed`, `rescues`) beside cache hits and
 coalesced calls — still per-instance, still not a substitute for Brave's own dashboard.
+
+### 2026-09-12 (third pass) — the key itself, hardened before it was ever set
+
+The admin obtained the Brave key and asked what to put in Cloud Run. Reading the code to answer that
+found a live trap: `process.env.BRAVE_API_KEY` was read RAW, in two places, and goes straight into the
+`X-Subscription-Token` header. A value pasted with a trailing space or newline — the most likely way a
+key is entered by hand — would be sent with that whitespace, Brave would reject every call, and both
+callers' `.catch()` would fall back to DuckDuckGo **with no error anywhere**. The console would show
+the key configured, no user would see a fault, and the paid engine would simply never run. Same shape
+as the malformed `ALERT_EMAIL_FROM` that read as configured for a day.
+
+Fixed at the door, not at the call sites: `braveApiKey()` trims and treats whitespace-only as UNSET,
+and both readers now call it (the raw env read is gone and test-locked out). Separately, rule 5 (fix
+the system's honesty): a rejected Brave call now logs ONE admin-only line per status naming what is
+wrong — 401/403 points at the key, 429 at credits — and says plainly that users are unaffected. Once
+per status, because a wrong key fails on every call and would otherwise flood the log.
+
+That log line is also the verification the admin had no way to do before: no line after real traffic
+means the key is genuinely working.

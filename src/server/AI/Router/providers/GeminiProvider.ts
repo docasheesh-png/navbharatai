@@ -34,13 +34,13 @@ export class GeminiProvider implements AIProvider {
     }
   }
 
-  async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void): Promise<string> {
+  async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string): Promise<string> {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-    const model = 'gemini-2.5-flash';
+    const streamModel = model || 'gemini-2.5-flash';
     const config: any = {};
     if (systemPrompt) config.systemInstruction = systemPrompt;
     const stream = await ai.models.generateContentStream({
-      model,
+      model: streamModel,
       contents: prompt,
       config: Object.keys(config).length ? config : undefined,
     });

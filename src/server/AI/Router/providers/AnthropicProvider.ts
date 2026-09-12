@@ -84,9 +84,9 @@ export class AnthropicProvider implements AIProvider {
     };
   }
 
-  async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void): Promise<string> {
+  async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string): Promise<string> {
     const params: any = {
-      model: this.modelId,
+      model: model || this.modelId,
       max_tokens: this.enableThinking ? this.thinkingBudget + 16_000 : 8_000,
       messages: [{ role: 'user', content: prompt }],
     };

@@ -62,12 +62,12 @@ export class GrokProvider implements AIProvider {
     };
   }
 
-  async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void): Promise<string> {
+  async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string): Promise<string> {
     const messages: any[] = [];
     if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
     messages.push({ role: 'user', content: prompt });
     const stream = await this.client.chat.completions.create({
-      model: 'grok-3-fast',
+      model: model || 'grok-3-fast',
       messages,
       max_tokens: 8000,
       stream: true,

@@ -1226,6 +1226,114 @@ the code (it is actually read somewhere) on 2026-07-11.
   Five of the six can be re-checked from a screen in seconds; the sixth cannot, so it stays open here
   until someone reads the console.
 
+### 💴 FULL MONEY AUDIT — every paying code path read end to end (admin-asked 2026-09-12)
+
+The admin asked for a microscopic audit of every money path: *"kahi koi money leak to nahi hai."* 53
+money-touching modules were mapped and walked. **Five real leaks were found, all verified from code
+rather than reasoned about, and all fixed in the same change.** The rest of the money surface held up —
+the Cashfree credit is transactional and derives tokens from the VERIFIED paid amount; the coupon table
+is server-side with an ATOMIC one-time claim; the weekly gift is transactional with its lifetime cap
+written in the same transaction as the credit; a failed build is never charged; an unmeasured provider
+charges zero rather than an invented number.
+
+**🔴 1. A FREE user's paid fallback was the DEAREST model on the card.** `buildFree` in
+`AIRouterManager.ts` registered `gemini-2.5-pro` (**$10/MTok out**) as the FIRST fallback after the free
+GLM-flash leader, with `gemini-2.5-flash` (**$2.50**) sitting BELOW it. So every time the free leader
+rate-limited — the 429 storm this file already documents — a free chat turn cost **4× the rung beneath
+it**, and free chat is NOT wallet-charged, so all of it was ours.
+🔒 **The policy already existed, one function away.** `buildProfessionalFreeFallback` states it verbatim:
+*"Vertex (cheap Gemini on Google), NEVER Grok / direct Gemini / Claude … so a free user can never trigger
+the pricier paid providers."* The professional free tier obeyed it; the twin universe every ordinary user
+hits did not. The bug was a rule applied in one place and not its sibling — not a missing rule.
+**Fixed:** one price-ordered ladder across both Google doors — flash-lite → flash (Vertex) → flash-lite →
+flash (Gemini) → **pro last of the Geminis** → grok ($15, dearest in the card) as the final resort.
+**Nothing was removed**, so resilience is identical; the rungs are climbed cheapest-first instead of
+dearest-first. Test-locked in `tests/freeChainCost.test.ts`, which reads the ORDER out of the source and
+prices it with `providerRates` — so it fails if an order OR a price ever puts an expensive model first.
+
+**🔴 2. The coupon redemption credited the wallet OUTSIDE a transaction, and moved only the ₹ view.**
+The redemption CLAIM was already atomic (a code cannot be redeemed twice — that guard is untouched), but
+the CREDIT was a read-modify-write: a build settling between the read and the write had its debit
+**erased** by a balance computed before it landed. Free spend, timed rather than hacked. It was the one
+credit path in the repo not using a transaction, while `computeCreditedWallet` carries a comment
+explaining exactly why the purchase path does.
+
+**🔴 3. The admin token adjustment ASSIGNED the ₹ view instead of moving it.** It wrote
+`remaining_balance = tokenBalance / TOKENS_PER_RUPEE` — an assignment, not a delta. The 2026-08-03 fix it
+replaced was right about the symptom (a gifted wallet showing ₹0 could not build) and wrong about the
+cure: an assignment silently rewrites a balance whenever the two views legitimately differ — **and they
+always differ for a Pass buyer**, because `remaining_balance += netPaid` while
+`creditableVishwakarmaTokens` subtracts the Pass price from the token figure first. A "+1 token"
+adjustment on such an account would have wiped ₹(pass price) the user really paid; on a wallet credited
+in ₹ only (leak 2), the same line MINTED balance. It was also non-transactional.
+
+**🔴 4. A store purchase could credit TWICE under a concurrent retry.** The receipt check on
+`/api/payment/store/verify` sat OUTSIDE the transaction, and the transaction read only the WALLET. Two
+concurrent deliveries of the SAME purchase token — the store re-delivering on relaunch and the app
+retrying on a flaky network, both named in that route's own comments as NORMAL — could both pass the
+outside check; Firestore saw the clash on the wallet alone, retried the loser, and the retry re-read the
+already-credited balance and credited the same purchase again. The receipt is now read IN-transaction
+(before the wallet), which puts it in the conflict set. **The sibling Cashfree path was checked and was
+already right** — it claims the PENDING→SUCCESS flip inside a transaction and only the winner credits,
+which is exactly the pattern the store path was missing.
+
+**🔴 5. IMAGE GENERATION HAD LEAK 1'S SHAPE, IN A SECOND PLACE — which is what makes it a CLASS.**
+`/api/image/generate` is a free-first ladder too: Pollinations (₹0) → Gemini (paid) → Grok (paid). Its
+allowance gate ran only `if (!pollinationsEnabled())` — the reasoning being "free provider on ⇒ the image
+is free". That holds only while the free provider SUCCEEDS, and the paid rungs exist precisely for when
+it does not; the route's own log line says *"trying paid fallbacks"*. So a bad minute at Pollinations
+(down, timeout, rate-limited — and a caller can provoke the last one) delivered a PAID image with **no
+allowance checked and nothing metered**. Now the allowance is resolved LAZILY, the first time the ladder
+is about to touch a paid provider and BEFORE that provider is called, and only a PAID delivery burns it —
+a free image still passes with no gate lookup, so the ordinary path is unchanged.
+
+**🔴 1b. THE SECOND BUG INSIDE LEAK 1 — and it HID the first, so re-ordering alone would have been
+decoration (found 2026-09-12 while answering "gemini se sasta koi ho sakta hai?").** `slot()` is how ONE
+provider serves as several ladder rungs at several prices — it pins a model per rung. But `executeStream`
+had **no model parameter at all**, and `VertexProvider.executeStream` hardcoded `this.modelPro`. **Chat
+STREAMS.** So on the path that carries the actual traffic, EVERY Vertex rung ran `gemini-2.5-pro`
+regardless of which rung won, and the ladder's order was cosmetic. The model now rides the stream
+(`executeStream(prompt, systemPrompt, onChunk, model?)`, every provider honouring it, `slot()` passing
+it); without that, the ceiling below would be decoration too. ⚠️ **I reported leak 1 as fixed by the
+re-order before finding this — the re-order alone fixed only the non-streaming path.** Test-locked:
+`tests/freeChainCost.test.ts` asserts the pin reaches `executeStream` on all five providers.
+
+**🔴 1c. THE ADMIN'S PRICE CEILING (mandated 2026-09-12).** Shown the whole rate card, the admin drew a
+line under `kimi-k2.7` — *"bas yahi tak rakho"*. So **`gemini-2.5-pro` ($10/MTok out) and grok ($15) are
+REMOVED from the free ladder, not demoted**, and Claude was never there. The rule is stated in MONEY, not
+as a list of ids (`src/server/AI/freeTierCostCeiling.ts`): nothing whose chat cost exceeds `kimi-k2.7`'s
+may serve a free turn, whatever it is called — so a rung added later at any price above the line fails CI
+rather than reaching a bill. The ceiling is DERIVED from the rate card, so a repriced kimi moves it.
+⚠️ **THE INDEX IS INPUT-WEIGHTED, AND ORDERING BY THE OUTPUT COLUMN ALONE IS WRONG FOR CHAT.** A grounded
+turn sends a large system prompt, the history and two fetched pages, and returns a few hundred tokens —
+it is input-heavy. `glm-4.7` ($0.60 in / $2.20 out) looks cheaper than `gemini-flash` ($0.30 / $2.50) on
+the output column and is DEARER for chat; they break even exactly when output equals input, which chat
+never does. `CHAT_INPUT_WEIGHT = 8` is an ASSUMPTION, labelled as one — retune that single constant when
+the chat route's token logs give a real ratio.
+🔒 **WHAT THE CEILING COSTS, STATED PLAINLY:** with the last resorts gone, a free chat turn where GLM and
+BOTH Google doors are failing at once now returns an honest "busy" instead of an answer. That is the trade
+the admin chose, and it is the SAME trade `buildProfessionalFreeFallback` already makes in writing. **PRO
+and PROFESSIONAL keep every rung** — the ceiling is the FREE ladder's alone, and a test asserts that.
+⚠️ The final rung, `glm-4.7`, shares ONE key with the flash leader: when the leader failed because that
+KEY was rate-limited, this rung usually fails too. It earns its place on a model-specific failure, not on
+a 429 storm, and it is NOT a substitute for a genuinely independent provider — **Kimi has no chat provider
+in this repo** (only the build engine has one), so adding it is a build, not a config change.
+
+🔒 **THE CLASS, NAMED SO IT IS RECOGNISED NEXT TIME: A FREE-FIRST LADDER WHOSE PAID RUNGS ARE UNGOVERNED.**
+Leaks 1 and 5 are the same mistake in two features — the cheap/free leader is reasoned about as if it
+were the whole ladder, and the fallback nobody expects to fire is left dearest-first (1) or unmetered
+(5). **Whenever a free or cheap provider leads, two questions must be answered about the rungs BELOW it:
+in what ORDER are they climbed (cheapest first?), and WHO PAYS when one of them serves?**
+
+🔒 **THE ROOT CAUSE BEHIND BOTH 2 AND 3, AND THE RULE THAT NOW PREVENTS THE CLASS:** the wallet holds ONE
+balance in TWO fields, and every bug here came from a writer that moved one of them. `walletMirror.ts`
+takes the delta ONCE and derives both fields from it — **there is no way to call it and move one view
+without the other**, and it never assigns (a deduction floors both views from the same clamped token
+figure, so one can never end at zero while the other goes negative). Both writers now use it, inside a
+transaction. ⚠️ **Any NEW wallet writer must go through it** — a direct `updateDoc` on a balance field is
+how this class comes back. Test-locked in `tests/walletMirror.test.ts`, including the Pass-buyer case
+that the old assignment got wrong.
+
 ### 🔎 FULL CLOUD RUN AUDIT — 84 keys read off the live console (admin screenshots, 2026-08-20)
 
 The admin sent the complete list of env-var NAMES from the live Cloud Run service, and every one was

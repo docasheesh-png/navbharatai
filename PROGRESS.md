@@ -48349,3 +48349,67 @@ mentions. Zero India-first templates are offered despite `UpiGenerator`, `Indian
 `SocietyGenerator`, `SchoolErpGenerator`, `PharmacyGenerator`, `CourierGenerator`, `NgoGenerator`;
 zero games despite three game engines. Published as a pick-list artifact for the admin to choose from —
 every candidate names the modules already in the repo that back it, so nothing on it is aspirational.
+
+---
+
+## 2026-09-12 — GAMES: three starter templates, each shipping a compile-proven game
+
+**Admin: "games se shuru karun?" → "go ahead!!"** — the first of the two real gaps the 12-layer/template
+audit found (the other, India-first, is next).
+
+### Why games were the right first move, and it is not "a genre was missing"
+
+A game is the one thing this platform makes that a person actually **shares** — which is the loop App
+Mart needs and has not had. It is also the cheapest app we can serve: no database, no backend, no auth,
+so a published game runs entirely in the viewer's browser and costs us **nothing per viewer**, however
+many arrive. Three standing problems — an empty store, the E2B bill, and a picker that never mentions
+the six game generators — answered by one shape of app.
+
+### The constraint that shaped everything: a template REQUIRES a golden scaffold
+
+`goldenScaffolds.test.ts` asserts `GOLDEN_SCAFFOLDS` and `STARTER_TEMPLATES` are id-for-id identical —
+**every** chip, simple and pro. So "add a game template" is not a one-line data change: it means writing
+a real, playable, compile-tested game. That constraint is the reason a NavBharatAI first build works, and
+it applied here in full. Each scaffold now passes, in CI: the full vite-react file set, a clean esbuild
+parse, a clean in-browser Babel compile, no duplicate same-module imports, and white-label/secret-free.
+
+### What shipped
+
+* **Memory match** (`memory`, **free**) — 4×4 grid of eight pairs, move counter, best score kept locally.
+  Fisher-Yates shuffle, because `sort(() => Math.random() - 0.5)` is not a shuffle and visibly clusters.
+* **Merge puzzle** (`puzzle`, **free**) — 4×4 slide-and-merge, arrow keys **and** swipe, score + best.
+  The board logic is one pure `slideRow` plus rotation, so all four directions are the same tested code;
+  a tile merged this move cannot merge again in it, which is the classic 2048 bug.
+* **Arcade — "Dodge"** (`arcade`, **pro + showcase**) — a real canvas game.
+
+### The tier split is a promise about quality, not a paywall
+
+The two free games are plain React state over a small grid: no physics, no timing loop, so the weak tier
+extends them reliably and a free user's **first game works**. The arcade is pro because it carries a
+fixed-timestep loop — precisely the code `GameRuntimeGenerator` documents a weak model getting wrong.
+Offering it free would hand someone a game that runs at double speed on their phone. It is
+`showcase: true`, so a free user sees it locked, which advertises the capability to everyone.
+
+The loop is written correctly once, so the builder extends a correct base rather than re-deriving it:
+**fixed timestep** (or the player moves faster on a 144Hz monitor), **delta clamp** (an alt-tabbed minute
+must not arrive as one 60-second frame), **polled input** (a press-and-release between two frames still
+counts), **no allocation in the loop** (obstacles recycle from a fixed pool; a `new` per frame is the
+usual cause of browser-game stutter), and **full teardown** (React 18 StrictMode double-mounts, and two
+loops means doubled input and double speed — in development only, which is worse than always).
+
+### One design decision worth defending
+
+The PRO contract requires a scaffold to use `lib/ui` + `lib/store` and a `useCollection`. A game looks
+like the exception — a loop is not a list — and the lazy answers were to demote it to `simple` or to
+bolt on a fake collection. Neither was needed: a game genuinely has records worth keeping, **the runs**.
+Score and date per attempt is what makes a high score mean anything, and it persists like any other
+record. So the canvas and the loop stay the game's own, and everything around them is the shared
+furniture — with a Scores tab that is a real feature, not a contrivance to satisfy a test.
+
+### Two real bugs caught on the way, both by the gate
+
+1. A scaffold must export `export default function App(` — the shape `main.tsx` mounts and a test pins.
+   My first draft used `function App()` + `export default App;` and failed.
+2. **A backtick inside a scaffold's comment terminates the template literal that holds it.** One comment
+   quoting `` `runs.add` `` broke the whole file into a syntax error 40 lines away. Worth recording: any
+   prose inside these scaffolds must avoid backticks entirely.

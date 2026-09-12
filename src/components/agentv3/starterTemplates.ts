@@ -78,6 +78,14 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
     prompt: 'Build a password generator: choose the length with a slider and toggle uppercase, numbers and symbols, generate a strong random password, show a strength meter, and copy it to the clipboard with one tap.',
   },
   {
+    id: 'memory', label: 'Memory match', icon: '🃏', category: 'Personal', tier: 'simple',
+    prompt: 'Build a memory match card game: a 4x4 grid of face-down cards hiding eight pairs, flip two at a time, matched pairs stay face up, count the moves taken, celebrate when the board is cleared, and remember the best (lowest) score in the browser. Big tappable cards, smooth flip feel, light/dark mode, works on a phone.',
+  },
+  {
+    id: 'puzzle', label: 'Merge puzzle', icon: '🧩', category: 'Personal', tier: 'simple',
+    prompt: 'Build a sliding merge puzzle on a 4x4 grid: swipe or use arrow keys to slide every tile, two equal tiles merge into their double and add to the score, a new tile appears after each move, and the game ends when no move is left. Show the current score and the best score kept in the browser. Mobile-first with swipe support, light/dark mode.',
+  },
+  {
     id: 'login-page', label: 'Login page', icon: '🔐', category: 'Personal', tier: 'simple',
     prompt: 'Build a polished login and signup page: email and password fields with inline validation, a show/hide password toggle, a "remember me" option, social-login buttons, and a smooth switch between Login and Sign up. Front-end UI with light/dark mode.',
   },
@@ -88,6 +96,10 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
   // users as the "⚡ Pro" upgrade carrot.
   // ══════════════════════════════════════════════════════════════════════════════════════════════════
   // ── Business ──
+  {
+    id: 'arcade', label: 'Arcade game', icon: '🕹️', category: 'Personal', tier: 'pro', showcase: true,
+    prompt: 'Build a playable arcade game on a canvas: the player moves left and right along the bottom while obstacles fall faster over time, dodging one scores a point, a hit costs a life, three lives end the run, and the best score is kept in the browser. Use a fixed-timestep game loop with a clamped delta and polled keyboard input so it runs identically on any screen, recycle obstacles from a pool instead of allocating each frame, and add on-screen buttons so it plays on a phone. Light/dark mode.',
+  },
   {
     id: 'saas-dashboard', label: 'SaaS app', icon: '📊', category: 'Business', tier: 'pro', showcase: true,
     prompt: 'Build a multi-tenant SaaS admin dashboard with team accounts, role-based access (owner/admin/member), an analytics overview with charts, a settings page, and subscription billing. Clean, modern UI with a sidebar.',

@@ -1,3 +1,5 @@
+import { braveSearch } from '../lib/braveSearch';
+
 export interface SearchResult {
   title: string;
   url: string;
@@ -11,7 +13,8 @@ const NPM_TIMEOUT_MS = 8_000;
  * Web search for Engineer AI.
  *
  * Priority:
- *  1. Brave Search API — if BRAVE_API_KEY env var is set (higher-quality results).
+ *  1. Brave Search API — if BRAVE_API_KEY env var is set (higher-quality results). The request lives
+ *     in `lib/braveSearch.ts`, the one client shared with AgentV3 (cache + coalescing + meter).
  *  2. DuckDuckGo HTML SERP — key-free fallback, always available.
  *
  * npm registry is always queried for package-name queries regardless of provider.
@@ -44,7 +47,7 @@ export class WebSearchClient {
     // 2. Web results: Brave Search if BRAVE_API_KEY is configured, else DuckDuckGo.
     const braveKey = process.env.BRAVE_API_KEY;
     const web = braveKey
-      ? await this.braveSearch(query, limit, braveKey).catch(
+      ? await braveSearch(query, limit, braveKey).catch(
           () => this.duckDuckGo(query, limit, htmlFetcher).catch(() => []),
         )
       : await this.duckDuckGo(query, limit, htmlFetcher).catch(() => []);
@@ -88,34 +91,6 @@ export class WebSearchClient {
       };
     } catch {
       return null;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  /** Brave Search API — higher-quality results, requires BRAVE_API_KEY env var.
-   *  Throws on any error so the caller can fall back to DuckDuckGo. */
-  private async braveSearch(query: string, limit: number, apiKey: string): Promise<SearchResult[]> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
-    try {
-      const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${limit}`;
-      const res = await fetch(url, {
-        signal: controller.signal,
-        headers: {
-          Accept: 'application/json',
-          'Accept-Encoding': 'gzip',
-          'X-Subscription-Token': apiKey,
-        },
-      });
-      if (!res.ok) throw new Error(`Brave Search: HTTP ${res.status}`);
-      const data: any = await res.json();
-      const items: any[] = data?.web?.results || [];
-      return items.slice(0, limit).map(item => ({
-        title: String(item.title || ''),
-        url: String(item.url || ''),
-        snippet: String(item.description || ''),
-      }));
     } finally {
       clearTimeout(timer);
     }

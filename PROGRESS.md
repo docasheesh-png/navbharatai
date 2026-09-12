@@ -48392,3 +48392,45 @@ mentions. Zero India-first templates are offered despite `UpiGenerator`, `Indian
 `SocietyGenerator`, `SchoolErpGenerator`, `PharmacyGenerator`, `CourierGenerator`, `NgoGenerator`;
 zero games despite three game engines. Published as a pick-list artifact for the admin to choose from —
 every candidate names the modules already in the repo that back it, so nothing on it is aspirational.
+
+---
+
+## 2026-09-12 — Brave Search: one client, and the three levers that keep its bill small
+
+**Why now.** The admin is taking the Brave Search plan (the one remaining change that makes chat faster
+AND more accurate at once), and asked the right question before pressing the button: *"$5 kitne din
+chalega? kam to nahi padega? code aisa likhna ki kam se kam kharcha ho."*
+
+**What was actually wrong, before any cost work could begin.** The Brave request existed **twice** —
+private `braveSearch()` methods in `AgentV3/WebSearch.ts` and `EngineerAI/WebSearchClient.ts`, the same
+request with two error styles. Two copies means no single place to put a cache, a counter or a price, so
+every cost control would have had to be written twice and would have drifted the first time anyone
+touched one. Centralised into `src/server/lib/braveSearch.ts` (fourth absolute rule, step 2) — one door,
+and both callers keep their existing `.catch(() => duckDuckGo(...))`, so a Brave failure still degrades
+to the free path.
+
+**The three levers, and what each costs in freshness:**
+- **In-flight coalescing** — identical calls in the same instant share one request. Zero staleness: the
+  second caller receives the same live response the first is already waiting for.
+- **Short, freshness-aware cache** — 60 s for the tick-by-tick class (score/live/match/nifty/stock/
+  crypto), 10 min for everything else. This is the only lever that trades anything, and the trade is
+  bounded by the standing CHAT GROUNDING rule: cost may never buy staleness a user can feel.
+- **Normalisation** — case and spacing collapsed, because Brave does not distinguish them either.
+
+Nothing shortens a fetch budget or reads fewer sources. The savings come only from not repeating work.
+
+**A real bug, caught by its own test rather than by a user.** The in-flight entry was cleared in a
+detached `.finally()`, which runs one microtask AFTER the caller's continuation — so a second call
+arriving immediately could coalesce onto an **already-settled** promise and be handed a result we had
+deliberately refused to cache (an empty response, or an outage). Fixed with an explicit `settled` flag
+set in the same hop that clears the entry, so coalescing is impossible once a request is no longer live.
+The failing case is pinned in `tests/braveSearch.test.ts` and named there as the regression it is.
+
+**Plan choice, verified against code rather than assumed.** `Search`, not `Answers`, not `Spellcheck &
+Suggest`: the only endpoint this repo calls is `/res/v1/web/search`. `Answers` has no code path, would
+hand the writing of the answer to a third party (White-Label Law), and caps at 2 req/s against Search's
+50. Recorded in `CLAUDE.md` beside the two env keys (`BRAVE_API_KEY`, `BRAVE_SEARCH_CACHE`).
+
+**Open, and deliberately not guessed:** how long $5 (≈1,000 searches/month) lasts depends on what share
+of chat messages are grounded — a number nobody has measured. The `[CHAT_TTFT] path=grounded|direct`
+log shipped in #2826 already records it; read it after a few days of real traffic rather than estimating.

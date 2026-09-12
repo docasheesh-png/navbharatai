@@ -812,6 +812,36 @@ the code (it is actually read somewhere) on 2026-07-11.
   than blank), and **`BRAVE_API_KEY`**, which is still UNSET — without it `WebSearch` scrapes
   DuckDuckGo HTML, which is both slower and weaker than Brave's API. That single key is the only
   remaining change that makes chat faster AND more accurate at once.
+- **Brave Search — the chat's grounding source (admin taking the plan 2026-09-12):** `BRAVE_API_KEY`
+  (the Search plan's subscription token) and `BRAVE_SEARCH_CACHE` (kill switch — **default ON**; `off`
+  sends every search straight to Brave exactly as before the cache existed). Read by
+  `src/server/lib/braveSearch.ts`, the ONE client both `AgentV3/WebSearch.ts` and
+  `EngineerAI/WebSearchClient.ts` now call.
+  🔴 **TAKE THE `Search` PLAN, NOT `Answers`, AND NOT `Spellcheck & Suggest`.** Verified against the
+  code, not assumed: the only endpoint this repo ever calls is
+  `https://api.search.brave.com/res/v1/web/search`. `Answers` would be a paid product with **no code
+  path at all**, it would hand the WRITING of the answer to a third party (the White-Label Law says
+  the answer is NavBharatAI's), and its capacity is **2 requests/second** against Search's 50 — a
+  ceiling that would queue real users.
+  💵 **$5.00 per 1,000 requests (~₹0.44 each), with $5 of credit applied FREE every month** — so the
+  first ~1,000 searches of each month cost nothing. Billing is per REQUEST, not per result, which is
+  why `count` is raised freely and repeats are not.
+  🔒 **IT CANNOT BECOME A SURPRISE BILL, AND IT CANNOT BREAK CHAT.** The plan is PREPAID (no credits ⇒
+  nothing to overspend), and on ANY Brave failure — exhausted credit, 429, network — both callers
+  already fall back to the key-free DuckDuckGo path (`WebSearch.ts` / `WebSearchClient.ts`, one
+  `.catch(...)` each, test-locked in `tests/braveSearch.test.ts`). Worst case is today's behaviour, not
+  an outage. The authoritative ceiling is Brave's own dashboard **Usage limits**, which is the one
+  place a cap cannot drift; the code's job is to need it less often.
+  📉 **What keeps the bill down, and what it deliberately does NOT trade.** Identical calls already in
+  flight share one request (zero staleness — it is the same live response); a repeat question inside a
+  short window reuses the result (**60 s** for tick-by-tick things — scores, live matches, market
+  prices — and **10 min** for everything else); and case/spacing are normalised because Brave does not
+  distinguish them either. Nothing here shortens a fetch budget or reads fewer sources: under the
+  standing CHAT GROUNDING rule, cost may never buy staleness a user can feel. An EMPTY or FAILED
+  response is never cached, so one blocked minute cannot become ten.
+  ⚠️ **`braveMeter()` is PER-INSTANCE and says so** — it reports this process's calls/hits since boot,
+  not the account's. The account's real number is on Brave's dashboard; do not quote the meter as spend.
+
 - **Live daily-life data for the chat AIs (added 2026-08-25):** `RAPIDAPI_KEY` (✅ **SET in Cloud Run by
   the admin 2026-08-25** — ONE RapidAPI key covering the subscribed marketplace APIs: IRCTC
   (`irctc1.p.rapidapi.com`, live train running status + PNR) and AeroDataBox (flight status); the admin

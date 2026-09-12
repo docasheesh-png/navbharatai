@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell, Clock, Trash2, Flag, Info, ShieldAlert, Image as PictureIcon } from 'lucide-react';
+import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon } from 'lucide-react';
 import { TirangaLoader } from './ui/TirangaLoader';
 import { stampLabel, dayLabel, signInMethodWords } from '../lib/adminUserDisplay';
 import { adultOptInSummary } from '../lib/adultContent';
@@ -1448,7 +1448,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                           <td className="py-3 px-4">
                             {/* The same account sheet a report opens — one place where a person's whole
                                 picture lives, reachable from both surfaces rather than rebuilt in each. */}
-                            <button onClick={() => void openAccount(u.userId)} className="text-left group">
+                            <button onClick={() => void openAccount(u.userId)} title="Open this account — everything we hold about this user, read only" className="text-left group">
                               <div className="text-white font-bold text-[11px] group-hover:underline">{u.name}</div>
                               <div className="text-[#8b949e] text-[9px] font-mono group-hover:text-white/80">{u.email}</div>
                             </button>
@@ -1490,12 +1490,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                                 </div>
                               ) : (
                                 <>
-                                  {/* The account sheet was only reachable by clicking the NAME, which
-                                      nobody discovers. An explicit, labelled button (admin 2026-09-11:
-                                      "user ke samne ek info button bhi banao") — same sheet, findable. */}
-                                  <button onClick={() => void openAccount(u.userId)} title="Everything we hold about this user — read only" className="px-2 py-1 bg-sky-500/10 border border-sky-500/20 rounded-lg text-[9px] font-black text-sky-300 uppercase hover:bg-sky-500/20 transition-all inline-flex items-center gap-1">
-                                    <Info className="w-3 h-3" /> Info
-                                  </button>
+                                  {/* No "Info" button here on purpose (admin 2026-09-12: "info button
+                                      hata do"). The account sheet opens by clicking the user's NAME —
+                                      one way in, not two that do the same thing. The name carries the
+                                      hover underline and a tooltip so it still reads as clickable. */}
                                   <button onClick={() => { setSelectedUserId(u.userId); setTokenDelta(''); setTokenReason(''); }} className="px-2 py-1 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[9px] font-black text-amber-400 uppercase hover:bg-amber-500/20 transition-all">
                                     Tokens
                                   </button>

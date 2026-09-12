@@ -14,6 +14,8 @@ import { reportParts, partJson, partsSummary, ordinal } from './adminReportParts
 import { MonitorPanels } from './admin/MonitorPanels';
 import { LoadBoard } from './admin/LoadBoard';
 import { reportStatus, reportStatusLabel, reportStatusHint, openReportCount, type ReportTriage } from '../server/AgentV3/reportTriage';
+import { problemKindLabel } from '../lib/userReport';
+import { describeOverflow } from '../lib/reportDiagnostics';
 
 interface AdminDashboardProps {
   adminToken: string;
@@ -2143,6 +2145,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                           <h4 className="text-base font-bold text-white">Report</h4>
                           <button onClick={() => setOpenReport(null)} className="text-white/40 hover:text-white p-1" aria-label="Close">✕</button>
                         </div>
+                        {problemKindLabel(openReport.report?.problemKind) && (
+                          <p className="mt-3 inline-block px-2.5 py-1 rounded-lg bg-indigo-500/15 border border-indigo-400/30 text-[11px] font-bold text-indigo-200">
+                            {problemKindLabel(openReport.report?.problemKind)}
+                          </p>
+                        )}
                         <p className="text-sm text-white whitespace-pre-wrap mt-3 bg-black/30 rounded-xl p-3">{openReport.report?.message}</p>
 
                         <div className="grid grid-cols-2 gap-3 mt-4 text-[11px]">
@@ -2171,11 +2178,57 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                           </div>
                         </div>
 
-                        {openReport.report?.context && (
-                          <p className="text-[10px] text-white/35 mt-3">
-                            Screen: {openReport.report.context.view || '—'} · {openReport.report.context.platform || '—'}
-                          </p>
-                        )}
+                        {/* WHAT THE APP SAW FOR ITSELF (admin 2026-09-12: "problem hi samajh nahi aa
+                            rahi fix kya karu?"). This block is the whole point of collecting any of
+                            it — a fact gathered and not shown is the same as a fact not gathered, and
+                            this screen used to print two of the eleven things we now know. */}
+                        {openReport.report?.context && (() => {
+                          const c = openReport.report.context;
+                          const facts: string[] = [];
+                          if (c.view) facts.push(`Screen: ${c.view}`);
+                          if (c.platform) facts.push(c.platform);
+                          if (c.viewport) facts.push(`${c.viewport}${c.dpr ? ` @${c.dpr}x` : ''}`);
+                          if (c.language) facts.push(c.language);
+                          if (c.connection) facts.push(c.connection);
+                          if (c.online === false) facts.push('OFFLINE');
+                          if (c.appBuild) facts.push(`app build ${c.appBuild}`);
+                          if (c.build) facts.push(`web ${String(c.build).slice(0, 16).replace('T', ' ')}`);
+                          return (
+                            <div className="mt-3 space-y-1.5">
+                              <p className="text-[10px] text-white/35">{facts.join(' · ') || '—'}</p>
+                              {/* 🔒 "Not measured" and "measured, nothing found" are printed as
+                                  DIFFERENT lines on purpose. Collapsing them would send whoever
+                                  reads this hunting for a layout bug that was never checked for. */}
+                              <p className={`text-[10px] ${(c.overflow?.length ?? 0) > 0 ? 'text-amber-300' : 'text-white/35'}`}>
+                                {describeOverflow(
+                                  c.overflowScanned === undefined
+                                    ? null
+                                    : { scanned: c.overflowScanned, truncated: !!c.overflowTruncated, findings: c.overflow ?? [] },
+                                )}
+                              </p>
+                              {(c.overflow?.length ?? 0) > 0 && (
+                                <ul className="text-[10px] text-amber-200/80 font-mono pl-3 list-disc">
+                                  {c.overflow.map((f, i) => (
+                                    <li key={`${f.element}-${i}`}>{f.element} — {f.overflowPx}px past the edge</li>
+                                  ))}
+                                </ul>
+                              )}
+                              {(c.errors?.length ?? 0) > 0 && (
+                                <div className="rounded-lg border border-rose-500/20 bg-rose-500/5 p-2">
+                                  <p className="text-[9px] uppercase tracking-widest font-black text-rose-300/70 mb-1">
+                                    Errors the browser recorded just before
+                                  </p>
+                                  <ul className="text-[10px] text-rose-200/90 font-mono space-y-0.5 break-all">
+                                    {c.errors.map((e, i) => <li key={`${e}-${i}`}>{e}</li>)}
+                                  </ul>
+                                </div>
+                              )}
+                              {c.userAgent && (
+                                <p className="text-[9px] text-white/20 break-all">{c.userAgent}</p>
+                              )}
+                            </div>
+                          );
+                        })()}
 
                         {openReport.screenshot && (
                           <img src={openReport.screenshot} alt="Screenshot from the reporter" className="mt-3 w-full rounded-xl border border-white/10" />

@@ -12,15 +12,29 @@
 //      plugin we do not ship or a DOM-painting library that renders the page WRONG often enough to
 //      mislead the person reading the report. Attaching a real screenshot the user took is honest and
 //      works everywhere. It is shrunk here so a report is never refused for being large.
-//   3. WE ATTACH THE FACTS THE USER SHOULD NOT HAVE TO TYPE — which screen they were on, the build,
-//      the platform. Most reports say "it doesn't work"; the context is what makes those actionable.
+//   3. WE ATTACH THE FACTS THE USER SHOULD NOT HAVE TO TYPE. Most reports say "it doesn't work"; the
+//      context is what makes those actionable.
+//
+// ADMIN 2026-09-12, holding a report they could not act on — "App is not responsive and sometimes it
+// does not work in Mobile phones. Some content goes outside the mobile." — *"problem hi samajh nahi aa
+// rahi fix kya karu?"* Departure 3 was right and far too thin: we attached the screen name and the
+// platform, and asked a non-technical person to supply the rest from memory. So the sheet now asks ONE
+// tap for the KIND of problem (which decides the question the box asks), and measures for itself what
+// it can see — screen size, which element reaches past the edge, the running build, and any error the
+// browser had just recorded. The footer names every one of those, because the previous footer's
+// promise stopped being true the moment this was added.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Send, Image as ImageIcon, Check, Loader2 } from 'lucide-react';
 import { authedHeaders } from '../lib/authHeaders';
-import { MESSAGE_MAX, type ReportTargetKind } from '../lib/userReport';
+import {
+  MESSAGE_MAX, PROBLEM_KINDS, problemKindAsk, type ProblemKind, type ReportTargetKind,
+} from '../lib/userReport';
 import { compressForReport } from '../lib/reportImage';
+import { collectDiagnostics } from '../lib/reportDiagnostics';
+import { recentErrors } from '../lib/recentErrors';
+import { nativeAppBuild } from '../lib/appBuildId';
 
 /** Above the app, and above the App Mart player (which sits at 200) — see WebAppPlayer. */
 const SHEET_Z = 400;
@@ -35,6 +49,7 @@ export interface ReportSheetProps {
 }
 
 export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
+  const [kind, setKind] = useState<ProblemKind | ''>('');
   const [message, setMessage] = useState('');
   const [shot, setShot] = useState('');
   const [note, setNote] = useState('');
@@ -52,7 +67,7 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
   // A fresh sheet every time it opens: a half-typed complaint from an hour ago is not what the user
   // means to send now.
   useEffect(() => {
-    if (open) { setMessage(''); setShot(''); setNote(''); setDone(false); }
+    if (open) { setKind(''); setMessage(''); setShot(''); setNote(''); setDone(false); }
   }, [open]);
 
   const pick = useCallback(async (file: File | undefined) => {
@@ -64,15 +79,23 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
   }, []);
 
   const send = useCallback(async () => {
-    if (busy || message.trim().length < 5) return;
+    if (busy || !kind || message.trim().length < 5) return;
     setBusy(true);
     setNote('');
     try {
+      // MEASURED HERE, NOT EARLIER. The scan has to see the page as it is at the moment the person
+      // decided something was wrong — a value captured when the sheet mounted would describe the
+      // screen underneath the sheet a second ago, which is not quite the same page and would be
+      // impossible to tell apart from the real one afterwards.
+      const seen = collectDiagnostics(window);
+      const errors = recentErrors();
+      const appBuild = await nativeAppBuild();
       const res = await fetch('/api/report', {
         method: 'POST',
         headers: await authedHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           message: message.trim(),
+          problemKind: kind,
           targetKind: target?.kind ?? 'bug',
           ...(target?.id ? { targetId: target.id } : {}),
           ...(shot ? { screenshot: shot } : {}),
@@ -80,6 +103,13 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
             view: view || '',
             platform: (window as { Capacitor?: { getPlatform?: () => string } }).Capacitor?.getPlatform?.() || 'web',
             userAgent: navigator.userAgent,
+            // Which frontend this person is running. On the bundled Android app this is the ONLY way
+            // to tell a current install from one that shipped months ago — and a stale bundle is
+            // itself a common cause of "it doesn't work for me".
+            build: (() => { try { return typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : ''; } catch { return ''; } })(),
+            ...(appBuild ? { appBuild } : {}),
+            ...seen,
+            ...(errors.length ? { errors } : {}),
           },
         }),
       });
@@ -98,7 +128,7 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
     } finally {
       setBusy(false);
     }
-  }, [busy, message, shot, target, view, onClose]);
+  }, [busy, kind, message, shot, target, view, onClose]);
 
   if (!open) return null;
 
@@ -136,12 +166,36 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
           </div>
         ) : (
           <>
+            {/* ONE TAP BEFORE THE BOX, and it is what makes the rest of the report legible.
+                A real report read "App is not responsive and sometimes it does not work in Mobile
+                phones" — which could be a layout bug, a hang, or a dead button, and we had no way to
+                ask. The tap settles that before the ambiguity is created, and it changes the question
+                the box asks so the answer lands on the right thing. */}
+            <p className="text-[11px] font-semibold text-zinc-300 mb-2">What kind of problem is it?</p>
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {PROBLEM_KINDS.map((k) => (
+                <button
+                  key={k.id}
+                  type="button"
+                  onClick={() => setKind(k.id)}
+                  aria-pressed={kind === k.id}
+                  className={`px-2.5 py-1.5 rounded-xl text-[11px] font-semibold border transition-colors ${
+                    kind === k.id
+                      ? 'bg-indigo-600 border-indigo-500 text-white'
+                      : 'bg-white/5 border-white/10 text-zinc-300 hover:bg-white/10'
+                  }`}
+                >
+                  {k.label}
+                </button>
+              ))}
+            </div>
+
             <textarea
               value={message}
               onChange={(e) => setMessage(e.target.value.slice(0, MESSAGE_MAX))}
               rows={4}
               autoFocus
-              placeholder="What happened? Even one line helps."
+              placeholder={kind ? problemKindAsk(kind) : 'Pick one above, then tell us what happened.'}
               className="w-full bg-black/40 border border-white/10 rounded-2xl px-3.5 py-3 text-sm text-white placeholder-zinc-600 outline-none focus:border-indigo-500/60 resize-none"
             />
 
@@ -172,15 +226,21 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
 
             <button
               onClick={() => void send()}
-              disabled={busy || message.trim().length < 5}
+              disabled={busy || !kind || message.trim().length < 5}
               className="mt-4 w-full py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-bold text-white flex items-center justify-center gap-2"
             >
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
               {busy ? 'Sending…' : 'Send report'}
             </button>
+            {/* 🔒 THIS LINE HAD TO CHANGE WITH THE CODE. It used to end with a flat claim that no
+                other information was gathered — which stopped being true the moment the screen size,
+                the build and the recent errors were attached. A promise that quietly goes stale is
+                worse than no promise, so it now names what is actually sent, and nothing is sent that
+                is not named here. Test-locked in `tests/reportCapture.test.ts`. */}
             <p className="mt-2 text-[10px] text-zinc-600 leading-relaxed">
-              We attach the screen you were on and your device type so the problem can be found. Nothing
-              else is collected.
+              So the problem can be found without asking you for details, we attach: the screen you were
+              on, your screen size, your device and app version, whether you were online, and any error
+              messages your browser had just recorded. No page content, and nothing you typed elsewhere.
             </p>
           </>
         )}

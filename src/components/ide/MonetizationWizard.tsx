@@ -10,7 +10,7 @@ import { insertSnippet } from '../../lib/htmlInsert';
 import {
   AppTargetPicker, useUserApps, useAppFiles, readAppFile, saveFilesToApp,
 } from './AppTargetPicker';
-import { listSecrets, saveSecret, deleteSecret } from '../../lib/secretsApi';
+import { saveSecret } from '../../lib/secretsApi';
 
 // "Start taking money" — one straight line from choosing an app to a working payment button.
 //
@@ -187,11 +187,13 @@ export const MonetizationWizard: React.FC<MonetizationWizardProps> = ({
     const envKeys = Object.entries(paymentEnvKeys(method, entered)).filter(([, v]) => v);
     if (envKeys.length === 0) return { status: 'skipped', names: [] };
     try {
-      const existing = await listSecrets(userId);
+      // The vault is no longer LISTED first: that list existed only to find rows to delete before
+      // re-saving, and the save route replaces by name itself. One request instead of two.
       for (const [name, value] of envKeys) {
-        await Promise.all(
-          existing.filter((s) => s.secret_name === name).map((s) => deleteSecret(userId, s.id)),
-        );
+        // REPLACING A KEY IS THE SAVE'S JOB, NOT A DELETE (2026-09-12) — see DatabaseSettings.tsx for
+        // the full reasoning. Short version: the server has replaced-by-name since #2842, this copy of
+        // the logic lost the key outright if it failed between the delete and the save, and DELETE now
+        // requires a vault unlock ticket that an overwrite neither has nor should need.
         await saveSecret(userId, name, value);
       }
       return { status: 'saved', names: envKeys.map(([n]) => n) };

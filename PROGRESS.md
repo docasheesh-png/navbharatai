@@ -49297,3 +49297,343 @@ so it is DEARER per turn. They break even exactly when output equals input, whic
 **Honest cost of the ceiling:** with the last resorts gone, a free turn where GLM and both Google doors
 fail at once returns an honest "busy" rather than an answer — the same trade the professional free tier
 already makes in writing.
+---
+
+## 2026-09-12 — THE SECRET VAULT GETS A REAL LOCK, and a Cloud Run-shaped screen behind it
+
+**The ask** (admin, verbatim): *"user jab secret and api keys par click kare to phone lock / face lock /
+pin dalna pade, tab open ho!"* … *"input box jaisa dikhna chahiye, jaisa cloud run me dikhta hai!"* …
+*"real working security ke sath!!!"*
+
+### The trap this feature is built to avoid
+
+The obvious implementation is: call the browser's biometric API, and on success render the list. **That
+protects the screen and leaves the secrets wide open.** The values would still be one ordinary
+`GET /api/secrets/:userId` away — reachable from devtools, an extension, or a stolen unlocked laptop —
+so the prompt would be decoration over an unchanged door. It is exactly the "built but not really
+working" state the second absolute rule forbids, and it would have been invisible: the screen would look
+locked and test green.
+
+So **nothing in the browser decides whether the vault opens.** The device produces a signature over a
+challenge we issued, the SERVER verifies it, and only then is a short-lived ticket minted. If
+`VaultLockGate.tsx` were deleted tomorrow, the keys would become **unreadable**, not public — which is
+the test of whether a lock is real.
+
+### What was built
+
+**`src/server/lib/deviceUnlock.ts`** — pure functions, 49 tests, verified against **real generated EC and
+RSA key pairs** rather than mocks:
+- signed stateless challenge + unlock ticket (HMAC, TTL, uid-bound)
+- `parseAuthenticatorData` — fixed offsets, no CBOR at all (see below)
+- `verifyClientData` — ceremony type, origin allow-list, cross-origin refusal, challenge MAC
+- `verifyAssertionSignature` — ES256 and RS256 through ONE code path
+- `signCounterOk`, `isFreshReauth`, `rpIdMatches`, `allowedOrigins`
+
+**Four routes** on the existing vault (`routes/secrets.ts`): `lock/challenge`, `lock/register`, `unlock`,
+`reveal`. Plus `verifyFreshAuth` in `authMiddleware.ts`, which reads `auth_time` out of the signed ID
+token.
+
+**`src/lib/vaultLock.ts` + `VaultLockGate.tsx`** — the browser half and the lock screen, and
+**`SavedKeyRows`** inside `SecretManager.tsx`: one row per key, name and value each in a real input box,
+a 🗑️ per row.
+
+### Five decisions worth defending
+
+**1 · No CBOR decoder, by using the browser's own `getPublicKey()`.** The textbook path decodes the
+attestation object (CBOR) to dig out a COSE key. A hand-rolled parser is precisely where a security bug
+hides, and a subtly-wrong verifier is worse than none because it *looks* right. The browser already
+offers the same key as SPKI DER, which Node reads directly — so the server parses 37 bytes at fixed
+offsets and nothing more.
+
+**2 · Two doors, because one door would lock people out of their own keys.** A device with no platform
+authenticator (older Android WebView, desktop without Hello) would otherwise permanently lose access to
+its API keys — a worse breach of the one absolute rule than a weaker prompt. The fallback is a genuinely
+fresh account sign-in, and it is **server-enforced**: `auth_time` is stamped by the identity provider
+inside the signed token, so a client cannot age a token forward. Both doors mint the SAME ticket, so
+every route downstream has one thing to check.
+
+**3 · `userVerified` is checked, not assumed.** WebAuthn will happily return an assertion for a mere
+*touch*. Accepting that would turn the whole feature into a button labelled "unlocked". Registration
+refuses a credential whose device did not verify the person, and so does every unlock.
+
+**4 · Domain separation, instead of reusing `previewDoor`'s signer.** Both sign "payload + expiry" with
+`SECRET_ENCRYPTION_KEY`, so sharing the helper looks like obvious de-duplication. Refused deliberately:
+a preview-door token and a vault ticket would become the same kind of string, and one future payload
+collision would let a PREVIEW token open somebody's KEYS. Distinct labels make that impossible by
+construction, and a test asserts a challenge cannot be used as a ticket or vice versa.
+
+**5 · Revealing values IS a change of posture, and it is recorded as one.** The list route's comment —
+true since the vault was built — says the ciphertext has no reason to leave the server. That was right
+while the screen showed only names. The admin asked for the Cloud Run experience, and that is a real
+requirement: a user who cannot see what they saved cannot tell a working key from a mistyped one. What
+makes it defensible is that it is ONE narrow POST route (so no value lands in a browser history or proxy
+log), unreachable without a verified unlock from seconds ago, `Cache-Control: no-store`, and **audited**.
+`GET` is untouched and still returns names only, so nothing that used to be safe became less so.
+
+### The sibling hunt — what nearly broke, and the pre-existing bug it exposed
+
+Requiring a ticket on DELETE would have **silently broken four other screens**: DatabaseSettings,
+AuthSettings, StorageSettings and MonetizationWizard each did *delete-then-save* to overwrite a key. Every
+one of those deletes would have started returning 401, leaving duplicate rows — the exact bug #2842 had
+just fixed.
+
+The fix was not to exempt them. **The save route has replaced-by-name since #2842**, so that client-side
+dance was redundant legacy — and it carried a real bug of its own: **a failure between the delete and the
+save LOST the key outright**, because the old value was already gone. The server's replace has no such
+window. All four now just save, and one fewer `listSecrets` request runs per save.
+
+`deleteSecret` was then **removed from `secretsApi.ts` entirely** rather than left in place: with the
+route requiring a ticket, that signature could only ever produce a 401, and a function that cannot
+succeed invites a future caller to hunt for a server bug that is not there.
+
+### Honest limits
+
+- **On the native Android/iOS shell the face/fingerprint door may not appear.** WebAuthn in a WebView
+  needs app-to-site association (assetlinks / associated domains) that is not set up, so those users get
+  the account-password door. It is equally server-verified, and stating this beats claiming Face ID
+  everywhere. ⚠️ The wrong "fix" is a biometric plugin returning a boolean — unverifiable, hence theatre.
+- **The delete is permanent.** There is no undo, which is what *"puri row delete ho jaye"* asks for; the
+  row asks once to confirm, because one stray tap on a phone must not destroy a key a live app depends on.
+- **The audit records that a key was read, never the key** — test-locked with a distinctive value, after
+  my first attempt at that assertion used the value `'v'`, which occurs inside the word "reveal" and so
+  could not fail.
+
+### Tests added (93)
+
+`deviceUnlock.test.ts` (49, real key pairs) · `vaultUnlockEndToEnd.test.ts` (17 — registers, signs,
+unlocks, reveals, then breaks each step in turn: wrong key, no user-verification, wrong origin, wrong
+rpId, replayed challenge, unknown credential, counter replay) · `vaultRevealLock.test.ts` (10) ·
+`vaultLockWiring.test.ts` (17) · `routesSecretsIdor.test.ts` rewritten for the hard delete + ticket
+while keeping its original cross-user IDOR property.
+
+`tests/helpers/routeTestUtils.ts` gained `req.header` and `res.set` — both exist on real Express, and a
+harness missing a verb fails a route that is perfectly correct.
+
+### Correction, same day: I named the wrong reason for the native-shell limit
+
+The entry above (and what I told the admin) said the device lock cannot work in the Android/iOS shell
+"because WebAuthn in a WebView needs app-to-site association (assetlinks) that is not set up". **That is
+not what decides it**, and the claim was reasoning from a general memory rather than from this project.
+A later session acting on it would have built an `assetlinks.json` that changes nothing.
+
+What the code actually says, read rather than assumed:
+
+* **Android → `https://localhost`.** Capacitor 8.5.0 defaults `androidScheme` to the https scheme with
+  hostname `localhost` (`@capacitor/android/.../CapConfig.java:38-39`), and `capacitor.config.ts` does
+  not override it. That is a secure context, and `https://localhost` was **already** in this feature's
+  origin allow-list. So the origin is not the blocker. The real unknown is whether the Android **WebView**
+  exposes WebAuthn platform authenticators — version-dependent, and not verifiable from here.
+  **Unknown, not broken.**
+* **iOS → `capacitor://localhost`.** A custom scheme cannot be a WebAuthn rpId, so the device lock
+  genuinely cannot work there. The original claim was accidentally right for iOS and wrong for Android,
+  for a reason that applies to neither.
+
+**Why shipping without a device was still safe:** `deviceLockAvailable()` asks the browser at runtime and
+a `false` offers the account-password door instead — so a WebView without WebAuthn is a different SCREEN,
+never a failure. The one-step way to settle it: open Settings → Secrets & API Keys in the Android app and
+see which door appears.
+
+And if Android does work, the credential is scoped to rpId `localhost`, shared with every Capacitor app on
+that device. Still safe — an assertion is useless without our challenge, the matching credential id and a
+live session — but that is not a reason to widen `VAULT_LOCK_ORIGINS`.
+
+**The lesson, and it is the one this file keeps re-learning:** "assetlinks" was a plausible, well-known
+reason that happened not to be THIS project's reason. A caveat is only honest if it names the mechanism
+that was actually checked — otherwise it is a guess wearing a warning label, and the next reader spends a
+day on it.
+
+---
+
+## 2026-09-12 — the admin's own six Cloud Run / console items, reported done
+
+**Trigger.** Admin, verbatim: *"mere karne ke liye aap jo 5 step bata rahe woh kar diya hai, sbhi"* —
+against the six put to them earlier the same day.
+
+Recorded in `CLAUDE.md`'s registry hand-to-hand, as that registry's own rule requires, on the day it was
+said. **The count is left unreconciled on purpose** (they said five; six were listed), and each item
+carries the one signal that settles it without anybody trusting the record:
+
+- `GRIEVANCE_OFFICER_NAME` → the Monitor's amber "not named" warning is gone
+- `NAVBHARAT_WEB_RISK=on` → `outboundNote` stops reading `unknown`
+- `E2B_USD_PER_HOUR = 0.1656` → the Monitor's rate-mismatch tile clears
+- Play developer verification, and the approved Play update published → Play Console
+- 🔴 **the six DUPLICATE Cloud Run keys — NO self-verifying signal exists.** The process sees one value
+  and cannot know a second row was ever there, so no code change could detect it. It stays open in the
+  registry until somebody reads the console.
+
+**Why the gap is written down rather than rounded away.** This repo has already paid for two drifts of
+this exact shape — the idle-minutes default that read "NOT taken" eight days after it was taken, and the
+E2B rate whose derivation "could not fail". A clean "all six done" would be read as fact by the next
+session, and for the duplicate keys there would be nothing to contradict it.
+
+### Also settled today
+All three PRs left open by other sessions are now merged: **#2848** (the apps-project record — which is
+what revealed that ROADMAP 0.1 was already DONE and Phase 2 unblocked, correcting an answer this session
+had given the admin from a stale picture), **#2851** (cheap-engine lead by live health), and **#2852**
+(the vault device lock).
+
+---
+
+## 2026-09-12 — The vault's phone lock was real, and the screen pointed at the wrong door
+
+**The evidence.** The admin, who had just been told the device lock exists, opened Secrets & API Keys on
+an iPhone in Safari and asked: *"kya yahan simple app lock nahi lag sakta… jaise UPI se payment kare to
+lock ko unlock karna hota hai, waise hi simple phone lock nahi lag sakta hai?"* — with a screenshot in
+which **the phone-lock button was visibly present**. `Set up iPhone lock` only renders when the browser
+has confirmed a platform authenticator is usable, so Face ID was available, offered, and one tap away.
+
+**The root cause, and why every test stayed green.** The button was the small outline one at the bottom
+in uppercase micro-type; `Use my account password` held the primary indigo. The screen's visual
+hierarchy said the password was the way in and the phone lock was an extra. Nothing was broken — the
+lock is genuinely server-verified (#2852) and all 93 of its tests passed throughout. **A correct
+feature can still answer a different question than the user is asking, and no security test can see
+that.**
+
+**The fix (`VaultLockGate.tsx`).** One explicit rule replaces an incidental layout: whenever the device
+can do face / fingerprint / PIN, **that is the primary button** — already set up (unlock) or not yet
+(set up) — and the account door steps down to secondary. `deviceIsPrimary = hasDeviceLock === true ||
+offerSetUp`, with `offerSetUp = canUseDevice === true && hasDeviceLock !== true` so nobody is ever sent
+to a prompt that cannot appear. 🔒 The account door is **never** hidden or gated: a device with no lock
+must not strand somebody outside their own API keys, which is the same reasoning that put two doors on
+this screen to begin with.
+
+**Two real bugs the same screenshot exposed.**
+1. **A Google account needed two taps for nothing.** The first tap only set `askPassword`, which reveals
+   a password field a Google user never gets — so the button read `Confirm and unlock` above no field to
+   confirm anything in. It now goes straight to the popup, and reads **`Confirm with Google`**: a label
+   naming what will actually happen rather than promising a field.
+2. **Setting up on a password account taught by error message.** The first tap fired the registration,
+   which threw *"Enter your account password to set up the device lock"* — an error used as an
+   instruction, which is how a one-tap feature comes to feel broken. It now reveals the field and waits.
+
+**Regression tests** (`vaultLockWiring.test.ts`, +7): the set-up button carries the primary style and
+not the uppercase micro-type; the device path renders above the account path; the account button is not
+preceded by a `&& (` guard (i.e. the fallback door cannot be conditionally hidden); `offerSetUp` is
+gated on a real capability check; the Google path is one tap; the password path reveals rather than
+errors. **Each was confirmed to FAIL when the old layout is restored** — the style assertion was
+verified by actually reverting it and watching it go red, since a wiring test that cannot fail is the
+class of test this repo has been bitten by before.
+
+**Still open, and deliberately not guessed:** the **Android app** remains untested. The screenshot was
+Safari, not the Capacitor shell, so it says nothing about the WebView. The registry's honest "unknown"
+for Android stands until somebody opens the installed app. iOS's shell (`capacitor://localhost`) still
+genuinely cannot do WebAuthn — that limit is unchanged by this work.
+
+Gate on the final state: `typecheck` 0 · `noUnusedImports` clean · `typecheck:server` 0 · `build` ok ·
+`test:bundle` within budget · `boot:check` PASS · `vitest run` **1,567 files / 21,540 passed / 1
+skipped / 0 failed**.
+## 2026-09-12 — The starter picker stops being a wall, and the India-first set reaches daily life and faith
+
+**What the admin asked for, in two steps.** First I offered two "tidying" suggestions: delete the Converter
+and Password chips because thirty-one buttons felt like a lot, and add four more India templates. The admin
+asked the right question — *"pahle mujhe hindi me samjhao, inko karne se hoga kya?"* — and the honest answer
+turned out to be that **both of my own suggestions were weak**, so I argued against them:
+
+* Deleting two chips makes nine lines of pills into eight. **No user feels that**, and whoever wanted the
+  converter is simply worse off. The problem was never the COUNT — it was the WALL.
+* Adding four more templates before any real v5 build report exists for the SEVEN shipped on 2026-09-12
+  would be building on unverified ground.
+
+The admin then approved the real fix and extended it: *"Shuru me sirf 10-12 buttons dikhao, neeche ek chhota
+'More templates'. … yeh banao, isi me indian apps daal dena (bhagwat geeta in hindi, quran in hindi,
+brahm_muhrats, ya panchang, kundali jaise apps … mera suggestion hai, aap isko real professional banana)"*.
+
+### Part 1 — twelve buttons, then "More templates (N)"
+
+`pickerSections(tappable, limit = 12)` (`starterTemplates.ts`) splits the picker; `AgentV3Panel.tsx` renders
+the first screen and one expander, collapsed by default, labelled with the number it is hiding.
+
+**`featured` is a FLAG on the data, not "the first twelve of the array"** — deliberately. The first screen is
+the most-seen surface in the product, so what lands on it is a decision; slicing the array would make it an
+ACCIDENT of insertion order, where adding a chip at the top silently pushes a curated one off with nothing
+failing to say so. Twelve are marked, nine of them `simple` so a FREE user's first screen is curated rather
+than topped up from array order.
+
+**The invariant the test pins, because it is the only way this can go wrong:** `initial ∪ more` is exactly
+the input and the two are disjoint. A chip in NEITHER half would be silently unreachable — no error, nothing
+on screen to notice — so `more` is a COMPLEMENT rather than its own hand-written list, and a chip nobody
+remembered to mark `featured` therefore appears in "More" instead of vanishing. The locked Pro showcases stay
+a separate row: folding the upgrade carrot into an expander would bury the one surface that earns revenue.
+**Nothing was deleted.** (`tests/starterPickerExpander.test.ts`, 17 assertions.)
+
+### Part 2 — four India-first templates, built to be REAL rather than to look complete
+
+`panchang`, `geeta`, `quran` (free/simple) and `kundali` (pro, showcase), with golden scaffolds in the new
+`goldenScaffolds/indiaFaith.ts` and `indiaPanchang.ts`.
+
+**The decision that shaped all four.** The easy version of each of these is the dishonest one: a panchang
+that prints a table of times somebody typed in for one city, a scripture reader that looks like the whole
+book while holding a handful of verses, a kundali that invents the planets it cannot compute. Every one of
+those *looks* identical to the real thing on the day it ships, and each is the "built but not really working"
+state the second absolute rule forbids — worst of all for a user planning a ceremony around those minutes.
+
+So:
+
+* **Panchang COMPUTES.** Sunrise, sunset and solar noon come from the standard NOAA solar-position algorithm
+  for the chosen latitude and longitude; Brahma Muhurat, Abhijit, Rahu Kaal, Gulika, Yamaganda and the eight
+  daytime Choghadiya are DERIVED from those by their documented traditional rules; tithi and nakshatra come
+  from the sun and moon longitudes with the Lahiri ayanamsa. 16 Indian cities plus manual lat/long. It states
+  its own accuracy (≈1 min for sunrise; ≈0.2° on the moon, so a tithi boundary can differ by half an hour
+  from a published panchang) and says the night choghadiya is deliberately not included.
+* **Gita and Quran COUNT what they hold.** "इस ऐप में N चुने हुए श्लोक हैं (कुल 700 में से)" on the first
+  screen; the Quran reader the same against 114 surahs, and it carries a **Hindi transliteration** so a reader
+  who cannot read Arabic can still recite — the feature that actually matters for an India-first reader. The
+  Devanagari and Arabic are the public-domain originals; the Hindi meanings are plain original paraphrase,
+  never a copied published translation. A chapter genuinely absent shows a real empty state rather than being
+  hidden, and says so.
+* **Kundali STOPS where honesty requires.** Lagna and the twelve bhava are exact spherical trigonometry
+  needing no ephemeris; the Sun (≈0.01°), Moon (≈0.2°) and the lunar nodes are genuinely computed; the chart
+  is the traditional North Indian diamond. **Mangal through Shani are NOT placed**, and the app says why on
+  the same screen as the table. The reason is recorded because it is the general rule: a table of orbital
+  elements written from memory into a scaffold is **untestable from a session**, and one wrong digit would put
+  a planet in the wrong rashi on every chart the app ever draws with nothing failing to say so. A wrong
+  kundali is worse than an incomplete one to the person reading it.
+
+### 🔴 The part worth carrying forward: the compile gate CANNOT tell a correct sunrise from a plausible one
+
+`goldenScaffolds.test.ts` proves every scaffold parses under esbuild and compiles under the preview Babel.
+Neither can evaluate a number. A grep for `Math.acos` would pass just as happily over maths that returned
+nonsense — and the maths lives inside a template-literal string, which is exactly the excuse for not testing
+it. **That excuse is wrong.** `tests/indiaAlmanacStarters.test.ts` lifts the astronomy out of the scaffold
+string, transpiles it with esbuild and RUNS it:
+
+* Delhi 21 Jun 2026 → 05:24 / 19:22 (published 05:23 / 19:21) · Delhi 22 Dec → 07:10 / 17:29 (exact) ·
+  Mumbai and Kolkata 12 Sep → within a minute. Tolerance 3 min.
+* Solar noon is exactly midway between sunrise and sunset (catches a sign error in the hour angle or the
+  equation of time); the June day is longer than the December day for every city it ships.
+* Sun at 0/90/180/270° within 1.5° of each equinox and solstice; moon moves 11–15.5°/day and returns in
+  27.32 days; Lahiri ayanamsa 24.18–24.28° for 2026 (published ≈24°14′).
+* Local sidereal time at the J2000 epoch = 99.9677° (textbook, to 0.01°); the ascendant is exactly
+  sidereal-time + 90° on the equator with zero obliquity; the Lagna sweeps all twelve rashis over 24 hours;
+  house 1 IS the Lagna rashi and the twelve houses are the twelve rashis exactly once; Ketu is exactly 180°
+  from Rahu every time; a malformed birth record returns `null`, never a chart of NaN.
+* A polar latitude where the sun does not set is REPORTED (`sunrise === null`), never faked.
+* The astronomy and city list are asserted **byte-identical** between the two apps. They are separate
+  generated apps — a golden scaffold must be one self-contained `App.tsx` — so drift between them would
+  otherwise be invisible; this is what makes the duplication safe rather than sloppy.
+
+**Lesson: "the code is inside a string" is a reason to extract and evaluate it, not a reason to test only
+that it compiles.** Every numeric claim in this entry is a test that could fail.
+
+### Two bugs found during the work, both by a check the previous step had skipped
+
+1. **`npx tsc --noEmit` does NOT typecheck `src/server/`.** A scaffold module with an unterminated string
+   (`"… label=\"x\"',` — opened with `"`, closed with `'`) passed the frontend typecheck silently; esbuild
+   caught it. The server files need `npm run typecheck:server`, which is why CLAUDE.md lists both.
+2. **`useCollection`'s `add()` mints its own id.** The kundali screen built a row with `newId()` and then
+   selected `b.id` — an id `add()` had already replaced, so "save and show the chart" would have selected a
+   profile that did not exist. It now uses what `add()` returns.
+
+Also normalised `indiaPanchang.ts` from joined string lines to the template-literal idiom every other
+scaffold module uses, verifying the rewritten module produces a **byte-identical** string to the version that
+had already been parse-checked.
+
+`AppKnowledgeBase.ts` updated in the same change: the chip roster, the "More templates" expander (so an AI
+tells a user hunting for the unit converter where it went), an honest description of each of the four new
+apps including what the kundali does not place, and the vocabulary a user actually types — `rahu kaal`,
+`choghadiya`, `suryoday`, `bhagwat geeta`, `shlok`, `surah`, `janam patri`, `kundli`, `jyotish` — because
+nobody searches for "Panchang" when they want to know the rahu kaal.
+
+**Still open, and still the right next step:** no real v5 build report exists for any of the eleven templates
+added today. Four more India templates (courier, wedding RSVP, NGO, school ERP) stay deferred until one
+arrives — a report is the only thing that can say whether these scaffolds actually hold up through a build.

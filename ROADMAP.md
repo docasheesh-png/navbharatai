@@ -1468,7 +1468,7 @@ That is the honest critical path of the whole plan.
 
 | # | Step | Unblocks |
 |---|---|---|
-| 0.1 | **§11's five GCP steps** (`navbharat-apps-prod`, APIs, separate billing account, cross-project IAM, the six env keys) — then tell a session, which records the keys in `CLAUDE.md` | all of Phase 2 |
+| 0.1 | ✅ **DONE 2026-09-12.** The apps project exists and is wired: id **`navbharatai-user-apps`** (NOT the suggested `navbharat-apps-prod`), four APIs enabled (Cloud Monitoring too — this table said three), a SEPARATE billing account, cross-project IAM on the platform's default compute SA, the `nbai-apps` Docker repo in `asia-south1`, and `NAVBHARAT_APPS_PROJECT` + `NAVBHARAT_CLOUD=on` set. Only TWO env keys were needed — the other four already have matching code defaults. `NAVBHARAT_CLOUD_PUBLIC` stays UNSET until 2.1 meters hosting. Full record in `CLAUDE.md`. | **Phase 2 is UNBLOCKED** |
 | 0.2 | **Decide D2** (starter DB in NavBharatAI's Supabase org, quota-bound) and **D3** (free hosting = gift wallet) | 2.5, 2.6 |
 | 0.3 | **Deploy the Cloudflare Worker** for the branded apps domain, confirm one test app loads, then set `PUBLISHED_APP_DOMAIN` (order per `CLAUDE.md`) | 1.1 (analytics has a place to count), 1.6, 1.7 |
 | 0.4 | Android **developer verification → Identity tab** (deadline 30 Sep 2026 — app removed globally otherwise) | not this plan; existential |

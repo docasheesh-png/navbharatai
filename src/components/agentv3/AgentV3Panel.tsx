@@ -47,7 +47,7 @@ import { useScreenWakeLock } from '../../lib/useScreenWakeLock';
 import { clampComposerHeight } from './composerHeight';
 import { FoldableMessage } from './FoldableMessage';
 import { MessageActions } from './MessageActions';
-import { partitionStarters, startersByCategory } from './starterTemplates';
+import { partitionStarters, pickerSections } from './starterTemplates';
 import { loadSavedTemplates, saveTemplate, removeSavedTemplate, type SavedTemplate } from './savedTemplates';
 import { checkAttachmentSizes, MAX_ATTACHMENT_BYTES } from '../../lib/attachmentLimits';
 import { deployBlockedReason } from '../../lib/deployGuard';
@@ -475,6 +475,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // 2026-07-12: "maine recharge kar liya fir bhi tiers locked" — the user recharges on the Wallet page and
   // comes back; without this refetch the tiers stayed 🔒 until a full page reload).
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // The starter picker shows a short first screen and hides the rest behind "More templates" — the wall
+  // of thirty-odd chips was the thing a first-time user scrolled past. Collapsed by default on purpose:
+  // expanded-by-default would be the wall again with one extra button on top of it.
+  const [startersExpanded, setStartersExpanded] = useState(false);
   // Paid-public (billing PR 5): learn whether this user is on paid billing and, if so, their wallet
   // balance — so the header can show a live ₹ chip and the composer can warn before a build is refused.
   // Refetches when the user changes, after a build finishes (balance was just spent), after a 402, and
@@ -4125,6 +4129,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   // few LOCKED `pro` showcases that open the upgrade surface (the free→paid carrot). An
                   // unlocked user gets the whole library, tappable, no locks.
                   const { tappable: starterTappable, locked: starterLocked } = partitionStarters(powerUnlocked);
+                  // A SHORT first screen + one expander (admin 2026-09-12). `pickerSections` guarantees
+                  // initial ∪ more === every tappable chip, so collapsing hides nothing permanently.
+                  const { initial: starterInitial, more: starterMore } = pickerSections(starterTappable);
+                  const starterShown = startersExpanded ? starterInitial.concat(starterMore) : starterInitial;
                   return (
                   <div className="mt-5">
                     <div className="text-[11px] uppercase tracking-wide text-zinc-600 mb-2">Or start from a template</div>
@@ -4145,11 +4153,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                         "Stopwatch"): a pill has to read as a button, and a sentence inside one does not.
  
                         The sketch solved a REAL problem though — a flat row of identical chips makes a to-do
-                        app and a CRM look alike — so that half is kept without costing a pixel: the flat wrap
-                        is ORDERED by category (`startersByCategory`, which already existed, tested, wired to
-                        nothing), so related apps sit together even with no heading above them. */}
+                        app and a CRM look alike — so that half is kept without costing a pixel: the chips are
+                        ORDERED by category, so related apps sit together even with no heading above them.
+                        That ordering now happens inside `pickerSections` rather than here, because the list
+                        has to be split before it is rendered. */}
                     <div className="flex flex-wrap justify-center gap-1.5 max-w-lg mx-auto">
-                      {startersByCategory(starterTappable).flatMap(({ items }) => items).map((t) => (
+                      {starterShown.map((t) => (
                         <button
                           key={t.id}
                           type="button"
@@ -4161,6 +4170,22 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                         </button>
                       ))}
                     </div>
+                    {/* One expander, and it names the number it is hiding — "More templates" alone reads
+                        like a link to somewhere else, while "More templates (19)" reads like the rest of
+                        this list. Collapsing again is allowed because a user who opened it to look for one
+                        app should be able to put the wall back. */}
+                    {starterMore.length > 0 && (
+                      <div className="flex justify-center mt-2">
+                        <button
+                          type="button"
+                          aria-expanded={startersExpanded}
+                          onClick={() => setStartersExpanded((v) => !v)}
+                          className="px-3 py-1 rounded-full text-[11px] text-zinc-500 hover:text-indigo-300 hover:bg-indigo-500/10 transition-colors"
+                        >
+                          {startersExpanded ? 'Show fewer templates' : 'More templates (' + starterMore.length + ')'}
+                        </button>
+                      </div>
+                    )}
                     {/* Free→paid carrot: LOCKED pro showcases. Tapping opens the tier/upgrade popover (real
                         recharge surface) instead of dropping a prompt the weak tier would flail on. */}
                     {starterLocked.length > 0 && (

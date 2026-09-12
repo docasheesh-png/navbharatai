@@ -184,7 +184,12 @@ export function loadBoard(r: LoadReadings | null | undefined): LoadTile[] {
     value: x.activeUsers ?? null,
     cap: null,
     display: displayOf(x.activeUsers, null, 'active'),
-    note: 'People using NavBharatAI right now. No ceiling — it is the other tiles that have limits.',
+    // 🔒 AN UNREAD TILE SAYS WHAT IT WOULD TAKE TO READ IT. "Unknown" with no next step is a tile the
+    // admin learns to ignore, which is how a board full of grey becomes wallpaper.
+    note: x.activeUsers === null || x.activeUsers === undefined
+      ? 'Not measured here — the 24-hour active count is on the Business panel; a live figure needs a '
+        + 'per-request user counter this route does not have.'
+      : 'People using NavBharatAI right now. No ceiling — it is the other tiles that have limits.',
   });
   tiles.push({
     id: 'requests',
@@ -204,7 +209,13 @@ export function loadBoard(r: LoadReadings | null | undefined): LoadTile[] {
     value: x.buildsRunning ?? null,
     cap: null,
     display: displayOf(x.buildsRunning, null, 'building'),
-    note: 'Apps being built right now. Each one holds a cloud machine while it runs.',
+    // ⚠️ PER-INSTANCE, AND IT SAYS SO. No process can count its siblings' builds, and several run at
+    // once — presenting one instance's number as the platform's would understate exactly the load this
+    // tile exists to show. Stated in the note rather than left for the admin to discover.
+    note: x.buildsRunning === null || x.buildsRunning === undefined
+      ? 'Not measured. Apps being built right now — each one holds a cloud machine while it runs.'
+      : 'Apps being built right now ON THIS SERVER (several servers run at once). Each one holds a '
+        + 'cloud machine while it runs.',
   });
   tiles.push({
     id: 'sandboxes',
@@ -295,7 +306,8 @@ export function loadBoard(r: LoadReadings | null | undefined): LoadTile[] {
     cap: null,
     display: money === null ? 'unknown' : `₹${money.toFixed(2)}`,
     note: moneyLevel === 'unknown'
-      ? 'Could not read spend against recovery.'
+      ? 'Not measured yet — it needs our real AI + VM cost compared against what users were actually '
+        + 'billed. The cost half is now real (see the Monitor); the comparison arrives with hosting metering.'
       : money && money > 0
         ? 'Spend not recovered from users in this window. Free-tier usage is deliberate; anything else is a leak.'
         : 'Every rupee spent in this window was recovered or deliberate.',

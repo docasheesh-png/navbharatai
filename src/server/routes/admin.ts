@@ -39,6 +39,7 @@ import { parseStatusFilter, parseDateFilter, sinceMsFor, buildMatchesFilters, st
 import { sandboxStore } from '../AgentV3/SandboxStore';
 import { liveSandboxNote, type LiveSandboxCount } from '../AgentV3/liveSandboxCount';
 import { buildActuator } from './actuatorFactory';
+import { runningBuildCount } from './agentv3';
 import { tallyHandover, projectHandover, handoverHeadline, handoverSample } from '../AgentV3/sandboxHandover';
 import { tallyPauseCauses } from '../AgentV3/sandboxLifetime';
 import { tallyMinutes, tallyStarts } from '../AgentV3/sandboxSessions';
@@ -1863,6 +1864,44 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
           }
         }
       }
+    } catch { /* unknown */ }
+
+    // ── THE THREE TILES THAT READ "unknown" BECAUSE NOTHING FED THEM (2026-09-12) ──────────────────
+    //
+    // The board showed 5 of 12 ceilings as not measured, and three of them had a real source sitting a
+    // few lines away — the Monitor was already reading two of them on the very same page. An unread
+    // ceiling is not a calm one; it may already be full. Each of these degrades to null on failure,
+    // which the board renders as unknown, so nothing here can invent a healthy number.
+
+    // AI load — the provider 429/error rate. The same counters the health score already grades on.
+    try {
+      const stats = getProviderStats();
+      let req = 0; let err = 0;
+      for (const st of Object.values(stats || {})) {
+        req += Number(st?.requestCount) || 0;
+        err += Number(st?.errorCount) || 0;
+      }
+      // 🔒 No requests ⇒ no RATE. Zero over zero is not "healthy", it is "nothing happened", and
+      // reporting 0% there would turn an idle window into a clean bill of health.
+      if (req > 0) readings.providerErrorRate = err / req;
+    } catch { /* unknown */ }
+
+    // Sandbox load — live E2B machines. The SAME reading the Monitor's "Live sandboxes" tile uses, so
+    // the two cannot tell different stories about the same number.
+    try {
+      const actuator = buildActuator();
+      if (typeof actuator.countRunningSandboxes === 'function') {
+        const live = await actuator.countRunningSandboxes();
+        // `truncated` means the provider's list was cut short — a partial count is not a count, and
+        // understating live machines is exactly the way this tile would mislead.
+        if (live && typeof live.running === 'number' && !live.truncated) readings.sandboxesLive = live.running;
+      }
+    } catch { /* unknown */ }
+
+    // Build load — builds running on THIS instance. Honest per-instance: no process can count its
+    // siblings' builds, and the tile's own note says so rather than passing one instance off as the fleet.
+    try {
+      readings.buildsRunning = runningBuildCount();
     } catch { /* unknown */ }
 
     // Publish channels against their cap (§10).

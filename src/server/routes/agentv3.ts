@@ -1708,6 +1708,18 @@ export interface RunningBuild {
 const runningBuilds = new Map<string, RunningBuild>();
 
 /**
+ * How many builds this INSTANCE is running right now.
+ *
+ * Exported for the admin load board, whose "Build load" tile read `unknown` because nothing exposed
+ * this — a ceiling nobody can see is a hope, not a trigger. Per-instance by nature: no process can
+ * count its siblings' builds, and the tile says so rather than presenting one instance's number as
+ * the platform's.
+ */
+export function runningBuildCount(): number {
+  return runningBuilds.size;
+}
+
+/**
  * TEST-ONLY seam (VITEST): register/clear a running build under a key so the /stop and /attach identity
  * guards (T0-9 — match by VERIFIED uid, never a claimed body.userId) can be regression-tested;
  * `runningBuilds` is module-internal. A hard no-op outside tests, so it can never affect production.

@@ -148,3 +148,57 @@ describe('loadBoard — every ceiling §12 found has a tile', () => {
     expect(money.display).toBe('₹240.50');
   });
 });
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// THE TILES THAT READ "unknown" BECAUSE NOTHING FED THEM (2026-09-12).
+//
+// The live board showed 5 of 12 ceilings as not measured — and three of them had a real source a few
+// lines away in the same route, one of which the Monitor on the same page was already reading. An
+// unread ceiling is not a calm one; it may already be full.
+//
+// These tests defend the two properties that make feeding them safe: a measured tile must not claim
+// more than it measured, and an unmeasured one must say what it would take to measure it.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe('the newly-fed ceilings', () => {
+  const tile = (readings: Parameters<typeof loadBoard>[0], id: string) =>
+    loadBoard(readings).find((t) => t.id === id)!;
+
+  it('AI load grades the real provider error rate', () => {
+    expect(tile({ providerErrorRate: 0 }, 'ai').level).toBe('ok');
+    expect(tile({ providerErrorRate: 0.5 }, 'ai').level).not.toBe('unknown');
+  });
+
+  it('🔒 no requests means no RATE — an idle window is not a clean bill of health', () => {
+    // The route only sets providerErrorRate when requests > 0; absent must stay unknown here.
+    expect(tile({}, 'ai').level).toBe('unknown');
+  });
+
+  it('sandbox load renders a real count', () => {
+    const t = tile({ sandboxesLive: 3 }, 'sandboxes');
+    expect(t.value).toBe(3);
+    expect(t.level).not.toBe('unknown');
+  });
+
+  it('🔒 the build tile SAYS it is per-server once it has a number', () => {
+    // Several instances run at once; presenting one instance's builds as the platform's would
+    // understate exactly the load this tile exists to show.
+    expect(tile({ buildsRunning: 2 }, 'builds').note).toMatch(/this server/i);
+    expect(tile({ buildsRunning: 2 }, 'builds').value).toBe(2);
+  });
+
+  it('🔒 an unmeasured tile says what it would take to measure it', () => {
+    // "Unknown" with no next step is a tile the admin learns to ignore, and a board full of grey
+    // becomes wallpaper.
+    for (const id of ['users', 'money', 'builds']) {
+      const t = tile({}, id);
+      expect(t.level).toBe('unknown');
+      expect(t.note.toLowerCase()).toMatch(/not measured|needs/);
+    }
+  });
+
+  it('🔒 zero is still zero — a measured nothing must not read as unknown', () => {
+    expect(tile({ buildsRunning: 0 }, 'builds').value).toBe(0);
+    expect(tile({ sandboxesLive: 0 }, 'sandboxes').value).toBe(0);
+  });
+});

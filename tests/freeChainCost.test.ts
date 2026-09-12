@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { realRateFor } from '../src/server/AgentV3/providerRates';
+import { chatCostIndex, freeTierCeiling, allowedOnFreeTier } from '../src/server/AI/freeTierCostCeiling';
 
 /**
  * A FREE USER'S FALLBACK MUST CLIMB CHEAPEST-FIRST — because nobody is billed for it.
@@ -29,61 +30,102 @@ function rungsOf(builder: string): Array<{ model: string; priority: number }> {
   const end = src.indexOf('\n  }', src.indexOf('return router;', at));
   const body = src.slice(at, end);
   const out: Array<{ model: string; priority: number }> = [];
-  // Matches both tuple shapes in this file: ['model', priority] and [provider, 'model', priority].
+  // Every shape this file registers a rung in: ['model', p], [provider, 'model', p], and a direct
+  // slot(new XProvider(), p, 'model'). Missing one would silently exempt that rung from the ceiling.
   for (const m of body.matchAll(/\[\s*(?:\w+,\s*)?'([^']+)',\s*(\d+)\s*\]/g)) out.push({ model: m[1], priority: Number(m[2]) });
+  for (const m of body.matchAll(/slot\([^,]+,\s*(\d+),\s*'([^']+)'\)/g)) out.push({ model: m[2], priority: Number(m[1]) });
   return out.sort((a, b) => a.priority - b.priority);
 }
 
 const outRate = (model: string) => realRateFor('VERTEX', model).outputPerMTok;
 
 describe('the rate card still says what this test assumes', () => {
-  it('gemini pro is dearer than gemini flash — the whole reason the order matters', () => {
-    expect(outRate('gemini-2.5-pro')).toBeGreaterThan(outRate('gemini-2.5-flash'));
+  it('gemini pro is dearer than gemini flash — the reason the order ever mattered', () => {
+    expect(realRateFor('VERTEX', 'gemini-2.5-pro').outputPerMTok)
+      .toBeGreaterThan(realRateFor('VERTEX', 'gemini-2.5-flash').outputPerMTok);
   });
 
-  it('grok is the dearest rung in the card', () => {
-    expect(realRateFor('GROK').outputPerMTok).toBeGreaterThan(outRate('gemini-2.5-pro'));
+  it('🔒 ordering by OUTPUT alone would be wrong for chat, and the index says so', () => {
+    // glm-4.7 has the LOWER output rate and the HIGHER chat cost — the exact trap the blended index
+    // exists to avoid. If this ever stops being true the weight or the card changed; re-read both.
+    expect(realRateFor('GLM', 'glm-4.7').outputPerMTok)
+      .toBeLessThan(realRateFor('VERTEX', 'gemini-2.5-flash').outputPerMTok);
+    expect(chatCostIndex('GLM', 'glm-4.7'))
+      .toBeGreaterThan(chatCostIndex('VERTEX', 'gemini-2.5-flash'));
   });
 });
 
-describe('buildFree — the paid rungs climb cheapest-first', () => {
+describe("the admin's ceiling — nothing dearer than kimi-k2.7 on the FREE ladder", () => {
   const rungs = rungsOf('buildFree');
+  const provFor = (m: string) => (m.includes('glm') ? 'GLM' : m.includes('kimi') ? 'KIMI' : 'VERTEX');
 
   it('registers a real ladder', () => {
-    expect(rungs.length).toBeGreaterThanOrEqual(3);
+    expect(rungs.length).toBeGreaterThanOrEqual(4);
   });
 
-  it('🔒 no rung is dearer than the one AFTER it — an expensive model is never tried first', () => {
-    const priced = rungs.map((r) => ({ ...r, out: outRate(r.model) }));
+  it('🔒 EVERY rung is at or below the line the admin drew', () => {
+    for (const r of rungs) {
+      expect(allowedOnFreeTier(provFor(r.model), r.model), `${r.model} (p${r.priority})`).toBe(true);
+      expect(chatCostIndex(provFor(r.model), r.model)).toBeLessThanOrEqual(freeTierCeiling());
+    }
+  });
+
+  it('🔒 the ceiling is enforced at REGISTRATION, not only by this test', () => {
+    // A test protects the repo; the runtime check protects the BILL — including on a branch where
+    // nobody ran the suite. A refused rung logs loudly rather than vanishing.
+    expect(src).toContain('if (!allowedOnFreeTier(label, model))');
+    expect(src).toContain('REFUSED ${model}');
+    expect(src).toContain('registerFree(new GlmProvider(), 5, \'glm-4.7\', \'GLM\')');
+  });
+
+  it('🔒 the models above the line are GONE, not demoted', () => {
+    const src2 = src.slice(src.indexOf('private static buildFree('), src.indexOf('private static buildPro('));
+    expect(src2).not.toContain('gemini-2.5-pro');
+    expect(src2).not.toContain('GrokProvider');
+    expect(src2).not.toContain('AnthropicProvider');
+  });
+
+  it('🔒 no rung is dearer than the one AFTER it, by the CHAT index', () => {
+    const priced = rungs.map((r) => ({ ...r, c: chatCostIndex(provFor(r.model), r.model) }));
     for (let i = 1; i < priced.length; i++) {
-      expect(
-        priced[i].out,
-        `${priced[i - 1].model}(p${priced[i - 1].priority}) → ${priced[i].model}(p${priced[i].priority})`,
-      ).toBeGreaterThanOrEqual(priced[i - 1].out);
+      expect(priced[i].c, `${priced[i - 1].model}(p${priced[i - 1].priority}) → ${priced[i].model}(p${priced[i].priority})`)
+        .toBeGreaterThanOrEqual(priced[i - 1].c);
     }
   });
 
-  it('🔒 gemini-2.5-pro is NOT the first paid fallback — that was the bug, at 4× the price', () => {
-    const first = rungs[0];
-    expect(first.model).not.toBe('gemini-2.5-pro');
-    const pro = rungs.find((r) => r.model === 'gemini-2.5-pro');
-    const flash = rungs.find((r) => r.model === 'gemini-2.5-flash');
-    expect(pro && flash && pro.priority > flash.priority).toBe(true);
+  it('the PAID universes keep every rung they had — this ceiling is the free ladder\'s alone', () => {
+    const pro = src.slice(src.indexOf('private static buildPro('), src.indexOf('private static buildProfessional('));
+    expect(pro).toContain('gemini-2.5-pro');
+    expect(pro).toContain('GrokProvider');
+    expect(pro).toContain('AnthropicProvider');
+  });
+});
+
+describe('the pinned model must reach the STREAMING path — without this the ceiling is decoration', () => {
+  /**
+   * 🔴 The bug that hid the first one. `slot()` pins a model per rung, but `executeStream` had no
+   * model parameter at all, and VertexProvider streamed `this.modelPro` regardless. Chat STREAMS —
+   * so every Vertex rung streamed gemini-2.5-pro no matter which rung won, and re-ordering the ladder
+   * would have changed nothing on the path that actually carries the traffic.
+   */
+  it('🔒 slot() passes its model into executeStream', () => {
+    expect(src).toContain('base.executeStream!(p, sys, cb, model)');
   });
 
-  it('🔒 grok stays the LAST resort — it is dearer than every Claude tier', () => {
-    const at = src.indexOf('private static buildFree(');
-    const body = src.slice(at, src.indexOf('return router;', at));
-    const grokPriority = Number(/grok\.priority = (\d+)/.exec(body)?.[1]);
-    expect(grokPriority).toBeGreaterThan(Math.max(...rungs.map((r) => r.priority)));
+  it('🔒 the contract carries a model, and Vertex no longer hardcodes pro when streaming', () => {
+    const types = readFileSync(join(process.cwd(), 'src/server/AI/Router/ProviderTypes.ts'), 'utf8');
+    expect(types).toContain('onChunk: (text: string) => void, model?: string');
+    const vertex = readFileSync(join(process.cwd(), 'src/server/AI/Router/providers/VertexProvider.ts'), 'utf8');
+    const at = vertex.indexOf('async executeStream');
+    expect(vertex.slice(at, at + 400)).toContain('model: modelName || this.modelPro');
   });
 
-  it('nothing was REMOVED — every model that could answer before still can', () => {
-    const models = rungs.map((r) => r.model);
-    for (const m of ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite']) {
-      expect(models, m).toContain(m);
+  it('every streaming provider accepts the pin, so no rung can silently ignore it', () => {
+    for (const f of ['VertexProvider', 'GeminiProvider', 'GlmProvider', 'GrokProvider', 'AnthropicProvider']) {
+      const p = readFileSync(join(process.cwd(), `src/server/AI/Router/providers/${f}.ts`), 'utf8');
+      const at = p.indexOf('async executeStream');
+      expect(p.slice(at, at + 200), f).toMatch(/onChunk: \(text: string\) => void, model(Name)?\?: string/);
     }
-    expect(src.slice(src.indexOf('private static buildFree('))).toContain('new GrokProvider()');
   });
 });
 

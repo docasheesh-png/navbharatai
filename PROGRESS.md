@@ -49272,3 +49272,28 @@ is not expressible — and never assigns. Both writers use it, transactionally.
 **Two findings came from my own new tests rather than from reading**: the price-order test caught that
 `gemini-2.5-pro` was still ahead of two cheaper direct-Gemini rungs after the first fix, and the mirror
 test pinned the Pass-buyer case the old assignment got wrong.
+
+### 2026-09-12 (fourth pass) — the admin's price ceiling, and the bug that would have made it decoration
+
+The admin, shown the whole rate card, drew a line under `kimi-k2.7`: *"bas yahi tak rakho"*, and accepted
+leaks 2–5. Implementing the ceiling turned up the part of leak 1 I had MISSED and already reported as
+fixed.
+
+**`slot()` could not pin a model on the streaming path.** `executeStream` had no model parameter at all,
+and `VertexProvider.executeStream` hardcoded `this.modelPro`. Chat streams. So every Vertex rung streamed
+`gemini-2.5-pro` regardless of which rung won — my re-order fixed only the NON-streaming path, while
+reading as a complete fix. Corrected to the admin the moment it was found. The model now rides the stream
+through all five providers.
+
+**The ceiling is a rule in money, not a list of ids** (`freeTierCostCeiling.ts`), derived from the rate
+card so a repricing moves it, and enforced by a test against every rung. `gemini-2.5-pro` and grok are
+removed from the free ladder; PRO and PROFESSIONAL are untouched and a test asserts that too.
+
+**The index is input-weighted, and that flips an answer.** Ordering by the output column would put
+`glm-4.7` ($2.20) ahead of `gemini-flash` ($2.50) — but chat is input-heavy and glm-4.7's input is double,
+so it is DEARER per turn. They break even exactly when output equals input, which a chat turn never does.
+`CHAT_INPUT_WEIGHT = 8` is labelled an assumption, not a measurement.
+
+**Honest cost of the ceiling:** with the last resorts gone, a free turn where GLM and both Google doors
+fail at once returns an honest "busy" rather than an answer — the same trade the professional free tier
+already makes in writing.

@@ -64,5 +64,16 @@ export interface AIProvider {
   lastResort?: boolean;
   execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string, images?: string[]): Promise<AIProviderResponse>;
   healthCheck(): Promise<boolean>;
-  executeStream?(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void): Promise<string>;
+  /**
+   * Stream a reply.
+   *
+   * 🔴 `model` WAS MISSING UNTIL 2026-09-12, AND THAT WAS A MONEY BUG, NOT A TIDINESS ONE.
+   * `AIRouterManager.slot()` pins a model per RUNG — it is how one provider serves as three ladder
+   * steps at three different prices. Without this parameter the pin could only reach `execute()`, so
+   * every STREAMED turn ran the provider's own hardcoded default no matter which rung won. On Vertex
+   * that default is `gemini-2.5-pro` ($10/MTok out), so the free chat's cheap rungs were streaming on
+   * the DEAREST model while the ladder read as if they were not. Re-ordering the rungs could not have
+   * fixed it; the pin had nowhere to go.
+   */
+  executeStream?(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string): Promise<string>;
 }

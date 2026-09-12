@@ -1178,6 +1178,38 @@ allowance checked and nothing metered**. Now the allowance is resolved LAZILY, t
 is about to touch a paid provider and BEFORE that provider is called, and only a PAID delivery burns it —
 a free image still passes with no gate lookup, so the ordinary path is unchanged.
 
+**🔴 1b. THE SECOND BUG INSIDE LEAK 1 — and it HID the first, so re-ordering alone would have been
+decoration (found 2026-09-12 while answering "gemini se sasta koi ho sakta hai?").** `slot()` is how ONE
+provider serves as several ladder rungs at several prices — it pins a model per rung. But `executeStream`
+had **no model parameter at all**, and `VertexProvider.executeStream` hardcoded `this.modelPro`. **Chat
+STREAMS.** So on the path that carries the actual traffic, EVERY Vertex rung ran `gemini-2.5-pro`
+regardless of which rung won, and the ladder's order was cosmetic. The model now rides the stream
+(`executeStream(prompt, systemPrompt, onChunk, model?)`, every provider honouring it, `slot()` passing
+it); without that, the ceiling below would be decoration too. ⚠️ **I reported leak 1 as fixed by the
+re-order before finding this — the re-order alone fixed only the non-streaming path.** Test-locked:
+`tests/freeChainCost.test.ts` asserts the pin reaches `executeStream` on all five providers.
+
+**🔴 1c. THE ADMIN'S PRICE CEILING (mandated 2026-09-12).** Shown the whole rate card, the admin drew a
+line under `kimi-k2.7` — *"bas yahi tak rakho"*. So **`gemini-2.5-pro` ($10/MTok out) and grok ($15) are
+REMOVED from the free ladder, not demoted**, and Claude was never there. The rule is stated in MONEY, not
+as a list of ids (`src/server/AI/freeTierCostCeiling.ts`): nothing whose chat cost exceeds `kimi-k2.7`'s
+may serve a free turn, whatever it is called — so a rung added later at any price above the line fails CI
+rather than reaching a bill. The ceiling is DERIVED from the rate card, so a repriced kimi moves it.
+⚠️ **THE INDEX IS INPUT-WEIGHTED, AND ORDERING BY THE OUTPUT COLUMN ALONE IS WRONG FOR CHAT.** A grounded
+turn sends a large system prompt, the history and two fetched pages, and returns a few hundred tokens —
+it is input-heavy. `glm-4.7` ($0.60 in / $2.20 out) looks cheaper than `gemini-flash` ($0.30 / $2.50) on
+the output column and is DEARER for chat; they break even exactly when output equals input, which chat
+never does. `CHAT_INPUT_WEIGHT = 8` is an ASSUMPTION, labelled as one — retune that single constant when
+the chat route's token logs give a real ratio.
+🔒 **WHAT THE CEILING COSTS, STATED PLAINLY:** with the last resorts gone, a free chat turn where GLM and
+BOTH Google doors are failing at once now returns an honest "busy" instead of an answer. That is the trade
+the admin chose, and it is the SAME trade `buildProfessionalFreeFallback` already makes in writing. **PRO
+and PROFESSIONAL keep every rung** — the ceiling is the FREE ladder's alone, and a test asserts that.
+⚠️ The final rung, `glm-4.7`, shares ONE key with the flash leader: when the leader failed because that
+KEY was rate-limited, this rung usually fails too. It earns its place on a model-specific failure, not on
+a 429 storm, and it is NOT a substitute for a genuinely independent provider — **Kimi has no chat provider
+in this repo** (only the build engine has one), so adding it is a build, not a config change.
+
 🔒 **THE CLASS, NAMED SO IT IS RECOGNISED NEXT TIME: A FREE-FIRST LADDER WHOSE PAID RUNGS ARE UNGOVERNED.**
 Leaks 1 and 5 are the same mistake in two features — the cheap/free leader is reasoned about as if it
 were the whole ladder, and the fallback nobody expects to fire is left dearest-first (1) or unmetered

@@ -2,6 +2,7 @@ import { AnthropicProvider } from './Router/providers/AnthropicProvider';
 import { GeminiProvider } from './Router/providers/GeminiProvider';
 import { VertexProvider } from './Router/providers/VertexProvider';
 import { GrokProvider } from './Router/providers/GrokProvider';
+import { allowedOnFreeTier, chatCostIndex, freeTierCeiling } from './freeTierCostCeiling';
 import { GlmProvider } from './Router/providers/GlmProvider';
 import { AIProvider } from './Router/ProviderTypes';
 import { AIRouter } from './Router/AIRouter';
@@ -13,8 +14,11 @@ function slot(base: AIProvider, priority: number, model: string): AIProvider {
     priority,
     healthCheck: () => base.healthCheck(),
     execute: (p, s, _, sys) => base.execute(p, s, model, sys),
+    // 🔴 THE MODEL MUST RIDE THE STREAM TOO. Dropping it here is what made every slotted rung stream
+    // on its provider's hardcoded default — on Vertex, `gemini-2.5-pro` at $10/MTok — so the cheap
+    // rungs of the FREE ladder were, on the streaming path chat actually uses, the dearest model.
     executeStream: base.executeStream
-      ? (p, sys, cb) => base.executeStream!(p, sys, cb)
+      ? (p, sys, cb) => base.executeStream!(p, sys, cb, model)
       : undefined,
   };
 }
@@ -49,29 +53,33 @@ export class AIRouterManager {
 
   static reset() { this.instanceFree = null; this.instancePro = null; this.instanceProfessional = null; this.instanceProfessionalFree = null; this.instanceProfessionalFreeFallback = null; }
 
-  // FREE: GLM-flash (free leader) → Vertex flash-lite → flash → pro → Gemini → Grok (last).
-  // Claude NEVER used in free.
+  // FREE: GLM-flash (free leader) → Gemini flash-lite/flash on both Google doors → GLM-4.7.
+  // Claude NEVER used in free. Nothing dearer than `kimi-k2.7` — see the ceiling below.
   //
-  // 🔴 THE ORDER OF THE PAID RUNGS IS A MONEY DECISION, AND IT WAS BACKWARDS (fixed 2026-09-12).
-  // The first paid fallback used to be `gemini-2.5-pro`, the DEAREST model on the Gemini card —
-  // $10/MTok out against flash's $2.50 (`providerRates.ts`) — with the cheap flash rungs sitting
-  // BELOW it. So the moment GLM-flash rate-limited (the 429 storm this repo has already lived
-  // through), every free chat turn cost 4× what the rung under it would have, and free chat is not
-  // wallet-charged, so all of it was ours.
+  // 🔴 THE ADMIN DREW THE LINE (2026-09-12). Shown the whole rate card, they marked it up to
+  // `kimi-k2.7` and said "bas yahi tak rakho". So `gemini-2.5-pro` ($10/MTok out) and grok ($15) are
+  // GONE from the free ladder — not demoted, removed. `freeTierCeiling()` states that rule in money
+  // rather than as a list of ids, and `tests/freeChainCost.test.ts` enforces it against the live rate
+  // card, so a rung added later at any price above the line fails CI instead of reaching a bill.
   //
-  // 🔒 THE POLICY WAS ALREADY WRITTEN DOWN — in `buildProfessionalFreeFallback` below, verbatim:
-  // "Vertex (cheap Gemini on Google), NEVER Grok / direct Gemini / Claude … so a free user can never
-  // trigger the pricier paid providers. gemini-2.5-flash primary → -flash-lite (cheaper) fallback."
-  // The professional free tier obeyed it; this one, which every ordinary user hits, did not. That is
-  // the bug: not a missing rule, a rule applied in one universe and not its twin.
+  // 🔴 TWO BUGS PRODUCED THE ORIGINAL LEAK, AND THE SECOND HID THE FIRST.
+  // (1) The paid rungs were registered dearest-first: `gemini-2.5-pro` sat above the flash rungs, so
+  //     a rate-limited leader fell to the DEAREST model. Reordering fixes that — on the non-streaming
+  //     path.
+  // (2) `slot()` could not pin a model on the STREAMING path at all (no `model` parameter existed on
+  //     `executeStream`), and `VertexProvider.executeStream` hardcoded `this.modelPro`. Chat streams.
+  //     So on the path that actually matters, EVERY Vertex rung ran `gemini-2.5-pro` regardless of
+  //     which one won, and re-ordering alone would have changed nothing while reading as a fix. The
+  //     model now rides the stream; without that, this ceiling would be decoration.
   //
-  // NOTHING IS REMOVED — every provider that could answer before can still answer, so resilience is
-  // unchanged. They are climbed cheapest-first instead of dearest-first, and the two most expensive
-  // models on the card (gemini-pro $10, grok $15) are now genuinely last resorts rather than the
-  // routine path.
+  // 🔒 WHAT REMOVING THE LAST RESORTS COSTS, STATED PLAINLY: if GLM and both Google doors are all
+  // failing at once, a free chat turn now returns an honest "busy" instead of an answer. That is the
+  // deliberate trade the admin chose, and it is the SAME trade `buildProfessionalFreeFallback` below
+  // already makes in writing — "a free build must never silently escalate to a paid provider". PRO and
+  // PROFESSIONAL keep every rung they had; this ceiling is the FREE ladder's alone.
   private static buildFree(): AIRouter {
     const router = new AIRouter("free");
-    console.log('[ROUTER_MGR] Building FREE chain: GLM-flash(free) → flash-lite → flash → pro(last Gemini) → Grok(last resort)');
+    console.log('[ROUTER_MGR] Building FREE chain: GLM-flash(free) → flash-lite → flash (Vertex, then Gemini) → GLM-4.7 — capped at the kimi-k2.7 price line');
 
     // Free, fast leader: GLM-4.7-Flash ($0 in/out on Z.AI). Self-gates on GLM_API_KEY
     // (healthCheck) so this is inert until the key is set; on failure/rate-limit the
@@ -85,10 +93,25 @@ export class AIRouterManager {
 
     // Current Gemini models only — gemini-2.0-flash / gemini-1.5-* are RETIRED and 404
     // at the provider, making those fallback slots dead weight that only added latency.
-    // ONE ladder across both Google doors, ordered by PRICE rather than by provider. Vertex leads
-    // among equals (it is the free universe's service-account auth, so it needs no extra key), but the
-    // cheap rungs of BOTH doors are exhausted before the dear one is touched. `gemini-2.5-pro` sits
-    // last of the Geminis: still there when everything cheaper has failed, never the routine path.
+    // ONE ladder across both Google doors, ordered by the CHAT cost index (input-weighted — a chat
+    // turn is input-heavy, so the output column alone orders them wrongly). Vertex leads among equals
+    // because it is the free universe's service-account auth and needs no extra key.
+    //
+    // 🔒 THE CEILING IS ENFORCED HERE, AT REGISTRATION — not only in CI. A test that fails on a dear
+    // rung protects the repo; this protects the BILL, including on a branch nobody ran the suite on.
+    // A refused rung says so loudly in the server log rather than vanishing, because a ladder that is
+    // quietly shorter than it reads is how the original leak stayed invisible.
+    const registerFree = (prov: AIProvider, priority: number, model: string, label: string) => {
+      if (!allowedOnFreeTier(label, model)) {
+        console.warn(
+          `[ROUTER_MGR] FREE: REFUSED ${model} — chat cost ${chatCostIndex(label, model).toFixed(2)} is above the ` +
+          `free-tier ceiling ${freeTierCeiling().toFixed(2)} (the kimi-k2.7 line). Free chat never pays more than that.`,
+        );
+        return;
+      }
+      try { router.registerProvider(slot(prov, priority, model)); } catch {}
+    };
+
     const vertex = new VertexProvider();
     const gemini = new GeminiProvider();
     ([
@@ -96,21 +119,15 @@ export class AIRouterManager {
       [vertex, 'gemini-2.5-flash',      2],
       [gemini, 'gemini-2.5-flash-lite', 3],
       [gemini, 'gemini-2.5-flash',      4],
-      [vertex, 'gemini-2.5-pro',        5],
-    ] as const).forEach(([prov, m, p]) => {
-      try { router.registerProvider(slot(prov, p, m)); } catch {}
-    });
+    ] as const).forEach(([prov, m, p]) => registerFree(prov, p, m, 'VERTEX'));
 
-    try {
-      // LAST, and deliberately so: grok is $15/MTok out — the dearest model in the card, dearer than
-      // every Claude tier. It is kept only as the final "the app must never break" rung, reached when
-      // GLM, Vertex and Gemini have all failed. Do not promote it for quality reasons without pricing
-      // the change: on the free tier that cost has no one to bill.
-      const grok = new GrokProvider();
-      grok.priority = 9;
-      router.registerProvider(grok);
-      console.log('[ROUTER_MGR] FREE: Grok registered as final fallback (dearest rung — last resort only)');
-    } catch {}
+    // GLM's cheap coder as the final rung — under the ceiling, and the only rung left that is not
+    // Google, so a Google-wide outage still has somewhere to go.
+    // ⚠️ HONEST CAVEAT: it shares ONE key with the flash leader. When the leader failed because that
+    // KEY was rate-limited, this rung will usually fail too — it earns its place on a model-specific
+    // failure, not on a 429 storm. It costs nothing to keep, and it is not a substitute for a second
+    // provider; a genuinely independent rung (Kimi) has no chat provider in this repo yet.
+    registerFree(new GlmProvider(), 5, 'glm-4.7', 'GLM');
 
     return router;
   }

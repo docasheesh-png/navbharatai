@@ -81,12 +81,12 @@ export class GlmProvider implements AIProvider {
     };
   }
 
-  async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void): Promise<string> {
+  async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string): Promise<string> {
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
     if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
     messages.push({ role: 'user', content: prompt });
     const stream = await this.client.chat.completions.create({
-      model: GlmProvider.model(),
+      model: model || GlmProvider.model(),
       messages,
       max_tokens: 8000,
       stream: true,

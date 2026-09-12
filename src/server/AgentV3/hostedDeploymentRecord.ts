@@ -34,11 +34,14 @@ export async function recordHostedDeployment(opts: {
   userId: string | null;
   url: string;
   fileCount: number;
+  /** The Cloud Run service the deploy actually created. Stored, never re-derived — see DeploymentRecord. */
+  service?: string;
 }): Promise<void> {
   if (!opts.workspaceId || !opts.url) return;
   try {
     await deploymentStore.record(opts.workspaceId, opts.userId, opts.url, opts.fileCount, {
       providerId: NAVBHARAT_CLOUD_PROVIDER,
+      ...(opts.service ? { service: opts.service } : {}),
       firstParty: true,
       status: 'active',
     });

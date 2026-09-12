@@ -22,7 +22,7 @@
 // before it moves a single rupee of anyone's balance.
 
 import { chatTurnCost, sumChatTurnCosts, type ChatTurnUsage, type ChatTurnCost } from './chatSpend';
-import { debitWalletForAiUsage } from './walletDebit';
+import { debitWalletRolledUp } from './walletDebit';
 
 /** The master switch. Off unless explicitly enabled, so shipping this changes nothing by itself. */
 export function aiWalletSpendEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -169,7 +169,7 @@ async function applyAiCharge(
 ): Promise<AiChargeResult> {
   if (!decision.charge || !ctx.userId) return { ...decision, debited: false, tokensDebited: 0 };
 
-  const res = await debitWalletForAiUsage(db, ctx.userId, {
+  const res = await debitWalletRolledUp(db, ctx.userId, {
     billedInr: decision.billedInr,
     rollupRef: aiSpendRollupRef(nowMs),
     description: AI_SPEND_LEDGER_LABEL,

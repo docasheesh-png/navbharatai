@@ -251,12 +251,17 @@ export async function debitWalletForBuild(
 }
 
 /**
- * Atomically debit a user's wallet for one SMALL AI turn, rolled up into a per-bucket ledger row.
+ * Atomically debit a user's wallet for one SMALL charge, rolled up into a per-bucket ledger row.
  *
  * The same wallet doc, the same transaction discipline and the same canonical-wallet resolution as
- * debitWalletForBuild — this is the chat-sized sibling, not a second money path. Never throws.
+ * debitWalletForBuild — this is the small-charge sibling, not a second money path. Never throws.
+ *
+ * ⚠️ RENAMED from `debitWalletForAiUsage` (2026-09-12) when hosting became its second caller. Nothing
+ * about it was ever AI-specific — the bucket and the ledger label are the CALLER's, which is exactly
+ * what let hosting reuse it instead of opening a third money path. The old name would have made a
+ * daily hosting charge read as an AI charge to whoever next opened this file.
  */
-export async function debitWalletForAiUsage(
+export async function debitWalletRolledUp(
   db: any,
   userId: string,
   tx: WalletRollupTx,

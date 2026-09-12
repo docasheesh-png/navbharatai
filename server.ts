@@ -854,6 +854,36 @@ setInterval(() => {
             },
           });
           /**
+           * THE DAILY HOSTING BILL (ROADMAP §11 slice 2.1). Measure yesterday's Cloud Run usage for
+           * every app NavBharatAI hosts, price it at D5's cost + 20%, and debit the owner's ONE wallet.
+           *
+           * 🔒 `exclusive`, and this is the job the lease matters most for. Two instances running it
+           * would each try to charge the same app for the same day — and while `HostingBillingStore`'s
+           * `create` guard would refuse the second, defending a money path on a race nobody watches is
+           * not a design, it is luck. The lease is the design; the guard is the proof.
+           *
+           * 04:00 UTC, so the day it bills (the last COMPLETE UTC day) closed four hours ago and
+           * Google's monitoring has had time to settle. Nothing is charged at all unless the admin has
+           * set NAVBHARAT_BILL_HOSTING=on — until then it measures, records and reports, exactly as
+           * slice 2's admin route already does.
+           */
+          scheduler.register({
+            id: 'hosting-daily-bill',
+            exclusive: true,
+            schedule: { kind: 'dailyAtUtc', hour: 4, minute: 0 },
+            handler: async () => {
+              await import('./src/server/AgentV3/hostingBillingSweep')
+                .then(({ runHostingBillingSweep }) => runHostingBillingSweep())
+                .then((r) => {
+                  if (r.considered > 0 || !r.registryComplete) {
+                    console.log(`[hosting-bill] ${r.day}: considered ${r.considered}, charged ${r.charged} (₹${r.totalInr}), skipped ${r.skipped}${r.registryComplete ? '' : ' ⚠️ registry read INCOMPLETE — some apps may not have been billed'}`);
+                    for (const n of r.notes) console.log(`[hosting-bill] ${n}`);
+                  }
+                })
+                .catch(() => { /* billing must never affect the server; under-charging is the safe side */ });
+            },
+          });
+          /**
            * LIVE USD→INR — the rate every build's bill is converted at.
            *
            * 🔴 THE BUG THIS CLOSES (revenue audit 2026-09-10). `refreshUsdInrRate()` has existed, and

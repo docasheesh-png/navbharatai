@@ -49220,3 +49220,115 @@ immediately, which is exactly why the fix is a confirmed recovery and not a long
 engine needs the real distribution of build durations, which nobody has measured — `maxBuildSeconds`
 defaults to 30 min, so the line may simply sit below normal. Fixing the sample removes the flapping;
 changing the threshold on a guess would replace a noisy alert with a quiet wrong one.
+
+---
+
+## 2026-09-12 — THE SECRET VAULT GETS A REAL LOCK, and a Cloud Run-shaped screen behind it
+
+**The ask** (admin, verbatim): *"user jab secret and api keys par click kare to phone lock / face lock /
+pin dalna pade, tab open ho!"* … *"input box jaisa dikhna chahiye, jaisa cloud run me dikhta hai!"* …
+*"real working security ke sath!!!"*
+
+### The trap this feature is built to avoid
+
+The obvious implementation is: call the browser's biometric API, and on success render the list. **That
+protects the screen and leaves the secrets wide open.** The values would still be one ordinary
+`GET /api/secrets/:userId` away — reachable from devtools, an extension, or a stolen unlocked laptop —
+so the prompt would be decoration over an unchanged door. It is exactly the "built but not really
+working" state the second absolute rule forbids, and it would have been invisible: the screen would look
+locked and test green.
+
+So **nothing in the browser decides whether the vault opens.** The device produces a signature over a
+challenge we issued, the SERVER verifies it, and only then is a short-lived ticket minted. If
+`VaultLockGate.tsx` were deleted tomorrow, the keys would become **unreadable**, not public — which is
+the test of whether a lock is real.
+
+### What was built
+
+**`src/server/lib/deviceUnlock.ts`** — pure functions, 49 tests, verified against **real generated EC and
+RSA key pairs** rather than mocks:
+- signed stateless challenge + unlock ticket (HMAC, TTL, uid-bound)
+- `parseAuthenticatorData` — fixed offsets, no CBOR at all (see below)
+- `verifyClientData` — ceremony type, origin allow-list, cross-origin refusal, challenge MAC
+- `verifyAssertionSignature` — ES256 and RS256 through ONE code path
+- `signCounterOk`, `isFreshReauth`, `rpIdMatches`, `allowedOrigins`
+
+**Four routes** on the existing vault (`routes/secrets.ts`): `lock/challenge`, `lock/register`, `unlock`,
+`reveal`. Plus `verifyFreshAuth` in `authMiddleware.ts`, which reads `auth_time` out of the signed ID
+token.
+
+**`src/lib/vaultLock.ts` + `VaultLockGate.tsx`** — the browser half and the lock screen, and
+**`SavedKeyRows`** inside `SecretManager.tsx`: one row per key, name and value each in a real input box,
+a 🗑️ per row.
+
+### Five decisions worth defending
+
+**1 · No CBOR decoder, by using the browser's own `getPublicKey()`.** The textbook path decodes the
+attestation object (CBOR) to dig out a COSE key. A hand-rolled parser is precisely where a security bug
+hides, and a subtly-wrong verifier is worse than none because it *looks* right. The browser already
+offers the same key as SPKI DER, which Node reads directly — so the server parses 37 bytes at fixed
+offsets and nothing more.
+
+**2 · Two doors, because one door would lock people out of their own keys.** A device with no platform
+authenticator (older Android WebView, desktop without Hello) would otherwise permanently lose access to
+its API keys — a worse breach of the one absolute rule than a weaker prompt. The fallback is a genuinely
+fresh account sign-in, and it is **server-enforced**: `auth_time` is stamped by the identity provider
+inside the signed token, so a client cannot age a token forward. Both doors mint the SAME ticket, so
+every route downstream has one thing to check.
+
+**3 · `userVerified` is checked, not assumed.** WebAuthn will happily return an assertion for a mere
+*touch*. Accepting that would turn the whole feature into a button labelled "unlocked". Registration
+refuses a credential whose device did not verify the person, and so does every unlock.
+
+**4 · Domain separation, instead of reusing `previewDoor`'s signer.** Both sign "payload + expiry" with
+`SECRET_ENCRYPTION_KEY`, so sharing the helper looks like obvious de-duplication. Refused deliberately:
+a preview-door token and a vault ticket would become the same kind of string, and one future payload
+collision would let a PREVIEW token open somebody's KEYS. Distinct labels make that impossible by
+construction, and a test asserts a challenge cannot be used as a ticket or vice versa.
+
+**5 · Revealing values IS a change of posture, and it is recorded as one.** The list route's comment —
+true since the vault was built — says the ciphertext has no reason to leave the server. That was right
+while the screen showed only names. The admin asked for the Cloud Run experience, and that is a real
+requirement: a user who cannot see what they saved cannot tell a working key from a mistyped one. What
+makes it defensible is that it is ONE narrow POST route (so no value lands in a browser history or proxy
+log), unreachable without a verified unlock from seconds ago, `Cache-Control: no-store`, and **audited**.
+`GET` is untouched and still returns names only, so nothing that used to be safe became less so.
+
+### The sibling hunt — what nearly broke, and the pre-existing bug it exposed
+
+Requiring a ticket on DELETE would have **silently broken four other screens**: DatabaseSettings,
+AuthSettings, StorageSettings and MonetizationWizard each did *delete-then-save* to overwrite a key. Every
+one of those deletes would have started returning 401, leaving duplicate rows — the exact bug #2842 had
+just fixed.
+
+The fix was not to exempt them. **The save route has replaced-by-name since #2842**, so that client-side
+dance was redundant legacy — and it carried a real bug of its own: **a failure between the delete and the
+save LOST the key outright**, because the old value was already gone. The server's replace has no such
+window. All four now just save, and one fewer `listSecrets` request runs per save.
+
+`deleteSecret` was then **removed from `secretsApi.ts` entirely** rather than left in place: with the
+route requiring a ticket, that signature could only ever produce a 401, and a function that cannot
+succeed invites a future caller to hunt for a server bug that is not there.
+
+### Honest limits
+
+- **On the native Android/iOS shell the face/fingerprint door may not appear.** WebAuthn in a WebView
+  needs app-to-site association (assetlinks / associated domains) that is not set up, so those users get
+  the account-password door. It is equally server-verified, and stating this beats claiming Face ID
+  everywhere. ⚠️ The wrong "fix" is a biometric plugin returning a boolean — unverifiable, hence theatre.
+- **The delete is permanent.** There is no undo, which is what *"puri row delete ho jaye"* asks for; the
+  row asks once to confirm, because one stray tap on a phone must not destroy a key a live app depends on.
+- **The audit records that a key was read, never the key** — test-locked with a distinctive value, after
+  my first attempt at that assertion used the value `'v'`, which occurs inside the word "reveal" and so
+  could not fail.
+
+### Tests added (93)
+
+`deviceUnlock.test.ts` (49, real key pairs) · `vaultUnlockEndToEnd.test.ts` (17 — registers, signs,
+unlocks, reveals, then breaks each step in turn: wrong key, no user-verification, wrong origin, wrong
+rpId, replayed challenge, unknown credential, counter replay) · `vaultRevealLock.test.ts` (10) ·
+`vaultLockWiring.test.ts` (17) · `routesSecretsIdor.test.ts` rewritten for the hard delete + ticket
+while keeping its original cross-user IDOR property.
+
+`tests/helpers/routeTestUtils.ts` gained `req.header` and `res.set` — both exist on real Express, and a
+harness missing a verb fails a route that is perfectly correct.

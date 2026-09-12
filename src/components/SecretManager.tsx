@@ -1,13 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { Lock, Eye, EyeOff, Save, Trash2, ShieldCheck } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Lock, Eye, EyeOff, Save, Trash2, ShieldCheck, AlertTriangle } from 'lucide-react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase'; // shared handle → navbharat-prod (NOT the (default) DB)
 // Authenticated vault client — always attaches the signed-in user's Firebase token. Raw axios calls
 // here used to omit it, so requireUserMatch rejected every save (401) → keys never saved (admin fix).
-import { saveSecret, deleteSecret, verifySecrets, type SecretVerdict } from '../lib/secretsApi';
+import { saveSecret, verifySecrets, type SecretVerdict } from '../lib/secretsApi';
 import { findRecipeSource } from '../lib/credentialRecipes';
 import { listApps, type AppChoice } from '../lib/appList';
 import { scopeControl, saveScope, scopeSentence, secretOwnerLabel, shortAppName } from '../lib/secretScope';
+import { VaultLockGate } from './VaultLockGate';
+import { revealSecrets, deleteSecretLocked, type RevealedSecret, type UnlockState } from '../lib/vaultLock';
 
 interface Secret {
   id: string;
@@ -194,14 +196,6 @@ export const SecretManager: React.FC<{
       setCheckedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
     } finally {
       setIsVerifying(false);
-    }
-  };
-
-  const handleDeleteSecret = async (id: string) => {
-    try {
-      await deleteSecret(userId, id);
-    } catch (err) {
-      console.error('Failed to delete secret:', err);
     }
   };
 
@@ -393,43 +387,205 @@ export const SecretManager: React.FC<{
         </div>
       )}
 
-      <div className="space-y-2">
-        {visibleSecrets.map((s) => {
-          const verdict = verdicts.find((v) => v.names.includes(s.secret_name));
-          return (
-            <div key={s.id} className="bg-gray-800 p-3 rounded font-mono text-xs space-y-1">
-              <div className="flex justify-between items-center gap-2">
-                <span className="truncate">{s.secret_name}</span>
-                {/* Which app owns this key. Shown only when the user actually has apps to tell apart —
-                    and a shared key says so explicitly, because "goes to everything" is the fact most
-                    worth knowing about a payment secret. */}
-                {(apps.length > 0 || !!defaultAppId) && (
-                  <span className="shrink-0 font-sans text-[10px] text-gray-500 truncate max-w-[45%]">
-                    {secretOwnerLabel({ workspaceId: s.workspace_id, currentAppId: defaultAppId, titleOf: appTitle })}
-                  </span>
-                )}
-                <button onClick={() => handleDeleteSecret(s.id)} aria-label={`Delete ${s.secret_name}`} className="shrink-0 text-red-400 hover:text-red-300">
-                  <Trash2 size={16} />
-                </button>
+      {/* ── THE SAVED KEYS, BEHIND THE LOCK ────────────────────────────────────────────────────────
+          The list is the part that can show a real credential, so it is the part the lock wraps. The
+          form ABOVE stays open on purpose: adding a key needs no unlock, because writing a secret you
+          already hold in your hand reveals nothing — and making people authenticate to paste a key
+          they just copied from a provider's dashboard would be friction with no security behind it. */}
+      <VaultLockGate
+        userId={userId}
+        embedded={embedded}
+        render={(unlock, relock) => (
+          <SavedKeyRows
+            userId={userId}
+            unlock={unlock}
+            relock={relock}
+            metas={visibleSecrets}
+            verdicts={verdicts}
+            showOwner={apps.length > 0 || !!defaultAppId}
+            ownerLabel={(s) => secretOwnerLabel({ workspaceId: s.workspace_id, currentAppId: defaultAppId, titleOf: appTitle })}
+          />
+        )}
+      />
+    </div>
+  );
+};
+
+/**
+ * THE CLOUD RUN LAYOUT (admin 2026-09-12: "input box jaisa dikhna chahiye, jaisa cloud run me dikhta
+ * hai!").
+ *
+ * One row per key: the NAME in a box, the VALUE in a box, and a 🗑️ that removes the whole row. The boxes
+ * are real inputs rather than styled text for a reason the admin gave himself — "copy/edit user khud
+ * apne phone/desktop se kar lega". A real input is where long-press-to-copy, ⌘C and select-all already
+ * work, on every device, with no button of ours to get wrong. So the screen provides the thing the
+ * platform's own copy gesture needs, instead of re-implementing copy badly.
+ *
+ * The value starts MASKED even though the vault is unlocked. Unlocking proves who you are; it is not a
+ * reason to put four payment secrets in plain text on a screen somebody might be standing behind. One
+ * tap per row reveals, and a row whose stored value could not be decrypted says so instead of showing
+ * an empty box that would invite overwriting a key that is actually fine.
+ */
+const SavedKeyRows: React.FC<{
+  userId: string;
+  unlock: UnlockState;
+  relock: () => void;
+  metas: Secret[];
+  verdicts: SecretVerdict[];
+  showOwner: boolean;
+  ownerLabel: (s: Secret) => string;
+}> = ({ userId, unlock, relock, metas, verdicts, showOwner, ownerLabel }) => {
+  const [rows, setRows] = useState<RevealedSecret[] | null>(null);
+  const [error, setError] = useState('');
+  const [shown, setShown] = useState<Record<string, boolean>>({});
+  const [confirming, setConfirming] = useState('');
+  const [deleting, setDeleting] = useState('');
+
+  const load = useCallback(async () => {
+    setError('');
+    try {
+      setRows(await revealSecrets(userId, unlock.ticket));
+    } catch (err: unknown) {
+      const e = err as { message?: string; needsUnlock?: boolean };
+      // An expired ticket is not an error to display — it is the vault having re-locked, so say that by
+      // actually re-locking rather than leaving a dead screen with a stale message on it.
+      if (e?.needsUnlock) { relock(); return; }
+      setError(e?.message || 'Could not read your keys.');
+    }
+  }, [userId, unlock.ticket, relock]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const remove = async (id: string) => {
+    setDeleting(id);
+    setError('');
+    try {
+      await deleteSecretLocked(userId, id, unlock.ticket);
+      // Drop it locally too. The Firestore listener in the parent will agree a moment later; waiting for
+      // it would leave the deleted row on screen long enough to look like the delete failed.
+      setRows((list) => (list ?? []).filter((r) => r.id !== id));
+      setConfirming('');
+    } catch (err: unknown) {
+      const e = err as { message?: string; needsUnlock?: boolean };
+      if (e?.needsUnlock) { relock(); return; }
+      setError(e?.message || 'Could not delete the key.');
+    } finally {
+      setDeleting('');
+    }
+  };
+
+  /** Only the keys this screen's app filter is showing — the scope rules stay exactly as they were. */
+  const visibleIds = new Set(metas.map((m) => m.id));
+  const visible = (rows ?? []).filter((r) => visibleIds.has(r.id));
+
+  if (rows === null) {
+    return <p className="py-6 text-center text-xs text-gray-500">Opening your keys…</p>;
+  }
+
+  return (
+    <div className="space-y-2">
+      {error && (
+        <p className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/5 p-2.5 text-[11px] leading-snug text-red-300">
+          <AlertTriangle size={14} className="mt-px shrink-0" /> {error}
+        </p>
+      )}
+
+      {visible.length === 0 && (
+        <p className="py-6 text-center text-xs text-gray-500">No keys saved yet. Add one above.</p>
+      )}
+
+      {visible.map((row) => {
+        const verdict = verdicts.find((v) => v.names.includes(row.secret_name));
+        const isShown = !!shown[row.id];
+        const meta = metas.find((m) => m.id === row.id);
+        return (
+          <div key={row.id} className="rounded-xl border border-white/5 bg-[#0d1117] p-2.5">
+            <div className="flex items-start gap-2">
+              <div className="min-w-0 flex-1 space-y-1.5">
+                {/* NAME — readOnly, not disabled: a disabled input cannot be selected, which would break
+                    the very copy gesture these boxes exist for. Renaming a key is not an edit, it is a
+                    different key, so the name is not editable here. */}
+                <input
+                  readOnly
+                  value={row.secret_name}
+                  aria-label={`Name of ${row.secret_name}`}
+                  className="w-full rounded-lg border border-white/10 bg-black/40 px-2.5 py-2 font-mono text-xs text-indigo-200 outline-none focus:border-indigo-500/40"
+                />
+                <div className="flex items-center gap-1.5">
+                  <input
+                    readOnly
+                    type={isShown ? 'text' : 'password'}
+                    value={row.readable ? row.secret_value : ''}
+                    placeholder={row.readable ? '' : 'Saved, but this value cannot be read back'}
+                    aria-label={`Value of ${row.secret_name}`}
+                    className="w-full rounded-lg border border-white/10 bg-black/40 px-2.5 py-2 font-mono text-xs text-gray-200 outline-none focus:border-indigo-500/40 placeholder-amber-400/60"
+                  />
+                  {row.readable && (
+                    <button
+                      onClick={() => setShown((m) => ({ ...m, [row.id]: !m[row.id] }))}
+                      aria-label={isShown ? `Hide ${row.secret_name}` : `Show ${row.secret_name}`}
+                      className="shrink-0 rounded-lg border border-white/10 p-2 text-gray-400 hover:text-white"
+                    >
+                      {isShown ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  )}
+                </div>
               </div>
+
+              {/* 🗑️ DELETES THE WHOLE ROW — name and value together, for good. Two taps, because one
+                  stray tap on a phone must not destroy a key a live app depends on, and there is no
+                  undo to fall back on now that the delete is real. */}
+              <div className="shrink-0">
+                {confirming === row.id ? (
+                  <div className="flex flex-col gap-1">
+                    <button
+                      onClick={() => void remove(row.id)}
+                      disabled={deleting === row.id}
+                      className="rounded-lg bg-red-600 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-white hover:bg-red-500 disabled:opacity-50"
+                    >
+                      {deleting === row.id ? '…' : 'Delete'}
+                    </button>
+                    <button
+                      onClick={() => setConfirming('')}
+                      className="rounded-lg border border-white/10 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400 hover:text-white"
+                    >
+                      Keep
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirming(row.id)}
+                    aria-label={`Delete ${row.secret_name}`}
+                    className="rounded-lg border border-white/10 p-2 text-red-400 hover:border-red-500/40 hover:text-red-300"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 px-0.5">
+              {showOwner && meta ? (
+                <span className="text-[10px] text-gray-500">{ownerLabel(meta)}</span>
+              ) : <span />}
               {/* A key with no verdict shows NOTHING — absence of a badge means "not checked", which is
                   the truth. A grey "unknown" pill on every unverifiable key would be noise that teaches
                   people to stop reading the badges that matter. */}
               {verdict && (
-                <p
-                  className={`font-sans leading-snug ${
+                <span
+                  className={`text-[10px] leading-snug ${
                     verdict.status === 'working' ? 'text-emerald-400'
                       : verdict.status === 'rejected' ? 'text-red-400'
                         : 'text-gray-500'
                   }`}
                 >
                   {verdict.message}
-                </p>
+                </span>
               )}
             </div>
-          );
-        })}
-      </div>
+          </div>
+        );
+      })}
     </div>
   );
 };

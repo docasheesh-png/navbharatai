@@ -1090,6 +1090,28 @@ the code (it is actually read somewhere) on 2026-07-11.
   ⇒ the in-app bell only, never a silent nothing. A probe that could
   not complete from our side is "unknown" and never counts as the user's site being down.
 
+- **Secret-vault device lock (shipped 2026-09-12):** `VAULT_LOCK_ORIGINS` — ⚠️ **NOT set, and it should
+  stay unset.** A comma-separated list of the origins a WebAuthn assertion may come from; UNSET uses the
+  built-in defaults (`https://navbharatai.com`, `https://www.navbharatai.com`, plus localhost for the
+  Capacitor shell and dev), which is what production needs. Setting it **replaces** the defaults, so a
+  value that omits the live origin would refuse every device unlock — only set it to ADD a staging host,
+  and include the production origins in the same list. A malformed entry is dropped rather than widening
+  the set (test-locked), so a typo cannot turn into "any origin".
+  🔒 **There is no secret to add for this feature.** The unlock challenge and ticket are signed with the
+  `SECRET_ENCRYPTION_KEY` that already encrypts the vault, which is why tickets verify across every Cloud
+  Run instance; with it unset the code falls back to a per-process RANDOM value (never a constant in
+  source, which would let anyone with the repo forge an unlock) and a user would simply be asked to
+  unlock again whenever the load balancer moved them.
+  **What it protects, stated precisely:** `POST /api/secrets/:userId/reveal` (the ONLY route that returns
+  a decrypted key) and `DELETE /api/secrets/:userId/:secretId` (now a REAL document delete, not a
+  `deleted: true` flag) refuse without a ticket minted seconds earlier from either a verified WebAuthn
+  platform-authenticator assertion or a genuinely fresh Firebase re-auth (`auth_time` within 5 min). The
+  old `GET /api/secrets/:userId` is unchanged and still returns names only.
+  ⚠️ **On the NATIVE Android/iOS shell the device-lock half may not work**, because WebAuthn in a
+  WebView needs app-to-site association (assetlinks / associated domains) that is NOT set up — those
+  users get the account-password door, which is equally server-verified. Do not "fix" this by accepting a
+  client-side biometric boolean: a plugin's yes/no is unverifiable and would make the lock theatre.
+
 - **Outbound abuse check for published apps (shipped 2026-09-10, NavBharat Cloud slice 4):**
   `NAVBHARAT_WEB_RISK` (⚠️ **NOT set yet** — `on` turns on BOTH halves together: the publish-time
   lookup of the outside hosts an app's code points at, and the daily `outbound-rescan` job that

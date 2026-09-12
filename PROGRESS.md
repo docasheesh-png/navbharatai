@@ -48395,6 +48395,96 @@ every candidate names the modules already in the repo that back it, so nothing o
 
 ---
 
+## 2026-09-12 — Brave Search: one client, and the three levers that keep its bill small
+
+**Why now.** The admin is taking the Brave Search plan (the one remaining change that makes chat faster
+AND more accurate at once), and asked the right question before pressing the button: *"$5 kitne din
+chalega? kam to nahi padega? code aisa likhna ki kam se kam kharcha ho."*
+
+**What was actually wrong, before any cost work could begin.** The Brave request existed **twice** —
+private `braveSearch()` methods in `AgentV3/WebSearch.ts` and `EngineerAI/WebSearchClient.ts`, the same
+request with two error styles. Two copies means no single place to put a cache, a counter or a price, so
+every cost control would have had to be written twice and would have drifted the first time anyone
+touched one. Centralised into `src/server/lib/braveSearch.ts` (fourth absolute rule, step 2) — one door,
+and both callers keep their existing `.catch(() => duckDuckGo(...))`, so a Brave failure still degrades
+to the free path.
+
+**The three levers, and what each costs in freshness:**
+- **In-flight coalescing** — identical calls in the same instant share one request. Zero staleness: the
+  second caller receives the same live response the first is already waiting for.
+- **Short, freshness-aware cache** — 60 s for the tick-by-tick class (score/live/match/nifty/stock/
+  crypto), 10 min for everything else. This is the only lever that trades anything, and the trade is
+  bounded by the standing CHAT GROUNDING rule: cost may never buy staleness a user can feel.
+- **Normalisation** — case and spacing collapsed, because Brave does not distinguish them either.
+
+Nothing shortens a fetch budget or reads fewer sources. The savings come only from not repeating work.
+
+**A real bug, caught by its own test rather than by a user.** The in-flight entry was cleared in a
+detached `.finally()`, which runs one microtask AFTER the caller's continuation — so a second call
+arriving immediately could coalesce onto an **already-settled** promise and be handed a result we had
+deliberately refused to cache (an empty response, or an outage). Fixed with an explicit `settled` flag
+set in the same hop that clears the entry, so coalescing is impossible once a request is no longer live.
+The failing case is pinned in `tests/braveSearch.test.ts` and named there as the regression it is.
+
+**Plan choice, verified against code rather than assumed.** `Search`, not `Answers`, not `Spellcheck &
+Suggest`: the only endpoint this repo calls is `/res/v1/web/search`. `Answers` has no code path, would
+hand the writing of the answer to a third party (White-Label Law), and caps at 2 req/s against Search's
+50. Recorded in `CLAUDE.md` beside the two env keys (`BRAVE_API_KEY`, `BRAVE_SEARCH_CACHE`).
+
+**Open, and deliberately not guessed:** how long $5 (≈1,000 searches/month) lasts depends on what share
+of chat messages are grounded — a number nobody has measured. The `[CHAT_TTFT] path=grounded|direct`
+log shipped in #2826 already records it; read it after a few days of real traffic rather than estimating.
+
+### 2026-09-12 (same day, second pass) — the admin's own idea, adapted: free engine first where it is safe
+
+The admin asked: *"DuckDuckGo aur Brave dono ko mila kar sync kar ke kaam kare, aur jahan brave ki need
+na ho wahan duckduckgo use ho? possible nahi hai kya?"*
+
+**Possible, yes — but one reading of it had to be corrected honestly (rule 3).** MERGING both engines on
+every query would pay Brave every single time and cost strictly MORE than today. What genuinely saves
+money is the other reading: ask the FREE engine first wherever its answer is good enough, and pay only
+where the paid one earns its fee. That is `searchOrder(intent, hasBraveKey)` in `lib/braveSearch.ts`:
+
+- **`reference`** (the default — AgentV3 build lookups, Engineer AI: package versions, framework docs,
+  error meanings) → **DuckDuckGo first, Brave only as the rescue.** Worth being precise about why this
+  is safe rather than assuming it: DuckDuckGo-alone IS production's behaviour on this path today, since
+  no key is set there. So the change is today's behaviour PLUS a paid rescue, never a downgrade — and a
+  build is not a user watching a spinner, so a wasted round trip costs nothing perceptible.
+- **`live`** (only `liveSearchContext`, the chat's grounding) → **Brave first, DuckDuckGo as the free
+  rescue.** Freshness and result quality are the entire product here, and a real person is waiting.
+
+A throw and an empty result are treated identically — both mean "this one did not answer" — so the
+rescue fires on a 429 and on a blocked scrape alike. New callers default to `reference`, because a
+caller that has not thought about intent is by definition not a user-facing live question.
+
+**A test's premise was deliberately changed, and it is recorded rather than quietly rewritten.**
+`webSearchClient.test.ts` asserted "a key is set ⇒ Brave is used", which was true only while Brave was
+all-or-nothing. It now asserts the intent contract in both directions. A second isolation bug surfaced
+while doing it: the search cache is process-wide by design, so one test's paid result was being handed
+to the next test for free — it would have passed for the wrong reason. `__resetBraveSearch()` now runs
+in that suite's `beforeEach`.
+
+**The meter now reports what the free engine saved** (`freeServed`, `rescues`) beside cache hits and
+coalesced calls — still per-instance, still not a substitute for Brave's own dashboard.
+
+### 2026-09-12 (third pass) — the key itself, hardened before it was ever set
+
+The admin obtained the Brave key and asked what to put in Cloud Run. Reading the code to answer that
+found a live trap: `process.env.BRAVE_API_KEY` was read RAW, in two places, and goes straight into the
+`X-Subscription-Token` header. A value pasted with a trailing space or newline — the most likely way a
+key is entered by hand — would be sent with that whitespace, Brave would reject every call, and both
+callers' `.catch()` would fall back to DuckDuckGo **with no error anywhere**. The console would show
+the key configured, no user would see a fault, and the paid engine would simply never run. Same shape
+as the malformed `ALERT_EMAIL_FROM` that read as configured for a day.
+
+Fixed at the door, not at the call sites: `braveApiKey()` trims and treats whitespace-only as UNSET,
+and both readers now call it (the raw env read is gone and test-locked out). Separately, rule 5 (fix
+the system's honesty): a rejected Brave call now logs ONE admin-only line per status naming what is
+wrong — 401/403 points at the key, 429 at credits — and says plainly that users are unaffected. Once
+per status, because a wrong key fails on every call and would otherwise flood the log.
+
+That log line is also the verification the admin had no way to do before: no line after real traffic
+means the key is genuinely working.
 ## 2026-09-12 — GAMES: three starter templates, each shipping a compile-proven game
 
 **Admin: "games se shuru karun?" → "go ahead!!"** — the first of the two real gaps the 12-layer/template

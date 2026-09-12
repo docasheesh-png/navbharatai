@@ -8517,6 +8517,40 @@ async function noteBuildOutcome(
         }
       }
     } catch { /* abuse detection is best-effort — never blocks the turn */ }
+
+    /**
+     * CONTENT SAFETY TRIAGE (admin 2026-09-12, Phase 6) — a different question from the abuse
+     * detector above, which asks "is this person attacking the assistant?". This asks "is this
+     * request one NavBharatAI must not help with at all?".
+     *
+     * Three outcomes, and the third is almost always the answer: BLOCK refuses and records, FLAG
+     * proceeds and records, ALLOW proceeds and stores NOTHING — no document, no read, not a byte.
+     * That is what makes "we do not read your chats" true rather than aspirational: for a clean
+     * message there is nothing to read.
+     *
+     * The recording never blocks the user's turn; the DECISION is already made by then.
+     */
+    try {
+      const { triagePrompt, safetyExcerpt, blockMessage } = await import('../lib/promptSafety');
+      const triage = triagePrompt(prompt);
+      if (triage.verdict !== 'allow') {
+        const { buildSafetyFlag, recordSafetyFlag } = await import('../lib/safetyFlagStore');
+        const flaggedUid = userId || 'anon';
+        audit(
+          triage.verdict === 'block' ? 'PROMPT_BLOCKED' : 'PROMPT_FLAGGED',
+          { uid: flaggedUid, rule: triage.ruleId, class: triage.contentClass },
+          'warn',
+        );
+        void recordSafetyFlag(buildSafetyFlag({
+          uid: flaggedUid, triage, surface: 'build', excerpt: safetyExcerpt(prompt), at: Date.now(),
+        })).catch(() => { /* the decision stands either way — see recordSafetyFlag */ });
+        if (triage.verdict === 'block') {
+          res.status(403).json({ error: blockMessage() });
+          return;
+        }
+      }
+    } catch { /* triage is best-effort: an unavailable checker must never refuse a legitimate build */ }
+
     // Per-user monthly spend ceiling (R1 §3.1). When the admin has set a cap and this user
     // has reached it this month, deny new builds with an honest, specific message (HTTP 402).
     // Disabled by default and fails open on a store error, so it never locks users out wrongly.

@@ -255,6 +255,43 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     // Ensure file-only messages have a prompt
     if (!message && visionAttachments.length > 0) message = visionAttachments[0].type === 'application/pdf' ? 'Please analyze this PDF and extract all relevant information.' : 'Please describe and analyze this image.';
 
+    /**
+     * CONTENT SAFETY TRIAGE (admin 2026-09-12, Phase 6) — the same three-way check the build path
+     * runs, on the chat path, for the same reason and with the same promise: a clean message stores
+     * NOTHING. No document, no read, not a byte. The 99.9% path is one regex pass.
+     *
+     * Placed AFTER attachment extraction on purpose, so the check reads what the model will actually
+     * receive — a request pasted inside an attached document is the same request.
+     *
+     * Recording never blocks the reply, and a triage that cannot run must never refuse a legitimate
+     * question: an unavailable checker degrades to allow, loudly in the log, never to a refusal.
+     */
+    try {
+      const { triagePrompt, safetyExcerpt, blockMessage } = await import('../lib/promptSafety');
+      const triage = triagePrompt(message);
+      if (triage.verdict !== 'allow') {
+        const { buildSafetyFlag, recordSafetyFlag } = await import('../lib/safetyFlagStore');
+        const { verifyFirebaseToken } = await import('../lib/authMiddleware');
+        const flaggedUid = (await verifyFirebaseToken(req).catch(() => null)) || 'anon';
+        const { audit } = await import('../lib/audit');
+        audit(
+          triage.verdict === 'block' ? 'PROMPT_BLOCKED' : 'PROMPT_FLAGGED',
+          { uid: flaggedUid, rule: triage.ruleId, class: triage.contentClass, tier },
+          'warn',
+        );
+        void recordSafetyFlag(buildSafetyFlag({
+          uid: flaggedUid, triage, surface: 'chat', excerpt: safetyExcerpt(message), at: Date.now(),
+        })).catch(() => { /* the decision stands either way */ });
+        if (triage.verdict === 'block') {
+          // 200 with a normal reply shape, not an error: this renders in the chat bubble the user is
+          // already looking at, which is where an answer to their message belongs.
+          return res.json({ reply: blockMessage() });
+        }
+      }
+    } catch (e) {
+      console.error('[CHAT] safety triage unavailable — allowing the turn:', e);
+    }
+
     const isFree = tier === 'navbharat';
     // Free tier: always conversational — ignore canvas and build intent completely
     const hasCanvas = !isFree && !!(currentApp && typeof currentApp === 'string' && currentApp.length > 200);

@@ -64,6 +64,10 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
    * list. It would also destroy the one record the retention duty exists for: deleting an account
    * must not erase why that account's app was taken down. It has its own 180-day TTL policy below
    * instead, and the exception is disclosed in the Privacy Policy (§6) and on the Grievance page.
+   *
+   * 🔒 SO IS `safety_flags`, for the sharper version of the same reason: a record of abuse that the
+   * abuser can erase by pressing "delete my account" is not a record. It has its own 180-day policy
+   * and is disclosed in the same place.
    */
 ];
 
@@ -139,6 +143,12 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
    * nothing for ever, which is exactly the defect that made this field required.
    */
   { collection: 'takedown_records', ttlDays: 180, timestampField: 'removedAt', timestampKind: 'epochMs' },
+  /**
+   * Flagged messages — the same 180-day story as the removal records above, and for the same reason:
+   * an abuse record must outlive the account (see the exclusion note in USER_SCOPED_COLLECTIONS) and
+   * must not become a permanent file. `at: Date.now()` ⇒ `epochMs`.
+   */
+  { collection: 'safety_flags', ttlDays: 180, timestampField: 'at', timestampKind: 'epochMs' },
   // `updatedAt: new Date()` — BuildJobManager. The original policy; its type is now stated rather
   // than assumed by the purge.
   { collection: 'build_jobs', ttlDays: 90, timestampField: 'updatedAt', timestampKind: 'date' },

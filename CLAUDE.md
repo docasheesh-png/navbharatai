@@ -1204,6 +1204,28 @@ the code (it is actually read somewhere) on 2026-07-11.
   Recorded because a display name that looks nothing like the id is exactly how an API gets enabled in
   the wrong project and nobody can tell.
 
+- ✅ **THE ADMIN'S OWN QUEUE, CLEARED (admin said so 2026-09-12, verbatim: "mere karne ke liye aap jo
+  5 step bata rahe woh kar diya hai, sbhi").** Recorded hand-to-hand per this registry's own rule, the
+  same day it was said. Six items had been put to them; they replied "5 … sabhi". **The count is not
+  reconciled and this entry deliberately does not pretend it is** — so each line below carries the ONE
+  signal that settles it without anybody taking this record on trust:
+
+  | Item | How to confirm it WITHOUT trusting this entry |
+  |---|---|
+  | **`GRIEVANCE_OFFICER_NAME`** (+ optional `_EMAIL` / `_PHONE` / `_ADDRESS`) — read by `src/server/lib/grievanceOfficer.ts`; the public page is `/grievance` | Admin Monitor: the amber "Grievance Officer not named" warning is GONE. It is driven by `officerIsNamed`, so it cannot be green while the key is missing |
+  | **`NAVBHARAT_WEB_RISK=on`** | An admin build report's `outboundNote` stops saying `unknown` for every origin |
+  | **`E2B_USD_PER_HOUR` = `0.1656`** (was the half-true `0.083`) | The Monitor's amber rate-mismatch tile clears — `sandboxRate.ts` raises it by comparing the configured rate against the template's REAL size, so a wrong value cannot look right |
+  | **The six DUPLICATE keys** (`AGENTV3_ESCALATION` ×3, `CHEAP_FLOOR`, `ENABLED`, `PAID_PUBLIC`, `CREDIT_GATE`, `STREAMING_PREVIEW`) — see the 2026-08-20 audit below | Console only. ⚠️ **Nothing in the code can detect a duplicate** — the process sees one value and cannot know a second row existed. This is the one item with no self-verifying signal, which is exactly why the audit below calls it the urgent one |
+  | **Play developer verification → Identity tab** (deadline 30 Sep 2026) | Play Console only |
+  | **The approved Play update published**, then `ANDROID_LATEST_VERSION_CODE` set to that run number | Play Console shows the release live; the number must be set AFTER it is downloadable, never before (see that key's own entry) |
+
+  🔴 **WHY THE UNRECONCILED COUNT IS WRITTEN DOWN RATHER THAN ROUNDED AWAY.** This file already records
+  two costly drifts of exactly this shape — an idle-minutes default that said "NOT taken" eight days
+  after it was taken, and an E2B rate whose derivation "could not fail". A later session reading a clean
+  "all six done" would reason from it as fact and, for the duplicate keys, would have no way to notice.
+  Five of the six can be re-checked from a screen in seconds; the sixth cannot, so it stays open here
+  until someone reads the console.
+
 ### 🔎 FULL CLOUD RUN AUDIT — 84 keys read off the live console (admin screenshots, 2026-08-20)
 
 The admin sent the complete list of env-var NAMES from the live Cloud Run service, and every one was

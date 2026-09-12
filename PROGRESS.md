@@ -49365,3 +49365,33 @@ live session — but that is not a reason to widen `VAULT_LOCK_ORIGINS`.
 reason that happened not to be THIS project's reason. A caveat is only honest if it names the mechanism
 that was actually checked — otherwise it is a guess wearing a warning label, and the next reader spends a
 day on it.
+
+---
+
+## 2026-09-12 — the admin's own six Cloud Run / console items, reported done
+
+**Trigger.** Admin, verbatim: *"mere karne ke liye aap jo 5 step bata rahe woh kar diya hai, sbhi"* —
+against the six put to them earlier the same day.
+
+Recorded in `CLAUDE.md`'s registry hand-to-hand, as that registry's own rule requires, on the day it was
+said. **The count is left unreconciled on purpose** (they said five; six were listed), and each item
+carries the one signal that settles it without anybody trusting the record:
+
+- `GRIEVANCE_OFFICER_NAME` → the Monitor's amber "not named" warning is gone
+- `NAVBHARAT_WEB_RISK=on` → `outboundNote` stops reading `unknown`
+- `E2B_USD_PER_HOUR = 0.1656` → the Monitor's rate-mismatch tile clears
+- Play developer verification, and the approved Play update published → Play Console
+- 🔴 **the six DUPLICATE Cloud Run keys — NO self-verifying signal exists.** The process sees one value
+  and cannot know a second row was ever there, so no code change could detect it. It stays open in the
+  registry until somebody reads the console.
+
+**Why the gap is written down rather than rounded away.** This repo has already paid for two drifts of
+this exact shape — the idle-minutes default that read "NOT taken" eight days after it was taken, and the
+E2B rate whose derivation "could not fail". A clean "all six done" would be read as fact by the next
+session, and for the duplicate keys there would be nothing to contradict it.
+
+### Also settled today
+All three PRs left open by other sessions are now merged: **#2848** (the apps-project record — which is
+what revealed that ROADMAP 0.1 was already DONE and Phase 2 unblocked, correcting an answer this session
+had given the admin from a stale picture), **#2851** (cheap-engine lead by live health), and **#2852**
+(the vault device lock).

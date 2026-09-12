@@ -16,6 +16,14 @@
  * a name that is already taken, an address we cannot reach, a service that offered no tools — and
  * replacing them with one generic "could not connect" would leave the user guessing at which.
  *
+ * ═══ "CONNECTED" IS NOT "WORKING" ═══
+ *
+ * A connection is proven once and then trusted forever, so an expired key first showed up in the
+ * middle of a build as a service that quietly contributed nothing — while this screen still said
+ * connected, because connected only ever meant "we saved it". The Check button asks every service
+ * again and reports what came back, per service. There is no "probably fine": anything that did not
+ * answer with tools is shown as not working, with the reason.
+ *
  * ═══ SAVED ONCE, CHOSEN PER APP ═══
  *
  * A connection is remembered on the ACCOUNT the first time it is made, so the second app is one tap
@@ -24,7 +32,7 @@
  * holding a key it has no business holding.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Puzzle, Trash2, Loader2, Plus, X, Link2 } from 'lucide-react';
+import { Puzzle, Trash2, Loader2, Plus, X, Link2, Stethoscope } from 'lucide-react';
 
 export interface ConnectedService {
   id: string;
@@ -42,6 +50,10 @@ export const ConnectedServices: React.FC<Props> = ({ workspaceId, authedFetch })
   const [services, setServices] = useState<ConnectedService[] | null>(null);
   /** What this user has connected before, on any app — their library. Never includes credentials. */
   const [saved, setSaved] = useState<ConnectedService[]>([]);
+  /** The last Check's verdict per service id, and its one-line summary. Empty until Check is pressed —
+   *  an unasked question must never render as an answer. */
+  const [health, setHealth] = useState<Record<string, { state: string; message: string }>>({});
+  const [healthHeadline, setHealthHeadline] = useState('');
   const [max, setMax] = useState(5);
   // THE PAID-PLAN GATE (admin 2026-09-12). `null` = not answered yet, which renders as neither locked
   // nor open — a screen that guesses "locked" during a slow load would upsell a paying customer.
@@ -105,9 +117,37 @@ export const ConnectedServices: React.FC<Props> = ({ workspaceId, authedFetch })
       // the user it really worked.
       setNote(`Connected "${data.id}" — ${data.toolCount} tool(s) are now available while building.`);
       setId(''); setUrl(''); setAuthValue(''); setAdding(false);
+      // A verdict from before this change describes a different set of services.
+      setHealth({}); setHealthHeadline('');
       await load();
     } catch {
       setError('Could not reach NavBharatAI. Check your connection and try again.');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  /** Ask every connected service whether it still works, and show what each one said. */
+  const check = async () => {
+    setError(''); setNote(''); setBusy('check');
+    try {
+      const res = await authedFetch('/api/agentv3/mcp/check', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspaceId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(data?.error || 'Could not check your services just now.'); return; }
+      const next: Record<string, { state: string; message: string }> = {};
+      for (const r of Array.isArray(data.results) ? data.results : []) {
+        if (r?.id) next[r.id] = { state: String(r.state || ''), message: String(r.message || '') };
+      }
+      setHealth(next);
+      setHealthHeadline(typeof data.headline === 'string' ? data.headline : '');
+    } catch {
+      // A check that could not run is NOT a verdict on the user's services — say which it was, and
+      // leave any earlier per-service result standing rather than blanking it to a false all-clear.
+      setError('Could not reach NavBharatAI, so your services were not checked.');
     } finally {
       setBusy('');
     }
@@ -125,6 +165,7 @@ export const ConnectedServices: React.FC<Props> = ({ workspaceId, authedFetch })
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.ok) { setError(data?.error || 'Could not attach that service.'); return; }
       setNote(`Added "${data.id}" to this app — ${data.toolCount} tool(s) are now available while building.`);
+      setHealth({}); setHealthHeadline('');
       await load();
     } catch {
       setError('Could not reach NavBharatAI. Check your connection and try again.');
@@ -162,6 +203,7 @@ export const ConnectedServices: React.FC<Props> = ({ workspaceId, authedFetch })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.ok) { setError(data?.error || 'Could not remove that service.'); return; }
+      setHealth({}); setHealthHeadline('');
       await load();
     } catch {
       setError('Could not reach NavBharatAI. Check your connection and try again.');
@@ -198,6 +240,11 @@ export const ConnectedServices: React.FC<Props> = ({ workspaceId, authedFetch })
               <div className="min-w-0 flex-1">
                 <div className="text-zinc-200 font-medium truncate">{s.id}</div>
                 <div className="text-[11px] text-zinc-500 truncate">{s.url}{s.hasAuth ? ' · key saved' : ''}</div>
+                {health[s.id] && (
+                  <div className={`text-[11px] ${health[s.id].state === 'working' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    {health[s.id].message}
+                  </div>
+                )}
               </div>
               <button
                 onClick={() => void remove(s.id)}
@@ -210,6 +257,23 @@ export const ConnectedServices: React.FC<Props> = ({ workspaceId, authedFetch })
             </li>
           ))}
         </ul>
+      )}
+
+      {(services?.length ?? 0) > 0 && (
+        /* "Connected" only ever meant "we saved it". This is how a user finds out that a key expired
+           BEFORE a build quietly loses the tools it was counting on. */
+        <div className="flex flex-col gap-1.5">
+          <button
+            onClick={() => void check()}
+            disabled={!!busy}
+            className="flex items-center justify-center gap-1.5 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 text-xs font-semibold disabled:opacity-40"
+          >
+            {busy === 'check'
+              ? <><Loader2 className="w-4 h-4 animate-spin" /> Asking your services…</>
+              : <><Stethoscope className="w-4 h-4" /> Check they still work</>}
+          </button>
+          {healthHeadline && <p className="text-[11px] text-zinc-400 leading-relaxed">{healthHeadline}</p>}
+        </div>
       )}
 
       {attachable.length > 0 && canConnect !== false && (

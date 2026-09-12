@@ -4,6 +4,7 @@ import { doc, getDoc, updateDoc, collection, addDoc, getDocs, query, where, getS
 import { encrypt, loadUserVaultSecrets, secretCreatedAtMs } from '../lib/secrets';
 import { planSecretWrite } from '../lib/secretScope';
 import { requireUserMatch, trackDevice } from '../lib/authMiddleware';
+import { allowAfterCooldown } from '../lib/callCooldown';
 import { probeCredentials, realProbeFetch } from '../AgentV3/credentialProbe';
 
 /** Shortest gap between two verify calls from one user. In-memory: a throttle, not an audit record. */
@@ -15,22 +16,13 @@ const verifyCooldown = new Map<string, number>();
 /**
  * May this user run a verification now, and what does the throttle look like afterwards?
  *
- * Extracted as a pure function because it is the only real decision in the route, and because both of
- * its edges matter: each call can fan out to several outbound provider requests, so a caller must not be
- * able to loop on it — and the map must not grow without limit on an instance that stays up for weeks.
- * Mutates and returns `state` so the caller keeps one map. PURE apart from that map.
+ * The rule itself now lives in `callCooldown.ts`, because a second route needed exactly the same one
+ * (re-probing a user's connected MCP services) and a second copy is how two implementations drift
+ * until only one of them carries the fix. This stays as the named, tested entry point for THIS route —
+ * the behaviour is unchanged and the tests below still pin it.
  */
 export function allowVerify(state: Map<string, number>, userId: string, now: number): boolean {
-  // `has`, not `?? 0`: a user who has never called must be distinguishable from one who called at
-  // timestamp 0. Collapsing the two makes "never verified" look like "just verified" and silently
-  // refuses a caller's very first request.
-  const last = state.get(userId);
-  if (last !== undefined && now - last < VERIFY_COOLDOWN_MS) return false;
-  // Clear rather than evict-oldest: this is a throttle whose worst case on a flush is that a few users
-  // may verify one extra time. Tracking insertion order to evict precisely would cost more than the bug.
-  if (state.size >= VERIFY_COOLDOWN_MAX_ENTRIES) state.clear();
-  state.set(userId, now);
-  return true;
+  return allowAfterCooldown(state, userId, now, VERIFY_COOLDOWN_MS, VERIFY_COOLDOWN_MAX_ENTRIES);
 }
 
 /**

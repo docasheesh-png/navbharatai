@@ -4,6 +4,8 @@ import { join } from 'path';
 import {
   canUseConnectedServices, canRunConnectedServices, skippedServicesNotice, type McpPlanFacts,
 } from './mcpPlanGate';
+// Shared anchor — see its own doc comment for why an indexOf on the read is not enough.
+import { buildLoopStart } from './mcpClient.test';
 
 /**
  * THE PAID-PLAN GATE ON CONNECTED SERVICES (MCP), admin-mandated 2026-09-12:
@@ -124,7 +126,7 @@ describe('🔒 the wiring — a gate that is not applied is not a gate', () => {
   });
 
   it('the BUILD loop checks before contacting any service', () => {
-    const at = routes.indexOf('const servers = await mcpServerStore.listFull(workspaceId)');
+    const at = buildLoopStart(routes);
     expect(at).toBeGreaterThan(-1);
     const body = routes.slice(at, at + 1800);
     expect(body).toContain('canRunConnectedServices');
@@ -134,7 +136,8 @@ describe('🔒 the wiring — a gate that is not applied is not a gate', () => {
   });
 
   it('🔒 the build SAYS when it skipped them', () => {
-    const at = routes.indexOf('const servers = await mcpServerStore.listFull(workspaceId)');
+    const at = buildLoopStart(routes);
+    expect(at).toBeGreaterThan(-1);
     expect(routes.slice(at, at + 1800)).toContain('skippedServicesNotice');
   });
 

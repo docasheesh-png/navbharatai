@@ -323,6 +323,7 @@ import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective, classifyFailure } from '../lib/BuildRetrospectiveEngine';
 import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
+import { outcomeCodeOf } from '../AgentV3/BuildDiagnostics';
 import { estimateBuildTime, complexityFromPrompt, liveEtaTick } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
@@ -17097,10 +17098,18 @@ async function noteBuildOutcome(
         // root-cause hint + reusable warning) and promote it into the SAME project memory the next
         // build recalls — so repeated failure patterns are learned, not re-hit. Best-effort.
         if (!result.ok) {
+          /**
+           * 🔎 SIBLING (rule 3). The per-workspace retrospective classified from `result.summary` — the
+           * agent's own narrative — for the same reason the ledger nearly did, and with the same
+           * result: an `unknown` warning recalled by the next build is a warning about nothing. It now
+           * reads the evidence-derived rootCause, and the build's verdict code decides the category.
+           */
+          const retroDiag = buildDiag.report();
           const retro = buildRetrospective({
             framework,
             intent: prompt.slice(0, 120),
-            finalError: result.summary,
+            finalError: retroDiag.rootCause || result.summary,
+            outcomeCode: outcomeCodeOf(retroDiag.issues),
             timeSpentMs: Math.max(0, Date.now() - buildStartedAt),
           });
           reflectMem.recordNote(`BUILD_RETROSPECTIVE\n${retro.warning}\n${retro.summary}`);
@@ -17923,8 +17932,12 @@ async function noteBuildOutcome(
           const failCost = realProviderCostUsd(providerLedger.entries(), realCostRemainderForFailure)
             + Math.max(0, livePreviewCharge.usd || 0);
           const sink = buildUsage.total();
+          // The build's OWN verdict code decides the category; the summary is only the fallback for a
+          // run that never recorded one. See OUTCOME_TO_CATEGORY — classifying v5's real failures from
+          // their prose would have put nearly all of them in `unknown`.
+          const failDiag = buildDiag.report();
           void failureLedgerStore.record({
-            category: classifyFailure(result.summary || '').category,
+            category: classifyFailure(failDiag.rootCause || result.summary || '', outcomeCodeOf(failDiag.issues)).category,
             framework,
             realUsd: failCost,
             inputTokens: sink.inputTokens || 0,

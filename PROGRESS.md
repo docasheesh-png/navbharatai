@@ -50349,3 +50349,46 @@ line if the admin wants it gone.
 
 **Gate on the final state:** typecheck 0, noUnusedImports clean, typecheck:server 0, build ok,
 test:bundle ok, boot:check PASS, vitest — see the commit.
+## 2026-09-12 — the failure ledger would have been a pile of `unknown`, and here is why
+
+Shipped the ledger, then asked the question that decides whether it is worth anything: **what does a
+real v5 failure actually look like when it reaches the classifier?**
+
+Every pattern in `BuildRetrospectiveEngine` matches a **compiler's** words — `cannot find module`,
+`SyntaxError`, `TS2322`, `ETIMEDOUT`. A v5 build does not usually fail that way. It fails with an
+`OUTCOME_*` diagnostic whose message is a sentence *we* wrote:
+
+- *"After one creation pass, 3 local module(s) are STILL missing — the app will crash at runtime"*
+- *"The live in-browser preview does not compile (entry file: src/main.tsx)"*
+- *"After one repair pass, 2 file(s) STILL miss an imported export"*
+
+None of those contain a single pattern the classifier knows. A test asserts it: on the text alone, all
+three classify as `unknown`. So the ledger's top row would have been `unknown`, over and over, and the
+honest headline I was so pleased with would have been the only thing it ever said.
+
+### The fix is to stop guessing at prose we wrote ourselves
+
+The diagnostic **code** is a machine fact the build recorded. Reading it is not pattern matching, it is
+just looking. `classifyFailure(text, outcomeCode)` now takes the code and lets it win, with the text as
+the fallback for anything that has no code — an imported build, a crash before any outcome was
+recorded, a caller holding only a string. An **unrecognised** code falls through to the text rather
+than landing in whatever the map's first entry happens to be, so a code added later classifies exactly
+as it would have before that code existed.
+
+Three categories were added, because the eight that existed are all compiler shapes and v5's real
+failures are not: **`preview`** (produced but never rendered — *"preview is EARNED"*), **`incomplete`**
+(missing files, missing exports, stopped part-way) and **`quality`** (the reviewer or the release gate
+found something the build did not repair).
+
+### The sibling, hunted (rule 3)
+
+The **per-workspace retrospective** had the identical bug and for the identical reason — it classified
+`result.summary`, the agent's own narrative. An `unknown` warning recalled by the next build is a
+warning about nothing, so that path is now fed the evidence-derived `rootCause` plus the verdict code
+as well. `outcomeCodeOf` is one helper shared by both, using the same "last outcome wins" rule
+`deriveRootCause` already uses, so the two can never disagree about which outcome was final.
+
+**The lesson, and it is not "add more regexes":** a classifier is only as good as what you hand it.
+Before this, nobody had checked what the classifier was actually being given — the pipe was built, both
+ends were correct, and the thing travelling through it could never match. 13 tests, including the one
+that proves the old path really would have said `unknown`.

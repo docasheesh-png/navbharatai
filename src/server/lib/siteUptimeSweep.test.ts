@@ -38,9 +38,16 @@ describe('runSiteUptimeSweep — the orchestration, without a network', () => {
     expect(h.bell).toHaveLength(1);
   });
 
-  it('announces the recovery once', async () => {
-    const h = harness({ 'a.com': ['down', 'down', 'up', 'up'] });
+  // 🔴 UPDATED 2026-09-12: a recovery must HOLD for two good probes (SUCCESSES_BEFORE_CLEAR), the
+  // same way an outage needs two bad ones. One good probe used to clear it instantly, and clearing
+  // reset `alerted`, which let the NEXT outage skip the cooldown entirely — so a flapping host mailed
+  // its owner on every transition. The all-clear still arrives exactly once; it just waits to be true.
+  it('announces the recovery once, after it has held for two probes', async () => {
+    const h = harness({ 'a.com': ['down', 'down', 'up', 'up', 'up'] });
     await runSiteUptimeSweep(h.deps); await runSiteUptimeSweep(h.deps);
+    const firstGood = await runSiteUptimeSweep(h.deps);
+    expect(firstGood.alertedUp).toBe(0);          // promising, not yet news
+    expect(h.bell).toHaveLength(1);
     const up = await runSiteUptimeSweep(h.deps);
     expect(up.alertedUp).toBe(1);
     expect(h.bell[1]).toMatch(/answering again/);

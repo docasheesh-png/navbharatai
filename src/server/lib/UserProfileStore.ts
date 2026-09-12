@@ -20,11 +20,21 @@ export interface UserProfile {
   photoUrl: string;
   /** Monthly spend budget in INR. 0 = no limit set. */
   budgetLimitInr: number;
+  /**
+   * The +18 setting (admin 2026-09-12). ABSENT = OFF — there is no third state, and absence must
+   * never read as "on": `adultPreferenceFrom` in src/lib/adultContent.ts treats anything it cannot
+   * read as off, which is the only safe direction for this particular flag.
+   *
+   * The date rides with it because consent has a date — an admin reviewing an account needs to know
+   * WHEN somebody turned this on, not merely that they did.
+   */
+  adultOptIn?: boolean;
+  adultOptInAt?: string;
   updatedAt: number;
   createdAt: number;
 }
 
-export type ProfileUpdate = Partial<Pick<UserProfile, 'displayName' | 'bio' | 'phone' | 'photoUrl' | 'budgetLimitInr'>>;
+export type ProfileUpdate = Partial<Pick<UserProfile, 'displayName' | 'bio' | 'phone' | 'photoUrl' | 'budgetLimitInr' | 'adultOptIn' | 'adultOptInAt'>>;
 
 class UserProfileStore {
   private db: admin.firestore.Firestore | null = null;
@@ -72,6 +82,8 @@ class UserProfileStore {
           phone: '',
           photoUrl: '',
           budgetLimitInr: 0,
+          adultOptIn: false,
+          adultOptInAt: '',
           updatedAt: now,
           createdAt: now,
         };

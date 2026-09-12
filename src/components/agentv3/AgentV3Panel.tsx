@@ -20,6 +20,7 @@ import { auth as firebaseAuth } from '../../lib/firebase';
 import { celebrationFor, type CelebrationKind } from '../../lib/firstPublish';
 import { usePublishState } from '../../hooks/usePublishState';
 import { needsPublishDot } from '../../lib/publishFreshness';
+import { rememberPublishIntent, takePublishIntent, browserIntentStore } from '../../lib/publishResume';
 import { getStoredMotionMode, resolveReduceMotion, systemPrefersReducedMotion } from '../../lib/a11y';
 import {  } from '../../lib/authHeaders';
 import { authedFetch } from '../../lib/authedFetch';
@@ -46,8 +47,7 @@ import { useScreenWakeLock } from '../../lib/useScreenWakeLock';
 import { clampComposerHeight } from './composerHeight';
 import { FoldableMessage } from './FoldableMessage';
 import { MessageActions } from './MessageActions';
-import { partitionStarters } from './starterTemplates';
-import { StarterSketch } from './StarterSketch';
+import { partitionStarters, pickerSections } from './starterTemplates';
 import { loadSavedTemplates, saveTemplate, removeSavedTemplate, type SavedTemplate } from './savedTemplates';
 import { checkAttachmentSizes, MAX_ATTACHMENT_BYTES } from '../../lib/attachmentLimits';
 import { deployBlockedReason } from '../../lib/deployGuard';
@@ -475,6 +475,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // 2026-07-12: "maine recharge kar liya fir bhi tiers locked" — the user recharges on the Wallet page and
   // comes back; without this refetch the tiers stayed 🔒 until a full page reload).
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // The starter picker shows a short first screen and hides the rest behind "More templates" — the wall
+  // of thirty-odd chips was the thing a first-time user scrolled past. Collapsed by default on purpose:
+  // expanded-by-default would be the wall again with one extra button on top of it.
+  const [startersExpanded, setStartersExpanded] = useState(false);
   // Paid-public (billing PR 5): learn whether this user is on paid billing and, if so, their wallet
   // balance — so the header can show a live ₹ chip and the composer can warn before a build is refused.
   // Refetches when the user changes, after a build finishes (balance was just spent), after a 402, and
@@ -2830,6 +2834,24 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [celebration, setCelebration] = useState<{ kind: CelebrationKind; url: string; firstPublish: boolean } | null>(null);
   // Hosting Phase 1 — the "Publish" chooser (host on NavBharatAI vs bring-your-own), opened from Deploy.
   const [showHostingChooser, setShowHostingChooser] = useState(false);
+  /**
+   * REOPEN PUBLISH AFTER THE GITHUB ROUND TRIP (admin 2026-09-12).
+   *
+   * Connecting GitHub is a FULL PAGE NAVIGATION — that is deliberate, because a popup is killed by
+   * every mobile browser — so the Publish sheet is gone when the user lands back. Without this they
+   * authorized, returned, and were shown the home screen with no sign that the thing they pressed
+   * Publish for had moved at all; finishing it meant finding the three-dot menu again.
+   *
+   * The intent is one-shot, workspace-scoped and expiring (see publishResume.ts), so this can only
+   * ever reopen the sheet for the app the user actually left from, once, and only just after.
+   * Deliberately NOT conditioned on a token being present: an authorization the user CANCELLED should
+   * still bring them back to the screen that asked for it — with the same honest "connect to continue"
+   * message — rather than dropping them somewhere with no explanation.
+   */
+  useEffect(() => {
+    if (!state.workspaceId) return;
+    if (takePublishIntent(browserIntentStore(), state.workspaceId)) setShowHostingChooser(true);
+  }, [state.workspaceId]);
   // The verify-number sheet, opened by an import the server refused for a missing verified number.
   const [verifyPhoneOpen, setVerifyPhoneOpen] = useState(false);
 
@@ -3788,7 +3810,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           customDomainPriceInr={customDomainPriceInr}
           ownRepo={state.ownRepo}
           githubConnected={!!ghToken()}
-          onConnectGitHub={() => void connectGitHub()}
+          onConnectGitHub={() => {
+            // Written BEFORE the navigation, because after it this component no longer exists.
+            rememberPublishIntent(browserIntentStore(), state.workspaceId);
+            void connectGitHub();
+          }}
           authedFetch={authedFetch}
           // Lands on the database FORM, not the settings root — sending the user to a menu mid-publish
           // is how a helpful button becomes a dead end.
@@ -4103,30 +4129,63 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   // few LOCKED `pro` showcases that open the upgrade surface (the free→paid carrot). An
                   // unlocked user gets the whole library, tappable, no locks.
                   const { tappable: starterTappable, locked: starterLocked } = partitionStarters(powerUnlocked);
+                  // A SHORT first screen + one expander (admin 2026-09-12). `pickerSections` guarantees
+                  // initial ∪ more === every tappable chip, so collapsing hides nothing permanently.
+                  const { initial: starterInitial, more: starterMore } = pickerSections(starterTappable);
+                  const starterShown = startersExpanded ? starterInitial.concat(starterMore) : starterInitial;
                   return (
                   <div className="mt-5">
                     <div className="text-[11px] uppercase tracking-wide text-zinc-600 mb-2">Or start from a template</div>
-                    {/* Cards, not bare pills (3.4): a row of identical grey chips makes a to-do app and a
-                        CRM look the same, so the picker is harder to use than it appears. The tile is a
-                        LAYOUT SKETCH — the shape of the app — never a screenshot of output we do not have. */}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-w-lg mx-auto">
-                      {starterTappable.map((t) => (
+                    {/* 🔴 BUTTONS, NOT TILES (admin 2026-09-12: *"in tiles se user confused hota hai, ki
+                        sayad kuch load ho raha hai … bas simple text button rahne do, koi discription nahi,
+                        koi preview image/background nahi"*).
+ 
+                        Each starter used to be a CARD carrying a layout sketch — grey and indigo bars standing
+                        for "a list", "a dashboard". The reasoning was sound and the outcome was not: grey bars
+                        stacked in a card ARE the universal visual language for a skeleton loader, so on an
+                        empty chat — the one moment this picker appears — a first-time user read the whole grid
+                        as "still loading" and waited instead of tapping. The cold-start helper was producing
+                        the cold stare it exists to prevent.
+ 
+                        So: emoji + one or two words, and nothing else. No sketch, no category caption, no
+                        description — anything that is not the app's name gives the eye something to wait for.
+                        The labels themselves were shortened for the same reason ("Stopwatch & timer" →
+                        "Stopwatch"): a pill has to read as a button, and a sentence inside one does not.
+ 
+                        The sketch solved a REAL problem though — a flat row of identical chips makes a to-do
+                        app and a CRM look alike — so that half is kept without costing a pixel: the chips are
+                        ORDERED by category, so related apps sit together even with no heading above them.
+                        That ordering now happens inside `pickerSections` rather than here, because the list
+                        has to be split before it is rendered. */}
+                    <div className="flex flex-wrap justify-center gap-1.5 max-w-lg mx-auto">
+                      {starterShown.map((t) => (
                         <button
                           key={t.id}
                           type="button"
                           title={t.prompt}
                           onClick={() => { setPrompt(t.prompt); setTimeout(() => composerRef.current?.focus(), 0); }}
-                          className="group flex flex-col gap-1.5 p-2 rounded-xl border border-zinc-800 bg-zinc-900/60 text-left hover:border-indigo-500/60 hover:bg-indigo-500/5 transition-colors"
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-zinc-700 bg-zinc-900/60 text-xs text-zinc-300 hover:border-indigo-500/70 hover:bg-indigo-500/10 hover:text-indigo-200 transition-colors"
                         >
-                          <StarterSketch id={t.id} className="group-hover:border-indigo-500/40 transition-colors" />
-                          <div className="flex items-center gap-1 min-w-0">
-                            <span aria-hidden className="shrink-0">{t.icon}</span>
-                            <span className="text-xs text-zinc-300 group-hover:text-indigo-200 truncate">{t.label}</span>
-                          </div>
-                          <span className="text-[10px] text-zinc-600 -mt-1">{t.category}</span>
+                          <span aria-hidden>{t.icon}</span>{t.label}
                         </button>
                       ))}
                     </div>
+                    {/* One expander, and it names the number it is hiding — "More templates" alone reads
+                        like a link to somewhere else, while "More templates (19)" reads like the rest of
+                        this list. Collapsing again is allowed because a user who opened it to look for one
+                        app should be able to put the wall back. */}
+                    {starterMore.length > 0 && (
+                      <div className="flex justify-center mt-2">
+                        <button
+                          type="button"
+                          aria-expanded={startersExpanded}
+                          onClick={() => setStartersExpanded((v) => !v)}
+                          className="px-3 py-1 rounded-full text-[11px] text-zinc-500 hover:text-indigo-300 hover:bg-indigo-500/10 transition-colors"
+                        >
+                          {startersExpanded ? 'Show fewer templates' : 'More templates (' + starterMore.length + ')'}
+                        </button>
+                      </div>
+                    )}
                     {/* Free→paid carrot: LOCKED pro showcases. Tapping opens the tier/upgrade popover (real
                         recharge surface) instead of dropping a prompt the weak tier would flail on. */}
                     {starterLocked.length > 0 && (
@@ -4921,7 +4980,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                       {/* KEEP SCREEN ON (admin 2026-08-14): stop the phone auto-locking mid-build and cutting
                           the connection. Toggleable ANYTIME (not disabled while running) so the user can turn
                           it on the moment they realise a long build is going. */}
-                      <ToggleRow label="Keep screen on" hint="Stops your screen from sleeping while a build runs, so it can't be interrupted (like a video keeps the screen on). Works while this tab is open." checked={keepScreenOn} onClick={() => setKeepScreenOn((v) => !v)} />
+                      <ToggleRow label="Keep screen on" checked={keepScreenOn} onClick={() => setKeepScreenOn((v) => !v)} />
                       {/* Power tiers (admin tier→model redefinition 2026-07-13): Weak (free — GLM/Kimi, never
                           Claude) / Normal (Sonnet, adaptive) / Strong (Sonnet 100%) / Powerful (Opus medium
                           effort) / Full Team (Opus max — ultracode). ALL FIVE are
@@ -5694,7 +5753,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           >
             <div className="sticky top-0 z-10 bg-zinc-900 flex items-center justify-between px-4 pt-3 pb-2 border-b border-zinc-800">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                {mobileSheet === 'history' ? 'Session history' : mobileSheet === 'report' ? 'Which build had the problem?' : mobileSheet === 'secrets' ? 'Keys & Secrets' : mobileSheet === 'services' ? 'Connected services' : 'More'}
+                {mobileSheet === 'history' ? 'Session history' : mobileSheet === 'report' ? 'Which build had the problem?' : mobileSheet === 'secrets' ? 'Keys & Secrets' : mobileSheet === 'services' ? 'Connected services (MCP)' : 'More'}
               </span>
               <button onClick={() => setMobileSheet(null)} aria-label="Close" className="p-1 rounded text-zinc-400 hover:text-white touch-manipulation">
                 <X className="w-4 h-4" />
@@ -5778,7 +5837,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation"
                 >
                   <Puzzle className="w-4 h-4 shrink-0 text-zinc-400" />
-                  <span className="flex-1 text-left">Connected services</span>
+                  <span className="flex-1 text-left">Connected services (MCP)</span>
                 </button>
                 <button onClick={() => openSurfaceFromFooter('history')} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation">
                   <History className="w-4 h-4 shrink-0 text-zinc-400" />
@@ -6539,7 +6598,11 @@ function TabPill({ active, onClick, icon, children, dataTour }: { active: boolea
   );
 }
 
-function ToggleRow({ label, hint, checked, disabled, onClick }: { label: string; hint?: string; checked: boolean; disabled?: boolean; onClick: () => void }) {
+// NO `hint` PROP, DELIBERATELY (admin 2026-09-12: "log already button se samajh jate hai — yeh
+// description bina bat ke jagah kha raha hai"). It rendered a grey sentence in brackets beside the
+// label, and it had exactly one caller. Leaving the prop behind after removing that caller would be
+// an open invitation to put the next paragraph back in the same menu, so the prop goes with it.
+function ToggleRow({ label, checked, disabled, onClick }: { label: string; checked: boolean; disabled?: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -6553,7 +6616,6 @@ function ToggleRow({ label, hint, checked, disabled, onClick }: { label: string;
         {checked && <Check className="w-3 h-3" />}
       </span>
       <span className="flex-1">{label}</span>
-      {hint && <span className="text-[10px] text-zinc-500">({hint})</span>}
     </button>
   );
 }

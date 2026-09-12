@@ -10,7 +10,8 @@
 //    chat, greetings, coding help, personal talk never pay the search latency.
 //  • BOUNDED — the whole search is capped (default 6s); a slow/flaky SERP never hangs the reply. On
 //    timeout or zero results it returns '' and the caller proceeds (recencyDirective keeps it honest).
-//  • KEY-FREE — uses the existing WebSearch (Brave when BRAVE_API_KEY is set, else DuckDuckGo), so it
+//  • KEY-FREE — uses the existing WebSearch with intent 'live' (Brave first when BRAVE_API_KEY is set,
+//    DuckDuckGo as the free rescue; DuckDuckGo alone when there is no key), so it
 //    works out of the box and improves automatically when a key is added.
 
 import { WebSearch, formatSearchResults } from '../AgentV3/WebSearch';
@@ -128,17 +129,33 @@ export interface LiveSearchOptions {
   readTopResult?: boolean;
   pageTimeoutMs?: number;
   fetchPage?: (url: string) => Promise<{ ok: boolean; text: string }>;
+  /**
+   * How many of the top results to READ, not just quote. Default 2, capped at 3.
+   *
+   * They are fetched CONCURRENTLY, so two pages cost the same wall-clock as one — the reader waits on
+   * the slowest, not the sum. That is the whole reason this is worth doing: the admin's standing rule
+   * for chat is that correct and current beats fast (2026-09-12, "chahe to time jyada lage par
+   * information sahi aur latest ho"), and a second source is the cheapest accuracy there is. One page
+   * can be a listicle or a paywall stub; two rarely both are.
+   */
+  readPages?: number;
   /** Injectable live-data source (tests). Defaults to the real liveDataContext dispatcher. */
   liveData?: (message: string) => Promise<string>;
   /**
-   * Cost-conscious mode for a non-paying surface (Free Chat, a free-tier Professional, a free/weak
-   * AgentV3 turn). Threads straight into WebSearch's `preferCheap` — DuckDuckGo leads, Brave is only
-   * a last-resort fallback on a genuinely empty DuckDuckGo result. Paid surfaces leave this unset.
+   * Cost-conscious mode for a non-paying caller (Free Chat, a free-tier Professional, a free/weak
+   * AgentV3 turn) — admin 2026-09-12: "free chat me brave api ka istemal bahut hi kanjusi se karna
+   * hai, minimal use, jyadatar duckduckgo hi use ho". Overrides the normal 'live'-intent Brave-first
+   * order to DuckDuckGo-first; Brave is only spent as a last-resort rescue on an empty DuckDuckGo
+   * result. Paid surfaces leave this unset and keep the Brave-first order for their live questions.
    */
   cheap?: boolean;
 }
 
-/** How much of the top result's page is folded into the chat context. A chat turn is not a build. */
+/** How many results are READ (not merely quoted). Concurrent, so the cost is the slowest, not the sum. */
+export const DEFAULT_PAGES_READ = 2;
+export const MAX_PAGES_READ = 3;
+
+/** How much of EACH read page is folded into the chat context. A chat turn is not a build. */
 export const PAGE_CONTEXT_MAX_CHARS = 3_500;
 
 /**
@@ -161,28 +178,52 @@ export async function liveSearchContext(message: string, opts: LiveSearchOptions
   const client = opts.client ?? new WebSearch();
   const query = shapeSearchQuery(message, opts.now ?? new Date());
   const results = await withTimeout(
-    client.search(query, limit, { preferCheap: opts.cheap }).catch(() => []),
+    // 'live' — the user is waiting on this and the answer moves, so the paid engine leads and the
+    // free one rescues. Every other caller in the repo is 'reference' and leads with the free engine.
+    // `cheap` (a non-paying caller) overrides that to DuckDuckGo-first even for a live question.
+    client.search(query, limit, 'live', opts.cheap).catch(() => []),
     opts.timeoutMs ?? 6000,
     [],
   );
   if (!results || results.length === 0) return '';
 
-  // Read the TOP page so the model has the words, not just two snippet lines. Best-effort: SSRF-guarded
-  // (webFetchUrl), capped in time and size, and '' on any failure — snippets-only remains a full answer.
+  // READ THE TOP RESULTS so the model has the words, not just two snippet lines. Best-effort:
+  // SSRF-guarded (webFetchUrl), capped in time and size, and any failure silently degrades to
+  // snippets-only — a page read may only ever ADD grounding, never cost the reply.
+  //
+  // TWO PAGES, CONCURRENTLY, AND 4 SECONDS — both reversals of my own change of 2026-09-11, made on
+  // the admin's explicit priority: "latest information aur correct information jyada important hai,
+  // time se jyada. Chahe to time jyada lage par information sahi aur latest ho."
+  //
+  //  • The budget was cut 4 s → 2.5 s to save time. That silently dropped every page slower than
+  //    2.5 s, which is exactly the heavy, content-rich page most worth reading. Restored.
+  //  • Reading a SECOND result costs no extra wall-clock, because both fetches run at once and the
+  //    reader waits on the slower of the two rather than their sum. One source can be a stub, a
+  //    listicle or a paywall; two rarely both are. So this is accuracy for free — the one trade this
+  //    priority actually allows.
   let pageBlock = '';
   if (opts.readTopResult !== false && results[0]?.url) {
     const fetchPage = opts.fetchPage ?? (async (url: string) => {
       const r = await webFetchUrl(url);
       return { ok: r.ok, text: r.text };
     });
-    const page = await withTimeout(
-      fetchPage(results[0].url).catch(() => ({ ok: false, text: '' })),
+    // `Math.trunc(x) || DEFAULT` was wrong and a test caught it: 0 is falsy, so asking for zero pages
+    // silently became the default two. A number that IS a number is clamped; only a non-number falls
+    // back. (Zero clamps UP to one — "read nothing" already has a name, `readTopResult: false`.)
+    const asked = Number(opts.readPages);
+    const want = Number.isFinite(asked)
+      ? Math.max(1, Math.min(Math.trunc(asked), MAX_PAGES_READ))
+      : DEFAULT_PAGES_READ;
+    const targets = results.slice(0, want).map((r) => r.url).filter((u): u is string => typeof u === 'string' && !!u);
+    const pages = await Promise.all(targets.map((url) => withTimeout(
+      fetchPage(url).catch(() => ({ ok: false, text: '' })),
       opts.pageTimeoutMs ?? 4000,
       { ok: false, text: '' },
-    );
-    if (page.ok && page.text.trim()) {
+    ).then((p) => ({ url, ...p }))));
+    for (const page of pages) {
+      if (!page.ok || !page.text.trim()) continue;
       const capped = capText(page.text.trim(), PAGE_CONTEXT_MAX_CHARS);
-      pageBlock = `\n\nTOP RESULT PAGE (${results[0].url}):\n${capped.text}${capped.truncated ? '\n…(page truncated)' : ''}`;
+      pageBlock += `\n\nTOP RESULT PAGE (${page.url}):\n${capped.text}${capped.truncated ? '\n…(page truncated)' : ''}`;
     }
   }
 

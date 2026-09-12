@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Reads/writes user_secrets (owner-only).
 import { query, collection, where, getDocs, doc, updateDoc, getServerDb as getDb } from './serverDb';
-import { resolveScopedSecrets, type VaultSecretRow } from './secretScope';
+import { resolveScopedSecrets, isNewerRow, type VaultSecretRow } from './secretScope';
 
 /**
  * Encryption & user-secret helpers.
@@ -166,6 +166,37 @@ export async function rotateAllSecrets(): Promise<{ rotated: number; skipped: nu
 }
 
 /**
+ * When was this row written, in ms? `null` when it cannot be told.
+ *
+ * A stored `created_at` arrives in three shapes depending on how old the row is and which client wrote
+ * it — a Firestore Timestamp, a Date, or an ISO string — and every one of them must reduce to the same
+ * comparable number, because this value is what decides which of two duplicate keys a build receives.
+ * Anything unrecognised returns null rather than 0: an invented "epoch" would make a broken row look
+ * like the OLDEST write, which is a quiet wrong answer instead of an honest absence.
+ */
+export function secretCreatedAtMs(raw: unknown): number | null {
+  if (raw == null) return null;
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  if (raw instanceof Date) return Number.isFinite(raw.getTime()) ? raw.getTime() : null;
+  const withToDate = raw as { toDate?: () => Date; seconds?: unknown; _seconds?: unknown };
+  if (typeof withToDate?.toDate === 'function') {
+    try {
+      const d = withToDate.toDate();
+      return d instanceof Date && Number.isFinite(d.getTime()) ? d.getTime() : null;
+    } catch { return null; }
+  }
+  // A Timestamp that crossed a JSON boundary keeps its seconds but loses its methods.
+  const secs = typeof withToDate?.seconds === 'number' ? withToDate.seconds
+    : typeof withToDate?._seconds === 'number' ? withToDate._seconds : null;
+  if (secs !== null && Number.isFinite(secs)) return secs * 1000;
+  if (typeof raw === 'string') {
+    const t = Date.parse(raw);
+    return Number.isFinite(t) ? t : null;
+  }
+  return null;
+}
+
+/**
  * Load ALL of a user's own stored vault secrets (decrypted) as a { NAME: value } map, for injecting
  * into the environment of the app THEY build (admin 2026-07-17: NavBharatAI Pro v5 guides the user to
  * store an app's required keys here — never in chat — and the build reads them from the vault).
@@ -176,6 +207,46 @@ export async function rotateAllSecrets(): Promise<{ rotated: number; skipped: nu
  * the user's real `user_secrets` documents are returned. Invalid env-var names and undecryptable/empty
  * values are dropped. Best-effort: any failure returns {} (the build just runs without injected secrets).
  */
+/**
+ * A user's vault as ROWS — each with its scope and its date, before anything is collapsed by name.
+ *
+ * `loadUserVaultSecrets` answers "what does this app get?", which is the right question almost
+ * everywhere and throws away the two facts a few callers genuinely need: WHICH app a key belongs to,
+ * and which of two keys of the same name is newer. Reusing a database the user already has needs both
+ * — it has to find a database belonging to a DIFFERENT app, and pick the newest when there are two.
+ *
+ * Server-side only: these rows carry decrypted values. There is one read path (this one) so the
+ * name-validation, the undecryptable-row skip and the date handling cannot drift between two copies.
+ */
+export async function loadUserVaultRows(userId: string): Promise<VaultSecretRow[]> {
+  if (!userId) return [];
+  const db = getDb() as any;
+  if (!db) return [];
+  const rows: VaultSecretRow[] = [];
+  try {
+    const snap = await getDocs(query(collection(db, 'user_secrets'), where('user_id', '==', userId)));
+    for (const d of snap.docs) {
+      const data = d.data() as {
+        secret_name?: string; encrypted_secret_value?: string; deleted?: boolean;
+        workspace_id?: string | null; created_at?: unknown;
+      };
+      if (data?.deleted || !data?.secret_name || !data?.encrypted_secret_value) continue;
+      const name = String(data.secret_name).trim();
+      // A valid POSIX env-var name only — never let a stored name inject extra .env lines.
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue;
+      const value = decrypt(data.encrypted_secret_value);
+      if (value === '') continue; // undecryptable or empty — skip
+      // The date travels with the row because it is what makes "newest wins" true rather than a claim —
+      // Firestore hands these back in DOCUMENT-ID order, which for auto-ids is random (see secretScope.ts).
+      rows.push({ name, value, workspaceId: data.workspace_id ?? null, createdAt: secretCreatedAtMs(data.created_at) });
+    }
+  } catch (err) {
+    console.error('[loadUserVaultRows] failed:', err);
+    return [];
+  }
+  return rows;
+}
+
 export async function loadUserVaultSecrets(
   userId: string,
   // WHICH APP IS THIS FOR? (admin 2026-08-17). Omit it and you get every key the user has, exactly as
@@ -185,30 +256,8 @@ export async function loadUserVaultSecrets(
   // user ever built carried every credential they had ever saved. See secretScope.ts.
   workspaceId?: string | null,
 ): Promise<Record<string, string>> {
-  if (!userId) return {};
-  const db = getDb() as any;
-  if (!db) return {};
-  const rows: VaultSecretRow[] = [];
-  try {
-    const snap = await getDocs(query(collection(db, 'user_secrets'), where('user_id', '==', userId)));
-    for (const d of snap.docs) {
-      const data = d.data() as {
-        secret_name?: string; encrypted_secret_value?: string; deleted?: boolean; workspace_id?: string | null;
-      };
-      if (data?.deleted || !data?.secret_name || !data?.encrypted_secret_value) continue;
-      const name = String(data.secret_name).trim();
-      // A valid POSIX env-var name only — never let a stored name inject extra .env lines.
-      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue;
-      const value = decrypt(data.encrypted_secret_value);
-      if (value === '') continue; // undecryptable or empty — skip
-      rows.push({ name, value, workspaceId: data.workspace_id ?? null });
-    }
-  } catch (err) {
-    console.error('[loadUserVaultSecrets] failed:', err);
-    return {};
-  }
-  // Last write still wins among equally-scoped duplicates; an app-specific key beats a shared one.
-  return resolveScopedSecrets(rows, workspaceId);
+  // The NEWEST row wins among equally-scoped duplicates; an app-specific key beats a shared one.
+  return resolveScopedSecrets(await loadUserVaultRows(userId), workspaceId);
 }
 
 /**
@@ -238,7 +287,16 @@ export async function getSecretValue(userId: string, secretName: string): Promis
       where('secret_name', '==', secretName)
     );
     const snap = await getDocs(q);
-    const docData = snap.docs.find((d: any) => !d.data()?.deleted);
+    // NEWEST, not first. `find` returned whichever document id happened to sort earliest, so a user who
+    // had ever saved this name twice got a coin flip between their old value and their new one.
+    let docData: any = null;
+    for (const d of snap.docs as any[]) {
+      if (d.data()?.deleted) continue;
+      if (!docData || isNewerRow(
+        { createdAt: secretCreatedAtMs(d.data()?.created_at) },
+        { createdAt: secretCreatedAtMs(docData.data()?.created_at) },
+      )) docData = d;
+    }
     if (docData) {
       const encryptedValue = docData.data().encrypted_secret_value;
       return decrypt(encryptedValue);

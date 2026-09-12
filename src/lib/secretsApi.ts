@@ -121,11 +121,18 @@ export async function verifySecrets(userId: string): Promise<SecretVerdict[]> {
   }
 }
 
-/** Soft-delete one secret by id. Throws with the server's message on failure. */
-export async function deleteSecret(userId: string, secretId: string): Promise<void> {
-  const res = await vaultFetch(`/api/secrets/${userId}/${secretId}`, { method: 'DELETE' }, 'Deleting the key timed out. Please try again.');
-  if (!res.ok) throw new Error(await errorMessage(res, 'Could not delete the key. Please try again.'));
-}
+/**
+ * DELETING A KEY LIVES IN `vaultLock.ts` NOW, AND THIS IS WHY THE FUNCTION IS GONE RATHER THAN KEPT.
+ *
+ * `deleteSecret(userId, id)` used to soft-delete without any further proof. Since 2026-09-12 the route
+ * requires a vault unlock ticket and the delete is REAL (the row and its encrypted value are removed),
+ * so this signature could only ever produce a 401 — a function that cannot succeed is worse than a
+ * missing one, because a future caller would add it, see it fail, and look for the bug in the server.
+ * Use `deleteSecretLocked(userId, id, ticket)` from `lib/vaultLock.ts`.
+ *
+ * Nothing needed it for an overwrite: the save route has replaced a key by name since #2842, which is
+ * what the four settings screens that used to delete-then-save now rely on.
+ */
 
 /** Prefer the server's honest `{ error }` message; on a 401 give a sign-in hint; else the fallback. */
 async function errorMessage(res: Response, fallback: string): Promise<string> {

@@ -63,7 +63,7 @@ import { applyPreviewDomain } from './PreviewDomain';
 import { injectAppSignature, hasAppSignature } from './appSignature';
 import { mergeDotEnv, gitignoreWithEnv, dotEnvValue } from '../secrets/appSecretsEnv';
 import { ensureBootEnv, ENV_SCAN_COMMAND } from './devSecretsBoot';
-import { envNamesFromGrep } from './ImportPreview';
+import { envNamesFromGrep, detectDatabaseProvider } from './ImportPreview';
 import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServerRecovery';
 import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { importCheckNote } from './writeTimeImportCheck';
@@ -4350,7 +4350,24 @@ export class ToolDispatcher {
         const dialect: MigrationDialect = rawDialect === 'prisma' || rawDialect === 'sql' ? rawDialect : 'both';
         const rawProvider = optStr(input, 'provider');
         const provider: SqlProvider = rawProvider === 'mysql' || rawProvider === 'sqlite' ? rawProvider : 'postgresql';
-        const { files, summary } = generateMigration(entities, { dialect, provider });
+        /**
+         * IS THIS APP REALLY SUPABASE? — decided from the project, never from a guess or a model hint.
+         *
+         * It governs whether the migration carries `auth.uid()` policies. Those exist ONLY on Supabase:
+         * emitting them against a plain Postgres server would fail the migration and break the app, so
+         * the answer has to come from evidence. `detectDatabaseProvider` is the detector this repo
+         * already has (ImportPreview.ts) — reused rather than copied, because a second copy of this
+         * question is a second answer waiting to drift from the first.
+         *
+         * Best-effort and fail-CLOSED: an unreadable package.json means no policies, which still leaves
+         * RLS itself ON. A missing policy is a visible, fixable state; a failed migration is a dead app.
+         */
+        let supabase = false;
+        try {
+          const pkgRaw = await this.actuator.readFile(this.workspaceId, 'package.json');
+          supabase = detectDatabaseProvider({ 'package.json': pkgRaw }) === 'Supabase';
+        } catch { /* no readable package.json — RLS on, policies off */ }
+        const { files, summary } = generateMigration(entities, { dialect, provider, supabase });
         if (files.length === 0) return 'generate_migration: nothing generated.';
         const written: string[] = [];
         for (const file of files) {

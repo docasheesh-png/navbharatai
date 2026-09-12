@@ -31,6 +31,12 @@ export interface UptimeRecord {
   userId: string;
   /** Consecutive DOWN probes. Reset by an UP; untouched by UNKNOWN. */
   failures: number;
+  /**
+   * Consecutive UP probes while an outage is being announced as over. Absent on a legacy record,
+   * which reads as 0 — so the worst a deploy can do is ask for one extra good probe before the
+   * "it is back" message, never send a wrong one.
+   */
+  successes?: number;
   /** True once an outage alert has been sent and no recovery has been announced since. */
   alerted: boolean;
   lastAlertAt: number | null;
@@ -42,6 +48,21 @@ export interface UptimeRecord {
 export type UptimeAction = 'none' | 'alert-down' | 'alert-up';
 
 export const FAILURES_BEFORE_ALERT = 2;
+
+/**
+ * Good probes needed before an outage is declared OVER. Symmetric with FAILURES_BEFORE_ALERT, and
+ * for the same reason.
+ *
+ * 🔴 WITHOUT THIS, A FLAPPING SITE SPAMS ITS OWNER, and the mechanism is worth naming because it is
+ * subtle: recovery set `alerted = false`, and the next outage then took the `!prev.alerted` branch —
+ * which does not consult the cooldown at all. So a host going down/up/down/up produced a mail on
+ * EVERY transition, no matter how recent the last one. That is the same root cause the admin reported
+ * on the Monitor mails the same day (2026-09-12): a recovery wiping the memory that the quiet period
+ * depends on. Requiring the recovery to HOLD for two probes closes it without suppressing anything
+ * real — a genuine outage after a genuine recovery still alerts immediately, which is the whole point
+ * of not simply extending the cooldown across recoveries.
+ */
+export const SUCCESSES_BEFORE_CLEAR = 2;
 
 export function cooldownMs(env: NodeJS.ProcessEnv = process.env): number {
   const raw = Number(env.SITE_UPTIME_COOLDOWN_HOURS);
@@ -81,13 +102,21 @@ export function decideUptime(
     next.failures = 0;
     next.lastOkAt = nowMs;
     if (prev.alerted) {
+      // One good probe is not a recovery — it is just as likely the good half of a flap. Announce the
+      // all-clear only once it has held, so a wobbling host cannot mail its owner on every swing.
+      next.successes = (prev.successes ?? 0) + 1;
+      if (next.successes < SUCCESSES_BEFORE_CLEAR) return { next, action: 'none' };
       next.alerted = false;
+      next.successes = 0;
       return { next, action: 'alert-up' };
     }
+    next.successes = 0;
     return { next, action: 'none' };
   }
   // down
   next.failures = prev.failures + 1;
+  // Any bad probe ends a recovery in progress: the site never actually came back.
+  next.successes = 0;
   if (next.failures < FAILURES_BEFORE_ALERT) return { next, action: 'none' };
   const dueAgain = prev.lastAlertAt === null || nowMs - prev.lastAlertAt >= cooldown;
   if (!prev.alerted || dueAgain) {

@@ -72,8 +72,16 @@ describe('🔒 the wiring — the decision runs before the push, and the evidenc
     expect(route).toContain("repoSync.pushAll(authedUrl, target.branch, 'Import large project from ZIP')");
     expect(route).not.toContain("pushAll(authedUrl, repo.defaultBranch || 'main', 'Import large project from ZIP')");
     // And it now remembers the repo durably, so the Publish screen knows about it on the next visit.
+    // ⚠️ Re-anchored 2026-09-12: the durable fact is now built by `ownRepoMemoryPatch`, which cannot
+    // emit a partial record. Matching its CALL rather than a field list is also what a spelled-out
+    // assertion could not do — the version of this check that listed three fields stayed green while
+    // a sibling write quietly omitted the fourth.
     const zipAt = route.indexOf("'Import large project from ZIP'");
-    expect(route.slice(zipAt, zipAt + 900)).toContain('repoOwnedByUser: true, deployBranch: target.branch');
+    const zipBlock = route.slice(zipAt, zipAt + 900);
+    expect(zipBlock).toContain('ownRepoMemoryPatch({ owner: login, repo: repoName');
+    expect(zipBlock).toContain('deployBranch: target.branch');
+    // This repo IS where the build pushes, so its storage name is pinned with it.
+    expect(zipBlock).toContain('storesCode: true');
   });
 
   it('🔒 the description is read from GitHub by BOTH clients — evidence that never arrives is evidence that never protects', () => {

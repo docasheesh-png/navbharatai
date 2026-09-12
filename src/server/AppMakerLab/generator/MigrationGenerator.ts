@@ -20,6 +20,8 @@
 //   • A transactional SQL migration (BEGIN … COMMIT), so a partial apply never half-migrates.
 // `enrich: false` (the default of the low-level generators) reproduces the exact prior output.
 
+import { generateRlsSql } from './RlsPolicy';
+
 export interface MigrationField {
   name: string;
   /** Optional explicit type hint; otherwise inferred from the field name. */
@@ -201,7 +203,12 @@ function sqlType(kind: Kind, provider: SqlProvider): string {
 }
 
 /** Generate a SQL CREATE TABLE migration from entities. `enrich` adds FKs/indexes/timestamps/tx. Pure. */
-export function generateSqlDdl(entities: MigrationEntity[], provider: SqlProvider = 'postgresql', enrich = false): string {
+export function generateSqlDdl(
+  entities: MigrationEntity[],
+  provider: SqlProvider = 'postgresql',
+  enrich = false,
+  opts: { supabase?: boolean } = {},
+): string {
   const list = (entities || []).filter((e) => e && e.name && Array.isArray(e.fields));
   const q = provider === 'mysql' ? '`' : '"';
   const wrap = (s: string) => `${q}${s}${q}`;
@@ -210,9 +217,15 @@ export function generateSqlDdl(entities: MigrationEntity[], provider: SqlProvide
   // Transactional migration — a failed statement rolls the whole thing back instead of half-applying.
   if (enrich) blocks.push('BEGIN;', '');
   const indexStatements: string[] = [];
+  // The REAL column names, per table, so the security rules below read the columns that were actually
+  // emitted rather than re-deriving them from the entity and risking a policy on a column that is not
+  // there — a policy naming a missing column fails to create, and a table with RLS on and no working
+  // policy reads as empty, which looks to the user exactly like a broken app.
+  const tableColumns: Array<{ table: string; columns: string[] }> = [];
   for (const e of list) {
     const table = snakePlural(e.name);
     const fields = e.fields.filter((f) => f && f.name);
+    tableColumns.push({ table, columns: fields.map((f) => String(f.name)) });
     const hasId = fields.some((f) => fieldKind(f) === 'id');
     const cols: string[] = [];
     if (!hasId) cols.push(`  ${wrap('id')} ${sqlType('id', provider)} PRIMARY KEY`);
@@ -252,6 +265,27 @@ export function generateSqlDdl(entities: MigrationEntity[], provider: SqlProvide
   // Indexes come after every table exists (a FK index can reference its own table safely either way,
   // but keeping them last also keeps the CREATE TABLE blocks clean and readable).
   if (enrich && indexStatements.length > 0) blocks.push(...indexStatements, '');
+  // ROW LEVEL SECURITY — inside the transaction, on purpose.
+  //
+  // A `CREATE TABLE` in Postgres leaves the table readable and writable by every role that can reach
+  // it, and a NavBharatAI app that talks to Supabase ships its public key inside the browser — so an
+  // unsecured table is an open door to every visitor of every published app. This closes it at the
+  // source, where the table is born, instead of hoping a later pass remembers.
+  //
+  // 🔒 Inside BEGIN…COMMIT so a policy that fails to apply rolls the WHOLE migration back. Half a
+  // migration — tables created, security not applied — is precisely the state this exists to prevent,
+  // and it is the state an RLS block appended after COMMIT would produce on its first bad statement.
+  //
+  // Gated on `enrich` because `enrich: false` is documented to reproduce the exact prior output, and a
+  // caller relying on that promise must keep getting it.
+  if (enrich) {
+    const rls = generateRlsSql(
+      tableColumns.map(({ table, columns }) => ({ table, columns })),
+      provider,
+      { supabase: opts.supabase === true },
+    );
+    if (rls) blocks.push(rls);
+  }
   if (enrich) blocks.push('COMMIT;', '');
   return blocks.join('\n');
 }
@@ -274,7 +308,7 @@ export interface MigrationResult {
  */
 export function generateMigration(
   entities: MigrationEntity[],
-  opts: { dialect?: MigrationDialect; provider?: SqlProvider; enrich?: boolean } = {},
+  opts: { dialect?: MigrationDialect; provider?: SqlProvider; enrich?: boolean; supabase?: boolean } = {},
 ): MigrationResult {
   const list = Array.isArray(entities) ? entities.filter((e) => e && e.name && Array.isArray(e.fields)) : [];
   const dialect: MigrationDialect = opts.dialect === 'prisma' || opts.dialect === 'sql' ? opts.dialect : 'both';
@@ -285,7 +319,7 @@ export function generateMigration(
     files.push({ path: 'prisma/schema.prisma', content: generatePrismaSchema(list, provider, enrich) });
   }
   if (list.length > 0 && (dialect === 'sql' || dialect === 'both')) {
-    files.push({ path: 'migrations/001_init.sql', content: generateSqlDdl(list, provider, enrich) });
+    files.push({ path: 'migrations/001_init.sql', content: generateSqlDdl(list, provider, enrich, { supabase: opts.supabase === true }) });
   }
   const summary = list.length
     ? `Generated ${files.length} migration file(s) for ${list.length} entit${list.length > 1 ? 'ies' : 'y'} (${provider}${enrich ? ', deep schema: FKs/indexes/timestamps/soft-delete' : ''}): ${files.map((f) => f.path).join(', ')}.`

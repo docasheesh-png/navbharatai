@@ -44,6 +44,8 @@ import {
 import { audit } from '../lib/audit';
 import { loadUserVaultSecrets } from '../lib/secrets';
 import { provisionDatabaseForUser, freshAccessToken } from '../lib/supabaseProvisionFlow';
+import { reusedDatabaseNote } from '../lib/databaseReuse';
+import { getConversationStore } from './agentv3';
 import { runPostgresQuery, isPostgresUrl } from '../lib/postgresQuery';
 import { dbProvider } from '../../lib/dbProviders';
 
@@ -309,11 +311,15 @@ export function registerSupabaseIntegrationRoutes(
     const uid = await verifyFirebaseToken(req);
     if (!uid) { res.status(401).json({ error: 'Please sign in first.' }); return; }
 
-    const body = (req.body ?? {}) as { appLabel?: unknown; region?: unknown; workspaceId?: unknown };
+    const body = (req.body ?? {}) as {
+      appLabel?: unknown; region?: unknown; workspaceId?: unknown; forceNew?: unknown;
+    };
     const result = await provisionDatabaseForUser(uid, {
       appLabel: typeof body.appLabel === 'string' ? body.appLabel : '',
       region: typeof body.region === 'string' ? body.region : '',
       workspaceId: typeof body.workspaceId === 'string' ? body.workspaceId : '',
+      // The escape hatch for a user who wants THIS app's data kept apart from their other apps'.
+      forceNew: body.forceNew === true,
     });
     if (!result.ok) {
       // The sequence already decided the right status — a 202 in particular means the project EXISTS
@@ -325,8 +331,15 @@ export function registerSupabaseIntegrationRoutes(
       });
       return;
     }
+    // A REUSED database is reported as reused, with the app it came from named where we can name it.
+    // Calling it "created" would be the fake success this whole feature exists to avoid — and the user
+    // needs to know their Supabase project slots were not spent.
+    const fromApp = result.reused && result.fromWorkspaceId
+      ? (await getConversationStore().get(result.fromWorkspaceId).catch(() => null))?.appName ?? ''
+      : '';
     res.json({
       ok: true,
+      ...(result.reused ? { reused: true, reusedNote: reusedDatabaseNote(fromApp), ...(fromApp ? { fromApp } : {}) } : {}),
       projectRef: result.projectRef,
       projectName: result.projectName,
       url: result.url,

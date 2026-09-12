@@ -8,6 +8,7 @@ import { WebAppPlayer } from './WebAppPlayer';
 import { authedHeaders } from '../../lib/authHeaders';
 import { resolveApiHref } from '../../lib/apiBase';
 import { isNativeApp } from '../../lib/mobileNative';
+import { adultBadge } from '../../lib/adultContent';
 import { mergeReviewQueue, pendingReviewCount, reviewStatusLabel, reviewActionsFor } from './storeReviewQueue';
 import { publishableApps, publishBlockedReason, type PublishableApp } from './publishablePicker';
 import { readStoreIcon, readStoreIconFromClipboard, type IconCheck } from '../../lib/appIcon';
@@ -81,6 +82,10 @@ interface WebApp {
   screenshotCount?: number;
   /** Owner/admin views only. */
   status?: 'unlisted' | 'listed' | 'removed';
+  /** ADMIN-ONLY, from the publish-time content scan. Never sent to a viewer — see navStoreWeb.ts. */
+  safetyFindings?: Array<{ severity: string; rule: string; description: string; matchSnippet: string }>;
+  /** PUBLIC, unlike the findings: a viewer has to be able to see that an app is 18+. */
+  contentClass?: 'general' | 'adult';
 }
 
 export interface NavAppStoreProps {
@@ -109,6 +114,15 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
   const [queue, setQueue] = useState<QueueApp[]>([]);
   // The tab badge counts only what still needs a DECISION — approved apps are a record, not work.
   const pendingCount = pendingReviewCount(queue);
+  /**
+   * DOWNLOAD (admin 2026-09-12: "download ke liye sign in jaruri hai").
+   *
+   * A download is a NAVIGATION, so it cannot carry an auth header — the server checks sign-in when
+   * it mints a short-lived ticket, and the navigation carries that. Which is why this is a button
+   * that fetches then navigates, instead of the plain `<a href>` it used to be.
+   */
+  const [dlBusy, setDlBusy] = useState(false);
+  const [dlError, setDlError] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [openApp, setOpenApp] = useState<PublicApp | null>(null);
@@ -325,6 +339,8 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
 
   const loadWebQueue = useCallback(async () => {
     try {
+      // FLAGGED FIRST. A reviewer working top-down must meet the apps the scanner is worried about
+      // before the ordinary ones, or the queue's order decides what actually gets looked at.
       const res = await fetch('/api/nav-store/web/admin/queue', { headers: await authedHeaders() });
       const data = await res.json().catch(() => null);
       if (liveRef.current) setWebQueue(Array.isArray(data?.apps) ? data.apps : []);
@@ -394,6 +410,40 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
       if (liveRef.current) setReviewing('');
     }
   }, [loadQueue, loadApps]);
+  /**
+   * Ask the server for a download ticket (that call CAN carry the auth header), then navigate.
+   *
+   * WEB — a plain navigation, so the browser streams a 30 MB file straight to disk; pulling it into
+   * a blob first would hold the whole APK in the tab's memory for no gain.
+   * APP — the WebView has no download manager, so a link to an attachment does exactly nothing
+   * (admin report 2026-08-19). Handing the URL to the system browser gives the file to Android's
+   * real downloader. `resolveApiHref` because a relative /api in the bundled app points at the
+   * shell, not at our server.
+   */
+  const startDownload = useCallback(async (appId: string) => {
+    if (dlBusy) return;
+    setDlBusy(true);
+    setDlError('');
+    try {
+      const r = await fetch(`/api/nav-store/download-ticket/${encodeURIComponent(appId)}`, {
+        method: 'POST',
+        headers: await authedHeaders(),
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok || !d?.path) {
+        setDlError(d?.error || 'Could not start the download. Please try again.');
+        return;
+      }
+      const href = resolveApiHref(d.path, window);
+      if (isNativeApp()) window.open(href, '_blank');
+      else window.location.href = href;
+    } catch {
+      setDlError('Could not reach the store. Check your connection and try again.');
+    } finally {
+      setDlBusy(false);
+    }
+  }, [dlBusy]);
+
 
   return (
     <div className="h-full overflow-y-auto overscroll-contain bg-[#0d1117] text-white" style={{ WebkitOverflowScrolling: 'touch' }}>
@@ -476,6 +526,14 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                       <p className="text-sm font-semibold truncate flex items-center gap-1.5">
                         {a.name}
                         {a.requiresPassword && <Lock size={11} className="text-white/40 flex-shrink-0" />}
+                        {/* The 18+ badge. Only ever seen by a viewer who turned the setting on — the
+                            server filters these out of the list for everyone else, so this labels
+                            what they chose to see rather than teasing what they cannot. */}
+                        {adultBadge(a.contentClass) && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-rose-500/15 text-rose-300 border border-rose-500/30 flex-shrink-0">
+                            {adultBadge(a.contentClass)}
+                          </span>
+                        )}
                       </p>
                       <p className="text-xs text-white/50 truncate">{a.description || 'A NavBharatAI-built app'}</p>
                       <p className="text-[11px] text-white/30 mt-1">
@@ -927,10 +985,28 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
               <Globe size={12} /> Instant apps — listing requests
             </p>
             <div className="space-y-3">
-              {webQueue.map((a) => (
-                <div key={a.id} className="p-3 rounded-xl bg-[#161b22] border border-white/10">
+              {[...webQueue]
+                .sort((x, y) => (y.safetyFindings?.length ?? 0) - (x.safetyFindings?.length ?? 0))
+                .map((a) => (
+                <div key={a.id} className={`p-3 rounded-xl bg-[#161b22] border ${(a.safetyFindings?.length ?? 0) > 0 ? 'border-amber-500/40' : 'border-white/10'}`}>
                   <p className="text-sm font-semibold">{a.name}</p>
                   <p className="text-xs text-white/50 mt-0.5">{a.description || '—'}</p>
+                  {/* WHAT THE SCAN SAW — shown BEFORE the List button, deliberately. A reviewer who
+                      has already decided is not going to scroll back for a warning. The matched text
+                      is included because "phishing lure" alone is not enough to judge a real app on. */}
+                  {(a.safetyFindings?.length ?? 0) > 0 && (
+                    <div className="mt-2 px-2.5 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 space-y-1">
+                      <p className="text-[11px] font-semibold text-amber-200 flex items-center gap-1.5">
+                        <ShieldAlert size={11} /> The content scan flagged this app
+                      </p>
+                      {a.safetyFindings!.map((f, i) => (
+                        <p key={`${f.rule}-${i}`} className="text-[10px] text-amber-100/70 leading-relaxed">
+                          <b>[{f.severity}]</b> {f.description}
+                          <span className="block text-amber-100/40 font-mono break-all">“{f.matchSnippet}”</span>
+                        </p>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex gap-2 mt-2.5">
                     <button
                       onClick={() => setPlayingId(a.id)}
@@ -1110,17 +1186,19 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                     file to Android's real downloader, the same `_blank` route UpdateBanner already
                     relies on. The URL is resolved through resolveApiHref because in the bundled app a
                     relative /api path points at the shell itself, not at our server. */}
-            <a
-              href={resolveApiHref(`/api/nav-store/download/${encodeURIComponent(openApp.id)}`, window)}
-              onClick={(e) => {
-                if (!isNativeApp()) return; // web: let the browser do what it already does well
-                e.preventDefault();
-                window.open(e.currentTarget.href, '_blank');
-              }}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-base font-bold transition-colors"
+            <button
+              type="button"
+              disabled={dlBusy}
+              onClick={() => void startDownload(openApp.id)}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-base font-bold transition-colors"
             >
-              <Download size={17} /> Download .apk
-            </a>
+              <Download size={17} /> {dlBusy ? 'Preparing…' : 'Download .apk'}
+            </button>
+            {/* 🔒 A REFUSED DOWNLOAD MUST SAY SO. The old `<a>` could only ever navigate; a signed-out
+                user would have met the server's page instead of a sentence here. */}
+            {dlError && (
+              <p className="mt-2 text-[11px] text-amber-300 leading-relaxed">{dlError}</p>
+            )}
 
             <p className="mt-3 flex gap-2 text-[11px] text-white/40 leading-relaxed">
               <Info size={12} className="mt-0.5 flex-shrink-0" />

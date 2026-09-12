@@ -48226,24 +48226,33 @@ field in the API schema. The admin can settle it from their own dashboard: if a 
 today is **gone from the list** in a few days, E2B reclaims it, and a rebuild-from-durable (what this
 change does) is the only possible answer rather than a better resume.
 
-## 2026-09-12 — BRAVE_API_KEY set; Free Chat cost-conscious search order (DuckDuckGo-first)
+## 2026-09-12 — BRAVE_API_KEY set; Free Chat gets a THIRD lever on top of `searchOrder` (`cheap`)
 
 Admin set `BRAVE_API_KEY` in Cloud Run, then gave a direct cost instruction: "free chat me brave api ka
 istemal bahut hi kanjusi se karna hai. minimal use. jyadatar duckduckgo hi use ho" — Brave (a paid API
 past its free quota) must be used stingily on non-paying chat surfaces; DuckDuckGo (free) should lead.
 
-**Root cause of the risk:** both existing web-search clients (`AgentV3/WebSearch.ts`,
-`EngineerAI/WebSearchClient.ts`) had exactly ONE priority order — Brave first whenever the key is
-present — with no concept of free vs. paid caller. Setting the key would have silently put every Free
-Chat message, every free-tier Professional turn, and every free/weak AgentV3 chat turn onto Brave first,
-the opposite of what was asked.
+**Safeguard #1 in action, mid-flight.** The first draft of this fix (a standalone `preferCheap` option on
+`AgentV3/WebSearch.ts`, invented from this session's own base commit) was written, tested, and pushed
+before discovering — via a merge conflict against `main` on PR push — that a DIFFERENT session had, the
+same day, already built a far more complete answer to a related admin ask ("dono ko mila kar… jahan brave
+ki need na ho wahan duckduckgo"): a shared `src/server/lib/braveSearch.ts` client (one Brave request path
+for both `AgentV3/WebSearch.ts` and `EngineerAI/WebSearchClient.ts`, with in-flight coalescing, a
+freshness-aware cache, and a per-instance meter) plus a `SearchIntent` ('reference' | 'live') that decides
+provider order by WHAT is being asked — `reference` (build/doc lookups) leads DuckDuckGo, `live` (chat
+grounding) leads Brave.
 
-**Fix (root cause, not a per-call patch):** `WebSearch.search(query, limit, { preferCheap })` in
-`AgentV3/WebSearch.ts` now takes a `preferCheap` option. When true: DuckDuckGo runs first; Brave is only
-called if DuckDuckGo genuinely returns zero results (rare last-resort spend, not "never"). Default/omitted
-behaviour (paid surfaces) is byte-identical to before — Brave leads when a key is configured.
-`liveSearchContext()` threads this through as a `cheap` option. Wired at all three call sites, each using
-that surface's own existing free/paid signal (no new concept invented):
+**That architecture did NOT yet cover WHO is asking**, though — `liveSearchContext()` called
+`client.search(query, limit, 'live')` unconditionally, so a free-tier chat message would have led with
+Brave exactly like a paid one. The two asks are complementary, not redundant, so per the fourth absolute
+rule the first draft was DISCARDED (not layered beside it) and rebuilt on top of the real shared client:
+`searchOrder(intent, hasBraveKey, cheap)` gained a third parameter — when `cheap` is true it forces
+DuckDuckGo-first regardless of intent, even for a `live` question, with Brave kept only as the
+last-resort rescue on a genuinely empty DuckDuckGo result. `WebSearch.search()` and `WebSearchClient.search()`
+both gained the matching `cheap` parameter (defaulting to `false`, so an untouched caller keeps today's
+paid behaviour) for structural symmetry with `intent` — even though only the chat path sets it today.
+`liveSearchContext()` threads its own `cheap` option straight into that 4th `search()` argument. Wired at
+all three call sites, each using that surface's own existing free/paid signal (no new concept invented):
 - `routes/chat.ts` → `cheap: isFree` (the `navbharat` tier — NavBharatAI Free Chat)
 - `professionals/engine.ts` → `cheap: tier === 'free'` (free-tier Professionals)
 - `routes/agentv3.ts` plain-chat-turn lane → `cheap: freeTierBuildActive || powerSpecResolved.cheapOnly`
@@ -48251,21 +48260,1518 @@ that surface's own existing free/paid signal (no new concept invented):
   spend instead of model spend)
 
 **Deliberately NOT touched:** the AgentV3/Engineer AI build-time web-search TOOL call (`makeWebSearch()`,
-`EngineerAgentLoop.ts`) that the agent invokes mid-build to look up docs/package versions. The admin's
-instruction was specifically about "free chat" (a conversational surface), not free-tier app builds —
-extending the change there would be scope beyond what was asked. Revisit only on a fresh admin ask.
+`EngineerAgentLoop.ts`) that the agent invokes mid-build to look up docs/package versions — it is already
+`reference`-intent (DuckDuckGo-first) regardless of tier, and the admin's instruction was specifically
+about "free chat" (a conversational surface), not app builds. Revisit only on a fresh admin ask.
 
-**Tests (regression-locked, rule 4):** `tests/agentV3WebSearchCheap.test.ts` (new — pins DuckDuckGo-first
-on `preferCheap`, Brave-as-fallback-on-empty-DDG, no-key behaviour, and that the default/paid order is
-unchanged) + a new case in `src/server/lib/liveSearchContext.test.ts` pinning that `cheap` threads into
-`preferCheap` on the client call.
+**Tests (regression-locked, rule 4):** `tests/braveSearch.test.ts` gained cases pinning `cheap`'s exact
+behaviour on `searchOrder` itself (overrides `live` to duck-first, no-op with no key, defaults to `false`
+so every pre-existing call site is unaffected) plus updated its two source-text wiring assertions to the
+new `searchOrder(intent, !!braveKey, cheap)` call and the new `client.search(query, limit, 'live',
+opts.cheap)` line. `tests/agentV3WebSearchCheap.test.ts` (new) exercises the real `WebSearch` class
+end-to-end with a mocked `fetch`, resetting `braveSearch.ts`'s module-level cache/meter between cases
+(`__resetBraveSearch()`) so its in-memory coalescing/cache cannot leak results between tests using
+different `cheap`/intent combinations for the same-shaped query. A new case in
+`src/server/lib/liveSearchContext.test.ts` pins that `cheap` reaches the client as the 4th `search()` arg.
 
-**Verification gate run in full (safeguard #5), all green:** `tsc --noEmit` (frontend) + `tsc -p
-tsconfig.server.json` (server) + `vitest run` (20756 passed, 4 skipped, 0 FAIL — grepped the log, not just
-the tail) + `node scripts/noUnusedImports.mjs` + `npm run build` + `npm run test:bundle` + `npm run
-boot:check` (PASS — reached "Server running"; the Firestore ADC warning in the log is expected in this
-sandbox with no real GCP credentials, unrelated to this change).
+**Verification gate run in full (safeguard #5) on the FINAL merged state, all green:** `tsc --noEmit`
+(frontend) + `tsc -p tsconfig.server.json` (server) + `vitest run` + `node scripts/noUnusedImports.mjs` +
+`npm run build` + `npm run test:bundle` + `npm run boot:check` (PASS — reached "Server running"; the
+Firestore ADC warning in the log is expected in this sandbox with no real GCP credentials, unrelated to
+this change).
 
-`CLAUDE.md`'s Cloud Run key registry updated in the same change: `BRAVE_API_KEY` marked SET, with the
-cost policy and exact wiring recorded so a future session does not silently flip the priority back to
-Brave-first-everywhere.
+`CLAUDE.md`'s existing "Brave Search — the chat's grounding source" entry (written by the other session)
+was corrected in place — `BRAVE_API_KEY` marked ✅ SET rather than "still UNSET" — and extended with the
+`cheap` lever, rather than left to drift into two competing entries for the same key.
+
+## 2026-09-11 — Free chat speed: the stall was never the model, it was the silence before it
+
+**Trigger.** Admin: *"kya navbharatai free ke response ko superfast banaya ja sakta hai"*.
+
+**Read the path before proposing anything (rule 4, step 1).** Most of it is already fast and was left
+alone: the reply genuinely streams (`aiRouter.routeStream` → SSE → the client renders every 40 ms with a
+cursor), the router RACES the top two providers so a slow leader costs nothing, the free chain leads with
+GLM-flash, and a plain message reaches the model with nothing awaited in front of it.
+
+**The one real stall, and it is structural.** `liveSearchContext(message)` is awaited BEFORE the model is
+allowed to speak: a web search bounded at 6 s, then a top-page read bounded at 4 s. And the gate is
+wide — `FRESH_SIGNAL` covers latest/current/today/price/rate/score/news/weather/who-is, the Hindi and
+Roman equivalents, plus the whole daily-life set (train/bus/flight/PNR/AQI/mandi). So **the questions
+users ask most are the slowest ones, and for up to ten seconds the reply bubble showed nothing at all**.
+From the user's chair that is indistinguishable from a frozen app.
+
+**What was fixed, and what deliberately was not.** The lookup itself is right — a stale answer is worse
+than a slow one — so it was not skipped or weakened. What was removed is the SILENCE:
+1. `chatGrounding.ts` (pure): `groundingStatusFor(message)` returns one honest line when, and only when,
+   the lookup will actually run. The route emits it as SSE **before** awaiting the lookup, opening the
+   stream itself. Ordinary messages get no status at all — a spinner for nothing teaches users to
+   distrust the one that means something.
+2. It rides its own field (`s`). The client appends only `c`, so an older client ignores it and the
+   server half is behaviour-identical until the client ships. The client renders `accumulated || status`,
+   so a status can never sit above real text and never reaches the saved message or history.
+3. The later header block is now `if (!res.headersSent)` — setting a header after flush throws, and that
+   would have turned a speed fix into a failed reply.
+4. Page-read budget 4 s → 2.5 s. A page that has not answered in 2.5 s is a heavy one whose text we cap
+   anyway, and the snippets already in hand are a complete answer on their own.
+5. **Measured, not assumed:** `firstTokenLog` records real time-to-first-token, split `grounded` vs
+   `direct` (averaging them hides the only useful number), stamped from the REQUEST so it covers document
+   extraction and vision too, marked `SLOW` past 2.5 s. Every speed claim in this repo so far — including
+   the ten seconds above — has been a BUDGET read off the code, not an observation.
+
+**Effect.** A grounded question now shows an honest line within a fraction of a second instead of a blank
+bubble for seconds, and its full answer lands up to 1.5 s sooner. An ordinary question is byte-identical.
+
+**Recorded, not done (the admin's call):** dropping the top-page read entirely on the free tier would save
+a further ~2.5 s on grounded answers, at the cost of the model seeing only search snippets rather than the
+page — speed bought with depth. Not taken unilaterally. Cold start (Cloud Run min-instances 0) is the
+other real first-message cost and is a standing monthly bill, so it belongs to the admin too.
+
+**Tests:** `tests/chatGrounding.test.ts` (15) — the gate fires on real everyday questions and stays silent
+on ordinary ones, survives rubbish input, the line names no vendor (white-label), the log's shape and its
+NaN/negative guards, and wiring pins: the status is emitted BEFORE the lookup (that ordering IS the fix),
+the later headers are guarded, the client never lets a status into the saved message, the timer starts at
+the request, and the page budget is 2.5 s.
+
+
+## 2026-09-12 — Chat grounding: two sources, and my own speed cut reversed
+
+**Trigger.** Admin asked to make free chat faster, then set the priority that decides every such
+question from now on: *"latest information aur correct information jyada important hai, time se jyada.
+Chahe to time jyada lage par information sahi aur latest ho!"*
+
+**What I proposed and did NOT do.** Dropping the top-page read on the free tier would have saved ~2.5 s
+per grounded answer. Measured against that priority it is the wrong trade: the read folds up to
+**3,500 characters** of the real page into the model's context, while the alternative is five two-line
+snippets. So the page read stays.
+
+**And my own change of the previous day was reversed.** In #2826 I cut the page-read budget 4 s → 2.5 s
+to save time. That silently drops every page slower than 2.5 s — which is precisely the heavy,
+content-rich page most worth reading. Restored to 4 s, and pinned by a test naming the reason so it is
+not "optimised" away again.
+
+**The one trade this priority allows — a second source for free.** `liveSearchContext` now reads the
+**top 2 results CONCURRENTLY** (`readPages`, default 2, clamped 1–3, `MAX_PAGES_READ`). Because the
+fetches overlap, two pages cost the wall-clock of the slower one rather than the sum, so accuracy goes
+up and time does not. One source can be a listicle, a stub or a paywall; two rarely both are. A failed
+source never costs the other — each is bounded and swallowed independently.
+
+**Two bugs my own tests caught before they shipped**, both worth recording because both looked right:
+- `Math.trunc(Number(readPages)) || DEFAULT` — **0 is falsy**, so asking for zero pages silently became
+  the default two. Now a real number is clamped and only a non-number falls back (0 clamps up to 1;
+  "read nothing" already has a name, `readTopResult: false`).
+- The test file's `readFileSync` import was skipped by a guard that checked for a string the new test
+  had itself just added. A guard that tests its own output is no guard.
+
+**Honest scope — what does NOT get faster.** Nothing here reduces latency; one change slightly increases
+it, deliberately. The speed levers that cost no accuracy are elsewhere and are named in CLAUDE.md: the
+grounding status shipped in #2826 (the wait is visible rather than blank), and **`BRAVE_API_KEY`**,
+still unset — today `WebSearch` scrapes DuckDuckGo HTML, which is slower AND weaker than Brave's API.
+That key is the only remaining change that improves speed and accuracy together, and it is the admin's.
+A short-TTL grounding cache was considered and **not built**: at today's traffic two users asking the
+same question within its window is rare, and the `CHAT_TTFT` logs from #2826 will show whether repeat
+queries exist before code is written for them.
+
+**Tests:** `liveSearchContext.test.ts` (+6, 25 total) — both pages folded in and named by their own url,
+the third result quoted but never read, the two fetches proven to OVERLAP (peak concurrency 2, so a
+future edit cannot quietly make them sequential and double the cost), one bad source never costing the
+other, the clamp across 0/1/2/9/NaN, and a source pin on the restored 4 s budget.
+---
+
+## 2026-09-12 — the starter tiles read as a loading spinner, so they are text buttons now
+
+**Report (admin, with a screenshot of the empty Pro v5.0 chat):** *"v5 ke andar yeh jo tiles aa rahi
+hai, inse user confused hota hai, ki sayad kuch load ho raha hai. in tiles ko hatao, bas simple text
+button rahne do."*
+
+**They were right, and the failure is worth recording because the original design was sound.** Each
+starter was a CARD carrying a layout sketch (`StarterSketch.tsx` + `starterSketchShapes.ts`) — a few
+grey and indigo bars standing for "a list", "a dashboard with a sidebar", "a grid of products". The
+reasoning in that module is still correct on its own terms: a row of identical grey chips cannot tell a
+to-do app from a CRM, and a fake screenshot of an app that does not exist is exactly what the second
+absolute rule forbids. What it did not anticipate is that **grey bars stacked inside a card ARE the
+universal visual language for a skeleton loader.** On an empty chat — the one moment the picker appears
+— a first-time user reads the whole grid as "still loading" and waits. The cold-start helper was
+producing the cold stare it exists to prevent.
+
+**The fix keeps the half the sketch got right.** This is not a revert to the flat row of identical chips
+the sketch was invented to fix: the starters are now pill buttons **grouped by category** (Business,
+Commerce, Social, Productivity, Personal), each keeping its emoji. Someone hunting for a shop app still
+finds it — by words instead of by bars that imitate a spinner.
+
+**CORRECTION, same day, after the admin saw it:** the category HEADINGS went too. *"bas simple text
+button rahne do … koi discription nahi, koi preview image/background nahi"*, with a sketch of a plain
+wrapped row. The reasoning is the bug's own: anything on a pill that is not the app's name gives the eye
+something to wait for, and a caption above a group is one more such thing. So the picker is now a single
+flat wrap of emoji + name — and the grouping survives as ORDER rather than as headings
+(`startersByCategory(...).flatMap(...)`), so related apps still sit together at no visual cost.
+
+**The labels were shortened in the same pass**, because a pill has to read as a button and a sentence
+inside one does not: "Stopwatch & timer" → "Stopwatch", "Tip & bill split" → "Bill split", "CRM /
+pipeline" → "CRM", "Booking / appointments" → "Bookings", "Learning platform" → "Courses". `label` is
+consumed ONLY by this picker, so this is the button text and nothing else. 🔒 **The RICH prompts are
+untouched** — they are what make the build deep, and a test now asserts every one is still over 120
+characters so a later "tidy-up" cannot quietly thin the builds. Labels are also asserted unique, since
+two starters showing the same word would be two identical buttons.
+
+**The locked Pro showcases are deliberately unchanged**, on the admin's instruction — same pills, same
+🔒, same tap-to-upgrade.
+
+**One existing test had to change, and it is worth saying why rather than burying it.**
+`tests/noCaseCollidingPaths.test.ts` guards the real 2026-08-16 iOS incident (a `starterSketch.ts`
+sitting beside `StarterSketch.tsx` — one file to case-insensitive macOS, two to Linux, so every Linux
+build passed and the iOS build died). Its second assertion demanded the directory contain exactly
+`['StarterSketch.tsx']`, i.e. it pinned the component's EXISTENCE as a proxy for "no collision" — so
+deleting a file that was supposed to go turned the guard red. **The rule being protected was never
+"this component exists"; it is "no two files collide on this stem", which an empty directory satisfies
+perfectly.** The assertion now states that directly (`clashing.length <= 1`) and was checked to still
+bite at two files. The repo-wide sweep in the same file is untouched and is the real guard.
+
+**`startersByCategory` already existed, was already tested, and was wired to nothing.** A built-but-
+unused helper is the "built but not really working" state the second absolute rule names, and it turned
+out to be exactly the function this needed. Found by the safeguard-#6 search before writing a new one.
+
+**The sketch files are DELETED, not left dormant** — dead code a later session could re-wire is how a
+fixed bug comes back. `tests/starterTilesAreTextButtons.test.ts` pins all of it: the files are gone,
+nothing imports them, the markup is pills rather than cards, and the grouping still covers every
+tappable starter with no empty group for a free user.
+
+`AppKnowledgeBase.ts` updated in the same change (the sync rule): its entry described "cards with a
+small layout sketch", so every AI in NavBharatAI would have kept describing a screen that no longer
+exists — and the entry now records why the sketch went, so the next session does not helpfully
+reinstate it.
+
+### Alongside: "Beyond the Tiles" — what the picker is not advertising
+
+The admin also asked what ELSE v5.0 can build. Read against the real generator list, the answer is
+uncomfortable: **the picker offers 25 app types while the engine carries 160+ capability generators and
+four output formats** (Android package, desktop app, browser extension, MCP server) that no tile
+mentions. Zero India-first templates are offered despite `UpiGenerator`, `IndianValidatorsGenerator`,
+`SocietyGenerator`, `SchoolErpGenerator`, `PharmacyGenerator`, `CourierGenerator`, `NgoGenerator`;
+zero games despite three game engines. Published as a pick-list artifact for the admin to choose from —
+every candidate names the modules already in the repo that back it, so nothing on it is aspirational.
+
+---
+
+## 2026-09-12 — Brave Search: one client, and the three levers that keep its bill small
+
+**Why now.** The admin is taking the Brave Search plan (the one remaining change that makes chat faster
+AND more accurate at once), and asked the right question before pressing the button: *"$5 kitne din
+chalega? kam to nahi padega? code aisa likhna ki kam se kam kharcha ho."*
+
+**What was actually wrong, before any cost work could begin.** The Brave request existed **twice** —
+private `braveSearch()` methods in `AgentV3/WebSearch.ts` and `EngineerAI/WebSearchClient.ts`, the same
+request with two error styles. Two copies means no single place to put a cache, a counter or a price, so
+every cost control would have had to be written twice and would have drifted the first time anyone
+touched one. Centralised into `src/server/lib/braveSearch.ts` (fourth absolute rule, step 2) — one door,
+and both callers keep their existing `.catch(() => duckDuckGo(...))`, so a Brave failure still degrades
+to the free path.
+
+**The three levers, and what each costs in freshness:**
+- **In-flight coalescing** — identical calls in the same instant share one request. Zero staleness: the
+  second caller receives the same live response the first is already waiting for.
+- **Short, freshness-aware cache** — 60 s for the tick-by-tick class (score/live/match/nifty/stock/
+  crypto), 10 min for everything else. This is the only lever that trades anything, and the trade is
+  bounded by the standing CHAT GROUNDING rule: cost may never buy staleness a user can feel.
+- **Normalisation** — case and spacing collapsed, because Brave does not distinguish them either.
+
+Nothing shortens a fetch budget or reads fewer sources. The savings come only from not repeating work.
+
+**A real bug, caught by its own test rather than by a user.** The in-flight entry was cleared in a
+detached `.finally()`, which runs one microtask AFTER the caller's continuation — so a second call
+arriving immediately could coalesce onto an **already-settled** promise and be handed a result we had
+deliberately refused to cache (an empty response, or an outage). Fixed with an explicit `settled` flag
+set in the same hop that clears the entry, so coalescing is impossible once a request is no longer live.
+The failing case is pinned in `tests/braveSearch.test.ts` and named there as the regression it is.
+
+**Plan choice, verified against code rather than assumed.** `Search`, not `Answers`, not `Spellcheck &
+Suggest`: the only endpoint this repo calls is `/res/v1/web/search`. `Answers` has no code path, would
+hand the writing of the answer to a third party (White-Label Law), and caps at 2 req/s against Search's
+50. Recorded in `CLAUDE.md` beside the two env keys (`BRAVE_API_KEY`, `BRAVE_SEARCH_CACHE`).
+
+**Open, and deliberately not guessed:** how long $5 (≈1,000 searches/month) lasts depends on what share
+of chat messages are grounded — a number nobody has measured. The `[CHAT_TTFT] path=grounded|direct`
+log shipped in #2826 already records it; read it after a few days of real traffic rather than estimating.
+
+### 2026-09-12 (same day, second pass) — the admin's own idea, adapted: free engine first where it is safe
+
+The admin asked: *"DuckDuckGo aur Brave dono ko mila kar sync kar ke kaam kare, aur jahan brave ki need
+na ho wahan duckduckgo use ho? possible nahi hai kya?"*
+
+**Possible, yes — but one reading of it had to be corrected honestly (rule 3).** MERGING both engines on
+every query would pay Brave every single time and cost strictly MORE than today. What genuinely saves
+money is the other reading: ask the FREE engine first wherever its answer is good enough, and pay only
+where the paid one earns its fee. That is `searchOrder(intent, hasBraveKey)` in `lib/braveSearch.ts`:
+
+- **`reference`** (the default — AgentV3 build lookups, Engineer AI: package versions, framework docs,
+  error meanings) → **DuckDuckGo first, Brave only as the rescue.** Worth being precise about why this
+  is safe rather than assuming it: DuckDuckGo-alone IS production's behaviour on this path today, since
+  no key is set there. So the change is today's behaviour PLUS a paid rescue, never a downgrade — and a
+  build is not a user watching a spinner, so a wasted round trip costs nothing perceptible.
+- **`live`** (only `liveSearchContext`, the chat's grounding) → **Brave first, DuckDuckGo as the free
+  rescue.** Freshness and result quality are the entire product here, and a real person is waiting.
+
+A throw and an empty result are treated identically — both mean "this one did not answer" — so the
+rescue fires on a 429 and on a blocked scrape alike. New callers default to `reference`, because a
+caller that has not thought about intent is by definition not a user-facing live question.
+
+**A test's premise was deliberately changed, and it is recorded rather than quietly rewritten.**
+`webSearchClient.test.ts` asserted "a key is set ⇒ Brave is used", which was true only while Brave was
+all-or-nothing. It now asserts the intent contract in both directions. A second isolation bug surfaced
+while doing it: the search cache is process-wide by design, so one test's paid result was being handed
+to the next test for free — it would have passed for the wrong reason. `__resetBraveSearch()` now runs
+in that suite's `beforeEach`.
+
+**The meter now reports what the free engine saved** (`freeServed`, `rescues`) beside cache hits and
+coalesced calls — still per-instance, still not a substitute for Brave's own dashboard.
+
+### 2026-09-12 (third pass) — the key itself, hardened before it was ever set
+
+The admin obtained the Brave key and asked what to put in Cloud Run. Reading the code to answer that
+found a live trap: `process.env.BRAVE_API_KEY` was read RAW, in two places, and goes straight into the
+`X-Subscription-Token` header. A value pasted with a trailing space or newline — the most likely way a
+key is entered by hand — would be sent with that whitespace, Brave would reject every call, and both
+callers' `.catch()` would fall back to DuckDuckGo **with no error anywhere**. The console would show
+the key configured, no user would see a fault, and the paid engine would simply never run. Same shape
+as the malformed `ALERT_EMAIL_FROM` that read as configured for a day.
+
+Fixed at the door, not at the call sites: `braveApiKey()` trims and treats whitespace-only as UNSET,
+and both readers now call it (the raw env read is gone and test-locked out). Separately, rule 5 (fix
+the system's honesty): a rejected Brave call now logs ONE admin-only line per status naming what is
+wrong — 401/403 points at the key, 429 at credits — and says plainly that users are unaffected. Once
+per status, because a wrong key fails on every call and would otherwise flood the log.
+
+That log line is also the verification the admin had no way to do before: no line after real traffic
+means the key is genuinely working.
+## 2026-09-12 — GAMES: three starter templates, each shipping a compile-proven game
+
+**Admin: "games se shuru karun?" → "go ahead!!"** — the first of the two real gaps the 12-layer/template
+audit found (the other, India-first, is next).
+
+### Why games were the right first move, and it is not "a genre was missing"
+
+A game is the one thing this platform makes that a person actually **shares** — which is the loop App
+Mart needs and has not had. It is also the cheapest app we can serve: no database, no backend, no auth,
+so a published game runs entirely in the viewer's browser and costs us **nothing per viewer**, however
+many arrive. Three standing problems — an empty store, the E2B bill, and a picker that never mentions
+the six game generators — answered by one shape of app.
+
+### The constraint that shaped everything: a template REQUIRES a golden scaffold
+
+`goldenScaffolds.test.ts` asserts `GOLDEN_SCAFFOLDS` and `STARTER_TEMPLATES` are id-for-id identical —
+**every** chip, simple and pro. So "add a game template" is not a one-line data change: it means writing
+a real, playable, compile-tested game. That constraint is the reason a NavBharatAI first build works, and
+it applied here in full. Each scaffold now passes, in CI: the full vite-react file set, a clean esbuild
+parse, a clean in-browser Babel compile, no duplicate same-module imports, and white-label/secret-free.
+
+### What shipped
+
+* **Memory match** (`memory`, **free**) — 4×4 grid of eight pairs, move counter, best score kept locally.
+  Fisher-Yates shuffle, because `sort(() => Math.random() - 0.5)` is not a shuffle and visibly clusters.
+* **Merge puzzle** (`puzzle`, **free**) — 4×4 slide-and-merge, arrow keys **and** swipe, score + best.
+  The board logic is one pure `slideRow` plus rotation, so all four directions are the same tested code;
+  a tile merged this move cannot merge again in it, which is the classic 2048 bug.
+* **Arcade — "Dodge"** (`arcade`, **pro + showcase**) — a real canvas game.
+
+### The tier split is a promise about quality, not a paywall
+
+The two free games are plain React state over a small grid: no physics, no timing loop, so the weak tier
+extends them reliably and a free user's **first game works**. The arcade is pro because it carries a
+fixed-timestep loop — precisely the code `GameRuntimeGenerator` documents a weak model getting wrong.
+Offering it free would hand someone a game that runs at double speed on their phone. It is
+`showcase: true`, so a free user sees it locked, which advertises the capability to everyone.
+
+The loop is written correctly once, so the builder extends a correct base rather than re-deriving it:
+**fixed timestep** (or the player moves faster on a 144Hz monitor), **delta clamp** (an alt-tabbed minute
+must not arrive as one 60-second frame), **polled input** (a press-and-release between two frames still
+counts), **no allocation in the loop** (obstacles recycle from a fixed pool; a `new` per frame is the
+usual cause of browser-game stutter), and **full teardown** (React 18 StrictMode double-mounts, and two
+loops means doubled input and double speed — in development only, which is worse than always).
+
+### One design decision worth defending
+
+The PRO contract requires a scaffold to use `lib/ui` + `lib/store` and a `useCollection`. A game looks
+like the exception — a loop is not a list — and the lazy answers were to demote it to `simple` or to
+bolt on a fake collection. Neither was needed: a game genuinely has records worth keeping, **the runs**.
+Score and date per attempt is what makes a high score mean anything, and it persists like any other
+record. So the canvas and the loop stay the game's own, and everything around them is the shared
+furniture — with a Scores tab that is a real feature, not a contrivance to satisfy a test.
+
+### Two real bugs caught on the way, both by the gate
+
+1. A scaffold must export `export default function App(` — the shape `main.tsx` mounts and a test pins.
+   My first draft used `function App()` + `export default App;` and failed.
+2. **A backtick inside a scaffold's comment terminates the template literal that holds it.** One comment
+   quoting `` `runs.add` `` broke the whole file into a syntax error 40 lines away. Worth recording: any
+   prose inside these scaffolds must avoid backticks entirely.
+---
+
+## 2026-09-11 — ROW LEVEL SECURITY: the layer the 12-layer audit found missing
+
+**Trigger.** The admin sent the standard "what a real app needs" diagram (Frontend · APIs · Database ·
+Auth · Hosting · Cloud · CI/CD · **Security & RLS** · Rate Limiting · Caching · Scaling · Error
+Tracking) and asked: *"hamare navbharatai me yeh sach check karo! jo nahi hai usko banao, aur jo hai
+usko rocksolid karo"*.
+
+### The audit: 11 of 12 layers were already there
+
+160+ generators cover the diagram almost entirely — `CrudGenerator`, `GraphqlGenerator`,
+`OpenApiGenerator`, `MigrationGenerator`, `StorageGenerator`, `RbacGenerator`, `AbacGenerator`,
+`SsoGenerator`, `TotpGenerator`, `RateLimitGenerator`, `CacheGenerator`, `ErrorTrackingGenerator`,
+`LoggingGenerator`, `TracingGenerator`, `GrafanaStackGenerator`, and the deploy/CI paths.
+**Load Balancing & Scaling** is honestly advisory (`ScaleAnalysis.ts` measures growth; the host does
+the scaling) — a measurement, not a knob, and the module says so itself.
+
+### The one real hole, and it was the worst one possible
+
+**`MigrationGenerator` emitted `CREATE TABLE` and stopped.** In Postgres that leaves a table readable
+and writable by every role that can reach it — and a NavBharatAI app on Supabase ships its **anon key
+inside the browser bundle** of every published copy. So every generated app with a database handed its
+entire database to every visitor: read *and* write.
+
+**The risk was not unknown — that is what makes it worth recording.** `supabaseStorageBucket.ts` writes
+real RLS policies for STORAGE and explains why ("a bucket with no RLS policy accepts…"), and
+`supabaseProvision.ts:280` deliberately never fetches the service-role key *because* that key
+"bypasses RLS". **The security model assumed RLS was on. Nothing turned it on.** Five searches — by
+filename and by three vocabularies, across the whole repo — found no `enable row level security`
+anywhere. The architect prompt never mentioned RLS or the anon key either, so the first build was never
+right and no later pass looked.
+
+### The fix: three layers, because any one alone is half of it (the 50/50 law)
+
+**1 — Generation (`RlsPolicy.ts`, pure + 27 tests).** Every generated Postgres migration now carries
+`ALTER TABLE … ENABLE ROW LEVEL SECURITY`, plus policies derived from the table's own columns: an owner
+column (`user_id`/`owner_id`/`created_by`/`uid`, matched case- and underscore-insensitively and emitted
+**as written**) → owner-scoped CRUD on `auth.uid()::text = "col"::text`; no owner column → public read,
+authenticated write. Idempotent (`drop policy if exists` before every create), and **inside the
+BEGIN…COMMIT** so a policy that fails to apply rolls the tables back rather than leaving the exact
+half-migrated state this exists to prevent.
+
+**🔒 WHY THIS CANNOT BREAK AN APP, which is the whole reason it can be a default.** In Postgres the
+table OWNER bypasses RLS (we never emit FORCE). A plain Postgres/Prisma/Neon app connects as the role
+that created the tables, so enabling RLS changes *nothing* for it; a Supabase app's browser holds
+`anon`, which is not the owner, so RLS bites exactly where the exposure is. The Supabase-flavoured
+policies are emitted **only** for a Supabase app, because `auth.uid()` and the `authenticated` role do
+not exist on a plain Postgres server and naming them there would fail the migration — breaking the app,
+which outranks this.
+
+**2 — Prevention (the architect prompt).** The rule is now stated upstream so the FIRST build is right:
+enable RLS on every table, write the policy that says who may reach it (RLS with no policy lets nobody
+in and the app reads empty), cast both sides of the uuid/text comparison, `DROP POLICY IF EXISTS` first,
+and — explicitly — **an allow-everyone policy is refused as "the hole with extra steps"**. It also tells
+the builder to say so plainly when an app writes with no login at all, because RLS cannot save that
+shape and pretending otherwise is worse than naming it.
+
+**3 — The net (`auditRlsInSql`, wired into every build).** Generation only fixes the migrations WE
+write; on a real app most are written by the builder. The audit reads whatever SQL the workspace
+actually contains — comments and string literals stripped, so a table named in a comment is never
+counted — and records `DATABASE_RLS`: **error** for a table created and left open, **warning** for a
+Supabase table with RLS on and no policy (the app would read nothing). Deterministic string analysis,
+**no model call**, so a clean build pays nothing. Advisory by construction: it can never fail a build.
+A clean pass is recorded too, so the check cannot be mistaken for one that never ran.
+
+**The Supabase decision is evidence, never a guess:** the tool reads the project's own `package.json`
+through `detectDatabaseProvider` — the detector this repo already had (`ImportPreview.ts`), reused
+rather than copied — and **fails CLOSED**: an unreadable project means no policies, with RLS still on.
+
+### What was already solid, stated rather than padded
+
+The storage half needed nothing. `tests/supabaseStorageBucket.test.ts` already pins 20 behaviours
+including "one user can never write over another user's file", "never grants write access to anonymous
+callers", "a private bucket is not readable by anonymous callers at all" and idempotency. Adding tests
+there would have been motion, not strengthening.
+
+### Honest limits
+
+- This governs migrations generated from **now on**. Tables that already exist in a user's Supabase
+  project are untouched — securing those needs a migration run against their project, which is the
+  user's database and their decision.
+- The audit reads SQL in the workspace. An app whose schema was created by hand in the Supabase
+  dashboard has no SQL here to read, and the audit says "nothing to secure" rather than implying a pass.
+- An app that writes to its database with **no login at all** cannot be secured by any policy. The
+  prompt now makes the builder say so instead of shipping an allow-everyone policy that looks like a fix.
+
+Tests: `RlsPolicy.test.ts` (27) + `tests/rlsWiring.test.ts` (16 — all three layers pinned, plus the
+fail-closed Supabase decision).
+
+---
+
+## 2026-09-12 — Connected services (MCP) become a paid feature
+
+**Admin, verbatim:** *"only for 149₹ subscription wale ke liye rakho, baaki ke liye disable kar do"* —
+asked after the honest answer that a fully-loaded five servers can add ~30,000 tokens to EVERY model
+call of that app's build, which a paid build bills to the user and a free build bills to NavBharatAI.
+
+**The cost reason is real, but the product reason is stronger and is the one worth recording:** somebody
+wiring their office Notion or their company's internal API into a builder is, by definition, not a casual
+free user. This is a business feature; gating it is what it was always for.
+
+**🔒 THE THREE-STATE PROBE IS THE DESIGN.** `probeHostingPlan` already answers in three states, and
+`mcpPlanGate.ts` keeps all three: "paid", "not paid", and "we could not find out" are different answers,
+and collapsing the third either way is how this goes wrong — collapse it to PAID and one Firestore hiccup
+hands the feature to everyone at our expense; collapse it to FREE and the same hiccup silently switches
+off a paying customer's working integration mid-build with nothing to explain it. So the two gates differ
+on **exactly one case**, and a test pins that they differ on no other:
+
+| | connect a NEW service | RUN services already connected |
+|---|---|---|
+| paid | ✅ | ✅ |
+| free | ❌ upgrade message | ❌ |
+| **unreadable** | ❌ *"try again in a moment"* | ✅ **keeps working** |
+
+New spend never starts on a guess; nothing a paying user already built stops on a blip. The unreadable
+refusal says **retry, not upgrade** — we do not know that user needs to buy anything, and an upsell on a
+lookup failure would be a lie about their account.
+
+**Four placements, each chosen rather than convenient:**
+- **CONNECT is gated BEFORE `assertPublicHttpUrl`** — a user who may not connect must not be able to make
+  our server fetch a URL of their choosing. Order pinned by a test.
+- **The BUILD checks before contacting any service**, so a free account costs neither the network calls
+  nor the tokens. It is **never silent**: `skippedServicesNotice` says plainly that connected services
+  were skipped, because a build that quietly stopped using a tool the user set up looks like the AI
+  forgetting — worse than one plain sentence.
+- **LIST carries the entitlement**, so the screen renders an honest locked state instead of a form that
+  accepts a URL and then refuses it. An **unanswered** entitlement renders as neither — a screen that
+  guesses "locked" while loading would upsell a paying customer.
+- **🔒 REMOVE is deliberately NOT gated.** A lapsed plan must never trap a user's own API key inside our
+  database. Pinned by a test, because "gate every route" is the obvious wrong instinct here.
+
+The admin free-list bypasses everything, so the feature is testable before a single plan is sold.
+
+**An existing test broke, and the fix is the interesting part.** `mcpClient.test.ts` asserts "connected
+services can never fail a build" by finding the try/catch around the block — via a fixed 900-character
+window. The block grew, the window stopped reaching the catch, and the test failed **while the invariant
+was still perfectly intact** (verified by reading the real source: the catch is still there, still
+wrapping the new code). A test that fails when the code is right is worse than no test, because the
+tempting fix is to weaken the assertion. It is now bound to the STRUCTURE — it finds the first `} catch {`
+after the block and checks that one — so the invariant is what is asserted and the length is not.
+
+### Still open (the other half the admin asked for)
+*"user har build par connect karega, ya ek bar connect kar diya fir apne aap sync rahega?"* — today a
+connection is stored per **workspace**, so the same app remembers it across every build, but a NEW app
+means retyping the URL and the key. The fix is **remember at the account, choose per app** — NOT
+"apply to every app automatically", which would repeat the exact bug `secretScope.ts` already fixed for
+credentials (a to-do list app's `.env` carrying the user's Razorpay secret). Next slice.
+
+### Gate (CI-equivalent, on the final state)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` within budget · `npm run boot:check` PASS ·
+`npx vitest run` **1,553 files / 21,129 passed / 0 failed** (20 new), log grepped for `FAIL` — none.
+
+---
+
+## 2026-09-12 — One global CSS line was breaking `position: fixed` across the whole app
+
+The admin reported two things that looked unrelated, and a third small one:
+1. Opening a user's details from the **end** of the admin user list rendered the sheet far above the
+   screen — *"page ko scroll up kar ke dekhni padti hai"*.
+2. In App Mart, clicking an app showed details **cropped by the footer**.
+3. The Users tab's **Info** button is redundant — the name already opens the same sheet.
+
+### Root cause — (1) and (2) are the SAME bug, in neither file
+
+`src/index.css` promoted animated elements to their own GPU layer, and both rules listed
+`[class*="transition-"]`. That matches any element whose class attribute merely CONTAINS the
+substring — every `transition-all` / `transition-colors` in the app, and, fatally, `App.tsx`'s main
+view container, which carries `transition-all` and **is the page's scroll container**.
+
+`transform: translateZ(0)` and `will-change: transform` both make an element a **containing block for
+`position: fixed` descendants**. So every overlay inside that container stopped being viewport-relative:
+- the admin sheet was positioned against the **scrolled content box** — 1,200px down a list, it opened
+  1,200px off-screen (which is why only the LAST rows made it obvious);
+- the App Mart sheet's `inset-0` started below the header, so a `100dvh` bottom-anchored sheet ran its
+  own header-height BELOW the screen, putting its last ~56px under the tab bar.
+
+**Why it survived:** invisible in the views people use most. Chat/studio/preview give that same
+container `overflow-hidden` at viewport height, where both positioning bases coincide. Only a
+**scrolling** view, **scrolled down**, shows the difference.
+
+It was also the opposite of the "applied narrowly" its own comment claimed — ~113 files use a
+`transition-` utility, so it promoted many hundreds of elements, paying the over-promotion cost the
+comment warns against *with* the app's fixed positioning.
+
+### Fix + lock
+Promote by animation class only. `.animate-spin` keeps its `will-change` hint and stays EXCLUDED from
+the static `translateZ(0)` — that exclusion is what makes the spinners spin.
+`tests/fixedPositioningContainingBlock.test.ts` fails CI if any rule ever again applies
+`transform` / `will-change: transform` / `filter` / `backdrop-filter` / `perspective` by class
+substring. **Verified to bite:** re-adding the selector fails 2 of its 4 tests.
+
+No markup changed for either sheet — both were already correct and are now positioned as written.
+
+### The lesson, and it is not "check your selectors"
+**A perf hint is a layout change when the property is `transform`.** The two lines read as a pure
+GPU optimisation; nothing in them mentions positioning, and the dialogs they broke are in other files.
+The rule to carry forward: never apply a containing-block property (`transform`, `will-change:
+transform`, `filter`, `backdrop-filter`, `perspective`) by attribute substring, and never to a layout
+or scroll container — whoever later writes `transition-colors` on a wrapper has no way to know they
+are opting every dialog beneath it out of the viewport.
+
+### The one trade-off, stated rather than hidden
+`transform: translateZ(0)` also created a **stacking context** on every element it touched. Removing it
+restores standard paint order, so a non-positioned element carrying a `transition-` class that happened
+to be painted above a later, positioned sibling with no `z-index` will now paint behind it. That
+combination is rare, and any UI depending on it was depending on an accident — the rule was written for
+GPU compositing, never for stacking. Preserving it with `isolation: isolate` was considered and
+rejected: it would keep the over-broad selector alive to protect behaviour nobody designed. If a
+stacking issue does surface, it is a real z-index bug in that component that the transform was masking,
+and it should be fixed there.
+
+**Sibling check done (rule 3):** no overlay in the app compensates for the old mispositioning — the only
+offsets on any `fixed inset-0` overlay are `pt-4` / `pt-24`, and the `pt-24` one (`AppModals.tsx`)
+renders OUTSIDE the affected container (App.tsx:3908, past its close at 3894), so it was never shifted.
+`position: absolute` descendants are unaffected too: the container's padding box and `<main>`'s (the
+`relative` ancestor that now resolves them) are the same box.
+
+### (3) Info button removed
+Admin: *"info button hata do"*. The account sheet opens by clicking the user's **name** — one way in,
+not two doing the same thing. The name keeps its hover underline and gains a tooltip so it still reads
+as clickable; the `Info` icon import goes with it.
+
+### Gate (CI-equivalent, run LAST, on the final state)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` within budget (CSS 47.5 KB / 55 KB) · `npm run boot:check`
+PASS · `npx vitest run` **1,556 files / 21,247 passed / 1 skipped / 0 failed**, log grepped for `FAIL`
+— only provider-fixture log lines, no failing test.
+
+### Branch note
+The designated branch's remote tip was `9309413` (the Play-billing work), squash-merged to `main` long
+ago — all four of its files are on `main` today, and the branch was otherwise ~46k lines behind. It was
+subsumed with a `-s ours` merge rather than force-discarded, so the history survives.
+
+---
+
+## 2026-09-12 — India-first starters: the part of the library nobody else carries
+
+**What shipped.** Four starter buttons and four compile-proven golden scaffolds, on the branch
+`feat/india-starters`:
+
+| Button | Tier | What it actually is |
+|---|---|---|
+| 🏪 **GST bill** | simple (FREE) | shop billing with the **CGST/SGST split per slab** (0/5/12/18/28%), the slab on the ITEM, auto-incrementing bill number, print |
+| ✍️ **Mock test** | simple (FREE) | sectioned competitive-exam paper, one clock for the whole paper, question palette, mark-for-review, **negative marking 0.25** |
+| 🏢 **Society** | pro (showcase) | flats → monthly maintenance dues raised for the whole society in ONE action, notice board, complaints with status |
+| 📚 **Coaching** | pro | batches → students → daily attendance (% per student) → monthly fees **at each student's own batch rate** |
+
+**Why these and not four more generic templates.** Every other starter in the library is a shape a
+competitor also ships — a to-do list, a CRM, a store. These four are the only ones that are obviously
+Indian, and each is the app its user currently keeps in a paper notebook. A kirana owner does not want
+an "invoice"; they need a bill with CGST and SGST printed separately, at the slab that belongs to that
+item, because rice and a cold drink are not taxed alike.
+
+### The tier split is the decision, not a default
+
+**Two of the four are FREE on purpose.** The moat is worth nothing if a free user only ever sees it
+behind a lock, so the GST biller and the mock test were designed as the shape the weak tier ships whole:
+one screen, plain React state, localStorage, no backend. The society and coaching apps are pro because
+they are several LINKED records — flats→dues, students→batches→fees — which is precisely where a weak
+model produces half an app. That promise is now pinned by a test rather than a comment:
+`tests/indiaFirstStarters.test.ts` asserts that `partitionStarters(false)` offers exactly `gst-bill` and
+`exam-prep`. **Verified it bites** — flipping `gst-bill` to `pro` fails with
+`expected [ 'exam-prep' ] to deeply equal [ 'exam-prep', 'gst-bill' ]`.
+
+### What the new test pins, and why each line is there
+
+Every assertion is a property a later "simplification" could remove with nothing else failing:
+
+- **CGST *and* SGST both present.** A single merged tax line still produces a working app and a useless
+  bill.
+- **The slab lives on the item** (`gst:` per item, all five slabs present). One app-wide rate is the
+  usual shortcut and it is simply wrong.
+- **`₹` and `en-IN` formatting.** An app printing `$` for an Indian shop is a wrong app.
+- **Negative marking is really applied** (`correct - wrong * NEGATIVE`). Without it a practice score is
+  not comparable to the real exam, which is the only thing the user is practising for.
+- **`clearInterval` present.** A timer left running after submission keeps waking the tab.
+- **Both pro apps bill a whole month in one action AND skip anyone already billed.** Billing one by one
+  is the friction that sends a treasurer back to paper; billing twice is the bug that ends their trust.
+  Both are one line of code each and both are now pinned.
+- **Coaching bills at `b ? b.fee : 0`** — the student's OWN batch rate, so two batches at different fees
+  bill correctly and an already-issued receipt is not silently rewritten when a batch fee changes.
+
+All 12 exam questions were worked through by hand before shipping; a practice app with a wrong answer
+key teaches the wrong answer. (Article 17, Odisha, the Speaker, forests, 38, XPSE, his sister, 24 years,
+30, 7.5 s, Occurrence, Forsake.)
+
+### A compliance decision, recorded because the safe path is not the obvious one
+
+**A clinic / pharmacy template was on the shortlist and was deliberately NOT built.** It is a strong
+India-first candidate and purely CRUD — patients, appointments, stock — with no medical advice in it. But
+this developer account has already taken one Play policy strike on medical features, and `CLAUDE.md` is
+explicit that `MEDICAL_PROFESSIONAL_IDS` may not be touched until the organization account is live AND
+the Health-apps declaration is filed. Adding a health-shaped surface to the Android app before that is a
+risk measured in the whole account, against a gain of one template. The remaining candidates (courier,
+wedding RSVP, NGO, school ERP) are unblocked and cost nothing to defer, so the clinic template waits for
+the org account rather than being argued into safety.
+
+### Honest limit, stated plainly
+
+When I proposed this work I said each template would be tested "by running a real build". **I cannot run
+a production v5 build from this session, and I did not.** The golden scaffold is the substitute and for
+this purpose it is the stronger guarantee: the app a user receives on tapping the chip is the exact file
+set CI has proven parses under esbuild, compiles under the in-browser Babel preview, ships the complete
+runnable file set, and mounts. What it does NOT prove is how the builder then CUSTOMISES a pro scaffold
+on a real prompt — that still wants a real build, and it is the first thing to check on the next one.
+
+### Also in this change
+
+- `AppKnowledgeBase.ts` updated in the same commit, per the standing rule — the new buttons are named in
+  the template entry, and the keyword list now carries the words a user actually types (`kirana`,
+  `dukaan ka app`, `cgst sgst`, `sarkari exam`, `negative marking`, `rwa`, `flat maintenance`, `hajiri`,
+  `tuition app`, `khel banao`). A button nobody can find by asking for it may as well not exist.
+
+### Still open, deliberately not done here
+
+- **The picker is now 31 buttons.** That is approaching a wall even as small pills. Two weak performers
+  ("Converter", "Password") are the obvious trim, and the admin did delegate the button set. I have not
+  removed them in this PR: deleting user-facing capability deserves its own explicit decision rather
+  than riding along inside an additive change.
+- Output formats (.apk, desktop, extension, MCP) still sit in the picker; they belong on the publish
+  screen, which is where a user is when they want them.
+
+---
+
+## 2026-09-12 — MCP, three slices: saved once, and "connected" finally means something
+
+The previous entry ended with the other half the admin asked for still open, plus a standing
+instruction: *"aap isko apne hisab se behtar banao! meri baat ignore karo"* — improve connected
+services by my own judgement. Three slices shipped against that.
+
+### #2841 — Saved once, chosen per app (the "still open" item above, closed)
+
+A connection was remembered per **app**. The same app kept its services across every build — that part
+was already right — but a NEW app meant retyping the address and pasting the API key again, for a
+service the user had already proven works.
+
+🔒 **And the obvious fix is the wrong one.** "Apply every saved service to every new app" would repeat
+exactly the bug `secretScope.ts` closed for credentials — a to-do list app quietly carrying a key it has
+no business holding. So `McpLibraryStore` **remembers** and the user **chooses**, per app, in one tap.
+Saving and using stay two separate decisions, and nothing ever attaches itself.
+
+- One document per user; credentials server-side only (`listForDisplay` / `listFull` as two functions,
+  so a call site cannot leak a key by forgetting an argument).
+- `upsertSaved` **replaces** by name instead of appending, so a rotated key *is* the record rather than
+  a second row whose precedence nothing chose. The cap still allows a replacement — refusing a key
+  rotation would be a cap protecting nothing.
+- `/mcp/attach` is the connect path minus the typing, **not a shortcut past its checks**: same plan
+  gate, same SSRF guard (a host that resolved publicly when it was saved can resolve elsewhere today),
+  same per-app cap and duplicate rule, and it **re-proves** the service before listing it — a revoked
+  key must never show as connected.
+- `/mcp/forget` is deliberately **not** plan-gated, for the same reason disconnect is not.
+- Attaching COPIES into the app's own record, so the build path is unchanged. The honest consequence is
+  stated on the screen rather than left to be discovered: forgetting stops a service being offered to
+  new apps and does not reach into apps already using it.
+- The card header and menu row now say **MCP**, per the admin's direct request.
+
+### #2843 — "Connected" was never proof of "working"
+
+A connection is proven once and then trusted forever. But keys expire and services move, and the first
+place that showed up was in the MIDDLE of a build, as a service that quietly contributed nothing while
+the screen still said *connected*. **Connected only ever meant "we saved it"** — the same gap
+`credentialProbe.ts` closed for saved keys, where storage succeeding got reported as the credential
+working.
+
+🔒 **There is no "probably fine".** A service that answered with tools is working; anything else is
+reported as not working, with the reason it gave. A service answering with an EMPTY tool list is
+**failing, not fine** — unusable to a build either way, and "connected but contributes nothing" is
+precisely the silent state this ends. The headline is told how many services there WERE, so a partial
+check can never read as a whole one.
+
+Bounded by construction: the per-app cap of 5, the transport's own 15 s timeout, probes in parallel, and
+a 10 s per-workspace cooldown because each call fans out to somebody else's servers. Not plan-gated —
+seeing why a build lost a tool is not buying a feature. `callCooldown.ts` now holds the one
+implementation of that cooldown, shared with `routes/secrets.ts`'s `allowVerify`, which was the only
+copy and would otherwise have become two.
+
+**A real fragility this exposed, fixed rather than worked around.** Three structural tests anchored on
+`indexOf('mcpServerStore.listFull(workspaceId)')` to find the BUILD loop. The new route reads the same
+list and sits earlier in the file, so those tests **silently began asserting against the wrong block** —
+including 🔒 *"connected services can never fail a build"*, which would have kept passing against
+unrelated code. `buildLoopStart` anchors on the one thing only the build loop does (handing the servers
+to the dispatcher) and walks back to its read: real code, not a marker comment, so it cannot be deleted
+without changing behaviour. Note that this is the SECOND time this month a structural test pointed at
+the wrong thing — the first was the 900-character window in the entry above. The lesson both times:
+**bind a structural test to something only the target does.**
+
+### Gate (CI-equivalent, on the final state, each slice)
+`typecheck` 0 · `noUnusedImports` clean · `typecheck:server` 0 · `build` ok · `test:bundle` within
+budget · `boot:check` PASS · `vitest run` green, log grepped for `FAIL` — none. #2843 finished at
+**1,555 files / 21,243 passed**.
+
+---
+
+## 2026-09-12 — "Last write wins" was a coin flip: the secrets duplicate bug (#2842)
+
+**Two files said it, and it was true in neither.** `secretScope.ts` and `secrets.ts` both claimed "last
+write still wins among equally-scoped duplicates".
+
+Saving a key under a name the user already had did not replace the row — `POST /api/secrets/:userId` was
+an unconditional `addDoc`, so it **added a second one**. The read path then walked `getDocs` output,
+which comes back ordered by **document ID**, and Firestore auto-ids are random rather than chronological.
+
+So a user who rotated a leaked Stripe key had roughly a **coin flip's** chance of their next build
+injecting the OLD one — the key they had just gone to the trouble of revoking. Nothing failed, nothing
+errored, and there was nothing on screen to see. This is the most dangerous shape a bug takes here: a
+documented guarantee that was never implemented.
+
+**Root-caused in both halves, because the bug has two.**
+
+- **UPSTREAM, so the duplicate is never created.** `planSecretWrite` decides what a save does to the
+  rows already under that name: update the newest row of the SAME scope in place, and retire any others
+  in the same operation. A save is the one moment we know for certain which value the user means, so it
+  is the right moment to collapse a pile that already exists. A replacement moves `created_at` forward,
+  or a freshly rotated key would lose to the row it replaced.
+- **DOWNSTREAM, for the duplicates already in the database.** `resolveScopedSecrets` picks the newest row
+  by its recorded timestamp. `secretCreatedAtMs` reduces every shape a stored `created_at` arrives in —
+  Firestore `Timestamp`, `Date`, ISO string, and a Timestamp that lost its methods crossing JSON — to one
+  comparable number, and returns **absent** rather than `0` for anything unreadable, since `0` would make
+  a broken row look like the oldest write.
+
+Scope still beats age: an app-specific key overrides a shared one however old it is. An exception a
+general save can undo is not an exception.
+
+**The sibling, found and fixed in the same change, and it was worse.** `saveUserSecrets` (Supabase
+provisioning) deduped by **name alone** and **hard-deleted** — so provisioning a database destroyed a key
+the user had deliberately tied to one of their other apps. Both writers now share `planSecretWrite`, so
+they cannot drift apart again. `getSecretValue` had the same first-not-newest bug and is fixed with it.
+
+### Gate
+`vitest run` **1,553 files / 21,162 passed / 0 failed**, log grepped for `FAIL` — none; full
+CI-equivalent chain green on the final state.
+
+---
+
+## 2026-09-12 — A database reaching an app nobody asked on: the provisioning leak (#2846)
+
+Found while answering the admin's question about apps A, B and C seeing each other's data. The admin
+withdrew the feature request; the **audit it prompted found a real leak**, which is the part that
+mattered.
+
+**THE LEAK.** The zero-setup database wrote its keys as SHARED, so every app that user built afterwards
+received them in its `.env`: `VITE_SUPABASE_URL`, the anon key, and `DATABASE_URL` — **a full Postgres
+connection string with the password in it**. A landing page built on Tuesday silently carried the
+credentials of the shop database built on Monday, and if either app was published or exported the
+credentials went with it. Exactly the class `secretScope.ts` closed for hand-saved keys, still open on
+the one path that writes keys **on the user's behalf** — the path where the user never gets to notice,
+because they never typed anything.
+
+**WHY "JUST SCOPE IT" WOULD HAVE BEEN HALF AN ANSWER, AND A BREAKING ONE.** Supabase's free plan allows
+**two** projects per organisation. Scoping is one line, and it means a user's second app can no longer
+see the first app's database, is offered "create one", spends their second slot, and their third app
+hits a wall where today it silently worked.
+
+**So the fix is not narrower access, it is ASKED-FOR access** (`databaseReuse.ts`):
+
+- A provisioned database is scoped to the app it was made for.
+- Pressing "Create database" in an app that has none, when the user already has one, **attaches that
+  database instead of creating a second project**, and says so, naming the app it came from.
+- **An app nobody pressed the button on gets nothing.** That is the leak, gone.
+- `forceNew` is the escape hatch, offered only as a follow-up AFTER a reuse — it really does spend a
+  project slot, which is why it is not the first button.
+
+🔒 The distinction the module exists to preserve: **having a database and being given one are different
+events.** The old code merged them, and the merge was invisible.
+
+**Nothing moves for existing users:** rows already written stay shared, so their apps behave exactly as
+today; the first press of the button in a new app is what moves them onto the scoped model.
+
+A reuse reports `schemaApplied: null` — nothing was created, so nothing was migrated, and `true` would
+be the fake success this feature exists to avoid.
+
+### Open, stated rather than quietly left
+- **Database Studio reads unscoped**, so a user with two databases sees the newest without being told
+  which app it belongs to. Unchanged by this PR (the newest shared row already won), and Studio has no
+  workspace context to pass — it wants an honest label, not a silent change.
+- The mid-build "ask the user for keys" read is also unscoped, deliberately: filtered to the names just
+  asked for, and scoping it could break a key the client saved without a workspace. Left alone rather
+  than changed on a guess.
+
+### Gate
+`vitest run` **1,558 files / 21,316 passed / 0 failed**, log grepped for `FAIL` — none; full
+CI-equivalent chain green on the final rebased state.
+## 2026-09-12 — "GitHub already connect hai" — the SAME report as 2026-09-06, a different root cause
+
+**Trigger.** Admin, with a screenshot of the Publish sheet: *"github already connect hai, app github se
+hi import ki hai, fir se github connect ki bol raha hai, isko aise fix karo dna root cause me ja kar ki
+wapas yeh error na aye"*.
+
+### The report repeated; the 2026-09-06 fix did not fail
+
+`deployRepoMemory.ts` was written for exactly this sentence and is correct. What was wrong was one of
+its WRITERS. The own-repo import path (`routes/agentv3.ts`, `target.mode === 'own-repo'`) hand-rolled
+its durable patch and wrote **three** of the four fields the fact needs — `repoOwner`,
+`repoOwnedByUser`, `deployBranch` — and omitted the repo **name**. Nothing complained: a patch of three
+fields is a perfectly valid patch.
+
+**The record that produced was worse than no record, because the two readers disagreed about it.**
+`repoAvailableForDeploy` looked only at the flag and said YES; `resolveDeployRepo` needs a name to build
+a URL and said NO. So one screen told the user a backend deploy could run and, directly beneath, told
+them to go and create the repository they already had. The client half matched: `conversationToEvents`
+requires all three before replaying the `repo` event, so the panel's `deployRepo` stayed null on every
+reload — the precise symptom, reported as a fact about the app.
+
+### 🔴 The obvious repair was the DESTRUCTIVE one, and finding that out is the real work
+
+"Just add `repoName`" would have shipped a worse bug than the one being fixed. `repoName` is the
+**STORAGE** repo: the build derives it, PINS it, and re-reads it next turn as `pinnedRepoName` →
+`mirrorRepoName` → *where to push*. For an app imported from the user's own GitHub the storage repo and
+the deploy repo are **different objects** — edits live on a working branch inside their real repository
+while `repoName` holds the derived mirror name. Writing the real repository's name into `repoName`
+would have aimed a later mirror fall-back at the user's own code.
+
+**So the root cause is not a forgotten field. It is one field carrying two meanings**, which is invisible
+while they coincide (they do for every mirror-stored app) and destructive the moment they do not.
+
+### The fix — the class, not the instance
+- **`deployRepoName` is now its own field** through `ConversationRecord`, `ConversationPatch`, the
+  Firestore store and the client's `PersistedConversation`. `deployRepoNameOf()` prefers it and falls
+  back to `repoName` **only** for records written before it existed — right for mirror-stored apps,
+  and no more wrong for own-repo apps than it already was.
+- **`ownRepoMemoryPatch()` is the ONLY way the fact may be written**, and returns `null` for an
+  incomplete one. Nothing is the honest state; a record claiming ownership it cannot name is not.
+- **`storesCode` is a REQUIRED argument with no default** — is this repo also where the build pushes?
+  `true` for a repo we created and pushed to (both names pinned), `false` for the user's own imported
+  repo (deploy name only). A default here would be a guess, and guessing wrong is the destructive
+  direction. All four durable write sites now go through it.
+- **`repoAvailableForDeploy` asks for a COMPLETE record**, so the two readers can no longer contradict
+  each other — pinned by a test that asserts the implication directly over a table of record shapes.
+
+### Siblings hunted (rule 3) — the split created one, and it was real
+- **`renameStorageRepoPatch()`** — renaming an app renames its storage repo, which was automatically
+  right for the deploy while one field served both. Split, it stops being automatic. The rule: the
+  deploy name follows the rename **iff** the rename moved its repository (the two matched, or the
+  deploy name was absent and so implicitly *was* the storage name). All three rename write sites use it.
+- **`pushAppFeedback.repoFactOf`** (client) — read `repoName` alone; now `deployRepoName` first, same
+  order as the server.
+- The duplicate-app path copies an allowlist, so a copy cannot inherit the original's deploy repo; the
+  comment now names the new field so the doc stays true.
+
+### ⚠️ Four existing tests failed, and every one had the same weakness as the bug
+They matched the literal object text — `'repoOwner: login, repoOwnedByUser: true, deployBranch: repoBranch'`.
+**A test that spells out three fields cannot notice the fourth going missing**, which is exactly how a
+half-written record shipped past a suite that had a wiring test pointed straight at it. They now assert
+the CALL to the builder, so completeness is enforced in one place instead of transcribed in several.
+One test also asserted the OLD behaviour — `repoAvailableForDeploy({hasRepo:false}, {repoOwnedByUser:true})`
+was `true` — and was corrected rather than preserved: it encoded the promise the deploy could not keep.
+
+Plus a new class guard: **no hand-rolled `repoOwnedByUser: true` may appear in the route at all.**
+Verified to bite — reintroducing the original omission fails two tests.
+
+### What happens to apps already in the broken state (rule 6, honestly)
+The repo name cannot be recovered from storage — nothing durable holds the import URL. Two things heal
+it, both without the user knowing: their **next build** takes the mirror path and writes a complete
+record, and **"Put this app in my GitHub"** pushes to the already-pinned name (so it re-uses the same
+repo, never a twin) and writes one too. No migration is possible and none is pretended.
+
+### Gate (CI-equivalent, run LAST, on the final state)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` within budget · `npm run boot:check` PASS ·
+`npx vitest run` **1,556 files / 21,262 passed / 1 skipped / 0 failed** (15 new), log grepped for
+`FAIL` — none.
+
+---
+
+## 2026-09-12 — "Publish par GitHub mandatory karo" — adopted where it is true, refused where it would break the product
+
+**Trigger.** Admin sent a written requirement: Publish must check GitHub first, redirect to GitHub's
+OAuth page if not connected, return, and only then publish; server-side validation so the API cannot be
+called around it; no repeat OAuth for an already-connected user. Closing line: *"yeh meri non technical
+shalah hai. blindly follow nahi karni hai"* — an explicit invitation to apply the external-suggestion
+rule rather than transcribe.
+
+### 🔴 Followed literally it would have broken the product, and the code says why
+
+- The default publish provider is Firebase Hosting, `isConfigured: () => true` — it reads **nothing**
+  from GitHub. A gate there is a lock on a door that is not locked.
+- That screen's own headline is **"Host on NavBharatAI — One click, no account."** A mandatory OAuth
+  redirect is the opposite of the promise printed on it.
+- **Every Email/Phone user would lose the ability to publish at all.** Most have no GitHub account and
+  no reason to make one — and they are the India-first audience the product exists for.
+- No competitor (Lovable / Bolt / v0 / Replit) requires GitHub to publish. Adding it would make
+  NavBharatAI the hardest of them, against THE AIM.
+
+Said to the admin plainly rather than implemented quietly (third absolute rule).
+
+### ✅ Where the admin is exactly right, and what was genuinely missing
+
+For an app with a **server half**, a host builds the server **from a repository** — GitHub is a real
+prerequisite. Three gaps, all real:
+
+1. **The server-side enforcement was implicit.** `/api/agentv3/deploy-backend` had no explicit check:
+   the request went to Render, came back `no-service`, and the user read a message about Render when
+   the missing thing was GitHub. A direct API call got the same vague answer.
+2. **A refusal arriving as 422 would render as "we could not create the backend service in your
+   account"** — a sentence about Render for a problem that is not Render's.
+3. **The OAuth return dropped the user's place.** The redirect worked; the Publish sheet did not
+   survive the full page navigation, so a user who pressed Publish, authorized, and came back landed on
+   the home screen with no sign anything had happened.
+
+### What shipped
+- **`src/lib/publishGithubGate.ts`** — one set of rules, imported by BOTH the screen and the server, so
+  they cannot disagree (the shape of the last two bugs on this path). `hasServerHalf` decides whether
+  GitHub is needed at all; `connect-github` and `push-to-github` are kept as SEPARATE verdicts all the
+  way to the user, because their next actions differ — which is also how the admin's "no unnecessary
+  re-authorization" rule is enforced rather than remembered.
+- **An explicit gate in `/api/agentv3/deploy-backend`, before any provider is contacted.**
+  🔒 The authority is the **server-resolved** repo (`effectiveRepoUrl` — the request's url or the
+  workspace's durable record). The one browser-supplied value, `githubConnected`, is a **hint that
+  chooses the sentence and never the outcome**: forging it buys a wrong message and no access, and a
+  test asserts exactly that for both values.
+- **`needs-github` as its own client outcome**, matched on the CODE before the status branches, so the
+  refusal reaches the user as the right next action.
+- **`src/lib/publishResume.ts`** — the Publish sheet reopens for the same app after the GitHub round
+  trip. One-shot, workspace-scoped and expiring (10 min), storage injected so all three are tested
+  without a browser; a storage that throws costs the resume and never the publish. It reopens after a
+  CANCELLED authorization too — that user most needs to see the screen that asked.
+
+### The census guard did its job, and was justified rather than weakened
+`appIdentityGuard.test.ts` counts effects keyed on `[state.workspaceId]` and failed on the new one.
+That is the design: a new one must be argued for. Argued and recorded — it fills nothing from a
+workspace-scoped response, and it cannot fire for the wrong app because the marker carries its own
+workspace id. Count updated, test untouched.
+
+### Gate (CI-equivalent, run LAST, on the final state)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` within budget · `npm run boot:check` PASS ·
+`npx vitest run` **1,561 files / 21,371 passed / 1 skipped / 0 failed** (20 new), log grepped for
+`FAIL` — none. `AppKnowledgeBase.ts` updated for the new user-facing behaviour.
+
+### Open for the admin
+If the blanket rule is still wanted after reading the above — GitHub required for EVERY publish,
+including a static one — it is one line: make `publishNeedsGitHub` return `true` unconditionally. The
+rest (server gate, wording, resume) already works for that case. It is recorded here as the admin's
+call, not closed off.
+### 2026-09-12 — alert flapping: one mail per episode, two at most, the second 48 hours later
+
+The admin forwarded their inbox: `ALERT → Resolved → Warning → ALERT → Resolved` for ONE condition
+inside two hours, with *"yeh alert to user ko bhaga dega"*. They are right, and a monitor nobody reads
+is worse than none — it trains the reader to ignore the one mail that mattered.
+
+**Two independent bugs, compounding.**
+
+1. **Resolving DELETED the state entry, so the cooldown was bypassed by the very thing it existed to
+   survive.** `nextState` was built only from currently-firing alerts, so a metric hovering at its
+   threshold resolved, forgot it had ever fired, and the next crossing hit the `!seen` branch — a brand
+   new alert, announced immediately, with no quiet period at any point. The six-hour cooldown had
+   literally never applied to a flapping alert. Fixed with an EPISODE model: a condition that stops
+   firing enters a cooling period and re-firing inside it is the same episode, silent.
+2. **`SLOW_BUILD_MIN_SAMPLE` was 3.** One slow build among three owns the hour's mean. Raised to
+   `ALERT_MIN_SAMPLE` (10) — the file's own existing constant, not an invented number. The old comment
+   ("latency shows up in fewer builds than a failure rate") is true of a human watching builds and
+   false of a mean.
+
+**The budget is now hard:** two mails per episode maximum, cooldown 6 h → 48 h, and an escalation
+spends the second slot rather than being exempt from the cap.
+
+**Two test premises were reversed on purpose** and say so in the files rather than being quietly
+rewritten: "resolves on the first quiet sweep and forgets it" (that instant forgetting WAS the bug) and
+"the slow-build floor is lower than the rate floor". The admin's exact sequence — fire, dip at 45 min,
+re-fire at 60 min — is now a regression test asserting **zero** mails after the first.
+
+**The sibling, fixed in the same change (rule 3).** The per-user "your site is down" mail had the
+identical root cause: recovery set `alerted = false`, and the next outage then took the
+`!prev.alerted` branch, which never consults the cooldown — so a flapping host mailed its owner on
+every transition. `SUCCESSES_BEFORE_CLEAR = 2` makes a recovery hold for two good probes, symmetric
+with the two bad ones that raise the alarm. A genuine outage after a genuine recovery still alerts
+immediately, which is exactly why the fix is a confirmed recovery and not a longer cooldown.
+
+**Open root cause (rule 6): the 10-minute threshold itself.** Whether 10 min is abnormal for this
+engine needs the real distribution of build durations, which nobody has measured — `maxBuildSeconds`
+defaults to 30 min, so the line may simply sit below normal. Fixing the sample removes the flapping;
+changing the threshold on a guess would replace a noisy alert with a quiet wrong one.
+
+### 2026-09-12 — the money audit: 53 modules walked, three real leaks found and closed
+
+The admin asked for a microscopic audit of every paying code path. Mapped the whole money surface (53
+modules) into three flows — money IN (Cashfree, coupons, store, gifts), money OUT (model calls, E2B,
+hosting, Web Risk), and CHARGING (wallet debit, spend zones, quotas) — then walked each for the classic
+leak shapes: spend with no charge, credit with no payment, double credit, missing idempotency, a
+money path that fails open, and rounding that always favours one side.
+
+**What held up** (worth recording, so a later audit does not redo it): the Cashfree credit is
+transactional and derives tokens from the VERIFIED paid amount, never from anything the client sent; the
+coupon price table is server-side and an UNSET value means no coupon is redeemable; the redemption claim
+is atomic; the weekly gift writes its lifetime-cap counter in the SAME transaction as the credit; a
+failed build is never charged; an unmeasured provider charges zero rather than an invented number.
+
+**Five real leaks, all fixed here.**
+
+1. **The free chat's paid fallback was the dearest model on the card.** `gemini-2.5-pro` ($10/MTok out)
+   was the first rung after the free GLM leader, with `gemini-2.5-flash` ($2.50) below it — so every
+   turn after a 429 cost 4× the rung beneath, uncharged. The policy against exactly this was already
+   written down in the neighbouring `buildProfessionalFreeFallback`; the universe every ordinary user
+   hits simply never got it. Now one price-ordered ladder across both Google doors, grok last.
+2. **The coupon credit ran outside a transaction** — a read-modify-write that could erase a debit
+   settling beside it — and moved only the ₹ view.
+3. **The admin token adjustment ASSIGNED `remaining_balance` from `tokenBalance`** rather than applying
+   the delta. For a Pass buyer the two views differ by the Pass price permanently, so a "+1 token"
+   adjustment would have wiped real money; on a ₹-only-credited wallet it minted some.
+
+4. **A store purchase could credit twice under a concurrent retry.** The receipt check sat outside the
+   transaction while the transaction read only the wallet, so two deliveries of the same purchase token
+   could both pass it and the retry would credit again. Now read in-transaction, before the wallet. The
+   sibling Cashfree path was checked and was already correct — it claims PENDING→SUCCESS atomically,
+   which is the pattern the store path lacked.
+
+5. **Image generation had leak 1's shape, in a second place.** Its allowance gate ran only when the
+   FREE provider was switched off globally — "free provider on ⇒ the image is free" — which holds only
+   while that provider SUCCEEDS. The paid Gemini/Grok rungs below it exist for when it does not, and
+   they delivered unmetered. Now metered by WHO SERVES: the allowance is resolved lazily before the
+   first paid rung is called, and only a paid delivery burns it.
+
+**The class, named: a free-first ladder whose paid rungs are ungoverned.** Leaks 1 and 5 are the same
+mistake in two features — the free leader is reasoned about as if it were the whole ladder. Whenever a
+free or cheap provider leads, two questions must be answered about the rungs beneath it: in what ORDER
+are they climbed, and WHO PAYS when one of them serves.
+
+**The class behind 2 and 3, and what now prevents it:** one balance in two fields, with writers free to
+move one. `walletMirror.ts` takes the delta once and derives both — calling it and moving a single view
+is not expressible — and never assigns. Both writers use it, transactionally.
+
+**Two findings came from my own new tests rather than from reading**: the price-order test caught that
+`gemini-2.5-pro` was still ahead of two cheaper direct-Gemini rungs after the first fix, and the mirror
+test pinned the Pass-buyer case the old assignment got wrong.
+
+### 2026-09-12 (fourth pass) — the admin's price ceiling, and the bug that would have made it decoration
+
+The admin, shown the whole rate card, drew a line under `kimi-k2.7`: *"bas yahi tak rakho"*, and accepted
+leaks 2–5. Implementing the ceiling turned up the part of leak 1 I had MISSED and already reported as
+fixed.
+
+**`slot()` could not pin a model on the streaming path.** `executeStream` had no model parameter at all,
+and `VertexProvider.executeStream` hardcoded `this.modelPro`. Chat streams. So every Vertex rung streamed
+`gemini-2.5-pro` regardless of which rung won — my re-order fixed only the NON-streaming path, while
+reading as a complete fix. Corrected to the admin the moment it was found. The model now rides the stream
+through all five providers.
+
+**The ceiling is a rule in money, not a list of ids** (`freeTierCostCeiling.ts`), derived from the rate
+card so a repricing moves it, and enforced by a test against every rung. `gemini-2.5-pro` and grok are
+removed from the free ladder; PRO and PROFESSIONAL are untouched and a test asserts that too.
+
+**The index is input-weighted, and that flips an answer.** Ordering by the output column would put
+`glm-4.7` ($2.20) ahead of `gemini-flash` ($2.50) — but chat is input-heavy and glm-4.7's input is double,
+so it is DEARER per turn. They break even exactly when output equals input, which a chat turn never does.
+`CHAT_INPUT_WEIGHT = 8` is labelled an assumption, not a measurement.
+
+**Honest cost of the ceiling:** with the last resorts gone, a free turn where GLM and both Google doors
+fail at once returns an honest "busy" rather than an answer — the same trade the professional free tier
+already makes in writing.
+---
+
+## 2026-09-12 — THE SECRET VAULT GETS A REAL LOCK, and a Cloud Run-shaped screen behind it
+
+**The ask** (admin, verbatim): *"user jab secret and api keys par click kare to phone lock / face lock /
+pin dalna pade, tab open ho!"* … *"input box jaisa dikhna chahiye, jaisa cloud run me dikhta hai!"* …
+*"real working security ke sath!!!"*
+
+### The trap this feature is built to avoid
+
+The obvious implementation is: call the browser's biometric API, and on success render the list. **That
+protects the screen and leaves the secrets wide open.** The values would still be one ordinary
+`GET /api/secrets/:userId` away — reachable from devtools, an extension, or a stolen unlocked laptop —
+so the prompt would be decoration over an unchanged door. It is exactly the "built but not really
+working" state the second absolute rule forbids, and it would have been invisible: the screen would look
+locked and test green.
+
+So **nothing in the browser decides whether the vault opens.** The device produces a signature over a
+challenge we issued, the SERVER verifies it, and only then is a short-lived ticket minted. If
+`VaultLockGate.tsx` were deleted tomorrow, the keys would become **unreadable**, not public — which is
+the test of whether a lock is real.
+
+### What was built
+
+**`src/server/lib/deviceUnlock.ts`** — pure functions, 49 tests, verified against **real generated EC and
+RSA key pairs** rather than mocks:
+- signed stateless challenge + unlock ticket (HMAC, TTL, uid-bound)
+- `parseAuthenticatorData` — fixed offsets, no CBOR at all (see below)
+- `verifyClientData` — ceremony type, origin allow-list, cross-origin refusal, challenge MAC
+- `verifyAssertionSignature` — ES256 and RS256 through ONE code path
+- `signCounterOk`, `isFreshReauth`, `rpIdMatches`, `allowedOrigins`
+
+**Four routes** on the existing vault (`routes/secrets.ts`): `lock/challenge`, `lock/register`, `unlock`,
+`reveal`. Plus `verifyFreshAuth` in `authMiddleware.ts`, which reads `auth_time` out of the signed ID
+token.
+
+**`src/lib/vaultLock.ts` + `VaultLockGate.tsx`** — the browser half and the lock screen, and
+**`SavedKeyRows`** inside `SecretManager.tsx`: one row per key, name and value each in a real input box,
+a 🗑️ per row.
+
+### Five decisions worth defending
+
+**1 · No CBOR decoder, by using the browser's own `getPublicKey()`.** The textbook path decodes the
+attestation object (CBOR) to dig out a COSE key. A hand-rolled parser is precisely where a security bug
+hides, and a subtly-wrong verifier is worse than none because it *looks* right. The browser already
+offers the same key as SPKI DER, which Node reads directly — so the server parses 37 bytes at fixed
+offsets and nothing more.
+
+**2 · Two doors, because one door would lock people out of their own keys.** A device with no platform
+authenticator (older Android WebView, desktop without Hello) would otherwise permanently lose access to
+its API keys — a worse breach of the one absolute rule than a weaker prompt. The fallback is a genuinely
+fresh account sign-in, and it is **server-enforced**: `auth_time` is stamped by the identity provider
+inside the signed token, so a client cannot age a token forward. Both doors mint the SAME ticket, so
+every route downstream has one thing to check.
+
+**3 · `userVerified` is checked, not assumed.** WebAuthn will happily return an assertion for a mere
+*touch*. Accepting that would turn the whole feature into a button labelled "unlocked". Registration
+refuses a credential whose device did not verify the person, and so does every unlock.
+
+**4 · Domain separation, instead of reusing `previewDoor`'s signer.** Both sign "payload + expiry" with
+`SECRET_ENCRYPTION_KEY`, so sharing the helper looks like obvious de-duplication. Refused deliberately:
+a preview-door token and a vault ticket would become the same kind of string, and one future payload
+collision would let a PREVIEW token open somebody's KEYS. Distinct labels make that impossible by
+construction, and a test asserts a challenge cannot be used as a ticket or vice versa.
+
+**5 · Revealing values IS a change of posture, and it is recorded as one.** The list route's comment —
+true since the vault was built — says the ciphertext has no reason to leave the server. That was right
+while the screen showed only names. The admin asked for the Cloud Run experience, and that is a real
+requirement: a user who cannot see what they saved cannot tell a working key from a mistyped one. What
+makes it defensible is that it is ONE narrow POST route (so no value lands in a browser history or proxy
+log), unreachable without a verified unlock from seconds ago, `Cache-Control: no-store`, and **audited**.
+`GET` is untouched and still returns names only, so nothing that used to be safe became less so.
+
+### The sibling hunt — what nearly broke, and the pre-existing bug it exposed
+
+Requiring a ticket on DELETE would have **silently broken four other screens**: DatabaseSettings,
+AuthSettings, StorageSettings and MonetizationWizard each did *delete-then-save* to overwrite a key. Every
+one of those deletes would have started returning 401, leaving duplicate rows — the exact bug #2842 had
+just fixed.
+
+The fix was not to exempt them. **The save route has replaced-by-name since #2842**, so that client-side
+dance was redundant legacy — and it carried a real bug of its own: **a failure between the delete and the
+save LOST the key outright**, because the old value was already gone. The server's replace has no such
+window. All four now just save, and one fewer `listSecrets` request runs per save.
+
+`deleteSecret` was then **removed from `secretsApi.ts` entirely** rather than left in place: with the
+route requiring a ticket, that signature could only ever produce a 401, and a function that cannot
+succeed invites a future caller to hunt for a server bug that is not there.
+
+### Honest limits
+
+- **On the native Android/iOS shell the face/fingerprint door may not appear.** WebAuthn in a WebView
+  needs app-to-site association (assetlinks / associated domains) that is not set up, so those users get
+  the account-password door. It is equally server-verified, and stating this beats claiming Face ID
+  everywhere. ⚠️ The wrong "fix" is a biometric plugin returning a boolean — unverifiable, hence theatre.
+- **The delete is permanent.** There is no undo, which is what *"puri row delete ho jaye"* asks for; the
+  row asks once to confirm, because one stray tap on a phone must not destroy a key a live app depends on.
+- **The audit records that a key was read, never the key** — test-locked with a distinctive value, after
+  my first attempt at that assertion used the value `'v'`, which occurs inside the word "reveal" and so
+  could not fail.
+
+### Tests added (93)
+
+`deviceUnlock.test.ts` (49, real key pairs) · `vaultUnlockEndToEnd.test.ts` (17 — registers, signs,
+unlocks, reveals, then breaks each step in turn: wrong key, no user-verification, wrong origin, wrong
+rpId, replayed challenge, unknown credential, counter replay) · `vaultRevealLock.test.ts` (10) ·
+`vaultLockWiring.test.ts` (17) · `routesSecretsIdor.test.ts` rewritten for the hard delete + ticket
+while keeping its original cross-user IDOR property.
+
+`tests/helpers/routeTestUtils.ts` gained `req.header` and `res.set` — both exist on real Express, and a
+harness missing a verb fails a route that is perfectly correct.
+
+### Correction, same day: I named the wrong reason for the native-shell limit
+
+The entry above (and what I told the admin) said the device lock cannot work in the Android/iOS shell
+"because WebAuthn in a WebView needs app-to-site association (assetlinks) that is not set up". **That is
+not what decides it**, and the claim was reasoning from a general memory rather than from this project.
+A later session acting on it would have built an `assetlinks.json` that changes nothing.
+
+What the code actually says, read rather than assumed:
+
+* **Android → `https://localhost`.** Capacitor 8.5.0 defaults `androidScheme` to the https scheme with
+  hostname `localhost` (`@capacitor/android/.../CapConfig.java:38-39`), and `capacitor.config.ts` does
+  not override it. That is a secure context, and `https://localhost` was **already** in this feature's
+  origin allow-list. So the origin is not the blocker. The real unknown is whether the Android **WebView**
+  exposes WebAuthn platform authenticators — version-dependent, and not verifiable from here.
+  **Unknown, not broken.**
+* **iOS → `capacitor://localhost`.** A custom scheme cannot be a WebAuthn rpId, so the device lock
+  genuinely cannot work there. The original claim was accidentally right for iOS and wrong for Android,
+  for a reason that applies to neither.
+
+**Why shipping without a device was still safe:** `deviceLockAvailable()` asks the browser at runtime and
+a `false` offers the account-password door instead — so a WebView without WebAuthn is a different SCREEN,
+never a failure. The one-step way to settle it: open Settings → Secrets & API Keys in the Android app and
+see which door appears.
+
+And if Android does work, the credential is scoped to rpId `localhost`, shared with every Capacitor app on
+that device. Still safe — an assertion is useless without our challenge, the matching credential id and a
+live session — but that is not a reason to widen `VAULT_LOCK_ORIGINS`.
+
+**The lesson, and it is the one this file keeps re-learning:** "assetlinks" was a plausible, well-known
+reason that happened not to be THIS project's reason. A caveat is only honest if it names the mechanism
+that was actually checked — otherwise it is a guess wearing a warning label, and the next reader spends a
+day on it.
+
+---
+
+## 2026-09-12 — the admin's own six Cloud Run / console items, reported done
+
+**Trigger.** Admin, verbatim: *"mere karne ke liye aap jo 5 step bata rahe woh kar diya hai, sbhi"* —
+against the six put to them earlier the same day.
+
+Recorded in `CLAUDE.md`'s registry hand-to-hand, as that registry's own rule requires, on the day it was
+said. **The count is left unreconciled on purpose** (they said five; six were listed), and each item
+carries the one signal that settles it without anybody trusting the record:
+
+- `GRIEVANCE_OFFICER_NAME` → the Monitor's amber "not named" warning is gone
+- `NAVBHARAT_WEB_RISK=on` → `outboundNote` stops reading `unknown`
+- `E2B_USD_PER_HOUR = 0.1656` → the Monitor's rate-mismatch tile clears
+- Play developer verification, and the approved Play update published → Play Console
+- 🔴 **the six DUPLICATE Cloud Run keys — NO self-verifying signal exists.** The process sees one value
+  and cannot know a second row was ever there, so no code change could detect it. It stays open in the
+  registry until somebody reads the console.
+
+**Why the gap is written down rather than rounded away.** This repo has already paid for two drifts of
+this exact shape — the idle-minutes default that read "NOT taken" eight days after it was taken, and the
+E2B rate whose derivation "could not fail". A clean "all six done" would be read as fact by the next
+session, and for the duplicate keys there would be nothing to contradict it.
+
+### Also settled today
+All three PRs left open by other sessions are now merged: **#2848** (the apps-project record — which is
+what revealed that ROADMAP 0.1 was already DONE and Phase 2 unblocked, correcting an answer this session
+had given the admin from a stale picture), **#2851** (cheap-engine lead by live health), and **#2852**
+(the vault device lock).
+
+---
+
+## 2026-09-12 — The vault's phone lock was real, and the screen pointed at the wrong door
+
+**The evidence.** The admin, who had just been told the device lock exists, opened Secrets & API Keys on
+an iPhone in Safari and asked: *"kya yahan simple app lock nahi lag sakta… jaise UPI se payment kare to
+lock ko unlock karna hota hai, waise hi simple phone lock nahi lag sakta hai?"* — with a screenshot in
+which **the phone-lock button was visibly present**. `Set up iPhone lock` only renders when the browser
+has confirmed a platform authenticator is usable, so Face ID was available, offered, and one tap away.
+
+**The root cause, and why every test stayed green.** The button was the small outline one at the bottom
+in uppercase micro-type; `Use my account password` held the primary indigo. The screen's visual
+hierarchy said the password was the way in and the phone lock was an extra. Nothing was broken — the
+lock is genuinely server-verified (#2852) and all 93 of its tests passed throughout. **A correct
+feature can still answer a different question than the user is asking, and no security test can see
+that.**
+
+**The fix (`VaultLockGate.tsx`).** One explicit rule replaces an incidental layout: whenever the device
+can do face / fingerprint / PIN, **that is the primary button** — already set up (unlock) or not yet
+(set up) — and the account door steps down to secondary. `deviceIsPrimary = hasDeviceLock === true ||
+offerSetUp`, with `offerSetUp = canUseDevice === true && hasDeviceLock !== true` so nobody is ever sent
+to a prompt that cannot appear. 🔒 The account door is **never** hidden or gated: a device with no lock
+must not strand somebody outside their own API keys, which is the same reasoning that put two doors on
+this screen to begin with.
+
+**Two real bugs the same screenshot exposed.**
+1. **A Google account needed two taps for nothing.** The first tap only set `askPassword`, which reveals
+   a password field a Google user never gets — so the button read `Confirm and unlock` above no field to
+   confirm anything in. It now goes straight to the popup, and reads **`Confirm with Google`**: a label
+   naming what will actually happen rather than promising a field.
+2. **Setting up on a password account taught by error message.** The first tap fired the registration,
+   which threw *"Enter your account password to set up the device lock"* — an error used as an
+   instruction, which is how a one-tap feature comes to feel broken. It now reveals the field and waits.
+
+**Regression tests** (`vaultLockWiring.test.ts`, +7): the set-up button carries the primary style and
+not the uppercase micro-type; the device path renders above the account path; the account button is not
+preceded by a `&& (` guard (i.e. the fallback door cannot be conditionally hidden); `offerSetUp` is
+gated on a real capability check; the Google path is one tap; the password path reveals rather than
+errors. **Each was confirmed to FAIL when the old layout is restored** — the style assertion was
+verified by actually reverting it and watching it go red, since a wiring test that cannot fail is the
+class of test this repo has been bitten by before.
+
+**Still open, and deliberately not guessed:** the **Android app** remains untested. The screenshot was
+Safari, not the Capacitor shell, so it says nothing about the WebView. The registry's honest "unknown"
+for Android stands until somebody opens the installed app. iOS's shell (`capacitor://localhost`) still
+genuinely cannot do WebAuthn — that limit is unchanged by this work.
+
+Gate on the final state: `typecheck` 0 · `noUnusedImports` clean · `typecheck:server` 0 · `build` ok ·
+`test:bundle` within budget · `boot:check` PASS · `vitest run` **1,567 files / 21,540 passed / 1
+skipped / 0 failed**.
+## 2026-09-12 — The starter picker stops being a wall, and the India-first set reaches daily life and faith
+
+**What the admin asked for, in two steps.** First I offered two "tidying" suggestions: delete the Converter
+and Password chips because thirty-one buttons felt like a lot, and add four more India templates. The admin
+asked the right question — *"pahle mujhe hindi me samjhao, inko karne se hoga kya?"* — and the honest answer
+turned out to be that **both of my own suggestions were weak**, so I argued against them:
+
+* Deleting two chips makes nine lines of pills into eight. **No user feels that**, and whoever wanted the
+  converter is simply worse off. The problem was never the COUNT — it was the WALL.
+* Adding four more templates before any real v5 build report exists for the SEVEN shipped on 2026-09-12
+  would be building on unverified ground.
+
+The admin then approved the real fix and extended it: *"Shuru me sirf 10-12 buttons dikhao, neeche ek chhota
+'More templates'. … yeh banao, isi me indian apps daal dena (bhagwat geeta in hindi, quran in hindi,
+brahm_muhrats, ya panchang, kundali jaise apps … mera suggestion hai, aap isko real professional banana)"*.
+
+### Part 1 — twelve buttons, then "More templates (N)"
+
+`pickerSections(tappable, limit = 12)` (`starterTemplates.ts`) splits the picker; `AgentV3Panel.tsx` renders
+the first screen and one expander, collapsed by default, labelled with the number it is hiding.
+
+**`featured` is a FLAG on the data, not "the first twelve of the array"** — deliberately. The first screen is
+the most-seen surface in the product, so what lands on it is a decision; slicing the array would make it an
+ACCIDENT of insertion order, where adding a chip at the top silently pushes a curated one off with nothing
+failing to say so. Twelve are marked, nine of them `simple` so a FREE user's first screen is curated rather
+than topped up from array order.
+
+**The invariant the test pins, because it is the only way this can go wrong:** `initial ∪ more` is exactly
+the input and the two are disjoint. A chip in NEITHER half would be silently unreachable — no error, nothing
+on screen to notice — so `more` is a COMPLEMENT rather than its own hand-written list, and a chip nobody
+remembered to mark `featured` therefore appears in "More" instead of vanishing. The locked Pro showcases stay
+a separate row: folding the upgrade carrot into an expander would bury the one surface that earns revenue.
+**Nothing was deleted.** (`tests/starterPickerExpander.test.ts`, 17 assertions.)
+
+### Part 2 — four India-first templates, built to be REAL rather than to look complete
+
+`panchang`, `geeta`, `quran` (free/simple) and `kundali` (pro, showcase), with golden scaffolds in the new
+`goldenScaffolds/indiaFaith.ts` and `indiaPanchang.ts`.
+
+**The decision that shaped all four.** The easy version of each of these is the dishonest one: a panchang
+that prints a table of times somebody typed in for one city, a scripture reader that looks like the whole
+book while holding a handful of verses, a kundali that invents the planets it cannot compute. Every one of
+those *looks* identical to the real thing on the day it ships, and each is the "built but not really working"
+state the second absolute rule forbids — worst of all for a user planning a ceremony around those minutes.
+
+So:
+
+* **Panchang COMPUTES.** Sunrise, sunset and solar noon come from the standard NOAA solar-position algorithm
+  for the chosen latitude and longitude; Brahma Muhurat, Abhijit, Rahu Kaal, Gulika, Yamaganda and the eight
+  daytime Choghadiya are DERIVED from those by their documented traditional rules; tithi and nakshatra come
+  from the sun and moon longitudes with the Lahiri ayanamsa. 16 Indian cities plus manual lat/long. It states
+  its own accuracy (≈1 min for sunrise; ≈0.2° on the moon, so a tithi boundary can differ by half an hour
+  from a published panchang) and says the night choghadiya is deliberately not included.
+* **Gita and Quran COUNT what they hold.** "इस ऐप में N चुने हुए श्लोक हैं (कुल 700 में से)" on the first
+  screen; the Quran reader the same against 114 surahs, and it carries a **Hindi transliteration** so a reader
+  who cannot read Arabic can still recite — the feature that actually matters for an India-first reader. The
+  Devanagari and Arabic are the public-domain originals; the Hindi meanings are plain original paraphrase,
+  never a copied published translation. A chapter genuinely absent shows a real empty state rather than being
+  hidden, and says so.
+* **Kundali STOPS where honesty requires.** Lagna and the twelve bhava are exact spherical trigonometry
+  needing no ephemeris; the Sun (≈0.01°), Moon (≈0.2°) and the lunar nodes are genuinely computed; the chart
+  is the traditional North Indian diamond. **Mangal through Shani are NOT placed**, and the app says why on
+  the same screen as the table. The reason is recorded because it is the general rule: a table of orbital
+  elements written from memory into a scaffold is **untestable from a session**, and one wrong digit would put
+  a planet in the wrong rashi on every chart the app ever draws with nothing failing to say so. A wrong
+  kundali is worse than an incomplete one to the person reading it.
+
+### 🔴 The part worth carrying forward: the compile gate CANNOT tell a correct sunrise from a plausible one
+
+`goldenScaffolds.test.ts` proves every scaffold parses under esbuild and compiles under the preview Babel.
+Neither can evaluate a number. A grep for `Math.acos` would pass just as happily over maths that returned
+nonsense — and the maths lives inside a template-literal string, which is exactly the excuse for not testing
+it. **That excuse is wrong.** `tests/indiaAlmanacStarters.test.ts` lifts the astronomy out of the scaffold
+string, transpiles it with esbuild and RUNS it:
+
+* Delhi 21 Jun 2026 → 05:24 / 19:22 (published 05:23 / 19:21) · Delhi 22 Dec → 07:10 / 17:29 (exact) ·
+  Mumbai and Kolkata 12 Sep → within a minute. Tolerance 3 min.
+* Solar noon is exactly midway between sunrise and sunset (catches a sign error in the hour angle or the
+  equation of time); the June day is longer than the December day for every city it ships.
+* Sun at 0/90/180/270° within 1.5° of each equinox and solstice; moon moves 11–15.5°/day and returns in
+  27.32 days; Lahiri ayanamsa 24.18–24.28° for 2026 (published ≈24°14′).
+* Local sidereal time at the J2000 epoch = 99.9677° (textbook, to 0.01°); the ascendant is exactly
+  sidereal-time + 90° on the equator with zero obliquity; the Lagna sweeps all twelve rashis over 24 hours;
+  house 1 IS the Lagna rashi and the twelve houses are the twelve rashis exactly once; Ketu is exactly 180°
+  from Rahu every time; a malformed birth record returns `null`, never a chart of NaN.
+* A polar latitude where the sun does not set is REPORTED (`sunrise === null`), never faked.
+* The astronomy and city list are asserted **byte-identical** between the two apps. They are separate
+  generated apps — a golden scaffold must be one self-contained `App.tsx` — so drift between them would
+  otherwise be invisible; this is what makes the duplication safe rather than sloppy.
+
+**Lesson: "the code is inside a string" is a reason to extract and evaluate it, not a reason to test only
+that it compiles.** Every numeric claim in this entry is a test that could fail.
+
+### Two bugs found during the work, both by a check the previous step had skipped
+
+1. **`npx tsc --noEmit` does NOT typecheck `src/server/`.** A scaffold module with an unterminated string
+   (`"… label=\"x\"',` — opened with `"`, closed with `'`) passed the frontend typecheck silently; esbuild
+   caught it. The server files need `npm run typecheck:server`, which is why CLAUDE.md lists both.
+2. **`useCollection`'s `add()` mints its own id.** The kundali screen built a row with `newId()` and then
+   selected `b.id` — an id `add()` had already replaced, so "save and show the chart" would have selected a
+   profile that did not exist. It now uses what `add()` returns.
+
+Also normalised `indiaPanchang.ts` from joined string lines to the template-literal idiom every other
+scaffold module uses, verifying the rewritten module produces a **byte-identical** string to the version that
+had already been parse-checked.
+
+`AppKnowledgeBase.ts` updated in the same change: the chip roster, the "More templates" expander (so an AI
+tells a user hunting for the unit converter where it went), an honest description of each of the four new
+apps including what the kundali does not place, and the vocabulary a user actually types — `rahu kaal`,
+`choghadiya`, `suryoday`, `bhagwat geeta`, `shlok`, `surah`, `janam patri`, `kundli`, `jyotish` — because
+nobody searches for "Panchang" when they want to know the rahu kaal.
+
+**Still open, and still the right next step:** no real v5 build report exists for any of the eleven templates
+added today. Four more India templates (courier, wedding RSVP, NGO, school ERP) stay deferred until one
+arrives — a report is the only thing that can say whether these scaffolds actually hold up through a build.
+
+---
+
+## 2026-09-12 — A report the admin could not act on, and the reporting system that caused it
+
+**The evidence.** A real user report arrived: *"App is not responsive and sometimes it does not work in
+Mobile phones. Some content goes outside the mobile."* — screen `home`, platform `android`, no
+screenshot. The admin: *"problem hi samajh nahi aa rahi fix kya karu? … aapne yeh aisa reporting system
+banaya hai ki user ki problem theek hi nahi ki ja sakti."*
+
+**They were right, and the fault was ours rather than the reporter's.** Every fact that report needed
+to be fixable was knowable BY THE APP at the moment Send was pressed — the viewport width, which
+element reached past the edge, which build was running, whether anything had just thrown. We captured
+**two** fields (`view`, `platform`), declared a third (`build`) that **the client never sent at all**,
+and asked a non-technical person to supply the rest from memory.
+
+**Root cause, stated as a class rather than an instance:** the report form collected the reporter's
+WORDS and almost none of the app's own OBSERVATIONS, so every report's usefulness was capped by how
+technical the reporter happened to be. That is a design defect in the channel, not a quality problem
+with the people using it.
+
+### What shipped
+
+**1. One tap before the text box (`PROBLEM_KINDS`).** Seven chips — looks broken / off-screen · slow,
+stuck or frozen · a button didn't work · it did the wrong thing · sign-in · payment · something else.
+The chosen kind also **changes the question the box asks** ("Which part goes off the screen, and on
+which page?" instead of a generic prompt), so the answer lands on the right thing. The sentence above
+could have meant a layout bug, a hang, or a dead button; one tap settles that before the ambiguity is
+created. 🔒 **Optional on the SERVER, required in the UI** — the Android app is bundled, so requiring
+it server-side would turn the one channel every older install has into a dead button.
+
+**2. The app measures what it can see (`reportDiagnostics.ts`).** Viewport, DPR, online state,
+connection type, language, the frontend build stamp, the native versionCode — and an **off-screen
+scan** that names the element reaching past the right edge and by how many pixels.
+- ⚠️ It measures against `documentElement.clientWidth`, **not** `innerWidth`: `innerWidth` includes the
+  vertical scrollbar, so an element overhanging by 10px inside a 17px scrollbar measures as clean and
+  the complaint looks imaginary. Test-locked.
+- 🔴 It blames the element that **introduces** the overflow, not every ancestor that inherits it. A
+  naive scan hands back `body`, `#root`, `div`, `div` — all true, none of them the thing to change.
+
+**3. The last few errors (`recentErrors.ts`).** A capped, in-memory ring buffer installed **before the
+app mounts**, because the errors most worth having are the ones from a boot that never completed.
+De-duplicated against the previous entry, so a render loop throwing 200 times cannot evict the error
+that started it. 🔒 Nothing leaves the device unless the user presses Send; this is not a logging
+pipeline and must not become one.
+
+**4. One shared native-build reader (`appBuildId.ts`).** Three places already asked `@capacitor/app`
+for the same fact and a fourth was about to be added, so the fourth is shared instead.
+
+**5. The admin screen shows all of it.** It previously printed two of the eleven things now known — a
+fact gathered and not shown is the same as a fact not gathered. Off-screen findings render in amber;
+browser errors in their own block.
+
+**6. THE HONESTY FIXES (rule 5), which were not optional.** Both the report sheet's footer and
+`AppKnowledgeBase.ts` ended with a flat claim that no other information was gathered. That became
+**false** the moment this snapshot was attached. Both now name every field, the Privacy Policy gains a
+paragraph under §2.1 stating exactly what is taken and that it is taken **only on Send, never in the
+background**, and a test fails if the footer's old promise returns.
+
+🔒 **"Not measured" and "measured, nothing found" are separate states end to end** — separate flags,
+separate sentences, separate tests. Collapsing them would send whoever reads the report hunting for a
+layout bug that was never checked for, which is worse than the vague report it replaced.
+
+**Tests: 51 new** across `reportDiagnostics.test.ts`, `recentErrors.test.ts` and `reportCapture.test.ts`
+— the parent-blame rule, the scrollbar trap, sub-pixel tolerance, the array caps (an unbounded list
+would make a report **fail to save** against Firestore's 1 MiB ceiling, not merely look untidy), the
+optional-kind rule, and the wiring. **Three were confirmed to fail when the behaviour is reverted**,
+including the not-measured/clean collapse and the Send-disabled rule.
+
+**What this does NOT do, stated plainly:** it does not let the admin ask the reporter a follow-up
+question. That is the other half of *"jisse uski help ho sake"* and it is the next slice — a reply
+thread on a report — recorded here as open rather than implied as done.
+
+**And the original report stays open.** It now has a shape (`layout`, on `home`, Android) but still no
+width, no element and no build, because it was filed under the old form. The honest position is that
+the next report of this class will name the element itself; this one cannot be root-caused from what
+it contains.
+
+Gate on the final state: `typecheck` 0 · `noUnusedImports` clean · `typecheck:server` 0 · `build` ok ·
+`test:bundle` within budget · `boot:check` PASS · `vitest run` **1,572 files / 21,665 passed / 1
+skipped / 0 failed**.

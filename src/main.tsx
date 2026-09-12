@@ -33,6 +33,7 @@ import { installNativeApiRewrite, isNativeShell } from './lib/apiBase';
 import { initMetaPixel, fetchPixelIdFromServer } from './lib/metaPixel';
 import { syncNativeMetaConsent, nativeMetaConsentGranted } from './lib/metaNativeConsent';
 import { installNativeShellPolish, loadNativeShellContext } from './lib/nativeShell';
+import { installErrorCapture } from './lib/recentErrors';
 
 // Top-level crash fallback — guarantees the app NEVER shows a full white page.
 // Any uncaught render error anywhere in the tree lands here with a recovery option.
@@ -100,6 +101,12 @@ function recoverFromStaleChunk(): void {
     }
   } catch { /* storage unavailable — best effort */ }
 }
+// Keep the last few faults in memory so a problem report can carry them. Installed HERE, before the
+// app mounts, because the errors most worth having are the ones that happen during boot — the render
+// that never completes is exactly the "app is not working" a user then reports with nothing attached.
+// Nothing leaves the device unless the user sends a report; see `lib/recentErrors.ts`.
+installErrorCapture(window);
+
 window.addEventListener('unhandledrejection', (e) => {
   if (isChunkLoadError(e.reason)) recoverFromStaleChunk();
 });

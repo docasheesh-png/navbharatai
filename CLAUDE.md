@@ -798,6 +798,90 @@ the code (it is actually read somewhere) on 2026-07-11.
   Set `off`/unset to disable. Works WITH the reactive stack: escalating 429 re-probe bench (#1801),
   GLM↔KIMI floor balance (#1802, kill switch `AGENTV3_FLOOR_BALANCE=off`), circuit breaker
   (`AGENTV3_CIRCUIT_BREAKER`, default on), and the GLM key-pool.)
+- **🔴 CHAT GROUNDING — CORRECT AND CURRENT BEATS FAST (admin-mandated 2026-09-12, standing rule).**
+  Admin, verbatim: *"latest information aur correct information jyada important hai, time se jyada.
+  Chahe to time jyada lage par information sahi aur latest ho!"* So on the chat path, **never trade
+  accuracy for latency.** Two changes were REVERSED on this rule the day after they shipped, and the
+  reversal is the precedent: the page-read budget had been cut 4 s → 2.5 s "to save time", which
+  silently dropped exactly the heavy, content-rich pages worth reading, and only ONE result was read.
+  Now `liveSearchContext` reads the **top 2 results CONCURRENTLY at 4 s** (`readPages`, default 2,
+  clamped 1–3) — a second source costs no extra wall-clock because the wait is the slower fetch, not
+  the sum, which is the one kind of trade this rule allows.
+  ⚠️ **Do not "optimise" chat by fetching less.** The honest speed levers are the ones that cost no
+  accuracy: the grounding STATUS shown while the lookup runs (#2826, so the wait is visible rather
+  than blank), and **`BRAVE_API_KEY`**, ✅ **SET in Cloud Run by the admin 2026-09-12** — `WebSearch`
+  no longer has to scrape DuckDuckGo HTML (slower, weaker) for a paying user's live question.
+- **Brave Search — the chat's grounding source (admin taking the plan 2026-09-12):** `BRAVE_API_KEY`
+  (the Search plan's subscription token) and `BRAVE_SEARCH_CACHE` (kill switch — **default ON**; `off`
+  sends every search straight to Brave exactly as before the cache existed). Read by
+  `src/server/lib/braveSearch.ts`, the ONE client both `AgentV3/WebSearch.ts` and
+  `EngineerAI/WebSearchClient.ts` now call.
+  🔴 **TAKE THE `Search` PLAN, NOT `Answers`, AND NOT `Spellcheck & Suggest`.** Verified against the
+  code, not assumed: the only endpoint this repo ever calls is
+  `https://api.search.brave.com/res/v1/web/search`. `Answers` would be a paid product with **no code
+  path at all**, it would hand the WRITING of the answer to a third party (the White-Label Law says
+  the answer is NavBharatAI's), and its capacity is **2 requests/second** against Search's 50 — a
+  ceiling that would queue real users.
+  💵 **$5.00 per 1,000 requests (~₹0.44 each), with $5 of credit applied FREE every month** — so the
+  first ~1,000 searches of each month cost nothing. Billing is per REQUEST, not per result, which is
+  why `count` is raised freely and repeats are not.
+  🔒 **IT CANNOT BECOME A SURPRISE BILL, AND IT CANNOT BREAK CHAT.** The plan is PREPAID (no credits ⇒
+  nothing to overspend), and on ANY Brave failure — exhausted credit, 429, network — both callers
+  already fall back to the key-free DuckDuckGo path (`WebSearch.ts` / `WebSearchClient.ts`, one
+  `.catch(...)` each, test-locked in `tests/braveSearch.test.ts`). Worst case is today's behaviour, not
+  an outage. The authoritative ceiling is Brave's own dashboard **Usage limits**, which is the one
+  place a cap cannot drift; the code's job is to need it less often.
+  🔴 **HOW TO SET IT, AND THE ONE MISTAKE THAT WOULD BE INVISIBLE.** Cloud Run → the service → *Edit &
+  deploy new revision* → Variables & Secrets → the name is exactly **`BRAVE_API_KEY`** (never a `VITE_`
+  prefix — that is frozen at image build and would change nothing, silently), set ONCE (a duplicate
+  wins by being last, per the 2026-08-20 audit), value = Brave's subscription token, nothing else.
+  ⚠️ **A trailing space or newline used to be fatal AND silent** — the value goes straight into the
+  `X-Subscription-Token` header, Brave rejects it, and both callers fall back to DuckDuckGo with no
+  error anywhere: the console shows it configured and the paid engine simply never runs. Since
+  2026-09-12 `braveApiKey()` TRIMS it and treats whitespace-only as unset, and a rejected call logs
+  ONE admin-only line naming the status (`[BRAVE] search rejected — HTTP 403 … check BRAVE_API_KEY`)
+  instead of degrading in silence. **That log line is how to verify the key is really working** —
+  no line after real traffic means Brave is answering.
+  🔀 **FREE FIRST WHERE IT IS SAFE, PAID FIRST WHERE IT MATTERS (admin asked 2026-09-12: "dono ko mila
+  kar… jahan brave ki need na ho wahan duckduckgo").** `searchOrder(intent, hasKey, cheap)` is that
+  rule. Note what it is NOT: merging both engines on every query would pay Brave EVERY time and cost
+  strictly MORE than today — so the saving comes from asking the FREE engine first wherever its answer
+  suffices.
+  • **`reference`** (the DEFAULT — AgentV3 build lookups and Engineer AI: package versions, framework
+  docs, error meanings) ⇒ **DuckDuckGo first, Brave only if DuckDuckGo finds nothing.** Not a downgrade
+  of anything: DuckDuckGo-only IS production's behaviour today, so this is today PLUS a paid rescue, and
+  nobody watches a spinner during a build. • **`live`** (only `liveSearchContext`, the chat's grounding)
+  ⇒ **Brave first, DuckDuckGo as the free rescue** — freshness and result quality are exactly what the
+  fee buys, and a real user is waiting. Both orders end in a second engine, so neither engine being down
+  can leave a caller with nothing. A THROW and an EMPTY result are treated identically (both mean "this
+  one did not answer"), which is what makes the rescue fire on a 429 as well as on a blocked scrape.
+  ⚠️ Adding a caller? It defaults to `reference` on purpose — a caller that has not thought about intent
+  is by definition not a user-facing live question, so the safe default is the one that costs nothing.
+  🔒 **`cheap` — the third lever, for a caller who is not PAYING at all (admin-mandated 2026-09-12,
+  verbatim: "free chat me brave api ka istemal bahut hi kanjusi se karna hai. minimal use. jyadatar
+  duckduckgo hi use ho").** The `reference`/`live` split above is about the QUESTION; `cheap` is about
+  the CALLER — even a `live` chat question gets DuckDuckGo-first when the asker is not a paying user, and
+  Brave is spent only as the last-resort rescue on a genuinely empty DuckDuckGo result. Wired at all
+  three `liveSearchContext()` call sites from each surface's OWN existing free/paid signal (no new
+  concept invented): `routes/chat.ts` → `cheap: isFree` (the `navbharat` tier), `professionals/engine.ts`
+  → `cheap: tier === 'free'`, `routes/agentv3.ts`'s plain-chat-turn lane →
+  `cheap: freeTierBuildActive || powerSpecResolved.cheapOnly`. Defaults to `false` in both
+  `AgentV3/WebSearch.ts` and `EngineerAI/WebSearchClient.ts`, so a caller that does not pass it keeps
+  exactly today's paid behaviour. Deliberately NOT extended to the AgentV3/Engineer AI build-time
+  web-search TOOL call (`makeWebSearch()` / `EngineerAgentLoop.ts`) — that is a `reference`-intent
+  lookup already DuckDuckGo-first regardless of tier, and the admin's instruction was about "free chat",
+  not app builds. Regression-locked in `tests/braveSearch.test.ts` (`searchOrder` itself) and
+  `tests/agentV3WebSearchCheap.test.ts` / `liveSearchContext.test.ts` (the wiring).
+  📉 **What keeps the bill down, and what it deliberately does NOT trade.** Identical calls already in
+  flight share one request (zero staleness — it is the same live response); a repeat question inside a
+  short window reuses the result (**60 s** for tick-by-tick things — scores, live matches, market
+  prices — and **10 min** for everything else); and case/spacing are normalised because Brave does not
+  distinguish them either. Nothing here shortens a fetch budget or reads fewer sources: under the
+  standing CHAT GROUNDING rule, cost may never buy staleness a user can feel. An EMPTY or FAILED
+  response is never cached, so one blocked minute cannot become ten.
+  ⚠️ **`braveMeter()` is PER-INSTANCE and says so** — it reports this process's calls/hits/free-served/rescues since
+  boot, not the account's. The account's real number is on Brave's dashboard; do not quote the meter as spend.
+
 - **Live daily-life data for the chat AIs (added 2026-08-25):** `RAPIDAPI_KEY` (✅ **SET in Cloud Run by
   the admin 2026-08-25** — ONE RapidAPI key covering the subscribed marketplace APIs: IRCTC
   (`irctc1.p.rapidapi.com`, live train running status + PNR) and AeroDataBox (flight status); the admin
@@ -807,24 +891,8 @@ the code (it is actually read somewhere) on 2026-07-11.
   set yet: movies-now-playing source in `lib/liveDataSources.ts`, may be superseded by the admin's IMDb
   API once its host is known. Key-free live sources (weather/AQI/currency/PIN codes) need no env at all.
   ⚠️ Open licensing item recorded in PROGRESS.md 2026-08-25: the no-key weather source (Open-Meteo) is
-  licensed non-commercial — license or swap it before heavy real traffic.
-- **`BRAVE_API_KEY` (✅ SET in Cloud Run by the admin 2026-09-12)** — search-quality upgrade over the
-  DuckDuckGo fallback, read by `AgentV3/WebSearch.ts` (chat live-search + AgentV3 build tool) and
-  `EngineerAI/WebSearchClient.ts` (Engineer AI builder). No companion key/format needed — a bare token in
-  `X-Subscription-Token`.
-  🔒 **COST POLICY (admin-mandated 2026-09-12, verbatim: "free chat me brave api ka istemal bahut hi
-  kanjusi se karna hai, minimal use, jyadatar duckduckgo hi use ho"): every non-paying chat surface must
-  spend Brave only as a last resort, DuckDuckGo first.** Implemented as `WebSearch.search(query, limit,
-  { preferCheap })` (`AgentV3/WebSearch.ts`) — when `preferCheap` is true, DuckDuckGo runs FIRST and Brave
-  is called only if DuckDuckGo genuinely returns zero results; the paid/default order (Brave first when a
-  key is configured) is unchanged when `preferCheap` is omitted. `liveSearchContext()` threads this as a
-  `cheap` option, wired at all three call sites by each surface's own free/paid signal: `routes/chat.ts`
-  (`cheap: isFree`, i.e. the `navbharat` tier), `professionals/engine.ts` (`cheap: tier === 'free'`), and
-  `routes/agentv3.ts`'s plain-chat-turn lane (`cheap: freeTierBuildActive || powerSpecResolved.cheapOnly`).
-  Regression-locked in `tests/agentV3WebSearchCheap.test.ts` and `liveSearchContext.test.ts`. Deliberately
-  NOT extended to the AgentV3/Engineer AI build-time web-search TOOL call (`makeWebSearch()` /
-  `EngineerAgentLoop.ts`) — the admin's instruction was about "free chat", not free-tier app builds; revisit
-  only if the admin asks for that too.
+  licensed non-commercial — license or swap it before heavy real traffic. (`BRAVE_API_KEY` is now SET —
+  see the "Brave Search — the chat's grounding source" entry above, which is the canonical record.)
 - **Sonic Chat (Amazon Nova Sonic voice — EXPERIMENTAL, route `/sonic`, admin 2026-07-13):**
   `SONIC_CHAT_ENABLED`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` (= `us-east-1`),
   plus optional `SONIC_MODEL_ID` / `SONIC_VOICE_ID`. All set in Cloud Run 2026-07-13. The feature is
@@ -994,6 +1062,39 @@ the code (it is actually read somewhere) on 2026-07-11.
   shown a green "Alerts reach you by app and email" while the provider rejected every send. Fixed the
   same day — the sender's SHAPE is now validated (`senderAddress`, both `a@b.c` and `Name <a@b.c>`
   accepted) and anything else is refused by name. Test-locked in `alertEmail.test.ts`.
+- **🔴 ALERT NOISE — ONE MAIL PER EPISODE, TWO AT MOST, THE SECOND 48 h LATER (admin-mandated
+  2026-09-12).** The admin's inbox showed `ALERT → Resolved → Warning → ALERT → Resolved` for ONE
+  condition inside two hours, and said plainly: *"yeh alert to user ko bhaga dega… ek information ke
+  liye bas 1 mail only. agar jyada jaruri hai, to maximum 2 — woh bhi 48hr baad."* Two independent
+  bugs produced it, and both are fixed in `monitorAlerts.ts` / `metricsAlerts.ts`:
+  **(1) Resolving DELETED the alert's state, so the cooldown was bypassed by the very thing it existed
+  to survive.** A metric hovering at its threshold resolved, forgot it had ever fired, and the next
+  crossing was a BRAND NEW alert that announced itself immediately — two mails per wobble, no quiet
+  period at any point. A condition that stops firing now enters a COOLING period
+  (`MONITOR_ALERT_RESOLVE_AFTER_MINUTES`, default **120** — twice the one-hour metric window, so a
+  wobble inside one window cannot end an episode); re-firing inside it is the SAME episode and says
+  **nothing at all**. `0` is refused and falls back to the default, because zero is precisely the bug.
+  **(2) `SLOW_BUILD_MIN_SAMPLE` was 3.** Three builds is not a sample: with a 30-minute build ceiling
+  ONE slow build among three drags the hour's mean over the 10-minute line by itself, and the next
+  hour drops it back. Raised to `ALERT_MIN_SAMPLE` (**10**) — this file's own existing answer to "how
+  many points before a mean is worth waking someone for", not a new invention.
+  **The budget is now hard:** `MAX_NOTIFICATIONS_PER_EPISODE = 2`, and `MONITOR_ALERT_COOLDOWN_MINUTES`
+  defaults to **48 h** (was 6 h; the ceiling rose 24 h → 7 days so 48 can actually be set). ⚠️ An
+  ESCALATION (warning → critical) now SPENDS the second slot instead of being exempt — "maximum 2" is
+  the instruction, and an exemption is how a cap quietly becomes a suggestion. A condition nobody fixes
+  therefore costs exactly two mails, ever. `MONITOR_ALERT_RESOLVED=off` drops the all-clear mails too.
+  🔎 **THE SIBLING, FIXED IN THE SAME CHANGE (rule 3):** the per-user "your site is down" mail had the
+  IDENTICAL root cause. Recovery set `alerted = false`, and the next outage then took the
+  `!prev.alerted` branch — **which never consults the cooldown** — so a flapping host mailed its owner
+  on every single transition. `SUCCESSES_BEFORE_CLEAR = 2` now makes a recovery hold for two good
+  probes, symmetrically with the two bad ones that raise the alarm. A genuine outage after a genuine
+  recovery still alerts at once, which is why the fix is a confirmed recovery rather than a longer
+  cooldown.
+  ⚠️ **OPEN, AND DELIBERATELY NOT GUESSED: the 10-minute threshold itself.** Whether 10 min is actually
+  abnormal for this engine needs the real distribution of build durations, which nobody has measured
+  (`maxBuildSeconds` alone defaults to 30 min, so it may simply be set below normal). Replacing a noisy
+  alert with a quiet one that is wrong would be worse — so the sample was fixed and the threshold is
+  recorded here as an open question.
 - **Site uptime alerts for connected domains (shipped 2026-09-10, ROADMAP §13 item 1.8):**
   `SITE_UPTIME_SWEEP` (kill switch — **default ON**; `off` stops the 15-minute probe of every connected
   custom domain), `SITE_UPTIME_COOLDOWN_HOURS` (default 6, clamped 1–72 — one "down" message per outage,
@@ -1003,6 +1104,48 @@ the code (it is actually read somewhere) on 2026-07-11.
   `ALERT_EMAIL_*` mailer — ✅ **configured since 2026-09-10, so the email really sends now**; unconfigured
   ⇒ the in-app bell only, never a silent nothing. A probe that could
   not complete from our side is "unknown" and never counts as the user's site being down.
+
+- **Secret-vault device lock (shipped 2026-09-12):** `VAULT_LOCK_ORIGINS` — ⚠️ **NOT set, and it should
+  stay unset.** A comma-separated list of the origins a WebAuthn assertion may come from; UNSET uses the
+  built-in defaults (`https://navbharatai.com`, `https://www.navbharatai.com`, plus localhost for the
+  Capacitor shell and dev), which is what production needs. Setting it **replaces** the defaults, so a
+  value that omits the live origin would refuse every device unlock — only set it to ADD a staging host,
+  and include the production origins in the same list. A malformed entry is dropped rather than widening
+  the set (test-locked), so a typo cannot turn into "any origin".
+  🔒 **There is no secret to add for this feature.** The unlock challenge and ticket are signed with the
+  `SECRET_ENCRYPTION_KEY` that already encrypts the vault, which is why tickets verify across every Cloud
+  Run instance; with it unset the code falls back to a per-process RANDOM value (never a constant in
+  source, which would let anyone with the repo forge an unlock) and a user would simply be asked to
+  unlock again whenever the load balancer moved them.
+  **What it protects, stated precisely:** `POST /api/secrets/:userId/reveal` (the ONLY route that returns
+  a decrypted key) and `DELETE /api/secrets/:userId/:secretId` (now a REAL document delete, not a
+  `deleted: true` flag) refuse without a ticket minted seconds earlier from either a verified WebAuthn
+  platform-authenticator assertion or a genuinely fresh Firebase re-auth (`auth_time` within 5 min). The
+  old `GET /api/secrets/:userId` is unchanged and still returns names only.
+  ⚠️ **ON THE NATIVE SHELL — and the first version of this line named the WRONG REASON, corrected the
+  same day.** It said the device lock fails because "WebAuthn in a WebView needs app-to-site association
+  (assetlinks / associated domains) that is NOT set up". That is not what decides it here, and a later
+  session acting on it would go and build an `assetlinks.json` that changes nothing. The verified facts:
+  - **Android: the origin is `https://localhost`** — Capacitor 8.5.0 defaults `androidScheme` to the
+    https scheme with hostname `localhost` (`node_modules/@capacitor/android/.../CapConfig.java:38-39`,
+    read rather than assumed; `capacitor.config.ts` does not override it). That is a secure context and
+    `https://localhost` is ALREADY in this feature's origin allow-list, so **the origin is not the
+    blocker**. What is genuinely uncertain is whether the Android **WebView** exposes WebAuthn platform
+    authenticators at all — that varies by WebView version, and it cannot be verified from a Claude
+    session. So: **unknown, not broken.**
+  - **iOS: the origin is `capacitor://localhost`** — a custom scheme, which cannot be a WebAuthn rpId.
+    The device lock genuinely cannot work there, and the account-password door is the real path.
+  🔒 **Either way nothing breaks, which is why this was safe to ship without a device.**
+  `deviceLockAvailable()` asks the browser at runtime (`isUserVerifyingPlatformAuthenticatorAvailable`)
+  and a `false` silently offers the account-password door instead — so a WebView without WebAuthn is a
+  different SCREEN, never a failure. **To settle it, open Settings → Secrets & API Keys in the Android
+  app: whatever it asks for IS the answer.**
+  ⚠️ Note what the Android path implies if it does work: the credential is scoped to rpId `localhost`,
+  which is shared by every Capacitor app on that device. It is still safe — an assertion is useless
+  without our server's challenge, the matching credential id, and a live session — but do not widen
+  `VAULT_LOCK_ORIGINS` casually on that reasoning.
+  Do not "fix" any of this by accepting a client-side biometric boolean: a plugin's yes/no is
+  unverifiable and would make the lock theatre.
 
 - **Outbound abuse check for published apps (shipped 2026-09-10, NavBharat Cloud slice 4):**
   `NAVBHARAT_WEB_RISK` (⚠️ **NOT set yet** — `on` turns on BOTH halves together: the publish-time
@@ -1030,6 +1173,181 @@ the code (it is actually read somewhere) on 2026-07-11.
   budget it cannot read spends NOTHING, because not looking up costs zero and changes no outcome —
   an unchecked origin is `unknown`, and nothing in the system acts on an `unknown`. Exhausting the
   budget is never silent: it says so in the same `outboundNote` the admin already reads.
+
+- **NavBharat Cloud — the SEPARATE project user apps run in (admin did the five GCP steps 2026-09-12,
+  hand-to-hand with a session, so this entry is the record of what was actually created):**
+  ✅ **`NAVBHARAT_APPS_PROJECT` = `navbharatai-user-apps`** and ✅ **`NAVBHARAT_CLOUD` = `on`**, both set
+  in the PLATFORM's Cloud Run (`navbharat-ai-prod`). Together these unblock ROADMAP Phase 0.1, which
+  every item in Phase 2 was waiting on.
+  🔴 **THE PROJECT ID IS `navbharatai-user-apps`, NOT `navbharat-apps-prod`.** The roadmap's §11 step 1
+  says "suggested id `navbharat-apps-prod`" and a later reader will take that for the real one — it is
+  not. Project number `219549203609`; the ADMIN console shows it as `navbharatai-user-apps` in both the
+  name and the id.
+  🔒 **`NAVBHARAT_CLOUD_PUBLIC` IS DELIBERATELY UNSET, and must stay unset until metering ships.** With
+  the master flag on and this one off, hosting works for the ADMIN ONLY. Setting it opens hosting to
+  every user — and ROADMAP 2.1 (the wallet debit for hosting) does not exist yet, so every hosted app's
+  Cloud Run bill would land on NavBharatAI with nothing recording it. This is the one key in this whole
+  section whose absence is load-bearing.
+  **What else was created, none of which is an env var and all of which a publish needs:**
+  - **Billing: a SEPARATE billing account** (`NavBharatAI User Apps`, organisation `doc-asheesh-org`),
+    NOT the platform's. The apps project is linked to it alone; the platform's three projects were left
+    on the old account untouched. The point is blast radius: an abuse complaint or a billing suspension
+    on somebody's hosted app cannot take NavBharatAI down with it.
+  - **Cross-project IAM** — the platform's runtime identity
+    `950841184325-compute@developer.gserviceaccount.com` (the DEFAULT compute service account of
+    `gen-lang-client-0866594388`) holds, **in the apps project only**: Cloud Run Admin, Cloud Build
+    Editor, Service Account User, Artifact Registry Writer, Storage Admin, Monitoring Viewer. The first
+    three are §11's list; the last three are what `hostingPreflight.ts` actually exercises — an image
+    push, the build's staging bucket, and the usage read.
+  - ⚠️ **FOUR APIs, not three.** §11 names Cloud Run, Cloud Build and Artifact Registry. `hostingPreflight`
+    also calls **Cloud Monitoring**, and without it the "Usage metering" check fails. All four are enabled.
+  - ⚠️ **An Artifact Registry repository must EXIST — nothing creates it.** A **DOCKER** repo named
+    **`nbai-apps`** in **`asia-south1`**, matching `appsImageRepo()` and `appsRegion()`. `containerBuild.ts`
+    pushes to it and never creates it; the preflight's one 404 remedy names exactly this.
+  - **The other four env keys in §11's table were NOT set, on purpose.** `NAVBHARAT_APPS_REGION`
+    (`asia-south1`), `NAVBHARAT_APPS_IMAGE_REPO` (`nbai-apps`) and `NAVBHARAT_APPS_BUILD_BUCKET`
+    (`<project>_cloudbuild`, which Cloud Build creates itself) already have exactly those code defaults,
+    so setting them would only add three more values to keep in sync. Verified against
+    `cloudRunHosting.ts` and `containerBuild.ts` rather than taken from the doc.
+  **How to check it without guessing:** admin panel → home → **"Check app hosting setup"**
+  (`LoadBoard.tsx` → `GET /api/admin/hosting/preflight`). It makes the SAME Google calls a real publish
+  makes, and a check that could not run reports as skipped rather than ok.
+- ✅ **`NAVBHARAT_WEB_RISK` — the API is now ENABLED (admin 2026-09-12).** The key was set on 2026-09-10;
+  the Web Risk API itself was switched on in `gen-lang-client-0866594388` today, so outbound verdicts are
+  real instead of `unknown`. **Confirmed the same day: the console display name `navBharat ai real` IS
+  project `gen-lang-client-0866594388`** — the billing console's project list shows both side by side.
+  Recorded because a display name that looks nothing like the id is exactly how an API gets enabled in
+  the wrong project and nobody can tell.
+
+- ✅ **THE ADMIN'S OWN QUEUE, CLEARED (admin said so 2026-09-12, verbatim: "mere karne ke liye aap jo
+  5 step bata rahe woh kar diya hai, sbhi").** Recorded hand-to-hand per this registry's own rule, the
+  same day it was said. Six items had been put to them; they replied "5 … sabhi". **The count is not
+  reconciled and this entry deliberately does not pretend it is** — so each line below carries the ONE
+  signal that settles it without anybody taking this record on trust:
+
+  | Item | How to confirm it WITHOUT trusting this entry |
+  |---|---|
+  | **`GRIEVANCE_OFFICER_NAME`** (+ optional `_EMAIL` / `_PHONE` / `_ADDRESS`) — read by `src/server/lib/grievanceOfficer.ts`; the public page is `/grievance` | Admin Monitor: the amber "Grievance Officer not named" warning is GONE. It is driven by `officerIsNamed`, so it cannot be green while the key is missing |
+  | **`NAVBHARAT_WEB_RISK=on`** | An admin build report's `outboundNote` stops saying `unknown` for every origin |
+  | **`E2B_USD_PER_HOUR` = `0.1656`** (was the half-true `0.083`) | The Monitor's amber rate-mismatch tile clears — `sandboxRate.ts` raises it by comparing the configured rate against the template's REAL size, so a wrong value cannot look right |
+  | **The six DUPLICATE keys** (`AGENTV3_ESCALATION` ×3, `CHEAP_FLOOR`, `ENABLED`, `PAID_PUBLIC`, `CREDIT_GATE`, `STREAMING_PREVIEW`) — see the 2026-08-20 audit below | Console only. ⚠️ **Nothing in the code can detect a duplicate** — the process sees one value and cannot know a second row existed. This is the one item with no self-verifying signal, which is exactly why the audit below calls it the urgent one |
+  | **Play developer verification → Identity tab** (deadline 30 Sep 2026) | Play Console only |
+  | **The approved Play update published**, then `ANDROID_LATEST_VERSION_CODE` set to that run number | Play Console shows the release live; the number must be set AFTER it is downloadable, never before (see that key's own entry) |
+
+  🔴 **WHY THE UNRECONCILED COUNT IS WRITTEN DOWN RATHER THAN ROUNDED AWAY.** This file already records
+  two costly drifts of exactly this shape — an idle-minutes default that said "NOT taken" eight days
+  after it was taken, and an E2B rate whose derivation "could not fail". A later session reading a clean
+  "all six done" would reason from it as fact and, for the duplicate keys, would have no way to notice.
+  Five of the six can be re-checked from a screen in seconds; the sixth cannot, so it stays open here
+  until someone reads the console.
+
+### 💴 FULL MONEY AUDIT — every paying code path read end to end (admin-asked 2026-09-12)
+
+The admin asked for a microscopic audit of every money path: *"kahi koi money leak to nahi hai."* 53
+money-touching modules were mapped and walked. **Five real leaks were found, all verified from code
+rather than reasoned about, and all fixed in the same change.** The rest of the money surface held up —
+the Cashfree credit is transactional and derives tokens from the VERIFIED paid amount; the coupon table
+is server-side with an ATOMIC one-time claim; the weekly gift is transactional with its lifetime cap
+written in the same transaction as the credit; a failed build is never charged; an unmeasured provider
+charges zero rather than an invented number.
+
+**🔴 1. A FREE user's paid fallback was the DEAREST model on the card.** `buildFree` in
+`AIRouterManager.ts` registered `gemini-2.5-pro` (**$10/MTok out**) as the FIRST fallback after the free
+GLM-flash leader, with `gemini-2.5-flash` (**$2.50**) sitting BELOW it. So every time the free leader
+rate-limited — the 429 storm this file already documents — a free chat turn cost **4× the rung beneath
+it**, and free chat is NOT wallet-charged, so all of it was ours.
+🔒 **The policy already existed, one function away.** `buildProfessionalFreeFallback` states it verbatim:
+*"Vertex (cheap Gemini on Google), NEVER Grok / direct Gemini / Claude … so a free user can never trigger
+the pricier paid providers."* The professional free tier obeyed it; the twin universe every ordinary user
+hits did not. The bug was a rule applied in one place and not its sibling — not a missing rule.
+**Fixed:** one price-ordered ladder across both Google doors — flash-lite → flash (Vertex) → flash-lite →
+flash (Gemini) → **pro last of the Geminis** → grok ($15, dearest in the card) as the final resort.
+**Nothing was removed**, so resilience is identical; the rungs are climbed cheapest-first instead of
+dearest-first. Test-locked in `tests/freeChainCost.test.ts`, which reads the ORDER out of the source and
+prices it with `providerRates` — so it fails if an order OR a price ever puts an expensive model first.
+
+**🔴 2. The coupon redemption credited the wallet OUTSIDE a transaction, and moved only the ₹ view.**
+The redemption CLAIM was already atomic (a code cannot be redeemed twice — that guard is untouched), but
+the CREDIT was a read-modify-write: a build settling between the read and the write had its debit
+**erased** by a balance computed before it landed. Free spend, timed rather than hacked. It was the one
+credit path in the repo not using a transaction, while `computeCreditedWallet` carries a comment
+explaining exactly why the purchase path does.
+
+**🔴 3. The admin token adjustment ASSIGNED the ₹ view instead of moving it.** It wrote
+`remaining_balance = tokenBalance / TOKENS_PER_RUPEE` — an assignment, not a delta. The 2026-08-03 fix it
+replaced was right about the symptom (a gifted wallet showing ₹0 could not build) and wrong about the
+cure: an assignment silently rewrites a balance whenever the two views legitimately differ — **and they
+always differ for a Pass buyer**, because `remaining_balance += netPaid` while
+`creditableVishwakarmaTokens` subtracts the Pass price from the token figure first. A "+1 token"
+adjustment on such an account would have wiped ₹(pass price) the user really paid; on a wallet credited
+in ₹ only (leak 2), the same line MINTED balance. It was also non-transactional.
+
+**🔴 4. A store purchase could credit TWICE under a concurrent retry.** The receipt check on
+`/api/payment/store/verify` sat OUTSIDE the transaction, and the transaction read only the WALLET. Two
+concurrent deliveries of the SAME purchase token — the store re-delivering on relaunch and the app
+retrying on a flaky network, both named in that route's own comments as NORMAL — could both pass the
+outside check; Firestore saw the clash on the wallet alone, retried the loser, and the retry re-read the
+already-credited balance and credited the same purchase again. The receipt is now read IN-transaction
+(before the wallet), which puts it in the conflict set. **The sibling Cashfree path was checked and was
+already right** — it claims the PENDING→SUCCESS flip inside a transaction and only the winner credits,
+which is exactly the pattern the store path was missing.
+
+**🔴 5. IMAGE GENERATION HAD LEAK 1'S SHAPE, IN A SECOND PLACE — which is what makes it a CLASS.**
+`/api/image/generate` is a free-first ladder too: Pollinations (₹0) → Gemini (paid) → Grok (paid). Its
+allowance gate ran only `if (!pollinationsEnabled())` — the reasoning being "free provider on ⇒ the image
+is free". That holds only while the free provider SUCCEEDS, and the paid rungs exist precisely for when
+it does not; the route's own log line says *"trying paid fallbacks"*. So a bad minute at Pollinations
+(down, timeout, rate-limited — and a caller can provoke the last one) delivered a PAID image with **no
+allowance checked and nothing metered**. Now the allowance is resolved LAZILY, the first time the ladder
+is about to touch a paid provider and BEFORE that provider is called, and only a PAID delivery burns it —
+a free image still passes with no gate lookup, so the ordinary path is unchanged.
+
+**🔴 1b. THE SECOND BUG INSIDE LEAK 1 — and it HID the first, so re-ordering alone would have been
+decoration (found 2026-09-12 while answering "gemini se sasta koi ho sakta hai?").** `slot()` is how ONE
+provider serves as several ladder rungs at several prices — it pins a model per rung. But `executeStream`
+had **no model parameter at all**, and `VertexProvider.executeStream` hardcoded `this.modelPro`. **Chat
+STREAMS.** So on the path that carries the actual traffic, EVERY Vertex rung ran `gemini-2.5-pro`
+regardless of which rung won, and the ladder's order was cosmetic. The model now rides the stream
+(`executeStream(prompt, systemPrompt, onChunk, model?)`, every provider honouring it, `slot()` passing
+it); without that, the ceiling below would be decoration too. ⚠️ **I reported leak 1 as fixed by the
+re-order before finding this — the re-order alone fixed only the non-streaming path.** Test-locked:
+`tests/freeChainCost.test.ts` asserts the pin reaches `executeStream` on all five providers.
+
+**🔴 1c. THE ADMIN'S PRICE CEILING (mandated 2026-09-12).** Shown the whole rate card, the admin drew a
+line under `kimi-k2.7` — *"bas yahi tak rakho"*. So **`gemini-2.5-pro` ($10/MTok out) and grok ($15) are
+REMOVED from the free ladder, not demoted**, and Claude was never there. The rule is stated in MONEY, not
+as a list of ids (`src/server/AI/freeTierCostCeiling.ts`): nothing whose chat cost exceeds `kimi-k2.7`'s
+may serve a free turn, whatever it is called — so a rung added later at any price above the line fails CI
+rather than reaching a bill. The ceiling is DERIVED from the rate card, so a repriced kimi moves it.
+⚠️ **THE INDEX IS INPUT-WEIGHTED, AND ORDERING BY THE OUTPUT COLUMN ALONE IS WRONG FOR CHAT.** A grounded
+turn sends a large system prompt, the history and two fetched pages, and returns a few hundred tokens —
+it is input-heavy. `glm-4.7` ($0.60 in / $2.20 out) looks cheaper than `gemini-flash` ($0.30 / $2.50) on
+the output column and is DEARER for chat; they break even exactly when output equals input, which chat
+never does. `CHAT_INPUT_WEIGHT = 8` is an ASSUMPTION, labelled as one — retune that single constant when
+the chat route's token logs give a real ratio.
+🔒 **WHAT THE CEILING COSTS, STATED PLAINLY:** with the last resorts gone, a free chat turn where GLM and
+BOTH Google doors are failing at once now returns an honest "busy" instead of an answer. That is the trade
+the admin chose, and it is the SAME trade `buildProfessionalFreeFallback` already makes in writing. **PRO
+and PROFESSIONAL keep every rung** — the ceiling is the FREE ladder's alone, and a test asserts that.
+⚠️ The final rung, `glm-4.7`, shares ONE key with the flash leader: when the leader failed because that
+KEY was rate-limited, this rung usually fails too. It earns its place on a model-specific failure, not on
+a 429 storm, and it is NOT a substitute for a genuinely independent provider — **Kimi has no chat provider
+in this repo** (only the build engine has one), so adding it is a build, not a config change.
+
+🔒 **THE CLASS, NAMED SO IT IS RECOGNISED NEXT TIME: A FREE-FIRST LADDER WHOSE PAID RUNGS ARE UNGOVERNED.**
+Leaks 1 and 5 are the same mistake in two features — the cheap/free leader is reasoned about as if it
+were the whole ladder, and the fallback nobody expects to fire is left dearest-first (1) or unmetered
+(5). **Whenever a free or cheap provider leads, two questions must be answered about the rungs BELOW it:
+in what ORDER are they climbed (cheapest first?), and WHO PAYS when one of them serves?**
+
+🔒 **THE ROOT CAUSE BEHIND BOTH 2 AND 3, AND THE RULE THAT NOW PREVENTS THE CLASS:** the wallet holds ONE
+balance in TWO fields, and every bug here came from a writer that moved one of them. `walletMirror.ts`
+takes the delta ONCE and derives both fields from it — **there is no way to call it and move one view
+without the other**, and it never assigns (a deduction floors both views from the same clamped token
+figure, so one can never end at zero while the other goes negative). Both writers now use it, inside a
+transaction. ⚠️ **Any NEW wallet writer must go through it** — a direct `updateDoc` on a balance field is
+how this class comes back. Test-locked in `tests/walletMirror.test.ts`, including the Pass-buyer case
+that the old assignment got wrong.
 
 ### 🔎 FULL CLOUD RUN AUDIT — 84 keys read off the live console (admin screenshots, 2026-08-20)
 

@@ -18,7 +18,33 @@ export function LegalDocPage({ docId }: { docId: string }) {
     setDoc('loading');
     // The lazy chunk: bodies download only when someone actually opens a legal page.
     import('../../content/legal')
-      .then((m) => { if (alive) setDoc(m.legalDocById(docId)); })
+      .then(async (m) => {
+        if (!alive) return;
+        const found = m.legalDocById(docId);
+        /**
+         * GRIEVANCE IS THE ONE DOCUMENT WITH LIVE DETAILS IN IT — the officer's real name and
+         * contact, which are deployment configuration rather than source. The registry carries the
+         * unconfigured fallback, so this page asks the server for the published details and builds
+         * the SAME words with them. Without this, the in-app page would name the role while the
+         * public /grievance URL named the person: one compliance page saying two things.
+         *
+         * A failed fetch keeps the fallback, which is honest and still gives a working address —
+         * never a blank page, and never an invented name.
+         */
+        if (found && docId === 'legal_grievance') {
+          try {
+            const r = await fetch('/api/public-config');
+            const cfg = r.ok ? await r.json() : null;
+            if (cfg?.grievance) {
+              const g = await import('../../content/legal/grievance');
+              const body = g.grievanceDoc(g.grievanceOfficerFrom(cfg.grievance));
+              if (alive) setDoc({ ...found, body });
+              return;
+            }
+          } catch { /* keep the fallback body — see the note above */ }
+        }
+        setDoc(found);
+      })
       .catch(() => { if (alive) setDoc(null); });
     return () => { alive = false; };
   }, [docId]);

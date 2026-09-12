@@ -16,10 +16,10 @@ import { LEGAL_DOCS, legalDocById } from '../src/content/legal';
 
 const byId = Object.fromEntries(LEGAL_DOCS.map((d) => [d.id, d.body]));
 
-describe('the registry — five documents, stable ids, real content', () => {
-  it('has exactly the five documents, each with a title, subtitle, date and a long body', () => {
+describe('the registry — the documents, stable ids, real content', () => {
+  it('has exactly the documents it should, each with a title, subtitle, date and a long body', () => {
     expect(LEGAL_DOCS.map((d) => d.id)).toEqual([
-      'legal_privacy', 'legal_terms', 'legal_dpa', 'legal_security', 'legal_nda',
+      'legal_privacy', 'legal_terms', 'legal_grievance', 'legal_dpa', 'legal_security', 'legal_nda',
     ]);
     for (const d of LEGAL_DOCS) {
       expect(d.title.length).toBeGreaterThan(3);
@@ -197,7 +197,7 @@ describe('wiring — registry drives Settings; a doc cannot exist without a butt
     expect(settings).toContain('<LegalDocPage docId={settingsScreen} />');
   });
 
-  it('the SettingsScreen type carries all five ids', () => {
+  it('the SettingsScreen type carries every id', () => {
     for (const d of LEGAL_DOCS) expect(types).toContain(`'${d.id}'`);
   });
 

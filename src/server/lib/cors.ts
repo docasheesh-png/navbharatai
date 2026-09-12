@@ -34,6 +34,23 @@ export function isAllowedCorsOrigin(origin: string | undefined, nodeEnv: string 
   return ALLOWED_ORIGINS.has(origin) || isLocalDev;
 }
 
+/**
+ * Is this request coming from the bundled NATIVE shell (Android/iOS), rather than a browser?
+ *
+ * The Capacitor shell's page origin is `https://localhost` / `capacitor://localhost` — which is why
+ * the allowlist above exists at all, and why that same header is the honest signal here.
+ *
+ * 🔒 USED ONLY TO WITHHOLD SOMETHING, NEVER TO GRANT IT. An origin header is client-controlled, so a
+ * browser could claim to be the app; all that buys is having 18+ apps hidden from you, which anyone
+ * can also achieve by leaving the setting off. The reverse — the app claiming to be a browser —
+ * cannot happen, because the shell's own page origin is what fills this in. Do not reuse this to
+ * unlock anything.
+ */
+export function isNativeRequest(req: { headers: { origin?: string } }): boolean {
+  const origin = String(req?.headers?.origin ?? '');
+  return origin === 'https://localhost' || origin === 'capacitor://localhost';
+}
+
 export function setCorsHeaders(
   req: { headers: { origin?: string } },
   res: { setHeader: (name: string, value: string) => void },

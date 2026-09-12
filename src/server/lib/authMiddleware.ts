@@ -129,6 +129,31 @@ export async function verifyFirebaseIdentityDiag(req: Request): Promise<Identity
   return verifyIdentityWithReason(req.headers.authorization, getAdminAuth as unknown as () => Promise<VerifierAuth | null>);
 }
 
+/**
+ * The uid AND the moment the user actually signed in, read from the ID token.
+ *
+ * `auth_time` is stamped by the identity provider when the password / passkey / social login was
+ * accepted, and it is INSIDE the signed token — so a client cannot turn a token from this morning into
+ * proof of a sign-in a moment ago. That is what lets the secret vault's fallback ("confirm your account
+ * password") be a real server-side check rather than a client claim; see `deviceUnlock.ts`.
+ *
+ * Returns null for an unverifiable token, exactly like `verifyFirebaseToken`, so a caller can never
+ * mistake "no proof" for "old proof".
+ */
+export async function verifyFreshAuth(req: Request): Promise<{ uid: string; authTimeSec: number | null } | null> {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ')) return null;
+  try {
+    const auth = await getAdminAuth();
+    if (!auth) return null;
+    const decoded = await auth.verifyIdToken(header.slice(7)) as { uid: string; auth_time?: unknown };
+    const t = typeof decoded.auth_time === 'number' ? decoded.auth_time : Number(decoded.auth_time);
+    return { uid: decoded.uid, authTimeSec: Number.isFinite(t) && t > 0 ? t : null };
+  } catch {
+    return null;
+  }
+}
+
 export async function verifyFirebaseToken(req: Request): Promise<string | null> {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) return null;

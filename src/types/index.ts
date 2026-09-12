@@ -101,7 +101,7 @@ export type SettingsScreen =
   // at all. Same lesson as 'modules' above: a duplicate surface is where this bug class comes back.
   | 'domain' | 'auth' | 'storage'
   // Legal & Trust pages (admin 2026-08-08): one screen per document, driven by the legal registry.
-  | 'legal_privacy' | 'legal_terms' | 'legal_dpa' | 'legal_security' | 'legal_nda';
+  | 'legal_privacy' | 'legal_terms' | 'legal_grievance' | 'legal_dpa' | 'legal_security' | 'legal_nda';
 
 export type ErrorType = 'AUTH' | 'QUOTA' | 'NETWORK' | 'CONFIG' | 'UNKNOWN';
 

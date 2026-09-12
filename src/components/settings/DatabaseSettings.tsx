@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { DB_PROVIDERS, envKeysFor, dbProvider, type DbProviderId } from '../../lib/dbProviders';
 import { Database, ExternalLink, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
-import { listSecrets, saveSecret, deleteSecret } from '../../lib/secretsApi';
+import { saveSecret } from '../../lib/secretsApi';
 import { SupabaseConnectCard } from './SupabaseConnectCard';
 
 /**
@@ -94,17 +94,23 @@ export function DatabaseSettings({ userId, workspaceId }: DatabaseSettingsProps)
     try {
       // All vault calls go through the authenticated client (attaches the Firebase token) — raw fetches
       // here previously omitted it, so requireUserMatch rejected the sync (401) and nothing saved.
-      const existing = await listSecrets(userId);
+      // The vault is no longer LISTED first: the only thing that list was for was finding rows to delete
+      // before re-saving, and the save route replaces by name itself. One request instead of two.
 
       const envKeys = envKeysFor(provider, enteredCreds);
       const upserts: { name: string; value: string }[] = [{ name: 'ENGINEER_DB_PROVIDER', value: provider }];
       for (const [name, value] of Object.entries(envKeys)) if (value) upserts.push({ name, value });
 
-      // Upsert each: delete any existing secret with that name, then write the new value.
+      // Upsert each: the save itself replaces any existing row with that name.
       for (const u of upserts) {
-        await Promise.all(
-          existing.filter(s => s.secret_name === u.name).map(s => deleteSecret(userId, s.id))
-        );
+        // REPLACING A KEY IS THE SAVE'S JOB, NOT A DELETE (2026-09-12). This used to delete every row
+        // with this name and then write the new value. Two things were wrong with it. It duplicated
+        // logic the server has had since #2842 — `planSecretWrite` replaces the matching row and retires
+        // any duplicate — and, worse, a failure between the delete and the save LOST the key outright,
+        // because the old value was already gone. The server's replace has no such window. It also has
+        // to go for a second reason: DELETE now requires a vault unlock ticket (the key can only be
+        // destroyed by someone who just proved who they are), and this path has no ticket and should not
+        // need one — overwriting a credential you are holding is not a deletion.
         await saveSecret(userId, u.name, u.value);
       }
 

@@ -29,8 +29,22 @@ const ROSTER = readFileSync(join(__dirname, '..', 'src/lib/accountRoster.ts'), '
 const AUTH = readFileSync(join(__dirname, '..', 'src/components/AuthComponent.tsx'), 'utf8');
 
 describe('the menu tells the user a switch means signing in again', () => {
-  it('says it, in the menu, where the decision is made', () => {
-    expect(NAV).toMatch(/Switching signs you in again/);
+  /**
+   * MOVED, NOT DROPPED (admin 2026-09-12: "yeh description bina bat ke jagah kha raha hai …
+   * unprofessional lagta hai"). The grey paragraph under the SWITCH ACCOUNT heading is gone; the
+   * same fact now rides the `title` of the row the user actually taps, which costs no space.
+   *
+   * The intent these tests defend is unchanged and still enforced: the menu must never promise a
+   * Gmail-style live switch it cannot deliver. What changed is WHERE the honesty lives — so the
+   * assertions follow it to the control instead of being deleted, which would have quietly re-opened
+   * the 2026-09-02 report.
+   */
+  it('says it on the row you tap, where the decision is actually made', () => {
+    expect(NAV).toMatch(/this signs you in again/);
+    // On the switch row's own tooltip — not loose in the menu, and not on the current account.
+    const at = NAV.indexOf('title={a.isCurrent');
+    expect(at).toBeGreaterThan(-1);
+    expect(NAV.slice(at, at + 400)).toMatch(/this signs you in again/);
   });
 
   it('distinguishes the two cases honestly — they are genuinely different', () => {
@@ -39,6 +53,12 @@ describe('the menu tells the user a switch means signing in again', () => {
     // would be the same overstatement in smaller print.
     expect(NAV).toMatch(/one tap with Google/i);
     expect(NAV).toMatch(/password for email accounts/i);
+  });
+
+  it('🔒 and it is no longer a paragraph sitting in the open', () => {
+    // The whole point of the change. If a later edit puts the sentence back as visible body text,
+    // this fails and the reviewer has to choose deliberately rather than by drift.
+    expect(NAV).not.toMatch(/Switching signs you in again/);
   });
 });
 

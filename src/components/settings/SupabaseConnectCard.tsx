@@ -39,6 +39,9 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
   const [busy, setBusy] = useState<'connect' | 'create' | 'disconnect' | null>(null);
   const [error, setError] = useState('');
   const [done, setDone] = useState('');
+  /** True when the last "Create database" attached an existing one instead of making a new project —
+   *  which is what turns "create a separate one instead" from clutter into a relevant follow-up. */
+  const [reused, setReused] = useState(false);
   // Read once at mount: is Pro v5.0 open behind this screen? Drives the "Back to your app" return.
   const [v3TabOpen] = useState<boolean>(() => {
     try { return sessionStorage.getItem(V3_TAB_FLAG) === '1'; } catch { return false; }
@@ -115,15 +118,23 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
     }
   };
 
-  const createDatabase = async (): Promise<void> => {
-    setBusy('create'); setError(''); setDone('');
+  /**
+   * Give this app a database.
+   *
+   * `forceNew` is the escape hatch, not the default. When the user already has a database, the server
+   * attaches THAT one rather than spending another of their two free Supabase project slots — and says
+   * so, because calling it "created" would be a fake success. Someone who genuinely wants this app's
+   * data kept apart presses the second button, which passes `forceNew`.
+   */
+  const createDatabase = async (forceNew = false): Promise<void> => {
+    setBusy('create'); setError(''); setDone(''); setReused(false);
     try {
       // A generous ceiling: the server waits for Supabase to actually bring the database up, which
       // routinely takes over a minute. The default 20s would abort a request that was going fine.
       const res = await authedFetch('/api/integrations/supabase/provision', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ appLabel: appLabel ?? '', workspaceId: workspaceId ?? '' }),
+        body: JSON.stringify({ appLabel: appLabel ?? '', workspaceId: workspaceId ?? '', forceNew }),
       }, 240_000);
       const data = await res.json();
       // The server words these to tell the user what to do next (plan limit, still starting up,
@@ -132,7 +143,12 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
       // The database and its TABLES are reported separately, because they fail separately. Saying
       // "ready" when the schema did not apply would be the nearly-true claim this feature exists to
       // avoid — the app would be wired to an empty database and every query would fail.
-      if (data?.schemaApplied === false) {
+      if (data?.reused) {
+        // Nothing was created, so nothing was migrated — and the honest line says exactly that rather
+        // than borrowing the "ready" wording from a path that really did set tables up.
+        setReused(true);
+        setDone(`${data.reusedNote || 'This app now uses a database you already made.'} Your app will use it automatically — no keys to copy.`);
+      } else if (data?.schemaApplied === false) {
         setDone('Your database was created and your app is wired to it, but its tables could not be '
           + 'set up yet. ' + (data?.schemaNote || 'Try "Create database" again in a moment.'));
       } else {
@@ -186,7 +202,7 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
           </p>
           <div className="flex flex-wrap gap-2">
             <button
-              onClick={createDatabase}
+              onClick={() => void createDatabase()}
               disabled={busy !== null}
               className="flex items-center gap-2 text-xs font-bold px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -201,6 +217,18 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
               Disconnect
             </button>
           </div>
+          {reused && busy === null && (
+            /* Offered only AFTER a reuse, so it is an answer to what just happened rather than a
+               choice nobody asked for. A separate database is a real want — two apps that should not
+               see each other's rows — and it costs one of the user's two free project slots, which is
+               why it is the second button and not the first. */
+            <button
+              onClick={() => void createDatabase(true)}
+              className="mt-2 text-[11px] font-semibold text-[#8b949e] underline hover:text-white"
+            >
+              Want this app to have its own separate database instead? Create a new one
+            </button>
+          )}
           {busy === 'create' && (
             <p className="text-[10px] text-[#8b949e] mt-2 leading-snug">
               This takes a minute or two — Supabase has to start the database before it can be used.

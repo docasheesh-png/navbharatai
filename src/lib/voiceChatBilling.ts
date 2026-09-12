@@ -64,36 +64,42 @@ export interface VoiceConsent {
 
 /**
  * The popup shown when the user taps the voice icon — WRITTEN in each language, not translated
- * word-for-word (the admin asked for exactly that). Each version says the four things that make the
- * consent real:
- *   • it costs money, before anything starts;
- *   • the rate BOTH ways — per second (how it is billed) and per minute (how people actually think);
- *   • charging begins when the call connects and stops when it ends, so the user knows what they
- *     control;
- *   • it comes from the same balance as everything else — no separate top-up, no surprise.
+ * word-for-word (the admin asked for exactly that).
+ *
+ * 🔴 IT IS ONE LINE, AND THAT IS A CORRECTION BASED ON REAL BEHAVIOUR (admin 2026-09-12: "user bina
+ * padhe hi start kar deta hai").
+ *
+ * It used to be three sentences saying four true things — the rate per second AND per minute, that
+ * charging starts on connect and stops on hang-up, and that it comes from the same balance. Every
+ * one of those is accurate and none of them was being read. A wall of text nobody reads is WORSE
+ * consent than one line everybody reads: the long version looked thorough and informed nobody.
+ *
+ * So the body is now the single material fact — the price — shown big and in red. The rest has not
+ * been hidden, it has been MOVED to where it actually lands: the title still says this is paid, and
+ * `voiceRunningCostLabel` shows the live time and rupees DURING the call, which is the moment a user
+ * can act on it. Telling somebody the meter stops when they hang up is worth far less than showing
+ * them the meter.
+ *
+ * ⚠️ The number is still GENERATED from the real rate, never typed in. A hardcoded "2 paise" would
+ * quietly become a lie the day the rate changes — and a price shown in red is exactly the sentence
+ * that must never be stale.
  * PURE.
  */
 export function voiceConsent(
   lang: VoiceLang = 'en',
   paisePerSecond: number = VOICE_PAISE_PER_SECOND,
 ): VoiceConsent {
-  const perMin = voiceRupeesPerMinute(paisePerSecond);
-  const perMinText = perMin.toFixed(2).replace(/\.00$/, '');
   if (lang === 'hi') {
     return {
       title: 'वॉइस चैट — यह सेवा सशुल्क है',
-      body: `बात करने का शुल्क ${paisePerSecond} पैसे प्रति सेकंड है, यानी लगभग ₹${perMinText} प्रति मिनट। `
-        + `पैसे तभी कटते हैं जब कॉल जुड़ती है, और कॉल खत्म करते ही कटना बंद हो जाता है — बीच में कोई छिपा शुल्क नहीं। `
-        + `यह आपके उसी बैलेंस से कटेगा जिससे बाकी सब चलता है, अलग से कुछ भरने की ज़रूरत नहीं।`,
+      body: `${paisePerSecond} पैसे प्रति सेकंड`,
       confirm: 'ठीक है, शुरू करें',
       cancel: 'रहने दें',
     };
   }
   return {
     title: 'Voice chat is a paid feature',
-    body: `Talking costs ${paisePerSecond} paise per second — about ₹${perMinText} a minute. `
-      + `You are charged only while the call is connected, and it stops the moment you end it, so nothing runs on in the background. `
-      + `It comes out of the same balance everything else uses — there is nothing separate to top up.`,
+    body: `${paisePerSecond} paise per second`,
     confirm: 'Start talking',
     cancel: 'Not now',
   };

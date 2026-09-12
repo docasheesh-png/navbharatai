@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { needsLiveSearch, liveSearchContext, shapeSearchQuery } from './liveSearchContext';
 import type { SearchResult } from '../AgentV3/WebSearch';
 
@@ -64,19 +66,22 @@ describe('liveSearchContext — builds a grounding block only when useful', () =
     expect(out).toBe('');
   });
 
-  it('threads `cheap` into the client as preferCheap (free-chat cost control, admin 2026-09-12)', async () => {
-    let receivedOpts: { preferCheap?: boolean } | undefined;
+  it('threads `cheap` into the client as the 4th search() arg (free-chat cost control, admin 2026-09-12)', async () => {
+    let receivedIntent: unknown;
+    let receivedCheap: unknown;
     const client = {
-      search: async (_q: string, _l: number, opts?: { preferCheap?: boolean }) => {
-        receivedOpts = opts;
+      search: async (_q: string, _l: number, intent?: unknown, cheap?: unknown) => {
+        receivedIntent = intent;
+        receivedCheap = cheap;
         return [{ title: 't', url: 'u', snippet: 's' }];
       },
     };
     await liveSearchContext('latest news', { client, cheap: true, fetchPage: async () => ({ ok: false, text: '' }) });
-    expect(receivedOpts?.preferCheap).toBe(true);
+    expect(receivedIntent).toBe('live');
+    expect(receivedCheap).toBe(true);
 
     await liveSearchContext('latest news', { client, fetchPage: async () => ({ ok: false, text: '' }) });
-    expect(receivedOpts?.preferCheap).toBeUndefined();
+    expect(receivedCheap).toBeUndefined();
   });
 });
 
@@ -191,5 +196,96 @@ describe('liveSearchContext — reads the top result page, and degrades without 
     });
     expect(out).toContain('LIVE WEB RESULTS');
     expect(fetched).toBe(false);
+  });
+});
+
+/**
+ * TWO SOURCES, NOT ONE — and the reason is the admin's standing priority for chat, not a benchmark
+ * (2026-09-12): "latest information aur correct information jyada important hai, time se jyada."
+ *
+ * A single page can be a listicle, a stub or a paywall; two rarely both are. It is affordable because
+ * the fetches run CONCURRENTLY, so the wait is the slower of the two rather than their sum — which is
+ * what makes a second source accuracy at no cost in time.
+ */
+describe('liveSearchContext — reads two results, concurrently', () => {
+  const TWO = [
+    { title: 'One', url: 'https://a.test/1', snippet: 's1' },
+    { title: 'Two', url: 'https://b.test/2', snippet: 's2' },
+    { title: 'Three', url: 'https://c.test/3', snippet: 's3' },
+  ];
+
+  it('folds BOTH pages in, each named by its own url', async () => {
+    const out = await liveSearchContext('aaj gold rate kya hai', {
+      client: stubClient(TWO),
+      liveData: async () => '',
+      fetchPage: async (url) => ({ ok: true, text: `body of ${url}` }),
+    });
+    expect(out).toContain('TOP RESULT PAGE (https://a.test/1)');
+    expect(out).toContain('TOP RESULT PAGE (https://b.test/2)');
+    expect(out).toContain('body of https://a.test/1');
+    expect(out).toContain('body of https://b.test/2');
+  });
+
+  it('🔒 stops at two by default — a third result is quoted, never read', async () => {
+    const seen: string[] = [];
+    await liveSearchContext('aaj gold rate kya hai', {
+      client: stubClient(TWO),
+      liveData: async () => '',
+      fetchPage: async (url) => { seen.push(url); return { ok: true, text: 'x' }; },
+    });
+    expect(seen).toHaveLength(2);
+    expect(seen).not.toContain('https://c.test/3');
+  });
+
+  it('🔒 the two reads OVERLAP — the wait is the slower one, not the sum', async () => {
+    // The whole justification for a second source. If these ever became sequential the cost would
+    // double and the trade would no longer hold, so the concurrency is asserted rather than assumed.
+    let live = 0, peak = 0;
+    await liveSearchContext('aaj gold rate kya hai', {
+      client: stubClient(TWO),
+      liveData: async () => '',
+      fetchPage: async (url) => {
+        live += 1; peak = Math.max(peak, live);
+        await new Promise((r) => setTimeout(r, 15));
+        live -= 1;
+        return { ok: true, text: `body of ${url}` };
+      },
+    });
+    expect(peak).toBe(2);
+  });
+
+  it('one bad source never costs the other — the good page still lands', async () => {
+    const out = await liveSearchContext('aaj gold rate kya hai', {
+      client: stubClient(TWO),
+      liveData: async () => '',
+      fetchPage: async (url) => {
+        if (url.includes('a.test')) throw new Error('paywall');
+        return { ok: true, text: 'the real number is 74,200' };
+      },
+    });
+    expect(out).toContain('the real number is 74,200');
+    expect(out).not.toContain('TOP RESULT PAGE (https://a.test/1)');
+  });
+
+  it('readPages is clamped — never zero, never a runaway crawl', async () => {
+    for (const [asked, expected] of [[0, 1], [1, 1], [2, 2], [9, 3], [NaN, 2]] as const) {
+      const seen: string[] = [];
+      await liveSearchContext('aaj gold rate kya hai', {
+        client: stubClient(TWO),
+        liveData: async () => '',
+        readPages: asked as number,
+        fetchPage: async (url) => { seen.push(url); return { ok: true, text: 'x' }; },
+      });
+      expect(seen.length, `readPages=${asked}`).toBe(expected);
+    }
+  });
+
+  it('🔒 the page budget is back to 4 s — the heavy, content-rich page is the one worth waiting for', async () => {
+    // Cut to 2.5 s on 2026-09-11 to save time, restored on the admin's priority the next day. A page
+    // slower than 2.5 s is usually the substantial one, and dropping it is exactly the accuracy this
+    // rule refuses to trade.
+    const src = readFileSync(join(process.cwd(), 'src/server/lib/liveSearchContext.ts'), 'utf8');
+    expect(src).toContain('opts.pageTimeoutMs ?? 4000');
+    expect(src).not.toContain('opts.pageTimeoutMs ?? 2500');
   });
 });

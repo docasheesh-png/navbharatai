@@ -82,9 +82,9 @@ export class VertexProvider implements AIProvider {
         return new Error(`Vertex AI Error: ${error.message}`);
     }
 
-    async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void): Promise<string> {
+    async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, modelName?: string): Promise<string> {
         if (!this.vertexAI) throw new Error('Vertex AI not configured');
-        const modelConfig: any = { model: this.modelPro };
+        const modelConfig: any = { model: modelName || this.modelPro };
         if (systemPrompt) modelConfig.systemInstruction = { role: 'system', parts: [{ text: systemPrompt }] };
         const model = this.vertexAI.getGenerativeModel(modelConfig);
         const result = await model.generateContentStream({

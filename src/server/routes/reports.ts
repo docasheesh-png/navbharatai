@@ -27,6 +27,14 @@ import { summariseBuilds, summarisePayments, accountFlags } from '../lib/adminUs
 import { userBuildHistoryStore } from '../lib/UserBuildHistoryStore';
 import { deploymentStore } from '../AgentV3/DeploymentStore';
 import { getServerDb } from '../lib/serverDb';
+import { audit } from '../lib/audit';
+import { activeHostingTier } from '../lib/hostingPlan';
+import { adultPreferenceFrom } from '../../lib/adultContent';
+import { professionalPassStore } from '../professionals/ProfessionalPassStore';
+import {
+  fetchAuthMetadata, firebaseAuthBatch, resolveJoinedAt, resolveLastActiveAt,
+  summariseAiActivity, summariseDevices, profileView,
+} from '../lib/adminUserActivity';
 
 /** The Firestore handle the identity lookup needs, or null so it degrades to ids rather than throwing. */
 function identityDb() {
@@ -37,17 +45,62 @@ function identityDb() {
   }
 }
 
-/** Trim whatever the client sent about its own context — none of it is trusted, all of it is capped. */
-function readContext(raw: unknown): ReportContext {
+/**
+ * Trim whatever the client sent about its own context — none of it is trusted, all of it is capped.
+ *
+ * ⚠️ EVERY FIELD IS BOUNDED, INCLUDING THE NEW ARRAYS, and that is not defensive habit: this object
+ * goes straight into a Firestore document with a hard 1 MiB ceiling, so an unbounded list from a
+ * client would not be a validation nicety but a way to make a report FAIL TO SAVE — the exact silent
+ * dead end this whole feature exists to remove. The caps are chosen to stay far under it.
+ *
+ * A field that arrives malformed is DROPPED rather than rejected. The alternative is refusing a real
+ * problem report over a diagnostic detail nobody typed, which trades the user's one channel for our
+ * tidiness.
+ */
+export function readContext(raw: unknown): ReportContext {
   const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const s = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : undefined);
+  const b = (v: unknown) => (typeof v === 'boolean' ? v : undefined);
+  const n = (v: unknown) => {
+    const num = Number(v);
+    return Number.isFinite(num) && num > 0 && num < 100 ? Math.round(num * 100) / 100 : undefined;
+  };
+
+  const overflowRaw = Array.isArray(o.overflow) ? o.overflow.slice(0, MAX_OVERFLOW_FINDINGS) : [];
+  const overflow = overflowRaw
+    .map((f) => {
+      const row = (f && typeof f === 'object' ? f : {}) as Record<string, unknown>;
+      const element = s(row.element, 80);
+      const px = Number(row.overflowPx);
+      return element && Number.isFinite(px) ? { element, overflowPx: Math.round(px) } : null;
+    })
+    .filter((f): f is { element: string; overflowPx: number } => f !== null);
+
+  const errors = (Array.isArray(o.errors) ? o.errors.slice(0, MAX_ERROR_LINES) : [])
+    .map((e) => s(e, 200))
+    .filter((e): e is string => !!e);
+
   return {
     view: s(o.view, 60),
     build: s(o.build, 40),
+    appBuild: s(o.appBuild, 20),
     platform: s(o.platform, 20),
     userAgent: s(o.userAgent, 300),
+    viewport: s(o.viewport, 20),
+    dpr: n(o.dpr),
+    online: b(o.online),
+    connection: s(o.connection, 20),
+    language: s(o.language, 20),
+    ...(overflow.length ? { overflow } : {}),
+    overflowScanned: b(o.overflowScanned),
+    ...(o.overflowTruncated === true ? { overflowTruncated: true } : {}),
+    ...(errors.length ? { errors } : {}),
   };
 }
+
+/** The client already caps these; the server caps them again because the client is not the authority. */
+const MAX_OVERFLOW_FINDINGS = 5;
+const MAX_ERROR_LINES = 8;
 
 export function registerReportRoutes(app: Express): void {
   /**
@@ -68,6 +121,7 @@ export function registerReportRoutes(app: Express): void {
         targetKind: req.body?.targetKind,
         targetId: req.body?.targetId,
         screenshot: req.body?.screenshot,
+        problemKind: req.body?.problemKind,
       });
       if (!parsed.ok) return res.status(400).json({ error: parsed.error });
 
@@ -90,6 +144,7 @@ export function registerReportRoutes(app: Express): void {
         reporterUid: me.uid,
         target: { kind: parsed.kind, ...(parsed.targetId ? { id: parsed.targetId } : {}), ...(ownerUid ? { ownerUid } : {}) },
         message: parsed.message,
+        ...(parsed.problemKind ? { problemKind: parsed.problemKind } : {}),
         hasScreenshot: !!parsed.screenshot,
         context: readContext(req.body?.context),
       });
@@ -164,7 +219,12 @@ export function registerReportRoutes(app: Express): void {
 
     const db = identityDb() as { collection?: (n: string) => { where: (f: string, op: string, v: unknown) => { limit: (n: number) => { get: () => Promise<{ docs: Array<{ data: () => unknown }> }> } } } } | null;
 
-    const [identityMap, buildRows, deployments, wallet, payments] = await Promise.all([
+    // 🔒 LOGGED, BECAUSE WE PROMISED IT WOULD BE. The Privacy Policy (§8) tells every user that
+    // "production access is limited, logged, and need-based". This screen is that access, so opening
+    // it writes an audit line with the admin who opened it — the promise made true rather than stated.
+    audit('ADMIN_USER_ACCOUNT_VIEW', { uid, ip: req.ip });
+
+    const [identityMap, buildRows, deployments, wallet, payments, profile, aiLogs, sessions, authMap, pass] = await Promise.all([
       resolveUserIdentities([uid], identityDb()),
       userBuildHistoryStore.list(uid, { limit: 500 }).then((r) => ({ ok: true, rows: r })).catch(() => ({ ok: false, rows: [] })),
       deploymentStore.listByUser(uid, 100).then((r) => ({ ok: true, rows: r })).catch(() => ({ ok: false, rows: [] })),
@@ -183,6 +243,41 @@ export function registerReportRoutes(app: Express): void {
           return { ok: true, rows: snap.docs.map((d) => d.data()) };
         } catch { return { ok: false, rows: [] as Record<string, unknown>[] }; }
       })(),
+      // The user's OWN profile, shown back to them read-only. This screen never writes.
+      (async () => {
+        try {
+          const snap = await (db as never as { collection: (n: string) => { doc: (id: string) => { get: () => Promise<{ exists: boolean; data: () => Record<string, unknown> }> } } })
+            .collection('user_profiles').doc(uid).get();
+          return { ok: true, data: snap.exists ? snap.data() : null };
+        } catch { return { ok: false, data: null as Record<string, unknown> | null }; }
+      })(),
+      // 🔒 HOW MUCH AND WHEN — NEVER WHAT. `ai_usage_logs` holds a tier, a timestamp and a token
+      // count; it holds no message text, and none is read from anywhere else either. The Privacy
+      // Policy says in §3 that team access is "restricted to what is needed to run the service, fix a
+      // defect you reported, or meet a legal duty", and §5 promises the clinical surface is used only
+      // for the user's own case. A browsable transcript viewer would contradict both — and the
+      // decisions this screen ends in (suspend, refund, believe a complaint) turn on volume and
+      // recency, not on what somebody typed.
+      (async () => {
+        try {
+          // Single equality on userId — no composite index, the rule this repo already paid for once.
+          const snap = await (db as never as { collection: (n: string) => { where: (f: string, op: string, v: unknown) => { limit: (n: number) => { get: () => Promise<{ docs: Array<{ data: () => Record<string, unknown> }> }> } } } })
+            .collection('ai_usage_logs').where('userId', '==', uid).limit(500).get();
+          return { ok: true, rows: snap.docs.map((d) => d.data()) };
+        } catch { return { ok: false, rows: [] as Record<string, unknown>[] }; }
+      })(),
+      // Devices, counted. The stored UA/IP HASHES never leave summariseDevices — re-publishing them
+      // would hand back a stable per-user tracking key for no decision-making benefit.
+      (async () => {
+        try {
+          const snap = await (db as never as { collection: (n: string) => { doc: (id: string) => { get: () => Promise<{ exists: boolean; data: () => Record<string, unknown> }> } } })
+            .collection('user_sessions').doc(uid).get();
+          const devices = snap.exists ? (snap.data() as { devices?: unknown }).devices : null;
+          return { ok: true, rows: Array.isArray(devices) ? devices : [] };
+        } catch { return { ok: false, rows: [] as unknown[] }; }
+      })(),
+      fetchAuthMetadata([uid], await firebaseAuthBatch()).catch(() => new Map()),
+      professionalPassStore.getStatus(uid).then((p) => ({ ok: true, ...p })).catch(() => ({ ok: false, active: false, expiresAt: null, plan: null })),
     ]);
 
     const builds = summariseBuilds(buildRows.rows as never[]);
@@ -190,8 +285,51 @@ export function registerReportRoutes(app: Express): void {
     const reportsAgainst = await countReportsAgainst(uid).catch(() => 0);
     const w = wallet.data as Record<string, unknown>;
 
+    const authMeta = authMap.get(uid) ?? null;
+    const ai = summariseAiActivity(aiLogs.rows as never[]);
+    const joined = resolveJoinedAt(authMeta, w.createdAt);
+    const lastActive = resolveLastActiveAt(authMeta, { walletUpdatedAt: w.updatedAt, activityAtMs: ai.lastAtMs });
+    const tier = activeHostingTier(w);
+
     res.json({
       identity: identityMap.get(uid) ?? null,
+      // How the account was created and when it was last used. Firestore answers neither properly —
+      // see adminUserActivity.ts for why Auth is the source and the wallet only a labelled fallback.
+      account: {
+        ok: authMap.size > 0,
+        joinedAt: joined.atMs,
+        joinedAtSource: joined.source,
+        lastActiveAt: lastActive.atMs,
+        lastActiveAtSource: lastActive.source,
+        emailVerified: authMeta?.emailVerified ?? null,
+        /** Firebase Auth's own disable flag — separate from our `banned`, and worth seeing both. */
+        authDisabled: authMeta?.disabled ?? null,
+        signInMethods: authMeta?.providers ?? [],
+        phone: authMeta?.phone || '',
+      },
+      // `present: false` is a DIFFERENT statement from `ok: false`: the first means the user never
+      // filled anything in, the second that we could not read the row. An admin must not read one as
+      // the other — that is the same "unread is not zero" rule the wallet card already follows.
+      profile: (() => {
+        const view = profileView(profile.data);
+        const base = view ? { ok: profile.ok, present: true, ...view } : { ok: profile.ok, present: false };
+        // The +18 setting belongs on the account sheet as well as the Security list: an admin who
+        // opens ONE person should not have to cross-reference a separate screen to see it.
+        return { ...base, adult: adultPreferenceFrom({ optedIn: (profile.data as Record<string, unknown> | null)?.adultOptIn, optedInAt: (profile.data as Record<string, unknown> | null)?.adultOptInAt }) };
+      })(),
+      activity: {
+        ok: aiLogs.ok,
+        aiRequests: ai.requests,
+        aiLast30Days: ai.last30Days,
+        aiLastAt: ai.lastAtMs,
+        byTier: ai.byTier,
+        devices: { ok: sessions.ok, ...summariseDevices(sessions.rows as never[]) },
+      },
+      entitlements: {
+        hostingPlan: tier ? { id: tier.id, name: tier.name } : null,
+        hostingPlanExpiresAt: (w.hostingPlan as { expiresAt?: string } | undefined)?.expiresAt ?? null,
+        professionalPass: pass.ok ? { active: pass.active, expiresAt: pass.expiresAt, plan: pass.plan } : null,
+      },
       wallet: {
         ok: wallet.ok,
         tokenBalance: Number(w.tokenBalance ?? 0),
@@ -213,6 +351,9 @@ export function registerReportRoutes(app: Express): void {
       reportsAgainst,
       // Few on purpose: a long list of amber flags trains an admin to ignore all of them.
       flags: accountFlags({ builds, payments: money, reportsAgainst }),
+      // Said on the screen, not just in a comment: an admin should know what this panel deliberately
+      // does not show, so an absent section is never mistaken for a user who has done nothing.
+      withheld: 'Chat, prompt and clinical content is deliberately not shown here — the Privacy Policy limits team access to what running the service requires. Counts and times are.',
     });
   });
 

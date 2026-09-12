@@ -77,14 +77,23 @@ describe('🔒 no two paths differ only by case', () => {
     // whenever someone next happens to build for iOS.
     const dir = join(ROOT, 'src/components/agentv3');
     const names = readdirSync(dir);
-    // The COMPONENT keeps its conventional PascalCase name; what must never come back is a sibling
-    // whose name collides with it once case is removed. Compare on the stem, since `.tsx` and `.ts`
-    // are different files but `StarterSketch` and `starterSketch` are the same one to macOS.
+    // What must never come back is TWO files sharing this stem once case is removed. Compare on the
+    // stem, since `.tsx` and `.ts` are different files but `StarterSketch` and `starterSketch` are the
+    // same one to macOS.
+    //
+    // ⚠️ THIS ASSERTION CHANGED ON 2026-09-12, AND THE REASON MATTERS. It used to demand exactly
+    // `['StarterSketch.tsx']` — i.e. it pinned the component's EXISTENCE as a proxy for "no collision".
+    // The component was then deliberately deleted (the starter picker became plain text buttons after
+    // the admin reported its grey sketch bars reading as a loading skeleton), which failed this test
+    // for a file that was SUPPOSED to be gone. The rule being protected was never "this component
+    // exists"; it is "no two files collide on this stem", and an empty directory satisfies that
+    // perfectly. So the assertion now says what it always meant, and still fails loudly the moment a
+    // second file joins the first. The general sweep above is unchanged and covers the whole repo.
     const stem = (n: string): string => n.replace(/\.(tsx?|jsx?)$/, '').toLowerCase();
     const clashing = names.filter((n) => stem(n) === 'startersketch');
     expect(
-      clashing.sort(),
-      'Only the component may own this stem — a starterSketch.ts beside StarterSketch.tsx is the exact pair that broke iOS.',
-    ).toEqual(['StarterSketch.tsx']);
+      clashing.length,
+      `A starterSketch.ts beside a StarterSketch.tsx is the exact pair that broke the iOS build. At most one file may own this stem — found: ${clashing.sort().join(', ') || 'none'}`,
+    ).toBeLessThanOrEqual(1);
   });
 });

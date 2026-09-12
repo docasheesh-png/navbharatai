@@ -9,6 +9,7 @@ import { buildDocumentContext } from '../lib/attachmentText';
 import { toSafeClientMessage } from '../lib/httpError';
 import { runVisionChain } from '../lib/visionChain';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
+import { groundingStatusFor, firstTokenLog } from '../lib/chatGrounding';
 import { songcraftFor } from '../AI/songcraft';
 import { liveSearchContext } from '../lib/liveSearchContext';
 import { detectImageIntent, imageGenGuidance, imageGenToolPointer } from '../lib/imageIntent';
@@ -230,6 +231,9 @@ ${LANGUAGE_RULE}
 Be helpful, concise, and accurate. If the user wants to build an app, guide them.`;
 
   const chatHandler = async (req: any, res: any, tier: 'navbharat' | 'vishwakarma-basic' | 'vishwakarma-pro' | 'vip') => {
+    // Stamped FIRST so the measurement below covers everything the user actually waits through — the
+    // document extraction, the vision pass and the live lookup included, not just the model call.
+    const requestStartedAt = Date.now();
     let { message, history, currentApp, mode, intent, userProfile, fileAttachments, memorySummary } = req.body;
     if (!message && !Array.isArray(fileAttachments)) return res.status(400).json({ reply: 'Message is required' });
     message = message || '';
@@ -250,6 +254,43 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     }
     // Ensure file-only messages have a prompt
     if (!message && visionAttachments.length > 0) message = visionAttachments[0].type === 'application/pdf' ? 'Please analyze this PDF and extract all relevant information.' : 'Please describe and analyze this image.';
+
+    /**
+     * CONTENT SAFETY TRIAGE (admin 2026-09-12, Phase 6) — the same three-way check the build path
+     * runs, on the chat path, for the same reason and with the same promise: a clean message stores
+     * NOTHING. No document, no read, not a byte. The 99.9% path is one regex pass.
+     *
+     * Placed AFTER attachment extraction on purpose, so the check reads what the model will actually
+     * receive — a request pasted inside an attached document is the same request.
+     *
+     * Recording never blocks the reply, and a triage that cannot run must never refuse a legitimate
+     * question: an unavailable checker degrades to allow, loudly in the log, never to a refusal.
+     */
+    try {
+      const { triagePrompt, safetyExcerpt, blockMessage } = await import('../lib/promptSafety');
+      const triage = triagePrompt(message);
+      if (triage.verdict !== 'allow') {
+        const { buildSafetyFlag, recordSafetyFlag } = await import('../lib/safetyFlagStore');
+        const { verifyFirebaseToken } = await import('../lib/authMiddleware');
+        const flaggedUid = (await verifyFirebaseToken(req).catch(() => null)) || 'anon';
+        const { audit } = await import('../lib/audit');
+        audit(
+          triage.verdict === 'block' ? 'PROMPT_BLOCKED' : 'PROMPT_FLAGGED',
+          { uid: flaggedUid, rule: triage.ruleId, class: triage.contentClass, tier },
+          'warn',
+        );
+        void recordSafetyFlag(buildSafetyFlag({
+          uid: flaggedUid, triage, surface: 'chat', excerpt: safetyExcerpt(message), at: Date.now(),
+        })).catch(() => { /* the decision stands either way */ });
+        if (triage.verdict === 'block') {
+          // 200 with a normal reply shape, not an error: this renders in the chat bubble the user is
+          // already looking at, which is where an answer to their message belongs.
+          return res.json({ reply: blockMessage() });
+        }
+      }
+    } catch (e) {
+      console.error('[CHAT] safety triage unavailable — allowing the turn:', e);
+    }
 
     const isFree = tier === 'navbharat';
     // Free tier: always conversational — ignore canvas and build intent completely
@@ -435,6 +476,29 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     // LIVE WEB GROUNDING (admin 2026-07-12): for a message that needs current facts (sports/news/
     // prices/"latest"/"aaj"), fetch real results and prepend them so the model answers from TODAY's
     // data, not its training cutoff. Gated + bounded + best-effort — never blocks or slows normal chat.
+    //
+    // ⚠️ THE COMMENT ABOVE IS TRUE OF THE ORDINARY MESSAGE AND FALSE OF THE GROUNDED ONE, and the
+    // difference is the whole reason for the status below. This await sits BEFORE the model is allowed
+    // to speak: a search bounded at 6 s followed by a page read bounded at 4 s, i.e. up to ten seconds
+    // in which the user sees NOTHING. The grounding itself is right — stale answers are worse than slow
+    // ones, and the admin made that the standing rule for chat on 2026-09-12 — so what is removed here
+    // is the silence, not the lookup. (The page budget was briefly 2.5 s; reverting it is what the rule
+    // required, and the two pages now read concurrently cost no extra wall-clock.)
+    //
+    // The stream is opened FIRST and says what is happening, so the first thing on screen arrives in a
+    // fraction of a second. `s` is a status field the answer never contains; a client that does not
+    // know it ignores it and renders exactly what it renders today.
+    const groundingStatus = groundingStatusFor(message);
+    if (groundingStatus && req.body.stream === true) {
+      if (!res.headersSent) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
+        res.flushHeaders();
+      }
+      if (!res.writableEnded) res.write(`data: ${JSON.stringify({ s: groundingStatus })}\n\n`);
+    }
     try {
       const liveBlock = await liveSearchContext(message, { cheap: isFree });
       if (liveBlock) contextualMessage = `${liveBlock}\n\n---\n${contextualMessage}`;
@@ -442,12 +506,16 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
 
     try {
       if (req.body.stream === true) {
-        // SSE stream — proper format so proxies/load balancers don't drop idle connections
-        res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control', 'no-cache');
-        res.setHeader('Connection', 'keep-alive');
-        res.setHeader('X-Accel-Buffering', 'no');
-        res.flushHeaders(); // send headers immediately, don't buffer
+        // SSE stream — proper format so proxies/load balancers don't drop idle connections.
+        // Guarded because the grounding status above may already have opened the stream; setting a
+        // header after flush throws, which would turn a speed improvement into a failed reply.
+        if (!res.headersSent) {
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
+          res.setHeader('X-Accel-Buffering', 'no');
+          res.flushHeaders(); // send headers immediately, don't buffer
+        }
 
         const controller = new AbortController();
 
@@ -462,11 +530,20 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           clearInterval(heartbeat);
         });
 
+        // MEASURED, NOT ASSUMED. Every statement about chat speed in this repo so far has been read
+        // off the code — including the eight-and-a-half-second figure above, which is a BUDGET and not
+        // an observation. This records what actually happened, split by path, because averaging a
+        // grounded reply with a direct one hides the only number worth knowing.
+        let firstTokenAt: number | null = null;
         try {
           await aiRouter.routeStream(
             contextualMessage, history, tier, systemPrompt,
             (chunk: string) => {
               if (!res.writableEnded) {
+                if (firstTokenAt === null) {
+                  firstTokenAt = Date.now();
+                  console.log(firstTokenLog({ ms: firstTokenAt - requestStartedAt, grounded: !!groundingStatus, tier }));
+                }
                 // JSON-encode each chunk so newlines/special chars are safe in SSE
                 res.write(`data: ${JSON.stringify({ c: chunk })}\n\n`);
               }
@@ -481,15 +558,36 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           res.end();
         }
       } else {
-        const aiResponse = await aiRouter.route(contextualMessage, history, tier, undefined, systemPrompt);
-        // Fire-and-forget usage logging
+        const routed = await aiRouter.routeDetailed(contextualMessage, history, tier, undefined, systemPrompt);
+        // USAGE LOGGING — what actually happened, and nothing else (2026-09-12).
+        //
+        // 🔴 THIS BLOCK USED TO INVENT EVERY FIELD IT WROTE: `providerName: 'auto'`, `modelName: 'auto'`,
+        // `latencyMs: 0`, `estimated_provider_cost: 0`, and `outputTokens = reply.length / 4`. Not one of
+        // those was measured, and the admin dashboard is built on this collection — so it reported engine
+        // cost ₹0.0000 however much was spent, a "margin" that was arithmetically just revenue, and one
+        // imaginary provider named AUTO holding 100% of traffic at 0 ms.
+        //
+        // 🔒 TOKENS ARE WRITTEN ONLY WHEN THE PROVIDER REPORTED THEM. `usageMeasured` is the flag every
+        // reader must branch on: absent tokens mean "we do not know", which is a different answer from
+        // zero and must never be summed as one. `estimated_provider_cost` is GONE rather than zeroed —
+        // a field whose only value was a lie is not worth keeping, and its absence makes any old reader
+        // fail loudly instead of quietly adding 0. Cost is DERIVED from these real numbers where they
+        // exist (see admin analytics), which is the same rate card a build is priced with.
         const userId2 = req.body?.userId || req.body?.uid || 'anonymous';
         addDoc(collection(getDb() as any, 'ai_usage_logs'), {
-          userId: userId2, tier, latencyMs: 0, outputTokens: Math.round((aiResponse.length || 0) / 4),
-          modelName: 'auto', providerName: 'auto', estimated_provider_cost: 0,
+          userId: userId2,
+          tier,
+          latencyMs: routed.latencyMs,
+          modelName: routed.model,
+          providerName: routed.provider,
+          usageMeasured: !!routed.usage,
+          ...(routed.usage
+            ? { inputTokens: routed.usage.inputTokens, outputTokens: routed.usage.outputTokens }
+            : {}),
+          ok: routed.ok,
           createdAt: new Date().toISOString(),
         }).catch(() => {});
-        res.json({ reply: aiResponse });
+        res.json({ reply: routed.content });
       }
     } catch(e: any) {
       console.error(`Error for tier ${tier}:`, e.message);

@@ -20,7 +20,7 @@
  * surface (White-Label Law §3). None of it may ever be rendered on a user-facing screen.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, AlertTriangle, RefreshCw, Cpu, IndianRupee, CheckCircle2, Clock, Server, Eye, Bell } from 'lucide-react';
+import { Activity, AlertTriangle, RefreshCw, Cpu, IndianRupee, CheckCircle2, Clock, Server, Eye, Bell, Scale } from 'lucide-react';
 import { stackedBarLayout, linePoints, donutSegments, axisTickIndices } from '../ui/charts/chartGeometry';
 import {
   RANGE_OPTIONS, timeLabel, humanDuration, percent, compactNumber, microUsdToInr, formatInr,
@@ -44,6 +44,7 @@ interface MonitorResponse {
   liveSandboxNote?: string;
   /** Can alerts reach the admin outside the app? Carries the reason, never the key. */
   emailAlerts?: { configured: boolean; reason: string; recipients: number };
+  compliance?: { grievanceOfficerNamed: boolean; grievanceWarning: string };
   /** How hard the instance that answered this request is working. */
   serverLoad?: {
     cpuPercent: number | null;
@@ -462,6 +463,25 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
               {data.emailAlerts.configured
                 ? `The notification bell, plus email to ${data.emailAlerts.recipients} address${data.emailAlerts.recipients === 1 ? '' : 'es'}.`
                 : `${data.emailAlerts.reason} Until then a problem overnight is seen when you next open the app.`}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ── COMPLIANCE THAT IS CONFIGURATION, NOT CODE ──────────────────────────────────────────
+          Amber and impossible to miss while unset, and it disappears the moment it is done. The
+          failure mode it exists for is SILENCE: an unnamed Grievance Officer breaks no test, throws
+          no error and renders a page that looks finished — it is simply missing the one thing the
+          IT Rules actually require, and nobody would ever be told. */}
+      {data?.compliance && !data.compliance.grievanceOfficerNamed && (
+        <div className="rounded-[1.25rem] border border-amber-500/40 bg-amber-500/5 px-4 py-3 flex items-start gap-3">
+          <Scale className="w-3.5 h-3.5 mt-0.5 shrink-0 text-amber-400" />
+          <div className="min-w-0">
+            <p className="text-[10px] font-black uppercase tracking-widest text-amber-200">
+              Grievance Officer not named
+            </p>
+            <p className="text-[10px] text-amber-100/70 mt-0.5 leading-relaxed">
+              {data.compliance.grievanceWarning}
             </p>
           </div>
         </div>

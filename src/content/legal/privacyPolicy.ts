@@ -67,6 +67,7 @@ This mailbox also serves as our **Grievance contact** for the purposes of Indian
 - **Payment identifiers.** When you buy tokens or a plan, the payment itself is processed by our payment provider (Section 7). We store the order identifiers, the amount, and the outcome — **we never see or store your full card number, UPI PIN or banking password**.
 - **Things you publish.** If you publish an app to the Nav App Store, the app package, its listing (name, description, icon) and your developer name become part of the store listing you asked us to create.
 - **Support communication.** Emails you send to our support address.
+- **Problem reports you send from inside the app.** When you use "Report a problem", we receive what you typed, the kind of problem you picked, and any screenshot you chose to attach. So that the fault can be found without a round of questions, the app also attaches a short technical snapshot of that moment: the screen you were on, your screen size and pixel density, your device and browser type, which version of NavBharatAI you are running, your language, whether you were online and the connection type your browser reports, a structural note of any element that was reaching past the edge of your screen (its tag and CSS classes — never its text), and the last few error messages your browser had recorded in that tab. **This snapshot is taken only when you press Send on a report, is never collected in the background, and never includes the content of your chats, your files or your apps.**
 
 ### 2.2 Information created while you use the Platform
 
@@ -93,7 +94,7 @@ We do not buy data about you from data brokers.
 - **Providing the service** — answering your chats, building and previewing your apps, storing your projects, keeping your wallet accurate. *(Basis: performance of the service you signed up for.)*
 - **AI processing** — sending your prompt and relevant project context to AI infrastructure so a reply or a build can be produced. *(Basis: performance of the service.)*
 - **Payments** — creating orders, crediting tokens, settling incomplete orders on your next sign-in so paid money is never lost. *(Basis: performance of the service; legal obligations.)*
-- **Safety and integrity** — malware-scanning Nav App Store uploads, rate-limiting abuse, blocking fraud. *(Basis: legitimate interest in a safe platform.)*
+- **Safety and integrity** — malware-scanning Nav App Store uploads, rate-limiting abuse, blocking fraud, and an **automatic check on messages and on apps before they are published**. That check is software, not a person: it looks for a short list of unlawful categories (sexual content involving minors, non-consensual imagery, weapon-making instructions, drug selling). **If it finds nothing — which is almost always — nothing at all is stored.** If it does object, we keep the rule it matched, the time, your account id and a short extract of the message with secrets and personal identifiers stripped out, for **180 days**, so a person can review it. We do not read your conversations otherwise. *(Basis: legitimate interest in a safe platform, and our legal duties as an intermediary.)*
 - **Improving the Platform** — fixing defects found in honest build reports; anonymous cross-user mistake learning. *(Basis: legitimate interest; anonymised data.)*
 - **Communication** — service messages (build finished, payment received, plan expiring), support replies. *(Basis: performance of the service.)*
 - **Legal compliance** — tax records, responding to lawful orders. *(Basis: legal obligation.)*
@@ -158,7 +159,9 @@ If you use it, you may enter health-related information or upload clinical docum
 
 - **Hosting.** The Platform runs on enterprise-grade cloud infrastructure. Our primary serving and storage region is **Asia (Singapore)**, with some services in other regions of the same providers. Because Singapore is outside India, your data is transferred across borders; we protect it in transit with TLS encryption and at rest with provider-grade encryption, and we transfer it only where permitted by applicable law.
 - **Retention.** We keep your account data, projects, chats and wallet records **for as long as your account is active**, because the product's promise is that your work and history are there when you return. Specific shorter windows: build sandboxes are recycled automatically after inactivity (minutes, not days); technical logs are retained for up to **90 days**; payment and tax records are retained for the period Indian law requires (typically **8 years**) even after account deletion.
-- **After deletion.** When you delete your account (Section 9), personal data is deleted or irreversibly anonymised within **30 days**, except the payment/tax records above and data we must keep for a live legal matter.
+- **Safety-check records.** The flagged-message records described in Section 3 are kept for **180 days** and then deleted. They survive account deletion for that period — a record of abuse that can be erased by closing the account is not a record.
+- **Removal records.** If we remove something you published — an app, a listing, a site — we keep a short record of **what was removed, why, when, and who published it**, for **180 days**, because the Information Technology (Intermediary Guidelines) Rules, 2021 require it for investigation. That record holds a description and a fingerprint of the content, **never a copy of the content itself**, and it is used only for that purpose. See our [Grievance Redressal](/grievance) page.
+- **After deletion.** When you delete your account (Section 9), personal data is deleted or irreversibly anonymised within **30 days**, except the payment/tax records above, the 180-day safety-check and removal records just described, and data we must keep for a live legal matter.
 
 ---
 
@@ -201,7 +204,7 @@ Under the DPDP Act (and simply because it is right), you can:
 - **Correct** — fix inaccurate account data (much of it is editable in Settings directly).
 - **Delete** — delete individual projects/chats in-app, or request full account deletion by email. Deletion follows the timelines in Section 6.
 - **Withdraw consent** — for anything based on consent (e.g. optional analytics via the consent banner), withdraw it at any time without losing the core service.
-- **Grievance** — raise a complaint at info@navbharatai.com; if you are unsatisfied with our response, you may escalate to the **Data Protection Board of India**.
+- **Grievance** — raise a complaint at info@navbharatai.com, or through our [Grievance Redressal](/grievance) page, which names the officer responsible and the timelines we must answer within under the IT Rules, 2021. If you are unsatisfied with our response, you may escalate to the **Data Protection Board of India**.
 - **Nominate** — under the DPDP Act you may nominate a person to exercise these rights for you in case of death or incapacity; email us to record a nomination.
 
 We will verify identity before acting on a request, so nobody else can use these rights against you.

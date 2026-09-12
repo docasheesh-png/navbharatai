@@ -11,7 +11,7 @@ vi.mock('./firebase', () => ({
   },
 }));
 
-import { listSecrets, saveSecret, deleteSecret } from './secretsApi';
+import { listSecrets, saveSecret } from './secretsApi';
 
 const okJson = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as unknown as Response;
 const errJson = (status: number, body: unknown) => ({ ok: false, status, json: async () => body }) as unknown as Response;
@@ -38,18 +38,20 @@ describe('secretsApi — always attaches the Firebase token (regression: keys ne
     expect(JSON.parse(init.body)).toEqual({ secret_name: 'OPENAI_API_KEY', secret_value: 'sk-real' });
   });
 
-  it('listSecrets and deleteSecret also carry the Authorization header', async () => {
+  it('listSecrets carries the Authorization header', async () => {
     fetchMock.mockResolvedValueOnce(okJson([{ id: 'a', secret_name: 'X' }]));
     const list = await listSecrets('user-1');
     expect(list).toEqual([{ id: 'a', secret_name: 'X' }]);
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer id-token-abc');
+  });
 
-    fetchMock.mockResolvedValueOnce(okJson({ success: true }));
-    await deleteSecret('user-1', 'sec-9');
-    const [url, init] = fetchMock.mock.calls[1];
-    expect(url).toBe('/api/secrets/user-1/sec-9');
-    expect(init.method).toBe('DELETE');
-    expect(init.headers.Authorization).toBe('Bearer id-token-abc');
+  it('no longer exports an UNTICKETED delete — deleting needs a vault unlock (2026-09-12)', async () => {
+    // This module deliberately cannot delete a key any more. The route requires an unlock ticket, so a
+    // helper without one could only ever return 401, and a function that cannot succeed invites a future
+    // caller to hunt for a server bug that is not there. The real one is deleteSecretLocked in vaultLock.
+    const mod = await import('./secretsApi') as Record<string, unknown>;
+    expect(mod.deleteSecret).toBeUndefined();
+    expect(typeof mod.saveSecret).toBe('function');
   });
 
   it('surfaces the server error message on a failed save (honest failure, not a silent no-op)', async () => {

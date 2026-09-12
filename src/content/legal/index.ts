@@ -12,6 +12,7 @@ import { TERMS_OF_SERVICE } from './termsOfService';
 import { DPA } from './dpa';
 import { SECURITY_DOCS } from './securityDocs';
 import { NDA } from './nda';
+import { grievanceDoc, grievanceOfficerFrom } from './grievance';
 
 export interface LegalDoc extends LegalMeta {
   body: string;
@@ -20,6 +21,16 @@ export interface LegalDoc extends LegalMeta {
 const BODIES: Record<LegalMeta['id'], string> = {
   legal_privacy: PRIVACY_POLICY,
   legal_terms: TERMS_OF_SERVICE,
+  /**
+   * The UNCONFIGURED version — role named, no person.
+   *
+   * The officer's real details live in the environment (they are a deployment fact, not source), so
+   * this static entry is the honest fallback: the document with the role named and the general
+   * mailbox. Both LIVE surfaces — the public /grievance route and the in-app page — pass the real
+   * officer in, so a reader never sees this version unless the config is genuinely missing. That is
+   * the same shape as everything else here: a value we could not read is never invented.
+   */
+  legal_grievance: grievanceDoc(grievanceOfficerFrom(null)),
   legal_dpa: DPA,
   legal_security: SECURITY_DOCS,
   legal_nda: NDA,

@@ -150,7 +150,19 @@ describe('workspace-scoped state census — a new one must be justified', () => 
     //   SOLE +1: the compare reset (compareMode/compareSel/compareResult) — this guard caught the
     //   leak on the first full-suite run; app A's diff would have rendered under app B's History.
     //   LEADING +1: runCompare — a fetch wrapper; its result state is cleared by the reset above. ✓
-    expect(sole).toBe(3);
+    //
+    // 2026-09-12 (publish resume after the GitHub round trip) — SOLE +1, audited:
+    //   The resume effect (`takePublishIntent` → `setShowHostingChooser(true)`). It is the one kind of
+    //   workspace-keyed effect this census does NOT have to worry about, and for a reason worth
+    //   writing down: it FILLS NOTHING from a workspace-scoped response. It reads a one-shot marker
+    //   and, at most, opens a sheet.
+    //   It also cannot fire for the wrong app — the marker carries the workspace it was written for
+    //   and `takePublishIntent` returns false on a mismatch (and consumes it, so it cannot fire later
+    //   either). That is this census's own concern, enforced inside the helper and test-locked in
+    //   publishResume.test.ts, rather than restated here.
+    //   It must stay keyed on the id ALONE: on a build-finished dependency it would re-evaluate
+    //   mid-build, and the marker would be consumed by a render the user never triggered. ✓
+    expect(sole).toBe(4);
     expect(leading).toBe(3);
   });
 

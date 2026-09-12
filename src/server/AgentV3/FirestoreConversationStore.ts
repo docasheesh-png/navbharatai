@@ -65,6 +65,8 @@ interface ConversationMeta {
   /** Which account that repo is under, and whether the user owns it (see ConversationRecord). */
   repoOwner?: string;
   repoOwnedByUser?: boolean;
+  /** See ConversationRecord.deployRepoName — the DEPLOY repo, never the storage one. */
+  deployRepoName?: string;
   /** See ConversationRecord.deployBranch. */
   deployBranch?: string;
   /** See ConversationRecord.backendDomain. */
@@ -306,6 +308,7 @@ export class FirestoreConversationStore implements ConversationStore {
       ...(meta.repoName ? { repoName: meta.repoName } : {}),
       ...(meta.repoOwner ? { repoOwner: meta.repoOwner } : {}),
       ...(meta.repoOwnedByUser ? { repoOwnedByUser: true } : {}),
+      ...(meta.deployRepoName ? { deployRepoName: meta.deployRepoName } : {}),
       ...(meta.deployBranch ? { deployBranch: meta.deployBranch } : {}),
       ...(meta.backendDomain ? { backendDomain: meta.backendDomain } : {}),
     };
@@ -324,6 +327,7 @@ export class FirestoreConversationStore implements ConversationStore {
     if (patch.repoName !== undefined) out.repoName = patch.repoName;
     if (patch.repoOwner !== undefined) out.repoOwner = patch.repoOwner;
     if (patch.repoOwnedByUser !== undefined) out.repoOwnedByUser = patch.repoOwnedByUser;
+    if (patch.deployRepoName !== undefined) out.deployRepoName = patch.deployRepoName;
     if (patch.deployBranch !== undefined) out.deployBranch = patch.deployBranch;
     if (patch.backendDomain !== undefined) out.backendDomain = patch.backendDomain;
     return out;

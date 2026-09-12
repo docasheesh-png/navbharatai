@@ -43,7 +43,22 @@ describe('buildPublicConfig — the advertising pixel id, and nothing secret', (
     // adding a key must be a decision someone makes here on purpose, not a side effect elsewhere.
     // `platformFeePct` was added 2026-09-10 and is safe by nature — a rate is printed on the
     // purchase screen either way, and the browser needs it to show the split before the user pays.
-    expect(Object.keys(buildPublicConfig('1234567890123456')).sort()).toEqual(['metaPixelId', 'platformFeePct']);
+    // `grievance` was added 2026-09-12 and is safe for a stronger reason: the IT Rules, 2021 REQUIRE
+    // a Grievance Officer's name and contact to be published, so these values are public by law.
+    expect(Object.keys(buildPublicConfig('1234567890123456')).sort()).toEqual(['grievance', 'metaPixelId', 'platformFeePct']);
+  });
+
+  it('the grievance block carries the published contact and nothing beyond it', () => {
+    const g = buildPublicConfig(null, undefined, { name: 'A. Sharma', email: 'g@navbharatai.com', phone: '+91…', address: 'Kanpur' }).grievance;
+    expect(Object.keys(g).sort()).toEqual(['address', 'email', 'name', 'phone']);
+    expect(g.name).toBe('A. Sharma');
+  });
+
+  it('an unconfigured officer serves an empty NAME, never a placeholder person', () => {
+    const g = buildPublicConfig(null, undefined, null).grievance;
+    expect(g.name).toBe('');
+    // The address still works, so the in-app page can always tell a user where to complain.
+    expect(g.email).toContain('@');
   });
 
   it('serves the recharge fee rate, falling back to the default when unset or unreadable', () => {

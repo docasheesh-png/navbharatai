@@ -4,6 +4,7 @@ import { verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { isStoreAdmin } from './navStore';
 import { hostingPlansEnabled, hostingPlanPriceInr, probeHostingPlan } from '../lib/hostingPlan';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
+import { remixGate, remixRefusal } from '../lib/remixPlanGate';
 import {
   preparePublishBundle,
   exclusionSummary,
@@ -143,7 +144,6 @@ export function registerGalleryRoutes(app: Express): void {
    */
   app.post('/api/gallery/:id/remix', async (req: Request, res: Response) => {
     const who = await verifyFirebaseIdentity(req);
-    if (!who?.uid) return res.status(401).json({ error: 'Sign in to remix an app.' });
     const found = await getGalleryApp(String(req.params.id));
     if (!found || found.status !== 'approved') return res.status(404).json({ error: 'That app is not available.' });
 
@@ -155,20 +155,35 @@ export function registerGalleryRoutes(app: Express): void {
      * valuable thing the gallery gives away, and it is what the hosting plans list as an included
      * benefit. Any active tier unlocks it — the entitlement is the plan, not a particular tier.
      *
-     * Shaped exactly like the custom-domain gate so the two cannot drift: free-list (admin/tester)
-     * accounts are exempt, and a store outage FAILS OPEN (`known` false ⇒ allow), because rule #1
-     * says an outage must never block a legitimate user. `needsPlan` + `priceInr` are what the
-     * client opens the purchase panel with — a plain 402 would be a dead button.
+     * ⚠️ THE DECISION NOW LIVES IN `remixPlanGate.ts`, SHARED WITH APP MART'S REMIX (2026-09-12).
+     * It was written here first and App Mart's copy of the same route had no gate at all, so one
+     * pricing page was true on this screen and false on the other for two days. Two surfaces, one
+     * entitlement, one implementation — that drift is the whole reason the module exists. The
+     * exemptions (free-list, your own app) and the FAIL-OPEN rule are enforced there and tested
+     * there; this route's job is to supply the facts and render the answer.
+     *
+     * The sign-in check moved INTO the gate for the same reason: a signed-out visitor now gets one
+     * message that says both things (sign in, and then a plan) instead of meeting two refusals in a
+     * row. `needsPlan` + `priceInr` are what the client opens the purchase panel with — a plain 402
+     * would be a dead button.
      */
-    if (hostingPlansEnabled() && !isAgentV3FreeUser(who.uid, who.email ?? null)) {
-      const plan = await probeHostingPlan(who.uid);
-      if (plan.known && !plan.active) {
-        return res.status(402).json({
-          error: `Remixing another creator's app is part of a hosting plan (from ₹${hostingPlanPriceInr()}/month, paid from your wallet). Open Billing → Plans to start one, then remix.`,
-          needsPlan: true,
-          priceInr: hostingPlanPriceInr(),
-        });
-      }
+    const galleryPlan = hostingPlansEnabled() && who?.uid && who.uid !== found.uid
+      ? await probeHostingPlan(who.uid).catch(() => ({ known: false, active: false }))
+      : { known: false, active: false };
+    const gate = remixGate({
+      plansEnabled: hostingPlansEnabled(),
+      uid: who?.uid ?? null,
+      freeListed: isAgentV3FreeUser(who?.uid, who?.email ?? null),
+      // Your own published app is yours — copying it back is not taking anyone's work.
+      isOwnApp: !!who?.uid && who.uid === found.uid,
+      // The gallery sells nothing, so there is no purchase to honour here. App Mart's remix does.
+      alreadyPurchased: false,
+      planKnown: galleryPlan.known,
+      planActive: galleryPlan.active,
+    });
+    if (!gate.allow) {
+      const refusal = remixRefusal(gate.reason, hostingPlanPriceInr());
+      return res.status(refusal.status).json(refusal.body);
     }
 
     await incrementRemixCount(found.id);

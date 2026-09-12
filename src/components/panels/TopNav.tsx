@@ -312,30 +312,30 @@ export function TopNav({
                       exactly why this menu read as an add-only control (admin 2026-08-22). */}
                   <div className="py-1 border-b border-white/5">
                     <p className="px-4 pt-1 pb-1.5 text-[9px] font-black text-[#484f58] uppercase tracking-widest">{SWITCH_ACCOUNT_LABEL}</p>
-                    {/* SAY WHAT TAPPING WILL DO (admin 2026-09-02: "2 account login theek se nahi chal
-                        rahe — 2nd account add karo, wapas 1st par jao to login manta hai").
- 
-                        Nothing here is broken, and that is precisely the problem. `accountRoster.ts`
-                        stores metadata and NEVER a token, because a refresh token in localStorage is a
-                        permanent account takeover for anyone who reaches that storage. The Firebase SDK
-                        also holds ONE live session per app instance. So a switch re-authenticates —
-                        correct, deliberate, and documented in that module's header, which even warns
-                        "the UI must not overstate it".
- 
-                        Then this menu said "Switch account" and "Add account" — Gmail's exact words for
-                        a mechanism that DOES keep sessions live at once. The user was promised Gmail and
-                        given a re-auth, so a working design read as a bug. The mechanism is right; the
-                        promise was wrong. This line makes the promise true, and it is the whole fix:
-                        the same tap, no longer a surprise. */}
-                    <p className="px-4 pb-2 text-[10px] leading-relaxed text-[#6e7681]">
-                      Switching signs you in again — one tap with Google, your password for email accounts.
-                    </p>
+                    {/* THE LINE THAT STOOD HERE IS NOW ON THE ROW ITSELF (admin 2026-09-12: "yeh
+                        description bina bat ke jagah kha raha hai … unprofessional lagta hai").
+
+                        WHAT IT SAID AND WHY IT EXISTED, because deleting it outright would re-open a
+                        reported bug. `accountRoster.ts` stores metadata and NEVER a token — a refresh
+                        token in localStorage is a permanent account takeover for anyone who reaches
+                        that storage — and the Firebase SDK holds ONE live session per app instance. So
+                        a switch genuinely re-authenticates: correct, deliberate, and documented in that
+                        module's header, which even warns "the UI must not overstate it". Meanwhile the
+                        menu says "Switch account", Gmail's exact words for a mechanism that DOES keep
+                        sessions live at once — and the mismatch is what the admin originally reported
+                        as broken login (2026-09-02).
+
+                        So the FACT is kept and only its PLACEMENT changes: it now rides the `title` of
+                        the row you actually tap, which costs no space and reads on hover or long-press.
+                        The promise still matches the mechanism; it just no longer sits in the open. */}
                     {accountRows(roster, user.uid, user).map((a) => (
                         <div key={a.uid} className={cn('group flex items-center gap-2 px-2 transition-colors', a.isCurrent ? 'bg-white/[0.03]' : 'hover:bg-white/5')}>
                           <button
                             onClick={() => { if (!a.isCurrent) void switchTo(a); }}
                             disabled={a.isCurrent}
-                            title={a.isCurrent ? 'You are signed in as this account' : `Switch to ${accountLabel(a)}`}
+                            title={a.isCurrent
+                              ? 'You are signed in as this account'
+                              : `Switch to ${accountLabel(a)} — this signs you in again (one tap with Google, your password for email accounts)`}
                             className="flex-1 flex items-center gap-3 px-2 py-2 text-left min-w-0 disabled:cursor-default"
                           >
                             {a.photo ? (

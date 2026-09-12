@@ -535,6 +535,8 @@ export function useChatEngine(deps: ChatEngineDeps) {
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
           let accumulated = '';
+          /** What the server says it is doing while the answer does not exist yet. Never part of the reply. */
+          let status = '';
           let lastUpdate = 0;
           let sseBuffer = '';
 
@@ -557,6 +559,17 @@ export function useChatEngine(deps: ChatEngineDeps) {
                     try {
                       const parsed = JSON.parse(payload);
                       if (parsed.c) accumulated += parsed.c;
+                      // A STATUS, NOT AN ANSWER (chatGrounding.ts). A question about today's price,
+                      // score or weather is answered from a live lookup, and that lookup runs BEFORE
+                      // the first word can exist — up to several seconds in which this bubble used to
+                      // show nothing but a cursor. The server now says what it is doing the moment it
+                      // starts; this shows that line until the real answer's first character arrives.
+                      //
+                      // It is deliberately NOT added to `accumulated`: the status must never reach the
+                      // saved message, be copied with the answer, or survive into history. An older
+                      // server never sends `s`, and then this is dead code and the bubble behaves
+                      // exactly as before.
+                      else if (typeof parsed.s === 'string' && parsed.s && !accumulated) status = parsed.s;
                     } catch { /* malformed chunk, skip */ }
                   }
                 }
@@ -566,7 +579,9 @@ export function useChatEngine(deps: ChatEngineDeps) {
 
               const now = Date.now();
               if (now - lastUpdate > 40) {
-                const snap = accumulated;
+                // The answer the moment there is one; until then the status, so the wait has a visible
+                // reason. `accumulated` wins outright — a status can never sit above real text.
+                const snap = accumulated || status;
                 setMessagesForTab(prev => prev.map(m => m.id === streamingMsgId ? { ...m, text: snap + '▋' } : m));
                 lastUpdate = now;
               }

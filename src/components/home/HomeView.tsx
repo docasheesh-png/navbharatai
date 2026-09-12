@@ -142,8 +142,12 @@ const PRODUCT_CARDS = [
     Icon: Store,
     title: 'App Mart',
     subtitle: 'Play & Install Apps',
-    description: 'Apps and games made by other NavBharatAI creators. Tap one and it runs straight away in your browser — nothing to download, nothing to install. Like what you see? Make it yours in one tap and change it however you like.',
-    features: ['Play instantly — no install', 'Install Android apps (.apk)', 'Remix any app into your own'],
+    // HONEST FROM 2026-09-12: playing is free and needs no account, but remixing is a plan benefit
+    // and downloading an .apk needs sign-in. A card that promises "make it yours in one tap" and
+    // then meets the user with a plan sheet is the "built but not really working" feeling, even
+    // though both halves work — so the card says which is which before they tap.
+    description: 'Apps and games made by other NavBharatAI creators. Tap one and it runs straight away in your browser — no account, nothing to download, nothing to install. Like what you see? With a hosting plan you can make it yours and change it however you like.',
+    features: ['Play instantly — no account needed', 'Install Android apps (.apk) — sign in to download', 'Remix any app into your own — with a plan'],
     featureIcon: CheckCircle2,
     featureColor: 'text-emerald-400',
     btnClass: 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white',

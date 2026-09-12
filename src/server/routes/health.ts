@@ -15,6 +15,8 @@ import { serverStats } from '../lib/serverStats';
 import { buildHealthReport, renderStatusPageHtml, type HealthCheck } from '../lib/HealthReport';
 import { adminRequestOk } from '../lib/adminAuth';
 import { normalizeFeePct } from '../../lib/platformFee';
+import { grievanceOfficerFrom, type GrievanceOfficer } from '../../content/legal/grievance';
+import { grievanceOfficer } from '../lib/grievanceOfficer';
 
 // Set true once the server has finished initialization (wired from server.ts).
 let serverReady = false;
@@ -47,6 +49,15 @@ export interface PublicConfig {
    * A rate is not a secret — it is printed on the purchase screen either way.
    */
   platformFeePct: number;
+  /**
+   * The Grievance Officer's published contact details.
+   *
+   * Public by construction — IT Rules, 2021 require them to be published, so serving them
+   * unauthenticated discloses nothing. They are here so the IN-APP grievance page shows the same
+   * details as the public /grievance URL instead of the unconfigured fallback; two versions of a
+   * compliance page is precisely the drift these documents warn about.
+   */
+  grievance: GrievanceOfficer;
 }
 
 /**
@@ -60,11 +71,13 @@ export interface PublicConfig {
 export function buildPublicConfig(
   rawPixelId: string | undefined | null,
   rawFeePct?: unknown,
+  rawGrievance?: Parameters<typeof grievanceOfficerFrom>[0],
 ): PublicConfig {
   const pixel = String(rawPixelId ?? '').trim();
   return {
     metaPixelId: /^\d{8,20}$/.test(pixel) ? pixel : null,
     platformFeePct: normalizeFeePct(rawFeePct),
+    grievance: grievanceOfficerFrom(rawGrievance ?? null),
   };
 }
 
@@ -198,7 +211,7 @@ export function registerHealthRoutes(app: Express): void {
   // of injecting junk into every page.
   app.get('/api/public-config', (_req: Request, res: Response) => {
     res.set('Cache-Control', 'public, max-age=300');
-    res.json(buildPublicConfig(process.env.META_PIXEL_ID, process.env.PLATFORM_FEE_PCT));
+    res.json(buildPublicConfig(process.env.META_PIXEL_ID, process.env.PLATFORM_FEE_PCT, grievanceOfficer()));
   });
 
   // U-15 — public status page (self-contained, polls /api/health).

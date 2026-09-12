@@ -6,6 +6,7 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 // / user_token_wallets which navbharat-prod's rules mark `allow write: if false` (server-only); the old
 // unauthenticated CLIENT SDK was rejected with PERMISSION_DENIED. Same modular API, admin-backed.
 import { doc, getDoc, setDoc, updateDoc, runTransaction, collection, query, where, limit, getDocs, getServerDb as getDb } from '../lib/serverDb';
+import { mirroredCreditPatch, rupeesToTokens } from '../lib/walletMirror';
 import { ordersToReconcile, reconcileMessage, type PendingOrderRecord } from '../lib/pendingOrders';
 import { getSecretValue } from '../lib/secrets';
 import { sendSafeError } from '../lib/httpError';
@@ -491,31 +492,39 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         return res.status(400).json({ error: 'You have already redeemed this promo coupon code!' });
       }
 
-      // Update user wallet
+      // 🔴 MONEY AUDIT 2026-09-12 — TWO BUGS FIXED HERE.
+      //
+      // (1) NOT TRANSACTIONAL. The redemption CLAIM above is atomic (so a code cannot be redeemed
+      //     twice), but the CREDIT was a read-modify-write outside any transaction — the one credit
+      //     path in the repo that was not. A build settling between the read and the write had its
+      //     debit erased by a balance computed before it landed: free spend, timed rather than hacked.
+      //     `computeCreditedWallet` carries a comment explaining exactly why the purchase path is
+      //     transactional; this path simply never got the same treatment.
+      //
+      // (2) IT CREDITED THE ₹ VIEW ONLY. `tokenBalance` never saw the money, so a coupon-funded wallet
+      //     drifted permanently from the token view the spend path debits — and that drift is what the
+      //     admin adjustment's old `remaining_balance = tokenBalance / RATE` assignment then turned
+      //     into a real, silent loss. One writer moving one view is how the other bug became possible.
       const walletRef = doc(db, 'user_token_wallets', userId);
-      const walletSnap = await getDoc(walletRef);
-      let newBalance = value;
-
-      if (walletSnap.exists()) {
-        const walletData = walletSnap.data();
-        newBalance = (walletData.remaining_balance || 0) + value;
-        await updateDoc(walletRef, {
-          remaining_balance: newBalance,
-          total_balance: (walletData.total_balance || 0) + value,
-          updatedAt: new Date().toISOString()
-        });
-      } else {
-        await setDoc(walletRef, {
-          userId,
-          userEmail: userEmail || '',
-          userName: userName || '',
-          total_balance: value,
-          remaining_balance: value,
-          total_output_tokens_used: 0,
-          total_money_spent: 0,
-          updatedAt: new Date().toISOString()
-        });
-      }
+      const newBalance = await runTransaction(db, async (tx: any) => {
+        const fresh = await tx.get(walletRef);
+        const w = fresh.exists() ? fresh.data() : null;
+        const patch = mirroredCreditPatch(w, rupeesToTokens(value));
+        if (w) {
+          tx.update(walletRef, { ...patch, updatedAt: new Date().toISOString() });
+        } else {
+          tx.set(walletRef, {
+            userId,
+            userEmail: userEmail || '',
+            userName: userName || '',
+            ...patch,
+            total_output_tokens_used: 0,
+            total_money_spent: 0,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+        return patch.remaining_balance;
+      });
 
       return res.json({ success: true, balanceAdded: value, currentBalance: newBalance });
     } catch (err: any) {
@@ -612,6 +621,16 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       };
 
       const wallet = await runTransaction(db, async (tx: any) => {
+        // 🔴 MONEY AUDIT 2026-09-12 — THE IDEMPOTENCY CHECK MUST BE INSIDE THE TRANSACTION.
+        // The `existing` read above is a cheap fast path, but it is OUTSIDE, and the transaction used
+        // to read only the WALLET. So two concurrent deliveries of the SAME purchase token — precisely
+        // what the comment above describes as normal (the store re-delivers on relaunch, the app
+        // retries on flaky networks) — could both pass the outside check; Firestore would detect the
+        // clash on the wallet alone, retry the loser, and the retry would re-read the already-credited
+        // balance and credit the same purchase A SECOND TIME. Reading `txRef` in-transaction makes the
+        // receipt part of the conflict set, so the second one sees SUCCESS and credits nothing.
+        const already = await tx.get(txRef);
+        if (already.exists() && already.data()?.paymentStatus === 'SUCCESS') return null;
         const walletRef = doc(db, 'user_token_wallets', userId);
         const walletSnap = await tx.get(walletRef);
         const walletData = walletSnap.exists() ? walletSnap.data() : { userId, tokenBalance: 0, totalTokensPurchased: 0, totalTokensUsed: 0, totalMoneySpent: 0, walletLedger: [], remaining_balance: 0, total_balance: 0 };
@@ -620,6 +639,9 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         tx.set(txRef, txData);
         return credited;
       });
+      if (wallet === null) {
+        return res.json({ alreadyProcessed: true, balanceAdded: pack.creditInr });
+      }
 
       return res.json({
         ok: true,

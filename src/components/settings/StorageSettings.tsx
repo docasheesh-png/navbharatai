@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { HardDrive, ExternalLink, CheckCircle2, ShieldCheck, Database } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
-import { listSecrets, saveSecret, deleteSecret } from '../../lib/secretsApi';
+import { saveSecret } from '../../lib/secretsApi';
 
 // Storage settings (admin 2026-07-29) — connect a STANDALONE file-storage provider for uploads.
 // Mirrors DatabaseSettings exactly: the chosen provider + credentials are AES-encrypted in the
@@ -101,16 +101,18 @@ export function StorageSettings({ userId }: StorageSettingsProps) {
 
     setSaving(true);
     try {
-      const existing = await listSecrets(userId);
+      // The vault is no longer LISTED first: that list existed only to find rows to delete before
+      // re-saving, and the save route replaces by name itself. One request instead of two.
 
       // Upsert the provider marker + each entered credential (env-var name = the field key).
       const upserts: { name: string; value: string }[] = [{ name: STORAGE_PROVIDER_MARKER, value: provider }];
       for (const [name, value] of Object.entries(enteredCreds)) if (value) upserts.push({ name, value });
 
       for (const u of upserts) {
-        await Promise.all(
-          existing.filter(s => s.secret_name === u.name).map(s => deleteSecret(userId, s.id)),
-        );
+        // REPLACING A KEY IS THE SAVE'S JOB, NOT A DELETE (2026-09-12) — see DatabaseSettings.tsx for
+        // the full reasoning. Short version: the server has replaced-by-name since #2842, this copy of
+        // the logic lost the key outright if it failed between the delete and the save, and DELETE now
+        // requires a vault unlock ticket that an overwrite neither has nor should need.
         await saveSecret(userId, u.name, u.value);
       }
 

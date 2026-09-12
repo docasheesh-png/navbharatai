@@ -14,6 +14,12 @@
 export const PUBLIC_LEGAL_ROUTES: Readonly<Record<string, string>> = {
   '/privacy': 'legal_privacy',
   '/terms': 'legal_terms',
+  /**
+   * The grievance page needs a PUBLIC url for the same reason the other two do, and one more: this
+   * is the address a regulator, a Play reviewer or an angry user is given, and it must answer for a
+   * checker that does not run JavaScript. Served with the officer's real details (see routes/legal).
+   */
+  '/grievance': 'legal_grievance',
 };
 
 /**
@@ -43,6 +49,10 @@ export const LEGAL_PATH_ALIASES: Readonly<Record<string, string>> = {
   '/terms-of-service': '/terms',
   '/terms-and-conditions': '/terms',
   '/terms.html': '/terms',
+  '/grievance-officer': '/grievance',
+  '/grievance-redressal': '/grievance',
+  '/grievances': '/grievance',
+  '/complaint': '/grievance',
   '/account-deletion': DELETE_ACCOUNT_PATH,
   '/delete_account': DELETE_ACCOUNT_PATH,
 };

@@ -21,6 +21,8 @@ import { getMetrics } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
 import { metricsTimeline } from '../lib/metricsTimeline';
 import { resolveEmailConfig } from '../lib/alertEmail';
+import { grievanceOfficer } from '../lib/grievanceOfficer';
+import { officerIsNamed, OFFICER_MISSING_WARNING } from '../../content/legal/grievance';
 import { serverLoad } from '../lib/serverLoad';
 import { usdInrRate } from '../lib/UsdInrRate';
 import { agentV3CostTelemetry, buildUsageReport } from '../AgentV3/AgentV3CostTelemetry';
@@ -562,6 +564,18 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         const cfg = resolveEmailConfig();
         return { configured: cfg.configured, reason: cfg.reason, recipients: cfg.configured ? cfg.to.length : 0 };
       })(),
+      /**
+       * COMPLIANCE — the obligations that are configuration rather than code.
+       *
+       * On the Monitor, not buried in a doc, because the failure mode is silence: a Grievance Officer
+       * that was never named produces no error, no failing test and no broken page — just a legal
+       * page quietly missing the one thing the Rules actually require. It says so here until it is
+       * set. Nothing secret travels: only whether a PUBLISHED-BY-LAW name exists, never a key.
+       */
+      compliance: {
+        grievanceOfficerNamed: officerIsNamed(grievanceOfficer()),
+        grievanceWarning: officerIsNamed(grievanceOfficer()) ? '' : OFFICER_MISSING_WARNING,
+      },
       alerts: guard(() => evaluateAlerts(snapshot)).value ?? [],
       health: health.value,
       healthError: health.error,

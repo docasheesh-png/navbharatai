@@ -90,9 +90,12 @@ describe('THE DRIFT GUARD — the pixel may only send what the policy discloses'
 });
 
 describe('The policy has a PUBLIC URL — the thing Meta and Play actually require', () => {
-  it('serves /privacy and /terms from the server, not the app shell', () => {
-    expect(Object.keys(PUBLIC_LEGAL_ROUTES).sort()).toEqual(['/privacy', '/terms']);
+  it('serves the compliance pages from the server, not the app shell', () => {
+    // `/grievance` joined on 2026-09-12 for exactly the same reason as the other two: it is a URL a
+    // regulator or a store reviewer opens, sometimes with a tool that does not run JavaScript.
+    expect(Object.keys(PUBLIC_LEGAL_ROUTES).sort()).toEqual(['/grievance', '/privacy', '/terms']);
     expect(PUBLIC_LEGAL_ROUTES['/privacy']).toBe('legal_privacy');
+    expect(PUBLIC_LEGAL_ROUTES['/grievance']).toBe('legal_grievance');
   });
 
   it('the SPA catch-all DEFERS both, or they would silently return index.html', () => {

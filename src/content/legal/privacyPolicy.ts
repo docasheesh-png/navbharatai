@@ -201,7 +201,7 @@ Under the DPDP Act (and simply because it is right), you can:
 - **Correct** — fix inaccurate account data (much of it is editable in Settings directly).
 - **Delete** — delete individual projects/chats in-app, or request full account deletion by email. Deletion follows the timelines in Section 6.
 - **Withdraw consent** — for anything based on consent (e.g. optional analytics via the consent banner), withdraw it at any time without losing the core service.
-- **Grievance** — raise a complaint at info@navbharatai.com; if you are unsatisfied with our response, you may escalate to the **Data Protection Board of India**.
+- **Grievance** — raise a complaint at info@navbharatai.com, or through our [Grievance Redressal](/grievance) page, which names the officer responsible and the timelines we must answer within under the IT Rules, 2021. If you are unsatisfied with our response, you may escalate to the **Data Protection Board of India**.
 - **Nominate** — under the DPDP Act you may nominate a person to exercise these rights for you in case of death or incapacity; email us to record a nomination.
 
 We will verify identity before acting on a request, so nobody else can use these rights against you.

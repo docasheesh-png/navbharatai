@@ -42,7 +42,7 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
   // at most) — exactly the shape the weak GLM/Kimi tier ships cleanly.
   // ══════════════════════════════════════════════════════════════════════════════════════════════════
   {
-    id: 'todo', label: 'To-do list', icon: '✅', category: 'Productivity', tier: 'simple',
+    id: 'todo', label: 'To-do', icon: '✅', category: 'Productivity', tier: 'simple',
     prompt: 'Build a to-do list app: add, edit, complete and delete tasks, organise them by category, filter by all/active/done, and save everything in the browser so it persists on reload. Clean, mobile-friendly UI with light/dark mode.',
   },
   {
@@ -50,23 +50,23 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
     prompt: 'Build a calculator app with the standard operations (+ − × ÷ %), a clear and a delete key, decimal support, keyboard input, and a running history of recent calculations. Big, tappable buttons; light/dark mode.',
   },
   {
-    id: 'stopwatch', label: 'Stopwatch & timer', icon: '⏱️', category: 'Personal', tier: 'simple',
+    id: 'stopwatch', label: 'Stopwatch', icon: '⏱️', category: 'Personal', tier: 'simple',
     prompt: 'Build a stopwatch and countdown timer: start, pause and reset, lap times for the stopwatch, and a settable countdown that plays an alarm sound when it reaches zero. Large, easy-to-read display; mobile-first.',
   },
   {
-    id: 'pomodoro', label: 'Pomodoro timer', icon: '🍅', category: 'Productivity', tier: 'simple',
+    id: 'pomodoro', label: 'Pomodoro', icon: '🍅', category: 'Productivity', tier: 'simple',
     prompt: 'Build a Pomodoro focus timer: 25-minute work sessions and 5-minute breaks, start/pause/skip controls, a completed-session counter, and a gentle chime when a session ends. Calm, minimal, distraction-free UI.',
   },
   {
-    id: 'tip-split', label: 'Tip & bill split', icon: '💵', category: 'Personal', tier: 'simple',
+    id: 'tip-split', label: 'Bill split', icon: '💵', category: 'Personal', tier: 'simple',
     prompt: 'Build a tip calculator and bill splitter: enter the bill amount, pick a tip percentage (or type a custom one), split between any number of people, and instantly see the tip, the grand total and the amount each person pays.',
   },
   {
-    id: 'unit-converter', label: 'Unit converter', icon: '📐', category: 'Productivity', tier: 'simple',
+    id: 'unit-converter', label: 'Converter', icon: '📐', category: 'Productivity', tier: 'simple',
     prompt: 'Build a unit converter for length, weight and temperature (and currency with simple fixed rates): a from/to unit picker and instant conversion as you type, with a quick swap button. Clean, compact, mobile-first UI.',
   },
   {
-    id: 'qr-generator', label: 'QR code maker', icon: '🔳', category: 'Productivity', tier: 'simple',
+    id: 'qr-generator', label: 'QR code', icon: '🔳', category: 'Productivity', tier: 'simple',
     prompt: 'Build a QR code generator: type any text or link and instantly see its QR code update, choose a size, and download it as an image with one tap. Simple, single-screen UI with light/dark mode.',
   },
   {
@@ -74,7 +74,7 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
     prompt: 'Build a quick notes app: write short notes, pin the important ones to the top, search by text, and save everything in the browser so it persists on reload. Fast, distraction-free, mobile-first UI.',
   },
   {
-    id: 'password-gen', label: 'Password generator', icon: '🔑', category: 'Personal', tier: 'simple',
+    id: 'password-gen', label: 'Password', icon: '🔑', category: 'Personal', tier: 'simple',
     prompt: 'Build a password generator: choose the length with a slider and toggle uppercase, numbers and symbols, generate a strong random password, show a strength meter, and copy it to the clipboard with one tap.',
   },
   {
@@ -89,28 +89,28 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
   // ══════════════════════════════════════════════════════════════════════════════════════════════════
   // ── Business ──
   {
-    id: 'saas-dashboard', label: 'SaaS dashboard', icon: '📊', category: 'Business', tier: 'pro', showcase: true,
+    id: 'saas-dashboard', label: 'SaaS app', icon: '📊', category: 'Business', tier: 'pro', showcase: true,
     prompt: 'Build a multi-tenant SaaS admin dashboard with team accounts, role-based access (owner/admin/member), an analytics overview with charts, a settings page, and subscription billing. Clean, modern UI with a sidebar.',
   },
   {
-    id: 'crm', label: 'CRM / pipeline', icon: '🤝', category: 'Business', tier: 'pro', showcase: true,
+    id: 'crm', label: 'CRM', icon: '🤝', category: 'Business', tier: 'pro', showcase: true,
     prompt: 'Build a CRM to manage contacts and a sales pipeline: kanban deal stages (lead → qualified → won/lost), contact profiles with activity history, notes and tasks, and a dashboard of pipeline value. Include search and filters.',
   },
   {
-    id: 'invoicing', label: 'Invoicing app', icon: '🧾', category: 'Business', tier: 'pro',
+    id: 'invoicing', label: 'Invoices', icon: '🧾', category: 'Business', tier: 'pro',
     prompt: 'Build an invoicing app for a small business: create and send invoices with line items and GST/tax, track paid/unpaid/overdue status, a client list, and a dashboard of revenue and outstanding amounts. PDF-ready invoice view.',
   },
   // ── Commerce ──
   {
-    id: 'store', label: 'Online store', icon: '🛍️', category: 'Commerce', tier: 'pro', showcase: true,
+    id: 'store', label: 'Store', icon: '🛍️', category: 'Commerce', tier: 'pro', showcase: true,
     prompt: 'Build an online store with a product catalog (search, categories, filters), product pages, a cart and checkout, order history, and an admin panel to manage products and orders. Responsive, image-forward design.',
   },
   {
-    id: 'restaurant', label: 'Restaurant / menu', icon: '🍽️', category: 'Commerce', tier: 'pro', showcase: true,
+    id: 'restaurant', label: 'Restaurant', icon: '🍽️', category: 'Commerce', tier: 'pro', showcase: true,
     prompt: 'Build a restaurant app: a digital menu by category with photos and prices, table/takeaway ordering, kitchen order tickets, GST billing, and an admin area to manage the menu and view orders.',
   },
   {
-    id: 'bookings', label: 'Booking / appointments', icon: '📅', category: 'Commerce', tier: 'pro',
+    id: 'bookings', label: 'Bookings', icon: '📅', category: 'Commerce', tier: 'pro',
     prompt: 'Build an appointment-booking app: an availability calendar with time slots, booking with confirmation, reminders, a cancellation policy, and an admin dashboard of upcoming bookings. Works for a salon, clinic or consultant.',
   },
   // ── Social ──
@@ -119,37 +119,37 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
     prompt: 'Build a social app with user profiles, a realtime post feed, likes and comments, follow/unfollow, image upload, and notifications. Include content moderation/report and a clean mobile-first UI.',
   },
   {
-    id: 'community', label: 'Community forum', icon: '🗣️', category: 'Social', tier: 'pro',
+    id: 'community', label: 'Forum', icon: '🗣️', category: 'Social', tier: 'pro',
     prompt: 'Build a community forum with topics and threaded discussions, upvotes, tags, user reputation, search, and moderation tools. A clean, readable, Reddit-style layout.',
   },
   {
-    id: 'events', label: 'Event platform', icon: '🎟️', category: 'Social', tier: 'pro',
+    id: 'events', label: 'Events', icon: '🎟️', category: 'Social', tier: 'pro',
     prompt: 'Build an events platform: event listings with an agenda, ticket types with capacity, registration/RSVP, QR check-in, payments, and an organizer dashboard of attendees and sales.',
   },
   // ── Productivity ──
   {
-    id: 'kanban', label: 'Project board', icon: '🗂️', category: 'Productivity', tier: 'pro',
+    id: 'kanban', label: 'Task board', icon: '🗂️', category: 'Productivity', tier: 'pro',
     prompt: 'Build a project management app with boards, drag-and-drop kanban columns, cards with assignees/labels/due dates, comments, and a dashboard. Team workspaces with member invites.',
   },
   {
-    id: 'notes', label: 'Notes / docs', icon: '📝', category: 'Productivity', tier: 'pro',
+    id: 'notes', label: 'Docs', icon: '📝', category: 'Productivity', tier: 'pro',
     prompt: 'Build a note-taking app with a folder/tag sidebar, a rich-text editor, full-text search, pinning and favorites, and autosave. Fast, keyboard-friendly, distraction-free UI.',
   },
   {
-    id: 'lms', label: 'Learning platform', icon: '🎓', category: 'Productivity', tier: 'pro',
+    id: 'lms', label: 'Courses', icon: '🎓', category: 'Productivity', tier: 'pro',
     prompt: 'Build a learning platform (LMS): courses with lessons and content, enrolment, quizzes with auto-grading, progress tracking, and separate student/teacher/admin roles. Include a course catalog and a student dashboard.',
   },
   // ── Personal ──
   {
-    id: 'portfolio', label: 'Portfolio site', icon: '🌐', category: 'Personal', tier: 'pro',
+    id: 'portfolio', label: 'Portfolio', icon: '🌐', category: 'Personal', tier: 'pro',
     prompt: 'Build a personal portfolio website: a hero intro, a projects gallery with detail pages, an about section, a skills list, and a contact form. Polished, animated, responsive, with light/dark mode.',
   },
   {
-    id: 'fitness', label: 'Fitness tracker', icon: '💪', category: 'Personal', tier: 'pro',
+    id: 'fitness', label: 'Fitness', icon: '💪', category: 'Personal', tier: 'pro',
     prompt: 'Build a fitness app: log workouts and track progress over time with charts, set goals, browse exercise routines, and (for a gym) membership and class scheduling with trainer assignment.',
   },
   {
-    id: 'expense', label: 'Expense tracker', icon: '💸', category: 'Personal', tier: 'pro',
+    id: 'expense', label: 'Expenses', icon: '💸', category: 'Personal', tier: 'pro',
     prompt: 'Build a personal finance app: add income and expenses by category, monthly budgets with progress, charts of spending trends, and a dashboard with balance and top categories. Clean, reassuring UI.',
   },
 ];

@@ -127,3 +127,58 @@ describe('the client helpers a screen depends on', () => {
     expect(deviceLabel('something unrecognised')).toBe('This device');
   });
 });
+
+/**
+ * WHICH DOOR THE SCREEN PUTS FIRST.
+ *
+ * Not decoration. The admin opened this screen on an iPhone that CAN do Face ID and still asked whether
+ * a simple phone lock was possible at all — because the phone-lock button was the small outline one at
+ * the bottom while the password path wore the primary colour. Every security test passed throughout:
+ * the lock was real, the screen just pointed at the wrong door. Nothing except an assertion on the
+ * SCREEN can catch that, which is why these live here rather than in the crypto tests.
+ */
+describe('the phone lock is the door this screen offers first', () => {
+  const src = read('src/components/VaultLockGate.tsx');
+  const setUpAt = src.indexOf('Set up ${deviceLabel()');
+  const accountAt = src.indexOf('{accountLabel}');
+
+  it('the set-up button wears the primary style, not a quiet outline', () => {
+    expect(setUpAt).toBeGreaterThan(0);
+    const button = src.slice(src.lastIndexOf('<button', setUpAt), setUpAt);
+    expect(button).toContain('primaryButton');
+    // The uppercase micro-type is what made it read as an afterthought.
+    expect(button).not.toContain('uppercase');
+  });
+
+  it('the account door steps down to secondary exactly when the device can do it', () => {
+    expect(src).toContain('const deviceIsPrimary = hasDeviceLock === true || offerSetUp;');
+    expect(src).toContain('deviceIsPrimary ? secondaryButton : primaryButton');
+  });
+
+  it('the device path is rendered above the account path, not below it', () => {
+    expect(setUpAt).toBeGreaterThan(0);
+    expect(accountAt).toBeGreaterThan(0);
+    expect(setUpAt).toBeLessThan(accountAt);
+  });
+
+  it('🔒 the account door is still offered unconditionally — a device lock must never strand somebody outside their own keys', () => {
+    const buttonAt = src.lastIndexOf('<button', accountAt);
+    // A `{something && (` immediately before the tag would be a guard hiding the fallback door.
+    expect(src.slice(buttonAt - 160, buttonAt)).not.toMatch(/&&\s*\(\s*$/);
+  });
+
+  it('nobody is sent to a device prompt that cannot appear', () => {
+    expect(src).toContain('const offerSetUp = canUseDevice === true && hasDeviceLock !== true;');
+  });
+
+  it('a Google account confirms in one tap, and the button says Google rather than password', () => {
+    // It used to take two: the first tap only revealed a password field that a Google user never gets.
+    expect(src).toContain('askPassword || isGoogleAccount ? void unlockViaAccount() : setAskPassword(true)');
+    expect(src).toMatch(/isGoogleAccount[\s\S]{0,60}'Confirm with Google'/);
+    expect(src).toContain('const showPasswordField = askPassword && !!auth.currentUser && !isGoogleAccount;');
+  });
+
+  it('setting up on a password account reveals the field instead of raising an error that says the same thing', () => {
+    expect(src).toContain("if (!isGoogleAccount && !password) { setAskPassword(true); return; }");
+  });
+});

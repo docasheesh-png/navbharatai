@@ -1117,6 +1117,56 @@ the code (it is actually read somewhere) on 2026-07-11.
   an unchecked origin is `unknown`, and nothing in the system acts on an `unknown`. Exhausting the
   budget is never silent: it says so in the same `outboundNote` the admin already reads.
 
+### 💴 FULL MONEY AUDIT — every paying code path read end to end (admin-asked 2026-09-12)
+
+The admin asked for a microscopic audit of every money path: *"kahi koi money leak to nahi hai."* 53
+money-touching modules were mapped and walked. **Three real leaks were found, all verified from code
+rather than reasoned about, and all fixed in the same change.** The rest of the money surface held up —
+the Cashfree credit is transactional and derives tokens from the VERIFIED paid amount; the coupon table
+is server-side with an ATOMIC one-time claim; the weekly gift is transactional with its lifetime cap
+written in the same transaction as the credit; a failed build is never charged; an unmeasured provider
+charges zero rather than an invented number.
+
+**🔴 1. A FREE user's paid fallback was the DEAREST model on the card.** `buildFree` in
+`AIRouterManager.ts` registered `gemini-2.5-pro` (**$10/MTok out**) as the FIRST fallback after the free
+GLM-flash leader, with `gemini-2.5-flash` (**$2.50**) sitting BELOW it. So every time the free leader
+rate-limited — the 429 storm this file already documents — a free chat turn cost **4× the rung beneath
+it**, and free chat is NOT wallet-charged, so all of it was ours.
+🔒 **The policy already existed, one function away.** `buildProfessionalFreeFallback` states it verbatim:
+*"Vertex (cheap Gemini on Google), NEVER Grok / direct Gemini / Claude … so a free user can never trigger
+the pricier paid providers."* The professional free tier obeyed it; the twin universe every ordinary user
+hits did not. The bug was a rule applied in one place and not its sibling — not a missing rule.
+**Fixed:** one price-ordered ladder across both Google doors — flash-lite → flash (Vertex) → flash-lite →
+flash (Gemini) → **pro last of the Geminis** → grok ($15, dearest in the card) as the final resort.
+**Nothing was removed**, so resilience is identical; the rungs are climbed cheapest-first instead of
+dearest-first. Test-locked in `tests/freeChainCost.test.ts`, which reads the ORDER out of the source and
+prices it with `providerRates` — so it fails if an order OR a price ever puts an expensive model first.
+
+**🔴 2. The coupon redemption credited the wallet OUTSIDE a transaction, and moved only the ₹ view.**
+The redemption CLAIM was already atomic (a code cannot be redeemed twice — that guard is untouched), but
+the CREDIT was a read-modify-write: a build settling between the read and the write had its debit
+**erased** by a balance computed before it landed. Free spend, timed rather than hacked. It was the one
+credit path in the repo not using a transaction, while `computeCreditedWallet` carries a comment
+explaining exactly why the purchase path does.
+
+**🔴 3. The admin token adjustment ASSIGNED the ₹ view instead of moving it.** It wrote
+`remaining_balance = tokenBalance / TOKENS_PER_RUPEE` — an assignment, not a delta. The 2026-08-03 fix it
+replaced was right about the symptom (a gifted wallet showing ₹0 could not build) and wrong about the
+cure: an assignment silently rewrites a balance whenever the two views legitimately differ — **and they
+always differ for a Pass buyer**, because `remaining_balance += netPaid` while
+`creditableVishwakarmaTokens` subtracts the Pass price from the token figure first. A "+1 token"
+adjustment on such an account would have wiped ₹(pass price) the user really paid; on a wallet credited
+in ₹ only (leak 2), the same line MINTED balance. It was also non-transactional.
+
+🔒 **THE ROOT CAUSE BEHIND BOTH 2 AND 3, AND THE RULE THAT NOW PREVENTS THE CLASS:** the wallet holds ONE
+balance in TWO fields, and every bug here came from a writer that moved one of them. `walletMirror.ts`
+takes the delta ONCE and derives both fields from it — **there is no way to call it and move one view
+without the other**, and it never assigns (a deduction floors both views from the same clamped token
+figure, so one can never end at zero while the other goes negative). Both writers now use it, inside a
+transaction. ⚠️ **Any NEW wallet writer must go through it** — a direct `updateDoc` on a balance field is
+how this class comes back. Test-locked in `tests/walletMirror.test.ts`, including the Pass-buyer case
+that the old assignment got wrong.
+
 ### 🔎 FULL CLOUD RUN AUDIT — 84 keys read off the live console (admin screenshots, 2026-08-20)
 
 The admin sent the complete list of env-var NAMES from the live Cloud Run service, and every one was

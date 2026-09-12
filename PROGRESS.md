@@ -49220,3 +49220,38 @@ immediately, which is exactly why the fix is a confirmed recovery and not a long
 engine needs the real distribution of build durations, which nobody has measured — `maxBuildSeconds`
 defaults to 30 min, so the line may simply sit below normal. Fixing the sample removes the flapping;
 changing the threshold on a guess would replace a noisy alert with a quiet wrong one.
+
+### 2026-09-12 — the money audit: 53 modules walked, three real leaks found and closed
+
+The admin asked for a microscopic audit of every paying code path. Mapped the whole money surface (53
+modules) into three flows — money IN (Cashfree, coupons, store, gifts), money OUT (model calls, E2B,
+hosting, Web Risk), and CHARGING (wallet debit, spend zones, quotas) — then walked each for the classic
+leak shapes: spend with no charge, credit with no payment, double credit, missing idempotency, a
+money path that fails open, and rounding that always favours one side.
+
+**What held up** (worth recording, so a later audit does not redo it): the Cashfree credit is
+transactional and derives tokens from the VERIFIED paid amount, never from anything the client sent; the
+coupon price table is server-side and an UNSET value means no coupon is redeemable; the redemption claim
+is atomic; the weekly gift writes its lifetime-cap counter in the SAME transaction as the credit; a
+failed build is never charged; an unmeasured provider charges zero rather than an invented number.
+
+**Three real leaks, all fixed here.**
+
+1. **The free chat's paid fallback was the dearest model on the card.** `gemini-2.5-pro` ($10/MTok out)
+   was the first rung after the free GLM leader, with `gemini-2.5-flash` ($2.50) below it — so every
+   turn after a 429 cost 4× the rung beneath, uncharged. The policy against exactly this was already
+   written down in the neighbouring `buildProfessionalFreeFallback`; the universe every ordinary user
+   hits simply never got it. Now one price-ordered ladder across both Google doors, grok last.
+2. **The coupon credit ran outside a transaction** — a read-modify-write that could erase a debit
+   settling beside it — and moved only the ₹ view.
+3. **The admin token adjustment ASSIGNED `remaining_balance` from `tokenBalance`** rather than applying
+   the delta. For a Pass buyer the two views differ by the Pass price permanently, so a "+1 token"
+   adjustment would have wiped real money; on a ₹-only-credited wallet it minted some.
+
+**The class behind 2 and 3, and what now prevents it:** one balance in two fields, with writers free to
+move one. `walletMirror.ts` takes the delta once and derives both — calling it and moving a single view
+is not expressible — and never assigns. Both writers use it, transactionally.
+
+**Two findings came from my own new tests rather than from reading**: the price-order test caught that
+`gemini-2.5-pro` was still ahead of two cheaper direct-Gemini rungs after the first fix, and the mirror
+test pinned the Pass-buyer case the old assignment got wrong.

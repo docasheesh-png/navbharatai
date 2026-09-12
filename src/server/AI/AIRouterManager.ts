@@ -49,11 +49,29 @@ export class AIRouterManager {
 
   static reset() { this.instanceFree = null; this.instancePro = null; this.instanceProfessional = null; this.instanceProfessionalFree = null; this.instanceProfessionalFreeFallback = null; }
 
-  // FREE: GLM-flash (free leader) → Vertex (3 models) → Gemini (2 models) → Grok.
+  // FREE: GLM-flash (free leader) → Vertex flash-lite → flash → pro → Gemini → Grok (last).
   // Claude NEVER used in free.
+  //
+  // 🔴 THE ORDER OF THE PAID RUNGS IS A MONEY DECISION, AND IT WAS BACKWARDS (fixed 2026-09-12).
+  // The first paid fallback used to be `gemini-2.5-pro`, the DEAREST model on the Gemini card —
+  // $10/MTok out against flash's $2.50 (`providerRates.ts`) — with the cheap flash rungs sitting
+  // BELOW it. So the moment GLM-flash rate-limited (the 429 storm this repo has already lived
+  // through), every free chat turn cost 4× what the rung under it would have, and free chat is not
+  // wallet-charged, so all of it was ours.
+  //
+  // 🔒 THE POLICY WAS ALREADY WRITTEN DOWN — in `buildProfessionalFreeFallback` below, verbatim:
+  // "Vertex (cheap Gemini on Google), NEVER Grok / direct Gemini / Claude … so a free user can never
+  // trigger the pricier paid providers. gemini-2.5-flash primary → -flash-lite (cheaper) fallback."
+  // The professional free tier obeyed it; this one, which every ordinary user hits, did not. That is
+  // the bug: not a missing rule, a rule applied in one universe and not its twin.
+  //
+  // NOTHING IS REMOVED — every provider that could answer before can still answer, so resilience is
+  // unchanged. They are climbed cheapest-first instead of dearest-first, and the two most expensive
+  // models on the card (gemini-pro $10, grok $15) are now genuinely last resorts rather than the
+  // routine path.
   private static buildFree(): AIRouter {
     const router = new AIRouter("free");
-    console.log('[ROUTER_MGR] Building FREE chain: GLM-flash(free) → Vertex×3 → Gemini×2 → Grok');
+    console.log('[ROUTER_MGR] Building FREE chain: GLM-flash(free) → flash-lite → flash → pro(last Gemini) → Grok(last resort)');
 
     // Free, fast leader: GLM-4.7-Flash ($0 in/out on Z.AI). Self-gates on GLM_API_KEY
     // (healthCheck) so this is inert until the key is set; on failure/rate-limit the
@@ -67,28 +85,31 @@ export class AIRouterManager {
 
     // Current Gemini models only — gemini-2.0-flash / gemini-1.5-* are RETIRED and 404
     // at the provider, making those fallback slots dead weight that only added latency.
+    // ONE ladder across both Google doors, ordered by PRICE rather than by provider. Vertex leads
+    // among equals (it is the free universe's service-account auth, so it needs no extra key), but the
+    // cheap rungs of BOTH doors are exhausted before the dear one is touched. `gemini-2.5-pro` sits
+    // last of the Geminis: still there when everything cheaper has failed, never the routine path.
     const vertex = new VertexProvider();
-    [
-      ['gemini-2.5-pro',        1],
-      ['gemini-2.5-flash',      2],
-      ['gemini-2.5-flash-lite', 3],
-    ].forEach(([m, p]) => {
-      try { router.registerProvider(slot(vertex, p as number, m as string)); } catch {}
-    });
-
     const gemini = new GeminiProvider();
-    [
-      ['gemini-2.5-flash',      6],
-      ['gemini-2.5-flash-lite', 7],
-    ].forEach(([m, p]) => {
-      try { router.registerProvider(slot(gemini, p as number, m as string)); } catch {}
+    ([
+      [vertex, 'gemini-2.5-flash-lite', 1],
+      [vertex, 'gemini-2.5-flash',      2],
+      [gemini, 'gemini-2.5-flash-lite', 3],
+      [gemini, 'gemini-2.5-flash',      4],
+      [vertex, 'gemini-2.5-pro',        5],
+    ] as const).forEach(([prov, m, p]) => {
+      try { router.registerProvider(slot(prov, p, m)); } catch {}
     });
 
     try {
+      // LAST, and deliberately so: grok is $15/MTok out — the dearest model in the card, dearer than
+      // every Claude tier. It is kept only as the final "the app must never break" rung, reached when
+      // GLM, Vertex and Gemini have all failed. Do not promote it for quality reasons without pricing
+      // the change: on the free tier that cost has no one to bill.
       const grok = new GrokProvider();
       grok.priority = 9;
       router.registerProvider(grok);
-      console.log('[ROUTER_MGR] FREE: Grok registered as final fallback');
+      console.log('[ROUTER_MGR] FREE: Grok registered as final fallback (dearest rung — last resort only)');
     } catch {}
 
     return router;

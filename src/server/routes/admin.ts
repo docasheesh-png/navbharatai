@@ -12,6 +12,7 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Admin panel reads/writes admin_mfa +
 // aggregates user_token_wallets / ai_usage_logs / payment_transactions (all server-side).
 import { doc, getDoc, setDoc, updateDoc, collection, getDocs, runTransaction, getServerDb as getDb } from '../lib/serverDb';
+import { mirroredCreditPatch } from '../lib/walletMirror';
 import { audit } from '../lib/audit';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
 import { mergeWallets } from '../lib/accountMerge';
@@ -1512,20 +1513,34 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     if (!delta || typeof delta !== 'number') return res.status(400).json({ error: 'delta (number) required' });
     try {
       const walletRef = doc(db, 'user_token_wallets', userId);
-      const snap = await getDoc(walletRef);
-      if (!snap.exists()) return res.status(404).json({ error: 'User not found' });
-      const data = snap.data();
-      const newBalance = Math.max(0, (data.tokenBalance || 0) + delta);
-      await updateDoc(walletRef, {
-        tokenBalance: newBalance,
-        // ROOT-CAUSE FIX (gift-token bug, admin 2026-08-03: "₹0 + 50,000 tokens → app building off"). The
-        // affordability gate reads `remaining_balance` (₹); this path used to bump ONLY tokenBalance, so a
-        // gifted user showed ₹0 and could not build despite the tokens. Keep the ₹ MIRROR in sync (same
-        // rate the welcome bonus + purchases use), so the balance is consistent for the gate AND the UI.
-        remaining_balance: TOKENS_PER_RUPEE > 0 ? newBalance / TOKENS_PER_RUPEE : 0,
-        walletLedger: [...(data.walletLedger || []), { type: 'admin_adjustment', amountCoinsOrTokens: delta, reason: reason || 'Admin adjustment', timestamp: new Date().toISOString() }],
-        updatedAt: new Date().toISOString(),
+      // 🔴 MONEY AUDIT 2026-09-12 — TWO BUGS FIXED HERE, AND THE SECOND WAS INVISIBLE.
+      //
+      // (1) This was a read-modify-write OUTSIDE a transaction, so a build settling at the same moment
+      //     could be erased by the adjustment writing a balance computed before that debit landed.
+      //     It is now a transaction that re-reads in-transaction, like every other credit path.
+      //
+      // (2) The ₹ mirror was ASSIGNED (`remaining_balance = newBalance / TOKENS_PER_RUPEE`), not moved
+      //     by the delta. The 2026-08-03 fix it replaced was right about the SYMPTOM — a gifted wallet
+      //     showing ₹0 could not build — but an assignment silently rewrites a balance whenever the two
+      //     views legitimately differ, and they DO: a Pass purchase credits `remaining_balance +=
+      //     netPaid` while `creditableVishwakarmaTokens` subtracts the Pass price from the token figure
+      //     first. So every Pass buyer's views differ by exactly the Pass price, permanently — and a
+      //     "+1 token" adjustment on such an account would have wiped that ₹ the user had really paid.
+      //     In the other direction (a wallet credited in ₹ only, as the coupon path used to do) the same
+      //     line MINTED balance. `mirroredCreditPatch` moves both views by the same money, never assigns.
+      const newBalance = await runTransaction(db, async (tx: any) => {
+        const fresh = await tx.get(walletRef);
+        if (!fresh.exists()) return null;
+        const w = fresh.data();
+        const patch = mirroredCreditPatch(w, delta);
+        tx.update(walletRef, {
+          ...patch,
+          walletLedger: [...(w.walletLedger || []), { type: 'admin_adjustment', amountCoinsOrTokens: delta, reason: reason || 'Admin adjustment', timestamp: new Date().toISOString() }],
+          updatedAt: new Date().toISOString(),
+        });
+        return patch.tokenBalance;
       });
+      if (newBalance === null) return res.status(404).json({ error: 'User not found' });
       audit('ADMIN_TOKEN_ADJUST', { userId, delta, reason, ip: req.ip });
       res.json({ ok: true, newBalance });
     } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }

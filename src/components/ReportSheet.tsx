@@ -26,13 +26,15 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Send, Image as ImageIcon, Check, Loader2 } from 'lucide-react';
+import { X, Send, Image as ImageIcon, Check, Loader2, MessageSquare } from 'lucide-react';
 import { authedHeaders } from '../lib/authHeaders';
 import {
-  MESSAGE_MAX, PROBLEM_KINDS, problemKindAsk, type ProblemKind, type ReportTargetKind,
+  MESSAGE_MAX, PROBLEM_KINDS, REPLY_MAX, problemKindAsk, problemKindLabel, validateReplyPayload,
+  type ProblemKind, type ReportMessage, type ReportTargetKind,
 } from '../lib/userReport';
 import { compressForReport } from '../lib/reportImage';
 import { collectDiagnostics } from '../lib/reportDiagnostics';
+import { ReportShot } from './ReportShot';
 import { recentErrors } from '../lib/recentErrors';
 import { nativeAppBuild } from '../lib/appBuildId';
 
@@ -48,6 +50,16 @@ export interface ReportSheetProps {
   view?: string;
 }
 
+/** One of the reporter's own reports, as `/api/report/mine` returns it (never the screenshot). */
+interface MyReport {
+  id: string;
+  at: number;
+  status: string;
+  problemKind?: ProblemKind;
+  message: string;
+  messages: ReportMessage[];
+}
+
 export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
   const [kind, setKind] = useState<ProblemKind | ''>('');
   const [message, setMessage] = useState('');
@@ -55,7 +67,20 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
+  /**
+   * THE CONVERSATIONS ALREADY RUNNING (admin 2026-09-12, the other half of "jisse uski help ho sake").
+   *
+   * They live at the TOP of this sheet rather than behind a separate screen, because the moment a
+   * person wants to talk to us about a problem is the moment they open this — asking them to find a
+   * second place is how an answer goes unread and the reporter concludes nobody listened.
+   */
+  const [mine, setMine] = useState<MyReport[] | null>(null);
+  const [openThread, setOpenThread] = useState<string>('');
+  const [reply, setReply] = useState('');
+  const [replyShot, setReplyShot] = useState('');
+  const [replying, setReplying] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const replyFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -67,8 +92,63 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
   // A fresh sheet every time it opens: a half-typed complaint from an hour ago is not what the user
   // means to send now.
   useEffect(() => {
-    if (open) { setKind(''); setMessage(''); setShot(''); setNote(''); setDone(false); }
+    if (open) {
+      setKind(''); setMessage(''); setShot(''); setNote(''); setDone(false);
+      setOpenThread(''); setReply(''); setReplyShot(''); setMine(null);
+      void (async () => {
+        try {
+          const res = await fetch('/api/report/mine', { headers: await authedHeaders() });
+          const data = await res.json().catch(() => null);
+          // An empty list and a failed fetch are BOTH rendered as "nothing here" — but only the empty
+          // list is true, so a failure leaves `mine` as [] rather than inventing a cheerful state.
+          setMine(Array.isArray(data?.reports) ? (data.reports as MyReport[]) : []);
+        } catch {
+          setMine([]);
+        }
+      })();
+    }
   }, [open]);
+
+  /** The SAME compression path the first report uses — one rule, so one can never accept what the other refuses. */
+  const pickReplyShot = useCallback(async (file: File | undefined) => {
+    if (!file) return;
+    setNote('');
+    const r = await compressForReport(file);
+    if (!r.ok) { setNote(r.error || 'That image could not be used.'); return; }
+    setReplyShot(r.dataUrl || '');
+  }, []);
+
+  const sendReply = useCallback(async (reportId: string) => {
+    const parsed = validateReplyPayload(reply, replyShot);
+    if (parsed.ok !== true) { setNote(parsed.error); return; }
+    if (replying) return;
+    setReplying(true);
+    setNote('');
+    try {
+      const res = await fetch(`/api/report/${encodeURIComponent(reportId)}/reply`, {
+        method: 'POST',
+        headers: await authedHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ text: parsed.text, ...(parsed.screenshot ? { screenshot: parsed.screenshot } : {}) }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) { setNote(data?.error || 'Could not send that. Please try again.'); return; }
+      // The server returns the WHOLE thread, so the screen shows what was actually stored rather
+      // than what we hoped was stored — the difference matters the one time a write is dropped.
+      setMine((prev) => (prev ?? []).map((r) => (r.id === reportId ? { ...r, messages: data.messages as ReportMessage[] } : r)));
+      setReply('');
+      setReplyShot('');
+      // 🔒 SAID OUT LOUD WHEN THE PICTURE DID NOT MAKE IT. The text is saved either way; letting the
+      // person believe their screenshot went through when it did not is how they stop trusting the
+      // channel — and a screenshot is usually the part that was going to answer the question.
+      if (replyShot && data?.imageSaved === false) {
+        setNote('Your message was sent, but the screenshot could not be attached. You can try adding it again.');
+      }
+    } catch {
+      setNote('Could not reach NavBharatAI. Check your connection and try again.');
+    } finally {
+      setReplying(false);
+    }
+  }, [reply, replyShot, replying]);
 
   const pick = useCallback(async (file: File | undefined) => {
     if (!file) return;
@@ -166,6 +246,121 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
           </div>
         ) : (
           <>
+            {/* YOUR EARLIER REPORTS, AND WHAT WE SAID BACK. Above the new-report form on purpose:
+                somebody opening this sheet for the second time is usually here about the first one,
+                and a reply they cannot find is a reply that was never sent. */}
+            {/* ONE input, shared by every thread — only one is open at a time, and a picker per
+                report would be a DOM node per report for no behaviour anyone can see. */}
+            <input
+              ref={replyFileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; void pickReplyShot(f); }}
+            />
+
+            {(mine?.length ?? 0) > 0 && (
+              <div className="mb-4 rounded-2xl border border-white/10 bg-black/20 p-3">
+                <p className="text-[11px] font-semibold text-zinc-300 mb-2">Your earlier reports</p>
+                <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                  {(mine ?? []).map((r) => {
+                    const isOpen = openThread === r.id;
+                    const fromUs = r.messages.filter((m) => m.from === 'admin').length;
+                    return (
+                      <div key={r.id} className="rounded-xl border border-white/10 bg-white/[0.03]">
+                        <button
+                          onClick={() => { setOpenThread(isOpen ? '' : r.id); setReply(''); setReplyShot(''); }}
+                          className="w-full text-left px-3 py-2"
+                          aria-expanded={isOpen}
+                        >
+                          <span className="flex items-center gap-2">
+                            <span className="text-[11px] text-zinc-300 flex-1 truncate">
+                              {problemKindLabel(r.problemKind) || 'Problem'} — {r.message}
+                            </span>
+                            {fromUs > 0 && (
+                              <span className="shrink-0 inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-emerald-300">
+                                <MessageSquare className="w-2.5 h-2.5" /> Reply
+                              </span>
+                            )}
+                          </span>
+                        </button>
+
+                        {isOpen && (
+                          <div className="px-3 pb-3 space-y-2">
+                            {r.messages.length === 0 ? (
+                              <p className="text-[11px] text-zinc-500">
+                                No reply yet. A person reads every report.
+                              </p>
+                            ) : (
+                              r.messages.map((m, i) => (
+                                <div
+                                  key={`${m.at}-${i}`}
+                                  className={`text-[11px] leading-relaxed rounded-xl px-3 py-2 ${
+                                    m.from === 'admin'
+                                      ? 'bg-indigo-500/10 border border-indigo-400/25 text-indigo-100'
+                                      : 'bg-white/5 border border-white/10 text-zinc-200'
+                                  }`}
+                                >
+                                  {/* 🔒 WHITE-LABEL LAW: to the user this is always NavBharatAI.
+                                      Never an admin's name, never an email, never who answered. */}
+                                  <span className="block text-[9px] uppercase tracking-widest font-black opacity-60 mb-0.5">
+                                    {m.from === 'admin' ? 'NavBharatAI' : 'You'}
+                                  </span>
+                                  {m.text}
+                                  {m.shotId && (
+                                    <ReportShot
+                                      src={`/api/report/${encodeURIComponent(r.id)}/shot/${encodeURIComponent(m.shotId)}`}
+                                      headers={() => authedHeaders()}
+                                      alt={m.from === 'admin' ? 'Screenshot from NavBharatAI' : 'Screenshot you sent'}
+                                    />
+                                  )}
+                                </div>
+                              ))
+                            )}
+
+                            <div className="flex items-end gap-2">
+                              <textarea
+                                value={reply}
+                                onChange={(e) => setReply(e.target.value.slice(0, REPLY_MAX))}
+                                rows={2}
+                                placeholder="Answer here…"
+                                className="flex-1 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-[12px] text-white placeholder-zinc-600 outline-none focus:border-indigo-500/60 resize-none"
+                              />
+                              <button
+                                onClick={() => void sendReply(r.id)}
+                                /* A screenshot ALONE is a complete answer — on a layout complaint it
+                                   is usually the whole answer — so an empty box with a picture
+                                   attached must not be a dead button. */
+                                disabled={replying || (reply.trim().length === 0 && !replyShot)}
+                                className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-[11px] font-bold text-white"
+                              >
+                                {replying ? '…' : 'Send'}
+                              </button>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => replyFileRef.current?.click()}
+                                disabled={replying}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/10 bg-white/5 text-[10px] font-semibold text-zinc-300 hover:bg-white/10 disabled:opacity-40"
+                              >
+                                <ImageIcon className="w-3 h-3" /> {replyShot ? 'Change screenshot' : 'Add screenshot'}
+                              </button>
+                              {replyShot && (
+                                <>
+                                  <img src={replyShot} alt="Screenshot to send" className="w-7 h-7 rounded object-cover border border-white/10" />
+                                  <button onClick={() => setReplyShot('')} className="text-[10px] text-zinc-500 hover:text-zinc-300 underline">Remove</button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* ONE TAP BEFORE THE BOX, and it is what makes the rest of the report legible.
                 A real report read "App is not responsive and sometimes it does not work in Mobile
                 phones" — which could be a layout bug, a hang, or a dead button, and we had no way to

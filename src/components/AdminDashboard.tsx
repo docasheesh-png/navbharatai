@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon } from 'lucide-react';
 import { TirangaLoader } from './ui/TirangaLoader';
 import { stampLabel, dayLabel, signInMethodWords } from '../lib/adminUserDisplay';
@@ -16,6 +16,8 @@ import { LoadBoard } from './admin/LoadBoard';
 import { reportStatus, reportStatusLabel, reportStatusHint, openReportCount, type ReportTriage } from '../server/AgentV3/reportTriage';
 import { problemKindLabel } from '../lib/userReport';
 import { describeOverflow } from '../lib/reportDiagnostics';
+import { ReportShot } from './ReportShot';
+import { compressForReport } from '../lib/reportImage';
 
 interface AdminDashboardProps {
   adminToken: string;
@@ -104,6 +106,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [activeTab, setActiveTab] = useState<TabId>('monitor');
   // ── User reports (admin 2026-08-21) ──────────────────────────────────────
   const [userReports, setUserReports] = useState<any[]>([]);
+  /** The admin's half of a report conversation — see the reply box in the report modal. */
+  const [reportReply, setReportReply] = useState('');
+  const [reportReplyShot, setReportReplyShot] = useState('');
+  const [reportReplyBusy, setReportReplyBusy] = useState(false);
+  const [reportReplyNote, setReportReplyNote] = useState('');
   const [reportsLoading, setReportsLoading] = useState(false);
   const [openReport, setOpenReport] = useState<any>(null);
   const [reportFilter, setReportFilter] = useState<'open' | 'all'>('open');
@@ -418,6 +425,55 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     } catch { setOpenReport({ error: 'Could not open that report.' }); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken]);
+
+  /**
+   * Answer the person who reported it.
+   *
+   * ⚠️ THE NOTIFICATION IS REPORTED HONESTLY, NOT ASSUMED. The server stores the reply first and
+   * tells us separately whether the bell actually rang; showing "sent" for both would leave the
+   * admin believing a user had been told when they had not — and the user waiting for a reply they
+   * can only find by chance.
+   */
+  const adminReplyFileRef = useRef<HTMLInputElement>(null);
+
+  /** The SAME compression the user's sheet uses, so one side can never accept what the other refuses. */
+  const pickAdminReplyShot = async (file: File | undefined) => {
+    if (!file) return;
+    setReportReplyNote('');
+    const r = await compressForReport(file);
+    if (!r.ok) { setReportReplyNote(r.error || 'That image could not be used.'); return; }
+    setReportReplyShot(r.dataUrl || '');
+  };
+
+  const replyToReport = async (id: string) => {
+    // A screenshot on its own is a complete reply ("tap here"), so an empty box with one attached
+    // must not be a dead button.
+    if (!id || reportReplyBusy || (reportReply.trim().length === 0 && !reportReplyShot)) return;
+    setReportReplyBusy(true);
+    setReportReplyNote('');
+    try {
+      const res = await fetch(`/api/admin/reports/${encodeURIComponent(id)}/reply`, {
+        method: 'POST', headers, body: JSON.stringify({ text: reportReply.trim() }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) { setReportReplyNote(data?.error || 'Could not send that reply.'); return; }
+      setOpenReport((prev: any) => (prev ? { ...prev, report: { ...prev.report, messages: data.messages } } : prev));
+      setReportReply('');
+      setReportReplyShot('');
+      // Two separate honest failures, kept separate: the bell may not have rung, and the picture may
+      // not have attached. Collapsing them into one "sent" would hide whichever actually happened.
+      const problems = [
+        data?.notified ? '' : 'the user could not be notified, so they may not see it soon',
+        reportReplyShot && data?.imageSaved === false ? 'the screenshot could not be attached' : '',
+      ].filter(Boolean);
+      setReportReplyNote(problems.length ? `Saved — but ${problems.join(', and ')}.` : '');
+      void fetchUserReports();
+    } catch {
+      setReportReplyNote('Could not reach the server. Please try again.');
+    } finally {
+      setReportReplyBusy(false);
+    }
+  };
 
   const markUserReport = useCallback(async (id: string, status: string) => {
     try {
@@ -2111,9 +2167,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     >
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-white/15 text-white/60">
-                          {r.target?.kind === 'app' ? 'App' : r.target?.kind === 'user' ? 'User' : 'Problem'}
+                          {r.target?.kind === 'app' ? 'App' : r.target?.kind === 'user' ? 'User' : problemKindLabel(r.problemKind) || 'Problem'}
                         </span>
-                        {r.status !== 'open' && (
+                        {/* 🔴 THE REPLY BADGE OUTRANKS THE STATUS BADGE, and that ordering is the
+                            point: a report the admin marked "reviewed" and the user then answered is
+                            owed a response, and showing only "reviewed" is exactly how an answered
+                            question goes unread and the reporter concludes nobody was listening. */}
+                        {r.awaitingReply ? (
+                          <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-amber-400/40 bg-amber-400/10 text-amber-300">
+                            Replied — needs you
+                          </span>
+                        ) : r.status !== 'open' && (
                           <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-emerald-500/30 text-emerald-300">{r.status}</span>
                         )}
                         {r.hasScreenshot && <PictureIcon size={12} className="text-white/40" />}
@@ -2133,7 +2197,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   are right here — reading a complaint and then hunting for the account in another tab
                   is how reports stop getting handled. */}
               {openReport && (
-                <div className="nb-sheet-overlay fixed inset-0 z-50 bg-black/70 flex items-center justify-center" onClick={() => setOpenReport(null)}>
+                <div className="nb-sheet-overlay fixed inset-0 z-50 bg-black/70 flex items-center justify-center" onClick={() => { setOpenReport(null); setReportReply(''); setReportReplyShot(''); setReportReplyNote(''); }}>
                   <div className="nb-sheet w-full max-w-lg overflow-y-auto bg-[#161b22] border border-white/10 rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
                     {openReport.loading ? (
                       <p className="text-sm text-white/60">Opening…</p>
@@ -2233,6 +2297,85 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         {openReport.screenshot && (
                           <img src={openReport.screenshot} alt="Screenshot from the reporter" className="mt-3 w-full rounded-xl border border-white/10" />
                         )}
+
+                        {/* THE CONVERSATION. Asking "which page?" is usually cheaper than any
+                            amount of guessing, and until now there was no way to ask at all. */}
+                        <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
+                          <p className="text-[9px] uppercase tracking-widest font-black text-white/40 mb-2">
+                            Conversation with the reporter
+                          </p>
+                          {(openReport.report?.messages?.length ?? 0) === 0 ? (
+                            <p className="text-[11px] text-white/40">Nothing said yet. Ask them anything you need.</p>
+                          ) : (
+                            <div className="space-y-1.5 max-h-56 overflow-y-auto mb-2">
+                              {openReport.report.messages.map((m: { from: string; text: string; at: number; shotId?: string }, i: number) => (
+                                <div
+                                  key={`${m.at}-${i}`}
+                                  className={`text-[11px] leading-relaxed rounded-lg px-2.5 py-1.5 ${
+                                    m.from === 'admin'
+                                      ? 'bg-indigo-500/10 border border-indigo-400/25 text-indigo-100'
+                                      : 'bg-white/5 border border-white/10 text-white/80'
+                                  }`}
+                                >
+                                  <span className="block text-[9px] uppercase tracking-widest font-black opacity-60 mb-0.5">
+                                    {/* The user reads this as NavBharatAI — see the sheet. Here it is
+                                        labelled "You" so the admin can follow their own thread. */}
+                                    {m.from === 'admin' ? 'You (as NavBharatAI)' : 'Reporter'}
+                                  </span>
+                                  {m.text}
+                                  {m.shotId && (
+                                    <ReportShot
+                                      src={`/api/admin/reports/${encodeURIComponent(openReport.report.id)}/shot/${encodeURIComponent(m.shotId)}`}
+                                      headers={() => headers}
+                                      alt={m.from === 'admin' ? 'Screenshot you sent' : 'Screenshot from the reporter'}
+                                    />
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          <div className="flex items-end gap-2">
+                            <textarea
+                              value={reportReply}
+                              onChange={(e) => setReportReply(e.target.value.slice(0, 1000))}
+                              rows={2}
+                              placeholder="Ask them something, or tell them it is fixed…"
+                              className="flex-1 bg-black/40 border border-white/10 rounded-lg px-2.5 py-2 text-[12px] text-white placeholder-white/30 outline-none focus:border-indigo-500/50 resize-none"
+                            />
+                            <button
+                              onClick={() => void replyToReport(openReport.report.id)}
+                              disabled={reportReplyBusy || (reportReply.trim().length === 0 && !reportReplyShot)}
+                              className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-xs font-bold text-white"
+                            >
+                              {reportReplyBusy ? 'Sending…' : 'Send reply'}
+                            </button>
+                          </div>
+                          <div className="flex items-center gap-2 mt-2">
+                            <input
+                              ref={adminReplyFileRef}
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; void pickAdminReplyShot(f); }}
+                            />
+                            <button
+                              onClick={() => adminReplyFileRef.current?.click()}
+                              disabled={reportReplyBusy}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/10 bg-white/5 text-[10px] font-semibold text-white/70 hover:bg-white/10 disabled:opacity-40"
+                            >
+                              <PictureIcon size={12} /> {reportReplyShot ? 'Change screenshot' : 'Add screenshot'}
+                            </button>
+                            {reportReplyShot && (
+                              <>
+                                <img src={reportReplyShot} alt="Screenshot to send" className="w-7 h-7 rounded object-cover border border-white/10" />
+                                <button onClick={() => setReportReplyShot('')} className="text-[10px] text-white/40 hover:text-white/70 underline">Remove</button>
+                              </>
+                            )}
+                          </div>
+                          {reportReplyNote && (
+                            <p className="mt-2 text-[10px] text-amber-300 leading-snug">{reportReplyNote}</p>
+                          )}
+                        </div>
 
                         <div className="flex flex-wrap gap-2 mt-5">
                           <button onClick={() => void markUserReport(openReport.report.id, 'actioned')} className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white">Acted on it</button>

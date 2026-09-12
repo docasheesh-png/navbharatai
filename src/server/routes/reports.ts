@@ -16,11 +16,15 @@ import type { Express, Request, Response } from 'express';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { requireAdmin } from '../lib/adminAuth';
 import { rateLimiter } from '../lib/authMiddleware';
-import { validateReport, type ReportContext } from '../../lib/userReport';
+import {
+  validateReport, validateReplyPayload, awaitingAdmin, newShotId, isShotId, type ReportContext,
+} from '../../lib/userReport';
 import {
   buildReport, saveReport, listReports, getReport, getReportScreenshot, setReportStatus,
-  countReportsAgainst,
+  countReportsAgainst, listReportsByReporter, addReportMessage,
+  saveReportMessageShot, getReportMessageShot,
 } from '../lib/userReportStore';
+import { saveNotification } from '../lib/AdminNotificationStore';
 import { getWebApp } from '../lib/navStoreWeb';
 import { resolveUserIdentities } from '../lib/adminUserLookup';
 import { summariseBuilds, summarisePayments, accountFlags } from '../lib/adminUserAccount';
@@ -159,7 +163,163 @@ export function registerReportRoutes(app: Express): void {
     },
   );
 
+  /**
+   * THE REPORTS THIS PERSON FILED, AND THE CONVERSATION ON EACH.
+   *
+   * ADMIN 2026-09-12, the other half of *"jisse uski help ho sake"*. Slice 1 made a report legible;
+   * without this the reporter still writes into a void — nobody can ask them "which page?", nobody
+   * can tell them it is fixed, and they learn nothing from having written in. That is how a report
+   * box becomes a suggestion box that people stop using.
+   *
+   * 🔒 SCOPED TO THE VERIFIED uid, never a parameter. A report carries device details and whatever
+   * somebody typed while upset; a list endpoint that took a uid would hand that to anyone who could
+   * guess one. The screenshot is deliberately NOT included — the reporter already has it, and
+   * shipping images into a list is how a phone on a slow connection stops loading the page at all.
+   */
+  app.get('/api/report/mine', async (req: Request, res: Response) => {
+    const me = await verifyFirebaseIdentity(req);
+    if (!me?.uid) return res.status(401).json({ error: 'Sign in to see your reports.' });
+    const rows = await listReportsByReporter(me.uid, 20);
+    res.json({
+      reports: rows.map((r) => ({
+        id: r.id,
+        at: r.at,
+        status: r.status,
+        problemKind: r.problemKind,
+        message: r.message,
+        messages: r.messages ?? [],
+      })),
+    });
+  });
+
+  /**
+   * The reporter answers. Only on their OWN report, and the ownership check happens inside the
+   * store's transaction against the stored document — see `addReportMessage`.
+   *
+   * A reply REOPENS the report. A conversation whose last word is the user's must come back to the
+   * top of the admin's queue rather than stay filed under whatever it was marked before — otherwise
+   * answering a question is the same as being ignored.
+   */
+  app.post(
+    '/api/report/:id/reply',
+    rateLimiter({ name: 'report-reply', authed: 60, anon: 0, noun: 'replies' }),
+    async (req: Request, res: Response) => {
+      const me = await verifyFirebaseIdentity(req);
+      if (!me?.uid) return res.status(401).json({ error: 'Sign in to reply.' });
+      const parsed = validateReplyPayload(req.body?.text, req.body?.screenshot);
+      if (parsed.ok !== true) return res.status(400).json({ error: parsed.error });
+
+      const reportId = String(req.params.id || '');
+      // ⚠️ THE IMAGE IS STORED FIRST, AND THE ORDER IS THE POINT. If the message were appended first
+      // and the image write then failed, the thread would carry a handle to a picture that does not
+      // exist — a broken attachment on somebody's bug report, which is worse than no attachment. This
+      // way a failed image write simply means the reply goes as text, and it SAYS so.
+      let shotId = '';
+      if (parsed.screenshot) {
+        const candidate = newShotId();
+        if (await saveReportMessageShot(reportId, candidate, parsed.screenshot)) shotId = candidate;
+      }
+
+      const messages = await addReportMessage(
+        reportId,
+        { from: 'user', text: parsed.text, at: Date.now(), ...(shotId ? { shotId } : {}) },
+        { expectReporterUid: me.uid, reopen: true },
+      );
+      // 🔒 ONE ANSWER FOR "not yours" AND "does not exist". Telling them apart would let anyone probe
+      // which report ids are real, and a report id is a handle on somebody else's complaint.
+      if (!messages) return res.status(404).json({ error: 'That report could not be found.' });
+      res.json({ ok: true, messages, imageSaved: parsed.screenshot ? !!shotId : undefined });
+    },
+  );
+
+  /**
+   * One message's screenshot, for the REPORTER.
+   *
+   * 🔒 OWNERSHIP IS RE-CHECKED HERE. This is a different route from the reply, so it needs its own
+   * proof — an image endpoint that trusted the caller's possession of an id would be an IDOR with a
+   * picture at the end of it, and report ids are not secrets.
+   *
+   * It is a JSON route rather than an `<img src>` because an image tag sends no auth header, and the
+   * alternative — a signed public URL — would put somebody's screenshot behind a link that leaks the
+   * moment it is pasted anywhere.
+   */
+  app.get('/api/report/:id/shot/:shotId', async (req: Request, res: Response) => {
+    const me = await verifyFirebaseIdentity(req);
+    if (!me?.uid) return res.status(401).json({ error: 'Sign in first.' });
+    const id = String(req.params.id || '');
+    const shotId = String(req.params.shotId || '');
+    if (!isShotId(shotId)) return res.status(404).json({ error: 'Not found.' });
+
+    const report = await getReport(id);
+    // One answer for "not yours" and "no such thing", exactly as the reply route does.
+    if (!report || report.reporterUid !== me.uid) return res.status(404).json({ error: 'Not found.' });
+
+    const dataUrl = await getReportMessageShot(id, shotId);
+    if (!dataUrl) return res.status(404).json({ error: 'Not found.' });
+    res.set('Cache-Control', 'private, no-store');
+    res.json({ dataUrl });
+  });
+
   // ── Admin ─────────────────────────────────────────────────────────────────
+
+  /**
+   * The admin answers a reporter — and the reporter is actually TOLD, through the bell they already
+   * have. A reply nobody notices is the same as no reply.
+   *
+   * ⚠️ THE NOTIFICATION IS BEST-EFFORT AND THE REPLY IS NOT. The message is stored first; if the
+   * notification fails the admin still gets `ok: true` with `notified: false`, because losing the
+   * admin's typed answer to a bell failure would be the worse outcome by far — and a silent `ok`
+   * that hid the failure would leave them believing the user had been told.
+   *
+   * 🔒 WHITE-LABEL LAW: the reporter sees this as NavBharatAI. Nothing here carries an admin name,
+   * an email, or which person answered.
+   */
+  app.post('/api/admin/reports/:id/reply', requireAdmin, async (req: Request, res: Response) => {
+    const parsed = validateReplyPayload(req.body?.text, req.body?.screenshot);
+    if (parsed.ok !== true) return res.status(400).json({ error: parsed.error });
+    const id = String(req.params.id || '');
+
+    const report = await getReport(id);
+    if (!report) return res.status(404).json({ error: 'That report could not be found.' });
+
+    // Same order, same reason as the reporter's route: an image that failed to save must not leave a
+    // handle pointing at nothing.
+    let shotId = '';
+    if (parsed.screenshot) {
+      const candidate = newShotId();
+      if (await saveReportMessageShot(id, candidate, parsed.screenshot)) shotId = candidate;
+    }
+
+    const messages = await addReportMessage(id, {
+      from: 'admin', text: parsed.text, at: Date.now(), ...(shotId ? { shotId } : {}),
+    });
+    if (!messages) return res.status(502).json({ error: 'Could not save that reply. Please try again.' });
+
+    let notified = false;
+    try {
+      const saved = await saveNotification({
+        message: 'NavBharatAI replied to your problem report. Open "Report a problem" to read it and answer.',
+        target: { type: 'user', userId: report.reporterUid },
+        createdBy: 'reports',
+      });
+      notified = !!saved;
+    } catch {
+      notified = false;
+    }
+
+    audit('REPORT_REPLY', { id, notified });
+    res.json({ ok: true, messages, notified, imageSaved: parsed.screenshot ? !!shotId : undefined });
+  });
+
+  /** The same image, for the admin. Separate route, separate authorisation. */
+  app.get('/api/admin/reports/:id/shot/:shotId', requireAdmin, async (req: Request, res: Response) => {
+    const shotId = String(req.params.shotId || '');
+    if (!isShotId(shotId)) return res.status(404).json({ error: 'Not found.' });
+    const dataUrl = await getReportMessageShot(String(req.params.id || ''), shotId);
+    if (!dataUrl) return res.status(404).json({ error: 'Not found.' });
+    res.set('Cache-Control', 'private, no-store');
+    res.json({ dataUrl });
+  });
 
   /** Every report, newest first. `?status=open` narrows it. */
   app.get('/api/admin/reports', requireAdmin, async (req: Request, res: Response) => {
@@ -178,6 +338,10 @@ export function registerReportRoutes(app: Express): void {
         ...r,
         reporter: people.get(r.reporterUid) ?? null,
         reported: r.target.ownerUid ? people.get(r.target.ownerUid) ?? null : null,
+        // The one thing that makes a conversation survive: a report whose LAST word is the user's is
+        // owed an answer, whatever it was marked before. Without this the admin asks a question, the
+        // user answers, and the answer is filed under "reviewed" where nobody looks again.
+        awaitingReply: awaitingAdmin(r.messages),
       })),
     });
   });

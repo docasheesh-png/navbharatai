@@ -110,6 +110,101 @@ export function problemKindAsk(v: unknown): string {
 
 export type ReportStatus = 'open' | 'reviewed' | 'actioned' | 'dismissed';
 
+/**
+ * One message in the conversation ON a report.
+ *
+ * ADMIN 2026-09-12, the other half of *"jisse uski help ho sake"*: capturing more facts told us WHAT
+ * a report meant; it still left no way to ASK the person anything. A report with no reply channel is
+ * a suggestion box — the reporter cannot be asked "which page?", cannot be told it is fixed, and
+ * learns nothing from having written in, which is exactly how people stop reporting.
+ */
+export interface ReportMessage {
+  /** Who wrote it. `admin` is shown to the user as NavBharatAI, never as a person's name. */
+  from: 'admin' | 'user';
+  text: string;
+  at: number;
+  /**
+   * A HANDLE for an attached screenshot, never the image itself.
+   *
+   * ⚠️ THE BYTES MUST NOT LIVE IN THE THREAD, and this is the field where that would quietly happen.
+   * The thread sits on the report DOCUMENT (1 MiB ceiling in Firestore) and is fetched whenever
+   * anyone opens the sheet — inlining even two compressed screenshots would both risk a reply that
+   * cannot save and drag megabytes onto a phone that is already having a bad time. The image lives
+   * in its own document and is fetched only when someone looks at that one message.
+   */
+  shotId?: string;
+}
+
+/** An id for one message's attachment. Short, opaque, and unguessable enough not to be a directory. */
+export function newShotId(rand: () => number = Math.random): string {
+  return `s${Date.now().toString(36)}${Math.floor(rand() * 1e9).toString(36)}`;
+}
+
+/** Reject anything that is not one of our own ids — this value ends up in a document path. */
+export function isShotId(v: unknown): v is string {
+  return typeof v === 'string' && /^s[a-z0-9]{4,40}$/.test(v);
+}
+
+/** Long enough for a real answer, short enough that the whole thread stays far under Firestore's cap. */
+export const REPLY_MAX = 1000;
+
+/**
+ * How many messages one report keeps.
+ *
+ * ⚠️ A CAP, NOT A PREFERENCE. The thread lives on the report DOCUMENT, which Firestore stops at
+ * 1 MiB — and the failure mode of an uncapped thread is not an untidy screen, it is a reply that
+ * silently refuses to save on a conversation that was going well.
+ */
+export const THREAD_MAX = 30;
+
+
+/**
+ * A reply may be text, an image, or both — but never neither.
+ *
+ * The "or both" matters more than it looks: on a layout complaint the screenshot IS the answer, and
+ * forcing someone to also type a sentence to send it is friction placed exactly where the useful
+ * evidence was about to arrive.
+ */
+export function validateReplyPayload(
+  text: unknown,
+  screenshot: unknown,
+): { ok: true; text: string; screenshot: string } | { ok: false; error: string } {
+  const shot = validateScreenshot(screenshot);
+  if (shot.ok !== true) return { ok: false, error: shot.error };
+  const t = (typeof text === 'string' ? text : '').trim();
+  if (!t && !shot.screenshot) return { ok: false, error: 'Write something, or attach a screenshot.' };
+  if (t.length > REPLY_MAX) return { ok: false, error: `Please keep it under ${REPLY_MAX} characters.` };
+  return { ok: true, text: t, screenshot: shot.screenshot };
+}
+
+/**
+ * Append a message and keep the thread bounded. PURE.
+ *
+ * 🔒 IT DROPS FROM THE FRONT, NEVER THE BACK. Losing the newest message would lose the one the person
+ * is reading right now; losing the oldest costs the opening line, which the report's own `message`
+ * field still holds. So the one irreplaceable thing is never what gets dropped.
+ */
+export function appendReportMessage(
+  existing: readonly ReportMessage[] | undefined,
+  message: ReportMessage,
+  max: number = THREAD_MAX,
+): ReportMessage[] {
+  const cap = Math.max(1, max);
+  const next = [...(existing ?? []), message];
+  return next.length > cap ? next.slice(next.length - cap) : next;
+}
+
+/**
+ * True when the reporter is owed an answer — the last word is theirs.
+ *
+ * This is what stops a conversation dying quietly: a report the user replied to must come BACK to
+ * the top of the admin's queue, not stay filed under whatever the admin marked it before.
+ */
+export function awaitingAdmin(messages: readonly ReportMessage[] | undefined): boolean {
+  const last = messages?.[messages.length - 1];
+  return !!last && last.from === 'user';
+}
+
 export interface UserReport {
   id: string;
   reporterUid: string;
@@ -125,6 +220,8 @@ export interface UserReport {
   /** What the admin wrote when they handled it. */
   adminNote?: string;
   handledAt?: number;
+  /** The conversation on this report, oldest first. Absent on every report filed before replies existed. */
+  messages?: ReportMessage[];
 }
 
 /** Enough to be actionable, short enough to store. */
@@ -138,6 +235,23 @@ export const MESSAGE_MAX = 2000;
  * picture was large.
  */
 export const SCREENSHOT_MAX_CHARS = 700_000;
+
+/**
+ * The ONE rule for "is this attachment usable?", shared by the first report and by every reply.
+ *
+ * Extracted rather than copied: the first report already had this check inline, and a reply that
+ * enforced a *slightly different* ceiling is exactly the drift this repo keeps paying for — one path
+ * accepting an image the other silently refuses, with no failing test anywhere to say so.
+ *
+ * An EMPTY value is valid and means "no attachment". Only a present-but-wrong one is an error.
+ */
+export function validateScreenshot(raw: unknown): { ok: true; screenshot: string } | { ok: false; error: string } {
+  const shot = typeof raw === 'string' ? raw : '';
+  if (!shot) return { ok: true, screenshot: '' };
+  if (!shot.startsWith('data:image/')) return { ok: false, error: 'The attachment could not be read as an image.' };
+  if (shot.length > SCREENSHOT_MAX_CHARS) return { ok: false, error: 'That screenshot is too large. Try a smaller one.' };
+  return { ok: true, screenshot: shot };
+}
 
 /**
  * Validate a submission. Pure, so both sides run the SAME rules and the user never meets a refusal the
@@ -170,15 +284,9 @@ export function validateReport(input: {
     return { ok: false, error: 'This report is missing the thing it is about.' };
   }
 
-  const screenshot = typeof input.screenshot === 'string' ? input.screenshot : '';
-  if (screenshot) {
-    if (!screenshot.startsWith('data:image/')) {
-      return { ok: false, error: 'The attachment could not be read as an image.' };
-    }
-    if (screenshot.length > SCREENSHOT_MAX_CHARS) {
-      return { ok: false, error: 'That screenshot is too large. Try a smaller one.' };
-    }
-  }
+  const shot = validateScreenshot(input.screenshot);
+  if (shot.ok !== true) return { ok: false, error: shot.error };
+  const screenshot = shot.screenshot;
 
   // 🔒 OPTIONAL ON PURPOSE, even though the current sheet always sends it.
   //

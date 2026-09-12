@@ -535,8 +535,17 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         // an observation. This records what actually happened, split by path, because averaging a
         // grounded reply with a direct one hides the only number worth knowing.
         let firstTokenAt: number | null = null;
+        // 🔴 THE STREAMING PATH WROTE NO USAGE LOG AT ALL until 2026-09-12 — `ai_usage_logs` was
+        // written only in the `else` branch below, and CHAT STREAMS. So the collection the admin
+        // dashboard is built on contained only the non-streaming minority, and the provider, model and
+        // outcome of REAL chat traffic were invisible. That mattered the moment the free ladder's
+        // last-resort rungs were removed: nothing could have shown whether free chat had started
+        // failing, or which rung was actually serving. Third bug of this exact shape found the same
+        // day (the model pin, Vertex's hardcoded stream model, this) — the streaming path in this repo
+        // has a habit of being forgotten, which is why it is now written down here.
+        let outcome: Awaited<ReturnType<typeof aiRouter.routeStream>> | null = null;
         try {
-          await aiRouter.routeStream(
+          outcome = await aiRouter.routeStream(
             contextualMessage, history, tier, systemPrompt,
             (chunk: string) => {
               if (!res.writableEnded) {
@@ -557,6 +566,25 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           res.write('data: [DONE]\n\n');
           res.end();
         }
+        // The SAME shape the non-streaming branch writes, so one collection answers for both paths and
+        // no reader has to know which one served. 🔒 `usageMeasured: false` is the honest value here:
+        // a streamed turn does not surface token counts today, and "we do not know" must never be
+        // summed as zero — the exact distinction the 2026-09-12 rewrite of the block below insisted on.
+        // `raced` records whether this turn paid for a second model to save latency (free never does).
+        addDoc(collection(getDb() as any, 'ai_usage_logs'), {
+          userId: req.body?.userId || req.body?.uid || 'anonymous',
+          tier,
+          streamed: true,
+          ...(outcome?.latencyMs !== undefined ? { latencyMs: outcome.latencyMs } : {}),
+          ...(outcome?.model ? { modelName: outcome.model } : {}),
+          ...(outcome?.provider ? { providerName: outcome.provider } : {}),
+          ...(outcome?.raced !== undefined ? { raced: outcome.raced } : {}),
+          ...(outcome?.reason ? { failureReason: outcome.reason } : {}),
+          usageMeasured: false,
+          ok: !!outcome?.ok,
+          grounded: !!groundingStatus,
+          createdAt: new Date().toISOString(),
+        }).catch(() => {});
       } else {
         const routed = await aiRouter.routeDetailed(contextualMessage, history, tier, undefined, systemPrompt);
         // USAGE LOGGING — what actually happened, and nothing else (2026-09-12).

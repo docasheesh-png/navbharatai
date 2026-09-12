@@ -151,8 +151,13 @@ describe('AIRouter', () => {
   });
 
   describe('routeStream()', () => {
-    it('commits to the first provider that emits a chunk and discards the loser\'s chunks', async () => {
-      const router = new AIRouterClass();
+    // 🔴 THE RACE IS NOW A PAID-UNIVERSE FEATURE (money audit, 2026-09-12), so this test names the
+    // universe it is testing. Racing starts BOTH providers, and the loser's answer is discarded while
+    // its invoice is not — on the FREE universe that meant every single turn also paid for the second
+    // rung. Paid tiers still race (the user bought speed); free walks the ladder. This test keeps the
+    // race honest where it still lives, and the two tests below pin the new free behaviour.
+    it('PAID: commits to the first provider that emits a chunk and discards the loser\'s chunks', async () => {
+      const router = new AIRouterClass('pro');
       const slow = makeProvider('GEMINI', 1, {
         executeStream: vi.fn().mockImplementation(async (_p: string, _s: string | undefined, onChunk: (t: string) => void) => {
           await new Promise((r) => setTimeout(r, 40));
@@ -174,6 +179,66 @@ describe('AIRouter', () => {
 
       expect(chunks).toContain('fast-chunk');
       expect(chunks).not.toContain('slow-chunk');
+    });
+
+    it('🔒 FREE: does NOT race — the second provider is never even called', async () => {
+      const router = new AIRouterClass('free');
+      const first = makeProvider('GLM', 1, {
+        executeStream: vi.fn().mockImplementation(async (_p: string, _s: string | undefined, onChunk: (t: string) => void) => {
+          await new Promise((r) => setTimeout(r, 20));   // slow, but it WORKS
+          onChunk('free-chunk');
+          return 'free-result';
+        }),
+      });
+      const second = makeProvider('GROK', 2, {
+        executeStream: vi.fn().mockImplementation(async (_p: string, _s: string | undefined, onChunk: (t: string) => void) => {
+          onChunk('paid-chunk');
+          return 'paid-result';
+        }),
+      });
+      router.registerProvider(first);
+      router.registerProvider(second);
+
+      const chunks: string[] = [];
+      const out = await router.routeStream('hello', undefined, (c: string) => chunks.push(c));
+
+      expect(chunks).toEqual(['free-chunk']);
+      // THE WHOLE POINT: the paid rung was not merely discarded, it was never called, so it costs ₹0.
+      expect(second.executeStream).not.toHaveBeenCalled();
+      expect(out.ok).toBe(true);
+      expect(out.raced).toBe(false);
+      expect(out.provider).toBe('GLM');
+    });
+
+    it('🔒 FREE: the next rung IS paid for when the first one genuinely fails', async () => {
+      const router = new AIRouterClass('free');
+      const broken = makeProvider('GLM', 1, {
+        executeStream: vi.fn().mockRejectedValue(new Error('down')),
+      });
+      const rescue = makeProvider('GEMINI', 2, {
+        executeStream: vi.fn().mockImplementation(async (_p: string, _s: string | undefined, onChunk: (t: string) => void) => {
+          onChunk('rescue-chunk');
+          return 'rescue-result';
+        }),
+      });
+      router.registerProvider(broken);
+      router.registerProvider(rescue);
+
+      const chunks: string[] = [];
+      const out = await router.routeStream('hello', undefined, (c: string) => chunks.push(c));
+
+      expect(chunks).toEqual(['rescue-chunk']);
+      expect(rescue.executeStream).toHaveBeenCalled();
+      expect(out.provider).toBe('GEMINI');
+      expect(out.raced).toBe(false);
+    });
+
+    it('reports an honest outcome when every rung fails, rather than a silent void', async () => {
+      const router = new AIRouterClass('free');
+      router.registerProvider(makeProvider('GLM', 1, { executeStream: vi.fn().mockRejectedValue(new Error('down')) }));
+      const out = await router.routeStream('hello', undefined, () => {});
+      expect(out.ok).toBe(false);
+      expect(out.reason).toBe('all-failed');
     });
 
     it('does not emit anything once the signal is already aborted', async () => {

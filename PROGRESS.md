@@ -49637,3 +49637,28 @@ nobody searches for "Panchang" when they want to know the rahu kaal.
 **Still open, and still the right next step:** no real v5 build report exists for any of the eleven templates
 added today. Four more India templates (courier, wedding RSVP, NGO, school ERP) stay deferred until one
 arrives — a report is the only thing that can say whether these scaffolds actually hold up through a build.
+
+### 2026-09-12 (fifth pass) — the race: every free chat turn was paying for TWO models
+
+Asked "next?", I went to add the measurement that the ceiling obviously needed — and found why it was
+needed far more than I thought.
+
+**`routeStream` races the top TWO providers and bills both.** The loser's answer is discarded, its call
+is not. The free ladder's leader is ₹0 and its second rung was `gemini-2.5-pro` ($10/MTok out), so
+**every free chat turn also paid for a gemini-2.5-pro call** — not on fallback, always. Leak 1 as I first
+reported it ("the fallback is 4× dearer") described a fraction of the real cost, and I said so plainly.
+
+**The rule now: a race is a purchase of speed, so it belongs where someone is paying.** PRO and
+PROFESSIONAL still race; FREE walks its ladder sequentially, paying for a second model only when the
+first genuinely failed. An unrecognised universe does not race either. `AI_STREAM_RACE` reverts it in
+either direction without a deploy. The honest cost: a SLOW (not failing) free leader now delays the
+reply, because nothing is running beside it to overtake it.
+
+**And the streaming path wrote no usage log at all** — `ai_usage_logs` was written only in the
+non-streaming branch, and chat streams. `routeStream` returned `Promise<void>`, so there was nothing to
+log: it now returns a `StreamOutcome` and the streamed turn writes the same row shape, with
+`usageMeasured: false` rather than a zero.
+
+**Three bugs of one shape in one day** — the model pin, Vertex's hardcoded stream model, and this
+missing log — all because the streaming path was forgotten. Recorded in `CLAUDE.md` as a standing check:
+reasoning that stops at `routeDetailed` has now been wrong three times.

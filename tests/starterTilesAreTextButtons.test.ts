@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { startersByCategory, partitionStarters, STARTER_TEMPLATES } from '../src/components/agentv3/starterTemplates';
+import { startersByCategory, partitionStarters, pickerSections, STARTER_TEMPLATES } from '../src/components/agentv3/starterTemplates';
 
 /**
  * ⚠️ THE COLD-START HELPER WAS PRODUCING THE COLD STARE IT EXISTS TO PREVENT (admin 2026-09-12).
@@ -21,6 +21,25 @@ import { startersByCategory, partitionStarters, STARTER_TEMPLATES } from '../src
  */
 const panel = readFileSync(join(__dirname, '..', 'src/components/agentv3/AgentV3Panel.tsx'), 'utf8');
 
+/**
+ * The chip-rendering block itself.
+ *
+ * This used to be `panel.slice(at, at + 2600)` from the "Or start from a template" heading, and that
+ * broke the day a COMMENT above the block grew past the window: the assertions below stopped looking at
+ * the render at all and failed for a reason that had nothing to do with what they test. So the block is
+ * now bounded by the markup it is about — from the wrap div to the end of the map — which cannot drift
+ * when the prose around it changes.
+ */
+function chipBlock(): string {
+  const at = panel.indexOf('Or start from a template');
+  expect(at, 'the picker heading moved').toBeGreaterThan(-1);
+  const from = panel.indexOf('<div className="flex flex-wrap justify-center', at);
+  const to = panel.indexOf('</div>', panel.indexOf('))}', from));
+  expect(from, 'the chip wrap was not found after the heading').toBeGreaterThan(at);
+  expect(to).toBeGreaterThan(from);
+  return panel.slice(from, to);
+}
+
 describe('the starter picker is text buttons, not loading-shaped tiles', () => {
   it('the sketch component and its shape table are gone from the repo', () => {
     // Left in place they would be dead code that a later session could re-wire, reintroducing the bug.
@@ -35,9 +54,7 @@ describe('the starter picker is text buttons, not loading-shaped tiles', () => {
   });
 
   it('starters render as pill buttons, not bordered cards stacked over a graphic', () => {
-    const at = panel.indexOf('Or start from a template');
-    expect(at).toBeGreaterThan(-1);
-    const block = panel.slice(at, at + 2600);
+    const block = chipBlock();
     expect(block).toContain('rounded-full');       // a pill reads as a button
     expect(block).not.toContain('rounded-xl');     // the card shape is gone
     expect(block).toContain('{t.label}');
@@ -45,8 +62,7 @@ describe('the starter picker is text buttons, not loading-shaped tiles', () => {
 
   it('carries NOTHING but an emoji and the name — no caption, no category line, no description', () => {
     // Anything that is not the app's name gives the eye something to wait for, which is the whole bug.
-    const at = panel.indexOf('Or start from a template');
-    const block = panel.slice(at, at + 2800);
+    const block = chipBlock();
     const btn = block.slice(block.indexOf('<button'), block.indexOf('</button>'));
     expect(btn).toContain('{t.icon}');
     expect(btn).toContain('{t.label}');
@@ -55,9 +71,11 @@ describe('the starter picker is text buttons, not loading-shaped tiles', () => {
 
   it('still orders by category, so related apps sit together without a heading costing a pixel', () => {
     // The half the sketch got RIGHT: a flat row of identical chips makes a to-do app and a CRM look alike.
-    const at = panel.indexOf('Or start from a template');
-    const block = panel.slice(at, at + 2800);
-    expect(block).toContain('startersByCategory(starterTappable).flatMap');
+    // The ordering moved INSIDE pickerSections when the "More templates" expander landed (2026-09-12),
+    // so the property is asserted on the helper's output rather than on the call site it used to be at.
+    const both = pickerSections(partitionStarters(true).tappable, 12);
+    const order = startersByCategory(both.initial.concat(both.more)).flatMap((g) => g.items).map((t) => t.id);
+    expect(both.more.map((t) => t.id)).toEqual(order.filter((id) => both.more.some((t) => t.id === id)));
   });
 });
 

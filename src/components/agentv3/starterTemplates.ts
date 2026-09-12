@@ -30,6 +30,9 @@ export interface StarterTemplate {
   /** For `pro` templates only: surface this one to FREE users as a locked "⚡ Pro" showcase (the aspirational
    *  apps that drive an upgrade). Ignored for `simple` templates. */
   showcase?: boolean;
+  /** Shown on the FIRST screen of the picker, before "More templates" is opened. See `pickerSections()`
+   *  for why this is a flag on the data rather than "the first twelve of the array". */
+  featured?: boolean;
   /** The rich, specific prompt dropped into the composer. Detailed on purpose — it showcases the engine and
    *  gives the requirement-analyzer a real domain to build out fully. */
   prompt: string;
@@ -42,11 +45,11 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
   // at most) — exactly the shape the weak GLM/Kimi tier ships cleanly.
   // ══════════════════════════════════════════════════════════════════════════════════════════════════
   {
-    id: 'todo', label: 'To-do', icon: '✅', category: 'Productivity', tier: 'simple',
+    id: 'todo', label: 'To-do', icon: '✅', category: 'Productivity', tier: 'simple', featured: true,
     prompt: 'Build a to-do list app: add, edit, complete and delete tasks, organise them by category, filter by all/active/done, and save everything in the browser so it persists on reload. Clean, mobile-friendly UI with light/dark mode.',
   },
   {
-    id: 'calculator', label: 'Calculator', icon: '🧮', category: 'Personal', tier: 'simple',
+    id: 'calculator', label: 'Calculator', icon: '🧮', category: 'Personal', tier: 'simple', featured: true,
     prompt: 'Build a calculator app with the standard operations (+ − × ÷ %), a clear and a delete key, decimal support, keyboard input, and a running history of recent calculations. Big, tappable buttons; light/dark mode.',
   },
   {
@@ -70,7 +73,7 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
     prompt: 'Build a QR code generator: type any text or link and instantly see its QR code update, choose a size, and download it as an image with one tap. Simple, single-screen UI with light/dark mode.',
   },
   {
-    id: 'quick-notes', label: 'Quick notes', icon: '🗒️', category: 'Productivity', tier: 'simple',
+    id: 'quick-notes', label: 'Quick notes', icon: '🗒️', category: 'Productivity', tier: 'simple', featured: true,
     prompt: 'Build a quick notes app: write short notes, pin the important ones to the top, search by text, and save everything in the browser so it persists on reload. Fast, distraction-free, mobile-first UI.',
   },
   {
@@ -78,7 +81,7 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
     prompt: 'Build a password generator: choose the length with a slider and toggle uppercase, numbers and symbols, generate a strong random password, show a strength meter, and copy it to the clipboard with one tap.',
   },
   {
-    id: 'memory', label: 'Memory match', icon: '🃏', category: 'Personal', tier: 'simple',
+    id: 'memory', label: 'Memory match', icon: '🃏', category: 'Personal', tier: 'simple', featured: true,
     prompt: 'Build a memory match card game: a 4x4 grid of face-down cards hiding eight pairs, flip two at a time, matched pairs stay face up, count the moves taken, celebrate when the board is cleared, and remember the best (lowest) score in the browser. Big tappable cards, smooth flip feel, light/dark mode, works on a phone.',
   },
   {
@@ -94,13 +97,32 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
   // split a shop actually has to print, and a mock test with sections and negative marking. Both are
   // one screen over plain React state, which is why the weak tier ships them whole.
   {
-    id: 'gst-bill', label: 'GST bill', icon: '🏪', category: 'Business', tier: 'simple',
+    id: 'gst-bill', label: 'GST bill', icon: '🏪', category: 'Business', tier: 'simple', featured: true,
     prompt: 'Build a GST billing app for a shop: keep a list of items each with a price and a GST slab (0/5/12/18/28%), add items to a bill with quantities, and show the bill with taxable value, the CGST and SGST split per slab, and the final total in rupees. Auto-increment the bill number, allow a customer name, support printing the bill, and save the item list in the browser. Mobile-first with large tappable item buttons and light/dark mode.',
   },
   {
-    id: 'exam-prep', label: 'Mock test', icon: '✍️', category: 'Personal', tier: 'simple',
+    id: 'exam-prep', label: 'Mock test', icon: '✍️', category: 'Personal', tier: 'simple', featured: true,
     prompt: 'Build a mock test app for Indian competitive exam practice: a sectioned paper (General Knowledge, Reasoning, Quantitative Aptitude, English), one timer for the whole paper, four options per question, mark-for-review, a question palette to jump between questions, and negative marking of 0.25 for every wrong answer. Show a result screen with the section-wise score and a review of every question, and keep past attempts in the browser. Mobile-first, light/dark mode.',
   },
+  // INDIA-FIRST, daily life (2026-09-12). The admin asked for panchang / brahm muhurat and Hindi
+  // scripture readers. All three are REAL by construction, which is the whole reason they are worth
+  // shipping: the panchang DERIVES its times from the standard solar/lunar formulae for the chosen
+  // city rather than printing a table somebody typed in, and both readers state how much of the text
+  // they carry instead of implying the whole book. Single screen, plain React state — the shape the
+  // weak tier ships whole.
+  {
+    id: 'panchang', label: 'Panchang', icon: '🕉️', category: 'Personal', tier: 'simple', featured: true,
+    prompt: 'Build a daily Panchang and Muhurat app for India in Hindi: pick a city (Delhi, Mumbai, Kolkata, Chennai, Bengaluru, Hyderabad, Ahmedabad, Pune, Jaipur, Lucknow, Varanasi, Patna, Bhopal, Chandigarh, Guwahati, Kochi) or enter a latitude and longitude, pick a date, and CALCULATE from the standard astronomical formulae — never from a stored table — the sunrise, sunset, solar noon and day length, and from those the Brahma Muhurat, the Abhijit Muhurat, Rahu Kaal, Gulika Kaal and Yamaganda, plus the eight day Choghadiya each marked auspicious, neutral or inauspicious. Also show the tithi, paksha, the nakshatra and the moon and sun rashi computed from the sun and moon longitudes, with an honest note about the accuracy of the simplified lunar model. Remember the chosen city in the browser. Hindi labels with English in brackets, mobile-first, light/dark mode.',
+  },
+  {
+    id: 'geeta', label: 'Gita (Hindi)', icon: '📖', category: 'Personal', tier: 'simple', featured: true,
+    prompt: 'Build a Bhagavad Gita reader in Hindi: all eighteen chapters listed with their names, each shloka shown in Devanagari with a simple Hindi meaning below it, a verse of the day chosen from the date so it is the same for everyone all day, bookmarks saved in the browser, search across the Hindi meaning and the chapter name, and next and previous navigation inside a chapter. State clearly and honestly how many shlokas the app carries out of the full seven hundred, so it never implies it holds the whole text. Large readable Devanagari, mobile-first, light/dark mode.',
+  },
+  {
+    id: 'quran', label: 'Quran (Hindi)', icon: '🕌', category: 'Personal', tier: 'simple', featured: true,
+    prompt: 'Build a Quran reader for Hindi readers: a list of the included surahs with their Arabic name, Hindi name and ayah count, each ayah shown with the Arabic text, a Hindi transliteration for someone who cannot read Arabic, and a simple Hindi meaning, an ayah of the day chosen from the date, bookmarks saved in the browser, and search across the Hindi meaning and surah names. State clearly and honestly how many surahs the app carries out of one hundred and fourteen, so it never implies it holds the whole text. Right-to-left Arabic in a large readable size, mobile-first, light/dark mode.',
+  },
+
   // ══════════════════════════════════════════════════════════════════════════════════════════════════
   // PRO — ambitious, multi-part apps (roles, backends, realtime, payments). Great on a paid tier; they
   // flail on the weak tier. Shown fully to unlocked users; a curated `showcase` few appear LOCKED to free
@@ -112,7 +134,7 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
     prompt: 'Build a playable arcade game on a canvas: the player moves left and right along the bottom while obstacles fall faster over time, dodging one scores a point, a hit costs a life, three lives end the run, and the best score is kept in the browser. Use a fixed-timestep game loop with a clamped delta and polled keyboard input so it runs identically on any screen, recycle obstacles from a pool instead of allocating each frame, and add on-screen buttons so it plays on a phone. Light/dark mode.',
   },
   {
-    id: 'saas-dashboard', label: 'SaaS app', icon: '📊', category: 'Business', tier: 'pro', showcase: true,
+    id: 'saas-dashboard', label: 'SaaS app', icon: '📊', category: 'Business', tier: 'pro', showcase: true, featured: true,
     prompt: 'Build a multi-tenant SaaS admin dashboard with team accounts, role-based access (owner/admin/member), an analytics overview with charts, a settings page, and subscription billing. Clean, modern UI with a sidebar.',
   },
   {
@@ -125,7 +147,7 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
   },
   // ── Commerce ──
   {
-    id: 'store', label: 'Store', icon: '🛍️', category: 'Commerce', tier: 'pro', showcase: true,
+    id: 'store', label: 'Store', icon: '🛍️', category: 'Commerce', tier: 'pro', showcase: true, featured: true,
     prompt: 'Build an online store with a product catalog (search, categories, filters), product pages, a cart and checkout, order history, and an admin panel to manage products and orders. Responsive, image-forward design.',
   },
   {
@@ -185,6 +207,13 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
     id: 'coaching', label: 'Coaching', icon: '📚', category: 'Business', tier: 'pro',
     prompt: 'Build a coaching class management app: batches with subject, timing and monthly fee; students assigned to a batch with a phone number; daily attendance taken batch by batch with an attendance percentage per student; and monthly fees raised for every student at their own batch rate, marked paid or pending. A dashboard showing students, batches, fees collected this month, fees pending and any student below 75% attendance. Rupee amounts throughout, a mobile-friendly sidebar layout, and light/dark mode.',
   },
+  // INDIA-FIRST, pro tier: a birth chart is the one of these four that needs real positional
+  // astronomy, so it is a pro ARCHITECTURE the paid engine extends — and it is honest about its own
+  // limit rather than inventing the planets it cannot place offline.
+  {
+    id: 'kundali', label: 'Kundali', icon: '✨', category: 'Personal', tier: 'pro', showcase: true, featured: true,
+    prompt: 'Build a Janam Kundali (Vedic birth chart) app in Hindi: save several birth profiles, each with a name, date of birth, time of birth and birth city chosen from a list of Indian cities or entered as a latitude and longitude. For the selected profile CALCULATE, from the standard formulae and not from a stored table, the local sidereal time, the Lagna (ascendant) with its exact degree, the twelve bhava, the Lahiri ayanamsa, and the sidereal positions of the Sun, the Moon, Rahu and Ketu with each one\'s rashi, nakshatra and pada. Draw the traditional North Indian diamond chart as a diagram with the rashi number and the placed grahas in each house. State clearly and honestly which grahas are computed and that placing Mangal through Shani needs a planetary ephemeris the offline app does not carry, so the user is never shown a position that was guessed. Hindi labels with English in brackets, rupee-free, mobile-friendly sidebar layout, light/dark mode.',
+  },
 ];
 
 /** Group the starters by category, preserving array order within each group. Pure. */
@@ -219,4 +248,45 @@ export function partitionStarters(powerUnlocked: boolean, list: readonly Starter
     tappable: list.filter((t) => t.tier === 'simple'),
     locked: list.filter((t) => t.tier === 'pro' && t.showcase === true),
   };
+}
+
+export interface PickerSections {
+  /** The chips shown on the FIRST screen, before anything is expanded. */
+  initial: StarterTemplate[];
+  /** Everything else, revealed by "More templates". Never empty-by-discard — see the invariant below. */
+  more: StarterTemplate[];
+}
+
+/**
+ * Split the tappable starters into a short first screen and the rest behind one expander.
+ *
+ * WHY (admin 2026-09-12, after I proposed DELETING two chips to shorten the list and then argued
+ * against my own suggestion): the problem was never the COUNT, it was the WALL. Thirty-odd pills on a
+ * phone is eight or nine lines of chips above the composer, and a first-time user reads a wall as
+ * something to scroll past rather than something to choose from. Removing two chips turns nine lines
+ * into eight and changes nothing a user can feel — while genuinely costing whoever wanted the chip
+ * that went. Twelve chips plus "More templates" fixes the wall AND keeps every capability: the user
+ * who is specifically hunting for the unit converter still finds it, one tap away.
+ *
+ * WHY `featured` IS A FLAG AND NOT "THE FIRST TWELVE": the first screen is the most-seen surface in the
+ * product, so what lands on it is a decision. Slicing the array would make it an ACCIDENT of insertion
+ * order — someone adding a chip at the top would silently push a curated one off the first screen with
+ * nothing failing to say so.
+ *
+ * THE INVARIANT, which is what the test pins: `initial` and `more` are disjoint and together are
+ * exactly the input (category-ordered). Collapsing can therefore never hide a chip permanently, and a
+ * new chip that nobody remembered to mark `featured` appears in "More" rather than vanishing.
+ * Pure — no React, no I/O.
+ */
+export function pickerSections(list: readonly StarterTemplate[], limit = 12): PickerSections {
+  const ordered = startersByCategory(list).flatMap(({ items }) => items);
+  const initial = ordered.filter((t) => t.featured === true).slice(0, Math.max(0, limit));
+  // Top up from the un-featured remainder so the first screen is never sparse on a tier whose featured
+  // chips are mostly locked away (a free user's featured set is only the `simple` half of the library).
+  for (const t of ordered) {
+    if (initial.length >= limit) break;
+    if (!initial.includes(t)) initial.push(t);
+  }
+  const chosen = new Set(initial.map((t) => t.id));
+  return { initial, more: ordered.filter((t) => !chosen.has(t.id)) };
 }

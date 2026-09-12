@@ -60,7 +60,7 @@ describe('evaluateAlerts', () => {
   });
 
   it('fires a slow-build warning when avg exceeds the latency budget', () => {
-    const alerts = evaluateAlerts(snap({ total: 3, succeeded: 3, previewAllowed: 3, previewRate: 1, avgMs: SLOW_BUILD_MS + 1 }));
+    const alerts = evaluateAlerts(snap({ total: SLOW_BUILD_MIN_SAMPLE, succeeded: SLOW_BUILD_MIN_SAMPLE, previewAllowed: SLOW_BUILD_MIN_SAMPLE, previewRate: 1, avgMs: SLOW_BUILD_MS + 1 }));
     const a = alerts.find(x => x.id === 'slow-builds');
     expect(a).toBeDefined();
     expect(a!.value).toBeGreaterThan(SLOW_BUILD_MS);
@@ -126,9 +126,24 @@ describe('one build has no average', () => {
     expect(alerts.find((a) => a.id === 'slow-builds')).toBeDefined();
   });
 
-  it('is lower than the rate floor, because latency shows up in fewer builds than a failure rate does', () => {
-    expect(SLOW_BUILD_MIN_SAMPLE).toBeLessThan(ALERT_MIN_SAMPLE);
-    expect(SLOW_BUILD_MIN_SAMPLE).toBeGreaterThan(1);
+  // 🔴 THIS TEST'S PREMISE WAS REVERSED ON PURPOSE (2026-09-12), so the change is legible rather than
+  // quietly rewritten. It used to assert the slow-build floor was LOWER than the rate floor, on the
+  // reasoning that "latency shows up in fewer builds than a failure rate does". That is true of a
+  // person watching builds and false of a MEAN: at three builds, one slow build among three drags the
+  // hour's average over the line by itself and the next hour drops it back — which is exactly the
+  // every-hour ALERT/resolved flapping the admin reported. An average needs a sample either way.
+  it('🔒 is NOT lower than the rate floor — one outlier owns a three-build mean', () => {
+    expect(SLOW_BUILD_MIN_SAMPLE).toBe(ALERT_MIN_SAMPLE);
+    expect(SLOW_BUILD_MIN_SAMPLE).toBeGreaterThanOrEqual(10);
+  });
+
+  it('stays silent below the floor, however slow those few builds were', () => {
+    const n = SLOW_BUILD_MIN_SAMPLE - 1;
+    const alerts = evaluateAlerts(snap({
+      total: n, succeeded: n, previewAllowed: n, previewRate: 1, successRate: 1,
+      avgMs: SLOW_BUILD_MS * 5,
+    }));
+    expect(alerts.find((a) => a.id === 'slow-builds')).toBeUndefined();
   });
 });
 

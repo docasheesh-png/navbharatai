@@ -184,10 +184,25 @@ describe('escalation reaches the admin (integration with the sweep’s dedupe)',
     expect(up.notify).toHaveLength(0);
   });
 
-  it('a genuine recovery still sends the all-clear', () => {
+  // 🔴 UPDATED 2026-09-12 with the flapping fix, and the change of premise is the point. The all-clear
+  // is unchanged in substance — a genuine recovery still announces itself exactly once — but it is now
+  // CONFIRMED first: the condition must stay clear for the resolve window before the episode is over.
+  // One quiet sweep used to be enough, and that instant forgetting was the bug (it deleted the state,
+  // so the next crossing announced itself as brand new with no cooldown). A publish-capacity number
+  // that sits on its threshold is exactly the shape that flapped.
+  it('a genuine recovery still sends the all-clear — once it has actually held', () => {
+    const resolveAfter = 2 * 60 * 60_000;
     const warn = publishCapacityAlert({ used: 36, cap: 50, remaining: 14, reclaimable: 0, level: 'warn', message: '' })!;
-    const state = decideAlertActions([warn], {}, 0, 60_000).nextState;
-    const recovered = decideAlertActions([], state, 1_000, 60_000);
+    const state = decideAlertActions([warn], {}, 0, 60_000, resolveAfter).nextState;
+
+    // A single quiet sweep is not a recovery yet — and it is silent, not a mail.
+    const cooling = decideAlertActions([], state, 1_000, 60_000, resolveAfter);
+    expect(cooling.resolved).toEqual([]);
+    expect(cooling.notify).toEqual([]);
+
+    // Clear for the whole window ⇒ the episode is genuinely over, and it says so once.
+    const recovered = decideAlertActions([], cooling.nextState, 1_000 + resolveAfter, 60_000, resolveAfter);
     expect(recovered.resolved).toEqual(['publish-capacity']);
+    expect(recovered.nextState).toEqual({});
   });
 });

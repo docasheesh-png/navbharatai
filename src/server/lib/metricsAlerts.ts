@@ -64,10 +64,26 @@ export const VERY_SLOW_BUILD_MS = 20 * 60_000;
  *
  * The old code skipped the sample check deliberately — "a single very slow avg matters". But ONE BUILD
  * HAS NO AVERAGE, and a single unlucky import (a big npm install, a cold sandbox) would page the admin
- * about a problem that does not exist. Lower than ALERT_MIN_SAMPLE because latency genuinely is
- * visible in a handful of builds, where a FAILURE RATE is not.
+ * about a problem that does not exist.
+ *
+ * 🔴 RAISED 3 → 10 (2026-09-12), and this is the OTHER HALF of the admin's alert-noise report. Three
+ * builds is not a sample, it is an anecdote: with a 30-minute build ceiling, ONE slow build among
+ * three drags the hour's mean over the 10-minute line on its own, and the next hour drops it back
+ * under. That is not a system getting slower and then better — it is the same handful of builds being
+ * averaged differently, and it is what made the metric cross its threshold every hour, all day.
+ *
+ * Ten is not a new invention: it is ALERT_MIN_SAMPLE, this file's own existing answer to "how many
+ * data points before an average is worth waking someone for". The earlier reasoning ("latency is
+ * visible in a handful of builds") is true of a HUMAN watching builds and false of a MEAN, which is
+ * exactly the kind of average one outlier owns.
+ *
+ * ⚠️ The 10-minute threshold itself is NOT changed here, and that is deliberate rather than an
+ * oversight: whether 10 minutes is actually abnormal for this engine needs the real distribution of
+ * build durations, which nobody has measured. Guessing a new threshold would replace a noisy alert
+ * with a quiet one that might be wrong — so the sample is fixed now and the threshold is named as an
+ * open question for the admin, with the data to settle it.
  */
-export const SLOW_BUILD_MIN_SAMPLE = 3;
+export const SLOW_BUILD_MIN_SAMPLE = ALERT_MIN_SAMPLE;
 
 /**
  * Evaluate alert conditions against a metrics snapshot.

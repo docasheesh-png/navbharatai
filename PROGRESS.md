@@ -48274,3 +48274,78 @@ on ordinary ones, survives rubbish input, the line names no vendor (white-label)
 NaN/negative guards, and wiring pins: the status is emitted BEFORE the lookup (that ordering IS the fix),
 the later headers are guarded, the client never lets a status into the saved message, the timer starts at
 the request, and the page budget is 2.5 s.
+
+---
+
+## 2026-09-12 — the starter tiles read as a loading spinner, so they are text buttons now
+
+**Report (admin, with a screenshot of the empty Pro v5.0 chat):** *"v5 ke andar yeh jo tiles aa rahi
+hai, inse user confused hota hai, ki sayad kuch load ho raha hai. in tiles ko hatao, bas simple text
+button rahne do."*
+
+**They were right, and the failure is worth recording because the original design was sound.** Each
+starter was a CARD carrying a layout sketch (`StarterSketch.tsx` + `starterSketchShapes.ts`) — a few
+grey and indigo bars standing for "a list", "a dashboard with a sidebar", "a grid of products". The
+reasoning in that module is still correct on its own terms: a row of identical grey chips cannot tell a
+to-do app from a CRM, and a fake screenshot of an app that does not exist is exactly what the second
+absolute rule forbids. What it did not anticipate is that **grey bars stacked inside a card ARE the
+universal visual language for a skeleton loader.** On an empty chat — the one moment the picker appears
+— a first-time user reads the whole grid as "still loading" and waits. The cold-start helper was
+producing the cold stare it exists to prevent.
+
+**The fix keeps the half the sketch got right.** This is not a revert to the flat row of identical chips
+the sketch was invented to fix: the starters are now pill buttons **grouped by category** (Business,
+Commerce, Social, Productivity, Personal), each keeping its emoji. Someone hunting for a shop app still
+finds it — by words instead of by bars that imitate a spinner.
+
+**CORRECTION, same day, after the admin saw it:** the category HEADINGS went too. *"bas simple text
+button rahne do … koi discription nahi, koi preview image/background nahi"*, with a sketch of a plain
+wrapped row. The reasoning is the bug's own: anything on a pill that is not the app's name gives the eye
+something to wait for, and a caption above a group is one more such thing. So the picker is now a single
+flat wrap of emoji + name — and the grouping survives as ORDER rather than as headings
+(`startersByCategory(...).flatMap(...)`), so related apps still sit together at no visual cost.
+
+**The labels were shortened in the same pass**, because a pill has to read as a button and a sentence
+inside one does not: "Stopwatch & timer" → "Stopwatch", "Tip & bill split" → "Bill split", "CRM /
+pipeline" → "CRM", "Booking / appointments" → "Bookings", "Learning platform" → "Courses". `label` is
+consumed ONLY by this picker, so this is the button text and nothing else. 🔒 **The RICH prompts are
+untouched** — they are what make the build deep, and a test now asserts every one is still over 120
+characters so a later "tidy-up" cannot quietly thin the builds. Labels are also asserted unique, since
+two starters showing the same word would be two identical buttons.
+
+**The locked Pro showcases are deliberately unchanged**, on the admin's instruction — same pills, same
+🔒, same tap-to-upgrade.
+
+**One existing test had to change, and it is worth saying why rather than burying it.**
+`tests/noCaseCollidingPaths.test.ts` guards the real 2026-08-16 iOS incident (a `starterSketch.ts`
+sitting beside `StarterSketch.tsx` — one file to case-insensitive macOS, two to Linux, so every Linux
+build passed and the iOS build died). Its second assertion demanded the directory contain exactly
+`['StarterSketch.tsx']`, i.e. it pinned the component's EXISTENCE as a proxy for "no collision" — so
+deleting a file that was supposed to go turned the guard red. **The rule being protected was never
+"this component exists"; it is "no two files collide on this stem", which an empty directory satisfies
+perfectly.** The assertion now states that directly (`clashing.length <= 1`) and was checked to still
+bite at two files. The repo-wide sweep in the same file is untouched and is the real guard.
+
+**`startersByCategory` already existed, was already tested, and was wired to nothing.** A built-but-
+unused helper is the "built but not really working" state the second absolute rule names, and it turned
+out to be exactly the function this needed. Found by the safeguard-#6 search before writing a new one.
+
+**The sketch files are DELETED, not left dormant** — dead code a later session could re-wire is how a
+fixed bug comes back. `tests/starterTilesAreTextButtons.test.ts` pins all of it: the files are gone,
+nothing imports them, the markup is pills rather than cards, and the grouping still covers every
+tappable starter with no empty group for a free user.
+
+`AppKnowledgeBase.ts` updated in the same change (the sync rule): its entry described "cards with a
+small layout sketch", so every AI in NavBharatAI would have kept describing a screen that no longer
+exists — and the entry now records why the sketch went, so the next session does not helpfully
+reinstate it.
+
+### Alongside: "Beyond the Tiles" — what the picker is not advertising
+
+The admin also asked what ELSE v5.0 can build. Read against the real generator list, the answer is
+uncomfortable: **the picker offers 25 app types while the engine carries 160+ capability generators and
+four output formats** (Android package, desktop app, browser extension, MCP server) that no tile
+mentions. Zero India-first templates are offered despite `UpiGenerator`, `IndianValidatorsGenerator`,
+`SocietyGenerator`, `SchoolErpGenerator`, `PharmacyGenerator`, `CourierGenerator`, `NgoGenerator`;
+zero games despite three game engines. Published as a pick-list artifact for the admin to choose from —
+every candidate names the modules already in the repo that back it, so nothing on it is aspirational.

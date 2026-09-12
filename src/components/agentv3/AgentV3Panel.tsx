@@ -46,8 +46,7 @@ import { useScreenWakeLock } from '../../lib/useScreenWakeLock';
 import { clampComposerHeight } from './composerHeight';
 import { FoldableMessage } from './FoldableMessage';
 import { MessageActions } from './MessageActions';
-import { partitionStarters } from './starterTemplates';
-import { StarterSketch } from './StarterSketch';
+import { partitionStarters, startersByCategory } from './starterTemplates';
 import { loadSavedTemplates, saveTemplate, removeSavedTemplate, type SavedTemplate } from './savedTemplates';
 import { checkAttachmentSizes, MAX_ATTACHMENT_BYTES } from '../../lib/attachmentLimits';
 import { deployBlockedReason } from '../../lib/deployGuard';
@@ -4106,24 +4105,36 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   return (
                   <div className="mt-5">
                     <div className="text-[11px] uppercase tracking-wide text-zinc-600 mb-2">Or start from a template</div>
-                    {/* Cards, not bare pills (3.4): a row of identical grey chips makes a to-do app and a
-                        CRM look the same, so the picker is harder to use than it appears. The tile is a
-                        LAYOUT SKETCH — the shape of the app — never a screenshot of output we do not have. */}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-w-lg mx-auto">
-                      {starterTappable.map((t) => (
+                    {/* 🔴 BUTTONS, NOT TILES (admin 2026-09-12: *"in tiles se user confused hota hai, ki
+                        sayad kuch load ho raha hai … bas simple text button rahne do, koi discription nahi,
+                        koi preview image/background nahi"*).
+ 
+                        Each starter used to be a CARD carrying a layout sketch — grey and indigo bars standing
+                        for "a list", "a dashboard". The reasoning was sound and the outcome was not: grey bars
+                        stacked in a card ARE the universal visual language for a skeleton loader, so on an
+                        empty chat — the one moment this picker appears — a first-time user read the whole grid
+                        as "still loading" and waited instead of tapping. The cold-start helper was producing
+                        the cold stare it exists to prevent.
+ 
+                        So: emoji + one or two words, and nothing else. No sketch, no category caption, no
+                        description — anything that is not the app's name gives the eye something to wait for.
+                        The labels themselves were shortened for the same reason ("Stopwatch & timer" →
+                        "Stopwatch"): a pill has to read as a button, and a sentence inside one does not.
+ 
+                        The sketch solved a REAL problem though — a flat row of identical chips makes a to-do
+                        app and a CRM look alike — so that half is kept without costing a pixel: the flat wrap
+                        is ORDERED by category (`startersByCategory`, which already existed, tested, wired to
+                        nothing), so related apps sit together even with no heading above them. */}
+                    <div className="flex flex-wrap justify-center gap-1.5 max-w-lg mx-auto">
+                      {startersByCategory(starterTappable).flatMap(({ items }) => items).map((t) => (
                         <button
                           key={t.id}
                           type="button"
                           title={t.prompt}
                           onClick={() => { setPrompt(t.prompt); setTimeout(() => composerRef.current?.focus(), 0); }}
-                          className="group flex flex-col gap-1.5 p-2 rounded-xl border border-zinc-800 bg-zinc-900/60 text-left hover:border-indigo-500/60 hover:bg-indigo-500/5 transition-colors"
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-zinc-700 bg-zinc-900/60 text-xs text-zinc-300 hover:border-indigo-500/70 hover:bg-indigo-500/10 hover:text-indigo-200 transition-colors"
                         >
-                          <StarterSketch id={t.id} className="group-hover:border-indigo-500/40 transition-colors" />
-                          <div className="flex items-center gap-1 min-w-0">
-                            <span aria-hidden className="shrink-0">{t.icon}</span>
-                            <span className="text-xs text-zinc-300 group-hover:text-indigo-200 truncate">{t.label}</span>
-                          </div>
-                          <span className="text-[10px] text-zinc-600 -mt-1">{t.category}</span>
+                          <span aria-hidden>{t.icon}</span>{t.label}
                         </button>
                       ))}
                     </div>

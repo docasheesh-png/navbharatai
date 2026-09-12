@@ -4921,7 +4921,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                       {/* KEEP SCREEN ON (admin 2026-08-14): stop the phone auto-locking mid-build and cutting
                           the connection. Toggleable ANYTIME (not disabled while running) so the user can turn
                           it on the moment they realise a long build is going. */}
-                      <ToggleRow label="Keep screen on" hint="Stops your screen from sleeping while a build runs, so it can't be interrupted (like a video keeps the screen on). Works while this tab is open." checked={keepScreenOn} onClick={() => setKeepScreenOn((v) => !v)} />
+                      <ToggleRow label="Keep screen on" checked={keepScreenOn} onClick={() => setKeepScreenOn((v) => !v)} />
                       {/* Power tiers (admin tier→model redefinition 2026-07-13): Weak (free — GLM/Kimi, never
                           Claude) / Normal (Sonnet, adaptive) / Strong (Sonnet 100%) / Powerful (Opus medium
                           effort) / Full Team (Opus max — ultracode). ALL FIVE are
@@ -6539,7 +6539,11 @@ function TabPill({ active, onClick, icon, children, dataTour }: { active: boolea
   );
 }
 
-function ToggleRow({ label, hint, checked, disabled, onClick }: { label: string; hint?: string; checked: boolean; disabled?: boolean; onClick: () => void }) {
+// NO `hint` PROP, DELIBERATELY (admin 2026-09-12: "log already button se samajh jate hai — yeh
+// description bina bat ke jagah kha raha hai"). It rendered a grey sentence in brackets beside the
+// label, and it had exactly one caller. Leaving the prop behind after removing that caller would be
+// an open invitation to put the next paragraph back in the same menu, so the prop goes with it.
+function ToggleRow({ label, checked, disabled, onClick }: { label: string; checked: boolean; disabled?: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -6553,7 +6557,6 @@ function ToggleRow({ label, hint, checked, disabled, onClick }: { label: string;
         {checked && <Check className="w-3 h-3" />}
       </span>
       <span className="flex-1">{label}</span>
-      {hint && <span className="text-[10px] text-zinc-500">({hint})</span>}
     </button>
   );
 }

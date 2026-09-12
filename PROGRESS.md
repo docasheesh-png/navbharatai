@@ -50587,3 +50587,15 @@ needing a server, which is the one moment those words belong on the screen.
 `AppKnowledgeBase.ts` updated in the same commit (the navigation changed, so every AI that answers
 "where is X?" had to change with it), and ROADMAP 2.4 marked done — with the caveat stated rather than
 implied: the code is complete and `NAVBHARAT_CLOUD_PUBLIC` is what still keeps it admin-only.
+### 2026-09-12 — the inline-description sweep is CLOSED by the admin
+
+The admin re-checked the app and found the remaining inline descriptions acceptable: *"isko mat banao…
+is kaam ko band kar do, agar bhi koi agent is par kaam na kare."* Work stopped immediately; the
+`InfoDot` control that had just been written for it was discarded unbuilt, and nothing was committed.
+
+The two descriptions the admin had specifically marked were removed earlier the same day and are
+already merged — that half is shipped and is not affected by this closure.
+
+Recorded as a ⛔ entry in `CLAUDE.md` because the 67 candidate strings are still in the code: the next
+session to read one of those screens will find the same pattern and propose the same sweep in good
+faith. A closed decision that is not written down is a decision that gets re-litigated.

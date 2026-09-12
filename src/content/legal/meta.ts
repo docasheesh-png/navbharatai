@@ -8,7 +8,7 @@
 // consistency AND that SettingsPanel never statically imports the heavy index again.
 
 export interface LegalMeta {
-  id: 'legal_privacy' | 'legal_terms' | 'legal_dpa' | 'legal_security' | 'legal_nda';
+  id: 'legal_privacy' | 'legal_terms' | 'legal_grievance' | 'legal_dpa' | 'legal_security' | 'legal_nda';
   title: string;
   subtitle: string;
   updated: string;
@@ -26,6 +26,14 @@ export const LEGAL_META: LegalMeta[] = [
     title: 'Terms of Service',
     subtitle: 'The rules of using NavBharatAI — tokens, refunds, your app ownership',
     updated: '8 August 2026',
+  },
+  {
+    // Placed third, directly under the two documents it points at: somebody who reads the policy and
+    // disagrees with it needs the complaint route in the same glance, not at the bottom of a list.
+    id: 'legal_grievance',
+    title: 'Grievance Redressal',
+    subtitle: 'Who to complain to, and how fast we must answer (IT Rules, 2021)',
+    updated: '12 September 2026',
   },
   {
     id: 'legal_dpa',

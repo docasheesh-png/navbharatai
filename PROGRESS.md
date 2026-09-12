@@ -49775,3 +49775,92 @@ it contains.
 Gate on the final state: `typecheck` 0 · `noUnusedImports` clean · `typecheck:server` 0 · `build` ok ·
 `test:bundle` within budget · `boot:check` PASS · `vitest run` **1,572 files / 21,665 passed / 1
 skipped / 0 failed**.
+### Tests that can fail
+
+`appAiGateway.test.ts` (41) pins the decisions; `appAiGatewayWiring.test.ts` (19) pins the ORDER and the
+PLACES — no model call before the caps are checked, no token stamped into a page whose registry row never
+landed, no charge before the visitor has their answer. Structural assertions strip comment lines first, so
+a test cannot pass because the file EXPLAINS the behaviour rather than having it, and the handler is
+anchored past the import block — every symbol asserted on also appears at the top of the file, so an
+ordering test over the whole source would have been comparing the order of the imports. The
+mint-before-stamp assertion was mutation-checked: moving the injection out of the guard fails it.
+
+**Still open, and deliberately so:** the owner has no in-product screen showing what their app's assistant
+spent today, and no way to raise the cap. Both are real gaps, both are named here rather than half-built.
+
+---
+
+## 2026-09-12 — ROADMAP §11 slice 5 / §13 item 2.4: Publish stops refusing an app that has a server
+
+Counted in the user's own steps, this is what the old behaviour asked of somebody who pressed one
+button: put the code in GitHub, open Render, make an account, generate an API key, paste it back, press
+"Deploy backend". Five steps through two other websites. Every competitor researched in §11 hosts the
+backend itself and none of them makes a third-party dashboard key the default path.
+
+`hostAppOnNavBharatCloud` has existed since slice 1c and works. What was missing was that **nothing
+pressed it** — it sat behind its own route that the Publish button never called. So Publish now calls it.
+
+### The decision is pure, and static still wins
+
+`choosePublishRoute(plan, { containerHostingAvailable })` → `static` | `container` | `refuse`. Static wins
+whenever static genuinely suffices, **even when hosting is available**: a plain website on a CDN is
+faster, cached at the edge and effectively free, and putting it in a container because we *can* would be
+a real downgrade paid for with our own money. And `refuse` is still a real outcome — with hosting off,
+which is its default and its state for everyone but an admin until 2.1 meters it, the Render/BYO path is
+unchanged byte for byte. A one-button publish that silently did nothing when the button could not work
+would be the worse half of this trade.
+
+### Two things found while wiring it, both real
+
+**The handler's identity is client-claimed.** `/publish` takes `userId`/`email` from `req.body`, which is
+fine for the feature gate it was written for and is *not* fine for an admin-only gate — a claimed email
+would have been a one-line bypass. The new branch resolves the identity from the token
+(`verifyFirebaseIdentity`, not `resolveReadIdentity`, whose documented fallback to the claimed identity is
+exactly what must not happen here), and an unresolvable one means **not** an admin.
+
+**A hosted app was invisible to everything that reads the deployment registry.** `hostAppOnNavBharatCloud`
+returned a live URL and wrote no record, so a NavBharat Cloud app never appeared in "Your published apps",
+the History menu's Live dot stayed dark, and — worst — **"Take offline" had no row to act on for an app
+that was genuinely serving the public**. The takedown *code* has deleted the Cloud Run service since the
+day it was written; it simply could never be reached. `hostedDeploymentRecord.ts` is now the one place
+both hosting routes record through, with `firstParty: true` set explicitly — NavBharatAI pays the Cloud
+Run bill, so a hosted app occupies a free publish slot exactly like a Firebase one, and `liveAppCount`
+honours an explicit flag over the provider allow-list, which is what lets that be true without adding a
+container host to a set named for static CDNs.
+
+### The one structural risk, and what pins it
+
+The whole planner sits inside a `catch` that deliberately falls through to the ordinary static publish —
+the right behaviour for a classifier that failed, and the **wrong** behaviour for this branch: falling
+through would upload a Node server to a CDN and report success, which is the precise `mitrify.com` bug
+(2026-08-23) the planner was written to end. So the branch always responds and always returns, and carries
+its own `catch`. `publishRoute.test.ts` asserts it, and the assertion was mutation-checked: removing one
+`return` fails it.
+
+That test also carries a mistake worth recording, because it is the same one this file has logged twice
+before. Its first version sliced "the branch" between a code anchor and a **comment**, and comments are
+stripped before the slice runs — so the end anchor was never found, the slice ran to the end of the file,
+and the assertion happily counted every response in a 12,000-line route. It now anchors both ends on real
+code and asserts the slice is small enough to be one branch.
+
+### Not done, and deliberately not claimed
+
+`AppKnowledgeBase.ts` was **not** updated. The rule is that every new user-facing capability gets an
+entry — and this one is not user-facing yet: `NAVBHARAT_CLOUD_PUBLIC` is unset, so only an admin can
+reach it. Describing it to every AI in the product would have them telling users about a button that
+refuses them. The entry ships with the flag. The UI half of 2.4 (GitHub and BYO Render moving under
+"Advanced") is likewise still open.
+
+### Two invariants the repo already had, and my first draft broke both
+
+The full suite caught it, not review. `publishSeedWiring` asserts the workspace files are loaded exactly
+once in the publish handler, and `deployFlowAudit` asserts the durable record is read exactly once — and
+my container branch had added a second of each (`src ?? await loadWorkspaceFiles(...)`, and its own
+`getConversationStore().get(...)` for the app's name). Both would have doubled the cost of every hosted
+publish for no new information.
+
+Fixed by hoisting rather than by weakening either test: the durable record is now read once at the top of
+the branch and serves the hosted name *and* the split-backend lookup below it, and the container path
+reuses the `src` that produced the plan. Where `src` is null — the files genuinely could not be read —
+the branch says so, because passing `{}` instead would have reached the hosting module's *"there are no
+app files yet, build your app first"*, which is the wrong reason: the app exists, we could not read it.

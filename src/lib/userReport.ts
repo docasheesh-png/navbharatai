@@ -123,11 +123,30 @@ export interface ReportMessage {
   from: 'admin' | 'user';
   text: string;
   at: number;
+  /**
+   * A HANDLE for an attached screenshot, never the image itself.
+   *
+   * ⚠️ THE BYTES MUST NOT LIVE IN THE THREAD, and this is the field where that would quietly happen.
+   * The thread sits on the report DOCUMENT (1 MiB ceiling in Firestore) and is fetched whenever
+   * anyone opens the sheet — inlining even two compressed screenshots would both risk a reply that
+   * cannot save and drag megabytes onto a phone that is already having a bad time. The image lives
+   * in its own document and is fetched only when someone looks at that one message.
+   */
+  shotId?: string;
+}
+
+/** An id for one message's attachment. Short, opaque, and unguessable enough not to be a directory. */
+export function newShotId(rand: () => number = Math.random): string {
+  return `s${Date.now().toString(36)}${Math.floor(rand() * 1e9).toString(36)}`;
+}
+
+/** Reject anything that is not one of our own ids — this value ends up in a document path. */
+export function isShotId(v: unknown): v is string {
+  return typeof v === 'string' && /^s[a-z0-9]{4,40}$/.test(v);
 }
 
 /** Long enough for a real answer, short enough that the whole thread stays far under Firestore's cap. */
 export const REPLY_MAX = 1000;
-export const REPLY_MIN = 1;
 
 /**
  * How many messages one report keeps.
@@ -138,12 +157,24 @@ export const REPLY_MIN = 1;
  */
 export const THREAD_MAX = 30;
 
-/** Shared by the sheet, both reply routes and the admin screen, so a refusal is never a surprise. */
-export function validateReply(text: unknown): { ok: true; text: string } | { ok: false; error: string } {
+
+/**
+ * A reply may be text, an image, or both — but never neither.
+ *
+ * The "or both" matters more than it looks: on a layout complaint the screenshot IS the answer, and
+ * forcing someone to also type a sentence to send it is friction placed exactly where the useful
+ * evidence was about to arrive.
+ */
+export function validateReplyPayload(
+  text: unknown,
+  screenshot: unknown,
+): { ok: true; text: string; screenshot: string } | { ok: false; error: string } {
+  const shot = validateScreenshot(screenshot);
+  if (shot.ok !== true) return { ok: false, error: shot.error };
   const t = (typeof text === 'string' ? text : '').trim();
-  if (t.length < REPLY_MIN) return { ok: false, error: 'Write something first.' };
+  if (!t && !shot.screenshot) return { ok: false, error: 'Write something, or attach a screenshot.' };
   if (t.length > REPLY_MAX) return { ok: false, error: `Please keep it under ${REPLY_MAX} characters.` };
-  return { ok: true, text: t };
+  return { ok: true, text: t, screenshot: shot.screenshot };
 }
 
 /**
@@ -206,6 +237,23 @@ export const MESSAGE_MAX = 2000;
 export const SCREENSHOT_MAX_CHARS = 700_000;
 
 /**
+ * The ONE rule for "is this attachment usable?", shared by the first report and by every reply.
+ *
+ * Extracted rather than copied: the first report already had this check inline, and a reply that
+ * enforced a *slightly different* ceiling is exactly the drift this repo keeps paying for — one path
+ * accepting an image the other silently refuses, with no failing test anywhere to say so.
+ *
+ * An EMPTY value is valid and means "no attachment". Only a present-but-wrong one is an error.
+ */
+export function validateScreenshot(raw: unknown): { ok: true; screenshot: string } | { ok: false; error: string } {
+  const shot = typeof raw === 'string' ? raw : '';
+  if (!shot) return { ok: true, screenshot: '' };
+  if (!shot.startsWith('data:image/')) return { ok: false, error: 'The attachment could not be read as an image.' };
+  if (shot.length > SCREENSHOT_MAX_CHARS) return { ok: false, error: 'That screenshot is too large. Try a smaller one.' };
+  return { ok: true, screenshot: shot };
+}
+
+/**
  * Validate a submission. Pure, so both sides run the SAME rules and the user never meets a refusal the
  * form could have shown them first.
  */
@@ -236,15 +284,9 @@ export function validateReport(input: {
     return { ok: false, error: 'This report is missing the thing it is about.' };
   }
 
-  const screenshot = typeof input.screenshot === 'string' ? input.screenshot : '';
-  if (screenshot) {
-    if (!screenshot.startsWith('data:image/')) {
-      return { ok: false, error: 'The attachment could not be read as an image.' };
-    }
-    if (screenshot.length > SCREENSHOT_MAX_CHARS) {
-      return { ok: false, error: 'That screenshot is too large. Try a smaller one.' };
-    }
-  }
+  const shot = validateScreenshot(input.screenshot);
+  if (shot.ok !== true) return { ok: false, error: shot.error };
+  const screenshot = shot.screenshot;
 
   // 🔒 OPTIONAL ON PURPOSE, even though the current sheet always sends it.
   //

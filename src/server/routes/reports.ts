@@ -16,10 +16,13 @@ import type { Express, Request, Response } from 'express';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { requireAdmin } from '../lib/adminAuth';
 import { rateLimiter } from '../lib/authMiddleware';
-import { validateReport, validateReply, awaitingAdmin, type ReportContext } from '../../lib/userReport';
+import {
+  validateReport, validateReplyPayload, awaitingAdmin, newShotId, isShotId, type ReportContext,
+} from '../../lib/userReport';
 import {
   buildReport, saveReport, listReports, getReport, getReportScreenshot, setReportStatus,
   countReportsAgainst, listReportsByReporter, addReportMessage,
+  saveReportMessageShot, getReportMessageShot,
 } from '../lib/userReportStore';
 import { saveNotification } from '../lib/AdminNotificationStore';
 import { getWebApp } from '../lib/navStoreWeb';
@@ -203,20 +206,59 @@ export function registerReportRoutes(app: Express): void {
     async (req: Request, res: Response) => {
       const me = await verifyFirebaseIdentity(req);
       if (!me?.uid) return res.status(401).json({ error: 'Sign in to reply.' });
-      const parsed = validateReply(req.body?.text);
-      if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+      const parsed = validateReplyPayload(req.body?.text, req.body?.screenshot);
+      if (parsed.ok !== true) return res.status(400).json({ error: parsed.error });
+
+      const reportId = String(req.params.id || '');
+      // ⚠️ THE IMAGE IS STORED FIRST, AND THE ORDER IS THE POINT. If the message were appended first
+      // and the image write then failed, the thread would carry a handle to a picture that does not
+      // exist — a broken attachment on somebody's bug report, which is worse than no attachment. This
+      // way a failed image write simply means the reply goes as text, and it SAYS so.
+      let shotId = '';
+      if (parsed.screenshot) {
+        const candidate = newShotId();
+        if (await saveReportMessageShot(reportId, candidate, parsed.screenshot)) shotId = candidate;
+      }
 
       const messages = await addReportMessage(
-        String(req.params.id || ''),
-        { from: 'user', text: parsed.text, at: Date.now() },
+        reportId,
+        { from: 'user', text: parsed.text, at: Date.now(), ...(shotId ? { shotId } : {}) },
         { expectReporterUid: me.uid, reopen: true },
       );
       // 🔒 ONE ANSWER FOR "not yours" AND "does not exist". Telling them apart would let anyone probe
       // which report ids are real, and a report id is a handle on somebody else's complaint.
       if (!messages) return res.status(404).json({ error: 'That report could not be found.' });
-      res.json({ ok: true, messages });
+      res.json({ ok: true, messages, imageSaved: parsed.screenshot ? !!shotId : undefined });
     },
   );
+
+  /**
+   * One message's screenshot, for the REPORTER.
+   *
+   * 🔒 OWNERSHIP IS RE-CHECKED HERE. This is a different route from the reply, so it needs its own
+   * proof — an image endpoint that trusted the caller's possession of an id would be an IDOR with a
+   * picture at the end of it, and report ids are not secrets.
+   *
+   * It is a JSON route rather than an `<img src>` because an image tag sends no auth header, and the
+   * alternative — a signed public URL — would put somebody's screenshot behind a link that leaks the
+   * moment it is pasted anywhere.
+   */
+  app.get('/api/report/:id/shot/:shotId', async (req: Request, res: Response) => {
+    const me = await verifyFirebaseIdentity(req);
+    if (!me?.uid) return res.status(401).json({ error: 'Sign in first.' });
+    const id = String(req.params.id || '');
+    const shotId = String(req.params.shotId || '');
+    if (!isShotId(shotId)) return res.status(404).json({ error: 'Not found.' });
+
+    const report = await getReport(id);
+    // One answer for "not yours" and "no such thing", exactly as the reply route does.
+    if (!report || report.reporterUid !== me.uid) return res.status(404).json({ error: 'Not found.' });
+
+    const dataUrl = await getReportMessageShot(id, shotId);
+    if (!dataUrl) return res.status(404).json({ error: 'Not found.' });
+    res.set('Cache-Control', 'private, no-store');
+    res.json({ dataUrl });
+  });
 
   // ── Admin ─────────────────────────────────────────────────────────────────
 
@@ -233,14 +275,24 @@ export function registerReportRoutes(app: Express): void {
    * an email, or which person answered.
    */
   app.post('/api/admin/reports/:id/reply', requireAdmin, async (req: Request, res: Response) => {
-    const parsed = validateReply(req.body?.text);
-    if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+    const parsed = validateReplyPayload(req.body?.text, req.body?.screenshot);
+    if (parsed.ok !== true) return res.status(400).json({ error: parsed.error });
     const id = String(req.params.id || '');
 
     const report = await getReport(id);
     if (!report) return res.status(404).json({ error: 'That report could not be found.' });
 
-    const messages = await addReportMessage(id, { from: 'admin', text: parsed.text, at: Date.now() });
+    // Same order, same reason as the reporter's route: an image that failed to save must not leave a
+    // handle pointing at nothing.
+    let shotId = '';
+    if (parsed.screenshot) {
+      const candidate = newShotId();
+      if (await saveReportMessageShot(id, candidate, parsed.screenshot)) shotId = candidate;
+    }
+
+    const messages = await addReportMessage(id, {
+      from: 'admin', text: parsed.text, at: Date.now(), ...(shotId ? { shotId } : {}),
+    });
     if (!messages) return res.status(502).json({ error: 'Could not save that reply. Please try again.' });
 
     let notified = false;
@@ -256,7 +308,17 @@ export function registerReportRoutes(app: Express): void {
     }
 
     audit('REPORT_REPLY', { id, notified });
-    res.json({ ok: true, messages, notified });
+    res.json({ ok: true, messages, notified, imageSaved: parsed.screenshot ? !!shotId : undefined });
+  });
+
+  /** The same image, for the admin. Separate route, separate authorisation. */
+  app.get('/api/admin/reports/:id/shot/:shotId', requireAdmin, async (req: Request, res: Response) => {
+    const shotId = String(req.params.shotId || '');
+    if (!isShotId(shotId)) return res.status(404).json({ error: 'Not found.' });
+    const dataUrl = await getReportMessageShot(String(req.params.id || ''), shotId);
+    if (!dataUrl) return res.status(404).json({ error: 'Not found.' });
+    res.set('Cache-Control', 'private, no-store');
+    res.json({ dataUrl });
   });
 
   /** Every report, newest first. `?status=open` narrows it. */

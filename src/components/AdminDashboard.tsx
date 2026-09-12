@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon } from 'lucide-react';
 import { TirangaLoader } from './ui/TirangaLoader';
 import { stampLabel, dayLabel, signInMethodWords } from '../lib/adminUserDisplay';
@@ -16,6 +16,8 @@ import { LoadBoard } from './admin/LoadBoard';
 import { reportStatus, reportStatusLabel, reportStatusHint, openReportCount, type ReportTriage } from '../server/AgentV3/reportTriage';
 import { problemKindLabel } from '../lib/userReport';
 import { describeOverflow } from '../lib/reportDiagnostics';
+import { ReportShot } from './ReportShot';
+import { compressForReport } from '../lib/reportImage';
 
 interface AdminDashboardProps {
   adminToken: string;
@@ -106,6 +108,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [userReports, setUserReports] = useState<any[]>([]);
   /** The admin's half of a report conversation — see the reply box in the report modal. */
   const [reportReply, setReportReply] = useState('');
+  const [reportReplyShot, setReportReplyShot] = useState('');
   const [reportReplyBusy, setReportReplyBusy] = useState(false);
   const [reportReplyNote, setReportReplyNote] = useState('');
   const [reportsLoading, setReportsLoading] = useState(false);
@@ -431,8 +434,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
    * admin believing a user had been told when they had not — and the user waiting for a reply they
    * can only find by chance.
    */
+  const adminReplyFileRef = useRef<HTMLInputElement>(null);
+
+  /** The SAME compression the user's sheet uses, so one side can never accept what the other refuses. */
+  const pickAdminReplyShot = async (file: File | undefined) => {
+    if (!file) return;
+    setReportReplyNote('');
+    const r = await compressForReport(file);
+    if (!r.ok) { setReportReplyNote(r.error || 'That image could not be used.'); return; }
+    setReportReplyShot(r.dataUrl || '');
+  };
+
   const replyToReport = async (id: string) => {
-    if (!id || reportReplyBusy || reportReply.trim().length === 0) return;
+    // A screenshot on its own is a complete reply ("tap here"), so an empty box with one attached
+    // must not be a dead button.
+    if (!id || reportReplyBusy || (reportReply.trim().length === 0 && !reportReplyShot)) return;
     setReportReplyBusy(true);
     setReportReplyNote('');
     try {
@@ -443,7 +459,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       if (!res.ok) { setReportReplyNote(data?.error || 'Could not send that reply.'); return; }
       setOpenReport((prev: any) => (prev ? { ...prev, report: { ...prev.report, messages: data.messages } } : prev));
       setReportReply('');
-      setReportReplyNote(data?.notified ? '' : 'Saved — but the user could not be notified, so they may not see it soon.');
+      setReportReplyShot('');
+      // Two separate honest failures, kept separate: the bell may not have rung, and the picture may
+      // not have attached. Collapsing them into one "sent" would hide whichever actually happened.
+      const problems = [
+        data?.notified ? '' : 'the user could not be notified, so they may not see it soon',
+        reportReplyShot && data?.imageSaved === false ? 'the screenshot could not be attached' : '',
+      ].filter(Boolean);
+      setReportReplyNote(problems.length ? `Saved — but ${problems.join(', and ')}.` : '');
       void fetchUserReports();
     } catch {
       setReportReplyNote('Could not reach the server. Please try again.');
@@ -2174,7 +2197,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   are right here — reading a complaint and then hunting for the account in another tab
                   is how reports stop getting handled. */}
               {openReport && (
-                <div className="nb-sheet-overlay fixed inset-0 z-50 bg-black/70 flex items-center justify-center" onClick={() => { setOpenReport(null); setReportReply(''); setReportReplyNote(''); }}>
+                <div className="nb-sheet-overlay fixed inset-0 z-50 bg-black/70 flex items-center justify-center" onClick={() => { setOpenReport(null); setReportReply(''); setReportReplyShot(''); setReportReplyNote(''); }}>
                   <div className="nb-sheet w-full max-w-lg overflow-y-auto bg-[#161b22] border border-white/10 rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
                     {openReport.loading ? (
                       <p className="text-sm text-white/60">Opening…</p>
@@ -2285,7 +2308,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             <p className="text-[11px] text-white/40">Nothing said yet. Ask them anything you need.</p>
                           ) : (
                             <div className="space-y-1.5 max-h-56 overflow-y-auto mb-2">
-                              {openReport.report.messages.map((m: { from: string; text: string; at: number }, i: number) => (
+                              {openReport.report.messages.map((m: { from: string; text: string; at: number; shotId?: string }, i: number) => (
                                 <div
                                   key={`${m.at}-${i}`}
                                   className={`text-[11px] leading-relaxed rounded-lg px-2.5 py-1.5 ${
@@ -2300,6 +2323,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                                     {m.from === 'admin' ? 'You (as NavBharatAI)' : 'Reporter'}
                                   </span>
                                   {m.text}
+                                  {m.shotId && (
+                                    <ReportShot
+                                      src={`/api/admin/reports/${encodeURIComponent(openReport.report.id)}/shot/${encodeURIComponent(m.shotId)}`}
+                                      headers={() => headers}
+                                      alt={m.from === 'admin' ? 'Screenshot you sent' : 'Screenshot from the reporter'}
+                                    />
+                                  )}
                                 </div>
                               ))}
                             </div>
@@ -2314,11 +2344,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             />
                             <button
                               onClick={() => void replyToReport(openReport.report.id)}
-                              disabled={reportReplyBusy || reportReply.trim().length === 0}
+                              disabled={reportReplyBusy || (reportReply.trim().length === 0 && !reportReplyShot)}
                               className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-xs font-bold text-white"
                             >
                               {reportReplyBusy ? 'Sending…' : 'Send reply'}
                             </button>
+                          </div>
+                          <div className="flex items-center gap-2 mt-2">
+                            <input
+                              ref={adminReplyFileRef}
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; void pickAdminReplyShot(f); }}
+                            />
+                            <button
+                              onClick={() => adminReplyFileRef.current?.click()}
+                              disabled={reportReplyBusy}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/10 bg-white/5 text-[10px] font-semibold text-white/70 hover:bg-white/10 disabled:opacity-40"
+                            >
+                              <PictureIcon size={12} /> {reportReplyShot ? 'Change screenshot' : 'Add screenshot'}
+                            </button>
+                            {reportReplyShot && (
+                              <>
+                                <img src={reportReplyShot} alt="Screenshot to send" className="w-7 h-7 rounded object-cover border border-white/10" />
+                                <button onClick={() => setReportReplyShot('')} className="text-[10px] text-white/40 hover:text-white/70 underline">Remove</button>
+                              </>
+                            )}
                           </div>
                           {reportReplyNote && (
                             <p className="mt-2 text-[10px] text-amber-300 leading-snug">{reportReplyNote}</p>

@@ -29,11 +29,12 @@ import { createPortal } from 'react-dom';
 import { X, Send, Image as ImageIcon, Check, Loader2, MessageSquare } from 'lucide-react';
 import { authedHeaders } from '../lib/authHeaders';
 import {
-  MESSAGE_MAX, PROBLEM_KINDS, REPLY_MAX, problemKindAsk, problemKindLabel, validateReply,
+  MESSAGE_MAX, PROBLEM_KINDS, REPLY_MAX, problemKindAsk, problemKindLabel, validateReplyPayload,
   type ProblemKind, type ReportMessage, type ReportTargetKind,
 } from '../lib/userReport';
 import { compressForReport } from '../lib/reportImage';
 import { collectDiagnostics } from '../lib/reportDiagnostics';
+import { ReportShot } from './ReportShot';
 import { recentErrors } from '../lib/recentErrors';
 import { nativeAppBuild } from '../lib/appBuildId';
 
@@ -76,8 +77,10 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
   const [mine, setMine] = useState<MyReport[] | null>(null);
   const [openThread, setOpenThread] = useState<string>('');
   const [reply, setReply] = useState('');
+  const [replyShot, setReplyShot] = useState('');
   const [replying, setReplying] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const replyFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -91,7 +94,7 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
   useEffect(() => {
     if (open) {
       setKind(''); setMessage(''); setShot(''); setNote(''); setDone(false);
-      setOpenThread(''); setReply(''); setMine(null);
+      setOpenThread(''); setReply(''); setReplyShot(''); setMine(null);
       void (async () => {
         try {
           const res = await fetch('/api/report/mine', { headers: await authedHeaders() });
@@ -106,8 +109,17 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
     }
   }, [open]);
 
+  /** The SAME compression path the first report uses — one rule, so one can never accept what the other refuses. */
+  const pickReplyShot = useCallback(async (file: File | undefined) => {
+    if (!file) return;
+    setNote('');
+    const r = await compressForReport(file);
+    if (!r.ok) { setNote(r.error || 'That image could not be used.'); return; }
+    setReplyShot(r.dataUrl || '');
+  }, []);
+
   const sendReply = useCallback(async (reportId: string) => {
-    const parsed = validateReply(reply);
+    const parsed = validateReplyPayload(reply, replyShot);
     if (parsed.ok !== true) { setNote(parsed.error); return; }
     if (replying) return;
     setReplying(true);
@@ -116,7 +128,7 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
       const res = await fetch(`/api/report/${encodeURIComponent(reportId)}/reply`, {
         method: 'POST',
         headers: await authedHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ text: parsed.text }),
+        body: JSON.stringify({ text: parsed.text, ...(parsed.screenshot ? { screenshot: parsed.screenshot } : {}) }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) { setNote(data?.error || 'Could not send that. Please try again.'); return; }
@@ -124,12 +136,19 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
       // than what we hoped was stored — the difference matters the one time a write is dropped.
       setMine((prev) => (prev ?? []).map((r) => (r.id === reportId ? { ...r, messages: data.messages as ReportMessage[] } : r)));
       setReply('');
+      setReplyShot('');
+      // 🔒 SAID OUT LOUD WHEN THE PICTURE DID NOT MAKE IT. The text is saved either way; letting the
+      // person believe their screenshot went through when it did not is how they stop trusting the
+      // channel — and a screenshot is usually the part that was going to answer the question.
+      if (replyShot && data?.imageSaved === false) {
+        setNote('Your message was sent, but the screenshot could not be attached. You can try adding it again.');
+      }
     } catch {
       setNote('Could not reach NavBharatAI. Check your connection and try again.');
     } finally {
       setReplying(false);
     }
-  }, [reply, replying]);
+  }, [reply, replyShot, replying]);
 
   const pick = useCallback(async (file: File | undefined) => {
     if (!file) return;
@@ -230,6 +249,16 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
             {/* YOUR EARLIER REPORTS, AND WHAT WE SAID BACK. Above the new-report form on purpose:
                 somebody opening this sheet for the second time is usually here about the first one,
                 and a reply they cannot find is a reply that was never sent. */}
+            {/* ONE input, shared by every thread — only one is open at a time, and a picker per
+                report would be a DOM node per report for no behaviour anyone can see. */}
+            <input
+              ref={replyFileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; void pickReplyShot(f); }}
+            />
+
             {(mine?.length ?? 0) > 0 && (
               <div className="mb-4 rounded-2xl border border-white/10 bg-black/20 p-3">
                 <p className="text-[11px] font-semibold text-zinc-300 mb-2">Your earlier reports</p>
@@ -240,7 +269,7 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
                     return (
                       <div key={r.id} className="rounded-xl border border-white/10 bg-white/[0.03]">
                         <button
-                          onClick={() => { setOpenThread(isOpen ? '' : r.id); setReply(''); }}
+                          onClick={() => { setOpenThread(isOpen ? '' : r.id); setReply(''); setReplyShot(''); }}
                           className="w-full text-left px-3 py-2"
                           aria-expanded={isOpen}
                         >
@@ -278,6 +307,13 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
                                     {m.from === 'admin' ? 'NavBharatAI' : 'You'}
                                   </span>
                                   {m.text}
+                                  {m.shotId && (
+                                    <ReportShot
+                                      src={`/api/report/${encodeURIComponent(r.id)}/shot/${encodeURIComponent(m.shotId)}`}
+                                      headers={() => authedHeaders()}
+                                      alt={m.from === 'admin' ? 'Screenshot from NavBharatAI' : 'Screenshot you sent'}
+                                    />
+                                  )}
                                 </div>
                               ))
                             )}
@@ -292,11 +328,29 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
                               />
                               <button
                                 onClick={() => void sendReply(r.id)}
-                                disabled={replying || reply.trim().length === 0}
+                                /* A screenshot ALONE is a complete answer — on a layout complaint it
+                                   is usually the whole answer — so an empty box with a picture
+                                   attached must not be a dead button. */
+                                disabled={replying || (reply.trim().length === 0 && !replyShot)}
                                 className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-[11px] font-bold text-white"
                               >
                                 {replying ? '…' : 'Send'}
                               </button>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => replyFileRef.current?.click()}
+                                disabled={replying}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/10 bg-white/5 text-[10px] font-semibold text-zinc-300 hover:bg-white/10 disabled:opacity-40"
+                              >
+                                <ImageIcon className="w-3 h-3" /> {replyShot ? 'Change screenshot' : 'Add screenshot'}
+                              </button>
+                              {replyShot && (
+                                <>
+                                  <img src={replyShot} alt="Screenshot to send" className="w-7 h-7 rounded object-cover border border-white/10" />
+                                  <button onClick={() => setReplyShot('')} className="text-[10px] text-zinc-500 hover:text-zinc-300 underline">Remove</button>
+                                </>
+                              )}
                             </div>
                           </div>
                         )}

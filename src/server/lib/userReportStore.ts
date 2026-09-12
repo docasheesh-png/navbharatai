@@ -19,7 +19,7 @@ import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
 import { listEqNewestFirst, newestFirstBy } from './firestoreIndexSafe';
 import {
-  appendReportMessage, THREAD_MAX,
+  appendReportMessage, isShotId, THREAD_MAX,
   type ProblemKind, type ReportContext, type ReportMessage, type ReportStatus, type ReportTarget,
   type UserReport,
 } from '../../lib/userReport';
@@ -211,6 +211,38 @@ export async function addReportMessage(
       tx.set(ref, { messages, ...(opts.reopen ? { status: 'open' as ReportStatus } : {}) }, { merge: true });
       return messages;
     });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A screenshot attached to one MESSAGE, in its own document beside the report's original one.
+ *
+ * 🔒 THE ID IS RE-VALIDATED HERE, not merely where it entered. This value becomes a Firestore
+ * document path segment, and a store function is reachable from any future caller — a check that
+ * lives only in today's route is a check the next route will not have.
+ */
+export async function saveReportMessageShot(reportId: string, shotId: string, dataUrl: string): Promise<boolean> {
+  const d = db();
+  if (!d || !reportId || !isShotId(shotId) || !dataUrl.startsWith('data:image/')) return false;
+  try {
+    await d.collection(COLLECTION).doc(reportId).collection(SHOT_SUB).doc(shotId)
+      .set({ dataUrl, at: Date.now() });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** One message's screenshot, or null. Fetched only when somebody actually looks at that message. */
+export async function getReportMessageShot(reportId: string, shotId: string): Promise<string | null> {
+  const d = db();
+  if (!d || !reportId || !isShotId(shotId)) return null;
+  try {
+    const snap = await d.collection(COLLECTION).doc(reportId).collection(SHOT_SUB).doc(shotId).get();
+    const url = snap.exists ? (snap.data() as { dataUrl?: string })?.dataUrl : '';
+    return typeof url === 'string' && url.startsWith('data:image/') ? url : null;
   } catch {
     return null;
   }

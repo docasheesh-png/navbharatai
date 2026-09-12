@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
-  appendReportMessage, awaitingAdmin, validateReply, REPLY_MAX, THREAD_MAX,
+  appendReportMessage, awaitingAdmin, validateReplyPayload, validateScreenshot,
+  isShotId, newShotId, REPLY_MAX, SCREENSHOT_MAX_CHARS, THREAD_MAX,
   type ReportMessage,
 } from '../src/lib/userReport';
 
@@ -57,15 +58,15 @@ describe('awaitingAdmin — what stops a conversation dying quietly', () => {
   });
 });
 
-describe('validateReply', () => {
+describe('validateReplyPayload — the one rule both reply routes run', () => {
   it('refuses an empty reply and anything over the cap', () => {
-    expect(validateReply('   ')).toMatchObject({ ok: false });
-    expect(validateReply(undefined)).toMatchObject({ ok: false });
-    expect(validateReply('x'.repeat(REPLY_MAX + 1))).toMatchObject({ ok: false });
+    expect(validateReplyPayload('   ', '')).toMatchObject({ ok: false });
+    expect(validateReplyPayload(undefined, undefined)).toMatchObject({ ok: false });
+    expect(validateReplyPayload('x'.repeat(REPLY_MAX + 1), '')).toMatchObject({ ok: false });
   });
 
   it('trims, and accepts a one-word answer — most real answers are one word', () => {
-    expect(validateReply('  home  ')).toEqual({ ok: true, text: 'home' });
+    expect(validateReplyPayload('  home  ', '')).toMatchObject({ ok: true, text: 'home' });
   });
 });
 
@@ -175,5 +176,108 @@ describe('the user can actually find it', () => {
 
   it('a failed load renders as empty rather than as a cheerful invented state', () => {
     expect(sheet).toContain('setMine([])');
+  });
+});
+
+/**
+ * SCREENSHOTS IN A REPLY.
+ *
+ * Admin 2026-09-12: *"screenshot atach hoga na?"* — the first report always carried one; the
+ * conversation did not. On the very complaint that started this work ("content goes outside the
+ * mobile") the follow-up screenshot IS the answer, so a text-only thread throws away the evidence at
+ * the exact moment somebody is willing to hand it over.
+ */
+describe('a reply can carry a screenshot', () => {
+  it('text alone, image alone, or both — but never neither', () => {
+    const img = 'data:image/jpeg;base64,abc';
+    expect(validateReplyPayload('the header', '')).toMatchObject({ ok: true, text: 'the header' });
+    // A screenshot ALONE is a complete answer on a layout complaint. Demanding a sentence too would
+    // be friction placed exactly where the useful evidence was about to arrive.
+    expect(validateReplyPayload('', img)).toMatchObject({ ok: true, text: '', screenshot: img });
+    expect(validateReplyPayload('  ', '   ')).toMatchObject({ ok: false });
+  });
+
+  it('applies the SAME attachment rule as a first report', () => {
+    // One rule, extracted rather than copied — a reply that enforced a slightly different ceiling is
+    // the drift this repo keeps paying for: one path accepting what the other silently refuses.
+    expect(validateScreenshot('https://example.com/x.png')).toMatchObject({ ok: false });
+    expect(validateScreenshot('data:image/png;base64,x'.padEnd(SCREENSHOT_MAX_CHARS + 1, 'x'))).toMatchObject({ ok: false });
+    expect(validateScreenshot('')).toEqual({ ok: true, screenshot: '' });
+    expect(validateReplyPayload('hi', 'not-an-image')).toMatchObject({ ok: false });
+  });
+
+  it('🔒 a shot id can never be the ORIGINAL report screenshot\'s document', () => {
+    // The first report's image lives at `shot/image` in the same sub-collection. If a message id
+    // could be "image", a reply attachment would overwrite the evidence the report was filed with.
+    expect(isShotId('image')).toBe(false);
+    expect(isShotId(newShotId())).toBe(true);
+  });
+
+  it('🔒 rejects anything that is not our own id — this value becomes a document path', () => {
+    for (const bad of ['../../admin', 's', '', 'S123456', 'sABC', null, 42, 's/../x']) {
+      expect(isShotId(bad)).toBe(false);
+    }
+  });
+
+  it('ids do not collide when two attachments are made in the same millisecond', () => {
+    const a = newShotId(() => 0.1);
+    const b = newShotId(() => 0.9);
+    expect(a).not.toBe(b);
+  });
+});
+
+describe('🔒 the image routes authorise on their own, and fail closed', () => {
+  const routes = read('src/server/routes/reports.ts');
+  const store = read('src/server/lib/userReportStore.ts');
+  const shot = read('src/components/ReportShot.tsx');
+
+  it('the reporter route re-checks ownership — report ids are not secrets', () => {
+    const r = routes.slice(routes.indexOf("app.get('/api/report/:id/shot/:shotId'"));
+    expect(r.slice(0, 1400)).toContain('report.reporterUid !== me.uid');
+    // Same single answer for "not yours" and "no such thing" as every other route here.
+    expect(r.slice(0, 1400)).toContain("res.status(404).json({ error: 'Not found.' })");
+  });
+
+  it('the id is validated at BOTH the route and the store', () => {
+    // A check that lives only in today's route is a check tomorrow's route will not have.
+    expect(routes).toContain('isShotId(shotId)');
+    expect(store).toContain('!isShotId(shotId)');
+  });
+
+  it('images are never cached by an intermediary', () => {
+    expect(routes).toMatch(/Cache-Control',\s*'private, no-store'/);
+  });
+
+  it('⚠️ the image is stored BEFORE the message, so a handle never points at nothing', () => {
+    const reply = routes.slice(routes.indexOf("app.post(\n    '/api/report/:id/reply'"), routes.indexOf('// ── Admin'));
+    expect(reply.indexOf('saveReportMessageShot')).toBeLessThan(reply.indexOf('addReportMessage'));
+  });
+
+  it('a failed attachment is SAID, not swallowed — the text still sends', () => {
+    expect(routes).toContain('imageSaved');
+    expect(read('src/components/ReportSheet.tsx')).toContain('the screenshot could not be attached');
+    expect(read('src/components/AdminDashboard.tsx')).toContain('the screenshot could not be attached');
+  });
+
+  it('a picture that will not load is distinguished from no picture at all', () => {
+    // Only one of those is a reason to ask the person for it again.
+    expect(shot).toContain('The screenshot could not be loaded.');
+    expect(shot).toContain('failed: true');
+  });
+
+  it('it fetches with credentials rather than exposing a public image URL', () => {
+    // A signed public URL would put somebody's screenshot behind a link that leaks when pasted.
+    expect(shot).toContain('headers ? await headers() : undefined');
+    expect(shot).not.toMatch(/<img[^>]*src=\{src\}/);
+  });
+
+  it('both sides compress through the one shared path', () => {
+    expect(read('src/components/ReportSheet.tsx')).toContain('compressForReport(file)');
+    expect(read('src/components/AdminDashboard.tsx')).toContain('compressForReport(file)');
+  });
+
+  it('a screenshot alone is not a dead Send button on either side', () => {
+    expect(read('src/components/ReportSheet.tsx')).toContain("reply.trim().length === 0 && !replyShot");
+    expect(read('src/components/AdminDashboard.tsx')).toContain("reportReply.trim().length === 0 && !reportReplyShot");
   });
 });

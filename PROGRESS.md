@@ -49788,3 +49788,46 @@ skipped / 0 failed**.
 
 **Not built, and deliberately:** no `.aab` / `.ipa`. The admin's standing instruction is that a store
 build happens **only** when they ask — *"fir aab banane ka sochenge, bolu tab"*.
+
+### Same day, same slice — screenshots in the conversation
+
+Admin, reading the slice back: *"screenshot atach hoga na?"* The honest answer was **half yes**: the
+first report still carried its screenshot, but a **reply was text only**. On the very complaint that
+started this work — *"some content goes outside the mobile"* — the follow-up screenshot **is** the
+answer, so a text-only thread throws the evidence away at the exact moment somebody is willing to
+hand it over. Both directions now carry images.
+
+- **One attachment rule, extracted not copied** (`validateScreenshot`). The first report already had
+  this check inline; a reply enforcing a *slightly different* ceiling is the drift this repo keeps
+  paying for — one path accepting what the other silently refuses, with no failing test to say so.
+  `validateReply` was **deleted** in the same change once nothing but a test used it: a validator the
+  product no longer calls is dead code that invites a future caller to trust the wrong rule.
+- **A screenshot alone is a complete reply.** Demanding a sentence with it would be friction placed
+  exactly where the useful evidence was about to arrive — so Send is live with an empty box and an
+  image attached, on both sides.
+- 🔒 **The bytes never enter the thread.** The message carries a `shotId` handle; the image lives in
+  its own document. The thread is on the report DOCUMENT (1 MiB) and is re-fetched every time the
+  sheet opens — inlining two screenshots would risk a reply that cannot save *and* drag megabytes onto
+  a phone already having a bad time.
+- 🔒 **`isShotId` cannot match `image`**, which is where the ORIGINAL report's screenshot lives in the
+  same sub-collection. Without that, a reply attachment could overwrite the evidence the report was
+  filed with. Test-locked, and confirmed to fail when the pattern is loosened.
+- 🔒 **The image route re-checks ownership itself.** It is a different route from the reply, so it
+  needs its own proof — trusting possession of an id would be an IDOR with a picture at the end of it,
+  and report ids are not secrets. Same single 404 for "not yours" and "no such thing".
+- **Fetched with credentials, not served as a public URL.** An `<img src>` sends no auth header, and a
+  signed public link would put somebody's screenshot behind a URL that leaks the moment it is pasted.
+  `ReportShot.tsx` fetches lazily, one message at a time.
+- ⚠️ **The image is written BEFORE the message**, so a handle can never point at nothing. A failed
+  image write means the reply goes as text — **and says so**: *"Your message was sent, but the
+  screenshot could not be attached."* The admin side reports the two possible failures (bell, image)
+  separately rather than collapsing them into one cheerful "sent".
+- **A picture that will not load is distinguished from no picture at all** — only one of those is a
+  reason to ask the person again.
+
+**14 further tests. Three were confirmed to fail when the property is removed:** the `image`
+collision, the path-segment validation, and the ownership re-check on the image route.
+
+Gate re-run on the final state: `typecheck` 0 · `noUnusedImports` clean · `typecheck:server` 0 ·
+`build` ok · `test:bundle` within budget · `boot:check` PASS · `vitest run` **1,575 files / 21,733
+passed / 1 skipped / 0 failed**.

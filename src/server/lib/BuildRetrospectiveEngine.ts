@@ -9,7 +9,10 @@
 // doesn't match any known pattern it is honestly `unknown` — no confident-but-wrong label.
 
 export type FailureCategory =
-  | 'syntax' | 'type' | 'dependency' | 'runtime' | 'network' | 'timeout' | 'test' | 'build' | 'unknown';
+  | 'syntax' | 'type' | 'dependency' | 'runtime' | 'network' | 'timeout' | 'test' | 'build'
+  // v5's own real failure shapes. Added 2026-09-12 with the failure ledger, because the eight
+  // categories above are all COMPILER shapes and v5 mostly fails in other ways — see OUTCOME_TO_CATEGORY.
+  | 'preview' | 'incomplete' | 'quality' | 'unknown';
 
 interface Pattern { category: FailureCategory; re: RegExp; hint: string }
 
@@ -27,8 +30,45 @@ const PATTERNS: Pattern[] = [
 
 const clean = (s: unknown): string => (typeof s === 'string' ? s.trim() : '');
 
-/** Classify an error string into a failure category + a human hint. */
-export function classifyFailure(error: string): { category: FailureCategory; hint: string } {
+/**
+ * 🔴 THE CODE BEATS THE PROSE, and this map exists because the regexes above could not have worked.
+ *
+ * Every pattern above matches a COMPILER's words. A v5 build does not usually fail that way — it fails
+ * with an `OUTCOME_*` diagnostic whose message is a sentence we wrote ourselves: *"After one creation
+ * pass, 3 local module(s) are STILL missing"*, *"The live in-browser preview does not compile"*. None
+ * of those contain `compilation`, `SyntaxError` or `cannot find module`, so classifying them by text
+ * would have put nearly every real failure into `unknown` — and a ledger of `unknown` answers nothing.
+ *
+ * The diagnostic CODE is a machine fact recorded by the build itself. Reading it is not pattern
+ * matching, it is just looking. Text classification stays as the fallback for everything that has no
+ * code (an imported build, a crash before any outcome was recorded, a caller that has only a string).
+ */
+export const OUTCOME_TO_CATEGORY: Readonly<Record<string, { category: FailureCategory; hint: string }>> = {
+  OUTCOME_BUILD_TIMEOUT: { category: 'timeout', hint: 'The build hit its wall-clock ceiling — it ran out of time rather than out of ideas.' },
+  OUTCOME_SYNTAX_ERROR: { category: 'syntax', hint: 'Generated code did not parse — check the file the diagnostic names.' },
+  OUTCOME_TYPECHECK_FAILED: { category: 'type', hint: 'The project does not typecheck — align the value with its expected type.' },
+  OUTCOME_MISSING_FILES: { category: 'incomplete', hint: 'Modules were imported and never created — the plan and the writes disagreed.' },
+  OUTCOME_MISSING_EXPORT: { category: 'incomplete', hint: 'A file was imported for an export it does not have — the contract between two files drifted.' },
+  OUTCOME_BUILD_PARTIAL: { category: 'incomplete', hint: 'The build stopped part-way and shipped less than it planned.' },
+  OUTCOME_STOPPED: { category: 'incomplete', hint: 'The run ended before it finished — cancelled, out of budget, or stopped by a gate.' },
+  OUTCOME_PREVIEW_FAILED: { category: 'preview', hint: 'The app was produced but never rendered — "preview is EARNED", so this is a failure.' },
+  OUTCOME_PREVIEW_COMPILE: { category: 'preview', hint: 'The in-browser preview does not compile — the app would not load for the user.' },
+  OUTCOME_REVIEW_CRITICAL: { category: 'quality', hint: 'The reviewer found something critical the build did not repair.' },
+  OUTCOME_RELEASE_GATE_RED: { category: 'quality', hint: 'The release gate found evidence the app does not work.' },
+};
+
+/**
+ * Classify a failure into a category + a human hint.
+ *
+ * `outcomeCode` is the build's own `OUTCOME_*` diagnostic when it has one; it WINS over the text,
+ * because it is a fact the build recorded rather than a guess about what its prose means. An
+ * unrecognised code falls through to the text, so a code added later is never silently mis-filed — it
+ * simply classifies as it would have before the code existed.
+ */
+export function classifyFailure(error: string, outcomeCode?: string | null): { category: FailureCategory; hint: string } {
+  const code = clean(outcomeCode);
+  const mapped = code ? OUTCOME_TO_CATEGORY[code] : undefined;
+  if (mapped) return mapped;
   const e = clean(error);
   if (!e) return { category: 'unknown', hint: 'No error text supplied — cannot classify.' };
   for (const p of PATTERNS) if (p.re.test(e)) return { category: p.category, hint: p.hint };
@@ -45,6 +85,8 @@ export interface FailedBuildInput {
   intent?: string;
   attempts?: RepairAttempt[];
   finalError?: string;
+  /** The build's own `OUTCOME_*` verdict code, when it recorded one. Beats the text — see classifyFailure. */
+  outcomeCode?: string;
   timeSpentMs?: number;
 }
 
@@ -70,7 +112,7 @@ export function buildRetrospective(input: FailedBuildInput): Retrospective {
   const intent = clean(input.intent) || 'unknown';
   const attempts = (input.attempts || []).filter((a) => clean(a.strategy));
   const finalError = clean(input.finalError);
-  const { category, hint } = classifyFailure(finalError);
+  const { category, hint } = classifyFailure(finalError, input.outcomeCode);
   const strategiesAttempted = attempts.map((a) => clean(a.strategy));
 
   const warning = `[${category}] ${framework}: ${hint}`;

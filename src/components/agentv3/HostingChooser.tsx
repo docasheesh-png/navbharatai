@@ -545,7 +545,10 @@ export function HostingChooser({
       const res = await authedFetch('/api/agentv3/deploy-backend', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        // `githubConnected` is a HINT, not a key: the server refuses on the repo IT resolved, and this
+        // only chooses whether a refusal says "connect GitHub" or "save this app to a repository".
+        // Sending it means the two screens agree on the next step instead of guessing separately.
+        body: JSON.stringify({ ...body, githubConnected: !!githubConnected }),
       }, LONG_REQUEST_TIMEOUT_MS.deployBackend);
       const data = await res.json().catch(() => null);
       const outcome = managedDeployOutcome(res.status, data);

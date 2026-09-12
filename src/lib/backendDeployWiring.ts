@@ -132,7 +132,14 @@ export function managedDeployRequest(
   };
 }
 
-export type ManagedDeployKind = 'deployed' | 'not-configured' | 'needs-connect' | 'create-refused' | 'failed';
+export type ManagedDeployKind =
+  | 'deployed'
+  | 'not-configured'
+  /** The GitHub prerequisite is not met — see the `needs-github` branch in `managedDeployOutcome`. */
+  | 'needs-github'
+  | 'needs-connect'
+  | 'create-refused'
+  | 'failed';
 
 /**
  * Turn the route's response into an honest outcome + printable lines.
@@ -164,6 +171,8 @@ export function managedDeployOutcome(
     envNote?: string;
     /** Set only when the service was just created, so its plan is a fact and not a guess. */
     planNote?: string;
+    /** The machine code of a refusal, when the route sent one — see publishGithubGate.ts. */
+    code?: string;
   } | null,
 ): { kind: ManagedDeployKind; lines: string[] } {
   const serverSaid = String(body?.error ?? body?.message ?? '').trim();
@@ -194,6 +203,29 @@ export function managedDeployOutcome(
       lines: [
         '⚠️ NavBharatAI cannot trigger Render deploys right now — the server has no Render key configured.',
         serverSaid || 'Deploy from your Render dashboard instead; your render.yaml is already in the project.',
+      ],
+    };
+  }
+  /**
+   * 🔴 THE GITHUB PREREQUISITE GETS ITS OWN WORDS (admin 2026-09-12).
+   *
+   * It arrives as a 422, and the branch below would otherwise have read it as "we could not create the
+   * backend service in your account" — a sentence about Render for a problem that is not Render's, and
+   * the precise "one message for two problems" failure the gate was built to end. Checked BEFORE the
+   * status branches, because the code is the specific fact and the status is the generic one.
+   *
+   * The two codes are kept apart all the way to the user because their next actions differ: one is an
+   * authorization, the other is a save. Telling a connected user to "connect GitHub" would send them
+   * back through an authorization they already gave — exactly what the admin ruled out.
+   */
+  if (body?.code === 'github-connect-required' || body?.code === 'github-repo-required') {
+    return {
+      kind: 'needs-github',
+      lines: [
+        body.code === 'github-connect-required'
+          ? 'ℹ️ Your app has a server half, and a host runs it from a GitHub repository.'
+          : 'ℹ️ This app is not saved to a repository of your own yet.',
+        serverSaid || 'Nothing was published. Use the button above, then press Deploy backend again.',
       ],
     };
   }

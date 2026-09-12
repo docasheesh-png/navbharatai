@@ -20,6 +20,7 @@ import { auth as firebaseAuth } from '../../lib/firebase';
 import { celebrationFor, type CelebrationKind } from '../../lib/firstPublish';
 import { usePublishState } from '../../hooks/usePublishState';
 import { needsPublishDot } from '../../lib/publishFreshness';
+import { rememberPublishIntent, takePublishIntent, browserIntentStore } from '../../lib/publishResume';
 import { getStoredMotionMode, resolveReduceMotion, systemPrefersReducedMotion } from '../../lib/a11y';
 import {  } from '../../lib/authHeaders';
 import { authedFetch } from '../../lib/authedFetch';
@@ -2829,6 +2830,24 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [celebration, setCelebration] = useState<{ kind: CelebrationKind; url: string; firstPublish: boolean } | null>(null);
   // Hosting Phase 1 — the "Publish" chooser (host on NavBharatAI vs bring-your-own), opened from Deploy.
   const [showHostingChooser, setShowHostingChooser] = useState(false);
+  /**
+   * REOPEN PUBLISH AFTER THE GITHUB ROUND TRIP (admin 2026-09-12).
+   *
+   * Connecting GitHub is a FULL PAGE NAVIGATION — that is deliberate, because a popup is killed by
+   * every mobile browser — so the Publish sheet is gone when the user lands back. Without this they
+   * authorized, returned, and were shown the home screen with no sign that the thing they pressed
+   * Publish for had moved at all; finishing it meant finding the three-dot menu again.
+   *
+   * The intent is one-shot, workspace-scoped and expiring (see publishResume.ts), so this can only
+   * ever reopen the sheet for the app the user actually left from, once, and only just after.
+   * Deliberately NOT conditioned on a token being present: an authorization the user CANCELLED should
+   * still bring them back to the screen that asked for it — with the same honest "connect to continue"
+   * message — rather than dropping them somewhere with no explanation.
+   */
+  useEffect(() => {
+    if (!state.workspaceId) return;
+    if (takePublishIntent(browserIntentStore(), state.workspaceId)) setShowHostingChooser(true);
+  }, [state.workspaceId]);
   // The verify-number sheet, opened by an import the server refused for a missing verified number.
   const [verifyPhoneOpen, setVerifyPhoneOpen] = useState(false);
 
@@ -3787,7 +3806,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           customDomainPriceInr={customDomainPriceInr}
           ownRepo={state.ownRepo}
           githubConnected={!!ghToken()}
-          onConnectGitHub={() => void connectGitHub()}
+          onConnectGitHub={() => {
+            // Written BEFORE the navigation, because after it this component no longer exists.
+            rememberPublishIntent(browserIntentStore(), state.workspaceId);
+            void connectGitHub();
+          }}
           authedFetch={authedFetch}
           // Lands on the database FORM, not the settings root — sending the user to a menu mid-publish
           // is how a helpful button becomes a dead end.

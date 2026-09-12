@@ -13,7 +13,7 @@ export function registerRetrospectiveRoutes(app: Express): void {
   app.post('/api/retrospective', (req: Request, res: Response) => {
     const body = req.body || {};
     if (typeof body !== 'object' || (!body.framework && !body.intent && !body.finalError && !Array.isArray(body.attempts))) {
-      res.status(400).json({ error: 'provide { framework?, intent?, attempts?, finalError?, timeSpentMs? }' });
+      res.status(400).json({ error: 'provide { framework?, intent?, attempts?, finalError?, outcomeCode?, timeSpentMs? }' });
       return;
     }
     const input: FailedBuildInput = {
@@ -23,6 +23,9 @@ export function registerRetrospectiveRoutes(app: Express): void {
         ? body.attempts.filter((a: any) => a && typeof a.strategy === 'string').slice(0, MAX)
         : undefined,
       finalError: typeof body.finalError === 'string' ? body.finalError.slice(0, 4000) : undefined,
+      // The build's own OUTCOME_* verdict, when the caller has it — it classifies far better than the
+      // error text, which for a v5 build is a sentence we wrote rather than a compiler's words.
+      outcomeCode: typeof body.outcomeCode === 'string' ? body.outcomeCode.slice(0, 60) : undefined,
       timeSpentMs: typeof body.timeSpentMs === 'number' ? body.timeSpentMs : undefined,
     };
     res.json({ retrospective: buildRetrospective(input) });

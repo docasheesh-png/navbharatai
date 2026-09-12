@@ -1832,6 +1832,21 @@ export function importTurnObservation(
   };
 }
 
+/**
+ * The build's own verdict CODE — the last `OUTCOME_*` issue it recorded, or '' when it recorded none.
+ *
+ * `deriveRootCause` already finds this issue and returns its MESSAGE, which is prose meant for a human.
+ * The failure ledger needs the code instead: a machine fact that classifies without anyone regexing a
+ * sentence we wrote ourselves. Same lookup, same "last one wins" rule, so the two can never disagree
+ * about which outcome was final. PURE.
+ */
+export function outcomeCodeOf(
+  issues: ReadonlyArray<{ code: string }> | null | undefined,
+): string {
+  const last = [...(issues ?? [])].reverse().find((i) => typeof i?.code === 'string' && i.code.startsWith('OUTCOME_'));
+  return last?.code ?? '';
+}
+
 export function deriveRootCause(input: {
   issues: readonly BuildIssue[];
   errors?: readonly CapturedError[];

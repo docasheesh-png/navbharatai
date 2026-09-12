@@ -125,8 +125,17 @@ describe('wiring — the stream opens BEFORE the lookup, and the status can neve
     expect(route).toContain('if (firstTokenAt === null) {');
   });
 
-  it('the page-read budget between the user and their first word is 2.5 s, not 4', () => {
-    expect(live).toContain('opts.pageTimeoutMs ?? 2500');
-    expect(live).not.toContain('opts.pageTimeoutMs ?? 4000');
+  it('🔒 REVERSED THE NEXT DAY — the budget is 4 s again, and two sources are read, not one', () => {
+    // This test pinned 2.5 s when the aim was latency. The admin then set the priority that governs
+    // the chat path (2026-09-12): "latest information aur correct information jyada important hai,
+    // time se jyada." A 2.5 s cut-off silently drops exactly the heavy, content-rich page worth
+    // reading, so it was restored — and a SECOND result is now read concurrently, which costs no
+    // extra wall-clock because the wait is the slower fetch rather than the sum.
+    //
+    // The assertion is inverted rather than deleted so the reversal is legible: whichever way a later
+    // session wants to move this number, it has to do so deliberately.
+    expect(live).toContain('opts.pageTimeoutMs ?? 4000');
+    expect(live).not.toContain('opts.pageTimeoutMs ?? 2500');
+    expect(live).toContain('DEFAULT_PAGES_READ = 2');
   });
 });

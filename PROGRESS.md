@@ -48275,6 +48275,49 @@ NaN/negative guards, and wiring pins: the status is emitted BEFORE the lookup (t
 the later headers are guarded, the client never lets a status into the saved message, the timer starts at
 the request, and the page budget is 2.5 s.
 
+
+## 2026-09-12 — Chat grounding: two sources, and my own speed cut reversed
+
+**Trigger.** Admin asked to make free chat faster, then set the priority that decides every such
+question from now on: *"latest information aur correct information jyada important hai, time se jyada.
+Chahe to time jyada lage par information sahi aur latest ho!"*
+
+**What I proposed and did NOT do.** Dropping the top-page read on the free tier would have saved ~2.5 s
+per grounded answer. Measured against that priority it is the wrong trade: the read folds up to
+**3,500 characters** of the real page into the model's context, while the alternative is five two-line
+snippets. So the page read stays.
+
+**And my own change of the previous day was reversed.** In #2826 I cut the page-read budget 4 s → 2.5 s
+to save time. That silently drops every page slower than 2.5 s — which is precisely the heavy,
+content-rich page most worth reading. Restored to 4 s, and pinned by a test naming the reason so it is
+not "optimised" away again.
+
+**The one trade this priority allows — a second source for free.** `liveSearchContext` now reads the
+**top 2 results CONCURRENTLY** (`readPages`, default 2, clamped 1–3, `MAX_PAGES_READ`). Because the
+fetches overlap, two pages cost the wall-clock of the slower one rather than the sum, so accuracy goes
+up and time does not. One source can be a listicle, a stub or a paywall; two rarely both are. A failed
+source never costs the other — each is bounded and swallowed independently.
+
+**Two bugs my own tests caught before they shipped**, both worth recording because both looked right:
+- `Math.trunc(Number(readPages)) || DEFAULT` — **0 is falsy**, so asking for zero pages silently became
+  the default two. Now a real number is clamped and only a non-number falls back (0 clamps up to 1;
+  "read nothing" already has a name, `readTopResult: false`).
+- The test file's `readFileSync` import was skipped by a guard that checked for a string the new test
+  had itself just added. A guard that tests its own output is no guard.
+
+**Honest scope — what does NOT get faster.** Nothing here reduces latency; one change slightly increases
+it, deliberately. The speed levers that cost no accuracy are elsewhere and are named in CLAUDE.md: the
+grounding status shipped in #2826 (the wait is visible rather than blank), and **`BRAVE_API_KEY`**,
+still unset — today `WebSearch` scrapes DuckDuckGo HTML, which is slower AND weaker than Brave's API.
+That key is the only remaining change that improves speed and accuracy together, and it is the admin's.
+A short-TTL grounding cache was considered and **not built**: at today's traffic two users asking the
+same question within its window is rare, and the `CHAT_TTFT` logs from #2826 will show whether repeat
+queries exist before code is written for them.
+
+**Tests:** `liveSearchContext.test.ts` (+6, 25 total) — both pages folded in and named by their own url,
+the third result quoted but never read, the two fetches proven to OVERLAP (peak concurrency 2, so a
+future edit cannot quietly make them sequential and double the cost), one bad source never costing the
+other, the clamp across 0/1/2/9/NaN, and a source pin on the restored 4 s budget.
 ---
 
 ## 2026-09-12 — the starter tiles read as a loading spinner, so they are text buttons now

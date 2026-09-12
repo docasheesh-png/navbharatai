@@ -798,6 +798,20 @@ the code (it is actually read somewhere) on 2026-07-11.
   Set `off`/unset to disable. Works WITH the reactive stack: escalating 429 re-probe bench (#1801),
   GLM↔KIMI floor balance (#1802, kill switch `AGENTV3_FLOOR_BALANCE=off`), circuit breaker
   (`AGENTV3_CIRCUIT_BREAKER`, default on), and the GLM key-pool.)
+- **🔴 CHAT GROUNDING — CORRECT AND CURRENT BEATS FAST (admin-mandated 2026-09-12, standing rule).**
+  Admin, verbatim: *"latest information aur correct information jyada important hai, time se jyada.
+  Chahe to time jyada lage par information sahi aur latest ho!"* So on the chat path, **never trade
+  accuracy for latency.** Two changes were REVERSED on this rule the day after they shipped, and the
+  reversal is the precedent: the page-read budget had been cut 4 s → 2.5 s "to save time", which
+  silently dropped exactly the heavy, content-rich pages worth reading, and only ONE result was read.
+  Now `liveSearchContext` reads the **top 2 results CONCURRENTLY at 4 s** (`readPages`, default 2,
+  clamped 1–3) — a second source costs no extra wall-clock because the wait is the slower fetch, not
+  the sum, which is the one kind of trade this rule allows.
+  ⚠️ **Do not "optimise" chat by fetching less.** The honest speed levers are the ones that cost no
+  accuracy: the grounding STATUS shown while the lookup runs (#2826, so the wait is visible rather
+  than blank), and **`BRAVE_API_KEY`**, which is still UNSET — without it `WebSearch` scrapes
+  DuckDuckGo HTML, which is both slower and weaker than Brave's API. That single key is the only
+  remaining change that makes chat faster AND more accurate at once.
 - **Live daily-life data for the chat AIs (added 2026-08-25):** `RAPIDAPI_KEY` (✅ **SET in Cloud Run by
   the admin 2026-08-25** — ONE RapidAPI key covering the subscribed marketplace APIs: IRCTC
   (`irctc1.p.rapidapi.com`, live train running status + PNR) and AeroDataBox (flight status); the admin

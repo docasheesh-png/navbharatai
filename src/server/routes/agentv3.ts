@@ -466,6 +466,7 @@ import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '
 import { renderRescueEligible, renderRescueConfirmsSuccess } from '../AgentV3/renderRescue';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { analyzeDesignCoverage, designRepairInstruction, designCoverageSummary } from '../AgentV3/DesignCoverage';
+import { auditRlsInSql, rlsAuditSummary } from '../AppMakerLab/generator/RlsPolicy';
 import { buildServiceGraph } from '../AgentV3/serviceGraph';
 import { detectMonorepo } from '../AgentV3/monorepoAnalysis';
 import { unsendKeepCount } from '../AgentV3/unsend';
@@ -14745,6 +14746,40 @@ async function noteBuildOutcome(
               }
             }
           } catch { /* the quality lint is advisory — it can never affect a build */ }
+
+          /**
+           * IS THE APP'S DATABASE CLOSED? (audit 2026-09-11, the admin's 12-layer diagram.)
+           *
+           * A `CREATE TABLE` in Postgres leaves the table readable and writable by every role that can
+           * reach it, and a NavBharatAI app that uses Supabase ships its public key INSIDE the browser
+           * bundle of every published copy. So an unsecured table is not a theoretical weakness — it is
+           * an open door handed to every visitor. The generator now closes tables at birth, but most
+           * real migrations are written by the builder itself, so generation alone is half a fix.
+           *
+           * Deterministic and free: string analysis over the SQL the workspace actually contains, no
+           * model call, so a clean build pays nothing. Advisory by construction — it records what it
+           * found and can never fail or block a build.
+           */
+          try {
+            const sqlFiles = [...writtenFiles.entries()].filter(([path]) => /\.sql$/i.test(path));
+            if (sqlFiles.length > 0) {
+              const supabaseApp = detectDatabaseProvider(Object.fromEntries(writtenFiles)) === 'Supabase';
+              const rls = auditRlsInSql(sqlFiles.map(([, content]) => content).join('\n'), { supabase: supabaseApp });
+              for (const finding of rls.findings.slice(0, 8)) {
+                buildDiag.record({
+                  phase: 'build',
+                  severity: finding.kind === 'no-rls' ? 'error' : 'warning',
+                  code: 'DATABASE_RLS',
+                  ...obs(finding.message),
+                });
+              }
+              // A clean pass is recorded too: a check that is only ever visible when it complains
+              // cannot be told apart from a check that never ran.
+              if (rls.findings.length === 0) {
+                buildDiag.record({ phase: 'build', severity: 'info', code: 'DATABASE_RLS', message: rlsAuditSummary(rls), autoResolved: true });
+              }
+            }
+          } catch { /* the database audit is advisory — it can never affect a build */ }
 
           const designFiles = Object.fromEntries(writtenFiles);
           const design = analyzeDesignCoverage(designFiles);

@@ -48456,3 +48456,92 @@ furniture — with a Scores tab that is a real feature, not a contrivance to sat
 2. **A backtick inside a scaffold's comment terminates the template literal that holds it.** One comment
    quoting `` `runs.add` `` broke the whole file into a syntax error 40 lines away. Worth recording: any
    prose inside these scaffolds must avoid backticks entirely.
+---
+
+## 2026-09-11 — ROW LEVEL SECURITY: the layer the 12-layer audit found missing
+
+**Trigger.** The admin sent the standard "what a real app needs" diagram (Frontend · APIs · Database ·
+Auth · Hosting · Cloud · CI/CD · **Security & RLS** · Rate Limiting · Caching · Scaling · Error
+Tracking) and asked: *"hamare navbharatai me yeh sach check karo! jo nahi hai usko banao, aur jo hai
+usko rocksolid karo"*.
+
+### The audit: 11 of 12 layers were already there
+
+160+ generators cover the diagram almost entirely — `CrudGenerator`, `GraphqlGenerator`,
+`OpenApiGenerator`, `MigrationGenerator`, `StorageGenerator`, `RbacGenerator`, `AbacGenerator`,
+`SsoGenerator`, `TotpGenerator`, `RateLimitGenerator`, `CacheGenerator`, `ErrorTrackingGenerator`,
+`LoggingGenerator`, `TracingGenerator`, `GrafanaStackGenerator`, and the deploy/CI paths.
+**Load Balancing & Scaling** is honestly advisory (`ScaleAnalysis.ts` measures growth; the host does
+the scaling) — a measurement, not a knob, and the module says so itself.
+
+### The one real hole, and it was the worst one possible
+
+**`MigrationGenerator` emitted `CREATE TABLE` and stopped.** In Postgres that leaves a table readable
+and writable by every role that can reach it — and a NavBharatAI app on Supabase ships its **anon key
+inside the browser bundle** of every published copy. So every generated app with a database handed its
+entire database to every visitor: read *and* write.
+
+**The risk was not unknown — that is what makes it worth recording.** `supabaseStorageBucket.ts` writes
+real RLS policies for STORAGE and explains why ("a bucket with no RLS policy accepts…"), and
+`supabaseProvision.ts:280` deliberately never fetches the service-role key *because* that key
+"bypasses RLS". **The security model assumed RLS was on. Nothing turned it on.** Five searches — by
+filename and by three vocabularies, across the whole repo — found no `enable row level security`
+anywhere. The architect prompt never mentioned RLS or the anon key either, so the first build was never
+right and no later pass looked.
+
+### The fix: three layers, because any one alone is half of it (the 50/50 law)
+
+**1 — Generation (`RlsPolicy.ts`, pure + 27 tests).** Every generated Postgres migration now carries
+`ALTER TABLE … ENABLE ROW LEVEL SECURITY`, plus policies derived from the table's own columns: an owner
+column (`user_id`/`owner_id`/`created_by`/`uid`, matched case- and underscore-insensitively and emitted
+**as written**) → owner-scoped CRUD on `auth.uid()::text = "col"::text`; no owner column → public read,
+authenticated write. Idempotent (`drop policy if exists` before every create), and **inside the
+BEGIN…COMMIT** so a policy that fails to apply rolls the tables back rather than leaving the exact
+half-migrated state this exists to prevent.
+
+**🔒 WHY THIS CANNOT BREAK AN APP, which is the whole reason it can be a default.** In Postgres the
+table OWNER bypasses RLS (we never emit FORCE). A plain Postgres/Prisma/Neon app connects as the role
+that created the tables, so enabling RLS changes *nothing* for it; a Supabase app's browser holds
+`anon`, which is not the owner, so RLS bites exactly where the exposure is. The Supabase-flavoured
+policies are emitted **only** for a Supabase app, because `auth.uid()` and the `authenticated` role do
+not exist on a plain Postgres server and naming them there would fail the migration — breaking the app,
+which outranks this.
+
+**2 — Prevention (the architect prompt).** The rule is now stated upstream so the FIRST build is right:
+enable RLS on every table, write the policy that says who may reach it (RLS with no policy lets nobody
+in and the app reads empty), cast both sides of the uuid/text comparison, `DROP POLICY IF EXISTS` first,
+and — explicitly — **an allow-everyone policy is refused as "the hole with extra steps"**. It also tells
+the builder to say so plainly when an app writes with no login at all, because RLS cannot save that
+shape and pretending otherwise is worse than naming it.
+
+**3 — The net (`auditRlsInSql`, wired into every build).** Generation only fixes the migrations WE
+write; on a real app most are written by the builder. The audit reads whatever SQL the workspace
+actually contains — comments and string literals stripped, so a table named in a comment is never
+counted — and records `DATABASE_RLS`: **error** for a table created and left open, **warning** for a
+Supabase table with RLS on and no policy (the app would read nothing). Deterministic string analysis,
+**no model call**, so a clean build pays nothing. Advisory by construction: it can never fail a build.
+A clean pass is recorded too, so the check cannot be mistaken for one that never ran.
+
+**The Supabase decision is evidence, never a guess:** the tool reads the project's own `package.json`
+through `detectDatabaseProvider` — the detector this repo already had (`ImportPreview.ts`), reused
+rather than copied — and **fails CLOSED**: an unreadable project means no policies, with RLS still on.
+
+### What was already solid, stated rather than padded
+
+The storage half needed nothing. `tests/supabaseStorageBucket.test.ts` already pins 20 behaviours
+including "one user can never write over another user's file", "never grants write access to anonymous
+callers", "a private bucket is not readable by anonymous callers at all" and idempotency. Adding tests
+there would have been motion, not strengthening.
+
+### Honest limits
+
+- This governs migrations generated from **now on**. Tables that already exist in a user's Supabase
+  project are untouched — securing those needs a migration run against their project, which is the
+  user's database and their decision.
+- The audit reads SQL in the workspace. An app whose schema was created by hand in the Supabase
+  dashboard has no SQL here to read, and the audit says "nothing to secure" rather than implying a pass.
+- An app that writes to its database with **no login at all** cannot be secured by any policy. The
+  prompt now makes the builder say so instead of shipping an allow-everyone policy that looks like a fix.
+
+Tests: `RlsPolicy.test.ts` (27) + `tests/rlsWiring.test.ts` (16 — all three layers pinned, plus the
+fail-closed Supabase decision).

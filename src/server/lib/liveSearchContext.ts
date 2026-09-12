@@ -10,7 +10,8 @@
 //    chat, greetings, coding help, personal talk never pay the search latency.
 //  • BOUNDED — the whole search is capped (default 6s); a slow/flaky SERP never hangs the reply. On
 //    timeout or zero results it returns '' and the caller proceeds (recencyDirective keeps it honest).
-//  • KEY-FREE — uses the existing WebSearch (Brave when BRAVE_API_KEY is set, else DuckDuckGo), so it
+//  • KEY-FREE — uses the existing WebSearch with intent 'live' (Brave first when BRAVE_API_KEY is set,
+//    DuckDuckGo as the free rescue; DuckDuckGo alone when there is no key), so it
 //    works out of the box and improves automatically when a key is added.
 
 import { WebSearch, formatSearchResults } from '../AgentV3/WebSearch';
@@ -169,7 +170,9 @@ export async function liveSearchContext(message: string, opts: LiveSearchOptions
   const client = opts.client ?? new WebSearch();
   const query = shapeSearchQuery(message, opts.now ?? new Date());
   const results = await withTimeout(
-    client.search(query, limit).catch(() => []),
+    // 'live' — the user is waiting on this and the answer moves, so the paid engine leads and the
+    // free one rescues. Every other caller in the repo is 'reference' and leads with the free engine.
+    client.search(query, limit, 'live').catch(() => []),
     opts.timeoutMs ?? 6000,
     [],
   );

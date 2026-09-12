@@ -3,12 +3,20 @@
 //
 // Lets the agent look up package versions, framework docs and error meanings instead of being
 // blind to anything outside the workspace. Priority:
-//   1. Brave Search API — if BRAVE_API_KEY is set (higher-quality results).
-//   2. DuckDuckGo HTML SERP — key-free fallback, always available.
+//   Which engine is asked FIRST depends on the caller's `intent` (see `searchOrder()` in
+//   `lib/braveSearch.ts`, the ONE Brave client shared with Engineer AI — so the cache, the coalescing
+//   and the meter that keep its per-request bill down exist in exactly one place):
+//     • `reference` (the DEFAULT, and what the agent's own lookups are) — DuckDuckGo first, since a
+//       package version or an error message does not need a paid engine and nobody is watching a
+//       spinner during a build. Brave is asked only if DuckDuckGo finds nothing.
+//     • `live` (the chat's grounding) — Brave first, DuckDuckGo as the free rescue.
+//   With no BRAVE_API_KEY set, DuckDuckGo is the only engine — which is production's behaviour today.
 // npm registry is queried for package-name lookups regardless of provider.
 //
 // Everything degrades gracefully: on any network/parse failure it returns an empty list rather
 // than throwing, so the agent simply learns "no results" and moves on.
+
+import { braveSearch, braveApiKey, searchOrder, noteFreeServed, noteRescue, type SearchIntent } from '../lib/braveSearch';
 
 export interface SearchResult {
   title: string;
@@ -23,8 +31,14 @@ const SEARCH_TIMEOUT_MS = 10_000;
 const NPM_TIMEOUT_MS = 8_000;
 
 export class WebSearch {
-  /** Run a search and return up to `limit` de-duplicated results. */
-  async search(query: string, limit = 5): Promise<SearchResult[]> {
+  /**
+   * Run a search and return up to `limit` de-duplicated results.
+   *
+   * `intent` decides which engine is asked first — see `searchOrder()`. It defaults to `reference`
+   * (free engine first) because the agent's own lookups are stable technical queries nobody is
+   * waiting on; the chat's grounding passes `live`, which is the class Brave is paid for.
+   */
+  async search(query: string, limit = 5, intent: SearchIntent = 'reference'): Promise<SearchResult[]> {
     const results: SearchResult[] = [];
 
     // 1. Package-style queries get authoritative npm metadata.
@@ -34,17 +48,41 @@ export class WebSearch {
       if (npm) results.push(npm);
     }
 
-    // 2. Web results: Brave if configured, else DuckDuckGo.
-    const braveKey = process.env.BRAVE_API_KEY;
-    const web = braveKey
-      ? await this.braveSearch(query, limit, braveKey).catch(() => this.duckDuckGo(query, limit).catch(() => []))
-      : await this.duckDuckGo(query, limit).catch(() => []);
+    // 2. Web results: free engine first unless this is a live question — see `searchOrder()`.
+    const web = await this.routedWeb(query, limit, intent);
 
     for (const r of web) {
       if (results.length >= limit) break;
       if (!results.some((existing) => existing.url === r.url)) results.push(r);
     }
     return results.slice(0, limit);
+  }
+
+  /**
+   * Ask the engines in the order `searchOrder()` gives, stopping at the first that finds anything.
+   *
+   * 🔒 An engine that THROWS and an engine that returns nothing are treated the same on purpose: from
+   * the caller's chair both mean "this one did not answer", and the next engine is free to try. What
+   * must never happen is returning nothing while an untried engine was available.
+   */
+  private async routedWeb(query: string, limit: number, intent: SearchIntent): Promise<SearchResult[]> {
+    const braveKey = braveApiKey();
+    const order = searchOrder(intent, !!braveKey);
+    let last: SearchResult[] = [];
+    for (let i = 0; i < order.length; i++) {
+      const engine = order[i];
+      const got =
+        engine === 'brave' && braveKey
+          ? await braveSearch(query, limit, braveKey).catch(() => [])
+          : await this.duckDuckGo(query, limit).catch(() => []);
+      if (got.length) {
+        if (i > 0) noteRescue();
+        else if (engine === 'duck' && braveKey) noteFreeServed();
+        return got;
+      }
+      last = got;
+    }
+    return last;
   }
 
   private detectPackage(query: string): string | null {
@@ -81,29 +119,6 @@ export class WebSearch {
       };
     } catch {
       return null;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  /** Brave Search API — throws on error so the caller can fall back to DuckDuckGo. */
-  private async braveSearch(query: string, limit: number, apiKey: string): Promise<SearchResult[]> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
-    try {
-      const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${limit}`;
-      const res = await fetch(url, {
-        signal: controller.signal,
-        headers: { Accept: 'application/json', 'Accept-Encoding': 'gzip', 'X-Subscription-Token': apiKey },
-      });
-      if (!res.ok) throw new Error(`Brave Search: HTTP ${res.status}`);
-      const data = (await res.json()) as { web?: { results?: Array<{ title?: string; url?: string; description?: string }> } };
-      const items = data?.web?.results || [];
-      return items.slice(0, limit).map((item) => ({
-        title: String(item.title || ''),
-        url: String(item.url || ''),
-        snippet: String(item.description || ''),
-      }));
     } finally {
       clearTimeout(timer);
     }

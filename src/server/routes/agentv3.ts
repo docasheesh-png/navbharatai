@@ -321,7 +321,8 @@ import { extractEntities, entityRequirementsContext } from '../AgentV3/EntityExt
 import { chatResponseCache, chatCacheEnabled, hashKey } from '../AgentV3/PromptCache';
 import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
-import { buildRetrospective } from '../lib/BuildRetrospectiveEngine';
+import { buildRetrospective, classifyFailure } from '../lib/BuildRetrospectiveEngine';
+import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
 import { estimateBuildTime, complexityFromPrompt, liveEtaTick } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
@@ -17870,8 +17871,12 @@ async function noteBuildOutcome(
       // the user is shown ("Live preview: 4 min — ₹8"). Two measurements would eventually disagree, and
       // only the user would notice.
       const livePreviewCharge = billableSandboxDetail(actuator, workspaceId, buildStartedAt);
-      const { effectiveBilledUsd: decidedBilledUsd, reconciledProviderUsage } =
-        decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, livePreviewCharge.usd);
+      const {
+        effectiveBilledUsd: decidedBilledUsd, reconciledProviderUsage,
+        // Needed by the failure ledger below: the tokens the per-provider ledger could not attribute.
+        // Taken from the SAME call that decides the bill, so the two can never price a build differently.
+        realCostRemainder: realCostRemainderForFailure,
+      } = decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, livePreviewCharge.usd);
       // PLATFORM TELEMETRY — feed the admin Monitor / Health Score / FinOps the REAL engine's numbers.
       // Until this line, those panels saw only the legacy Engineer-AI builder and were blind to every
       // Pro build. Uses the reconciled per-provider tokens, so the cost graph and the bill agree.
@@ -17884,6 +17889,36 @@ async function noteBuildOutcome(
         // OUR VM cost, measured whether or not the user was charged for it.
         sandboxSeconds: livePreviewCharge.measuredSeconds,
       });
+      /**
+       * WHY DO BUILDS FAIL? — the platform-level ledger (failureLedger.ts).
+       *
+       * 🔴 RECORDED HERE AND NOT AT THE RETROSPECTIVE BELOW, because only here do both halves exist.
+       * The retrospective classifies the failure but runs before the provider ledger is reconciled, so
+       * it has no idea what the build COST — and a cause with no money against it cannot be ranked
+       * against the others, which is the entire point of the ledger.
+       *
+       * 🔒 THE RUPEES ARE OURS. A failed build is never charged to the user, and this does not change
+       * that; `realProviderCostUsd` is what NavBharatAI itself spent producing nothing, plus the VM.
+       * Admin-only, and it must never reach a user-facing surface.
+       *
+       * Best-effort and never awaited: a telemetry write must not be able to cost somebody their
+       * build, and this one runs on the path where the build has already gone wrong.
+       */
+      if (result.ok !== true) {
+        try {
+          const failCost = realProviderCostUsd(providerLedger.entries(), realCostRemainderForFailure)
+            + Math.max(0, livePreviewCharge.usd || 0);
+          const sink = buildUsage.total();
+          void failureLedgerStore.record({
+            category: classifyFailure(result.summary || '').category,
+            framework,
+            realUsd: failCost,
+            inputTokens: sink.inputTokens || 0,
+            outputTokens: sink.outputTokens || 0,
+            ms: Math.max(0, Date.now() - buildStartedAt),
+          });
+        } catch { /* the ledger must never be why a failed build fails differently */ }
+      }
       let effectiveBilledUsd: number = decidedBilledUsd;
       // WHY a build ended up free — recorded into the build report's billing section (admin
       // 2026-07-11) so a ₹0 build always explains itself.

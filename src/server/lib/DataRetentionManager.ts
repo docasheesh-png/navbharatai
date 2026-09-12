@@ -161,6 +161,10 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
   { collection: 'build_sessions', ttlDays: 90, timestampField: 'savedAt', timestampKind: 'epochMs' },
   // `updatedAt: new Date().toISOString()` — ErrorPatternStore. Per-session hints, regenerated freely.
   { collection: 'session_error_hints', ttlDays: 30, timestampField: 'updatedAt', timestampKind: 'iso' },
+  // The "why do builds fail?" ledger — ONE document per calendar day, so a long window is cheap and
+  // year-over-year comparison stays possible. `date` is the doc id AND a field ('YYYY-MM-DD'), which
+  // sorts lexicographically, so it is its own timestamp.
+  { collection: 'build_failures', ttlDays: 400, timestampField: 'date', timestampKind: 'iso' },
 ];
 
 /**

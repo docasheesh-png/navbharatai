@@ -64,6 +64,7 @@ import { escapeHtml } from '../../lib/escapeHtml';
 import { bakeIsCurrent } from '../runtime/previewRuntimeSignature';
 import { assessPublishSafety } from '../lib/storePublishSafety';
 import { audit } from '../lib/audit';
+import { recordTakedown, hashContent } from '../lib/takedownLedger';
 import { hostingPlansEnabled, hostingPlanPriceInr, probeHostingPlan } from '../lib/hostingPlan';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import { remixGate, remixRefusal } from '../lib/remixPlanGate';
@@ -559,7 +560,24 @@ export function registerNavStoreRoutes(app: Express): void {
         reviewNote: typeof note === 'string' ? note.slice(0, 500) : undefined,
       });
       // A removed app must actually stop existing, not merely stop being listed.
-      if (status === 'removed' || status === 'rejected') await deleteApk(found.storagePath);
+      if (status === 'removed' || status === 'rejected') {
+        // THE RECORD IS WRITTEN BEFORE THE BYTES GO (180-day duty). Not because the order is legally
+        // required, but because a delete that succeeds while the record fails would leave us having
+        // removed something with no account of what it was — the exact state the duty forbids. There
+        // is no hash here: the APK's bytes live in Storage, not in a file map we hold.
+        await recordTakedown({
+          surface: 'app_mart_apk',
+          contentId: found.id,
+          name: found.appName,
+          ownerUid: found.uid,
+          ownerEmail: found.developer?.email,
+          reason: typeof note === 'string' && note.trim() ? note.trim() : `${status} by admin`,
+          actor: 'admin',
+          removedBy: me?.email || 'admin',
+          removedAt: Date.now(),
+        });
+        await deleteApk(found.storagePath);
+      }
 
       res.json({ ok: true, id: appId, status });
     } catch {
@@ -929,6 +947,19 @@ export function registerNavStoreRoutes(app: Express): void {
       const found = await getWebApp(String(req.params.id || ''));
       if (!found || found.uid !== me.uid) return res.status(404).json({ error: 'No such app of yours.' });
       if (req.body?.action === 'unpublish') {
+        // An owner unpublishing their own app is recorded too, marked `owner` — it is not a takedown,
+        // and an investigator must be able to tell the two apart at a glance rather than infer it.
+        await recordTakedown({
+          surface: 'app_mart_web',
+          contentId: found.id,
+          name: found.name,
+          ownerUid: found.uid,
+          ownerEmail: me.email || '',
+          reason: 'unpublished by the owner',
+          actor: 'owner',
+          removedAt: Date.now(),
+          contentHash: hashContent(await getWebAppFiles(found.id).catch(() => null)),
+        });
         await removeWebApp(found.id, 'unpublished by the owner', me.email || me.uid);
         return res.json({ ok: true, status: 'removed' });
       }
@@ -1265,6 +1296,19 @@ export function registerNavStoreRoutes(app: Express): void {
       const found = await getWebApp(id);
       if (!found) return res.status(404).json({ error: 'No such app.' });
       if (decision === 'removed') {
+        // Before the snapshot is deleted, while the files can still be hashed.
+        await recordTakedown({
+          surface: 'app_mart_web',
+          contentId: id,
+          name: found.name,
+          ownerUid: found.uid,
+          reason: typeof req.body?.note === 'string' ? req.body.note : 'removed by admin',
+          actor: 'admin',
+          removedBy: me?.email || 'admin',
+          removedAt: Date.now(),
+          contentHash: hashContent(await getWebAppFiles(id).catch(() => null)),
+          findings: (found.safetyFindings ?? []).map((f) => `${f.severity}:${f.rule}`),
+        });
         await removeWebApp(id, typeof req.body?.note === 'string' ? req.body.note : 'removed by admin', me?.email || 'admin');
       } else {
         await updateWebApp(id, { status: 'listed', reviewedAt: Date.now(), reviewedBy: me?.email || 'admin' });

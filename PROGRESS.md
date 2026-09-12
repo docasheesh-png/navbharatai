@@ -48434,3 +48434,35 @@ hand the writing of the answer to a third party (White-Label Law), and caps at 2
 **Open, and deliberately not guessed:** how long $5 (≈1,000 searches/month) lasts depends on what share
 of chat messages are grounded — a number nobody has measured. The `[CHAT_TTFT] path=grounded|direct`
 log shipped in #2826 already records it; read it after a few days of real traffic rather than estimating.
+
+### 2026-09-12 (same day, second pass) — the admin's own idea, adapted: free engine first where it is safe
+
+The admin asked: *"DuckDuckGo aur Brave dono ko mila kar sync kar ke kaam kare, aur jahan brave ki need
+na ho wahan duckduckgo use ho? possible nahi hai kya?"*
+
+**Possible, yes — but one reading of it had to be corrected honestly (rule 3).** MERGING both engines on
+every query would pay Brave every single time and cost strictly MORE than today. What genuinely saves
+money is the other reading: ask the FREE engine first wherever its answer is good enough, and pay only
+where the paid one earns its fee. That is `searchOrder(intent, hasBraveKey)` in `lib/braveSearch.ts`:
+
+- **`reference`** (the default — AgentV3 build lookups, Engineer AI: package versions, framework docs,
+  error meanings) → **DuckDuckGo first, Brave only as the rescue.** Worth being precise about why this
+  is safe rather than assuming it: DuckDuckGo-alone IS production's behaviour on this path today, since
+  no key is set there. So the change is today's behaviour PLUS a paid rescue, never a downgrade — and a
+  build is not a user watching a spinner, so a wasted round trip costs nothing perceptible.
+- **`live`** (only `liveSearchContext`, the chat's grounding) → **Brave first, DuckDuckGo as the free
+  rescue.** Freshness and result quality are the entire product here, and a real person is waiting.
+
+A throw and an empty result are treated identically — both mean "this one did not answer" — so the
+rescue fires on a 429 and on a blocked scrape alike. New callers default to `reference`, because a
+caller that has not thought about intent is by definition not a user-facing live question.
+
+**A test's premise was deliberately changed, and it is recorded rather than quietly rewritten.**
+`webSearchClient.test.ts` asserted "a key is set ⇒ Brave is used", which was true only while Brave was
+all-or-nothing. It now asserts the intent contract in both directions. A second isolation bug surfaced
+while doing it: the search cache is process-wide by design, so one test's paid result was being handed
+to the next test for free — it would have passed for the wrong reason. `__resetBraveSearch()` now runs
+in that suite's `beforeEach`.
+
+**The meter now reports what the free engine saved** (`freeServed`, `rescues`) beside cache hits and
+coalesced calls — still per-instance, still not a substitute for Brave's own dashboard.

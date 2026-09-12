@@ -832,6 +832,20 @@ the code (it is actually read somewhere) on 2026-07-11.
   `.catch(...)` each, test-locked in `tests/braveSearch.test.ts`). Worst case is today's behaviour, not
   an outage. The authoritative ceiling is Brave's own dashboard **Usage limits**, which is the one
   place a cap cannot drift; the code's job is to need it less often.
+  🔀 **FREE FIRST WHERE IT IS SAFE, PAID FIRST WHERE IT MATTERS (admin asked 2026-09-12: "dono ko mila
+  kar… jahan brave ki need na ho wahan duckduckgo").** `searchOrder(intent, hasKey)` is that rule. Note
+  what it is NOT: merging both engines on every query would pay Brave EVERY time and cost strictly MORE
+  than today — so the saving comes from asking the FREE engine first wherever its answer suffices.
+  • **`reference`** (the DEFAULT — AgentV3 build lookups and Engineer AI: package versions, framework
+  docs, error meanings) ⇒ **DuckDuckGo first, Brave only if DuckDuckGo finds nothing.** Not a downgrade
+  of anything: DuckDuckGo-only IS production's behaviour today, so this is today PLUS a paid rescue, and
+  nobody watches a spinner during a build. • **`live`** (only `liveSearchContext`, the chat's grounding)
+  ⇒ **Brave first, DuckDuckGo as the free rescue** — freshness and result quality are exactly what the
+  fee buys, and a real user is waiting. Both orders end in a second engine, so neither engine being down
+  can leave a caller with nothing. A THROW and an EMPTY result are treated identically (both mean "this
+  one did not answer"), which is what makes the rescue fire on a 429 as well as on a blocked scrape.
+  ⚠️ Adding a caller? It defaults to `reference` on purpose — a caller that has not thought about intent
+  is by definition not a user-facing live question, so the safe default is the one that costs nothing.
   📉 **What keeps the bill down, and what it deliberately does NOT trade.** Identical calls already in
   flight share one request (zero staleness — it is the same live response); a repeat question inside a
   short window reuses the result (**60 s** for tick-by-tick things — scores, live matches, market
@@ -839,8 +853,8 @@ the code (it is actually read somewhere) on 2026-07-11.
   distinguish them either. Nothing here shortens a fetch budget or reads fewer sources: under the
   standing CHAT GROUNDING rule, cost may never buy staleness a user can feel. An EMPTY or FAILED
   response is never cached, so one blocked minute cannot become ten.
-  ⚠️ **`braveMeter()` is PER-INSTANCE and says so** — it reports this process's calls/hits since boot,
-  not the account's. The account's real number is on Brave's dashboard; do not quote the meter as spend.
+  ⚠️ **`braveMeter()` is PER-INSTANCE and says so** — it reports this process's calls/hits/free-served/rescues since
+  boot, not the account's. The account's real number is on Brave's dashboard; do not quote the meter as spend.
 
 - **Live daily-life data for the chat AIs (added 2026-08-25):** `RAPIDAPI_KEY` (✅ **SET in Cloud Run by
   the admin 2026-08-25** — ONE RapidAPI key covering the subscribed marketplace APIs: IRCTC

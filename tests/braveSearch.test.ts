@@ -7,6 +7,7 @@ import {
   cacheKey,
   cacheTtlMs,
   braveCacheEnabled,
+  searchOrder,
   __resetBraveSearch,
   VOLATILE_TTL_MS,
   STANDARD_TTL_MS,
@@ -28,6 +29,26 @@ const okResponse = (results: Array<{ title: string; url: string; description: st
   json: async () => ({ web: { results } }),
 });
 const ONE = [{ title: 'T', url: 'https://example.com', description: 'D' }];
+
+describe('searchOrder — free first where it is safe, paid first where it matters', () => {
+  it('no key ⇒ the free engine is the only engine, exactly as production behaves today', () => {
+    expect(searchOrder('live', false)).toEqual(['duck']);
+    expect(searchOrder('reference', false)).toEqual(['duck']);
+  });
+
+  it('🔒 a REFERENCE lookup asks the FREE engine first — a build is not watching a spinner', () => {
+    expect(searchOrder('reference', true)).toEqual(['duck', 'brave']);
+  });
+
+  it('🔒 a LIVE question asks the PAID engine first — this is the class it is bought for', () => {
+    expect(searchOrder('live', true)).toEqual(['brave', 'duck']);
+  });
+
+  it('every order ends with a second engine to rescue the first, so neither being down leaves nothing', () => {
+    expect(searchOrder('live', true)).toHaveLength(2);
+    expect(searchOrder('reference', true)).toHaveLength(2);
+  });
+});
 
 describe('cacheTtlMs — the freshness trade, made explicit and small', () => {
   it('gives the tick-by-tick things one minute', () => {
@@ -187,16 +208,25 @@ describe('wiring — ONE client, and both callers still fall back to the free pa
 
   it('🔒 the duplicated private copies are gone — one door is what makes one cache possible', () => {
     for (const [name, src] of [['AgentV3', v3], ['EngineerAI', eng]] as const) {
-      expect(src, name).toContain("import { braveSearch } from '../lib/braveSearch'");
+      expect(src, name).toContain("from '../lib/braveSearch'");
       expect(src, name).not.toContain('private async braveSearch(');
       expect(src, name).not.toContain('api.search.brave.com');
     }
   });
 
-  it('🔒 a Brave failure still falls through to DuckDuckGo, which costs nothing', () => {
-    expect(v3).toContain('await braveSearch(query, limit, braveKey).catch(() => this.duckDuckGo(query, limit)');
-    const at = eng.indexOf('braveSearch(query, limit, braveKey)');
-    expect(eng.slice(at, at + 160)).toContain('.catch(');
-    expect(eng.slice(at, at + 160)).toContain('duckDuckGo');
+  it('🔒 both callers route through searchOrder, so neither engine failing leaves the caller with nothing', () => {
+    for (const [name, src] of [['AgentV3', v3], ['EngineerAI', eng]] as const) {
+      expect(src, name).toContain('const order = searchOrder(intent, !!braveKey);');
+      // A throw is swallowed to [] so the loop can try the OTHER engine — never so the caller gets [].
+      expect(src, name).toContain('await braveSearch(query, limit, braveKey).catch(() => [])');
+      expect(src, name).toContain('if (i > 0) noteRescue();');
+    }
+  });
+
+  it("🔒 only the chat's grounding asks for the paid engine first — everything else defaults to free", () => {
+    const live = readFileSync(join(process.cwd(), 'src/server/lib/liveSearchContext.ts'), 'utf8');
+    expect(live).toContain("client.search(query, limit, 'live')");
+    for (const [name, src] of [['AgentV3', v3], ['EngineerAI', eng]] as const)
+      expect(src, name).toContain("intent: SearchIntent = 'reference'");
   });
 });

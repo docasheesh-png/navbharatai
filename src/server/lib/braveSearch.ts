@@ -33,12 +33,45 @@
 // transient failure must not be remembered as an answer), and why nothing here shortens a fetch budget
 // or reads fewer sources — the savings come only from not repeating work.
 //
+// ── FREE FIRST WHERE IT IS SAFE, PAID FIRST WHERE IT MATTERS (admin 2026-09-12) ─────────────────
+// The admin asked whether Brave and DuckDuckGo could work together, with DuckDuckGo used wherever
+// Brave is not really needed. They can, and `searchOrder()` below is that rule — but NOT as a merge of
+// both engines on every query, which would pay Brave EVERY time and cost strictly MORE than today.
+// What actually saves money is asking the FREE engine first wherever its answer is good enough, and
+// paying only where the paid one earns its fee:
+//
+//   • `reference` — a build or Engineer AI looking up a package version, a framework doc, an error
+//     message. Stable, keyword-shaped queries; nobody is watching a spinner (a build already runs for
+//     minutes). DuckDuckGo FIRST, Brave only if DuckDuckGo comes back with nothing. Note what this
+//     really is: DuckDuckGo alone is EXACTLY today's behaviour on this path, since there is no key in
+//     production yet — so this is not a downgrade of anything, it is today plus a paid rescue.
+//   • `live` — a chat question the user is waiting on, about something that changes (a rate, a score,
+//     the news). Freshness and result quality are the entire product here, and this is the class Brave
+//     is being bought for. Brave FIRST, DuckDuckGo as the free rescue if Brave fails or finds nothing.
+//
+// So the split is by WHO IS WAITING and WHETHER THE ANSWER MOVES, not by a guess about quality. Both
+// directions rescue each other, so neither engine being down can leave a caller with nothing.
+//
 // 🔒 AND IT CANNOT BECOME A SURPRISE BILL. Brave's Search plan is PREPAID: without credits on the
 // account there is nothing to overspend, and when a call fails for any reason — no credit, a rate
 // limit, a network blip — both callers already fall back to the key-free DuckDuckGo path. The failure
 // mode is "today's behaviour", never a broken chat and never an invoice nobody approved. The
 // authoritative ceiling therefore lives on Brave's own dashboard (Usage limits), which is the one
 // place a cap cannot be wrong; this module's job is to need it less often.
+
+/**
+ * Why this search is being run — which decides which engine is asked FIRST. See the header.
+ *
+ * `reference` is the default everywhere on purpose: a caller that has not thought about it is, by
+ * definition, not a user-facing live question, and the safe default is the one that costs nothing.
+ */
+export type SearchIntent = 'live' | 'reference';
+
+/** Which engines to try, in order. PURE. */
+export function searchOrder(intent: SearchIntent, hasBraveKey: boolean): Array<'brave' | 'duck'> {
+  if (!hasBraveKey) return ['duck'];
+  return intent === 'live' ? ['brave', 'duck'] : ['duck', 'brave'];
+}
 
 /** One web result, in the shape both callers already use. */
 export interface BraveResult {
@@ -117,7 +150,17 @@ interface InFlight {
 const inFlight = new Map<string, InFlight>();
 
 /** What the meter has seen since this instance booted — honest about being per-instance. */
-const meter = { calls: 0, cacheHits: 0, coalesced: 0 };
+const meter = { calls: 0, cacheHits: 0, coalesced: 0, freeServed: 0, rescues: 0 };
+
+/** A search the free engine answered while a paid key was available — money not spent. */
+export function noteFreeServed(): void {
+  meter.freeServed += 1;
+}
+
+/** The first engine found nothing and the second had to be asked. */
+export function noteRescue(): void {
+  meter.rescues += 1;
+}
 
 /**
  * What this instance has spent and saved since boot.
@@ -126,8 +169,11 @@ const meter = { calls: 0, cacheHits: 0, coalesced: 0 };
  * without this module — so the pair is what tells the admin whether the cache is earning its keep
  * rather than merely existing.
  */
-export function braveMeter(): { calls: number; cacheHits: number; coalesced: number; saved: number; savedPct: number } {
-  const saved = meter.cacheHits + meter.coalesced;
+export function braveMeter(): {
+  calls: number; cacheHits: number; coalesced: number; freeServed: number; rescues: number;
+  saved: number; savedPct: number;
+} {
+  const saved = meter.cacheHits + meter.coalesced + meter.freeServed;
   const total = meter.calls + saved;
   return { ...meter, saved, savedPct: total > 0 ? Math.round((saved / total) * 100) : 0 };
 }
@@ -139,6 +185,8 @@ export function __resetBraveSearch(): void {
   meter.calls = 0;
   meter.cacheHits = 0;
   meter.coalesced = 0;
+  meter.freeServed = 0;
+  meter.rescues = 0;
 }
 
 function readCache(key: string, ttl: number, now: number): BraveResult[] | null {

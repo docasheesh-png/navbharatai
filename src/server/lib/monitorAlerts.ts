@@ -40,11 +40,52 @@ import { capacityExtraAlerts } from './publishCapacityAlerts';
 export const ALERT_STATE_COLLECTION = 'monitor_alert_state';
 export const ALERT_STATE_DOC = 'current';
 
-/** How long an alert that keeps firing stays quiet after being announced once. */
+/**
+ * How long an alert that keeps firing stays quiet after being announced once.
+ *
+ * 🔴 DEFAULT 48 HOURS (admin-mandated 2026-09-12: "ek information ke liye bas 1 mail only. agar jyada
+ * jaruri hai, to maximum 2 — woh bhi 48hr baad"). It was six hours, which — combined with the
+ * flapping bug fixed below — put five mails in the admin's inbox in two hours about ONE condition.
+ * A monitoring system nobody reads is worse than none, because it trains the reader to ignore the
+ * one mail that mattered.
+ */
 export function alertCooldownMs(): number {
   const raw = Number(process.env.MONITOR_ALERT_COOLDOWN_MINUTES);
-  const mins = Number.isFinite(raw) && raw > 0 ? Math.min(24 * 60, Math.max(15, Math.floor(raw))) : 360;
+  const mins = Number.isFinite(raw) && raw > 0 ? Math.min(7 * 24 * 60, Math.max(15, Math.floor(raw))) : 48 * 60;
   return mins * 60_000;
+}
+
+/**
+ * The HARD CAP on how many times one episode may interrupt the admin. Two, and the second only after
+ * the cooldown above — so a condition that fires and never clears costs exactly two mails, ever.
+ *
+ * 🔒 An ESCALATION (warning → critical) spends the SECOND slot rather than being exempt from the cap.
+ * "Maximum 2" is the instruction, and an exemption is how a cap quietly becomes a suggestion.
+ */
+export const MAX_NOTIFICATIONS_PER_EPISODE = 2;
+
+/**
+ * How long a condition must stay CONTINUOUSLY clear before the episode is declared over.
+ *
+ * 🔴 THIS IS THE FLAPPING FIX, and it is the real root cause of the admin's inbox. Resolving used to
+ * DELETE the alert's state, so the cooldown — the entire anti-noise mechanism — was bypassed by the
+ * very thing it was meant to survive: an average hovering at its threshold resolved, forgot it had
+ * ever fired, and the next crossing was a BRAND NEW alert that announced itself immediately. Two
+ * mails per wobble, with no quiet period at any point. Now a condition that stops firing enters a
+ * cooling period instead; re-firing inside it is the SAME episode and says nothing at all.
+ *
+ * Default two hours = twice the one-hour window the metrics are judged over, so a wobble inside one
+ * window cannot possibly end an episode. An all-clear is never urgent, so waiting costs nothing.
+ */
+export function alertResolveAfterMs(): number {
+  const raw = Number(process.env.MONITOR_ALERT_RESOLVE_AFTER_MINUTES);
+  const mins = Number.isFinite(raw) && raw > 0 ? Math.min(24 * 60, Math.max(15, Math.floor(raw))) : 120;
+  return mins * 60_000;
+}
+
+/** The all-clear mail. On by default; `off` keeps the alert mails and drops the "it is over" ones. */
+export function resolvedNoticesEnabled(): boolean {
+  return String(process.env.MONITOR_ALERT_RESOLVED ?? '').trim().toLowerCase() !== 'off';
 }
 
 /** The window alerts judge. Long enough to be stable, short enough to still be news. */
@@ -74,6 +115,21 @@ export interface AlertStateEntry {
    * single notification about a genuinely critical condition, which is the right side to err on.
    */
   severity?: AlertSeverity;
+  /**
+   * How many mails this EPISODE has already sent, capped at MAX_NOTIFICATIONS_PER_EPISODE.
+   *
+   * Optional because state written before this field existed does not have it; a legacy entry is read
+   * as having sent ONE, which is both true and the safe side — it can still send its 48-hour
+   * follow-up, and it can never exceed the cap.
+   */
+  notifyCount?: number;
+  /**
+   * When the condition STOPPED firing, while the episode is cooling. Absent means it is firing now.
+   *
+   * The presence of this field is what makes a flap silent: the entry still exists, so a re-fire is a
+   * continuation rather than a new alert.
+   */
+  clearSince?: number;
 }
 
 export type AlertState = Record<string, AlertStateEntry>;
@@ -95,39 +151,34 @@ export function decideAlertActions(
   state: AlertState,
   nowMs: number,
   cooldownMs: number,
+  resolveAfterMs: number = alertResolveAfterMs(),
 ): AlertActions {
   const firing = new Map((current || []).map((a) => [a.id, a]));
   const prev = state || {};
   const notify: MetricAlert[] = [];
+  const resolved: string[] = [];
   const nextState: AlertState = {};
 
   for (const [id, alert] of firing) {
     const seen = prev[id];
     if (!seen) {
-      // Brand new — announce it.
+      // Brand new episode — announce it. This is mail 1 of at most 2.
       notify.push(alert);
-      nextState[id] = { firstSeenAt: nowMs, lastNotifiedAt: nowMs, severity: alert.severity };
+      nextState[id] = { firstSeenAt: nowMs, lastNotifiedAt: nowMs, severity: alert.severity, notifyCount: 1 };
       continue;
     }
-    // 🔒 AN ESCALATION BREAKS THE COOLDOWN. Without this, an alert that was announced as a warning and
-    // then became CRITICAL stayed silent for the rest of the quiet period — six hours by default. That
-    // is the exact window in which the admin most needs to hear from us, and the silence was invisible:
-    // the condition WAS firing, we had simply already mentioned a milder version of it. `slow-builds`
-    // has had both severities since it was written (10 min warning / 20 min critical), so builds could
-    // go from 11 minutes to half an hour with nothing said.
-    //
-    // Only UPWARD, and only once per episode. Announcing a de-escalation ("still bad, slightly less
-    // bad") is not news worth interrupting for, and re-announcing every crossing would reintroduce the
-    // flapping this module exists to prevent.
-    //
-    // A state entry written before this field existed has NO recorded severity, and that is read as
-    // "whatever is firing now is what we announced" — never as an escalation. Reading it the other way
-    // would have every currently-critical alert announce itself once more on the first sweep after
-    // deploy: a burst of notifications caused by shipping, about nothing that changed. The quiet branch
-    // below backfills the field, so a genuine escalation is still caught from the next sweep onwards.
+
+    // 🔒 RE-FIRING DURING THE COOLING PERIOD IS THE SAME EPISODE, AND IT SAYS NOTHING.
+    // This is the line that ends the flapping: an average wobbling across its threshold no longer
+    // produces "resolved … ALERT … resolved … ALERT". `clearSince` is dropped because it is firing
+    // again, and nothing is announced because this episode has already had its say.
+    const sent = seen.notifyCount ?? 1;
     const escalated = alert.severity === 'critical' && seen.severity === 'warning';
-    if (escalated || nowMs - seen.lastNotifiedAt >= cooldownMs) {
-      // Still firing well after we last said so — worth repeating, but only this rarely.
+    const dueAgain = nowMs - seen.lastNotifiedAt >= cooldownMs;
+
+    if (sent < MAX_NOTIFICATIONS_PER_EPISODE && (escalated || dueAgain)) {
+      // Either it got worse, or it is still firing a full cooldown later. Either way this is the
+      // SECOND and FINAL mail for this episode — the cap is absolute, escalation included.
       notify.push(alert);
       nextState[id] = {
         firstSeenAt: seen.firstSeenAt,
@@ -135,19 +186,38 @@ export function decideAlertActions(
         // Never downgrade the recorded high-water mark: an episode that has already announced
         // 'critical' must not be able to announce it again by dipping to 'warning' and back.
         severity: seen.severity === 'critical' ? 'critical' : alert.severity,
+        notifyCount: sent + 1,
       };
       continue;
     }
-    // Firing, already announced, still inside the quiet period. The recorded severity is deliberately
-    // left ALONE — it records what was announced, and staying quiet announced nothing. The ONE
-    // exception is backfilling a legacy entry that has no severity at all, which costs nothing and is
-    // what lets the escalation check work for alerts that were already firing at deploy time.
-    nextState[id] = seen.severity ? seen : { ...seen, severity: alert.severity };
+
+    // Firing, already announced, and either inside the quiet period or out of mail budget. The
+    // recorded severity is deliberately left ALONE — it records what was announced, and staying quiet
+    // announced nothing. The ONE exception is backfilling a legacy entry that has no severity at all,
+    // which costs nothing and is what lets the escalation check work for alerts already firing at
+    // deploy time. `clearSince` is dropped: it is firing.
+    const { clearSince: _wasClear, ...rest } = seen;
+    void _wasClear;
+    nextState[id] = { ...rest, severity: seen.severity ?? alert.severity, notifyCount: sent };
   }
 
-  const resolved = Object.keys(prev).filter((id) => !firing.has(id));
+  // Everything that was in the state and is NOT firing right now.
+  for (const [id, seen] of Object.entries(prev)) {
+    if (firing.has(id)) continue;
+    const clearSince = seen.clearSince ?? nowMs;
+    if (nowMs - clearSince >= resolveAfterMs) {
+      // Continuously clear for the whole confirmation window — the episode is genuinely over, so say
+      // so ONCE and forget it. The next occurrence is then a real new episode, as it should be.
+      resolved.push(id);
+      continue;
+    }
+    // Still cooling. Say NOTHING and keep the entry, so a re-fire is a continuation rather than news.
+    nextState[id] = { ...seen, clearSince };
+  }
+
   return { notify, resolved, nextState };
 }
+
 
 /**
  * Shape a timeline window like a MetricsSnapshot so the EXISTING, tested `evaluateAlerts` rules run
@@ -256,6 +326,10 @@ export interface AlertSweepDeps {
   now: () => number;
   windowHours: number;
   cooldownMs: number;
+  /** How long a condition must stay clear before its episode is declared over. */
+  resolveAfterMs?: number;
+  /** Send the all-clear mail at all. Default true. */
+  resolvedNotices?: boolean;
   /**
    * Alerts that come from somewhere other than the build-rate rules (today: the VM-cost spike).
    *
@@ -286,13 +360,18 @@ export async function runAlertSweep(deps: AlertSweepDeps): Promise<AlertSweepRes
 
     const alerts = [...(snapshot ? evaluateAlerts(snapshot) : []), ...extra];
     const actions = await deps.readAndWriteState((prev, nowMs) =>
-      decideAlertActions(alerts, prev, nowMs, deps.cooldownMs));
+      decideAlertActions(alerts, prev, nowMs, deps.cooldownMs, deps.resolveAfterMs));
     if (!actions) return { skipped: 'no-storage', notified: 0, resolved: 0 };
 
     for (const a of actions.notify) {
       await deps.notify(alertMessage(a, deps.windowHours)).catch(() => {});
     }
+    // The all-clear. One per EPISODE by construction (the entry only reaches `resolved` after the
+    // condition has been continuously clear for the confirmation window), and droppable entirely for
+    // an admin who wants alerts but not their endings.
+    const announceResolved = deps.resolvedNotices ?? true;
     for (const id of actions.resolved) {
+      if (!announceResolved) break;
       await deps.notify(resolvedMessage(id)).catch(() => {});
     }
     return { notified: actions.notify.length, resolved: actions.resolved.length };
@@ -309,6 +388,8 @@ export async function runMonitorAlertSweep(): Promise<AlertSweepResult> {
   return runAlertSweep({
     windowHours,
     cooldownMs: alertCooldownMs(),
+    resolveAfterMs: alertResolveAfterMs(),
+    resolvedNotices: resolvedNoticesEnabled(),
     now: () => Date.now(),
     readSummary: async () => {
       const series = await metricsTimeline.series(windowHours);

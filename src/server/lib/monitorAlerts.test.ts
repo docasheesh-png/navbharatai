@@ -1,9 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   decideAlertActions, snapshotFromWindow, alertMessage, resolvedMessage,
   runAlertSweep, alertCooldownMs, alertWindowHours, alertsEnabled,
   detectSandboxSpike, sandboxSpikeMultiple, sandboxSpikeMinUsd,
   type AlertState,
+  alertResolveAfterMs,
+  resolvedNoticesEnabled,
 } from './monitorAlerts';
 import { evaluateAlerts, type MetricAlert } from './metricsAlerts';
 import type { TimelineSummary } from './metricsTimeline';
@@ -21,6 +23,8 @@ const summary = (over: Partial<TimelineSummary>): TimelineSummary => ({
 
 describe('decideAlertActions — announce once, then stay quiet', () => {
   const COOLDOWN = 6 * 60 * 60_000;
+  /** The confirmation window an episode must stay clear for before it is declared over. */
+  const RESOLVE_AFTER = 2 * 60 * 60_000;
 
   it('announces a brand-new alert', () => {
     const out = decideAlertActions([alert('high-error-rate')], {}, 1_000, COOLDOWN);
@@ -44,19 +48,73 @@ describe('decideAlertActions — announce once, then stay quiet', () => {
     expect(out.nextState['high-error-rate'].lastNotifiedAt).toBe(500 + COOLDOWN);
   });
 
-  it('sends the all-clear when a condition stops firing, and forgets it', () => {
-    // Without this the admin cannot tell "fixed" from "still broken and I stopped being told".
-    const state: AlertState = { 'slow-builds': { firstSeenAt: 0, lastNotifiedAt: 0 } };
-    const out = decideAlertActions([], state, 10_000, COOLDOWN);
+  // 🔴 THE ALL-CLEAR IS NOW CONFIRMED BEFORE IT IS SENT, and this test's shape changed with it.
+  // It used to assert that a condition absent for a single sweep resolved IMMEDIATELY and was
+  // forgotten. That instant forgetting was the flapping bug: the state entry vanished, so the next
+  // crossing of the threshold was a BRAND NEW alert that announced itself with no cooldown at all.
+  // The admin's inbox (2026-09-12) had ALERT/resolved/Warning/ALERT/resolved inside two hours from
+  // exactly this. A condition must now stay clear for the confirmation window before it is over.
+  it('🔒 does NOT resolve on the first quiet sweep — it cools first, and says nothing meanwhile', () => {
+    const state: AlertState = { 'slow-builds': { firstSeenAt: 0, lastNotifiedAt: 0, notifyCount: 1 } };
+    const out = decideAlertActions([], state, 10_000, COOLDOWN, RESOLVE_AFTER);
+    expect(out.resolved).toEqual([]);
+    expect(out.notify).toEqual([]);
+    expect(out.nextState['slow-builds'].clearSince).toBe(10_000);
+  });
+
+  it('sends the all-clear once the condition has been clear for the whole window, then forgets it', () => {
+    const state: AlertState = { 'slow-builds': { firstSeenAt: 0, lastNotifiedAt: 0, notifyCount: 1, clearSince: 1_000 } };
+    const out = decideAlertActions([], state, 1_000 + RESOLVE_AFTER, COOLDOWN, RESOLVE_AFTER);
     expect(out.resolved).toEqual(['slow-builds']);
     expect(out.nextState).toEqual({});
   });
 
+  it('🔒 THE FLAP: stops firing, fires again while cooling — one episode, and NOT ONE extra mail', () => {
+    // The exact sequence from the admin's inbox, at the real timings: fires at 0, quiet at 45 min,
+    // firing again at 60 min. Old behaviour: resolved mail + a fresh ALERT mail. New: silence.
+    let state: AlertState = {};
+    const first = decideAlertActions([alert('slow-builds')], state, 0, COOLDOWN, RESOLVE_AFTER);
+    expect(first.notify).toHaveLength(1);
+    state = first.nextState;
+
+    const dip = decideAlertActions([], state, 45 * 60_000, COOLDOWN, RESOLVE_AFTER);
+    expect(dip.resolved).toEqual([]);
+    expect(dip.notify).toEqual([]);
+    state = dip.nextState;
+
+    const again = decideAlertActions([alert('slow-builds')], state, 60 * 60_000, COOLDOWN, RESOLVE_AFTER);
+    expect(again.notify).toEqual([]);           // the whole point
+    expect(again.resolved).toEqual([]);
+    expect(again.nextState['slow-builds'].clearSince).toBeUndefined();
+    expect(again.nextState['slow-builds'].notifyCount).toBe(1);
+  });
+
+  it('🔒 TWO MAILS PER EPISODE, EVER — the second after the cooldown, then permanent silence', () => {
+    let state: AlertState = decideAlertActions([alert('a')], {}, 0, COOLDOWN, RESOLVE_AFTER).nextState;
+    const second = decideAlertActions([alert('a')], state, COOLDOWN, COOLDOWN, RESOLVE_AFTER);
+    expect(second.notify).toHaveLength(1);
+    expect(second.nextState.a.notifyCount).toBe(2);
+    state = second.nextState;
+    // A year later, still firing: nothing. A condition nobody fixed is not new information.
+    const third = decideAlertActions([alert('a')], state, COOLDOWN * 200, COOLDOWN, RESOLVE_AFTER);
+    expect(third.notify).toEqual([]);
+    expect(third.nextState.a.notifyCount).toBe(2);
+  });
+
+  it('🔒 an escalation SPENDS the second slot rather than being exempt — the cap is absolute', () => {
+    const state: AlertState = { a: { firstSeenAt: 0, lastNotifiedAt: 0, severity: 'warning', notifyCount: 2 } };
+    const out = decideAlertActions([alert('a', 'critical')], state, 1_000, COOLDOWN, RESOLVE_AFTER);
+    expect(out.notify).toEqual([]);
+  });
+
   it('handles several alerts independently in one sweep', () => {
-    const state: AlertState = { a: { firstSeenAt: 0, lastNotifiedAt: 0 }, gone: { firstSeenAt: 0, lastNotifiedAt: 0 } };
-    const out = decideAlertActions([alert('a'), alert('b')], state, 1_000, COOLDOWN);
+    const state: AlertState = {
+      a: { firstSeenAt: 0, lastNotifiedAt: 0, notifyCount: 1 },
+      gone: { firstSeenAt: 0, lastNotifiedAt: 0, notifyCount: 1, clearSince: 0 },
+    };
+    const out = decideAlertActions([alert('a'), alert('b')], state, RESOLVE_AFTER, COOLDOWN, RESOLVE_AFTER);
     expect(out.notify.map((x) => x.id)).toEqual(['b']);   // 'a' is inside its cooldown
-    expect(out.resolved).toEqual(['gone']);
+    expect(out.resolved).toEqual(['gone']);               // clear for the whole window
     expect(Object.keys(out.nextState).sort()).toEqual(['a', 'b']);
   });
 
@@ -225,11 +283,46 @@ describe('monitorAlerts — configuration', () => {
     process.env.MONITOR_ALERT_COOLDOWN_MINUTES = '1';       // too chatty
     expect(alertCooldownMs()).toBe(15 * 60_000);
     process.env.MONITOR_ALERT_COOLDOWN_MINUTES = 'abc';
-    expect(alertCooldownMs()).toBe(360 * 60_000);           // default 6h
+    // 🔴 DEFAULT RAISED 6h → 48h (admin 2026-09-12: "maximum 2 — woh bhi 48hr baad").
+    expect(alertCooldownMs()).toBe(48 * 60 * 60_000);
     process.env.MONITOR_ALERT_WINDOW_HOURS = '999';
     expect(alertWindowHours()).toBe(24);
+    // 48h is inside the new ceiling — the old one capped at 24h and would have silently halved it.
+    process.env.MONITOR_ALERT_COOLDOWN_MINUTES = String(48 * 60);
+    expect(alertCooldownMs()).toBe(48 * 60 * 60_000);
     if (prevC === undefined) delete process.env.MONITOR_ALERT_COOLDOWN_MINUTES; else process.env.MONITOR_ALERT_COOLDOWN_MINUTES = prevC;
     if (prevW === undefined) delete process.env.MONITOR_ALERT_WINDOW_HOURS; else process.env.MONITOR_ALERT_WINDOW_HOURS = prevW;
+  });
+});
+
+describe('the all-clear window and switch', () => {
+  const keys = ['MONITOR_ALERT_RESOLVE_AFTER_MINUTES', 'MONITOR_ALERT_RESOLVED'] as const;
+  const saved: Record<string, string | undefined> = {};
+  beforeEach(() => { for (const k of keys) { saved[k] = process.env[k]; delete process.env[k]; } });
+  afterEach(() => { for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } });
+
+  it('defaults to two hours — twice the window the metrics are judged over, so a wobble cannot end an episode', () => {
+    expect(alertResolveAfterMs()).toBe(120 * 60_000);
+  });
+
+  it('clamps, and an unreadable value falls back to the default rather than to zero', () => {
+    process.env.MONITOR_ALERT_RESOLVE_AFTER_MINUTES = '1';
+    expect(alertResolveAfterMs()).toBe(15 * 60_000);
+    process.env.MONITOR_ALERT_RESOLVE_AFTER_MINUTES = 'abc';
+    expect(alertResolveAfterMs()).toBe(120 * 60_000);
+  });
+
+  it('🔒 zero would make every dip an instant all-clear — the exact bug — so it is refused', () => {
+    process.env.MONITOR_ALERT_RESOLVE_AFTER_MINUTES = '0';
+    expect(alertResolveAfterMs()).toBe(120 * 60_000);
+  });
+
+  it('all-clear mails are ON unless explicitly turned off', () => {
+    expect(resolvedNoticesEnabled()).toBe(true);
+    process.env.MONITOR_ALERT_RESOLVED = 'off';
+    expect(resolvedNoticesEnabled()).toBe(false);
+    process.env.MONITOR_ALERT_RESOLVED = ' OFF ';
+    expect(resolvedNoticesEnabled()).toBe(false);
   });
 });
 

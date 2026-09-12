@@ -42,6 +42,23 @@ export interface IllegalRule {
   /** BOTH must match, in the same app, for the rule to fire. */
   subject: RegExp;
   context: RegExp;
+  /**
+   * The ILLICIT-PURPOSE signal, for a REQUEST rather than a page (`promptSafety.ts`).
+   *
+   * 🔴 THIS FIELD EXISTS BECAUSE THE FIRST DESIGN FAILED ITS OWN TESTS. The prompt checker began by
+   * pairing `subject` with a generic "is this a request?" pattern (build / make / write / app /
+   * site). On an APP BUILDER every message contains those words, so the pair degenerated into the
+   * single-signal rule this whole file exists to avoid — and it flagged "build me a school
+   * attendance app for children", "a pharmacy app that lists ketamine", "a de-addiction helpline for
+   * people struggling with heroin" and "a chemistry lesson about how a detonator works".
+   *
+   * A request verb carries NO information here. What separates "a marketplace for heroin" from "a
+   * helpline for heroin addiction" is the word *marketplace*, not the word *app*. So each rule names
+   * the narrow purpose that makes the request illicit — and a rule with no honest way to express
+   * that (CSAM: there is no benign request pairing children with sexual content, so `context` is
+   * already the whole test) simply omits it and never reaches the weaker tier at all.
+   */
+  intent?: RegExp;
 }
 
 /**
@@ -67,17 +84,25 @@ export const ILLEGAL_RULES: readonly IllegalRule[] = [
     contentClass: 'illegal',
     description:
       'offers to undress or sexualise a real person from their photograph, or to publish intimate images without consent.',
-    subject: /\b(nudify|undress|deep[-\s]?fake|deepfake|face[-\s]?swap|revenge[-\s]?porn|upskirt|hidden[-\s]?cam)\b/i,
+    // `nudif\w*` rather than `nudify`: the first version missed "nudifies"/"nudified" — a word-boundary
+    // rule that stops at the stem is a rule an ordinary sentence walks past.
+    subject: /\b(nudif\w*|undress\w*|deep[-\s]?fakes?|face[-\s]?swaps?|revenge[-\s]?porn|upskirt|hidden[-\s]?cam)\b/i,
     context: /\b(photo|photos|picture|pictures|image|images|video|videos|selfie|her|girlfriend|wife|ex)\b/i,
+    // Asking to build one IS the illicit purpose — there is no benign "undress any photo" tool.
+    intent: /\b(app|tool|site|website|bot|service|generator)\b/i,
   },
   {
     id: 'WEAPON_MANUFACTURE',
     contentClass: 'illegal',
     description:
       'gives instructions for making a weapon or an explosive device, rather than merely mentioning one.',
-    subject: /\b(pipe[-\s]?bomb|ied|improvised[-\s]?explosive|pressure[-\s]?cooker[-\s]?bomb|detonator|blasting[-\s]?cap|ghost[-\s]?gun|untraceable[-\s]?(gun|firearm)|silencer|suppressor)\b/i,
+    // Plurals matter: `ghost gun` alone missed "ghost guns", which is how the phrase is usually written.
+    subject: /\b(pipe[-\s]?bombs?|ieds?|improvised[-\s]?explosives?|pressure[-\s]?cooker[-\s]?bombs?|detonators?|blasting[-\s]?caps?|ghost[-\s]?guns?|untraceable[-\s]?(guns?|firearms?)|silencers?|suppressors?)\b/i,
     // The instructional half — a news report about a bomb has the subject and never this.
     context: /\b(how[-\s]to[-\s]make|step[-\s]by[-\s]step|instructions|tutorial|recipe|assemble|build[-\s]your[-\s]own|materials[-\s]needed|ingredients)\b/i,
+    // NOT "write me a …": a chemistry lesson explaining a detonator is a legitimate request. Only
+    // evasion or trade makes it illicit.
+    intent: /\b(untraceable|undetectable|evade|bypass[-\s]detection|black[-\s]?market|dark[-\s]?web|without[-\s]a[-\s]licen[cs]e|no[-\s]licen[cs]e|sell|selling|dealer)\b/i,
   },
   {
     id: 'DRUG_MARKETPLACE',
@@ -96,6 +121,9 @@ export const ILLEGAL_RULES: readonly IllegalRule[] = [
      * crypto-only payment or "no prescription needed".
      */
     context: /\b(discreet[-\s]?(shipping|delivery|packaging)|stealth[-\s]?(shipping|delivery)|escrow|crypto[-\s]?only|bitcoin[-\s]?only|no[-\s]?prescription|without[-\s]a[-\s]prescription)\b/i,
+    // Trade, not treatment. A de-addiction helpline and a pharmacy listing both name the drug; only
+    // a market names the market.
+    intent: /\b(marketplace|market[-\s]?place|dark[-\s]?web|black[-\s]?market|dealer|dealers|street[-\s]?price|anonymous[-\s]?(buy|sale|order)|untraceable)\b/i,
   },
   {
     id: 'ADULT_CONTENT',
@@ -105,6 +133,7 @@ export const ILLEGAL_RULES: readonly IllegalRule[] = [
       'contains adult sexual content. Lawful, and allowed for a creator who has turned on the 18+ setting.',
     subject: /\b(porn|pornography|xxx|hardcore|erotica|nsfw|adult[-\s]?(video|content|film)s?)\b/i,
     context: /\b(watch|stream|gallery|videos|category|categories|subscribe|premium|18\+|adults?[-\s]only)\b/i,
+    intent: /\b(site|website|app|platform|streaming|gallery|tube)\b/i,
   },
 ];
 

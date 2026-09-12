@@ -24,6 +24,7 @@ import { resolveEmailConfig } from '../lib/alertEmail';
 import { grievanceOfficer } from '../lib/grievanceOfficer';
 import { adultPreferenceFrom } from '../../lib/adultContent';
 import { recordTakedown, listTakedowns, TAKEDOWN_RETENTION_DAYS } from '../lib/takedownLedger';
+import { listSafetyFlags, SAFETY_FLAG_RETENTION_DAYS } from '../lib/safetyFlagStore';
 import { officerIsNamed, OFFICER_MISSING_WARNING } from '../../content/legal/grievance';
 import { serverLoad } from '../lib/serverLoad';
 import { usdInrRate } from '../lib/UsdInrRate';
@@ -1417,6 +1418,42 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     } catch (e: any) {
       console.error('[ADMIN] /takedowns failed:', e?.message);
       res.status(500).json({ error: 'Could not read the removal record', detail: e?.message || String(e) });
+    }
+  });
+
+  /**
+   * THE SAFETY QUEUE (admin 2026-09-12, Phase 6) — the messages the automatic check objected to.
+   *
+   * 🔒 THIS IS NOT A CHAT BROWSER, and the difference is structural rather than a matter of
+   * restraint: there is nothing else to browse. A clean message writes no document at all, so this
+   * collection contains ONLY what the check itself stopped or questioned. Each row carries the rule,
+   * the verdict, the surface and a hard-bounded excerpt with secrets and personal identifiers
+   * already stripped — enough to judge, far too little to be a transcript.
+   *
+   * Rows are grouped by account, because one flagged message is a maybe and six from one account is
+   * a pattern — and counting rows by hand is how a reviewer misses the second kind.
+   */
+  app.get('/api/admin/safety-flags', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '200'), 10) || 200, 1), 500);
+      const rows = await listSafetyFlags(limit);
+      const identities = await resolveUserIdentities(rows.map((r) => r.uid), getDb() as any);
+      const perUser = new Map<string, number>();
+      for (const r of rows) perUser.set(r.uid, (perUser.get(r.uid) ?? 0) + 1);
+      res.json({
+        ok: true,
+        retentionDays: SAFETY_FLAG_RETENTION_DAYS,
+        rows: rows.map((r) => ({
+          ...r,
+          label: identityLabel(identities.get(r.uid) ?? identityFrom(r.uid, null)),
+          flagsForThisAccount: perUser.get(r.uid) ?? 1,
+        })),
+      });
+    } catch (e: any) {
+      // 🔒 A QUEUE WE COULD NOT READ IS NOT AN EMPTY QUEUE. On this screen those two look identical
+      // and mean opposite things.
+      console.error('[ADMIN] /safety-flags failed:', e?.message);
+      res.status(500).json({ error: 'Could not read the safety queue', detail: e?.message || String(e) });
     }
   });
 

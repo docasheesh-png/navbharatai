@@ -298,6 +298,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken]);
   /**
+   * THE SAFETY QUEUE (admin 2026-09-12, Phase 6) — the messages the automatic check objected to.
+   * `null` = not read, kept distinct from an empty queue for the usual reason: on this screen those
+   * two look identical and mean opposite things.
+   */
+  const [safetyFlags, setSafetyFlags] = useState<Array<Record<string, any>> | null>(null);
+  const [safetyError, setSafetyError] = useState('');
+  const fetchSafetyFlags = useCallback(async () => {
+    setSafetyError('');
+    try {
+      const r = await fetch('/api/admin/safety-flags', { headers });
+      const d = await r.json();
+      if (!r.ok) { setSafetyFlags(null); setSafetyError(d?.error || 'Could not read the queue.'); return; }
+      setSafetyFlags(Array.isArray(d?.rows) ? d.rows : null);
+      if (!Array.isArray(d?.rows)) setSafetyError('Unexpected response from the server.');
+    } catch (e) { console.error(e); setSafetyFlags(null); setSafetyError('Could not reach the server.'); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+
+  /**
    * WHO HAS TURNED ON +18 (admin 2026-09-12: "kis kis user ne on kiya hai, admin penal me dikhe").
    *
    * `null` means NOT READ, and it is kept distinct from an empty list on purpose: "nobody has this
@@ -900,7 +919,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     } catch (e) { console.error(e); setMfaStatus(null); }
   }, [adminToken]);
 
-  useEffect(() => { if (activeTab === 'security') { fetchMfaStatus(); fetchLicenceExposure(); void fetchAdultOptIns(); } }, [activeTab, fetchMfaStatus, fetchLicenceExposure, fetchAdultOptIns]);
+  useEffect(() => { if (activeTab === 'security') { fetchMfaStatus(); fetchLicenceExposure(); void fetchAdultOptIns(); void fetchSafetyFlags(); } }, [activeTab, fetchMfaStatus, fetchLicenceExposure, fetchAdultOptIns, fetchSafetyFlags]);
 
   const startMfaEnroll = async () => {
     setMfaBusy(true);
@@ -3062,6 +3081,68 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           {/* ── SECURITY TAB ── */}
           {activeTab === 'security' && (
             <div className="space-y-6">
+              {/* ── THE SAFETY QUEUE ───────────────────────────────────────────────────────────
+                  🔒 NOT a chat browser, and the difference is structural: a clean message writes no
+                  document at all, so there is nothing else here to browse. Each row is something the
+                  automatic check stopped or questioned, with secrets and personal identifiers already
+                  stripped from the extract. Kept 180 days, then deleted. */}
+              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-5 space-y-3">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <h3 className="flex items-center gap-2 text-sm font-black text-white uppercase tracking-tight">
+                    <AlertTriangle size={15} className="text-amber-400" /> Safety queue
+                    {Array.isArray(safetyFlags) && safetyFlags.length > 0 && (
+                      <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-amber-500/40 text-amber-300">
+                        {safetyFlags.length}
+                      </span>
+                    )}
+                  </h3>
+                  <button onClick={() => void fetchSafetyFlags()} className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-wider text-white hover:border-amber-500/40 transition-all">
+                    Refresh
+                  </button>
+                </div>
+                <p className="text-[11px] text-[#8b949e] leading-relaxed">
+                  Messages the automatic check stopped or questioned. A clean message stores nothing at
+                  all — this is the whole of what is kept, and only for 180 days.
+                </p>
+                {safetyError && (
+                  <p className="text-[11px] text-amber-300">{safetyError} <button onClick={() => void fetchSafetyFlags()} className="underline">Retry</button></p>
+                )}
+                {!safetyError && safetyFlags !== null && safetyFlags.length === 0 && (
+                  <p className="text-[11px] text-emerald-300">Nothing flagged.</p>
+                )}
+                {!safetyError && safetyFlags !== null && safetyFlags.length > 0 && (
+                  <div className="space-y-1.5">
+                    {safetyFlags.slice(0, 60).map((f: any) => (
+                      <button
+                        key={f.id}
+                        onClick={() => void openAccount(f.uid)}
+                        className={`w-full text-left rounded-lg border px-3 py-2 transition-colors ${
+                          f.verdict === 'block' ? 'border-rose-500/40 bg-rose-500/5 hover:border-rose-500/60' : 'border-amber-500/25 bg-amber-500/5 hover:border-amber-500/50'}`}
+                      >
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded ${f.verdict === 'block' ? 'bg-rose-500/20 text-rose-200' : 'bg-amber-500/20 text-amber-200'}`}>
+                            {f.verdict}
+                          </span>
+                          <span className="text-[10px] font-mono text-white/60">{f.ruleId}</span>
+                          <span className="text-[10px] text-white/35">· {f.surface}</span>
+                          <span className="text-[10px] text-white/35">· {new Date(f.at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                          {/* One flag is a maybe; six from one account is a pattern. Counting rows by
+                              hand is how a reviewer misses the second kind. */}
+                          {(f.flagsForThisAccount ?? 1) > 1 && (
+                            <span className="text-[10px] font-bold text-rose-300">· {f.flagsForThisAccount} flags on this account</span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-white/70 mt-1 truncate">{f.label}</p>
+                        <p className="text-[11px] text-white/45 mt-0.5 leading-relaxed">{f.description}</p>
+                        {f.excerpt && (
+                          <p className="text-[10px] text-white/30 mt-1 font-mono break-words">“{f.excerpt}”</p>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* ── WHO HAS +18 TURNED ON ──────────────────────────────────────────────────────
                   A list of SETTINGS, not of content: who turned a switch on and when. It does not
                   say what anybody built, and there is nothing here to read about a person — the same

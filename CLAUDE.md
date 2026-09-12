@@ -1107,10 +1107,30 @@ the code (it is actually read somewhere) on 2026-07-11.
   `deleted: true` flag) refuse without a ticket minted seconds earlier from either a verified WebAuthn
   platform-authenticator assertion or a genuinely fresh Firebase re-auth (`auth_time` within 5 min). The
   old `GET /api/secrets/:userId` is unchanged and still returns names only.
-  ⚠️ **On the NATIVE Android/iOS shell the device-lock half may not work**, because WebAuthn in a
-  WebView needs app-to-site association (assetlinks / associated domains) that is NOT set up — those
-  users get the account-password door, which is equally server-verified. Do not "fix" this by accepting a
-  client-side biometric boolean: a plugin's yes/no is unverifiable and would make the lock theatre.
+  ⚠️ **ON THE NATIVE SHELL — and the first version of this line named the WRONG REASON, corrected the
+  same day.** It said the device lock fails because "WebAuthn in a WebView needs app-to-site association
+  (assetlinks / associated domains) that is NOT set up". That is not what decides it here, and a later
+  session acting on it would go and build an `assetlinks.json` that changes nothing. The verified facts:
+  - **Android: the origin is `https://localhost`** — Capacitor 8.5.0 defaults `androidScheme` to the
+    https scheme with hostname `localhost` (`node_modules/@capacitor/android/.../CapConfig.java:38-39`,
+    read rather than assumed; `capacitor.config.ts` does not override it). That is a secure context and
+    `https://localhost` is ALREADY in this feature's origin allow-list, so **the origin is not the
+    blocker**. What is genuinely uncertain is whether the Android **WebView** exposes WebAuthn platform
+    authenticators at all — that varies by WebView version, and it cannot be verified from a Claude
+    session. So: **unknown, not broken.**
+  - **iOS: the origin is `capacitor://localhost`** — a custom scheme, which cannot be a WebAuthn rpId.
+    The device lock genuinely cannot work there, and the account-password door is the real path.
+  🔒 **Either way nothing breaks, which is why this was safe to ship without a device.**
+  `deviceLockAvailable()` asks the browser at runtime (`isUserVerifyingPlatformAuthenticatorAvailable`)
+  and a `false` silently offers the account-password door instead — so a WebView without WebAuthn is a
+  different SCREEN, never a failure. **To settle it, open Settings → Secrets & API Keys in the Android
+  app: whatever it asks for IS the answer.**
+  ⚠️ Note what the Android path implies if it does work: the credential is scoped to rpId `localhost`,
+  which is shared by every Capacitor app on that device. It is still safe — an assertion is useless
+  without our server's challenge, the matching credential id, and a live session — but do not widen
+  `VAULT_LOCK_ORIGINS` casually on that reasoning.
+  Do not "fix" any of this by accepting a client-side biometric boolean: a plugin's yes/no is
+  unverifiable and would make the lock theatre.
 
 - **Outbound abuse check for published apps (shipped 2026-09-10, NavBharat Cloud slice 4):**
   `NAVBHARAT_WEB_RISK` (⚠️ **NOT set yet** — `on` turns on BOTH halves together: the publish-time

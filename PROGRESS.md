@@ -49332,3 +49332,36 @@ while keeping its original cross-user IDOR property.
 
 `tests/helpers/routeTestUtils.ts` gained `req.header` and `res.set` — both exist on real Express, and a
 harness missing a verb fails a route that is perfectly correct.
+
+### Correction, same day: I named the wrong reason for the native-shell limit
+
+The entry above (and what I told the admin) said the device lock cannot work in the Android/iOS shell
+"because WebAuthn in a WebView needs app-to-site association (assetlinks) that is not set up". **That is
+not what decides it**, and the claim was reasoning from a general memory rather than from this project.
+A later session acting on it would have built an `assetlinks.json` that changes nothing.
+
+What the code actually says, read rather than assumed:
+
+* **Android → `https://localhost`.** Capacitor 8.5.0 defaults `androidScheme` to the https scheme with
+  hostname `localhost` (`@capacitor/android/.../CapConfig.java:38-39`), and `capacitor.config.ts` does
+  not override it. That is a secure context, and `https://localhost` was **already** in this feature's
+  origin allow-list. So the origin is not the blocker. The real unknown is whether the Android **WebView**
+  exposes WebAuthn platform authenticators — version-dependent, and not verifiable from here.
+  **Unknown, not broken.**
+* **iOS → `capacitor://localhost`.** A custom scheme cannot be a WebAuthn rpId, so the device lock
+  genuinely cannot work there. The original claim was accidentally right for iOS and wrong for Android,
+  for a reason that applies to neither.
+
+**Why shipping without a device was still safe:** `deviceLockAvailable()` asks the browser at runtime and
+a `false` offers the account-password door instead — so a WebView without WebAuthn is a different SCREEN,
+never a failure. The one-step way to settle it: open Settings → Secrets & API Keys in the Android app and
+see which door appears.
+
+And if Android does work, the credential is scoped to rpId `localhost`, shared with every Capacitor app on
+that device. Still safe — an assertion is useless without our challenge, the matching credential id and a
+live session — but that is not a reason to widen `VAULT_LOCK_ORIGINS`.
+
+**The lesson, and it is the one this file keeps re-learning:** "assetlinks" was a plausible, well-known
+reason that happened not to be THIS project's reason. A caveat is only honest if it names the mechanism
+that was actually checked — otherwise it is a guess wearing a warning label, and the next reader spends a
+day on it.

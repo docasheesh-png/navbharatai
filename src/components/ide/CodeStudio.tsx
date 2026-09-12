@@ -85,7 +85,6 @@ interface CodeStudioProps {
   onAgentChange?: (agent: string) => void;
   onGoToMain?: () => void;
   wallet?: any;
-  onUnlockVishwakarma: () => void;
   /** N1-N9: Send a message directly to AI (bypasses controlled input state). */
   onSendDirect?: (text: string) => void;
 }
@@ -138,7 +137,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   onAgentChange,
   onGoToMain,
   wallet,
-  onUnlockVishwakarma,
   onSendDirect,
 }) => {
   const themeClasses = getThemeClasses(theme);
@@ -1955,5 +1953,5 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
          prev.chatInput === next.chatInput &&
          prev.problems === next.problems &&
          prev.activeAgent === next.activeAgent &&
-         prev.onUnlockVishwakarma === next.onUnlockVishwakarma;
+         prev.onSocialChatTrigger === next.onSocialChatTrigger;
 });

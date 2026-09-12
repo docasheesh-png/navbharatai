@@ -1047,15 +1047,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     } finally { setActionLoading(null); }
   };
 
-  const handlePro = async (userId: string, grant: boolean) => {
-    setActionLoading(userId + '_pro');
-    try {
-      const r = await adminPost(`/api/admin/users/${userId}/pro`, { grant });
-      if (r.ok) { toast(grant ? 'Pro granted!' : 'Pro revoked'); fetchUsers(); }
-      else toast('Error: ' + r.error);
-    } finally { setActionLoading(null); }
-  };
-
   // Merge a duplicate account's wallet INTO this user (one person = one wallet). The admin PROVES the
   // two accounts are the same person by supplying the source userId. Debt carries, welcome bonus counts
   // once, real purchases carry (server-side tested mergeWallets). Confirmed before running (irreversible).
@@ -1514,7 +1505,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         <th className="py-3 px-4 text-left">Token Balance</th>
                         <th className="py-3 px-4 text-left">Total Used</th>
                         <th className="py-3 px-4 text-left">Wallet</th>
-                        <th className="py-3 px-4 text-left">Pro</th>
                         <th className="py-3 px-4 text-left">Status</th>
                         <th className="py-3 px-4 text-left">Actions</th>
                       </tr>
@@ -1557,9 +1547,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                           <td className="py-3 px-4 font-mono text-violet-400">{(u.totalTokensUsed || 0).toLocaleString()}</td>
                           <td className="py-3 px-4 font-mono text-emerald-400">₹{(u.remainingBalance || 0).toFixed(2)}</td>
                           <td className="py-3 px-4">
-                            {u.hasPro ? <span className="text-indigo-400 font-black text-[9px] uppercase">Pro</span> : <span className="text-[#484f58] text-[9px] uppercase">–</span>}
-                          </td>
-                          <td className="py-3 px-4">
                             {u.banned ? <span className="text-red-400 font-black text-[9px] uppercase flex items-center gap-1"><BanIcon className="w-3 h-3"/>Banned</span> : <span className="text-emerald-400 font-black text-[9px] uppercase flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/>Active</span>}
                           </td>
                           <td className="py-3 px-4">
@@ -1582,9 +1569,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                                       hover underline and a tooltip so it still reads as clickable. */}
                                   <button onClick={() => { setSelectedUserId(u.userId); setTokenDelta(''); setTokenReason(''); }} className="px-2 py-1 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[9px] font-black text-amber-400 uppercase hover:bg-amber-500/20 transition-all">
                                     Tokens
-                                  </button>
-                                  <button onClick={() => handlePro(u.userId, !u.hasPro)} disabled={actionLoading === u.userId + '_pro'} className="px-2 py-1 bg-indigo-500/10 border border-indigo-500/20 rounded-lg text-[9px] font-black text-indigo-400 uppercase hover:bg-indigo-500/20 transition-all">
-                                    {actionLoading === u.userId + '_pro' ? '...' : u.hasPro ? 'Revoke' : 'Pro'}
                                   </button>
                                   <button onClick={() => handleBan(u.userId, !u.banned)} disabled={actionLoading === u.userId + '_ban'} className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase transition-all border ${u.banned ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20' : 'bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20'}`}>
                                     {actionLoading === u.userId + '_ban' ? '...' : u.banned ? 'Unban' : 'Ban'}

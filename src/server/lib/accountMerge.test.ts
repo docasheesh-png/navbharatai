@@ -7,7 +7,7 @@ const WELCOME = 50000;
 
 /** Build a wallet doc the way the app does. `welcome` adds the welcome-bonus ledger entry so
  *  walletReceivedWelcome() detects it (as buildInitialWallet writes it). */
-function wallet(opts: { purchased: number; used: number; welcome: boolean; pass?: boolean }): Record<string, any> {
+function wallet(opts: { purchased: number; used: number; welcome: boolean }): Record<string, any> {
   const ledger: any[] = [];
   if (opts.welcome) ledger.push({ type: 'purchase', amountCoinsOrTokens: WELCOME, moneySpent: 0, timestamp: '2026-01-01T00:00:00Z', description: `Welcome Bonus: ${WELCOME.toLocaleString()} AI Tokens Credited!` });
   return {
@@ -18,7 +18,6 @@ function wallet(opts: { purchased: number; used: number; welcome: boolean; pass?
     remaining_balance: (opts.purchased - opts.used) / 100,
     total_output_tokens_used: opts.used,
     total_money_spent: 0,
-    hasVishwakarmaPass: !!opts.pass,
     walletLedger: ledger,
   };
 }
@@ -83,14 +82,24 @@ describe('mergeWallets — real purchases all carry, and flags OR', () => {
     const b = wallet({ purchased: 30000, used: 0, welcome: false });
     expect(mergeWallets(a, b, 'now').wallet.tokenBalance).toBe(50000);
   });
-  it('carries the Vishwakarma Pass if EITHER had it, sums usage totals, and keeps `into` identity', () => {
-    const a = wallet({ purchased: 10000, used: 5000, welcome: false, pass: false });
-    const b = wallet({ purchased: 10000, used: 3000, welcome: false, pass: true });
+  it('sums usage totals and keeps `into` identity', () => {
+    const a = wallet({ purchased: 10000, used: 5000, welcome: false });
+    const b = wallet({ purchased: 10000, used: 3000, welcome: false });
     a.userEmail = 'keep@me.com';
     const { wallet: m } = mergeWallets(a, b, 'now');
-    expect(m.hasVishwakarmaPass).toBe(true);
     expect(m.totalTokensUsed).toBe(8000);
     expect(m.userEmail).toBe('keep@me.com'); // `into` identity preserved
+  });
+
+  it('🔒 carries no Vishwakarma pass, because there is no such entitlement to carry', () => {
+    // The merge used to OR `hasVishwakarmaPass` across both wallets. That flag gated nothing and is
+    // deleted (2026-09-12); a merge must not resurrect it onto a wallet from whichever side had it.
+    const a = wallet({ purchased: 10000, used: 5000, welcome: false });
+    const b = wallet({ purchased: 0, used: 0, welcome: false });
+    b.hasVishwakarmaPass = true;            // a genuinely old wallet document still carrying the field
+    const { wallet: m } = mergeWallets(a, b, 'now');
+    expect(m.hasVishwakarmaPass).toBeUndefined();
+    expect(m.vishwakarmaPassActivatedAt).toBeUndefined();
   });
   it('prepends an honest merge marker to the ledger and stays bounded', () => {
     const a = wallet({ purchased: 10000, used: 0, welcome: true });

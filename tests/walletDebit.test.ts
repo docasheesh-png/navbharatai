@@ -61,7 +61,7 @@ describe('computeDebitedWallet — debit math (the missing half of the money pat
   });
 
   it('debit is the exact mirror of credit: buy then spend the same ₹ returns to the start', () => {
-    const credit: WalletCreditTx = { userId: 'u1', amountPaid: 50, balanceAdded: 50, isVishwakarmaOrder: false };
+    const credit: WalletCreditTx = { userId: 'u1', amountPaid: 50, balanceAdded: 50 };
     const bought = computeCreditedWallet({ tokenBalance: 0, remaining_balance: 0, walletLedger: [] }, credit, null, T).wallet;
     const { wallet } = computeDebitedWallet(bought, tx({ billedInr: 50 }), T);
     expect(wallet.tokenBalance).toBe(0);
@@ -98,9 +98,9 @@ describe('computeDebitedWallet — debit math (the missing half of the money pat
   });
 
   it('preserves unrelated existing wallet fields (full merge, not a reset)', () => {
-    const existing = { ...FUNDED, hasVishwakarmaPass: true, someOtherField: 'keep-me' };
+    const existing = { ...FUNDED, unrelatedFlag: true, someOtherField: 'keep-me' };
     const { wallet } = computeDebitedWallet(existing, tx(), T);
-    expect(wallet.hasVishwakarmaPass).toBe(true);
+    expect(wallet.unrelatedFlag).toBe(true);
     expect(wallet.someOtherField).toBe('keep-me');
   });
 });

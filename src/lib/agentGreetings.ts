@@ -1,6 +1,12 @@
 /**
  * Per-agent greeting lines + selection logic.
  * Pure data + helpers extracted from App.tsx so greeting selection is testable.
+ *
+ * The Vishwakarma Basic / Pro / VIP pools were removed on 2026-09-12 when Vishwakarma itself was
+ * deleted (admin: "Vishwakarma ab delete karne layak hai … permanently delete kar do"). One pool
+ * remains because there is one chat identity left, and `greetingsForAgent` keeps its signature so
+ * a legacy session whose stored agent id is `vishwakarma_pro` still gets a greeting rather than
+ * an empty string.
  */
 
 export const NBI_GREETINGS = [
@@ -10,29 +16,13 @@ export const NBI_GREETINGS = [
   "navBharatAI online. Let's craft scalable architectures with deep, robust logic today.",
 ];
 
-export const BASIC_GREETINGS = [
-  "Vishwakarma Basic active. Security audit protocols loaded and ready for code analysis.",
-  "Vishwakarma Basic online. Let's identify structural vulnerabilities and build secure pages.",
-  "Vishwakarma Basic analysis engine is fully operational. Ready for your coding needs.",
-];
-
-export const PRO_GREETINGS = [
-  "Vishwakarma Pro ready. Previous architecture context restored. Ready to build highly optimized premium SaaS workflows!",
-  "Welcome back. Continuing your last high-fidelity development session with Vishwakarma Pro configurations.",
-  "Pro level authorized. Let's design premium microservices, database structures, and high-performance assets.",
-];
-
-export const VIP_GREETINGS = [
-  "VIP orchestration initialized. Sovereign multi-model cognitive routing is actively online.",
-  "Sovereign VIP Agent active. Enterprise platforms, AI scaling, and zero-trust security matrices initialized.",
-  "Welcome to VIP Workspace! Highly tuned LLM orchestrators and stateful agents are ready to assist you.",
-];
-
-/** Return the greeting pool for a given agent id. */
-export function greetingsForAgent(agent: string): string[] {
-  if (agent === 'vishwakarma_vip') return VIP_GREETINGS;
-  if (agent === 'vishwakarma_pro') return PRO_GREETINGS;
-  if (agent === 'vishwakarma_basic') return BASIC_GREETINGS;
+/**
+ * Return the greeting pool for a given agent id.
+ *
+ * Every agent now resolves to the same pool. The parameter is kept so callers (and the stored agent
+ * id on an old session) need no change, and so a future second identity has somewhere to hook in.
+ */
+export function greetingsForAgent(_agent: string): string[] {
   return NBI_GREETINGS;
 }
 

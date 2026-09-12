@@ -607,7 +607,7 @@ setInterval(() => {
   registerAuditRoutes(app);
 
   // New Isolated Chat Endpoints
-  // Chat routes (general + Vishwakarma tiers) — extracted to src/server/routes/chat.ts (Phase 1, AI-core step c).
+  // Chat routes (the general/FREE chat) — extracted to src/server/routes/chat.ts (Phase 1, AI-core step c).
   registerChatRoutes(app, chatLimiter);
 
   // Pro engine routes (pro-chat + pro-build + callClaudePro) — extracted to src/server/routes/pro.ts (Phase 1, AI-core step d).

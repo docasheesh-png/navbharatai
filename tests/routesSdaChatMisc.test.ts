@@ -68,15 +68,22 @@ async function importChatRoutes() {
 }
 
 describe('Chat routes — /api/chat/* validation', () => {
-  it('registers all five chat tier endpoints', async () => {
+  it('registers the chat endpoints that still exist', async () => {
     const register = await importChatRoutes();
     // Pass a dummy chatLimiter (captured handlers ignore the middleware positionally)
     const routes = captureRoutes(register, () => {});
     expect(routes.has('POST /api/chat/navbharat')).toBe(true);
     expect(routes.has('POST /api/chat/navbharatai')).toBe(true);
-    expect(routes.has('POST /api/chat/vishwakarma-basic')).toBe(true);
-    expect(routes.has('POST /api/chat/vishwakarma-pro')).toBe(true);
-    expect(routes.has('POST /api/chat/vip')).toBe(true);
+  });
+
+  it('🔒 the three Vishwakarma/VIP endpoints are GONE — a stale client gets a 404, not a reply', async () => {
+    // Deleted 2026-09-12 with Vishwakarma. A 404 is the honest answer: the surface that posted here no
+    // longer exists, and an endpoint that silently kept answering would make the deletion a half-one.
+    const register = await importChatRoutes();
+    const routes = captureRoutes(register, () => {});
+    for (const gone of ['POST /api/chat/vishwakarma-basic', 'POST /api/chat/vishwakarma-pro', 'POST /api/chat/vip']) {
+      expect(routes.has(gone), gone).toBe(false);
+    }
   });
 
   it('returns 400 when message is missing and no fileAttachments provided', async () => {
@@ -104,10 +111,10 @@ describe('Chat routes — /api/chat/* validation', () => {
     expect(res.statusCode).not.toBe(400);
   });
 
-  it('returns 400 for vishwakarma-pro tier when message is missing', async () => {
+  it('returns 400 on the navbharatai alias too when message is missing', async () => {
     const register = await importChatRoutes();
     const routes = captureRoutes(register, () => {});
-    const handler = routes.get('POST /api/chat/vishwakarma-pro')!;
+    const handler = routes.get('POST /api/chat/navbharatai')!;
 
     const req = mockReq({ body: {} });
     const res = mockRes();

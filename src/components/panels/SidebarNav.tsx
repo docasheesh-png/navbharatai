@@ -39,7 +39,6 @@ export interface SidebarNavProps {
   setTheme: (t: ThemeMode) => void;
   isThemePickerOpen: boolean;
   setIsThemePickerOpen: (v: boolean) => void;
-  setShowVishwakarmaChooser: (v: boolean) => void;
   setErrorContext: (v: any) => void;
   /** Open the app-wide "Report a problem" sheet (the same one a phone shake opens). */
   onReportProblem?: () => void;
@@ -111,7 +110,7 @@ export function SidebarNav({
   isMenuOpen, setIsMenuOpen, menuItems, enabledModules,
   activeView, toggleTab, setActiveView, hasGeneratedCode, user, setShowAuth,
   addLog, theme, setTheme, isThemePickerOpen, setIsThemePickerOpen,
-  setShowVishwakarmaChooser, setErrorContext, onReportProblem,
+  setErrorContext, onReportProblem,
 }: SidebarNavProps) {
   // Git lives in App Settings now (admin 2026-08-01: "Git option sidebar se App Settings me move karo"),
   // so it is excluded from the rail/drawer here. It stays in `menuItems` so its header tab + view still
@@ -136,11 +135,6 @@ export function SidebarNav({
 
   const makeClickHandler = (item: MenuItem, closeMenu?: boolean) => () => {
     if (item.id === 'preview') { toggleTab('preview'); if (closeMenu) setIsMenuOpen(false); return; }
-    if (item.id === 'asc_chat') {
-      if (closeMenu) { setShowVishwakarmaChooser(true); setIsMenuOpen(false); }
-      else { toggleTab('asc_chat'); }
-      return;
-    }
     if (item.id === 'history' && !user) {
       setShowAuth(true);
       if (closeMenu) setIsMenuOpen(false);

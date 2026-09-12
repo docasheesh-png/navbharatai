@@ -10,7 +10,7 @@
 //   • The ADMIN token adjustment did the opposite and worse: it OVERWROTE `remaining_balance` with
 //     `tokenBalance / TOKENS_PER_RUPEE` — not a delta, an assignment. For any user whose two views
 //     legitimately differ it silently rewrote a real balance. And they DO legitimately differ: a Pass
-//     purchase credits `remaining_balance += netPaid` while `creditableVishwakarmaTokens` subtracts
+//     purchase credits `remaining_balance += netPaid` while the token figure was computed separately,
 //     the Pass price first, so a Pass buyer's views differ by exactly the Pass price, forever. A "+1
 //     token" adjustment on that account would have wiped ₹(pass price) the user had really paid — and
 //     on an account credited the other way round, minted balance nobody paid for.

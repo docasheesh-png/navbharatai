@@ -124,7 +124,6 @@ export interface ViewPanelsProps {
   downloadAppZip: (deployFiles: Record<string, string>, appName: string) => void;
   setActiveFile: (path: string) => void;
   wallet: any;
-  setShowVishwakarmaUnlockModal: (v: boolean) => void;
   setShowAuth: (v: boolean) => void;
   zipSizeModal: { variant: ZipSizeModalVariant; fileName: string; fileSizeMB: number } | null;
   setZipSizeModal: (v: { variant: ZipSizeModalVariant; fileName: string; fileSizeMB: number } | null) => void;
@@ -161,7 +160,7 @@ export function ViewPanels({
   pushToRepo, firebaseToken, firebaseUser, connectFirebase, disconnectFirebase,
   sessions, currentSessionId, togglePin, currentProSessionId,
   previewHistory, fileUploadConflict, resolveFileConflict, handleFilesUpload,
-  downloadAppZip, setActiveFile, wallet, setShowVishwakarmaUnlockModal, setShowAuth,
+  downloadAppZip, setActiveFile, wallet, setShowAuth,
   zipSizeModal, setZipSizeModal, v3Preview, previousFiles, onV3FixError, onBuildViaV5Prompt, onAutoFixInV5, onSwitchApp, problems = [],
 }: ViewPanelsProps) {
   return (
@@ -189,7 +188,7 @@ export function ViewPanels({
             messages={messages}
             chatInput={input}
             onChatInputChange={setInput}
-            onChatSend={() => handleSendForTab(activeAgent.startsWith('vishwakarma') ? 'asc_chat' as ViewType : 'nbi_pro_chat' as ViewType)}
+            onChatSend={() => handleSendForTab('nbi_pro_chat' as ViewType)}
             isChatLoading={isLoading}
             activeIntent={activeIntent}
             problems={problems}
@@ -228,11 +227,7 @@ export function ViewPanels({
               addLog('Cognitive memory layer successfully merged and redirected to main cockpit.', 'info');
             }}
             wallet={wallet}
-            onUnlockVishwakarma={() => setShowVishwakarmaUnlockModal(true)}
-            onSendDirect={(text: string) => handleSendForTab(
-              activeAgent.startsWith('vishwakarma') ? 'asc_chat' as ViewType : 'nbi_pro_chat' as ViewType,
-              text
-            )}
+            onSendDirect={(text: string) => handleSendForTab('nbi_pro_chat' as ViewType, text)}
           />
         </div>
       )}

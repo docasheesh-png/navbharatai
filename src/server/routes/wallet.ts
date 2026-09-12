@@ -157,7 +157,6 @@ export function registerWalletRoutes(app: Express): void {
         const data = snap.data();
         let updated = false;
 
-        if (data.hasVishwakarmaPass === undefined) { data.hasVishwakarmaPass = false; updated = true; }
         if (data.tokenBalance === undefined) { data.tokenBalance = 0; updated = true; }
         if (data.totalTokensPurchased === undefined) { data.totalTokensPurchased = 0; updated = true; }
         if (data.totalTokensUsed === undefined) { data.totalTokensUsed = 0; updated = true; }

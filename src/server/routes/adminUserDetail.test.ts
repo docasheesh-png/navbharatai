@@ -125,7 +125,7 @@ describe('the users list carries the two dates the admin asked for', () => {
 
   it('keeps the fields the panel already showed — this is an addition, not a replacement', () => {
     const src = usersListHandler();
-    for (const field of ['tokenBalance:', 'remainingBalance:', 'hasPro:', 'banned:', 'createdAt:']) {
+    for (const field of ['tokenBalance:', 'remainingBalance:', 'banned:', 'createdAt:']) {
       expect(src).toContain(field);
     }
   });

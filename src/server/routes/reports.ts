@@ -501,7 +501,6 @@ export function registerReportRoutes(app: Express): void {
         totalSpentInr: Number(w.total_money_spent ?? 0),
         banned: w.banned === true,
         banReason: typeof w.banReason === 'string' ? w.banReason : '',
-        hasPro: w.hasVishwakarmaPass === true,
       },
       builds: { ok: buildRows.ok, ...builds },
       publishedApps: {

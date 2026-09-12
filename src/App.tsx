@@ -248,9 +248,6 @@ export default function App() {
     wallet, setWallet,
     dailyUsage, setDailyUsage, incrementDailyUsage, isFreeLimitReached,
     myReferralCode,
-    showVishwakarmaChooser, setShowVishwakarmaChooser,
-    showVishwakarmaUnlockModal, setShowVishwakarmaUnlockModal,
-    vkTokenInput, setVkTokenInput,
     billingLogs, setBillingLogs,
     billingTransactions, setBillingTransactions,
     loadingWallet, setLoadingWallet,
@@ -266,7 +263,6 @@ export default function App() {
     isRedeemingCoupon, setIsRedeemingCoupon,
     couponError, setCouponError,
     couponSuccess, setCouponSuccess,
-    vkMode, setVkMode,
     reminderLimit, setReminderLimit,
     budgetLimit, setBudgetLimit,
     tempReminderLimit, setTempReminderLimit,
@@ -280,7 +276,6 @@ export default function App() {
     fetchWallet,
     createBillingOrder,
     storeRail, storeConfig, platformFeePct, buyStorePack, buyingProductId, storePurchaseNotice,
-    createVishwakarmaOrder,
     verifyBillingPayment,
     redeemPromoCoupon,
   } = usePaymentEngine({ user, addLog });
@@ -966,8 +961,6 @@ export default function App() {
       // L7: Escape — close any open modal overlay
       if (e.key === 'Escape') {
         if (showAuth) { setShowAuth(false); return; }
-        if (showVishwakarmaChooser) { setShowVishwakarmaChooser(false); return; }
-        if (showVishwakarmaUnlockModal) { setShowVishwakarmaUnlockModal(false); return; }
         if (showCheckoutModal) { setShowCheckoutModal(false); return; }
         if (showPurchaseFormPanel) { setShowPurchaseFormPanel(false); return; }
         if (showDeployPanel) { setShowDeployPanel(false); return; }
@@ -987,7 +980,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [canUndo, canRedo, undoCode, redoCode, addToast, showAuth, showVishwakarmaChooser, showVishwakarmaUnlockModal, showCheckoutModal, showPurchaseFormPanel, showDeployPanel, showContinueModal, focusMode]);
+  }, [canUndo, canRedo, undoCode, redoCode, addToast, showAuth, showCheckoutModal, showPurchaseFormPanel, showDeployPanel, showContinueModal, focusMode]);
 
   const [keys, setKeys] = useState<ApiKeys>(() => {
       const defaults = { gemini: '', groq: '', deepseek: '', openai: '', openrouter: '', claude: '' };
@@ -1555,7 +1548,6 @@ export default function App() {
   // Synchronized Auto-Save for All AI Agents (NBI Chat & AS Chat)
   useEffect(() => {
     if (!user) return; // ONLY save sessions if logged-in!
-    const isVishwakarma = false;
     const activeMsgs = messages;
     
     // Avoid saving if messages are empty or only contains welcome greetings
@@ -1820,7 +1812,7 @@ export default function App() {
     errorContext, preferredLanguage, user, keys, invalidKeys, selectedModel, apnapanProfile,
     hasGeneratedCode, generatedCode, pendingGHEdit, githubToken, files, FREE_DAILY_MESSAGES, isFreeLimitReached,
     setMessages, setInput, setIsLoading, setActiveIntent, setErrorContext, setIsSearching, setPreferredLanguage,
-    setMode, setShowAuth, setUser, setShowVishwakarmaUnlockModal, setGithubToken, setGithubRepoContext,
+    setMode, setShowAuth, setUser, setGithubToken, setGithubRepoContext,
     setFiles, setHasGeneratedCode, setIsDeployed, setIsAppBuilt,
     addLog, addToast, incrementDailyUsage, handleGHConfirmPush, learnFromMessage, updatePreview,
   });
@@ -2287,26 +2279,16 @@ export default function App() {
 
     setCurrentSessionId(session.id);
     const m = session.messages || [];
-    const isVishwakarmaSession = (session.agent && session.agent.startsWith('vishwakarma')) || m.some(msg => msg.text?.includes('Vishwakarma') || msg.text?.includes('AGENT: Vishwakarma') || msg.text?.includes('Vishwakarma VIP'));
+    // A session saved before Vishwakarma was deleted (2026-09-12). Its surface is gone, so it opens in
+    // the Pro chat — the same mapping resolveSessionSurface makes — rather than being unopenable.
+    const isLegacyBuilderSession = !!(session.agent && session.agent.startsWith('vishwakarma'));
     
     setFiles(session.files || {});
     if (session.mode) setMode(session.mode);
-    if (session.agent) {
-       if (session.agent.startsWith('vishwakarma')) {
-          setActiveAgent(session.agent);
-       } else {
-          setActiveAgent(session.agent);
-       }
-    }
+    if (session.agent) setActiveAgent(isLegacyBuilderSession ? 'navbharatai-pro' : session.agent);
     
-    if (isVishwakarmaSession) {
-       const targetAgentForSession = 'navbharatai';
-       setMessages(m);
-       toggleTab('asc_chat');
-    } else {
-      setMessages(m);
-       toggleTab('nbi_chat');
-    }
+    setMessages(m);
+    toggleTab(isLegacyBuilderSession ? 'nbi_pro_chat' : 'nbi_chat');
     
     addLog(`Resored session (UCI: ${session.uci || 'N/A'}): ${session.title}`, 'info');
   };
@@ -2871,7 +2853,6 @@ export default function App() {
         setTheme={setTheme}
         isThemePickerOpen={isThemePickerOpen}
         setIsThemePickerOpen={setIsThemePickerOpen}
-        setShowVishwakarmaChooser={setShowVishwakarmaChooser}
         setErrorContext={setErrorContext}
         sessions={sessions}
         onResumeSession={resumeSession}
@@ -2890,7 +2871,7 @@ export default function App() {
           </div>
         }>
         <div className={cn("flex-1 flex flex-col min-h-0 min-w-0 transition-all",
-          ['chat', 'nbi_chat', 'asc_chat', 'studio', 'preview', 'shell'].includes(activeView) ? "overflow-hidden h-[calc(100vh-3.5rem-var(--nb-safe-top))] supports-[height:100dvh]:h-[calc(100dvh-3.5rem-var(--nb-safe-top))] max-h-[calc(100vh-3.5rem-var(--nb-safe-top))] supports-[height:100dvh]:max-h-[calc(100dvh-3.5rem-var(--nb-safe-top))]" : "overflow-y-auto overflow-x-hidden custom-scrollbar",
+          ['chat', 'nbi_chat', 'studio', 'preview', 'shell'].includes(activeView) ? "overflow-hidden h-[calc(100vh-3.5rem-var(--nb-safe-top))] supports-[height:100dvh]:h-[calc(100dvh-3.5rem-var(--nb-safe-top))] max-h-[calc(100vh-3.5rem-var(--nb-safe-top))] supports-[height:100dvh]:max-h-[calc(100dvh-3.5rem-var(--nb-safe-top))]" : "overflow-y-auto overflow-x-hidden custom-scrollbar",
           // 8.1 — space for bottom nav on mobile (all views including chat). Gated on !focusMode so it
           // stays in lock-step with the bottom nav itself, which is hidden in focus mode (see the mobile
           // <nav> below, also `!focusMode`). Without this, focus mode reserved 56px for a nav that isn't
@@ -3885,7 +3866,6 @@ export default function App() {
             downloadAppZip={downloadAppZip}
             setActiveFile={setActiveFile}
             wallet={wallet}
-            setShowVishwakarmaUnlockModal={setShowVishwakarmaUnlockModal}
             setShowAuth={setShowAuth}
             zipSizeModal={zipSizeModal}
             setZipSizeModal={setZipSizeModal}
@@ -3896,7 +3876,6 @@ export default function App() {
         </ErrorBoundary>
       </main>
 
-{/* Vishwakarma Mode Chooser Modal Removed */}
 
               </div>
  
@@ -3913,17 +3892,6 @@ export default function App() {
         githubRedirectingMessage={githubRedirectingMessage}
         githubDebugData={githubDebugData}
         setGithubRedirectingMessage={setGithubRedirectingMessage}
-        showVishwakarmaUnlockModal={showVishwakarmaUnlockModal}
-        setShowVishwakarmaUnlockModal={setShowVishwakarmaUnlockModal}
-        wallet={wallet}
-        vkMode={vkMode}
-        platformFeePct={platformFeePct}
-        couponError={couponError}
-        couponSuccess={couponSuccess}
-        vkTokenInput={vkTokenInput}
-        setVkTokenInput={setVkTokenInput}
-        isRecharging={isRecharging}
-        createVishwakarmaOrder={createVishwakarmaOrder}
         showContinueModal={showContinueModal}
         setShowContinueModal={setShowContinueModal}
         setRestoreUciError={setRestoreUciError}

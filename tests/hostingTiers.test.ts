@@ -181,15 +181,49 @@ describe('every advertised entitlement has a real gate behind it', () => {
   const domains = src('src/server/routes/nbaiDomains.ts');
   const wallet = src('src/server/routes/wallet.ts');
 
+  /**
+   * REMIX — now advertised on BOTH surfaces, so both are checked here (2026-09-12).
+   *
+   * The tier line used to read "Remix any app in the gallery" and this test pinned the Community
+   * Gallery's inline gate. App Mart's remix had no gate at all, so the same sentence on the same
+   * pricing page was true on one screen and false on the other. The decision moved into
+   * `remixPlanGate.ts` — shared by both routes — and the tier line now names both, so this test
+   * follows it there and covers the surface that was missing rather than only the one that had it.
+   */
+  const storeRoutes = src('src/server/routes/navStore.ts');
+  const gateModule = src('src/server/lib/remixPlanGate.ts');
+
   it('REMIX is refused without an active plan, and the refusal opens the purchase panel', () => {
-    const remix = gallery.slice(gallery.indexOf("app.post('/api/gallery/:id/remix'"));
-    expect(remix).toContain('probeHostingPlan');
-    expect(remix).toContain('needsPlan: true');
-    expect(remix).toContain('402');
+    // The refusal the client acts on — `needsPlan` + a price — is produced in ONE place.
+    expect(gateModule).toContain('needsPlan: true');
+    expect(gateModule).toContain('status: 402');
+    expect(gateModule).toContain('priceInr');
     // Fails OPEN on an outage and exempts the admin/tester list — the same shape as the domain gate,
     // so the two cannot drift into treating an outage differently.
-    expect(remix).toContain('plan.known && !plan.active');
-    expect(remix).toContain('isAgentV3FreeUser');
+    expect(gateModule).toContain('if (!f.planKnown) return { allow: true }');
+    expect(gateModule).toContain('if (f.freeListed) return { allow: true }');
+  });
+
+  it('BOTH advertised remix surfaces actually run that gate', () => {
+    for (const [label, route] of [['gallery', gallery], ['App Mart', storeRoutes]] as const) {
+      const remix = route.slice(route.indexOf(label === 'gallery'
+        ? "app.post('/api/gallery/:id/remix'"
+        : "app.post('/api/nav-store/web/app/:id/remix'"));
+      expect(remix, label).toContain('remixGate(');
+      expect(remix, label).toContain('remixRefusal(');
+      expect(remix, label).toContain('probeHostingPlan');
+      expect(remix, label).toContain('isAgentV3FreeUser');
+    }
+  });
+
+  it('the tier line names every surface the gate actually covers', () => {
+    // A benefit line naming one surface while the gate covers two is how the drift started.
+    for (const tier of HOSTING_TIERS) {
+      const remixLine = tier.includes.find((i) => i.toLowerCase().includes('remix'));
+      expect(remixLine, tier.id).toBeTruthy();
+      expect(remixLine!.toLowerCase()).toContain('gallery');
+      expect(remixLine!.toLowerCase()).toContain('app mart');
+    }
   });
 
   it('the DOMAIN COUNT is counted against the tier, not merely printed on the card', () => {

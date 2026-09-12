@@ -95,7 +95,20 @@ describe('the settlement order is the billing law (source pins — the order is 
 
   it('the owner and a past buyer are never charged', () => {
     expect(remixRoute).toContain('buyerUid !== found.uid');
-    expect(remixRoute).toContain('hasPurchased(');
+    /**
+     * `hasPurchased` moved EARLIER in the handler on 2026-09-12 — above the `PAID REMIX` marker this
+     * slice starts at — because the plan gate needs the same answer: a past buyer is exempt from the
+     * plan requirement too ("buy once, take the code whenever you like"). So it is asserted against
+     * the WHOLE handler, which is the honest scope for the claim, and the paid block now REUSES that
+     * result rather than reading the record a second time.
+     */
+    const whole = route.slice(
+      route.indexOf("app.post('/api/nav-store/web/app/:id/remix'"),
+      route.indexOf("app.get('/api/nav-store/web/purchases'"),
+    );
+    expect(whole).toContain('hasPurchased(');
+    expect(whole).toContain('alreadyPurchased:');
+    expect(remixRoute).toContain('const owned = boughtThisApp;');
   });
 
   it('a failed creator credit lands in the reconciliation trail, never silently lost', () => {

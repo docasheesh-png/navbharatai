@@ -49395,3 +49395,54 @@ All three PRs left open by other sessions are now merged: **#2848** (the apps-pr
 what revealed that ROADMAP 0.1 was already DONE and Phase 2 unblocked, correcting an answer this session
 had given the admin from a stale picture), **#2851** (cheap-engine lead by live health), and **#2852**
 (the vault device lock).
+
+---
+
+## 2026-09-12 — The vault's phone lock was real, and the screen pointed at the wrong door
+
+**The evidence.** The admin, who had just been told the device lock exists, opened Secrets & API Keys on
+an iPhone in Safari and asked: *"kya yahan simple app lock nahi lag sakta… jaise UPI se payment kare to
+lock ko unlock karna hota hai, waise hi simple phone lock nahi lag sakta hai?"* — with a screenshot in
+which **the phone-lock button was visibly present**. `Set up iPhone lock` only renders when the browser
+has confirmed a platform authenticator is usable, so Face ID was available, offered, and one tap away.
+
+**The root cause, and why every test stayed green.** The button was the small outline one at the bottom
+in uppercase micro-type; `Use my account password` held the primary indigo. The screen's visual
+hierarchy said the password was the way in and the phone lock was an extra. Nothing was broken — the
+lock is genuinely server-verified (#2852) and all 93 of its tests passed throughout. **A correct
+feature can still answer a different question than the user is asking, and no security test can see
+that.**
+
+**The fix (`VaultLockGate.tsx`).** One explicit rule replaces an incidental layout: whenever the device
+can do face / fingerprint / PIN, **that is the primary button** — already set up (unlock) or not yet
+(set up) — and the account door steps down to secondary. `deviceIsPrimary = hasDeviceLock === true ||
+offerSetUp`, with `offerSetUp = canUseDevice === true && hasDeviceLock !== true` so nobody is ever sent
+to a prompt that cannot appear. 🔒 The account door is **never** hidden or gated: a device with no lock
+must not strand somebody outside their own API keys, which is the same reasoning that put two doors on
+this screen to begin with.
+
+**Two real bugs the same screenshot exposed.**
+1. **A Google account needed two taps for nothing.** The first tap only set `askPassword`, which reveals
+   a password field a Google user never gets — so the button read `Confirm and unlock` above no field to
+   confirm anything in. It now goes straight to the popup, and reads **`Confirm with Google`**: a label
+   naming what will actually happen rather than promising a field.
+2. **Setting up on a password account taught by error message.** The first tap fired the registration,
+   which threw *"Enter your account password to set up the device lock"* — an error used as an
+   instruction, which is how a one-tap feature comes to feel broken. It now reveals the field and waits.
+
+**Regression tests** (`vaultLockWiring.test.ts`, +7): the set-up button carries the primary style and
+not the uppercase micro-type; the device path renders above the account path; the account button is not
+preceded by a `&& (` guard (i.e. the fallback door cannot be conditionally hidden); `offerSetUp` is
+gated on a real capability check; the Google path is one tap; the password path reveals rather than
+errors. **Each was confirmed to FAIL when the old layout is restored** — the style assertion was
+verified by actually reverting it and watching it go red, since a wiring test that cannot fail is the
+class of test this repo has been bitten by before.
+
+**Still open, and deliberately not guessed:** the **Android app** remains untested. The screenshot was
+Safari, not the Capacitor shell, so it says nothing about the WebView. The registry's honest "unknown"
+for Android stands until somebody opens the installed app. iOS's shell (`capacitor://localhost`) still
+genuinely cannot do WebAuthn — that limit is unchanged by this work.
+
+Gate on the final state: `typecheck` 0 · `noUnusedImports` clean · `typecheck:server` 0 · `build` ok ·
+`test:bundle` within budget · `boot:check` PASS · `vitest run` **1,567 files / 21,540 passed / 1
+skipped / 0 failed**.

@@ -50273,3 +50273,17 @@ Pro v5.0"* in ~69 files. The admin asked for plain *"NavBharatAI Pro"*. That is 
 the internal identifiers (`AgentV3`, `/api/agentv3`, and above all the `AGENTV3_*` **Cloud Run env
 keys**) must NOT be renamed — renaming an env key that is set in Cloud Run breaks production instantly,
 with nothing in the code able to detect it.
+
+**A bug of my own, caught before it merged.** `generate_ai` was made to DEFAULT to the no-key path — and
+the default did not consult the flag. With `APP_AI_GATEWAY` unset, publishing stamps no token, so
+`window.NavAI` is never defined and `isAiReady()` is false **forever**, while the generated helper says
+*"The assistant becomes available once this app is published."* The user would publish, be told the same
+thing again, and have nothing anywhere to explain it — a status indicator reporting a state that cannot
+arrive, which is exactly what the real-features rule forbids. It also broke this flag's own promise that
+unset means today's behaviour **exactly**.
+
+`resolveAiProvider` now takes the flag: with the gateway off, an unspecified provider is an error naming
+the two BYO providers — the same sentence the tool gave before this feature existed. The TOOL CATALOG
+follows too (`defaultToolCatalog()` is a function, which is what makes that possible without a second
+tool): with the gateway off it advertises the BYO-only schema and never mentions the no-key path, so the
+builder is never steered toward an integration that cannot work. Four tests pin both directions.

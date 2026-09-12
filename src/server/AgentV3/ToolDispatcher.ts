@@ -271,6 +271,7 @@ import { generateTracing } from '../lib/TracingGenerator';
 import { generateErrorTrackingIntegration, isErrorTrackingProvider } from '../lib/ErrorTrackingGenerator';
 import { generateFeatureFlagIntegration, isFeatureFlagProvider } from '../lib/FeatureFlagGenerator';
 import { generateAiIntegration, resolveAiProvider } from '../lib/AiGenerator';
+import { appAiGatewayEnabled } from '../lib/appAiGateway';
 import { generateGeocodingIntegration, isGeocodingProvider } from '../lib/GeocodingGenerator';
 import { generateTranslationIntegration, isTranslationProvider } from '../lib/TranslationGenerator';
 import { generateModerationIntegration, isModerationProvider } from '../lib/ModerationGenerator';
@@ -6753,8 +6754,15 @@ export class ToolDispatcher {
         // ABSENT ⇒ the NavBharatAI gateway: the app's assistant works on the owner's existing
         // balance with no key pasted anywhere, which is the only default that does not stop at a
         // wall (ROADMAP §13, 3.1). A provider that is NAMED but unrecognised is still an error.
-        const aiProvider = resolveAiProvider(optStr(input, 'provider'));
-        if (!aiProvider) return 'generate_ai: pass provider = "navbharat" (default, no key needed) | "openai" | "anthropic".';
+        const aiGatewayOn = appAiGatewayEnabled();
+        const aiProvider = resolveAiProvider(optStr(input, 'provider'), aiGatewayOn);
+        if (!aiProvider) {
+          // With the gateway OFF the no-key path does not exist, so the message must not offer it —
+          // this is the same sentence this tool gave before the gateway was built.
+          return aiGatewayOn
+            ? 'generate_ai: pass provider = "navbharat" (default, no key needed) | "openai" | "anthropic".'
+            : 'generate_ai: pass provider = "openai" | "anthropic".';
+        }
         const aicfg = generateAiIntegration(aiProvider);
         const aiWritten: string[] = [];
         for (const [path, content] of Object.entries(aicfg.files)) {

@@ -195,12 +195,24 @@ export function isAiProvider(v: unknown): v is AiProvider {
 /**
  * Which provider an unspecified request means.
  *
- * ABSENT means the NavBharatAI gateway, because that is the one that works with nothing pasted
- * anywhere — the default has to be the path that does not stop at a wall. A provider that is PRESENT
- * but unrecognised is still an error: silently substituting a default for a typo would hand somebody
- * a different integration from the one they named.
+ * ABSENT means the NavBharatAI gateway — the one that works with nothing pasted anywhere, so the
+ * default is the path that does not stop at a wall.
+ *
+ * 🔴 BUT ONLY WHEN THE GATEWAY IS ACTUALLY SWITCHED ON, and this parameter exists because the first
+ * version of this function did not have it. With `APP_AI_GATEWAY` unset, publishing stamps no token,
+ * so `window.NavAI` is never defined and `isAiReady()` is false FOREVER — while the generated helper
+ * says "The assistant becomes available once this app is published". The user would publish, and be
+ * told the same thing again, with nothing anywhere to explain it. That is a status indicator
+ * reporting a state that cannot arrive, which is precisely what the real-features rule forbids — and
+ * it also broke the flag's own promise that unset means today's behaviour EXACTLY.
+ *
+ * So with the gateway off, an unspecified request is an error naming the two BYO providers: today's
+ * behaviour, unchanged, exactly as it was before this feature existed.
+ *
+ * A provider that is PRESENT but unrecognised is still an error either way: silently substituting a
+ * default for a typo would hand somebody a different integration from the one they named.
  */
-export function resolveAiProvider(v: unknown): AiProvider | null {
-  if (v === undefined || v === null || v === '') return 'navbharat';
+export function resolveAiProvider(v: unknown, gatewayEnabled: boolean): AiProvider | null {
+  if (v === undefined || v === null || v === '') return gatewayEnabled ? 'navbharat' : null;
   return isAiProvider(v) ? v : null;
 }

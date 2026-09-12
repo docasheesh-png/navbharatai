@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { generateAiIntegration, resolveAiProvider, isAiProvider } from './AiGenerator';
+import { defaultToolCatalog } from '../AgentV3/ToolCatalog';
 
 /**
  * THE AI GATEWAY — the wiring the pure core cannot see (ROADMAP §13, 3.1).
@@ -135,17 +136,66 @@ describe('minting the token at publish', () => {
 });
 
 describe('what a generated app is given', () => {
-  it('the no-key assistant is the DEFAULT when no provider is named', () => {
-    expect(resolveAiProvider(undefined)).toBe('navbharat');
-    expect(resolveAiProvider('')).toBe('navbharat');
+  it('the no-key assistant is the DEFAULT when no provider is named AND the gateway is on', () => {
+    expect(resolveAiProvider(undefined, true)).toBe('navbharat');
+    expect(resolveAiProvider('', true)).toBe('navbharat');
   });
 
-  it('🔒 a NAMED but unrecognised provider is still an error', () => {
+  it('🔒 with the gateway OFF an unnamed provider is an ERROR, not the no-key path', () => {
+    // Publishing stamps no token while the flag is unset, so window.NavAI is never defined and
+    // isAiReady() is false FOREVER — while the generated helper says "becomes available once this app
+    // is published". The user would publish and be told the same thing again. That is a status
+    // indicator reporting a state that cannot arrive, and it broke the flag's own promise that unset
+    // means today's behaviour exactly.
+    expect(resolveAiProvider(undefined, false)).toBeNull();
+    expect(resolveAiProvider('', false)).toBeNull();
+    // A named BYO provider still works with the gateway off — that path never needed it.
+    expect(resolveAiProvider('openai', false)).toBe('openai');
+    expect(resolveAiProvider('anthropic', false)).toBe('anthropic');
+  });
+
+  it('🔒 a NAMED but unrecognised provider is still an error, either way', () => {
     // Substituting a default for a typo would hand somebody a different integration from the one
     // they asked for.
-    expect(resolveAiProvider('openai')).toBe('openai');
-    expect(resolveAiProvider('gemini')).toBeNull();
+    expect(resolveAiProvider('openai', true)).toBe('openai');
+    expect(resolveAiProvider('gemini', true)).toBeNull();
+    expect(resolveAiProvider('gemini', false)).toBeNull();
     expect(isAiProvider('navbharat')).toBe(true);
+  });
+
+  it('🔒 the TOOL CATALOG follows the flag — it never advertises a path that cannot work', () => {
+    // With the gateway off, steering the builder toward the no-key integration would produce an app
+    // that tells its owner to publish for an assistant that never arrives.
+    const before = process.env.APP_AI_GATEWAY;
+    try {
+      delete process.env.APP_AI_GATEWAY;
+      const off = defaultToolCatalog().find((t) => t.name === 'generate_ai')!;
+      expect(off.description).not.toContain('NO API KEY');
+      expect((off.input_schema as { properties: { provider: { enum: string[] } } }).properties.provider.enum)
+        .toEqual(['openai', 'anthropic']);
+      expect((off.input_schema as { required?: string[] }).required).toEqual(['provider']);
+
+      process.env.APP_AI_GATEWAY = 'on';
+      const on = defaultToolCatalog().find((t) => t.name === 'generate_ai')!;
+      expect(on.description).toContain('NO API KEY');
+      expect((on.input_schema as { required?: string[] }).required).toBeUndefined();
+    } finally {
+      if (before === undefined) delete process.env.APP_AI_GATEWAY;
+      else process.env.APP_AI_GATEWAY = before;
+    }
+  });
+
+  it('there is exactly ONE generate_ai in the catalog, whichever way the flag is set', () => {
+    const before = process.env.APP_AI_GATEWAY;
+    try {
+      for (const v of [undefined, 'on']) {
+        if (v === undefined) delete process.env.APP_AI_GATEWAY; else process.env.APP_AI_GATEWAY = v;
+        expect(defaultToolCatalog().filter((t) => t.name === 'generate_ai').length, String(v)).toBe(1);
+      }
+    } finally {
+      if (before === undefined) delete process.env.APP_AI_GATEWAY;
+      else process.env.APP_AI_GATEWAY = before;
+    }
   });
 
   it('needs no key, no env and no dependency — that is the whole point', () => {

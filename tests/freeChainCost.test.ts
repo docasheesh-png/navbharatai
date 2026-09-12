@@ -97,3 +97,42 @@ describe('the free professional fallback — the universe that already had it ri
     expect(body).not.toContain('gemini-2.5-pro');
   });
 });
+
+/**
+ * THE SAME CLASS, IN A SECOND PLACE — and finding it twice is what makes it a class rather than a bug.
+ *
+ * Image generation is a free-first ladder too: Pollinations (₹0) → Gemini (paid) → Grok (paid). Its
+ * allowance gate used to run only when the FREE provider was switched off globally, on the reasoning
+ * "free provider on ⇒ the image is free". That is true only while the free provider SUCCEEDS, and the
+ * paid rungs exist precisely for when it does not — the route's own log line says "trying paid
+ * fallbacks". So a bad minute at Pollinations served a PAID image with nothing metered.
+ */
+describe('image generation — the paid rungs are metered by who SERVES, not by a flag', () => {
+  const img = readFileSync(join(process.cwd(), 'src/server/routes/imageGen.ts'), 'utf8');
+
+  it('🔒 the allowance is no longer decided by the free-provider flag alone', () => {
+    expect(img).not.toContain('if (!pollinationsEnabled()) {\n      gate = await gateToolAction');
+    expect(img).toContain('const allowPaidRung = async ()');
+  });
+
+  it('🔒 EVERY paid rung checks the allowance BEFORE it is called', () => {
+    // Both paid providers, each guarded, and each guard ahead of its own network call.
+    const gem = img.indexOf('if (geminiImageConfigured()) {');
+    const grok = img.indexOf('const gKey = grokImageKey();');
+    expect(gem).toBeGreaterThan(-1);
+    expect(grok).toBeGreaterThan(-1);
+    expect(img.slice(gem, img.indexOf('generateContent', gem))).toContain('await allowPaidRung()');
+    expect(img.slice(grok, img.indexOf('api.x.ai', grok))).toContain('await allowPaidRung()');
+  });
+
+  it('🔒 only a PAID delivery burns an allowance — a free image still costs the user nothing', () => {
+    expect(img).toContain('if (paidRung && gate && gate.allow && gate.countsAgainstFree)');
+    // The free rung delivers without the paid flag; both paid rungs pass it.
+    expect(img).toContain('deliver(pr.image); return;');
+    expect((img.match(/deliver\(img, true\); return;/g) || []).length).toBe(2);
+  });
+
+  it('sign-in is still required regardless of any flag — an anonymous caller can never spend', () => {
+    expect(img).toContain("requireAccountForCostlyAi(req, 'image generation')");
+  });
+});

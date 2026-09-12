@@ -66,19 +66,35 @@ export function registerImageGenRoutes(app: Express): void {
       return;
     }
 
-    // Image generation is FREE for the user while the free provider (Pollinations) is on (admin 2026-08-01:
-    // "free denge user ko"): it costs NavBharatAI ₹0, so there is NO paywall/quota — sign-in above plus the
-    // hourly rate limiter are the only guards. The Professional-Pass allowance gate re-applies ONLY when the
-    // free provider is turned OFF, because then images fall through to the PAID providers (Gemini/Grok) and
-    // the real per-image cost must be metered again.
+    // Image generation is FREE for the user while the free provider (Pollinations) SERVES the image
+    // (admin 2026-08-01: "free denge user ko") — it costs NavBharatAI ₹0, so there is no paywall on it.
+    //
+    // 🔴 MONEY AUDIT 2026-09-12 — THE GATE USED TO KEY OFF THE FLAG, NOT OFF WHO ACTUALLY SERVED.
+    // It ran only `if (!pollinationsEnabled())`, on the reasoning "free provider on ⇒ the image is
+    // free". That holds only while the free provider SUCCEEDS — and the ladder below exists precisely
+    // for when it does not: its own log line says "trying paid fallbacks". So a bad minute at
+    // Pollinations (down, timeout, rate-limited — and a caller can provoke the last one) delivered a
+    // PAID Gemini/Grok image with no allowance checked and nothing metered. Same shape as the free
+    // chat chain in this audit: a free-first ladder whose paid rungs were unmetered.
+    //
+    // 🔒 THE FIX IS TO METER BY WHO SERVES, NOT BY A FLAG. The allowance is resolved LAZILY, the first
+    // time the ladder is about to touch a paid provider, and BEFORE that provider is called — checking
+    // after spending would be theatre. A free image still passes through without a gate lookup, so the
+    // ordinary path is unchanged and costs nothing extra.
     let gate: Awaited<ReturnType<typeof gateToolAction>> | null = null;
-    if (!pollinationsEnabled()) {
-      gate = await gateToolAction(account.uid, account.email, 'image');
-      if (!gate.allow) {
-        res.status(gate.status).json(gate.body);
-        return;
+    let gateRefused = false;
+    const allowPaidRung = async (): Promise<boolean> => {
+      if (gateRefused) return false;
+      if (!gate) {
+        gate = await gateToolAction(account.uid, account.email, 'image');
+        if (!gate.allow) {
+          gateRefused = true;
+          if (!res.headersSent) res.status(gate.status).json(gate.body);
+          return false;
+        }
       }
-    }
+      return true;
+    };
 
     try {
       // ART DIRECTION (2026-08-14). The prompt was the ceiling, not the model: what a user typed went
@@ -104,8 +120,10 @@ export function registerImageGenRoutes(app: Express): void {
       // Deliver a generated image: only a genuinely-delivered image spends a PAID allowance (and only when
       // the paywall is active, i.e. the free provider is off — see above). A free Pollinations image never
       // counts against a quota. A failed rung never spends anything.
-      const deliver = (img: { mimeType: string; base64: string }) => {
-        if (gate && gate.allow && gate.countsAgainstFree) burnToolAction(gate.uid, 'image');
+      const deliver = (img: { mimeType: string; base64: string }, paidRung = false) => {
+        // Only a PAID rung spends an allowance. A free Pollinations image never counts against a quota,
+        // and a failed rung never spends anything — the burn happens on delivery, not on attempt.
+        if (paidRung && gate && gate.allow && gate.countsAgainstFree) burnToolAction(gate.uid, 'image');
         // `notes` carries the honest caveats (a style chip that was overruled, or the warning that
         // image engines cannot spell). Surfacing them is the point: a user who knows their shop name
         // may come out garbled can shorten it, where a silent bad spelling just wastes their time.
@@ -139,6 +157,8 @@ export function registerImageGenRoutes(app: Express): void {
 
       // PRIMARY (paid) provider — Gemini image models (skipped entirely when no Gemini key is present).
       if (geminiImageConfigured()) {
+        // First paid rung: the allowance is checked HERE, before a rupee is spent.
+        if (!(await allowPaidRung())) return;
         const { GoogleGenAI } = await import('@google/genai');
         const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
         const ai = new GoogleGenAI({ apiKey });
@@ -150,7 +170,7 @@ export function registerImageGenRoutes(app: Express): void {
               config: { responseModalities: ['IMAGE', 'TEXT'] },
             }));
             const img = parseImagePartsResponse(result);
-            if (img) { deliver(img); return; }
+            if (img) { deliver(img, true); return; }
             if (isImageRefusal(result)) {
               sawRefusal = true;
               console.warn(`[IMAGE_GEN] ${model} declined the prompt (content refusal): ${extractResponseText(result) || 'no reason given'}`);
@@ -171,6 +191,8 @@ export function registerImageGenRoutes(app: Express): void {
       // already-configured GROK_API_KEY/XAI_API_KEY; invisible to the user (still "NavBharatAI").
       const gKey = grokImageKey();
       if (gKey) {
+        // Also a PAID rung — reached when Gemini is absent or failed, so it needs the same check.
+        if (!(await allowPaidRung())) return;
         const gModel = grokImageModel();
         try {
           const r = await timeout(fetch('https://api.x.ai/v1/images/generations', {
@@ -181,7 +203,7 @@ export function registerImageGenRoutes(app: Express): void {
           const data: any = await r.json().catch(() => null);
           if (r.ok) {
             const img = parseGrokImageResponse(data);
-            if (img) { deliver(img); return; }
+            if (img) { deliver(img, true); return; }
             diag.push(`${gModel}: no image in response`);
           } else {
             diag.push(`${gModel}: ${r.status} ${JSON.stringify(data?.error || data || '').slice(0, 140)}`);

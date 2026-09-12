@@ -49235,7 +49235,7 @@ coupon price table is server-side and an UNSET value means no coupon is redeemab
 is atomic; the weekly gift writes its lifetime-cap counter in the SAME transaction as the credit; a
 failed build is never charged; an unmeasured provider charges zero rather than an invented number.
 
-**Four real leaks, all fixed here.**
+**Five real leaks, all fixed here.**
 
 1. **The free chat's paid fallback was the dearest model on the card.** `gemini-2.5-pro` ($10/MTok out)
    was the first rung after the free GLM leader, with `gemini-2.5-flash` ($2.50) below it — so every
@@ -49253,6 +49253,17 @@ failed build is never charged; an unmeasured provider charges zero rather than a
    could both pass it and the retry would credit again. Now read in-transaction, before the wallet. The
    sibling Cashfree path was checked and was already correct — it claims PENDING→SUCCESS atomically,
    which is the pattern the store path lacked.
+
+5. **Image generation had leak 1's shape, in a second place.** Its allowance gate ran only when the
+   FREE provider was switched off globally — "free provider on ⇒ the image is free" — which holds only
+   while that provider SUCCEEDS. The paid Gemini/Grok rungs below it exist for when it does not, and
+   they delivered unmetered. Now metered by WHO SERVES: the allowance is resolved lazily before the
+   first paid rung is called, and only a paid delivery burns it.
+
+**The class, named: a free-first ladder whose paid rungs are ungoverned.** Leaks 1 and 5 are the same
+mistake in two features — the free leader is reasoned about as if it were the whole ladder. Whenever a
+free or cheap provider leads, two questions must be answered about the rungs beneath it: in what ORDER
+are they climbed, and WHO PAYS when one of them serves.
 
 **The class behind 2 and 3, and what now prevents it:** one balance in two fields, with writers free to
 move one. `walletMirror.ts` takes the delta once and derives both — calling it and moving a single view

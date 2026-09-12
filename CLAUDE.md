@@ -1120,7 +1120,7 @@ the code (it is actually read somewhere) on 2026-07-11.
 ### 💴 FULL MONEY AUDIT — every paying code path read end to end (admin-asked 2026-09-12)
 
 The admin asked for a microscopic audit of every money path: *"kahi koi money leak to nahi hai."* 53
-money-touching modules were mapped and walked. **Four real leaks were found, all verified from code
+money-touching modules were mapped and walked. **Five real leaks were found, all verified from code
 rather than reasoned about, and all fixed in the same change.** The rest of the money surface held up —
 the Cashfree credit is transactional and derives tokens from the VERIFIED paid amount; the coupon table
 is server-side with an ATOMIC one-time claim; the weekly gift is transactional with its lifetime cap
@@ -1167,6 +1167,22 @@ already-credited balance and credited the same purchase again. The receipt is no
 (before the wallet), which puts it in the conflict set. **The sibling Cashfree path was checked and was
 already right** — it claims the PENDING→SUCCESS flip inside a transaction and only the winner credits,
 which is exactly the pattern the store path was missing.
+
+**🔴 5. IMAGE GENERATION HAD LEAK 1'S SHAPE, IN A SECOND PLACE — which is what makes it a CLASS.**
+`/api/image/generate` is a free-first ladder too: Pollinations (₹0) → Gemini (paid) → Grok (paid). Its
+allowance gate ran only `if (!pollinationsEnabled())` — the reasoning being "free provider on ⇒ the image
+is free". That holds only while the free provider SUCCEEDS, and the paid rungs exist precisely for when
+it does not; the route's own log line says *"trying paid fallbacks"*. So a bad minute at Pollinations
+(down, timeout, rate-limited — and a caller can provoke the last one) delivered a PAID image with **no
+allowance checked and nothing metered**. Now the allowance is resolved LAZILY, the first time the ladder
+is about to touch a paid provider and BEFORE that provider is called, and only a PAID delivery burns it —
+a free image still passes with no gate lookup, so the ordinary path is unchanged.
+
+🔒 **THE CLASS, NAMED SO IT IS RECOGNISED NEXT TIME: A FREE-FIRST LADDER WHOSE PAID RUNGS ARE UNGOVERNED.**
+Leaks 1 and 5 are the same mistake in two features — the cheap/free leader is reasoned about as if it
+were the whole ladder, and the fallback nobody expects to fire is left dearest-first (1) or unmetered
+(5). **Whenever a free or cheap provider leads, two questions must be answered about the rungs BELOW it:
+in what ORDER are they climbed (cheapest first?), and WHO PAYS when one of them serves?**
 
 🔒 **THE ROOT CAUSE BEHIND BOTH 2 AND 3, AND THE RULE THAT NOW PREVENTS THE CLASS:** the wallet holds ONE
 balance in TWO fields, and every bug here came from a writer that moved one of them. `walletMirror.ts`

@@ -48659,6 +48659,22 @@ transform`, `filter`, `backdrop-filter`, `perspective`) by attribute substring, 
 or scroll container — whoever later writes `transition-colors` on a wrapper has no way to know they
 are opting every dialog beneath it out of the viewport.
 
+### The one trade-off, stated rather than hidden
+`transform: translateZ(0)` also created a **stacking context** on every element it touched. Removing it
+restores standard paint order, so a non-positioned element carrying a `transition-` class that happened
+to be painted above a later, positioned sibling with no `z-index` will now paint behind it. That
+combination is rare, and any UI depending on it was depending on an accident — the rule was written for
+GPU compositing, never for stacking. Preserving it with `isolation: isolate` was considered and
+rejected: it would keep the over-broad selector alive to protect behaviour nobody designed. If a
+stacking issue does surface, it is a real z-index bug in that component that the transform was masking,
+and it should be fixed there.
+
+**Sibling check done (rule 3):** no overlay in the app compensates for the old mispositioning — the only
+offsets on any `fixed inset-0` overlay are `pt-4` / `pt-24`, and the `pt-24` one (`AppModals.tsx`)
+renders OUTSIDE the affected container (App.tsx:3908, past its close at 3894), so it was never shifted.
+`position: absolute` descendants are unaffected too: the container's padding box and `<main>`'s (the
+`relative` ancestor that now resolves them) are the same box.
+
 ### (3) Info button removed
 Admin: *"info button hata do"*. The account sheet opens by clicking the user's **name** — one way in,
 not two doing the same thing. The name keeps its hover underline and gains a tooltip so it still reads

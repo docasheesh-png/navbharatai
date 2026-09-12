@@ -621,6 +621,16 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       };
 
       const wallet = await runTransaction(db, async (tx: any) => {
+        // 🔴 MONEY AUDIT 2026-09-12 — THE IDEMPOTENCY CHECK MUST BE INSIDE THE TRANSACTION.
+        // The `existing` read above is a cheap fast path, but it is OUTSIDE, and the transaction used
+        // to read only the WALLET. So two concurrent deliveries of the SAME purchase token — precisely
+        // what the comment above describes as normal (the store re-delivers on relaunch, the app
+        // retries on flaky networks) — could both pass the outside check; Firestore would detect the
+        // clash on the wallet alone, retry the loser, and the retry would re-read the already-credited
+        // balance and credit the same purchase A SECOND TIME. Reading `txRef` in-transaction makes the
+        // receipt part of the conflict set, so the second one sees SUCCESS and credits nothing.
+        const already = await tx.get(txRef);
+        if (already.exists() && already.data()?.paymentStatus === 'SUCCESS') return null;
         const walletRef = doc(db, 'user_token_wallets', userId);
         const walletSnap = await tx.get(walletRef);
         const walletData = walletSnap.exists() ? walletSnap.data() : { userId, tokenBalance: 0, totalTokensPurchased: 0, totalTokensUsed: 0, totalMoneySpent: 0, walletLedger: [], remaining_balance: 0, total_balance: 0 };
@@ -629,6 +639,9 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         tx.set(txRef, txData);
         return credited;
       });
+      if (wallet === null) {
+        return res.json({ alreadyProcessed: true, balanceAdded: pack.creditInr });
+      }
 
       return res.json({
         ok: true,

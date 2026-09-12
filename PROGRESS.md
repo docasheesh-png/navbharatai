@@ -49235,7 +49235,7 @@ coupon price table is server-side and an UNSET value means no coupon is redeemab
 is atomic; the weekly gift writes its lifetime-cap counter in the SAME transaction as the credit; a
 failed build is never charged; an unmeasured provider charges zero rather than an invented number.
 
-**Three real leaks, all fixed here.**
+**Four real leaks, all fixed here.**
 
 1. **The free chat's paid fallback was the dearest model on the card.** `gemini-2.5-pro` ($10/MTok out)
    was the first rung after the free GLM leader, with `gemini-2.5-flash` ($2.50) below it — so every
@@ -49247,6 +49247,12 @@ failed build is never charged; an unmeasured provider charges zero rather than a
 3. **The admin token adjustment ASSIGNED `remaining_balance` from `tokenBalance`** rather than applying
    the delta. For a Pass buyer the two views differ by the Pass price permanently, so a "+1 token"
    adjustment would have wiped real money; on a ₹-only-credited wallet it minted some.
+
+4. **A store purchase could credit twice under a concurrent retry.** The receipt check sat outside the
+   transaction while the transaction read only the wallet, so two deliveries of the same purchase token
+   could both pass it and the retry would credit again. Now read in-transaction, before the wallet. The
+   sibling Cashfree path was checked and was already correct — it claims PENDING→SUCCESS atomically,
+   which is the pattern the store path lacked.
 
 **The class behind 2 and 3, and what now prevents it:** one balance in two fields, with writers free to
 move one. `walletMirror.ts` takes the delta once and derives both — calling it and moving a single view

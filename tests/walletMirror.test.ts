@@ -93,3 +93,45 @@ describe('wiring — every wallet credit is transactional, and none of them assi
     expect(block).toContain('if (snap.exists()) return false;');
   });
 });
+
+describe('store purchases — one purchase token can only ever credit once', () => {
+  const payment = readFileSync(join(process.cwd(), 'src/server/routes/payment.ts'), 'utf8');
+  const block = (() => {
+    const at = payment.indexOf("app.post('/api/payment/store/verify'");
+    return at > -1 ? payment.slice(at) : payment.slice(payment.indexOf('verifyStorePurchase'));
+  })();
+
+  /**
+   * 🔴 The receipt check used to live OUTSIDE the transaction, which reads as idempotent and is not.
+   * The transaction touched only the WALLET, so two concurrent deliveries of the SAME token — the
+   * store re-delivering on relaunch, the app retrying on a flaky network, both named in that route's
+   * own comments as normal — could both pass the outside check. Firestore would see the clash on the
+   * wallet alone, retry the loser, and the retry would re-read the already-credited balance and credit
+   * the same purchase again. Reading the receipt IN-transaction puts it in the conflict set.
+   */
+  it('🔒 the receipt is read INSIDE the transaction, before the wallet', () => {
+    const tx = block.indexOf('runTransaction(');
+    expect(tx).toBeGreaterThan(-1);
+    const body = block.slice(tx, tx + 1400);
+    expect(body).toContain('await tx.get(txRef)');
+    expect(body).toContain("already.data()?.paymentStatus === 'SUCCESS'");
+    expect(body.indexOf('await tx.get(txRef)')).toBeLessThan(body.indexOf('await tx.get(walletRef)'));
+  });
+
+  it('a second delivery credits nothing and still answers honestly', () => {
+    expect(block).toContain('if (wallet === null)');
+    expect(block).toContain('alreadyProcessed: true');
+  });
+
+  it('the sibling Cashfree path still claims PENDING→SUCCESS atomically — it was already right', () => {
+    const payments = readFileSync(join(process.cwd(), 'src/server/lib/payments.ts'), 'utf8');
+    expect(payments).toContain("if (snap.data().paymentStatus === 'SUCCESS') return false;");
+    expect(payments).toContain('if (!claimedNow) {');
+  });
+
+  it('🔒 and the simulator still refuses to mint balance in production', () => {
+    const payments = readFileSync(join(process.cwd(), 'src/server/lib/payments.ts'), 'utf8');
+    expect(payments).toContain("if (process.env.NODE_ENV === 'production')");
+    expect(payments).toContain('Refusing simulator credit in production');
+  });
+});

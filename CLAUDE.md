@@ -1120,7 +1120,7 @@ the code (it is actually read somewhere) on 2026-07-11.
 ### 💴 FULL MONEY AUDIT — every paying code path read end to end (admin-asked 2026-09-12)
 
 The admin asked for a microscopic audit of every money path: *"kahi koi money leak to nahi hai."* 53
-money-touching modules were mapped and walked. **Three real leaks were found, all verified from code
+money-touching modules were mapped and walked. **Four real leaks were found, all verified from code
 rather than reasoned about, and all fixed in the same change.** The rest of the money surface held up —
 the Cashfree credit is transactional and derives tokens from the VERIFIED paid amount; the coupon table
 is server-side with an ATOMIC one-time claim; the weekly gift is transactional with its lifetime cap
@@ -1157,6 +1157,16 @@ always differ for a Pass buyer**, because `remaining_balance += netPaid` while
 `creditableVishwakarmaTokens` subtracts the Pass price from the token figure first. A "+1 token"
 adjustment on such an account would have wiped ₹(pass price) the user really paid; on a wallet credited
 in ₹ only (leak 2), the same line MINTED balance. It was also non-transactional.
+
+**🔴 4. A store purchase could credit TWICE under a concurrent retry.** The receipt check on
+`/api/payment/store/verify` sat OUTSIDE the transaction, and the transaction read only the WALLET. Two
+concurrent deliveries of the SAME purchase token — the store re-delivering on relaunch and the app
+retrying on a flaky network, both named in that route's own comments as NORMAL — could both pass the
+outside check; Firestore saw the clash on the wallet alone, retried the loser, and the retry re-read the
+already-credited balance and credited the same purchase again. The receipt is now read IN-transaction
+(before the wallet), which puts it in the conflict set. **The sibling Cashfree path was checked and was
+already right** — it claims the PENDING→SUCCESS flip inside a transaction and only the winner credits,
+which is exactly the pattern the store path was missing.
 
 🔒 **THE ROOT CAUSE BEHIND BOTH 2 AND 3, AND THE RULE THAT NOW PREVENTS THE CLASS:** the wallet holds ONE
 balance in TWO fields, and every bug here came from a writer that moved one of them. `walletMirror.ts`

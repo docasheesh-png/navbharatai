@@ -438,6 +438,7 @@ import { parseFileMentions, fileMentionsBlock, unresolvedMentionsNotice } from '
 import { mcpServerStore } from '../AgentV3/McpServerStore';
 import { listRemoteTools } from '../AgentV3/mcpTransport';
 import { externalToolDefs, externalToolsPreamble, canConnectServer, MAX_SERVERS_PER_WORKSPACE, type SafeMcpTool } from '../AgentV3/mcpClient';
+import { canUseConnectedServices, canRunConnectedServices, skippedServicesNotice, type McpPlanFacts } from '../AgentV3/mcpPlanGate';
 import { assertPublicHttpUrl } from '../lib/ssrfGuard';
 import { parseIgnoreFile, ignoreRulesBlock, IGNORE_FILE } from '../AgentV3/ignoreRules';
 import { terminalDailyLimitSeconds, decideTerminalAccess, type TerminalAccess } from '../AgentV3/terminalQuota';
@@ -7133,6 +7134,23 @@ async function noteBuildOutcome(
    * or simply unreadable right now. A greyed-out button with no explanation reads as broken.
    */
   /** The services connected to this app. Credentials are NEVER returned — see McpServerStore. */
+  /**
+   * WHO IS ASKING, AND MAY THEY USE CONNECTED SERVICES? (admin 2026-09-12 — the paid-plan gate.)
+   *
+   * One helper for every MCP surface, so the list screen, the connect button and the build loop can
+   * never disagree about a user's entitlement. The decision itself is pure (`mcpPlanGate.ts`); this
+   * only gathers the three facts it needs.
+   */
+  async function mcpPlanFacts(req: Request): Promise<McpPlanFacts> {
+    const identity = process.env.VITEST ? null : await verifyFirebaseIdentity(req);
+    const uid = identity?.uid || null;
+    const email = identity?.email || (uid ? await resolveVerifiedEmail(uid) : null);
+    const isFreeListed = isAgentV3FreeUser(uid, email);
+    if (!uid) return { signedIn: false, hasActivePlan: false, planKnown: true, isFreeListed };
+    const probe = await probeHostingPlan(uid).catch(() => ({ active: false, known: false }));
+    return { signedIn: true, hasActivePlan: !!probe.active, planKnown: !!probe.known, isFreeListed };
+  }
+
   app.post('/api/agentv3/mcp/list', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     if (!workspaceId) { res.status(400).json({ error: 'No app selected.' }); return; }
@@ -7140,7 +7158,15 @@ async function noteBuildOutcome(
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
-    res.json({ servers: await mcpServerStore.listForDisplay(workspaceId), max: MAX_SERVERS_PER_WORKSPACE });
+    // The entitlement travels WITH the list, so the screen can show an honest locked state instead of
+    // a form that accepts a URL and then refuses it.
+    const gate = canUseConnectedServices(await mcpPlanFacts(req));
+    res.json({
+      servers: await mcpServerStore.listForDisplay(workspaceId),
+      max: MAX_SERVERS_PER_WORKSPACE,
+      canConnect: gate.allowed,
+      ...(gate.allowed ? {} : { lockedReason: gate.reason, lockedMessage: gate.message }),
+    });
   });
 
   /**
@@ -7164,6 +7190,14 @@ async function noteBuildOutcome(
     if (!workspaceId) { res.status(400).json({ error: 'No app selected.' }); return; }
     if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+
+    // The plan gate comes FIRST — before the SSRF probe and before we ask the service anything. A user
+    // who may not connect should not be able to make our server fetch a URL of their choosing.
+    const planGate = canUseConnectedServices(await mcpPlanFacts(req));
+    if (!planGate.allowed) {
+      res.status(403).json({ error: planGate.message, reason: planGate.reason });
       return;
     }
 
@@ -12137,7 +12171,24 @@ async function noteBuildOutcome(
           // proceeds exactly as it does today. It must never be able to fail or delay a build.
           try {
             const servers = await mcpServerStore.listFull(workspaceId);
-            if (servers.length > 0) {
+            // THE PAID-PLAN GATE (admin 2026-09-12). Checked BEFORE the services are contacted, so a
+            // free account costs neither the network calls nor the tokens their descriptions would add
+            // to every model call of this build.
+            //
+            // 🔒 More forgiving than the connect gate on ONE case only: a plan we could not READ lets
+            // an existing integration keep working, because a billing-lookup blip must not silently
+            // change what a paying customer's app can do mid-build. See mcpPlanGate.ts.
+            const mcpFacts = await mcpPlanFacts(req).catch(
+              () => ({ signedIn: false, hasActivePlan: false, planKnown: true, isFreeListed: false }),
+            );
+            const mcpAllowed = canRunConnectedServices(mcpFacts);
+            if (servers.length > 0 && !mcpAllowed) {
+              // NEVER SILENT: a build that quietly stopped using a tool the user set up looks like the
+              // AI forgetting, which is worse than one plain sentence.
+              const notice = skippedServicesNotice(servers.length, mcpFacts);
+              if (notice) events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: `🔌 ${notice}` });
+            }
+            if (servers.length > 0 && mcpAllowed) {
               const lists = await Promise.all(servers.map((sv) => listRemoteTools(sv).catch(() => ({ tools: [] as SafeMcpTool[] }))));
               mcpTools = lists.flatMap((l) => l.tools);
               if (mcpTools.length > 0) {

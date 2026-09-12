@@ -48545,3 +48545,67 @@ there would have been motion, not strengthening.
 
 Tests: `RlsPolicy.test.ts` (27) + `tests/rlsWiring.test.ts` (16 — all three layers pinned, plus the
 fail-closed Supabase decision).
+
+---
+
+## 2026-09-12 — Connected services (MCP) become a paid feature
+
+**Admin, verbatim:** *"only for 149₹ subscription wale ke liye rakho, baaki ke liye disable kar do"* —
+asked after the honest answer that a fully-loaded five servers can add ~30,000 tokens to EVERY model
+call of that app's build, which a paid build bills to the user and a free build bills to NavBharatAI.
+
+**The cost reason is real, but the product reason is stronger and is the one worth recording:** somebody
+wiring their office Notion or their company's internal API into a builder is, by definition, not a casual
+free user. This is a business feature; gating it is what it was always for.
+
+**🔒 THE THREE-STATE PROBE IS THE DESIGN.** `probeHostingPlan` already answers in three states, and
+`mcpPlanGate.ts` keeps all three: "paid", "not paid", and "we could not find out" are different answers,
+and collapsing the third either way is how this goes wrong — collapse it to PAID and one Firestore hiccup
+hands the feature to everyone at our expense; collapse it to FREE and the same hiccup silently switches
+off a paying customer's working integration mid-build with nothing to explain it. So the two gates differ
+on **exactly one case**, and a test pins that they differ on no other:
+
+| | connect a NEW service | RUN services already connected |
+|---|---|---|
+| paid | ✅ | ✅ |
+| free | ❌ upgrade message | ❌ |
+| **unreadable** | ❌ *"try again in a moment"* | ✅ **keeps working** |
+
+New spend never starts on a guess; nothing a paying user already built stops on a blip. The unreadable
+refusal says **retry, not upgrade** — we do not know that user needs to buy anything, and an upsell on a
+lookup failure would be a lie about their account.
+
+**Four placements, each chosen rather than convenient:**
+- **CONNECT is gated BEFORE `assertPublicHttpUrl`** — a user who may not connect must not be able to make
+  our server fetch a URL of their choosing. Order pinned by a test.
+- **The BUILD checks before contacting any service**, so a free account costs neither the network calls
+  nor the tokens. It is **never silent**: `skippedServicesNotice` says plainly that connected services
+  were skipped, because a build that quietly stopped using a tool the user set up looks like the AI
+  forgetting — worse than one plain sentence.
+- **LIST carries the entitlement**, so the screen renders an honest locked state instead of a form that
+  accepts a URL and then refuses it. An **unanswered** entitlement renders as neither — a screen that
+  guesses "locked" while loading would upsell a paying customer.
+- **🔒 REMOVE is deliberately NOT gated.** A lapsed plan must never trap a user's own API key inside our
+  database. Pinned by a test, because "gate every route" is the obvious wrong instinct here.
+
+The admin free-list bypasses everything, so the feature is testable before a single plan is sold.
+
+**An existing test broke, and the fix is the interesting part.** `mcpClient.test.ts` asserts "connected
+services can never fail a build" by finding the try/catch around the block — via a fixed 900-character
+window. The block grew, the window stopped reaching the catch, and the test failed **while the invariant
+was still perfectly intact** (verified by reading the real source: the catch is still there, still
+wrapping the new code). A test that fails when the code is right is worse than no test, because the
+tempting fix is to weaken the assertion. It is now bound to the STRUCTURE — it finds the first `} catch {`
+after the block and checks that one — so the invariant is what is asserted and the length is not.
+
+### Still open (the other half the admin asked for)
+*"user har build par connect karega, ya ek bar connect kar diya fir apne aap sync rahega?"* — today a
+connection is stored per **workspace**, so the same app remembers it across every build, but a NEW app
+means retyping the URL and the key. The fix is **remember at the account, choose per app** — NOT
+"apply to every app automatically", which would repeat the exact bug `secretScope.ts` already fixed for
+credentials (a to-do list app's `.env` carrying the user's Razorpay secret). Next slice.
+
+### Gate (CI-equivalent, on the final state)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` within budget · `npm run boot:check` PASS ·
+`npx vitest run` **1,553 files / 21,129 passed / 0 failed** (20 new), log grepped for `FAIL` — none.

@@ -34,6 +34,10 @@ interface Props {
 export const ConnectedServices: React.FC<Props> = ({ workspaceId, authedFetch }) => {
   const [services, setServices] = useState<ConnectedService[] | null>(null);
   const [max, setMax] = useState(5);
+  // THE PAID-PLAN GATE (admin 2026-09-12). `null` = not answered yet, which renders as neither locked
+  // nor open — a screen that guesses "locked" during a slow load would upsell a paying customer.
+  const [canConnect, setCanConnect] = useState<boolean | null>(null);
+  const [lockedMessage, setLockedMessage] = useState('');
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
@@ -53,6 +57,12 @@ export const ConnectedServices: React.FC<Props> = ({ workspaceId, authedFetch })
       if (!res.ok || !data) { setServices([]); return; }
       setServices(Array.isArray(data.servers) ? data.servers : []);
       if (Number.isFinite(data.max)) setMax(Number(data.max));
+      // The server decides the entitlement; the screen only renders it. An older server that does not
+      // send the field leaves `canConnect` unset, and the form stays open exactly as it does today.
+      if (typeof data.canConnect === 'boolean') {
+        setCanConnect(data.canConnect);
+        setLockedMessage(typeof data.lockedMessage === 'string' ? data.lockedMessage : '');
+      }
     } catch {
       // An unreadable list is NOT "nothing connected" — but an empty list is the only honest thing to
       // render, so the error line says which it was.
@@ -146,7 +156,14 @@ export const ConnectedServices: React.FC<Props> = ({ workspaceId, authedFetch })
         </ul>
       )}
 
-      {!adding ? (
+      {canConnect === false ? (
+        /* LOCKED, HONESTLY — the form is not rendered at all rather than accepting a URL and then
+           refusing it. Services ALREADY connected stay listed above and stay removable: a plan that
+           lapsed must never trap a user's own key inside our database. */
+        <div className="rounded-lg border border-zinc-700 bg-zinc-900/60 p-3 text-[11px] text-zinc-400 leading-relaxed">
+          {lockedMessage || 'Connecting your own tools is part of the paid plan.'}
+        </div>
+      ) : !adding ? (
         <button
           onClick={() => { setAdding(true); setError(''); setNote(''); }}
           disabled={atCap || services === null}

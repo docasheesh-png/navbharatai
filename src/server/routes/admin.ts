@@ -23,6 +23,7 @@ import { metricsTimeline } from '../lib/metricsTimeline';
 import { resolveEmailConfig } from '../lib/alertEmail';
 import { grievanceOfficer } from '../lib/grievanceOfficer';
 import { adultPreferenceFrom } from '../../lib/adultContent';
+import { recordTakedown, listTakedowns, TAKEDOWN_RETENTION_DAYS } from '../lib/takedownLedger';
 import { officerIsNamed, OFFICER_MISSING_WARNING } from '../../content/legal/grievance';
 import { serverLoad } from '../lib/serverLoad';
 import { usdInrRate } from '../lib/UsdInrRate';
@@ -1401,6 +1402,24 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     }
   });
 
+  /**
+   * THE REMOVAL RECORD (admin 2026-09-12) — everything taken down, newest first.
+   *
+   * Admin-only, and it is a record of REMOVALS, not a copy of what was removed: what it was, from
+   * where, why, who published it, who decided, and a hash. Keeping the content itself in order to
+   * prove we removed it would be the same file in a different folder.
+   */
+  app.get('/api/admin/takedowns', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '200'), 10) || 200, 1), 500);
+      const rows = await listTakedowns(limit);
+      res.json({ ok: true, retentionDays: TAKEDOWN_RETENTION_DAYS, rows });
+    } catch (e: any) {
+      console.error('[ADMIN] /takedowns failed:', e?.message);
+      res.status(500).json({ error: 'Could not read the removal record', detail: e?.message || String(e) });
+    }
+  });
+
   // ── User token adjustment ─────────────────────────────────────────────────
   app.post('/api/admin/users/:userId/tokens', verifyAdminToken, async (req: Request, res: Response) => {
     const db = getDb() as any;
@@ -1506,6 +1525,24 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       await new FirebaseHostingDeployer().deleteChannel(workspaceId);
       const marked = await deploymentStore.setStatus(workspaceId, 'taken_down');
       audit('ADMIN_APP_TAKEDOWN', { workspaceId, reason: reason || '', ip: req.ip });
+      /**
+       * The 180-day record (IT Rules, 2021 Rule 3(1)(g)). Written only AFTER the channel is really
+       * gone, because this route's whole discipline is that it never claims a takedown it did not
+       * perform — and a ledger row for a removal that failed would be exactly that claim.
+       *
+       * No content hash: what was taken down here is a live Hosting channel, not a file map we hold.
+       * An honest '' beats a hash of the wrong thing.
+       */
+      const owner = await deploymentStore.get(workspaceId).catch(() => null);
+      await recordTakedown({
+        surface: 'navbharat_hosting',
+        contentId: workspaceId,
+        ownerUid: owner?.userId,
+        reason: typeof reason === 'string' ? reason : '',
+        actor: 'admin',
+        removedBy: 'admin',
+        removedAt: Date.now(),
+      });
       res.json({ ok: true, workspaceId, status: 'taken_down', registryUpdated: marked });
     } catch (e: any) {
       console.error('[ADMIN] Takedown error:', e?.message);

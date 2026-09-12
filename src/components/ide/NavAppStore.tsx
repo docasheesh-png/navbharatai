@@ -81,6 +81,8 @@ interface WebApp {
   screenshotCount?: number;
   /** Owner/admin views only. */
   status?: 'unlisted' | 'listed' | 'removed';
+  /** ADMIN-ONLY, from the publish-time content scan. Never sent to a viewer — see navStoreWeb.ts. */
+  safetyFindings?: Array<{ severity: string; rule: string; description: string; matchSnippet: string }>;
 }
 
 export interface NavAppStoreProps {
@@ -334,6 +336,8 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
 
   const loadWebQueue = useCallback(async () => {
     try {
+      // FLAGGED FIRST. A reviewer working top-down must meet the apps the scanner is worried about
+      // before the ordinary ones, or the queue's order decides what actually gets looked at.
       const res = await fetch('/api/nav-store/web/admin/queue', { headers: await authedHeaders() });
       const data = await res.json().catch(() => null);
       if (liveRef.current) setWebQueue(Array.isArray(data?.apps) ? data.apps : []);
@@ -970,10 +974,28 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
               <Globe size={12} /> Instant apps — listing requests
             </p>
             <div className="space-y-3">
-              {webQueue.map((a) => (
-                <div key={a.id} className="p-3 rounded-xl bg-[#161b22] border border-white/10">
+              {[...webQueue]
+                .sort((x, y) => (y.safetyFindings?.length ?? 0) - (x.safetyFindings?.length ?? 0))
+                .map((a) => (
+                <div key={a.id} className={`p-3 rounded-xl bg-[#161b22] border ${(a.safetyFindings?.length ?? 0) > 0 ? 'border-amber-500/40' : 'border-white/10'}`}>
                   <p className="text-sm font-semibold">{a.name}</p>
                   <p className="text-xs text-white/50 mt-0.5">{a.description || '—'}</p>
+                  {/* WHAT THE SCAN SAW — shown BEFORE the List button, deliberately. A reviewer who
+                      has already decided is not going to scroll back for a warning. The matched text
+                      is included because "phishing lure" alone is not enough to judge a real app on. */}
+                  {(a.safetyFindings?.length ?? 0) > 0 && (
+                    <div className="mt-2 px-2.5 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 space-y-1">
+                      <p className="text-[11px] font-semibold text-amber-200 flex items-center gap-1.5">
+                        <ShieldAlert size={11} /> The content scan flagged this app
+                      </p>
+                      {a.safetyFindings!.map((f, i) => (
+                        <p key={`${f.rule}-${i}`} className="text-[10px] text-amber-100/70 leading-relaxed">
+                          <b>[{f.severity}]</b> {f.description}
+                          <span className="block text-amber-100/40 font-mono break-all">“{f.matchSnippet}”</span>
+                        </p>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex gap-2 mt-2.5">
                     <button
                       onClick={() => setPlayingId(a.id)}

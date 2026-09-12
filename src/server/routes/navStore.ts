@@ -45,7 +45,7 @@ import {
 import {
   evaluateWebPublish, hashAppPassword, verifyAppPassword, toPublicWebApp, newWebAppId,
   saveWebApp, getWebApp, getWebAppFiles, listListedWebApps, listMyWebApps, listUnlistedWebApps,
-  saveWebAppBakedPage, getWebAppBakedPage,
+  saveWebAppBakedPage, readWebAppBake,
   updateWebApp, makeWebAppPublic, bumpWebAppCounter, removeWebApp, reportWebApp,
   recordRemixOrigin, getRemixOrigin, keyShapedEnvVars, listWebAppReports,
   sanitizeScreenshots, saveWebAppScreenshots, getWebAppScreenshots,
@@ -61,6 +61,9 @@ import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { renderPreview } from '../runtime/renderPreview';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { escapeHtml } from '../../lib/escapeHtml';
+import { bakeIsCurrent } from '../runtime/previewRuntimeSignature';
+import { assessPublishSafety } from '../lib/storePublishSafety';
+import { audit } from '../lib/audit';
 import { hostingPlansEnabled, hostingPlanPriceInr, probeHostingPlan } from '../lib/hostingPlan';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import { remixGate, remixRefusal } from '../lib/remixPlanGate';
@@ -664,6 +667,27 @@ export function registerNavStoreRoutes(app: Express): void {
       const gate = evaluateWebPublish(workspaceFiles);
       if (!gate.ok) return res.status(422).json({ error: gate.reason });
 
+      /**
+       * CONTENT-SAFETY SCAN (admin 2026-09-12: "app mart me app post ke samay scans chala do").
+       *
+       * Runs BEFORE anything is saved, because a refused publish must leave nothing behind. It is
+       * regex over the app's own text, bounded per file — cheap next to the Firestore writes below,
+       * and it costs no model call.
+       *
+       * The same scanner NavBharatAI hosting has used since hosting Phase A. It was never wired
+       * here, which meant an instant app went live, reachable by anyone with the link, with nothing
+       * having looked at it. See storePublishSafety.ts for the second hole this closes — an already
+       * LISTED app being quietly rewritten into something else under its approved listing.
+       */
+      const safety = assessPublishSafety(gate.files);
+      if (safety.refuse) {
+        audit('STORE_PUBLISH_REFUSED', { uid: me.uid, workspaceId, findings: safety.summary });
+        return res.status(422).json({ error: safety.refusalMessage });
+      }
+      if (safety.flagged) {
+        audit('STORE_PUBLISH_FLAGGED', { uid: me.uid, workspaceId, findings: safety.summary });
+      }
+
       // RE-PUBLISH = same listing, new version — one app id per (owner, workspace), so updating
       // never spawns a duplicate listing and the share link the creator already sent keeps working.
       const mine = await listMyWebApps(me.uid);
@@ -672,9 +696,17 @@ export function registerNavStoreRoutes(app: Express): void {
       const pw = visibility === 'private' ? hashAppPassword(password) : undefined;
       const record: WebStoreApp = {
         id,
-        // A re-publish keeps its earned place: a listed app stays listed (same owner, same listing —
-        // the admin reviewed the LISTING; content updates are the point of re-publishing).
-        status: existing?.status === 'listed' ? 'listed' : 'unlisted',
+        /**
+         * A re-publish keeps its earned place: a listed app stays listed (same owner, same listing —
+         * the admin reviewed the LISTING; content updates are the point of re-publishing).
+         *
+         * 🔴 UNLESS THE SCAN FLAGGED IT. That exemption was the attack: publish something clean, wait
+         * for an admin to list it, then re-publish a phishing page into the same, already-approved
+         * listing. A flagged app goes back to `unlisted` and back into the queue however it got
+         * listed — the app still publishes and its own link still works, but being FEATURED has to
+         * be earned again.
+         */
+        status: existing?.status === 'listed' && !safety.forceUnlisted ? 'listed' : 'unlisted',
         uid: me.uid,
         name, description, iconDataUrl,
         visibility,
@@ -704,6 +736,10 @@ export function registerNavStoreRoutes(app: Express): void {
           return carried;
         })(),
         screenshotCount: screenshots.length,
+        // What the scan actually saw, on the record an admin reads. Capped, and recorded on EVERY
+        // publish (an empty array after a flagged version is the honest "this one came back clean").
+        safetyFindings: safety.findings,
+        safetyScannedAt: Date.now(),
         publishedAt: Date.now(),
         version: (existing?.version ?? 0) + 1,
       };
@@ -792,8 +828,22 @@ export function registerNavStoreRoutes(app: Express): void {
    */
   app.post('/api/nav-store/web/app/:id/open', async (req: Request, res: Response) => {
     try {
-      const found = await getWebApp(String(req.params.id || ''));
-      if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
+      const appId = String(req.params.id || '');
+      /**
+       * Both reads start together. See the note at the fast path below for why this is safe: the
+       * bake is addressed by id and self-describes its version, so it cannot serve a stale page just
+       * because it was fetched before we knew which version was current.
+       *
+       * `.catch(() => null)` because this is an OPTIMISATION, not the answer — a failed bake read
+       * must fall through to the compile, never fail the open. And it is attached immediately so the
+       * promise can never be an unhandled rejection while the listing read is still in flight.
+       */
+      const bakedEarly = readWebAppBake(appId).catch(() => null);
+      const found = await getWebApp(appId);
+      if (!found || found.status === 'removed') {
+        void bakedEarly;  // resolved and discarded — an app that is gone serves nothing
+        return res.status(404).json({ error: 'This app is not on the store.' });
+      }
       if (found.visibility === 'private') {
         const pw = typeof req.body?.password === 'string' ? req.body.password : '';
         if (!verifyAppPassword(pw, found.passwordHash, found.passwordSalt)) {
@@ -805,7 +855,19 @@ export function registerNavStoreRoutes(app: Express): void {
       if (!compiled) {
         // FAST PATH — the page baked at publish time: one small doc read instead of every file +
         // a compile. Version-checked inside, so a re-publish can never serve its predecessor.
-        const baked = await getWebAppBakedPage(found.id, found.version);
+        //
+        // ⚡ IT WAITS FOR NOTHING (admin 2026-09-12: "app open speed badha sakte ho to badha dena").
+        // The bake read used to start only after the listing read had come back, so a cold open paid
+        // TWO Firestore round trips end to end. It does not actually need the listing: the bake doc
+        // is addressed by id alone and carries its own version and runtime, so it is started in
+        // parallel with the listing read above (see `bakedEarly`) and judged HERE, where the current
+        // version is known. The staleness rule itself is unchanged and still lives in exactly one
+        // place — `bakeIsCurrent` — so a superseded or wrong-runtime bake is discarded exactly as
+        // before. The only thing that changed is that the wait no longer happens twice.
+        const bake = await bakedEarly;
+        const baked = bake && bakeIsCurrent({ version: bake.version, runtime: bake.runtime }, found.version)
+          ? bake.html
+          : null;
         if (baked) compiled = { html: withStoreAppId(baked, found.id), kind: 'web' };
       }
       if (!compiled) {

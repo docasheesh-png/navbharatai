@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { encrypt, decrypt, getLatestKeyVersion } from '../src/server/lib/secrets';
+import { encrypt, decrypt, getLatestKeyVersion, secretCreatedAtMs } from '../src/server/lib/secrets';
 
 /**
  * P-SEC.5 — Encryption key rotation (versioned ciphertext, backward-compatible).
@@ -40,5 +40,48 @@ describe('secrets — versioned encryption (P-SEC.5)', () => {
   it('different ivs → different ciphertext for the same plaintext', () => {
     expect(encrypt('same')).not.toBe(encrypt('same'));
     expect(decrypt(encrypt('same'))).toBe('same');
+  });
+});
+
+/**
+ * WHEN WAS THIS SECRET WRITTEN? (2026-09-12)
+ *
+ * This number is what decides which of two duplicate keys a build receives, so every shape a
+ * `created_at` can arrive in has to reduce to the same comparable value — and an unreadable one has
+ * to come back as ABSENT rather than 0, because 0 would make a broken row look like the oldest write
+ * and quietly win or lose on that basis.
+ */
+describe('secretCreatedAtMs', () => {
+  it('reads a Date', () => {
+    const d = new Date('2026-01-02T03:04:05Z');
+    expect(secretCreatedAtMs(d)).toBe(d.getTime());
+  });
+
+  it('reads a Firestore Timestamp through toDate()', () => {
+    const ms = Date.UTC(2026, 0, 2);
+    expect(secretCreatedAtMs({ toDate: () => new Date(ms) })).toBe(ms);
+  });
+
+  it('reads a Timestamp that lost its methods crossing JSON', () => {
+    expect(secretCreatedAtMs({ seconds: 1_700_000_000, nanoseconds: 0 })).toBe(1_700_000_000_000);
+    expect(secretCreatedAtMs({ _seconds: 1_700_000_000 })).toBe(1_700_000_000_000);
+  });
+
+  it('reads an ISO string and a plain number', () => {
+    expect(secretCreatedAtMs('2026-01-02T00:00:00.000Z')).toBe(Date.UTC(2026, 0, 2));
+    expect(secretCreatedAtMs(1234)).toBe(1234);
+  });
+
+  it('🔒 anything unreadable is ABSENT, never the epoch', () => {
+    expect(secretCreatedAtMs(null)).toBeNull();
+    expect(secretCreatedAtMs(undefined)).toBeNull();
+    expect(secretCreatedAtMs('not a date')).toBeNull();
+    expect(secretCreatedAtMs({})).toBeNull();
+    expect(secretCreatedAtMs(NaN)).toBeNull();
+    expect(secretCreatedAtMs(new Date('nonsense'))).toBeNull();
+  });
+
+  it('a toDate() that throws is absent rather than an exception up the call stack', () => {
+    expect(secretCreatedAtMs({ toDate: () => { throw new Error('bad'); } })).toBeNull();
   });
 });

@@ -1,7 +1,8 @@
 import type { Express, Request, Response } from 'express';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Reads/writes user_secrets (owner-only).
 import { doc, getDoc, updateDoc, collection, addDoc, getDocs, query, where, getServerDb as getDb } from '../lib/serverDb';
-import { encrypt, loadUserVaultSecrets } from '../lib/secrets';
+import { encrypt, loadUserVaultSecrets, secretCreatedAtMs } from '../lib/secrets';
+import { planSecretWrite } from '../lib/secretScope';
 import { requireUserMatch, trackDevice } from '../lib/authMiddleware';
 import { probeCredentials, realProbeFetch } from '../AgentV3/credentialProbe';
 
@@ -77,14 +78,49 @@ export function registerSecretsRoutes(app: Express): void {
       // what every key saved before scoping existed is, and what the Settings screen still offers as an
       // option. A value here ties the key to one workspace, so the user's other apps never receive it.
       const scope = typeof workspace_id === 'string' && workspace_id.trim() ? workspace_id.trim() : null;
-      await addDoc(collection(db, 'user_secrets'), {
-        user_id: userId,
-        secret_name,
-        encrypted_secret_value: encryptedValue,
-        workspace_id: scope,
-        created_at: new Date()
-      });
-      res.json({ success: true });
+
+      // SAVING AN EXISTING NAME REPLACES IT (2026-09-12). This used to be an unconditional addDoc, so a
+      // user rotating a leaked key ended up with TWO rows and no rule about which one their build would
+      // get — Firestore returns documents in id order, and auto-ids are random. Now the save updates the
+      // row it is replacing and retires any duplicate already sitting there, so the pile collapses on the
+      // next save instead of growing. Rows of a DIFFERENT scope are never touched — see secretScope.ts.
+      const existing = await getDocs(query(
+        collection(db, 'user_secrets'),
+        where('user_id', '==', userId),
+        where('secret_name', '==', secret_name),
+      ));
+      const plan = planSecretWrite(
+        existing.docs.map((d: any) => ({
+          id: d.id,
+          workspaceId: d.data()?.workspace_id ?? null,
+          createdAt: secretCreatedAtMs(d.data()?.created_at),
+          deleted: !!d.data()?.deleted,
+        })),
+        scope,
+      );
+
+      if (plan.replace) {
+        await updateDoc(doc(db, 'user_secrets', plan.replace), {
+          encrypted_secret_value: encryptedValue,
+          workspace_id: scope,
+          // `created_at` is what "newest wins" reads, so a replacement must move it forward. Leaving it
+          // at the original date would make a freshly rotated key lose to an older duplicate.
+          created_at: new Date(),
+          deleted: false,
+        });
+        // Soft-delete, matching the DELETE route: the vault has never hard-deleted a user's secret, and
+        // a cleanup is not the place to start.
+        for (const id of plan.retire) await updateDoc(doc(db, 'user_secrets', id), { deleted: true });
+      } else {
+        await addDoc(collection(db, 'user_secrets'), {
+          user_id: userId,
+          secret_name,
+          encrypted_secret_value: encryptedValue,
+          workspace_id: scope,
+          created_at: new Date()
+        });
+      }
+      res.json({ success: true, replaced: !!plan.replace, duplicatesRetired: plan.retire.length });
     } catch (err) {
       res.status(500).json({ error: 'Failed to save secret' });
     }

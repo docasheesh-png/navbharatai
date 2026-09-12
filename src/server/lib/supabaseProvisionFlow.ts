@@ -21,7 +21,8 @@ import {
 } from './supabaseProvision';
 import { getConnection, needsRefresh, updateTokens } from './supabaseConnectionStore';
 import { getServerDb } from './serverDb';
-import { encrypt } from './secrets';
+import { encrypt, secretCreatedAtMs } from './secrets';
+import { planSecretWrite } from './secretScope';
 import { audit } from './audit';
 import { loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 
@@ -70,14 +71,41 @@ export async function saveUserSecrets(userId: string, values: Record<string, str
     for (const [name, value] of Object.entries(values)) {
       if (!value) continue;
       // Replace rather than accumulate — a stale duplicate would make which key wins ambiguous.
+      //
+      // 🔒 SCOPE-AWARE SINCE 2026-09-12, and the old version was destructive. It deleted EVERY row of
+      // that name, so provisioning a database wiped a key the user had deliberately tied to one of
+      // their other apps. These keys are written SHARED (workspace_id null), so only shared rows of the
+      // same name are theirs to replace. One shared decision — `planSecretWrite` — now governs both
+      // this path and the Settings save, so the two cannot drift apart again.
       const dupes = await col.where('user_id', '==', userId).where('secret_name', '==', name).get();
-      await Promise.all(dupes.docs.map((d: { ref: { delete: () => Promise<unknown> } }) => d.ref.delete()));
-      await col.add({
-        user_id: userId,
-        secret_name: name,
-        encrypted_secret_value: encrypt(value),
-        created_at: new Date(),
-      });
+      const plan = planSecretWrite(
+        dupes.docs.map((d: any) => ({
+          id: d.id,
+          workspaceId: d.data()?.workspace_id ?? null,
+          createdAt: secretCreatedAtMs(d.data()?.created_at),
+          deleted: !!d.data()?.deleted,
+        })),
+        null,
+      );
+      if (plan.replace) {
+        await col.doc(plan.replace).update({
+          encrypted_secret_value: encrypt(value),
+          workspace_id: null,
+          created_at: new Date(),
+          deleted: false,
+        });
+        // Soft-delete, like every other path that retires a secret — the vault has never destroyed a
+        // user's stored key, and a cleanup is not the place to start.
+        for (const id of plan.retire) await col.doc(id).update({ deleted: true });
+      } else {
+        await col.add({
+          user_id: userId,
+          secret_name: name,
+          encrypted_secret_value: encrypt(value),
+          workspace_id: null,
+          created_at: new Date(),
+        });
+      }
     }
     return true;
   } catch {

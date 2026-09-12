@@ -84,7 +84,7 @@ describe('wiring — the stream opens BEFORE the lookup, and the status can neve
 
   it('🔒 the status is emitted BEFORE the live lookup is awaited — that ordering IS the fix', () => {
     const status = route.indexOf('const groundingStatus = groundingStatusFor(message);');
-    const lookup = route.indexOf('const liveBlock = await liveSearchContext(message);');
+    const lookup = route.indexOf('const liveBlock = await liveSearchContext(message, { cheap: isFree });');
     expect(status).toBeGreaterThan(-1);
     expect(lookup).toBeGreaterThan(status);
     // And it opens the stream itself, since nothing else has yet.

@@ -67,9 +67,19 @@
  */
 export type SearchIntent = 'live' | 'reference';
 
-/** Which engines to try, in order. PURE. */
-export function searchOrder(intent: SearchIntent, hasBraveKey: boolean): Array<'brave' | 'duck'> {
+/**
+ * Which engines to try, in order. PURE.
+ *
+ * `cheap` (admin 2026-09-12, verbatim: "free chat me brave api ka istemal bahut hi kanjusi se karna
+ * hai. minimal use. jyadatar duckduckgo hi use ho") is the caller telling us "this request is not
+ * paying for anything" — a Free Chat message, a free-tier Professional, a free/weak-power AgentV3 turn.
+ * It OVERRIDES the intent-based order: DuckDuckGo always leads, even for a `live` question, and Brave
+ * is only spent as the last-resort rescue when DuckDuckGo genuinely finds nothing. Paid callers never
+ * set it, so their `live` questions keep leading with Brave exactly as before.
+ */
+export function searchOrder(intent: SearchIntent, hasBraveKey: boolean, cheap = false): Array<'brave' | 'duck'> {
   if (!hasBraveKey) return ['duck'];
+  if (cheap) return ['duck', 'brave'];
   return intent === 'live' ? ['brave', 'duck'] : ['duck', 'brave'];
 }
 

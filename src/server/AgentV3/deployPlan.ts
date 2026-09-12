@@ -431,3 +431,38 @@ export function deployDecision(plan: DeployPlan, backend: BackendCapability): De
     message: `${plan.summary} Use “Deploy backend” to put it somewhere it can run. ${backend.requirement}`,
   };
 }
+
+/**
+ * ONE BUTTON (ROADMAP §13 item 2.4 / §11 slice 5): what should PUBLISH actually do with this app?
+ *
+ * 🔴 THE PROBLEM THIS REPLACES, in the user's own steps. An app with a server used to be REFUSED by
+ * publish, with a message inviting the user to: put the code in GitHub, open Render, make an account,
+ * generate an API key, paste it back, press Deploy backend. Five steps through two other websites, to
+ * do the thing they pressed one button for. Every competitor researched in §11 hosts the backend
+ * itself; none makes a third-party dashboard key the default path.
+ *
+ * So when first-party container hosting can actually run RIGHT NOW for this caller, the answer is not
+ * a better refusal — it is `'container'`, and publish just does it.
+ *
+ * 🔒 AVAILABILITY IS PASSED IN, NOT DETECTED HERE, for the same reason `deployDecision` takes its
+ * backend capability: this module stays pure, and the two flags plus the apps-project check that
+ * decide it live in `hostApp.hostingAvailability`. A second first-party host later changes the
+ * CALLER, not this function.
+ *
+ * 🔒 `'refuse'` IS STILL A REAL OUTCOME, and deliberately so. With hosting off — which is its default,
+ * and its state for everyone but an admin until metering ships — the existing Render/BYO path is
+ * unchanged, byte for byte. A one-button publish that silently did nothing when the button could not
+ * work would be the worse half of this trade.
+ */
+export type PublishRoute = 'static' | 'container' | 'refuse';
+
+export function choosePublishRoute(
+  plan: Pick<DeployPlan, 'staticHostingSufficient'>,
+  opts: { containerHostingAvailable: boolean },
+): PublishRoute {
+  // Static wins whenever it genuinely suffices — a plain website on a CDN is faster, cached at the
+  // edge and effectively free, and putting it in a container instead would be a real downgrade paid
+  // for with our own money. Hosting being available is not a reason to use it.
+  if (plan.staticHostingSufficient) return 'static';
+  return opts.containerHostingAvailable ? 'container' : 'refuse';
+}

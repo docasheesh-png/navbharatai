@@ -809,9 +809,8 @@ the code (it is actually read somewhere) on 2026-07-11.
   the sum, which is the one kind of trade this rule allows.
   ⚠️ **Do not "optimise" chat by fetching less.** The honest speed levers are the ones that cost no
   accuracy: the grounding STATUS shown while the lookup runs (#2826, so the wait is visible rather
-  than blank), and **`BRAVE_API_KEY`**, which is still UNSET — without it `WebSearch` scrapes
-  DuckDuckGo HTML, which is both slower and weaker than Brave's API. That single key is the only
-  remaining change that makes chat faster AND more accurate at once.
+  than blank), and **`BRAVE_API_KEY`**, ✅ **SET in Cloud Run by the admin 2026-09-12** — `WebSearch`
+  no longer has to scrape DuckDuckGo HTML (slower, weaker) for a paying user's live question.
 - **Brave Search — the chat's grounding source (admin taking the plan 2026-09-12):** `BRAVE_API_KEY`
   (the Search plan's subscription token) and `BRAVE_SEARCH_CACHE` (kill switch — **default ON**; `off`
   sends every search straight to Brave exactly as before the cache existed). Read by
@@ -844,9 +843,10 @@ the code (it is actually read somewhere) on 2026-07-11.
   instead of degrading in silence. **That log line is how to verify the key is really working** —
   no line after real traffic means Brave is answering.
   🔀 **FREE FIRST WHERE IT IS SAFE, PAID FIRST WHERE IT MATTERS (admin asked 2026-09-12: "dono ko mila
-  kar… jahan brave ki need na ho wahan duckduckgo").** `searchOrder(intent, hasKey)` is that rule. Note
-  what it is NOT: merging both engines on every query would pay Brave EVERY time and cost strictly MORE
-  than today — so the saving comes from asking the FREE engine first wherever its answer suffices.
+  kar… jahan brave ki need na ho wahan duckduckgo").** `searchOrder(intent, hasKey, cheap)` is that
+  rule. Note what it is NOT: merging both engines on every query would pay Brave EVERY time and cost
+  strictly MORE than today — so the saving comes from asking the FREE engine first wherever its answer
+  suffices.
   • **`reference`** (the DEFAULT — AgentV3 build lookups and Engineer AI: package versions, framework
   docs, error meanings) ⇒ **DuckDuckGo first, Brave only if DuckDuckGo finds nothing.** Not a downgrade
   of anything: DuckDuckGo-only IS production's behaviour today, so this is today PLUS a paid rescue, and
@@ -857,6 +857,21 @@ the code (it is actually read somewhere) on 2026-07-11.
   one did not answer"), which is what makes the rescue fire on a 429 as well as on a blocked scrape.
   ⚠️ Adding a caller? It defaults to `reference` on purpose — a caller that has not thought about intent
   is by definition not a user-facing live question, so the safe default is the one that costs nothing.
+  🔒 **`cheap` — the third lever, for a caller who is not PAYING at all (admin-mandated 2026-09-12,
+  verbatim: "free chat me brave api ka istemal bahut hi kanjusi se karna hai. minimal use. jyadatar
+  duckduckgo hi use ho").** The `reference`/`live` split above is about the QUESTION; `cheap` is about
+  the CALLER — even a `live` chat question gets DuckDuckGo-first when the asker is not a paying user, and
+  Brave is spent only as the last-resort rescue on a genuinely empty DuckDuckGo result. Wired at all
+  three `liveSearchContext()` call sites from each surface's OWN existing free/paid signal (no new
+  concept invented): `routes/chat.ts` → `cheap: isFree` (the `navbharat` tier), `professionals/engine.ts`
+  → `cheap: tier === 'free'`, `routes/agentv3.ts`'s plain-chat-turn lane →
+  `cheap: freeTierBuildActive || powerSpecResolved.cheapOnly`. Defaults to `false` in both
+  `AgentV3/WebSearch.ts` and `EngineerAI/WebSearchClient.ts`, so a caller that does not pass it keeps
+  exactly today's paid behaviour. Deliberately NOT extended to the AgentV3/Engineer AI build-time
+  web-search TOOL call (`makeWebSearch()` / `EngineerAgentLoop.ts`) — that is a `reference`-intent
+  lookup already DuckDuckGo-first regardless of tier, and the admin's instruction was about "free chat",
+  not app builds. Regression-locked in `tests/braveSearch.test.ts` (`searchOrder` itself) and
+  `tests/agentV3WebSearchCheap.test.ts` / `liveSearchContext.test.ts` (the wiring).
   📉 **What keeps the bill down, and what it deliberately does NOT trade.** Identical calls already in
   flight share one request (zero staleness — it is the same live response); a repeat question inside a
   short window reuses the result (**60 s** for tick-by-tick things — scores, live matches, market
@@ -872,12 +887,12 @@ the code (it is actually read somewhere) on 2026-07-11.
   (`irctc1.p.rapidapi.com`, live train running status + PNR) and AeroDataBox (flight status); the admin
   also subscribed an IMDb API the same day, whose exact host is pending a screenshot before it is wired —
   do NOT guess the host, several APIs share the name. Read by `src/server/lib/transitLive.ts`; without the
-  key every path honestly degrades to web search, never an invented "live" answer). Companion keys, NOT
-  set yet: `BRAVE_API_KEY` (search-quality upgrade over the DuckDuckGo fallback, read by
-  `AgentV3/WebSearch.ts`), `TMDB_API_KEY` (movies-now-playing source in `lib/liveDataSources.ts` — may be
-  superseded by the admin's IMDb API once its host is known). Key-free live sources (weather/AQI/currency/
-  PIN codes) need no env at all. ⚠️ Open licensing item recorded in PROGRESS.md 2026-08-25: the no-key
-  weather source (Open-Meteo) is licensed non-commercial — license or swap it before heavy real traffic.
+  key every path honestly degrades to web search, never an invented "live" answer). `TMDB_API_KEY` — NOT
+  set yet: movies-now-playing source in `lib/liveDataSources.ts`, may be superseded by the admin's IMDb
+  API once its host is known. Key-free live sources (weather/AQI/currency/PIN codes) need no env at all.
+  ⚠️ Open licensing item recorded in PROGRESS.md 2026-08-25: the no-key weather source (Open-Meteo) is
+  licensed non-commercial — license or swap it before heavy real traffic. (`BRAVE_API_KEY` is now SET —
+  see the "Brave Search — the chat's grounding source" entry above, which is the canonical record.)
 - **Sonic Chat (Amazon Nova Sonic voice — EXPERIMENTAL, route `/sonic`, admin 2026-07-13):**
   `SONIC_CHAT_ENABLED`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` (= `us-east-1`),
   plus optional `SONIC_MODEL_ID` / `SONIC_VOICE_ID`. All set in Cloud Run 2026-07-13. The feature is

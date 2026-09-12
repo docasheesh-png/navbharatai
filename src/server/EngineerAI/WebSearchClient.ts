@@ -19,6 +19,10 @@ const NPM_TIMEOUT_MS = 8_000;
  *
  * npm registry is always queried for package-name queries regardless of provider.
  *
+ * `intent` and `cheap` mirror `AgentV3/WebSearch.ts` exactly (same `searchOrder()`) — kept here for
+ * structural symmetry even though today's Engineer AI callers only ever look up build-time reference
+ * material, never a non-paying chat surface.
+ *
  * Everything degrades gracefully: on any network/parse failure it returns an empty
  * list rather than throwing, so the agent simply learns "no results" and moves on.
  */
@@ -34,7 +38,13 @@ export class WebSearchClient {
    * @param htmlFetcher optional — if supplied, used to fetch the DuckDuckGo SERP
    *                    (e.g. via a sandbox curl). Falls back to a server-side fetch.
    */
-  async search(query: string, limit = 5, htmlFetcher?: HtmlFetcher, intent: SearchIntent = 'reference'): Promise<SearchResult[]> {
+  async search(
+    query: string,
+    limit = 5,
+    htmlFetcher?: HtmlFetcher,
+    intent: SearchIntent = 'reference',
+    cheap = false,
+  ): Promise<SearchResult[]> {
     const results: SearchResult[] = [];
 
     // 1. If the query looks like a package lookup, enrich with authoritative npm data.
@@ -45,7 +55,7 @@ export class WebSearchClient {
     }
 
     // 2. Web results: free engine first unless this is a live question — see `searchOrder()`.
-    const web = await this.routedWeb(query, limit, intent, htmlFetcher);
+    const web = await this.routedWeb(query, limit, intent, htmlFetcher, cheap);
 
     for (const r of web) {
       if (results.length >= limit) break;
@@ -66,9 +76,10 @@ export class WebSearchClient {
     limit: number,
     intent: SearchIntent,
     htmlFetcher?: HtmlFetcher,
+    cheap = false,
   ): Promise<SearchResult[]> {
     const braveKey = braveApiKey();
-    const order = searchOrder(intent, !!braveKey);
+    const order = searchOrder(intent, !!braveKey, cheap);
     let last: SearchResult[] = [];
     for (let i = 0; i < order.length; i++) {
       const engine = order[i];

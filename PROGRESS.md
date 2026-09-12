@@ -48226,6 +48226,63 @@ field in the API schema. The admin can settle it from their own dashboard: if a 
 today is **gone from the list** in a few days, E2B reclaims it, and a rebuild-from-durable (what this
 change does) is the only possible answer rather than a better resume.
 
+## 2026-09-12 — BRAVE_API_KEY set; Free Chat gets a THIRD lever on top of `searchOrder` (`cheap`)
+
+Admin set `BRAVE_API_KEY` in Cloud Run, then gave a direct cost instruction: "free chat me brave api ka
+istemal bahut hi kanjusi se karna hai. minimal use. jyadatar duckduckgo hi use ho" — Brave (a paid API
+past its free quota) must be used stingily on non-paying chat surfaces; DuckDuckGo (free) should lead.
+
+**Safeguard #1 in action, mid-flight.** The first draft of this fix (a standalone `preferCheap` option on
+`AgentV3/WebSearch.ts`, invented from this session's own base commit) was written, tested, and pushed
+before discovering — via a merge conflict against `main` on PR push — that a DIFFERENT session had, the
+same day, already built a far more complete answer to a related admin ask ("dono ko mila kar… jahan brave
+ki need na ho wahan duckduckgo"): a shared `src/server/lib/braveSearch.ts` client (one Brave request path
+for both `AgentV3/WebSearch.ts` and `EngineerAI/WebSearchClient.ts`, with in-flight coalescing, a
+freshness-aware cache, and a per-instance meter) plus a `SearchIntent` ('reference' | 'live') that decides
+provider order by WHAT is being asked — `reference` (build/doc lookups) leads DuckDuckGo, `live` (chat
+grounding) leads Brave.
+
+**That architecture did NOT yet cover WHO is asking**, though — `liveSearchContext()` called
+`client.search(query, limit, 'live')` unconditionally, so a free-tier chat message would have led with
+Brave exactly like a paid one. The two asks are complementary, not redundant, so per the fourth absolute
+rule the first draft was DISCARDED (not layered beside it) and rebuilt on top of the real shared client:
+`searchOrder(intent, hasBraveKey, cheap)` gained a third parameter — when `cheap` is true it forces
+DuckDuckGo-first regardless of intent, even for a `live` question, with Brave kept only as the
+last-resort rescue on a genuinely empty DuckDuckGo result. `WebSearch.search()` and `WebSearchClient.search()`
+both gained the matching `cheap` parameter (defaulting to `false`, so an untouched caller keeps today's
+paid behaviour) for structural symmetry with `intent` — even though only the chat path sets it today.
+`liveSearchContext()` threads its own `cheap` option straight into that 4th `search()` argument. Wired at
+all three call sites, each using that surface's own existing free/paid signal (no new concept invented):
+- `routes/chat.ts` → `cheap: isFree` (the `navbharat` tier — NavBharatAI Free Chat)
+- `professionals/engine.ts` → `cheap: tier === 'free'` (free-tier Professionals)
+- `routes/agentv3.ts` plain-chat-turn lane → `cheap: freeTierBuildActive || powerSpecResolved.cheapOnly`
+  (free-tier / weak-power AgentV3 chat turns — same "never Sonnet/Opus for weak" spirit, applied to search
+  spend instead of model spend)
+
+**Deliberately NOT touched:** the AgentV3/Engineer AI build-time web-search TOOL call (`makeWebSearch()`,
+`EngineerAgentLoop.ts`) that the agent invokes mid-build to look up docs/package versions — it is already
+`reference`-intent (DuckDuckGo-first) regardless of tier, and the admin's instruction was specifically
+about "free chat" (a conversational surface), not app builds. Revisit only on a fresh admin ask.
+
+**Tests (regression-locked, rule 4):** `tests/braveSearch.test.ts` gained cases pinning `cheap`'s exact
+behaviour on `searchOrder` itself (overrides `live` to duck-first, no-op with no key, defaults to `false`
+so every pre-existing call site is unaffected) plus updated its two source-text wiring assertions to the
+new `searchOrder(intent, !!braveKey, cheap)` call and the new `client.search(query, limit, 'live',
+opts.cheap)` line. `tests/agentV3WebSearchCheap.test.ts` (new) exercises the real `WebSearch` class
+end-to-end with a mocked `fetch`, resetting `braveSearch.ts`'s module-level cache/meter between cases
+(`__resetBraveSearch()`) so its in-memory coalescing/cache cannot leak results between tests using
+different `cheap`/intent combinations for the same-shaped query. A new case in
+`src/server/lib/liveSearchContext.test.ts` pins that `cheap` reaches the client as the 4th `search()` arg.
+
+**Verification gate run in full (safeguard #5) on the FINAL merged state, all green:** `tsc --noEmit`
+(frontend) + `tsc -p tsconfig.server.json` (server) + `vitest run` + `node scripts/noUnusedImports.mjs` +
+`npm run build` + `npm run test:bundle` + `npm run boot:check` (PASS — reached "Server running"; the
+Firestore ADC warning in the log is expected in this sandbox with no real GCP credentials, unrelated to
+this change).
+
+`CLAUDE.md`'s existing "Brave Search — the chat's grounding source" entry (written by the other session)
+was corrected in place — `BRAVE_API_KEY` marked ✅ SET rather than "still UNSET" — and extended with the
+`cheap` lever, rather than left to drift into two competing entries for the same key.
 
 ## 2026-09-11 — Free chat speed: the stall was never the model, it was the silence before it
 
@@ -49831,3 +49888,92 @@ collision, the path-segment validation, and the ownership re-check on the image 
 Gate re-run on the final state: `typecheck` 0 · `noUnusedImports` clean · `typecheck:server` 0 ·
 `build` ok · `test:bundle` within budget · `boot:check` PASS · `vitest run` **1,575 files / 21,733
 passed / 1 skipped / 0 failed**.
+### Tests that can fail
+
+`appAiGateway.test.ts` (41) pins the decisions; `appAiGatewayWiring.test.ts` (19) pins the ORDER and the
+PLACES — no model call before the caps are checked, no token stamped into a page whose registry row never
+landed, no charge before the visitor has their answer. Structural assertions strip comment lines first, so
+a test cannot pass because the file EXPLAINS the behaviour rather than having it, and the handler is
+anchored past the import block — every symbol asserted on also appears at the top of the file, so an
+ordering test over the whole source would have been comparing the order of the imports. The
+mint-before-stamp assertion was mutation-checked: moving the injection out of the guard fails it.
+
+**Still open, and deliberately so:** the owner has no in-product screen showing what their app's assistant
+spent today, and no way to raise the cap. Both are real gaps, both are named here rather than half-built.
+
+---
+
+## 2026-09-12 — ROADMAP §11 slice 5 / §13 item 2.4: Publish stops refusing an app that has a server
+
+Counted in the user's own steps, this is what the old behaviour asked of somebody who pressed one
+button: put the code in GitHub, open Render, make an account, generate an API key, paste it back, press
+"Deploy backend". Five steps through two other websites. Every competitor researched in §11 hosts the
+backend itself and none of them makes a third-party dashboard key the default path.
+
+`hostAppOnNavBharatCloud` has existed since slice 1c and works. What was missing was that **nothing
+pressed it** — it sat behind its own route that the Publish button never called. So Publish now calls it.
+
+### The decision is pure, and static still wins
+
+`choosePublishRoute(plan, { containerHostingAvailable })` → `static` | `container` | `refuse`. Static wins
+whenever static genuinely suffices, **even when hosting is available**: a plain website on a CDN is
+faster, cached at the edge and effectively free, and putting it in a container because we *can* would be
+a real downgrade paid for with our own money. And `refuse` is still a real outcome — with hosting off,
+which is its default and its state for everyone but an admin until 2.1 meters it, the Render/BYO path is
+unchanged byte for byte. A one-button publish that silently did nothing when the button could not work
+would be the worse half of this trade.
+
+### Two things found while wiring it, both real
+
+**The handler's identity is client-claimed.** `/publish` takes `userId`/`email` from `req.body`, which is
+fine for the feature gate it was written for and is *not* fine for an admin-only gate — a claimed email
+would have been a one-line bypass. The new branch resolves the identity from the token
+(`verifyFirebaseIdentity`, not `resolveReadIdentity`, whose documented fallback to the claimed identity is
+exactly what must not happen here), and an unresolvable one means **not** an admin.
+
+**A hosted app was invisible to everything that reads the deployment registry.** `hostAppOnNavBharatCloud`
+returned a live URL and wrote no record, so a NavBharat Cloud app never appeared in "Your published apps",
+the History menu's Live dot stayed dark, and — worst — **"Take offline" had no row to act on for an app
+that was genuinely serving the public**. The takedown *code* has deleted the Cloud Run service since the
+day it was written; it simply could never be reached. `hostedDeploymentRecord.ts` is now the one place
+both hosting routes record through, with `firstParty: true` set explicitly — NavBharatAI pays the Cloud
+Run bill, so a hosted app occupies a free publish slot exactly like a Firebase one, and `liveAppCount`
+honours an explicit flag over the provider allow-list, which is what lets that be true without adding a
+container host to a set named for static CDNs.
+
+### The one structural risk, and what pins it
+
+The whole planner sits inside a `catch` that deliberately falls through to the ordinary static publish —
+the right behaviour for a classifier that failed, and the **wrong** behaviour for this branch: falling
+through would upload a Node server to a CDN and report success, which is the precise `mitrify.com` bug
+(2026-08-23) the planner was written to end. So the branch always responds and always returns, and carries
+its own `catch`. `publishRoute.test.ts` asserts it, and the assertion was mutation-checked: removing one
+`return` fails it.
+
+That test also carries a mistake worth recording, because it is the same one this file has logged twice
+before. Its first version sliced "the branch" between a code anchor and a **comment**, and comments are
+stripped before the slice runs — so the end anchor was never found, the slice ran to the end of the file,
+and the assertion happily counted every response in a 12,000-line route. It now anchors both ends on real
+code and asserts the slice is small enough to be one branch.
+
+### Not done, and deliberately not claimed
+
+`AppKnowledgeBase.ts` was **not** updated. The rule is that every new user-facing capability gets an
+entry — and this one is not user-facing yet: `NAVBHARAT_CLOUD_PUBLIC` is unset, so only an admin can
+reach it. Describing it to every AI in the product would have them telling users about a button that
+refuses them. The entry ships with the flag. The UI half of 2.4 (GitHub and BYO Render moving under
+"Advanced") is likewise still open.
+
+### Two invariants the repo already had, and my first draft broke both
+
+The full suite caught it, not review. `publishSeedWiring` asserts the workspace files are loaded exactly
+once in the publish handler, and `deployFlowAudit` asserts the durable record is read exactly once — and
+my container branch had added a second of each (`src ?? await loadWorkspaceFiles(...)`, and its own
+`getConversationStore().get(...)` for the app's name). Both would have doubled the cost of every hosted
+publish for no new information.
+
+Fixed by hoisting rather than by weakening either test: the durable record is now read once at the top of
+the branch and serves the hosted name *and* the split-backend lookup below it, and the container path
+reuses the `src` that produced the plan. Where `src` is null — the files genuinely could not be read —
+the branch says so, because passing `{}` instead would have reached the hosting module's *"there are no
+app files yet, build your app first"*, which is the wrong reason: the app exists, we could not read it.

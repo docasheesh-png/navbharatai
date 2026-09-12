@@ -199,7 +199,7 @@ export async function runProfessionalChatWithUsage(
   // fold in real search results so the professional answers from today's data, not its training
   // cutoff. Gated + bounded + best-effort — never blocks the reply.
   try {
-    const liveBlock = await liveSearchContext(message);
+    const liveBlock = await liveSearchContext(message, { cheap: tier === 'free' });
     if (liveBlock) prompt = `${liveBlock}\n\n---\n${prompt}`;
   } catch { /* live search is best-effort */ }
 

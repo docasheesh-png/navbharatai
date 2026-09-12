@@ -11,6 +11,8 @@
 //       spinner during a build. Brave is asked only if DuckDuckGo finds nothing.
 //     • `live` (the chat's grounding) — Brave first, DuckDuckGo as the free rescue.
 //   With no BRAVE_API_KEY set, DuckDuckGo is the only engine — which is production's behaviour today.
+//   A caller can additionally pass `cheap: true` (admin 2026-09-12: free chat must be stingy with
+//   Brave) to force DuckDuckGo-first regardless of intent — see `searchOrder()`'s `cheap` parameter.
 // npm registry is queried for package-name lookups regardless of provider.
 //
 // Everything degrades gracefully: on any network/parse failure it returns an empty list rather
@@ -37,8 +39,12 @@ export class WebSearch {
    * `intent` decides which engine is asked first — see `searchOrder()`. It defaults to `reference`
    * (free engine first) because the agent's own lookups are stable technical queries nobody is
    * waiting on; the chat's grounding passes `live`, which is the class Brave is paid for.
+   *
+   * `cheap` overrides that order to DuckDuckGo-first regardless of intent — pass it for a non-paying
+   * caller (Free Chat, a free-tier Professional, a free/weak-power AgentV3 turn) so Brave is spent
+   * only as a last-resort rescue on a genuinely empty DuckDuckGo result.
    */
-  async search(query: string, limit = 5, intent: SearchIntent = 'reference'): Promise<SearchResult[]> {
+  async search(query: string, limit = 5, intent: SearchIntent = 'reference', cheap = false): Promise<SearchResult[]> {
     const results: SearchResult[] = [];
 
     // 1. Package-style queries get authoritative npm metadata.
@@ -49,7 +55,7 @@ export class WebSearch {
     }
 
     // 2. Web results: free engine first unless this is a live question — see `searchOrder()`.
-    const web = await this.routedWeb(query, limit, intent);
+    const web = await this.routedWeb(query, limit, intent, cheap);
 
     for (const r of web) {
       if (results.length >= limit) break;
@@ -65,9 +71,9 @@ export class WebSearch {
    * the caller's chair both mean "this one did not answer", and the next engine is free to try. What
    * must never happen is returning nothing while an untried engine was available.
    */
-  private async routedWeb(query: string, limit: number, intent: SearchIntent): Promise<SearchResult[]> {
+  private async routedWeb(query: string, limit: number, intent: SearchIntent, cheap = false): Promise<SearchResult[]> {
     const braveKey = braveApiKey();
-    const order = searchOrder(intent, !!braveKey);
+    const order = searchOrder(intent, !!braveKey, cheap);
     let last: SearchResult[] = [];
     for (let i = 0; i < order.length; i++) {
       const engine = order[i];

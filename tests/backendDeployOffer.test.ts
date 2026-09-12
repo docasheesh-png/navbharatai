@@ -169,7 +169,10 @@ describe('🔒 POST /api/agentv3/github/push-app — the missing control, wired 
     // The platform-org mirror is invisible to the user's Render account; a deploy from it could only
     // ever fail, which is why deployRepo excludes it and why this must be their own account.
     expect(handler).toContain('new UserGitHubClient(githubToken)');
-    expect(handler).toContain('repoOwnedByUser: true');
+    // ⚠️ `repoOwnedByUser: true` is no longer written here by hand — `ownRepoMemoryPatch` is the only
+    // thing that may write it, so that it cannot be written without the repo's NAME beside it
+    // (2026-09-12). The fact asserted is the same: this push records a repo the USER owns.
+    expect(handler).toContain('ownRepoMemoryPatch({ owner: login');
     expect(handler).toContain('res.status(401)');   // no token ⇒ refuse, never a platform-org fallback
   });
 
@@ -196,8 +199,11 @@ describe('🔒 POST /api/agentv3/github/push-app — the missing control, wired 
 
   it('remembers the repo, so the screen knows about it on every later visit', () => {
     // Without this the fact lives only in a transient build event, which is what made the panel ask
-    // for a repo the user already had.
-    expect(handler).toContain('repoOwner: login');
+    // for a repo the user already had. Built by the one helper so it can never be half-remembered —
+    // a partial record was the 2026-09-12 root cause.
+    expect(handler).toContain('ownRepoMemoryPatch({ owner: login, repo: repoName');
+    // This repo IS where the build pushes, so its storage name is pinned with it.
+    expect(handler).toContain('storesCode: true');
   });
 });
 

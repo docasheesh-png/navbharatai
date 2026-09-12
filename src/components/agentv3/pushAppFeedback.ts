@@ -40,15 +40,21 @@ export function pushSavedLine(d: PushAppResult | null | undefined): string {
  * The durable repo fact from GET /api/agentv3/conversations/:id, or null.
  *
  * Read while the screen waits out a push that outlived its request: the route records the repo the
- * moment the push lands, so the record — not the lost response — is what proves it. The same three
- * fields `deployRepoMemory.ts` requires on the server, so what counts as "a repo" cannot drift.
+ * moment the push lands, so the record — not the lost response — is what proves it. The same fields
+ * `deployRepoMemory.ts` requires on the server, so what counts as "a repo" cannot drift.
+ *
+ * ⚠️ `deployRepoName` FIRST, `repoName` only as the fallback — the same order as the server's
+ * `deployRepoNameOf` (2026-09-12). The two are different repositories for an app imported from the
+ * user's own GitHub, and this function wants the one a deploy can use.
  */
 export function repoFactOf(payload: unknown): { owner: string; repo: string } | null {
   const conv = (payload as { conversation?: unknown } | null | undefined)?.conversation as
-    { repoOwnedByUser?: unknown; repoOwner?: unknown; repoName?: unknown } | null | undefined;
+    { repoOwnedByUser?: unknown; repoOwner?: unknown; repoName?: unknown; deployRepoName?: unknown } | null | undefined;
   if (!conv || conv.repoOwnedByUser !== true) return null;
   const owner = typeof conv.repoOwner === 'string' ? conv.repoOwner.trim() : '';
-  const repo = typeof conv.repoName === 'string' ? conv.repoName.trim() : '';
+  const deployName = typeof conv.deployRepoName === 'string' ? conv.deployRepoName.trim() : '';
+  const storageName = typeof conv.repoName === 'string' ? conv.repoName.trim() : '';
+  const repo = deployName || storageName;
   return owner && repo ? { owner, repo } : null;
 }
 

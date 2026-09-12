@@ -1090,6 +1090,48 @@ the code (it is actually read somewhere) on 2026-07-11.
   ⇒ the in-app bell only, never a silent nothing. A probe that could
   not complete from our side is "unknown" and never counts as the user's site being down.
 
+- **Secret-vault device lock (shipped 2026-09-12):** `VAULT_LOCK_ORIGINS` — ⚠️ **NOT set, and it should
+  stay unset.** A comma-separated list of the origins a WebAuthn assertion may come from; UNSET uses the
+  built-in defaults (`https://navbharatai.com`, `https://www.navbharatai.com`, plus localhost for the
+  Capacitor shell and dev), which is what production needs. Setting it **replaces** the defaults, so a
+  value that omits the live origin would refuse every device unlock — only set it to ADD a staging host,
+  and include the production origins in the same list. A malformed entry is dropped rather than widening
+  the set (test-locked), so a typo cannot turn into "any origin".
+  🔒 **There is no secret to add for this feature.** The unlock challenge and ticket are signed with the
+  `SECRET_ENCRYPTION_KEY` that already encrypts the vault, which is why tickets verify across every Cloud
+  Run instance; with it unset the code falls back to a per-process RANDOM value (never a constant in
+  source, which would let anyone with the repo forge an unlock) and a user would simply be asked to
+  unlock again whenever the load balancer moved them.
+  **What it protects, stated precisely:** `POST /api/secrets/:userId/reveal` (the ONLY route that returns
+  a decrypted key) and `DELETE /api/secrets/:userId/:secretId` (now a REAL document delete, not a
+  `deleted: true` flag) refuse without a ticket minted seconds earlier from either a verified WebAuthn
+  platform-authenticator assertion or a genuinely fresh Firebase re-auth (`auth_time` within 5 min). The
+  old `GET /api/secrets/:userId` is unchanged and still returns names only.
+  ⚠️ **ON THE NATIVE SHELL — and the first version of this line named the WRONG REASON, corrected the
+  same day.** It said the device lock fails because "WebAuthn in a WebView needs app-to-site association
+  (assetlinks / associated domains) that is NOT set up". That is not what decides it here, and a later
+  session acting on it would go and build an `assetlinks.json` that changes nothing. The verified facts:
+  - **Android: the origin is `https://localhost`** — Capacitor 8.5.0 defaults `androidScheme` to the
+    https scheme with hostname `localhost` (`node_modules/@capacitor/android/.../CapConfig.java:38-39`,
+    read rather than assumed; `capacitor.config.ts` does not override it). That is a secure context and
+    `https://localhost` is ALREADY in this feature's origin allow-list, so **the origin is not the
+    blocker**. What is genuinely uncertain is whether the Android **WebView** exposes WebAuthn platform
+    authenticators at all — that varies by WebView version, and it cannot be verified from a Claude
+    session. So: **unknown, not broken.**
+  - **iOS: the origin is `capacitor://localhost`** — a custom scheme, which cannot be a WebAuthn rpId.
+    The device lock genuinely cannot work there, and the account-password door is the real path.
+  🔒 **Either way nothing breaks, which is why this was safe to ship without a device.**
+  `deviceLockAvailable()` asks the browser at runtime (`isUserVerifyingPlatformAuthenticatorAvailable`)
+  and a `false` silently offers the account-password door instead — so a WebView without WebAuthn is a
+  different SCREEN, never a failure. **To settle it, open Settings → Secrets & API Keys in the Android
+  app: whatever it asks for IS the answer.**
+  ⚠️ Note what the Android path implies if it does work: the credential is scoped to rpId `localhost`,
+  which is shared by every Capacitor app on that device. It is still safe — an assertion is useless
+  without our server's challenge, the matching credential id, and a live session — but do not widen
+  `VAULT_LOCK_ORIGINS` casually on that reasoning.
+  Do not "fix" any of this by accepting a client-side biometric boolean: a plugin's yes/no is
+  unverifiable and would make the lock theatre.
+
 - **Outbound abuse check for published apps (shipped 2026-09-10, NavBharat Cloud slice 4):**
   `NAVBHARAT_WEB_RISK` (⚠️ **NOT set yet** — `on` turns on BOTH halves together: the publish-time
   lookup of the outside hosts an app's code points at, and the daily `outbound-rescan` job that

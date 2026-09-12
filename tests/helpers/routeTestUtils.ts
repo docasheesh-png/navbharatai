@@ -65,6 +65,10 @@ export interface MockResponse {
   headersSent?: boolean;
   setHeader(k: string, v: string): void;
   header(k: string, v: string): MockResponse;
+  /** Express's `res.set` — an alias of `header`. Modelled because real routes use it (the vault's reveal
+   *  route sets Cache-Control: no-store so a revealed key is never written to a disk cache), and a mock
+   *  missing a verb the real express has fails a route that is perfectly correct. */
+  set(k: string, v: string): MockResponse;
   get(k: string): string | undefined;
 }
 
@@ -85,6 +89,7 @@ export function mockRes(): MockResponse {
     headersSent: false,
     setHeader(k: string, v: string) { this.headers[k.toLowerCase()] = v; },
     header(k: string, v: string) { this.headers[k.toLowerCase()] = v; return this; },
+    set(k: string, v: string) { this.headers[k.toLowerCase()] = v; return this; },
     get(k: string) { return this.headers[k.toLowerCase()]; },
   };
   return res;
@@ -100,5 +105,8 @@ export function mockReq(opts: Partial<{ body: any; query: any; params: any; head
     protocol: opts.protocol ?? 'https',
     socket: { remoteAddress: '127.0.0.1' },
     get(key: string) { return (this.headers as any)[key.toLowerCase()]; },
+    /** Express's `req.header` — the same lookup as `req.get`. Both exist on the real Request, and a
+     *  route that reads a token out of a header (the vault's unlock ticket) uses this one. */
+    header(key: string) { return (this.headers as any)[key.toLowerCase()]; },
   };
 }

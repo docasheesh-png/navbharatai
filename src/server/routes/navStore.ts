@@ -61,6 +61,13 @@ import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { renderPreview } from '../runtime/renderPreview';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { escapeHtml } from '../../lib/escapeHtml';
+import { hostingPlansEnabled, hostingPlanPriceInr, probeHostingPlan } from '../lib/hostingPlan';
+import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
+import { remixGate, remixRefusal } from '../lib/remixPlanGate';
+import {
+  downloadSignInRequired, signDownloadTicket, verifyDownloadTicket, downloadTicketQuery,
+  ticketRefusalMessage, ticketSecret, DOWNLOAD_TICKET_TTL_MS,
+} from '../lib/downloadTicket';
 
 /** What an upload costs today. One value, so raising it later is a one-line change. */
 export const UPLOAD_FEE_INR = 0;
@@ -407,6 +414,39 @@ export function registerNavStoreRoutes(app: Express): void {
    * Served through here rather than from a public bucket URL, so removing an app genuinely stops the
    * download instead of leaving a link alive somewhere.
    */
+  /**
+   * MINT A DOWNLOAD TICKET (admin 2026-09-12: "download ke liye sign in jaruri hai").
+   *
+   * This is the ONLY place sign-in is actually checked for a download — and it is an ordinary
+   * `fetch`, so it CAN read the Authorization header. The download itself is a browser navigation
+   * (and in the Android shell, a hand-off to the system downloader) and can carry no header at all,
+   * which is why the answer is a short-lived signed ticket rather than an auth check on the file
+   * route. See `downloadTicket.ts` for why this shape and not the obvious one.
+   *
+   * The app is checked here too, so a signed-in user cannot mint a ticket for something that is not
+   * on the store and then meet the refusal only after the download has appeared to start.
+   */
+  app.post('/api/nav-store/download-ticket/:id', async (req: Request, res: Response) => {
+    const me = await verifyFirebaseIdentity(req);
+    if (!me?.uid) return res.status(401).json({ error: 'Please sign in to download this app.', needsSignIn: true });
+    let found: Awaited<ReturnType<typeof getApp>> = null;
+    try {
+      found = await getApp(String(req.params.id || ''));
+    } catch {
+      return res.status(502).json({ error: 'Could not reach the store just now.' });
+    }
+    if (!found || found.status !== 'approved') return res.status(404).json({ error: 'That app is not available.' });
+    const exp = Date.now() + DOWNLOAD_TICKET_TTL_MS;
+    const sig = signDownloadTicket(found.id, me.uid, exp, ticketSecret());
+    res.json({
+      ok: true,
+      // A path, not an absolute URL: the client resolves it through `resolveApiHref`, which is what
+      // makes it work in the bundled app where a relative /api points at the shell, not at us.
+      path: `/api/nav-store/download/${encodeURIComponent(found.id)}?${downloadTicketQuery(me.uid, exp, sig)}`,
+      expiresAt: exp,
+    });
+  });
+
   app.get('/api/nav-store/download/:id', async (req: Request, res: Response) => {
     // A DOWNLOAD IS A NAVIGATION, SO A FAILURE MUST READ LIKE A PAGE (admin report 2026-08-19:
     // "app mart se apk download hi nahi hoti"). This route is opened by the browser itself, not by
@@ -432,6 +472,17 @@ export function registerNavStoreRoutes(app: Express): void {
       return fail(502, 'Could not reach the store just now.');
     }
     if (!found || found.status !== 'approved') return fail(404, 'That app is not available.');
+
+    // SIGN-IN, CHECKED THE ONLY WAY A NAVIGATION ALLOWS — see `downloadTicket.ts`. The three
+    // verdicts are kept apart because the sentence the user reads differs: sign in / press Download
+    // again / this link is not valid. Each is something they can act on; "not allowed" is not.
+    // 401 for a missing ticket and 403 for a bad or stale one, so the status matches the sentence.
+    if (downloadSignInRequired()) {
+      const verdict = verifyDownloadTicket(found.id, req.query as Record<string, unknown>, ticketSecret(), Date.now());
+      if (verdict !== 'ok') {
+        return fail(verdict === 'missing' ? 401 : 403, ticketRefusalMessage(verdict));
+      }
+    }
 
     const safeName = found.appName.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 40) || 'app';
     res.setHeader('Content-Type', 'application/vnd.android.package-archive');
@@ -879,15 +930,58 @@ export function registerNavStoreRoutes(app: Express): void {
           return res.status(401).json({ error: 'This app is private — the password is wrong or missing.', requiresPassword: true });
         }
       }
+      // WHO IS THIS? Asked ONCE, at the top, and reused by every decision below. Verifying the same
+      // token twice in one request is a way for two answers to disagree (a token expiring between
+      // the two calls), and "who is the caller" must have exactly one answer per request.
+      const remixerIdentity = await verifyFirebaseIdentity(req);
+      const remixerUid = remixerIdentity?.uid ?? null;
+      const remixerEmail = remixerIdentity?.email ?? null;
       const target = typeof req.body?.targetWorkspaceId === 'string' ? req.body.targetWorkspaceId : '';
       if (!target) return res.status(400).json({ error: 'targetWorkspaceId is required.' });
-      if (!verifiedWorkspaceReadOk(await verifyFirebaseToken(req), target)) {
+      if (!verifiedWorkspaceReadOk(remixerUid, target)) {
         return res.status(403).json({ error: 'That workspace does not belong to you.' });
       }
       const already = await loadWorkspaceFiles(target);
       if (Object.keys(already).length > 0) {
         return res.status(409).json({ error: 'That workspace already has files — remix into a fresh app instead.' });
       }
+      // ── PLAN GATE (admin 2026-09-12: "remix sirf wahi user kar sakta hai, jisme 149₹ ya usse
+      // adhik ka plan liya hai, har koi nahi") ──────────────────────────────────────────────────
+      //
+      // The SAME decision the Community Gallery's remix uses — `remixPlanGate.ts`, shared on purpose,
+      // because this exact gap is what let one pricing page be true on one screen and false on the
+      // other. Both hosting tiers have always listed "Remix any app in the gallery" as an included
+      // benefit; this is what makes that sentence true here too.
+      //
+      // Three exemptions live in the shared module and are load-bearing: your OWN app, an app you
+      // ALREADY BOUGHT (the store's "buy once, take the code whenever you like" promise, which a
+      // plan gate must never retroactively take back), and the admin free-list. It fails OPEN.
+      const ownsThisApp = !!remixerUid && remixerUid === found.uid;
+      // Only asked when it can change the answer: an owner is already exempt, and a signed-out
+      // visitor has nothing to have bought.
+      const boughtThisApp = !ownsThisApp && !!remixerUid && PAID_REMIX_ENABLED
+        ? await hasPurchased(found.id, remixerUid).catch(() => false)
+        : false;
+      const plansOn = hostingPlansEnabled();
+      // The probe is the only step that costs a read, so it is skipped whenever the gate cannot need
+      // it. `known: false` is the honest "we could not ask", which the gate treats as ALLOW.
+      const planProbe = plansOn && remixerUid && !ownsThisApp && !boughtThisApp
+        ? await probeHostingPlan(remixerUid).catch(() => ({ known: false, active: false }))
+        : { known: false, active: false };
+      const gate = remixGate({
+        plansEnabled: plansOn,
+        uid: remixerUid,
+        freeListed: isAgentV3FreeUser(remixerUid ?? undefined, remixerEmail),
+        isOwnApp: ownsThisApp,
+        alreadyPurchased: boughtThisApp,
+        planKnown: planProbe.known,
+        planActive: planProbe.active,
+      });
+      if (!gate.allow) {
+        const refusal = remixRefusal(gate.reason, hostingPlanPriceInr());
+        return res.status(refusal.status).json(refusal.body);
+      }
+
       // ── PAID REMIX (Kadam 3) ──────────────────────────────────────────────────────────────────
       // Non-refundable by decision, fair by construction (the app is free to RUN before buying).
       // Owners and past buyers pay nothing; an anonymous viewer has no wallet, so a paid remix
@@ -897,7 +991,10 @@ export function registerNavStoreRoutes(app: Express): void {
       // free app — no separate "disabled" code path to keep in sync, and no way for a stored price
       // on an old listing to charge anyone.
       const price = PAID_REMIX_ENABLED ? (found.priceInr ?? 0) : 0;
-      const buyerUid = await verifyFirebaseToken(req);
+      // Reused from the gate above rather than re-verified: two `verifyFirebaseToken` calls in one
+      // request could, in principle, disagree (an expiring token), and "who is this?" must have one
+      // answer per request — the gate's answer.
+      const buyerUid = remixerUid;
       let settlementNote: string | undefined;
       // "Buy once, take the code whenever you like" (admin 2026-08-16) — reported back so v5 can say
       // "copied again" rather than "yours now". Only read when there IS a price: while paid remix is
@@ -905,7 +1002,9 @@ export function registerNavStoreRoutes(app: Express): void {
       let alreadyOwned = false;
       if (price > 0 && buyerUid !== found.uid) {
         if (!buyerUid) return res.status(401).json({ error: `This remix costs ₹${price} — sign in to buy it (it's non-refundable; you can use the app free first).` });
-        const owned = await hasPurchased(found.id, buyerUid);
+        // Already resolved by the gate (it is one of the gate's exemptions), so this is a reuse, not
+        // a second read of the same record.
+        const owned = boughtThisApp;
         alreadyOwned = owned;
         if (!owned) {
           const afford = await canAffordRemix(buyerUid, price);

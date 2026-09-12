@@ -204,6 +204,15 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
    * right there: the viewer has the whole app free to use before deciding.
    */
   const [confirmingBuy, setConfirmingBuy] = useState(false);
+  /**
+   * PLAN GATE (admin 2026-09-12: "remix sirf wahi user kar sakta hai, jisme 149₹ ya usse adhik ka
+   * plan liya hai").
+   *
+   * A refusal here is an OFFER, not an error, so it gets its own sheet rather than the red error
+   * line — a plan pitch rendered in rose text reads as "something broke", and the user closes it.
+   * The price comes from the server's own answer, so this can never quote a stale number.
+   */
+  const [needsPlan, setNeedsPlan] = useState<{ message: string; priceInr: number; signIn: boolean } | null>(null);
   const price = meta?.priceInr ?? 0;
   const remix = useCallback(async () => {
     if (remixing) return;
@@ -222,6 +231,17 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) {
+        // 401/402 with `needsPlan` is the plan gate, not a failure. Shown as the offer it is.
+        if ((res.status === 402 || res.status === 401) && data?.needsPlan) {
+          setConfirmingBuy(false);
+          setNeedsPlan({
+            message: String(data.error || ''),
+            priceInr: Number(data.priceInr) || 0,
+            signIn: data.needsSignIn === true,
+          });
+          setError('');
+          return;
+        }
         setError(data?.error || 'The remix failed — nothing was copied.');
         return;
       }
@@ -397,6 +417,40 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
           <div className="h-full flex flex-col items-center justify-center gap-3">
             <div className="w-10 h-10 animate-spin" style={{ animationDuration: '1.6s' }} dangerouslySetInnerHTML={{ __html: ashokChakraSvg(40, '#4f6ef7') }} />
             <p className="text-xs text-white/40">Opening the app…</p>
+          </div>
+        )}
+
+        {/* REMIXING IS PART OF A PLAN — the offer, with a real way to take it.
+            Both hosting tiers have always listed "Remix any app in the gallery"; this is where that
+            sentence is finally true in App Mart too. The app stays free to USE either way, which is
+            said here rather than left for the user to discover. */}
+        {needsPlan && (
+          <div className="absolute inset-0 bg-black/60 flex items-center justify-center p-6" onClick={() => setNeedsPlan(null)}>
+            <div className="w-full max-w-sm bg-[#161b22] border border-indigo-500/30 rounded-2xl p-4" onClick={(e) => e.stopPropagation()}>
+              <p className="text-sm font-semibold text-white mb-1">
+                {needsPlan.signIn ? 'Sign in to make this app yours' : 'Remixing is part of a hosting plan'}
+              </p>
+              <p className="text-xs text-white/60 leading-relaxed mb-3">{needsPlan.message}</p>
+              <p className="text-[11px] text-white/50 bg-white/5 rounded-lg px-2.5 py-2 mb-3 leading-relaxed">
+                A plan also connects your own domain, keeps more of your apps published, removes the
+                “Made with NavBharatAI” badge, and keeps NavBharatAI ad-free for you. It is paid from
+                your normal wallet balance — there is no card to add.
+              </p>
+              <div className="flex gap-2 justify-end">
+                <button onClick={() => setNeedsPlan(null)} className="px-3 py-1.5 rounded-lg text-xs text-white/60 hover:text-white transition-colors">Not now</button>
+                {/* Plans live in Wallet & Billing, which is outside this overlay — so the player
+                    closes and hands over, rather than pretending to open a panel it does not own. */}
+                <button
+                  onClick={() => { setNeedsPlan(null); onClose(); }}
+                  className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs text-white font-bold transition-colors"
+                >
+                  {needsPlan.priceInr > 0 ? `See plans — from ₹${needsPlan.priceInr}/month` : 'See plans'}
+                </button>
+              </div>
+              <p className="mt-2 text-[10px] text-white/35 leading-relaxed">
+                Open Wallet &amp; Billing from the sidebar menu → Plans.
+              </p>
+            </div>
           </div>
         )}
 

@@ -109,6 +109,15 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
   const [queue, setQueue] = useState<QueueApp[]>([]);
   // The tab badge counts only what still needs a DECISION — approved apps are a record, not work.
   const pendingCount = pendingReviewCount(queue);
+  /**
+   * DOWNLOAD (admin 2026-09-12: "download ke liye sign in jaruri hai").
+   *
+   * A download is a NAVIGATION, so it cannot carry an auth header — the server checks sign-in when
+   * it mints a short-lived ticket, and the navigation carries that. Which is why this is a button
+   * that fetches then navigates, instead of the plain `<a href>` it used to be.
+   */
+  const [dlBusy, setDlBusy] = useState(false);
+  const [dlError, setDlError] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [openApp, setOpenApp] = useState<PublicApp | null>(null);
@@ -394,6 +403,40 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
       if (liveRef.current) setReviewing('');
     }
   }, [loadQueue, loadApps]);
+  /**
+   * Ask the server for a download ticket (that call CAN carry the auth header), then navigate.
+   *
+   * WEB — a plain navigation, so the browser streams a 30 MB file straight to disk; pulling it into
+   * a blob first would hold the whole APK in the tab's memory for no gain.
+   * APP — the WebView has no download manager, so a link to an attachment does exactly nothing
+   * (admin report 2026-08-19). Handing the URL to the system browser gives the file to Android's
+   * real downloader. `resolveApiHref` because a relative /api in the bundled app points at the
+   * shell, not at our server.
+   */
+  const startDownload = useCallback(async (appId: string) => {
+    if (dlBusy) return;
+    setDlBusy(true);
+    setDlError('');
+    try {
+      const r = await fetch(`/api/nav-store/download-ticket/${encodeURIComponent(appId)}`, {
+        method: 'POST',
+        headers: await authedHeaders(),
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok || !d?.path) {
+        setDlError(d?.error || 'Could not start the download. Please try again.');
+        return;
+      }
+      const href = resolveApiHref(d.path, window);
+      if (isNativeApp()) window.open(href, '_blank');
+      else window.location.href = href;
+    } catch {
+      setDlError('Could not reach the store. Check your connection and try again.');
+    } finally {
+      setDlBusy(false);
+    }
+  }, [dlBusy]);
+
 
   return (
     <div className="h-full overflow-y-auto overscroll-contain bg-[#0d1117] text-white" style={{ WebkitOverflowScrolling: 'touch' }}>
@@ -1110,17 +1153,19 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                     file to Android's real downloader, the same `_blank` route UpdateBanner already
                     relies on. The URL is resolved through resolveApiHref because in the bundled app a
                     relative /api path points at the shell itself, not at our server. */}
-            <a
-              href={resolveApiHref(`/api/nav-store/download/${encodeURIComponent(openApp.id)}`, window)}
-              onClick={(e) => {
-                if (!isNativeApp()) return; // web: let the browser do what it already does well
-                e.preventDefault();
-                window.open(e.currentTarget.href, '_blank');
-              }}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-base font-bold transition-colors"
+            <button
+              type="button"
+              disabled={dlBusy}
+              onClick={() => void startDownload(openApp.id)}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-base font-bold transition-colors"
             >
-              <Download size={17} /> Download .apk
-            </a>
+              <Download size={17} /> {dlBusy ? 'Preparing…' : 'Download .apk'}
+            </button>
+            {/* 🔒 A REFUSED DOWNLOAD MUST SAY SO. The old `<a>` could only ever navigate; a signed-out
+                user would have met the server's page instead of a sentence here. */}
+            {dlError && (
+              <p className="mt-2 text-[11px] text-amber-300 leading-relaxed">{dlError}</p>
+            )}
 
             <p className="mt-3 flex gap-2 text-[11px] text-white/40 leading-relaxed">
               <Info size={12} className="mt-0.5 flex-shrink-0" />

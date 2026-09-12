@@ -68,7 +68,7 @@ export const GalleryPanel: React.FC<GalleryPanelProps> = ({ user, files, onRemix
   const [message, setMessage] = useState('');
   const [blockers, setBlockers] = useState<Blocker[]>([]);
   /** Set when the server refuses a remix for want of a plan — carries the price it named. */
-  const [needsPlan, setNeedsPlan] = useState<{ message: string; priceInr: number } | null>(null);
+  const [needsPlan, setNeedsPlan] = useState<{ message: string; priceInr: number; signIn: boolean } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -120,8 +120,10 @@ export const GalleryPanel: React.FC<GalleryPanelProps> = ({ user, files, onRemix
       if (!r.ok) {
         // A plan refusal is not an error to read and shrug at — it is an offer. The PRICE comes from
         // the server's own answer rather than a number typed here, so it can never go stale.
-        if (r.status === 402 && d?.needsPlan) {
-          setNeedsPlan({ message: String(d.error || ''), priceInr: Number(d.priceInr) || 0 });
+        // 401 as well as 402 since 2026-09-12: the shared gate answers a SIGNED-OUT visitor with one
+        // message that says both things (sign in, then a plan) instead of two refusals in a row.
+        if ((r.status === 402 || r.status === 401) && d?.needsPlan) {
+          setNeedsPlan({ message: String(d.error || ''), priceInr: Number(d.priceInr) || 0, signIn: d.needsSignIn === true });
           setMessage('');
           return;
         }
@@ -147,7 +149,7 @@ export const GalleryPanel: React.FC<GalleryPanelProps> = ({ user, files, onRemix
           <div className="flex items-center gap-2">
             <GitFork className="w-4 h-4 text-indigo-400" />
             <h3 className="text-sm font-black text-white uppercase tracking-tight">
-              Remixing is part of a hosting plan
+              {needsPlan.signIn ? 'Sign in to remix this app' : 'Remixing is part of a hosting plan'}
             </h3>
           </div>
           <p className="text-[11px] text-[#c9d1d9] leading-relaxed">{needsPlan.message}</p>

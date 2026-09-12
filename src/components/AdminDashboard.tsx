@@ -160,7 +160,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     /** WHY they failed, ranked by what each cause cost US. Null when the ledger could not be read. */
     causes?: {
       builds: number; usd: number; headline: string;
-      causes: Array<{ category: string; builds: number; usd: number; shareOfBuilds: number; avgSeconds: number }>;
+      causes: Array<{ category: string; builds: number; usd: number; shareOfBuilds: number; avgSeconds: number; sample?: string }>;
       frameworks: Array<{ framework: string; builds: number }>;
     } | null;
     /** False means the read FAILED — not that nothing went wrong. */
@@ -1852,13 +1852,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             <div className="text-[10px] text-[#8b949e] mt-1 leading-relaxed">{failureReport.causes.headline}</div>
                             <div className="mt-2 space-y-1">
                               {failureReport.causes.causes.slice(0, 6).map((c) => (
-                                <div key={c.category} className="flex items-center justify-between text-[10px]">
-                                  <span className={c.category === 'unknown' ? 'text-amber-400 font-bold' : 'text-[#c9d1d9]'}>
-                                    {c.category}
-                                  </span>
-                                  <span className="text-[#8b949e]">
-                                    {c.builds} build{c.builds === 1 ? '' : 's'} · {(c.shareOfBuilds * 100).toFixed(0)}% · ${c.usd.toFixed(4)} · {c.avgSeconds}s avg
-                                  </span>
+                                <div key={c.category}>
+                                  <div className="flex items-center justify-between text-[10px]">
+                                    <span className={c.category === 'unknown' ? 'text-amber-400 font-bold' : 'text-[#c9d1d9]'}>
+                                      {c.category}
+                                    </span>
+                                    <span className="text-[#8b949e]">
+                                      {c.builds} build{c.builds === 1 ? '' : 's'} · {(c.shareOfBuilds * 100).toFixed(0)}% · ${c.usd.toFixed(4)} · {c.avgSeconds}s avg
+                                    </span>
+                                  </div>
+                                  {/* One REAL example, so a row is something to act on rather than something to go and look up. */}
+                                  {c.sample && (
+                                    <div className="text-[9px] text-[#6e7681] mt-0.5 pl-1 border-l border-white/10 leading-relaxed">{c.sample}</div>
+                                  )}
                                 </div>
                               ))}
                             </div>

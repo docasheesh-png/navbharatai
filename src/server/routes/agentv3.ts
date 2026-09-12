@@ -17943,6 +17943,10 @@ async function noteBuildOutcome(
             inputTokens: sink.inputTokens || 0,
             outputTokens: sink.outputTokens || 0,
             ms: Math.max(0, Date.now() - buildStartedAt),
+            // ONE real example per cause, so "preview: 12 builds" becomes something to act on rather
+            // than something to go and look up twelve times. The rootCause is evidence-derived and
+            // admin-only; the ledger truncates it.
+            sample: failDiag.rootCause || '',
           });
         } catch { /* the ledger must never be why a failed build fails differently */ }
       }

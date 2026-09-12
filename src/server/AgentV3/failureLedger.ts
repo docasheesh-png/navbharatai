@@ -33,7 +33,19 @@ export interface FailureEntry {
   outputTokens: number;
   /** Wall-clock the build burned before failing. */
   ms: number;
+  /**
+   * The build's own rootCause sentence, so a ranked cause can show ONE real example.
+   *
+   * 🔒 ADMIN-ONLY and TRUNCATED. "preview: 12 builds, $0.80" tells an admin where to look and nothing
+   * about what to look AT; one real sentence turns it into something they can act on without opening
+   * twelve build reports. Bounded hard (see SAMPLE_CHARS) because this lands in a document that also
+   * has to hold a year of days.
+   */
+  sample?: string;
 }
+
+/** The most of a rootCause one sample keeps. Enough for the sentence, never enough to bloat a day. */
+export const SAMPLE_CHARS = 200;
 
 export interface CategoryTotals {
   builds: number;
@@ -41,6 +53,8 @@ export interface CategoryTotals {
   inputTokens: number;
   outputTokens: number;
   ms: number;
+  /** ONE real rootCause from this category today — the most recent. Admin-only. */
+  sample?: string;
 }
 
 export interface FailureDay {
@@ -85,8 +99,13 @@ export function foldFailure(existing: FailureDay | null | undefined, date: strin
   const cat = String(entry?.category ?? 'unknown') || 'unknown';
   const prev = day.categories[cat] ?? EMPTY;
   const usd = num(entry?.realUsd);
+  // The MOST RECENT sample wins: somebody reading this is debugging now, and the newest example is the
+  // one most likely to still be reproducible. An entry with no sample never erases the one already
+  // there — losing the only example to a build that failed before it could say why would be a real loss.
+  const sample = String(entry?.sample ?? '').trim().slice(0, SAMPLE_CHARS) || prev.sample;
   day.categories[cat] = {
     builds: prev.builds + 1,
+    ...(sample ? { sample } : {}),
     // Six decimals, matching hostingCost: a build can genuinely cost a fraction of a cent, and
     // rounding those to zero would make the cheapest-but-most-frequent failure look free.
     usd: Math.round((prev.usd + usd) * 1e6) / 1e6,
@@ -110,6 +129,8 @@ export interface RankedCause {
   category: string;
   builds: number;
   usd: number;
+  /** One real example of this cause from the window. Admin-only; absent when none was captured. */
+  sample?: string;
   /** Share of the window's failed builds, 0-1. */
   shareOfBuilds: number;
   /** Share of the window's wasted money, 0-1. 0 when nothing measurable was spent. */
@@ -151,7 +172,10 @@ export function rankFailures(days: ReadonlyArray<FailureDay | null | undefined>)
     usd += num(d.usd);
     for (const [cat, t] of Object.entries(d.categories ?? {})) {
       const prev = totals.get(cat) ?? EMPTY;
+      // Days arrive newest-first, so the FIRST sample seen for a category is the most recent one.
+      const sample = prev.sample || String(t?.sample ?? '').trim().slice(0, SAMPLE_CHARS) || undefined;
       totals.set(cat, {
+        ...(sample ? { sample } : {}),
         builds: prev.builds + num(t?.builds),
         usd: Math.round((prev.usd + num(t?.usd)) * 1e6) / 1e6,
         inputTokens: prev.inputTokens + num(t?.inputTokens),
@@ -173,6 +197,7 @@ export function rankFailures(days: ReadonlyArray<FailureDay | null | undefined>)
       shareOfBuilds: builds > 0 ? t.builds / builds : 0,
       shareOfUsd: usd > 0 ? t.usd / usd : 0,
       avgSeconds: t.builds > 0 ? Math.round(t.ms / t.builds / 100) / 10 : 0,
+      ...(t.sample ? { sample: t.sample } : {}),
     }))
     // Money first, because that is the question being asked. Count breaks the tie, which matters on a
     // day when nothing measurable was spent — otherwise the order would be arbitrary.

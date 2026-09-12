@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { foldFailure, rankFailures, frameworkKey, MAX_FRAMEWORK_KEYS, type FailureDay, type FailureEntry } from './failureLedger';
+import { foldFailure, rankFailures, frameworkKey, MAX_FRAMEWORK_KEYS, SAMPLE_CHARS, type FailureDay, type FailureEntry } from './failureLedger';
 
 /**
  * WHY DO BUILDS FAIL? (admin: "mera paisa kam kharch ho").
@@ -64,6 +64,38 @@ describe('folding one failure into a day', () => {
   it('a missing category becomes unknown rather than vanishing', () => {
     const day = foldFailure(null, '2026-09-12', entry({ category: undefined as never }));
     expect(day.categories.unknown.builds).toBe(1);
+  });
+});
+
+describe('one real example per cause', () => {
+  it('keeps the MOST RECENT sample — a debugger wants the newest, not the first', () => {
+    let day = foldFailure(null, '2026-09-12', entry({ sample: 'older failure' }));
+    day = foldFailure(day, '2026-09-12', entry({ sample: 'newer failure' }));
+    expect(day.categories.dependency.sample).toBe('newer failure');
+  });
+
+  it('🔒 a build with NO sample never erases the one already there', () => {
+    // Losing the only example to a build that failed before it could say why would be a real loss.
+    let day = foldFailure(null, '2026-09-12', entry({ sample: 'the only example' }));
+    day = foldFailure(day, '2026-09-12', entry({ sample: '' }));
+    day = foldFailure(day, '2026-09-12', entry({ sample: undefined }));
+    expect(day.categories.dependency.sample).toBe('the only example');
+  });
+
+  it('🔒 is truncated — this document also has to hold a year of days', () => {
+    const day = foldFailure(null, '2026-09-12', entry({ sample: 'x'.repeat(5000) }));
+    expect(day.categories.dependency.sample!.length).toBe(SAMPLE_CHARS);
+  });
+
+  it('a category with no example simply has none, rather than an empty string', () => {
+    const day = foldFailure(null, '2026-09-12', entry({ sample: '   ' }));
+    expect(day.categories.dependency.sample).toBeUndefined();
+  });
+
+  it('the ranking carries the newest example across days (days arrive newest-first)', () => {
+    const newer = foldFailure(null, '2026-09-12', entry({ sample: 'today' }));
+    const older = foldFailure(null, '2026-09-11', entry({ sample: 'yesterday' }));
+    expect(rankFailures([newer, older]).causes[0].sample).toBe('today');
   });
 });
 
@@ -178,6 +210,16 @@ describe('the wiring', () => {
     const ui = read('src/components/AdminDashboard.tsx');
     expect(ui).toContain('Why they failed — ranked by what it cost us');
     expect(ui).toContain('failureReport.causes.headline');
+  });
+
+  it('🔒 the example reaches the screen too — a row nobody can act on is half a feature', () => {
+    const ui = read('src/components/AdminDashboard.tsx');
+    expect(ui).toContain('{c.sample && (');
+  });
+
+  it('the build records its evidence-derived rootCause as the example', () => {
+    const route = codeOf(read('src/server/routes/agentv3.ts'));
+    expect(route).toContain("sample: failDiag.rootCause || ''");
   });
 
   it('🔒 an unreadable ledger is shown as a gap, never as a clean week', () => {

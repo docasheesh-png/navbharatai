@@ -50392,3 +50392,18 @@ as well. `outcomeCodeOf` is one helper shared by both, using the same "last outc
 Before this, nobody had checked what the classifier was actually being given — the pipe was built, both
 ends were correct, and the thing travelling through it could never match. 13 tests, including the one
 that proves the old path really would have said `unknown`.
+
+**And one real example per cause, so a row is something to act on.** *"preview: 12 builds, $0.80"* tells
+an admin where to look and nothing about what to look AT. Each ranked cause now carries ONE real
+`rootCause` sentence — the most recent, because somebody reading it is debugging now and the newest
+example is the likeliest to still reproduce. Bounded at 200 characters (the document also has to hold a
+year of days), and a build that failed before it could say why **never erases** the example already
+there. Admin-only, like every other line on that card.
+
+⚠️ **Still true and worth stating rather than leaving to be discovered:** `relevantWarnings()` in
+`BuildRetrospectiveEngine` takes a history of retrospectives and **still has no caller that can give it
+one** — the ledger stores per-day aggregates, not individual retrospectives. It is a tested function
+with no live path. Left as it is rather than wired speculatively: pushing generic advice
+("dependency failures are common") into every build prompt would cost tokens on every build and tell
+the model nothing it does not already know. It becomes worth wiring when the ledger shows a cause
+concentrated in one framework — which is exactly what the framework counts were added to reveal.

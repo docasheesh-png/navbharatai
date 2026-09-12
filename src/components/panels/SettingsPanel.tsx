@@ -9,6 +9,7 @@ import { authedHeaders } from '../../lib/authHeaders';
 import { LEGAL_META } from '../../content/legal/meta';
 import { LegalDocPage } from './LegalDocPage';
 import { DangerZone } from '../settings/DangerZone';
+import { AdultContentToggle } from '../settings/AdultContentToggle';
 import {
   type MotionMode, getStoredMotionMode, applyMotionMode,
   getStoredFontScale, applyFontScale, FONT_SCALE_MIN, FONT_SCALE_MAX, FONT_SCALE_STEP, FONT_SCALE_DEFAULT,
@@ -821,6 +822,10 @@ export function SettingsPanel({
 
                                           {/* "Made by NavBharatAI" signature toggle — badge on every built app (admin 2026-07-16). */}
                      <AppSignatureToggle />
+
+                     {/* The +18 setting (admin 2026-09-12). Renders NOTHING in the Android app — see
+                         AdultContentToggle for why absent rather than disabled. */}
+                     <AdultContentToggle />
 
                      <div className="p-4 sm:p-6 bg-[#0d1117] border border-white/5 rounded-2xl sm:rounded-[1.5rem] shadow-inner space-y-3">
                        <div className="flex items-center gap-3 mb-2">

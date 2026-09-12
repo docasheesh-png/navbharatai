@@ -5,6 +5,7 @@ import {
   assessPublishSafety, decideFromScan, filesForScan, refusalFor, MAX_RECORDED_FINDINGS,
 } from './storePublishSafety';
 import type { ContentScanResult } from '../AgentV3/ContentSafetyScanner';
+import { classifyPublishedText } from '../AgentV3/illegalContentRules';
 
 const finding = (severity: string, rule = 'R') => ({
   severity: severity as 'critical' | 'high' | 'medium',
@@ -156,5 +157,85 @@ describe('⚡ opening an app waits for one round trip, not two', () => {
     expect(open).toContain('found.version');
     const store = readFileSync(join(__dirname, 'navStoreWeb.ts'), 'utf8');
     expect(store.match(/bakeIsCurrent\(/g)?.length).toBe(1);
+  });
+});
+
+describe('🔒 the illegal tier refuses UNCONDITIONALLY — no switch reaches it', () => {
+  const illegal = classifyPublishedText('underage porn gallery');
+
+  it('blocks even in WARN mode, which is what "saaf-saaf wale cases par block" means', () => {
+    // The older judgement-call rules stay behind AGENTV3_PUBLISH_SCAN because a false positive there
+    // costs an honest creator their app. A category that is unlawful for everyone must not be
+    // reachable by flipping an operations switch.
+    const d = decideFromScan({ safe: true, findings: [] }, false, illegal);
+    expect(d.refuse).toBe(true);
+    expect(d.forceUnlisted).toBe(true);
+    expect(d.contentClass).toBe('illegal');
+  });
+
+  it('and the +18 setting cannot unlock it either', () => {
+    const d = decideFromScan({ safe: true, findings: [] }, false, illegal, { adultOptIn: true });
+    expect(d.refuse).toBe(true);
+  });
+
+  it('the illegal check comes FIRST, so no later branch can undo it', () => {
+    const src = readFileSync(join(__dirname, 'storePublishSafety.ts'), 'utf8');
+    const fn = src.slice(src.indexOf('export function decideFromScan'));
+    expect(fn.indexOf('if (illegal.length > 0)')).toBeLessThan(fn.indexOf('refuse: !scan.safe && blockMode'));
+  });
+
+  it('the refusal names the category and the way to appeal, never the matched text', () => {
+    const d = decideFromScan({ safe: true, findings: [] }, false, illegal);
+    expect(d.refusalMessage).toContain('Grievance');
+    expect(d.refusalMessage).not.toContain('underage');
+  });
+});
+
+describe('the adult tier rides the creator’s own +18 setting', () => {
+  const adult = classifyPublishedText('Adult videos — browse categories, 18+ only');
+
+  it('a creator WITH the setting on publishes normally, marked 18+', () => {
+    const d = decideFromScan({ safe: true, findings: [] }, false, adult, { adultOptIn: true });
+    expect(d.refuse).toBe(false);
+    expect(d.contentClass).toBe('adult');
+    expect(d.adultWithoutOptIn).toBe(false);
+  });
+
+  it('a creator WITHOUT it is not refused — it waits for review, and they are told which switch', () => {
+    // They are allowed to build it; they simply have not said they are an adult yet.
+    const d = decideFromScan({ safe: true, findings: [] }, false, adult, { adultOptIn: false });
+    expect(d.refuse).toBe(false);
+    expect(d.forceUnlisted).toBe(true);
+    expect(d.adultWithoutOptIn).toBe(true);
+  });
+
+  it('an ordinary app is untouched by any of this', () => {
+    const d = decideFromScan({ safe: true, findings: [] }, false, classifyPublishedText('<h1>Chai</h1>'), { adultOptIn: false });
+    expect(d).toMatchObject({ refuse: false, flagged: false, forceUnlisted: false, contentClass: 'general', adultWithoutOptIn: false });
+  });
+});
+
+describe('wiring — Phase 5 reaches the real publish', () => {
+  const route = readFileSync(join(__dirname, '..', 'routes', 'navStore.ts'), 'utf8');
+
+  it('the publisher’s own +18 setting is read and passed in', () => {
+    expect(route).toContain('adultOptIn: publisherAdult.optedIn');
+  });
+
+  it('the app’s class is stored, and `illegal` is narrowed away rather than cast', () => {
+    // An illegal publish never reaches the save; narrowing means a future reorder stores `general`
+    // (harmless, reviewable) instead of silently persisting `illegal`.
+    expect(route).toContain("safety.contentClass === 'adult' ? 'adult' as const : 'general' as const");
+  });
+
+  it('18+ apps are hidden from browse on the SERVER, not in the client’s render', () => {
+    const list = route.slice(route.indexOf("app.get('/api/nav-store/web/apps'"), route.indexOf("app.get('/api/nav-store/web/mine'"));
+    expect(list).toContain('hiddenFromBrowse(');
+    expect(list).toContain('isNativeRequest(req)');
+  });
+
+  it('both rule sets read the SAME text, so they cannot disagree about scope', () => {
+    const safety = readFileSync(join(__dirname, 'storePublishSafety.ts'), 'utf8');
+    expect(safety).toContain('classifyPublishedText(scannableText(scanned))');
   });
 });

@@ -68,8 +68,14 @@ const CONTENT_RULES: ContentRule[] = [
   },
 ];
 
-/** Decode + concatenate the scannable text of a dist file map (bounded). Pure. */
-function scannableText(files: Map<string, Buffer> | null | undefined): string {
+/**
+ * Decode + concatenate the scannable text of a dist file map (bounded). Pure.
+ *
+ * EXPORTED since 2026-09-12 so the illegal-category rules read EXACTLY the same text as the rules
+ * here. A second copy of "which files count, and how much of each" would let the two rule sets
+ * disagree about scope — and the one that read less would be the one that missed something.
+ */
+export function scannableText(files: Map<string, Buffer> | null | undefined): string {
   if (!files || files.size === 0) return '';
   const parts: string[] = [];
   for (const [path, buf] of files) {

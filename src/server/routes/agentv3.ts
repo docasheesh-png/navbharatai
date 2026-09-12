@@ -227,7 +227,7 @@ import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findC
 import { detectBackendPresence } from '../AgentV3/BackendPresence';
 import { planDeployment, deployDecision } from '../AgentV3/deployPlan';
 import { analyzeApiWiring, buildEnvForSplit, buildEnvForWhole, mergeEnvFile } from '../AgentV3/apiWiring';
-import { repoAvailableForDeploy, resolveDeployRepo } from '../AgentV3/deployRepoMemory';
+import { repoAvailableForDeploy, resolveDeployRepo, ownRepoMemoryPatch, renameStorageRepoPatch } from '../AgentV3/deployRepoMemory';
 import { decidePushBranch } from '../AgentV3/pushAppTarget';
 import { hostingAvailability, hostAppOnNavBharatCloud } from '../AgentV3/hostApp';
 import { appsProject, appsRegion, serviceNameFor, deleteHostedService } from '../AgentV3/cloudRunHosting';
@@ -3358,7 +3358,8 @@ export function registerAgentV3Routes(app: Express): void {
     const now = Date.now();
     try {
       await saveWorkspaceFiles(newWorkspaceId, files);
-      // Files + chat + name. Deliberately NOT: repoName, repoOwner, deployBranch, backendDomain,
+      // Files + chat + name. Deliberately NOT: repoName, deployRepoName, repoOwner, deployBranch,
+      // backendDomain,
       // pinned, or anything about hosting — see duplicateApp.ts.
       await store.create({ id: newSessionId, userId, workspaceId: newWorkspaceId, title: name, messages: source.messages ?? [], createdAt: now });
       await store.update(newSessionId, { appName: name, status: copyStatus(source.status), updatedAt: now, ...(source.framework ? { framework: source.framework } : {}) });
@@ -3389,7 +3390,10 @@ export function registerAgentV3Routes(app: Express): void {
       // `?? ''` is not a shrug: isEnumerableUserId('') is false, so a token-less identity yields an
       // empty list here by the same Phase-3.1 rule that protects the shared-anon bucket.
       const mine = await store.listByUser(userId ?? '', 200).catch(() => []);
-      let renamed: { id: string; repoName?: string } | null = null;
+      // `deployRepoName` travels with it because the rename rule needs BOTH names to decide whether
+      // the deploy repo is the one being moved — see renameStorageRepoPatch. `rec` itself is scoped to
+      // the loop below, so carrying the two fields is what keeps the rule readable at the call sites.
+      let renamed: { id: string; repoName?: string; deployRepoName?: string } | null = null;
       let forbidden = false;
       for (const cid of candidateConversationIds(req.params.id, userId)) {
         const rec = await store.get(cid).catch(() => null);
@@ -3413,6 +3417,7 @@ export function registerAgentV3Routes(app: Express): void {
         // this record's own identity.
         renamed = {
           id: cid,
+          deployRepoName: rec.deployRepoName,
           repoName: rec.repoName || repoNameForProject(userId, req.params.id, {
             appName: rec.title,
             createdAtMs: typeof rec.createdAt === 'number' && rec.createdAt > 0 ? rec.createdAt : Date.now(),
@@ -3435,19 +3440,19 @@ export function registerAgentV3Routes(app: Express): void {
       if (fromRepo === toRepo) {
         // Already called this. Pin it anyway: an app whose repo name is only ever DERIVED is one
         // rename away from ambiguity, and a fact costs nothing to record.
-        await store.update(renamed.id, { repoName: toRepo, updatedAt: Date.now() }).catch(() => { /* cosmetic */ });
+        await store.update(renamed.id, { ...renameStorageRepoPatch(renamed, toRepo), updatedAt: Date.now() }).catch(() => { /* cosmetic */ });
         repoNote = 'already-named';
       } else if (ghToken) {
         const out = await new UserGitHubClient(ghToken).renameRepo(fromRepo, toRepo);
         if (out.ok) {
           // Persist ONLY what GitHub confirmed — the name it reports, not the one we asked for.
-          await store.update(renamed.id, { repoName: out.name, updatedAt: Date.now() }).catch(() => { /* display rename already stands */ });
+          await store.update(renamed.id, { ...renameStorageRepoPatch(renamed, out.name), updatedAt: Date.now() }).catch(() => { /* display rename already stands */ });
           repoRenamed = true;
         } else if (out.status === 404) {
           // NOTHING TO MOVE — this app has never been pushed to GitHub. So pin the chosen name and the
           // repo is simply BORN with it on the first save. This is the common path for a rename right
           // after the first build, and pinning here is safe precisely because no repo exists to strand.
-          await store.update(renamed.id, { repoName: toRepo, updatedAt: Date.now() }).catch(() => { /* cosmetic */ });
+          await store.update(renamed.id, { ...renameStorageRepoPatch(renamed, toRepo), updatedAt: Date.now() }).catch(() => { /* cosmetic */ });
           repoNote = 'will-use-on-first-save';
         } else {
           // 422 is GitHub itself saying the name is taken — the authoritative duplicate check that no
@@ -4623,10 +4628,11 @@ async function noteBuildOutcome(
       // while a build event happens to be in flight — which is what made the panel ask for a repo the
       // user already had. It is ALSO how a client that stopped waiting learns the push landed: the
       // screen polls this record after its own timeout (see HostingChooser.awaitRepoFact).
-      await store.update(workspaceId, {
-        repoName, repoOwner: login, repoOwnedByUser: true, deployBranch: target.branch,
-        updatedAt: rec?.updatedAt ?? Date.now(),
-      }).catch(() => { /* the push is what mattered; a failed note only costs the shortcut */ });
+      const pushMemory = ownRepoMemoryPatch({ owner: login, repo: repoName, deployBranch: target.branch, storesCode: true });
+      if (pushMemory) {
+        await store.update(workspaceId, { ...pushMemory, updatedAt: rec?.updatedAt ?? Date.now() })
+          .catch(() => { /* the push is what mattered; a failed note only costs the shortcut */ });
+      }
 
       res.json({
         ok: true, fullName: repo.fullName || `${login}/${repoName}`, htmlUrl: repo.htmlUrl || '', owner: login, repo: repoName,
@@ -8482,9 +8488,11 @@ async function noteBuildOutcome(
               // Remember it durably — this repo is in the user's own account, so it is exactly as
               // deployable as one made by "Put this app in my GitHub" (the 2026-09-06 memory rule).
               // Best-effort: an import that precedes any conversation record has nothing to update yet.
-              await getConversationStore().update(workspaceId, {
-                repoName, repoOwner: login, repoOwnedByUser: true, deployBranch: target.branch, updatedAt: Date.now(),
-              }).catch(() => { /* the backup itself is what mattered; a missing record only costs the shortcut */ });
+              const zipMemory = ownRepoMemoryPatch({ owner: login, repo: repoName, deployBranch: target.branch, storesCode: true });
+              if (zipMemory) {
+                await getConversationStore().update(workspaceId, { ...zipMemory, updatedAt: Date.now() })
+                  .catch(() => { /* the backup itself is what mattered; a missing record only costs the shortcut */ });
+              }
             }
           } catch { /* GitHub backup is a best-effort backstop — never blocks the import */ }
         } else {
@@ -11564,10 +11572,11 @@ async function noteBuildOutcome(
                  * deploy must never build from `navbharatai/work`, which can hold unreviewed,
                  * mid-session edits. See renderCreateService's branch wiring.
                  */
-                void getConversationStore().update(workspaceId, {
-                  repoOwner: target.owner, repoOwnedByUser: true, deployBranch: target.baseBranch,
-                  updatedAt: Date.now(),
-                }).catch(() => { /* best-effort — the live stream event above still reaches this session */ });
+                const ownRepoMemory = ownRepoMemoryPatch({ owner: target.owner, repo: target.repo, deployBranch: target.baseBranch, storesCode: false });
+                if (ownRepoMemory) {
+                  void getConversationStore().update(workspaceId, { ...ownRepoMemory, updatedAt: Date.now() })
+                    .catch(() => { /* best-effort — the live stream event above still reaches this session */ });
+                }
               } else {
                 // MIRROR (today's behaviour): a private per-project repo in the user's account.
                 const repo = await userClient.ensureRepo(repoName);
@@ -11588,10 +11597,13 @@ async function noteBuildOutcome(
                 });
                 // Same durable memory as the own-repo branch above — this repo IS the user's own
                 // account (userClient.ensureRepo created it there), so it is exactly as deployable.
-                void getConversationStore().update(workspaceId, {
-                  repoOwner: login, repoOwnedByUser: true, deployBranch: repoBranch,
-                  updatedAt: Date.now(),
-                }).catch(() => { /* best-effort — the live stream event above still reaches this session */ });
+                // `storesCode: true` — this mirror IS where the build pushes (ensureRepo created it in
+                // the user's own account just above), so the storage name is pinned with it.
+                const mirrorMemory = ownRepoMemoryPatch({ owner: login, repo: repoName, deployBranch: repoBranch, storesCode: true });
+                if (mirrorMemory) {
+                  void getConversationStore().update(workspaceId, { ...mirrorMemory, updatedAt: Date.now() })
+                    .catch(() => { /* best-effort — the live stream event above still reaches this session */ });
+                }
               }
             } catch { repoSync = undefined; prClient = undefined; ownRepoTarget = null; /* fall through to the platform store */ }
           }

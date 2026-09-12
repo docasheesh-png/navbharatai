@@ -37,7 +37,13 @@ export interface PersistedConversation {
    */
   repoOwner?: string;
   repoOwnedByUser?: boolean;
+  /** The STORAGE repo the build pushes to — the fallback only, see `deployRepoNameOf`. */
   repoName?: string;
+  /**
+   * 🔴 The DEPLOY repo, which for a GitHub-IMPORTED app is a different repository from `repoName`
+   * (root-caused 2026-09-12 — see server/AgentV3/deployRepoMemory.ts for the whole story).
+   */
+  deployRepoName?: string;
 }
 
 /**
@@ -126,9 +132,10 @@ export function conversationToEvents(conv: PersistedConversation): AgentV3WireEv
    * Publish/Deploy-backend screen's own signal) resolve correctly on the very next visit — no new
    * client-side logic, just replaying a fact the server already had.
    */
-  if (conv.repoOwnedByUser && conv.repoOwner?.trim() && conv.repoName?.trim()) {
+  const replayRepoName = (conv.deployRepoName ?? '').trim() || (conv.repoName ?? '').trim();
+  if (conv.repoOwnedByUser && conv.repoOwner?.trim() && replayRepoName) {
     const owner = conv.repoOwner.trim();
-    const repo = conv.repoName.trim();
+    const repo = replayRepoName;
     events.push({ type: 'repo', url: `https://github.com/${owner}/${repo}`, fullName: `${owner}/${repo}`, ownedByUser: true, ts: 0 });
   }
   const msgs = conv.messages ?? [];

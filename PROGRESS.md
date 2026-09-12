@@ -48940,3 +48940,82 @@ be the fake success this feature exists to avoid.
 ### Gate
 `vitest run` **1,558 files / 21,316 passed / 0 failed**, log grepped for `FAIL` — none; full
 CI-equivalent chain green on the final rebased state.
+## 2026-09-12 — "GitHub already connect hai" — the SAME report as 2026-09-06, a different root cause
+
+**Trigger.** Admin, with a screenshot of the Publish sheet: *"github already connect hai, app github se
+hi import ki hai, fir se github connect ki bol raha hai, isko aise fix karo dna root cause me ja kar ki
+wapas yeh error na aye"*.
+
+### The report repeated; the 2026-09-06 fix did not fail
+
+`deployRepoMemory.ts` was written for exactly this sentence and is correct. What was wrong was one of
+its WRITERS. The own-repo import path (`routes/agentv3.ts`, `target.mode === 'own-repo'`) hand-rolled
+its durable patch and wrote **three** of the four fields the fact needs — `repoOwner`,
+`repoOwnedByUser`, `deployBranch` — and omitted the repo **name**. Nothing complained: a patch of three
+fields is a perfectly valid patch.
+
+**The record that produced was worse than no record, because the two readers disagreed about it.**
+`repoAvailableForDeploy` looked only at the flag and said YES; `resolveDeployRepo` needs a name to build
+a URL and said NO. So one screen told the user a backend deploy could run and, directly beneath, told
+them to go and create the repository they already had. The client half matched: `conversationToEvents`
+requires all three before replaying the `repo` event, so the panel's `deployRepo` stayed null on every
+reload — the precise symptom, reported as a fact about the app.
+
+### 🔴 The obvious repair was the DESTRUCTIVE one, and finding that out is the real work
+
+"Just add `repoName`" would have shipped a worse bug than the one being fixed. `repoName` is the
+**STORAGE** repo: the build derives it, PINS it, and re-reads it next turn as `pinnedRepoName` →
+`mirrorRepoName` → *where to push*. For an app imported from the user's own GitHub the storage repo and
+the deploy repo are **different objects** — edits live on a working branch inside their real repository
+while `repoName` holds the derived mirror name. Writing the real repository's name into `repoName`
+would have aimed a later mirror fall-back at the user's own code.
+
+**So the root cause is not a forgotten field. It is one field carrying two meanings**, which is invisible
+while they coincide (they do for every mirror-stored app) and destructive the moment they do not.
+
+### The fix — the class, not the instance
+- **`deployRepoName` is now its own field** through `ConversationRecord`, `ConversationPatch`, the
+  Firestore store and the client's `PersistedConversation`. `deployRepoNameOf()` prefers it and falls
+  back to `repoName` **only** for records written before it existed — right for mirror-stored apps,
+  and no more wrong for own-repo apps than it already was.
+- **`ownRepoMemoryPatch()` is the ONLY way the fact may be written**, and returns `null` for an
+  incomplete one. Nothing is the honest state; a record claiming ownership it cannot name is not.
+- **`storesCode` is a REQUIRED argument with no default** — is this repo also where the build pushes?
+  `true` for a repo we created and pushed to (both names pinned), `false` for the user's own imported
+  repo (deploy name only). A default here would be a guess, and guessing wrong is the destructive
+  direction. All four durable write sites now go through it.
+- **`repoAvailableForDeploy` asks for a COMPLETE record**, so the two readers can no longer contradict
+  each other — pinned by a test that asserts the implication directly over a table of record shapes.
+
+### Siblings hunted (rule 3) — the split created one, and it was real
+- **`renameStorageRepoPatch()`** — renaming an app renames its storage repo, which was automatically
+  right for the deploy while one field served both. Split, it stops being automatic. The rule: the
+  deploy name follows the rename **iff** the rename moved its repository (the two matched, or the
+  deploy name was absent and so implicitly *was* the storage name). All three rename write sites use it.
+- **`pushAppFeedback.repoFactOf`** (client) — read `repoName` alone; now `deployRepoName` first, same
+  order as the server.
+- The duplicate-app path copies an allowlist, so a copy cannot inherit the original's deploy repo; the
+  comment now names the new field so the doc stays true.
+
+### ⚠️ Four existing tests failed, and every one had the same weakness as the bug
+They matched the literal object text — `'repoOwner: login, repoOwnedByUser: true, deployBranch: repoBranch'`.
+**A test that spells out three fields cannot notice the fourth going missing**, which is exactly how a
+half-written record shipped past a suite that had a wiring test pointed straight at it. They now assert
+the CALL to the builder, so completeness is enforced in one place instead of transcribed in several.
+One test also asserted the OLD behaviour — `repoAvailableForDeploy({hasRepo:false}, {repoOwnedByUser:true})`
+was `true` — and was corrected rather than preserved: it encoded the promise the deploy could not keep.
+
+Plus a new class guard: **no hand-rolled `repoOwnedByUser: true` may appear in the route at all.**
+Verified to bite — reintroducing the original omission fails two tests.
+
+### What happens to apps already in the broken state (rule 6, honestly)
+The repo name cannot be recovered from storage — nothing durable holds the import URL. Two things heal
+it, both without the user knowing: their **next build** takes the mirror path and writes a complete
+record, and **"Put this app in my GitHub"** pushes to the already-pinned name (so it re-uses the same
+repo, never a twin) and writes one too. No migration is possible and none is pretended.
+
+### Gate (CI-equivalent, run LAST, on the final state)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` within budget · `npm run boot:check` PASS ·
+`npx vitest run` **1,556 files / 21,262 passed / 1 skipped / 0 failed** (15 new), log grepped for
+`FAIL` — none.

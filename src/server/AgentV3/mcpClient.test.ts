@@ -287,6 +287,21 @@ describe('externalToolDefs — the shape handed to the model', () => {
   });
 });
 
+/**
+ * Where the BUILD LOOP reads the workspace's connected services.
+ *
+ * `indexOf('mcpServerStore.listFull(workspaceId)')` is NOT enough: the MCP routes also read that list,
+ * they sit earlier in the file, and the day one of them did (the health check, 2026-09-12) three
+ * structural tests silently started asserting against the wrong block. So anchor on the one thing only
+ * the build loop does — handing the servers to the dispatcher — and walk BACK to its read. That is real
+ * code rather than a marker comment, so it cannot be deleted without changing behaviour.
+ */
+export function buildLoopStart(routes: string): number {
+  const wiring = routes.indexOf('dispatcher.setMcpServers');
+  if (wiring < 0) return -1;
+  return routes.lastIndexOf('mcpServerStore.listFull(workspaceId)', wiring);
+}
+
 describe('the wiring stays safe (locked against the real source)', () => {
   const dispatcher = readFileSync(resolve(__dirname, 'ToolDispatcher.ts'), 'utf8');
   const routes = readFileSync(resolve(__dirname, '../routes/agentv3.ts'), 'utf8');
@@ -355,7 +370,7 @@ describe('the wiring stays safe (locked against the real source)', () => {
     // still exactly where it should be — a test that fails when the code is right is worse than no
     // test, because the tempting fix is to weaken the assertion. Now it finds the FIRST catch after
     // the block and checks that one, so the invariant is what is asserted and the length is not.
-    const start = routes.indexOf('mcpServerStore.listFull(workspaceId)');
+    const start = buildLoopStart(routes);
     expect(start).toBeGreaterThan(-1);
     const after = routes.slice(start);
     const catchAt = after.indexOf('} catch {');

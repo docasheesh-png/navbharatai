@@ -437,6 +437,8 @@ import { findProjectInstructionPath, normalizeProjectInstructions, projectInstru
 import { parseFileMentions, fileMentionsBlock, unresolvedMentionsNotice } from '../AgentV3/fileMentions';
 import { mcpServerStore } from '../AgentV3/McpServerStore';
 import { mcpLibraryStore, MAX_SAVED_SERVICES } from '../AgentV3/McpLibraryStore';
+import { serviceHealth, healthHeadline } from '../AgentV3/mcpHealth';
+import { allowAfterCooldown } from '../lib/callCooldown';
 import { listRemoteTools } from '../AgentV3/mcpTransport';
 import { externalToolDefs, externalToolsPreamble, canConnectServer, MAX_SERVERS_PER_WORKSPACE, type SafeMcpTool } from '../AgentV3/mcpClient';
 import { canUseConnectedServices, canRunConnectedServices, skippedServicesNotice, type McpPlanFacts } from '../AgentV3/mcpPlanGate';
@@ -1719,6 +1721,11 @@ const MAX_BUILD_BUFFER = 4000;
 const lastDiagnostics = new Map<string, BuildDiagnosticsReport>();
 /** Free users already shown the weak-tier welcome notice this instance (once per user — see the send). */
 const weakNoticeShownFor = new Set<string>();
+
+/** Shortest gap between two "check my connected services" calls from one app. Each one fans out to
+ *  somebody else's servers, so a button must not be loopable. See callCooldown.ts. */
+export const MCP_CHECK_COOLDOWN_MS = 10_000;
+const mcpCheckCooldown = new Map<string, number>();
 
 /** Push an event into a build's replay buffer and fan it out to every subscriber. */
 function broadcastBuild(rb: RunningBuild, e: unknown): void {
@@ -7250,6 +7257,42 @@ async function noteBuildOutcome(
       tools: probe.tools.map((t) => t.remoteName),
       remembered,
     });
+  });
+
+  /**
+   * IS EVERYTHING STILL WORKING? — re-probe this app's connected services and say so honestly.
+   *
+   * A connection is proven once, when it is made, and then trusted forever. Keys expire and services
+   * move, and until this existed the first place that showed up was in the middle of a build, as a
+   * service that quietly contributed nothing while the screen still said "connected".
+   *
+   * Deliberately NOT plan-gated: looking at the state of what you already have is not connecting
+   * something new, and a user whose plan lapsed still deserves to know why their build lost a tool.
+   *
+   * Bounded by construction — the per-app cap is 5, each probe carries the transport's own 15s
+   * timeout, and one workspace may run this once every 10 seconds, because each call fans out to
+   * somebody else's servers.
+   */
+  app.post('/api/agentv3/mcp/check', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) { res.status(400).json({ error: 'No app selected.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    if (!allowAfterCooldown(mcpCheckCooldown, workspaceId, Date.now(), MCP_CHECK_COOLDOWN_MS)) {
+      res.status(429).json({ error: 'Please wait a moment before checking your services again.' });
+      return;
+    }
+    const servers = await mcpServerStore.listFull(workspaceId);
+    if (servers.length === 0) { res.json({ results: [], headline: 'Nothing to check.' }); return; }
+    // In parallel: five services at 15s each would be over a minute in sequence, and the user is
+    // watching a spinner for all of it. A probe that throws is a FAILING service, never a failed check.
+    const results = (await Promise.all(servers.map(async (cfg) => {
+      const probe = await listRemoteTools(cfg).catch(() => ({ tools: [], error: 'It could not be reached just now.' }));
+      return serviceHealth({ id: cfg.id, toolCount: probe.tools.length, error: probe.error });
+    })));
+    res.json({ results, headline: healthHeadline(results, servers.length) });
   });
 
   /**

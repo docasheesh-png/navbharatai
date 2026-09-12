@@ -50599,3 +50599,19 @@ already merged — that half is shipped and is not affected by this closure.
 Recorded as a ⛔ entry in `CLAUDE.md` because the 67 candidate strings are still in the code: the next
 session to read one of those screens will find the same pattern and propose the same sweep in good
 faith. A closed decision that is not written down is a decision that gets re-litigated.
+
+### 2026-09-12 (correction) — the closure note was too long, and for the wrong reason
+
+The admin's reaction to the ⛔ entry was fair: *"yeh likhne se accha tha sab detele kar dete… sabut hi
+mita dete."* Half of that is right and half would backfire, and both halves are worth recording.
+
+**Right:** the entry ran 25 lines and carried the whole four-bucket analysis. I kept that because the
+analysis was work I had just done — not because any future session needs it. `CLAUDE.md` is read by
+every session and a CLOSED non-issue does not earn that much of it. Cut to three lines; the analysis
+lives here in the append-only log instead, where it costs nobody anything.
+
+**Backfires:** deleting the record entirely. The sweep was never found in a document — the admin found
+it by LOOKING AT A SCREEN, and those 67 strings are still in the app. Erasing the note does not erase
+the source; it erases the fact that the question has already been asked and answered. The next session
+would propose it again in good faith and the admin would have to refuse it a second time, with nothing
+to show it had been settled. A closed decision with no record is a decision that gets re-litigated.

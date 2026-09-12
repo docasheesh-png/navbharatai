@@ -1719,38 +1719,13 @@ the flag entries above promise.
   controls" list above. It is live: a finished build fails on real ESLint **errors** (warnings/formatting
   never block). Watch the first few real builds; if a genuinely-working app gets blocked, set it `off`.
 
-## ⛔ CLOSED BY THE ADMIN — the "inline button description" sweep. DO NOT REOPEN IT (2026-09-12)
+## ⛔ CLOSED: the inline button-description sweep (admin, 2026-09-12). DO NOT REOPEN.
 
-**A session (mine) must not start this work again, and neither must any other agent.** The admin closed
-it explicitly: *"isko mat banao, isko maine wapas check kiya sab theek hai, is kaam ko band kar do, agar
-bhi koi agent is par kaam na kare."*
-
-**What the work WAS, so nobody re-derives it from scratch and "discovers" it again.** On 2026-09-12 the
-admin reported that explanatory sentences sitting under buttons ate space and read unprofessionally, and
-asked for a list of every one in the app. A three-pass scan produced **67 candidates across 33 screens**
-(a scanner over JSX text nodes adjacent to controls). Two that the admin marked in a screenshot were
-removed the same day and merged — **that part is DONE and shipped** (the Pro v5.0 "Keep screen on" hint,
-and the account-menu switching paragraph, which was folded into the row's existing tooltip). The
-REMAINING 65 were the ones this entry closes.
-
-**The admin then re-checked the app themselves and found the rest acceptable.** That is the decision, and
-it is theirs to make — the screens are theirs to look at every day, and a sweep nobody wants is churn
-with a regression risk attached.
-
-🔴 **WHY THIS ENTRY EXISTS AT ALL:** those 67 strings are still in the code, so the NEXT agent to read a
-screen will find the same pattern and propose the same sweep in good faith. Without this line it would
-be re-proposed, re-scoped, and possibly re-built. **If a future session believes a particular inline
-description is a problem, it raises THAT ONE with the admin — it does not restart the sweep.**
-
-⚠️ Also closed with it: the `InfoDot` control that was being built for it (a thin wrapper over the
-existing `src/components/ui/Popover.tsx`) was **discarded unbuilt** — do not go looking for it, and do
-not build it speculatively. `Popover` itself is untouched and still in use.
-
-📌 For the record, in case the decision is ever revisited: the 67 split into FOUR kinds, and only one of
-them was ever the real target — live STATE text ("no repositories found", "12 tokens left") is the
-screen's answer and not a description; a WARNING (money, permanence, something stops working) must stay
-VISIBLE and behind no dot; a PANEL SUBTITLE is the screen's own identity; only an explanation attached to
-a CONTROL (33 of the 67) was ever a candidate for moving.
+The admin re-checked the app and closed it: *"is kaam ko band kar do, agar bhi koi agent is par kaam na
+kare."* The two descriptions they had marked were already removed (#2828); the rest stay. **This entry
+exists only because those strings are still in the code, so the pattern is re-discoverable from any
+screen — if a future session thinks ONE description is wrong, it raises that one. It does not restart
+the sweep.**
 
 ## Play Store release — build a signed `.aab` on every roadmap/checkpoint completion (mandatory, admin-mandated 2026-07-10)
 

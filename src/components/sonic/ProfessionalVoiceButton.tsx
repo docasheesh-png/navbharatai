@@ -102,7 +102,11 @@ export function ProfessionalVoiceButton({ professionalId, getHistory, className,
               <Mic className="w-6 h-6" />
             </div>
             <h3 className="font-bold text-white text-center mb-2">{consent.title}</h3>
-            <p className="text-sm text-[#8b949e] leading-relaxed mb-5">{consent.body}</p>
+            {/* THE PRICE, AND NOTHING ELSE (admin 2026-09-12: "user bina padhe hi start kar deta hai").
+                Big, red and centred, because the whole point of the change is that this line gets
+                read in the half-second before somebody taps Start. The longer explanation moved to
+                the live cost meter during the call — see voiceConsent for why. */}
+            <p className="text-center text-lg font-black text-red-400 mb-5">{consent.body}</p>
             <button
               onClick={() => { setAsking(false); setHistory(getHistory ? getHistory() : []); setOpen(true); }}
               className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold"

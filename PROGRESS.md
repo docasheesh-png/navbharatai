@@ -50939,3 +50939,53 @@ today forward is attributed.
 Gate on the final state: `typecheck` 0 · `noUnusedImports` clean · `typecheck:server` 0 · `build` ok ·
 `test:bundle` within budget · `boot:check` PASS · `vitest run` **1,589 files / 22,035 passed / 1
 skipped / 0 failed**. 22 new tests; **three confirmed to fail when the behaviour is reverted.**
+
+### Same day — the floor under every wallet (−₹506 and −₹1,198 on real accounts)
+
+The admin sent a second screenshot: `morphesious@gmail.com` at **−₹506.03** with **0 apps built**, and
+in the list behind it another account at **−1,19,841 tokens = −₹1,198.41**. *"user ka bill -500₹ tak na
+jaye … -50₹ ya -100 tab chala jaye jitna ham jhel sakte hai. aise -500₹ har user ko diye to ham
+barbaad ho jayenge!!!"*
+
+**🔴 Root cause — and every START gate was already correct.** `decideAffordability` refuses a NEW build
+at a balance of 0 or less; a chat turn is refused on an empty wallet. What had **no bound at all** was
+the **SETTLEMENT**. A build legitimately allowed to begin at ₹1 could run its full wall clock and then
+debit whatever it had cost, in one go, at the end. The design states this in writing — *"the debt is
+recorded honestly; the NEXT pre-flight gate then blocks until a recharge"* — which is exactly right
+about the next build and **completely silent about the size of this one**. `SESSION_COST_CAP_USD` ($5)
+is not that limit either: it only decides whether an EMPTY build may retry.
+
+**🔒 The floor lives at the DEBIT, not in a gate.** Nine paths take money out of a wallet; a limit
+written into the callers is a limit the tenth caller never gets. Applied inside the two functions every
+debit passes through, it is true by construction for all of them — including callers nobody has written
+yet. **A caller that omits it gets the built-in floor rather than unlimited debt**: "unset" must never
+be the single input that restores the bug, and a test asserts exactly that.
+
+- Default **₹50**, env `WALLET_OVERDRAFT_FLOOR_INR`, **capped at ₹500** — a typo of `5000` would
+  otherwise silently reproduce the −₹1,198 account. A malformed value falls back to ₹50, never to "no
+  limit" (the same reasoning `parseRolloutPercent` already uses).
+- ⚠️ **The carry follows what was CHARGED, not what was owed** — carrying the absorbed part would
+  quietly re-bill on the next charge the very rupees we just said we would eat.
+- Applied **before** the ₹→token conversion, and measured against the **token** balance, so the floor
+  can never disagree with the number the gates read.
+
+**💸 What it does NOT do, stated plainly.** Clamping the debit bounds the USER'S BILL; it does not
+un-spend what the model already cost us. The excess is **absorbed** and **recorded** as `absorbedInr`
+on the ledger row, shown on the admin panel as *"NavBharatAI absorbed ₹X"* — a clamp that quietly
+shrank the number would hide our own bleeding on the exact screen built to judge it.
+
+**🔴 OPEN ROOT CAUSE (rule 6): there is no MID-BUILD stop.** Nothing checks the running cost while a
+build is in flight, so the model spend itself is still unbounded — only the user's bill is now capped.
+The real saving needs a periodic in-loop check that ends a build once its accumulated cost crosses what
+the account can bear. That is a change inside the build loop and is **not** in this PR; recorded here
+rather than implied as done.
+
+**Also unexplained, honestly:** both accounts show **0 builds** in the panel, which comes from
+`userBuildHistoryStore` — a *different* store from the wallet. Either the spend came from a non-build
+path, or a build debited the wallet without landing in build history. The per-feature attribution
+shipped in this same PR is what will answer that on the next such account; it cannot answer it
+retroactively.
+
+Gate re-run on the final state: `typecheck` 0 · `noUnusedImports` clean · `typecheck:server` 0 ·
+`build` ok · `test:bundle` within budget · `boot:check` PASS · `vitest run` **1,590 files / 22,053
+passed / 1 skipped / 0 failed**. 18 further tests; **three confirmed to fail when the floor is removed.**

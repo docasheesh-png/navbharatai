@@ -2209,6 +2209,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             </div>
                           );
                         })}
+                        {Number(account.wallet.spend?.absorbedInr) > 0 && (
+                          /* 🔴 OUR loss, not their debt (admin 2026-09-13: "aise -500₹ har user ko
+                             diye to ham barbaad ho jayenge"). The overdraft floor stopped the charge
+                             here and NavBharatAI ate the rest — shown so the bleeding is visible on
+                             the screen used to judge it, never folded into the user's number. */
+                          <div className="flex items-center gap-2 text-[11px] pt-1">
+                            <span className="text-rose-300/80 w-40 shrink-0">NavBharatAI absorbed</span>
+                            <span className="flex-1 min-w-0" />
+                            <span className="text-rose-300/90 tabular-nums w-16 text-right shrink-0">
+                              ₹{Number(account.wallet.spend.absorbedInr).toFixed(2)}
+                            </span>
+                            <span className="w-9 shrink-0" />
+                          </div>
+                        )}
                         {Number(account.wallet.spend?.unattributedInr) > 0 && (
                           /* 🔒 NEVER filed under a real feature name. Every ledger row written before
                              this recording existed has no feature on it, and putting those rupees

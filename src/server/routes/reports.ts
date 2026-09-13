@@ -538,6 +538,7 @@ export function registerReportRoutes(app: Express): void {
             featureLabel: featureLabel(e?.feature) || null,
             description: typeof e?.description === 'string' ? e.description.slice(0, 200) : '',
             tokens: Number.isFinite(Number(e?.amountCoinsOrTokens)) ? Number(e.amountCoinsOrTokens) : 0,
+            absorbedInr: Number.isFinite(Number(e?.absorbedInr)) ? Number(e.absorbedInr) : 0,
             at: typeof e?.timestamp === 'string' ? e.timestamp : '',
           })),
       },

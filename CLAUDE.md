@@ -1335,6 +1335,33 @@ the code (it is actually read somewhere) on 2026-07-11.
   Five of the six can be re-checked from a screen in seconds; the sixth cannot, so it stays open here
   until someone reads the console.
 
+- **🔴 THE OVERDRAFT FLOOR — how far a wallet may go negative (admin-mandated 2026-09-13):**
+  `WALLET_OVERDRAFT_FLOOR_INR` — ⚠️ **NOT set; the code default is ₹50 and that is the intended value.**
+  Read by `src/server/lib/walletFloor.ts`, applied inside BOTH `computeDebitedWallet` and
+  `computeRolledUpDebit`.
+  **WHY IT EXISTS:** the admin found two live accounts at **−₹506.03** and **−₹1,198.41**, both with
+  **0 apps built** — *"aise -500₹ har user ko diye to ham barbaad ho jayenge!!!"* Every START gate was
+  already correct (`decideAffordability` refuses a new build at a balance ≤ 0; a chat turn is refused
+  on an empty wallet). What had **no bound at all** was the SETTLEMENT: a build legitimately allowed to
+  begin at ₹1 ran its full wall-clock and then debited whatever it had cost, in one go. The design said
+  so in writing — *"the debt is recorded honestly; the NEXT pre-flight gate then blocks"* — which is
+  exactly right about the next build and silent about the size of this one. `SESSION_COST_CAP_USD` ($5)
+  is not that limit either: it only decides whether an EMPTY build may retry.
+  🔒 **THE FLOOR LIVES AT THE DEBIT, NOT IN A GATE.** Nine paths take money out of a wallet; a limit
+  written into the callers is a limit the tenth caller never gets. Inside the two functions every debit
+  passes through, it is true by construction — including for callers nobody has written yet. A caller
+  that omits it gets the built-in floor rather than unlimited debt: "unset" must never be the single
+  input that restores the bug.
+  ⚠️ **THE SETTING ITSELF IS CAPPED at ₹500** (`MAX_OVERDRAFT_FLOOR_INR`), and a MALFORMED value falls
+  back to ₹50 rather than to "no limit" — the same reasoning `parseRolloutPercent` already uses. A typo
+  of `5000` would otherwise silently reproduce the −₹1,198 account.
+  💸 **WHAT IT DOES NOT DO, stated plainly:** clamping the debit bounds the USER'S BILL; it does not
+  un-spend what the model already cost us. The excess is **absorbed** by NavBharatAI and RECORDED as
+  `absorbedInr` on the ledger row, surfaced on the admin's account panel as *"NavBharatAI absorbed ₹X"*
+  — because a clamp that quietly shrank the number would hide our own bleeding on the exact screen used
+  to judge it. **The real saving is a mid-build stop, which does NOT exist yet — see `PROGRESS.md`
+  2026-09-13 as an OPEN root cause.**
+
 ### 💴 FULL MONEY AUDIT — every paying code path read end to end (admin-asked 2026-09-12)
 
 The admin asked for a microscopic audit of every money path: *"kahi koi money leak to nahi hai."* 53

@@ -68,6 +68,7 @@ export interface LedgerRow {
   amountCoinsOrTokens?: unknown;
   moneySpent?: unknown;
   timestamp?: unknown;
+  absorbedInr?: unknown;
 }
 
 export interface FeatureSpendRow {
@@ -93,6 +94,14 @@ export interface WalletSpendBreakdown {
    */
   unattributedInr: number;
   unattributedEntries: number;
+  /**
+   * What NavBharatAI ATE on this wallet because the overdraft floor stopped the charge.
+   *
+   * 🔒 Shown to the admin, never to the user and never mixed into their total: it is our loss, not
+   * their debt, and folding the two would make the platform's own bleeding invisible on the exact
+   * screen built to judge it.
+   */
+  absorbedInr: number;
 }
 
 /**
@@ -118,9 +127,12 @@ export function spendByFeature(ledger: readonly LedgerRow[] | null | undefined):
   const totals = new Map<WalletFeature, { tokens: number; entries: number }>();
   let unattributedTokens = 0;
   let unattributedEntries = 0;
+  let absorbedInr = 0;
 
   for (const row of ledger ?? []) {
     if (!row || typeof row !== 'object') continue;
+    const eaten = Number(row.absorbedInr);
+    if (Number.isFinite(eaten) && eaten > 0) absorbedInr += eaten;
     // A CREDIT is not spending. Only a debit (negative tokens) is money leaving.
     const raw = Number(row.amountCoinsOrTokens);
     if (!Number.isFinite(raw) || raw >= 0) continue;
@@ -149,5 +161,6 @@ export function spendByFeature(ledger: readonly LedgerRow[] | null | undefined):
     totalInr: inr(attributedTokens + unattributedTokens),
     unattributedInr: inr(unattributedTokens),
     unattributedEntries,
+    absorbedInr: Math.round(absorbedInr * 100) / 100,
   };
 }

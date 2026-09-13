@@ -30,6 +30,7 @@ import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletRes
 //     user's build result.
 
 import type { WalletFeature } from './walletFeature';
+import { clampChargeToFloor, overdraftFloorInr, DEFAULT_OVERDRAFT_FLOOR_INR } from './walletFloor';
 
 /** Oldest ledger entries roll off past this bound (doc-size protection; totals are unaffected). */
 export const MAX_WALLET_LEDGER_ENTRIES = 500;
@@ -43,6 +44,14 @@ export interface WalletDebitTx {
    * it — see `walletFeature.ts`.
    */
   feature?: WalletFeature;
+  /**
+   * How far below zero this wallet may go, in ₹.
+   *
+   * 🔒 DEFAULTED INSIDE the debit, never left open. A caller that forgets it gets the built-in floor
+   * rather than unlimited debt — the failure being fixed here IS a debit with no bound, so "unset"
+   * must not be the one input that restores it.
+   */
+  floorInr?: number;
   /** The customer-facing ₹ amount to debit (billedUsd × USD→INR rate). */
   billedInr: number;
   /** Unique per build (e.g. `${workspaceId}_${buildStartedAt}`) — the idempotency key. */
@@ -88,6 +97,22 @@ export const TOKEN_CARRY_FIELD = 'tokenCarry';
  * A non-finite or non-positive `billedInr`, or a `buildRef` already present in the ledger
  * (idempotency), returns the wallet UNCHANGED with tokensDebited 0.
  */
+
+/**
+ * Apply the overdraft floor to one charge, in ₹, against the balance the TOKEN column reports.
+ *
+ * Tokens, not `remaining_balance`: tokens are the unit the balance is actually kept in, so a floor
+ * measured against them can never disagree with the number the gates read.
+ */
+function floorCharge(w: Record<string, any>, billedInr: number, floorInr: number | undefined) {
+  const bal = typeof w.tokenBalance === 'number' && Number.isFinite(w.tokenBalance) ? w.tokenBalance : 0;
+  return clampChargeToFloor({
+    balanceInr: bal / TOKENS_PER_RUPEE,
+    billedInr,
+    floorInr: Number.isFinite(floorInr as number) ? (floorInr as number) : DEFAULT_OVERDRAFT_FLOOR_INR,
+  });
+}
+
 export function computeDebitedWallet(
   current: Record<string, any>,
   tx: WalletDebitTx,
@@ -112,8 +137,14 @@ export function computeDebitedWallet(
   // build (and overcharging the user by up to ₹0.01 each time). Here the ₹ is DERIVED from the tokens
   // actually debited, so the two can never disagree again, and nothing is silently rounded away in
   // either direction: over any number of charges the total billed equals the total owed to the paisa.
+  // 🔴 THE FLOOR, APPLIED BEFORE ANYTHING IS CONVERTED TO TOKENS (admin 2026-09-13, on a real account
+  // at −₹506 and another at −₹1,198). A build that was legitimately allowed to start at ₹1 used to
+  // settle for whatever it had cost, in one debit, with nothing bounding it.
+  const floored = floorCharge(w, tx.billedInr, tx.floorInr);
   const carriedIn = Math.min(Math.max(n(w[TOKEN_CARRY_FIELD]), 0), 1); // defensive: 0 ≤ carry < 1
-  const owed = inrToDebitTokens(tx.billedInr) + carriedIn;
+  // ⚠️ The CARRY follows what was actually CHARGED, never what was owed. Carrying the absorbed part
+  // would quietly re-bill on the next charge the very rupees we just said we would eat.
+  const owed = inrToDebitTokens(floored.chargedInr) + carriedIn;
   const tokens = Math.floor(owed);
   const carryOut = Math.round((owed - tokens) * 1e6) / 1e6; // keep the remainder free of float dust
   const billedInr = Math.round((tokens / TOKENS_PER_RUPEE) * 100) / 100;
@@ -130,6 +161,8 @@ export function computeDebitedWallet(
       : `${tx.description} — under ₹0.01, carried to your next charge`,
     buildRef: tx.buildRef,
     ...(tx.feature ? { feature: tx.feature } : {}),
+    // Our own loss, on the row that caused it — never folded into the user's number.
+    ...(floored.absorbedInr > 0 ? { absorbedInr: floored.absorbedInr } : {}),
   };
   const nextLedger = [...ledger, ledgerEntry].slice(-MAX_WALLET_LEDGER_ENTRIES);
 
@@ -157,6 +190,8 @@ export function computeDebitedWallet(
 export interface WalletRollupTx {
   /** Which feature this bucket belongs to — see WalletDebitTx.feature. */
   feature?: WalletFeature;
+  /** How far below zero this wallet may go, in ₹. Defaults to the built-in floor — see below. */
+  floorInr?: number;
   /** The customer-facing ₹ amount to debit for this one turn. */
   billedInr: number;
   /** The bucket this turn belongs to, e.g. `ai_2026-08-02`. Turns sharing a ref share ONE ledger row. */
@@ -194,8 +229,11 @@ export function computeRolledUpDebit(
     return { wallet: w, tokensDebited: 0, applied: false };
   }
 
+  // The same floor, for the same reason — see computeDebitedWallet. A rollup can cross it just as a
+  // build can: many small assistant charges in one day add up exactly like one large one.
+  const floored = floorCharge(w, tx.billedInr, tx.floorInr);
   const carriedIn = Math.min(Math.max(n(w[TOKEN_CARRY_FIELD]), 0), 1);
-  const owed = inrToDebitTokens(tx.billedInr) + carriedIn;
+  const owed = inrToDebitTokens(floored.chargedInr) + carriedIn;
   const tokens = Math.floor(owed);
   const carryOut = Math.round((owed - tokens) * 1e6) / 1e6;
 
@@ -214,6 +252,7 @@ export function computeRolledUpDebit(
     description: `${tx.description} — ${bucketTokens.toLocaleString()} tokens (₹${bucketInr.toFixed(2)})`,
     rollupRef: tx.rollupRef,
     ...(tx.feature ? { feature: tx.feature } : {}),
+    ...(floored.absorbedInr > 0 ? { absorbedInr: floored.absorbedInr } : {}),
   };
 
   // The updated row moves to the END so the ledger stays in time order and the ledger cap trims the
@@ -292,7 +331,9 @@ export async function debitWalletForBuild(
     const debited = await runTransaction(db, async (t: any) => {
       const snap = await t.get(walletRef);
       const current = snap.exists() ? snap.data() : { userId, tokenBalance: 0, totalTokensUsed: 0, remaining_balance: 0, walletLedger: [] };
-      const result = computeDebitedWallet(current, tx, new Date().toISOString());
+      // The env-tunable floor is resolved HERE, in the I/O layer, so the pure function above stays
+      // pure and testable while production still gets the configured value.
+      const result = computeDebitedWallet(current, { ...tx, floorInr: tx.floorInr ?? overdraftFloorInr() }, new Date().toISOString());
       // `applied`, not `tokensDebited > 0`: a charge under one whole token debits nothing now but
       // moves the carried remainder, and losing that write would quietly forgive the charge.
       if (result.applied) t.set(walletRef, result.wallet);
@@ -342,7 +383,7 @@ export async function debitWalletRolledUp(
     const debited = await runTransaction(db, async (t: any) => {
       const snap = await t.get(walletRef);
       const current = snap.exists() ? snap.data() : { userId, tokenBalance: 0, totalTokensUsed: 0, remaining_balance: 0, walletLedger: [] };
-      const result = computeRolledUpDebit(current, tx, new Date().toISOString());
+      const result = computeRolledUpDebit(current, { ...tx, floorInr: tx.floorInr ?? overdraftFloorInr() }, new Date().toISOString());
       if (result.applied) t.set(walletRef, result.wallet);
       return result;
     });

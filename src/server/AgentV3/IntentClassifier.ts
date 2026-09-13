@@ -364,34 +364,54 @@ const STATE_QUESTION_SIGNALS: readonly string[] = [
   'where did', 'where are my', 'where is my', 'what happened', 'how many files', 'how many pages',
 ];
 
-/** A capability question is brief by nature; past this it is a detailed request. */
-const CAPABILITY_QUESTION_MAX_WORDS = 8;
+/**
+ * Words that ALWAYS open a question, in either language. A wh-word is interrogative whether or not the
+ * user bothered with a question mark, and plenty of real users do not.
+ */
+const WH_OPENERS =
+  /^(?:what|whats|what's|how|why|which|who|whom|whose|when|where|kya|kaise|kaisa|kaisi|kyun|kyu|kyon|kaun|kab|kahan|kahaan|kitna|kitne|kitni|konsa|konsi)\b/;
 
 /**
- * Second-person ability questions: "can you …", "could you …", "are you able to …", "do you support …",
- * and the Hinglish "kya aap … sakte ho". Deliberately narrow — see the call site for why.
+ * Auxiliaries that open a question OR an order, and cannot be told apart on their own.
  *
- * Pure and exported so the exact sentences that cost 29 minutes are pinned by tests.
+ * 🔴 THIS DISTINCTION IS NOT PEDANTRY — it was a real regression, caught by the existing suite before
+ * this shipped. **"do it again"** is a retry, and treating `do` as interrogative turned a continuation
+ * into small talk — re-opening the "please continue" amnesia this repo has already fixed once. So an
+ * auxiliary counts as a question only with a question mark, or when a SECOND-PERSON subject follows it
+ * ("can you …", "kya aap …"), which is the one shape that is never an order.
  */
-export function isCapabilityQuestion(lower: string): boolean {
+const AUX_OPENERS = /^(?:can|could|would|will|shall|should|do|does|did|is|are|am|may|might)\b/;
+const AUX_ASKS_US = /^(?:can|could|would|will|do|does|did|are)\s+(?:you|u|aap|tum)\b/;
+
+/**
+ * Does this message READ as a question — a request for an answer rather than an order to act? Pure.
+ */
+export function readsAsQuestion(lower: string): boolean {
   const text = lower.trim();
   if (!text) return false;
-  // Short by nature. A long message that happens to open with "can you" is a real, detailed request.
-  if (text.split(/\s+/).filter(Boolean).length > CAPABILITY_QUESTION_MAX_WORDS) return false;
-  // A SPECIFIC deliverable means it is a polite imperative, not a question about our powers.
-  // ("can you build me a todo app", "can you make a landing page", "can you fix my footer")
-  if (/\b(?:a|an|the|my|our|this|that|me|us|mere|hamare|mera|humara)\b/.test(text)) return false;
-  if (/\bfor (?:me|us)\b|\bmere liye\b|\bhamare liye\b/.test(text)) return false;
+  if (text.endsWith('?')) return true;
+  if (WH_OPENERS.test(text)) return true;
+  if (AUX_OPENERS.test(text)) return AUX_ASKS_US.test(text);
+  // "kya aap … sakte ho" — the Hinglish ability question, whose opener is a wh-word anyway but whose
+  // mark is very often missing.
+  return /^kya\s+(?:aap|tum|main|mai)\b/.test(text);
+}
 
-  // English: an ability auxiliary aimed at "you", then a verb, then a BARE PLURAL object.
-  // The trailing "s" with no article is what separates the class of thing from one instance of it.
-  if (/^(?:can|could|are)\s+(?:you|u)\b/.test(text) || /^do(?:es)?\s+you\b/.test(text)) {
-    return /\b[a-z]+s\b\s*\??$/.test(text);
-  }
-  // Hinglish: "kya aap/tum … sakte/sakti ho/hain" — the ability auxiliary is the verb tail, so the
-  // sentence shape rather than the leading word is what identifies it.
-  if (/^kya\s+(?:aap|tum)\b/.test(text) && /\bsakt[ae]\s+(?:ho|hain|hai)\b/.test(text)) return true;
-
+/**
+ * Does the message name a SPECIFIC thing to produce — an article + noun ("a todo app"), something of
+ * the user's ("my site"), something pointed at ("this page"), or something asked for on their behalf
+ * ("build me …", "mere liye")?
+ *
+ * This is the line between *asking about* app-building and *asking for* an app. "Can you build me a
+ * todo app?" is a question in form and an order in substance; "Can you generate images?" is neither.
+ * Pure.
+ */
+export function namesSpecificDeliverable(lower: string): boolean {
+  const text = lower.trim();
+  if (!text) return false;
+  if (/\b(?:a|an|the|my|our|your|this|that|these|those|ek|mera|meri|mere|hamara|hamari|apna|apni|yeh|ye|is|iska|isko)\b/.test(text)) return true;
+  if (/\b(?:me|us|humein|hume|mujhe)\b/.test(text)) return true;
+  if (/\bfor (?:me|us)\b|\bmere liye\b|\bhamare liye\b/.test(text)) return true;
   return false;
 }
 
@@ -410,36 +430,48 @@ export function classifyIntentWithConfidence(message: string): IntentWithConfide
     return { intent: 'chat', confidence: 'high', signal: 'state-question' };
   }
 
-  // Step 0b — "CAN YOU …?" IS A QUESTION ABOUT US, NOT AN INSTRUCTION TO US.
+  // ─────────────────────────────────────────────────────────────────────────────────────────────
+  // Step 0b — READ THE MOOD BEFORE OBEYING A KEYWORD (admin-mandated 2026-09-13, after autopsy
+  // 5abad374). Admin, verbatim: *"simple question ka just simple answer dena chahiye — app banane ki
+  // yahan jarurat hi kahan hai. Direct app mat bana do! Yeh system control karo — pehle dekhu user ka
+  // mood kya hai, kya woh sirf answer chahta hai, ya app banwana chahta hai."*
   //
-  // ROOT CAUSE (autopsy 5abad374, 2026-09-13). A user typed **"Can you generate images?"** — four words,
-  // a plain capability question of the kind every new user asks first. `generate` is a NEW_BUILD verb, so
-  // the scanner below returned new_build at HIGH confidence, and high confidence SKIPS the LLM upgrade
-  // entirely (`classifyIntentSmart` returns immediately). The engine then spent **29 minutes** building
-  // an "AI Image Studio", hit the wall-clock cap, and told the user their app was not ready. It had even
-  // ANSWERED the question in text at minute 8 — and kept building anyway.
+  // WHAT WENT WRONG. A user typed **"Can you generate images?"**. `generate` is a build verb, so the
+  // scanner below returned new_build at HIGH confidence — and HIGH confidence SKIPS the LLM upgrade
+  // entirely (`classifyIntentSmart` returns before asking it). The engine built an "AI Image Studio"
+  // for 29 minutes, hit the wall-clock cap, and told the user their app was not ready. At minute 8 it
+  // had already ANSWERED the question in plain text, and kept building anyway.
   //
-  // The verb in such a sentence is the OBJECT of the question, never an imperative. This check runs
-  // before the verb scanner so the wording cannot out-vote the grammar (the same reasoning as Step 0).
+  // It was never one sentence. Measured across ordinary phrasings, ALL of these hard-locked to
+  // "build an app" without the intention reader ever being consulted:
+  //     "can I make money from this?"      "what can you generate?"
+  //     "how do I make a login page?"      "should I create a react app or next js?"
+  // A pricing question built an app. That is the class, and the keyword is not the bug — the HARD LOCK
+  // is: one matched word ending a decision that the sentence's own grammar contradicts.
   //
-  // PRECISION-FIRST, because a false positive here refuses a real build. It fires ONLY on a short,
-  // second-person ability question whose object is a BARE PLURAL noun — the CLASS of thing ("images",
-  // "apps", "websites"), which is what one asks about a capability. Anything naming a specific
-  // deliverable keeps today's behaviour exactly: an article ("a todo app"), a possessive ("my site"), a
-  // benefactive ("for me"), or a singular object ("dark mode") all fall through to the scanner below.
-  //
-  // LOW confidence on purpose: the LLM upgrade — which sees the project and the conversation — still
-  // gets the final say. All this removes is the HARD LOCK that kept it from being asked at all.
-  if (isCapabilityQuestion(lower)) {
-    return { intent: 'chat', confidence: 'low', signal: 'capability-question' };
+  // THE RULE, IN TWO PARTS, AND THE ASYMMETRY THAT JUSTIFIES IT.
+  // Being wrong toward CHAT costs one extra message — and the chat reply is already prompted to offer
+  // to build, so the user answers "yes" and the build starts. Being wrong toward BUILD costs what this
+  // autopsy measured: 29 minutes, a failed app, real money, and a user who never asked for any of it.
+  const question = readsAsQuestion(lower);
+  //   (a) A question that names NOTHING to produce is a question. Answer it.
+  if (question && !namesSpecificDeliverable(lower)) {
+    return { intent: 'chat', confidence: 'low', signal: 'question-no-deliverable' };
   }
 
   // Steps 1–4 → high confidence (strong, explicit signals). Uses the shared whole-word scanner so an
   // embedded first occurrence can't hide a valid standalone one later (the mis-route root cause).
+  //   (b) A question that DOES name something to produce ("can you build me a todo app?") keeps its
+  //       intent — but never its HARD LOCK. Dropping to LOW is what finally sends the sentence to the
+  //       intention reader, which sees the project and the conversation that a keyword cannot.
+  //       ⚠️ The INTENT is unchanged, so nothing regresses when the reader is slow or down: the
+  //       keyword answer still stands. All this buys is that the question gets READ. And an ORDER
+  //       ("build a notes app", "ek billing app banao") is not a question, so it stays HIGH and
+  //       instant — the common path pays nothing for this.
   const nbSignal = firstSignalWord(lower, NEW_BUILD_SIGNALS);
-  if (nbSignal) return { intent: 'new_build', confidence: 'high', signal: nbSignal };
+  if (nbSignal) return { intent: 'new_build', confidence: question ? 'low' : 'high', signal: nbSignal };
   const editSignal = firstSignalWord(lower, EDIT_SIGNALS);
-  if (editSignal) return { intent: 'edit_existing', confidence: 'high', signal: editSignal };
+  if (editSignal) return { intent: 'edit_existing', confidence: question ? 'low' : 'high', signal: editSignal };
   // A comparison/explanation ask ("compare X and Y") → chat, even if it mentions a build-flavored
   // noun in passing. High confidence so length/code-heuristics below can't override it either.
   if (matchesSignal(lower, INFORMATIONAL_SIGNALS)) {
@@ -531,6 +563,11 @@ export async function classifyIntentSmart(
 
   const prompt = [
     'Decide what the user actually WANTS — read their intention, do NOT just match keywords.',
+    // The admin's rule, stated to the reader in the reader's own terms: a question deserves an answer.
+    // Building an app for someone who asked a question wastes their time and ours, and the reply is
+    // already free to OFFER to build — so "chat" is never a refusal, only a faster first response.
+    'If they are ASKING something, the answer is "chat" — even when their sentence contains a word like',
+    'build, make, create or generate. Choose "build" only when they want an app produced NOW.',
     'Choose exactly one of three categories:',
     '  chat    — plain conversation, a greeting, a question, thanks, or asking how something works',
     '  build   — create a NEW app / feature / component from scratch',

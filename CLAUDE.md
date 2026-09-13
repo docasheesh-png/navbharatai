@@ -135,6 +135,33 @@ rule says *how* to fix; this fifth rule says *every real report is the trigger a
 of what to fix*. Both are non-negotiable and reinforce the one absolute rule (never break the
 app). Run all four mandatory steps, in order, every time:
 
+### 🙋 READ THE MOOD FIRST — a question gets an answer, not an app (admin-mandated 2026-09-13)
+
+> *"Simple question ka just simple answer dena chahiye — app banane ki yahan jarurat hi kahan hai.
+> Direct app mat bana do! Yeh system control karo — pehle dekhu user ka mood kya hai, kya woh sirf
+> answer chahta hai, ya app banwana chahta hai."*
+
+**Before anything is built, decide what the user actually wants.** A build verb inside a QUESTION is the
+object of that question, not an order: *"Can you generate images?"* asks what we can do. It cost a real
+user **29 minutes and a failed app** (autopsy `5abad374`), and it was never one sentence — *"can I make
+money from this?"*, *"what can you generate?"*, *"how do I make a login page?"* all hard-locked to
+"build an app" too. **A pricing question built an app.**
+
+The rule, in `IntentClassifier.ts`:
+- A question naming **nothing to produce** ⇒ answer it (`chat`).
+- A question that **does** name something ("can you build me a todo app?") keeps its build intent but
+  **loses its HIGH confidence**, so the LLM intention-reader is finally consulted with project and
+  conversation context. The intent is unchanged, so nothing regresses if that reader is slow or down.
+- An **order** ("build a notes app", "ek billing app banao") is not a question — it stays HIGH and
+  instant. The common path pays nothing.
+
+⚠️ **The asymmetry is the whole justification, and it must not be reversed.** Wrong toward chat costs
+one message — and the chat reply already offers to build, so "haan" starts it. Wrong toward build costs
+29 minutes, real money, and a user who asked for none of it.
+⚠️ **An auxiliary opens an order as often as a question.** *"do it again"* is a retry; reading `do` as
+interrogative re-opened the "please continue" amnesia this repo has already fixed once. An auxiliary
+counts as interrogative only with a question mark, or when a second-person subject follows it.
+
 ### 🫰 THE BAR EVERY AUTOPSY IS MEASURED AGAINST (admin-mandated 2026-09-13, verbatim)
 
 > *"NavBharatAI koi bhi app — kitni bhi badi aur complex — bina kisi struggle ke, minutes me bana de.

@@ -51156,3 +51156,20 @@ the fence in the same PR closes both.
   v3.0 generates, not only to what we write.
 - 🟡 **Sandbox 90% idle** (28.9 of 32.2 min) and **`SANDBOX_PEAK_MEMORY` "not available"** again.
 - 🟡 **ETA said ~3 min**, then "~53s to go" at minute 2, for a build that ran 29 minutes and failed.
+
+**FOLLOW-UP, same day — the admin widened the fix from one sentence to a SYSTEM.** Verbatim: *"simple
+question ka just simple answer dena chahiye… direct app mat bana do! Yeh system control karo — pehle
+dekhu user ka mood kya hai."* They were right, and measuring proved it: the narrow capability rule
+caught `"Can you generate images?"` and missed **`"can I make money from this?"`**,
+`"what can you generate?"`, `"how do I make a login page?"` and `"should I create a react app or next
+js?"` — every one of them hard-locked to `new_build` at HIGH confidence with the intention reader never
+consulted. **A pricing question built an app.** The keyword was never the bug; the HARD LOCK was.
+
+Replaced with two rules (`readsAsQuestion` + `namesSpecificDeliverable`): a question naming nothing to
+produce is answered; a question that does name something keeps its intent but drops to LOW so the reader
+is consulted; an order stays HIGH and instant. The reader's own prompt now states the rule in its terms.
+
+🔴 **The existing suite caught a regression before this shipped:** `"do it again"` became `chat`, because
+`do` was read as interrogative — re-opening the "please continue" amnesia this repo has already fixed
+once. An auxiliary (`do/can/is/should/…`) now counts as interrogative only with a question mark or a
+second-person subject after it (`can you`, `kya aap`); a wh-word always does. Pinned by four tests.

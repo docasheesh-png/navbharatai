@@ -32,6 +32,7 @@
  * other rule in this vault.
  */
 import { randomBytes, randomInt, scryptSync, timingSafeEqual } from 'crypto';
+import { normaliseLockedAreas, type AppLockArea } from '../../lib/appLockAreas';
 
 // ── The PIN itself ─────────────────────────────────────────────────────────────────────────────────
 
@@ -158,6 +159,14 @@ export interface VaultPinRecord {
   otpSendsToday: number;
   /** The UTC day `otpSendsToday` counts, so the daily cap cannot be reset by a device clock. */
   otpSendDay: string;
+  /**
+   * Which parts of the app this PIN guards (admin 2026-09-13 — the generalised App Lock).
+   *
+   * Stored on the SERVER beside the PIN, never in the browser, because the list IS security
+   * configuration: a device-local flag saying "nothing is locked" could be flipped by the same person
+   * the lock exists to stop. Always contains the mandatory areas — see `normaliseLockedAreas`.
+   */
+  lockedAreas: AppLockArea[];
 }
 
 export function emptyPinRecord(): VaultPinRecord {
@@ -166,6 +175,7 @@ export function emptyPinRecord(): VaultPinRecord {
     failCount: 0, lockedUntilMs: 0, lockLevel: 0,
     otpHash: '', otpSalt: '', otpExpiresAtMs: 0, otpAttempts: 0, otpPurpose: '',
     otpSentAtMs: 0, otpSendsToday: 0, otpSendDay: '',
+    lockedAreas: normaliseLockedAreas([]),
   };
 }
 
@@ -199,6 +209,9 @@ export function readPinRecord(raw: unknown): VaultPinRecord {
     otpSentAtMs: num(d.otp_sent_at_ms),
     otpSendsToday: num(d.otp_sends_today),
     otpSendDay: str(d.otp_send_day),
+    // A missing list is the DEFAULT (only the mandatory areas), never "everything locked" — a corrupt
+    // record must not be able to shut somebody out of their own app.
+    lockedAreas: normaliseLockedAreas(d.locked_areas),
   };
 }
 
@@ -218,6 +231,7 @@ export function writePinRecord(r: VaultPinRecord): Record<string, unknown> {
     otp_sent_at_ms: r.otpSentAtMs,
     otp_sends_today: r.otpSendsToday,
     otp_send_day: r.otpSendDay,
+    locked_areas: normaliseLockedAreas(r.lockedAreas),
   };
 }
 

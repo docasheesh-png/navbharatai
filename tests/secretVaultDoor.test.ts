@@ -36,13 +36,13 @@ const codeOnly = (src: string) => src
   .join('\n');
 
 const panel = read('src/components/SecretManager.tsx');
-const gate = read('src/components/VaultLockGate.tsx');
+const gate = read('src/components/AppLockGate.tsx');
 const gateCode = codeOnly(gate);
 const panelCode = codeOnly(panel);
 
 describe('the lock is the DOOR, not a card inside the room', () => {
   it('every control renders INSIDE the gate, not above it', () => {
-    const gateAt = panel.indexOf('<VaultLockGate');
+    const gateAt = panel.indexOf('<AppLockGate');
     expect(gateAt, 'the gate is gone entirely').toBeGreaterThan(-1);
     // The two bottom buttons and the credential table are the whole of the room. If any of them appears
     // before the gate, the screen is half-locked again — which is what the admin photographed.
@@ -52,7 +52,7 @@ describe('the lock is the DOOR, not a card inside the room', () => {
   });
 
   it('there is exactly ONE gate on this screen — two would mean two prompts', () => {
-    expect(panel.split('<VaultLockGate').length - 1).toBe(1);
+    expect(panel.split('<AppLockGate').length - 1).toBe(1);
   });
 });
 
@@ -137,9 +137,14 @@ describe('"Save and sync" does something real', () => {
 
 describe('🔴 the door is a PIN, and NOTHING else survives in it', () => {
   it('collects a 4-digit PIN and sends it to the server to be checked', () => {
-    expect(gate).toContain("from '../lib/vaultLock'");
+    expect(gate).toContain("from '../lib/appLock'");
     expect(gate).toContain('unlockWithPin(userId, pin)');
     expect(gate).toContain('maxLength={4}');
+  });
+
+  it("the keys screen uses the ONE area the user cannot switch off", () => {
+    // "api keys and secret (non removal ✅)" — enforced server-side too, see appLockAreas.ts.
+    expect(panel).toContain('area="api_keys"');
   });
 
   it('never compares the PIN itself — the only client-side check is the shape of the field', () => {
@@ -182,16 +187,28 @@ describe('🔴 the door is a PIN, and NOTHING else survives in it', () => {
 });
 
 describe('the client half leaks nothing and decides nothing', () => {
-  const client = read('src/lib/vaultLock.ts');
+  const client = read('src/lib/appLock.ts');
+  const secretsClient = read('src/lib/vaultLock.ts');
 
   it('the PIN only ever travels in a request body — it is never stored in the browser', () => {
     for (const stored of ['localStorage', 'sessionStorage', 'document.cookie', 'indexedDB']) {
       expect(client, stored).not.toContain(stored);
+      expect(secretsClient, stored).not.toContain(stored);
     }
   });
 
   it('every privileged call carries the ticket header', () => {
-    expect(client).toContain('[UNLOCK_TICKET_HEADER]: ticket');
-    expect(client.match(/UNLOCK_TICKET_HEADER\]: ticket/g)?.length).toBe(2); // reveal + delete
+    // Reveal and delete go through ONE helper now, so the header is attached in one place rather than
+    // copied per call — which is what stops a third such call being added without it.
+    expect(secretsClient).toContain('[UNLOCK_TICKET_HEADER]: ticket');
+    expect(secretsClient).toContain('revealSecrets');
+    expect(secretsClient).toContain('deleteSecretLocked');
+  });
+
+  it('changing WHAT is locked carries the ticket too', () => {
+    // A lock that can be switched off without the PIN is a preference. The server enforces this as well
+    // (tests/appLockRoutes.test.ts); this pins that the client does not even try without one.
+    expect(client).toContain('const unlock = currentUnlock();');
+    expect(client).toContain("jsonBody('PUT', { areas }, unlock.ticket)");
   });
 });

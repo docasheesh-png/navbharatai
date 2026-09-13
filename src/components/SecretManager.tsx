@@ -8,8 +8,9 @@ import { saveSecret, verifySecrets, type SecretVerdict } from '../lib/secretsApi
 import { findRecipeSource } from '../lib/credentialRecipes';
 import { listApps, type AppChoice } from '../lib/appList';
 import { scopeControl, saveScope, scopeSentence, secretOwnerLabel, shortAppName } from '../lib/secretScope';
-import { VaultLockGate } from './VaultLockGate';
-import { revealSecrets, deleteSecretLocked, type RevealedSecret, type UnlockState, type VaultError } from '../lib/vaultLock';
+import { AppLockGate } from './AppLockGate';
+import { revealSecrets, deleteSecretLocked, type RevealedSecret } from '../lib/vaultLock';
+import type { UnlockState, VaultError } from '../lib/appLock';
 
 interface Secret {
   id: string;
@@ -178,11 +179,17 @@ export const SecretManager: React.FC<{
           The lock is the DOOR: nothing of this panel renders until the vault is genuinely open, and once
           it is, everything inside is ordinary — add, reveal, copy, edit, delete, with no second prompt.
           Security is unchanged either way, because the lock was never the React flag: the server refuses
-          to decrypt without the ticket this gate collects. */}
-      <VaultLockGate
+          to decrypt without the ticket this gate collects.
+
+          ⚠️ `area="api_keys"` is the ONE area the user cannot switch off (admin 2026-09-13: *"api keys and
+          secret (non removal ✅)"*), enforced server-side in `normaliseLockedAreas` rather than by a
+          disabled checkbox. And the render prop returns null without a live unlock: every call this panel
+          makes needs the ticket, so rendering it half-open would only produce 401s. */}
+      <AppLockGate
         userId={userId}
+        area="api_keys"
         embedded={embedded}
-        render={(unlock, relock) => (
+        render={(unlock, relock) => (unlock === null ? null : (
           <div className="space-y-4">
             {/* One vault for every key an app needs — a Cashfree key is just a name/value secret, so it
                 is added here like any other. Saved keys are injected into the app you build at build time. */}
@@ -293,7 +300,7 @@ export const SecretManager: React.FC<{
               </div>
             )}
           </div>
-        )}
+        ))}
       />
     </div>
   );

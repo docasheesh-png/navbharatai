@@ -1,5 +1,5 @@
 /**
- * THE PIN ENDPOINTS — status, send a code, set the PIN, unlock.
+ * THE APP LOCK'S ENDPOINTS — status, send a code, set the PIN, unlock, and choose what is locked.
  *
  * `vaultPin.test.ts` proves the RULES. What it cannot see is whether these routes actually apply them,
  * and this lock has exactly one way to rot into theatre: a route that reads the record, compares the
@@ -11,7 +11,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
 import { hashPin, newSalt, writePinRecord, emptyPinRecord, MAX_PIN_ATTEMPTS, LOCKOUT_STEPS_MS, afterOtpSent, readPinRecord } from '../src/server/lib/vaultPin';
-import { verifyUnlockTicket, unlockSecret } from '../src/server/lib/vaultTicket';
+import { mintUnlockTicket, verifyUnlockTicket, unlockSecret } from '../src/server/lib/vaultTicket';
+import { UNLOCK_TICKET_HEADER } from '../src/server/lib/vaultTicketHttp';
+import { normaliseLockedAreas } from '../src/lib/appLockAreas';
 
 process.env.VITEST = 'true';
 
@@ -66,17 +68,9 @@ vi.mock('../src/server/lib/alertEmail', () => ({
   },
 }));
 
-vi.mock('../src/server/lib/secrets', () => ({
-  encrypt: (v: string) => `enc:${v}`,
-  decrypt: (v: string) => String(v).replace(/^enc:/, ''),
-  loadUserVaultSecrets: async () => ({}),
-  secretCreatedAtMs: () => 0,
-}));
-vi.mock('../src/server/AgentV3/credentialProbe', () => ({ probeCredentials: async () => [], realProbeFetch: async () => null }));
-
 async function routes() {
-  const { registerSecretsRoutes } = await import('../src/server/routes/secrets');
-  return captureRoutes(registerSecretsRoutes as any);
+  const { registerAppLockRoutes } = await import('../src/server/routes/appLock');
+  return captureRoutes(registerAppLockRoutes as any);
 }
 const handler = async (key: string) => {
   const r = await routes();
@@ -101,10 +95,10 @@ beforeEach(() => {
   CONTACT = { email: 'owner@example.com', emailVerified: true, phone: null };
 });
 
-describe('GET /pin — what the screen is told, and what it is NOT told', () => {
+describe('GET /api/app-lock/:userId — what the screen is told, and what it is NOT told', () => {
   it('reports no PIN for a fresh account, and names the masked destination', async () => {
     const res = mockRes();
-    await (await handler('GET /api/secrets/:userId/pin'))(mockReq({ params: { userId: UID } }), res);
+    await (await handler('GET /api/app-lock/:userId'))(mockReq({ params: { userId: UID } }), res);
     expect(res.statusCode).toBe(200);
     expect(res.body).toMatchObject({ hasPin: false, locked: false, channel: 'email', attemptsLeft: MAX_PIN_ATTEMPTS });
     expect(res.body.destination).toBe('ow•••@example.com');
@@ -117,24 +111,24 @@ describe('GET /pin — what the screen is told, and what it is NOT told', () => 
 
   it('is marked no-store, so a vault status is never written into a disk cache', async () => {
     const res = mockRes();
-    await (await handler('GET /api/secrets/:userId/pin'))(mockReq({ params: { userId: UID } }), res);
+    await (await handler('GET /api/app-lock/:userId'))(mockReq({ params: { userId: UID } }), res);
     expect(String(res.headers['Cache-Control'] ?? res.headers['cache-control'])).toContain('no-store');
   });
 
   it('reports an existing PIN and a live lock-out', async () => {
     seedPin(PIN, { locked_until_ms: Date.now() + 120_000 });
     const res = mockRes();
-    await (await handler('GET /api/secrets/:userId/pin'))(mockReq({ params: { userId: UID } }), res);
+    await (await handler('GET /api/app-lock/:userId'))(mockReq({ params: { userId: UID } }), res);
     expect(res.body.hasPin).toBe(true);
     expect(res.body.locked).toBe(true);
     expect(res.body.lockedForMs).toBeGreaterThan(100_000);
   });
 });
 
-describe('POST /pin/otp — sending the code', () => {
+describe('POST /otp — sending the code', () => {
   it('emails the ACCOUNT address, never the admin list, and never returns the code', async () => {
     const res = mockRes();
-    await (await handler('POST /api/secrets/:userId/pin/otp'))(mockReq({ params: { userId: UID }, body: { purpose: 'create' } }), res);
+    await (await handler('POST /api/app-lock/:userId/otp'))(mockReq({ params: { userId: UID }, body: { purpose: 'create' } }), res);
     expect(res.statusCode).toBe(200);
     expect(EMAIL_SENDS).toBe(1);
     // The admin list is the mailer's DEFAULT recipient. Sending a user's vault code there would be a
@@ -152,14 +146,14 @@ describe('POST /pin/otp — sending the code', () => {
 
   it('stores the hash BEFORE sending, so a delivered code always has something to check against', async () => {
     const res = mockRes();
-    await (await handler('POST /api/secrets/:userId/pin/otp'))(mockReq({ params: { userId: UID }, body: {} }), res);
+    await (await handler('POST /api/app-lock/:userId/otp'))(mockReq({ params: { userId: UID }, body: {} }), res);
     expect(res.statusCode).toBe(200);
     expect(readPinRecord(STORE).otpHash).not.toBe('');
     expect(readPinRecord(STORE).otpExpiresAtMs).toBeGreaterThan(Date.now());
   });
 
   it('refuses a second code inside the cooldown', async () => {
-    const h = await handler('POST /api/secrets/:userId/pin/otp');
+    const h = await handler('POST /api/app-lock/:userId/otp');
     await h(mockReq({ params: { userId: UID }, body: {} }), mockRes());
     const res = mockRes();
     await h(mockReq({ params: { userId: UID }, body: {} }), res);
@@ -170,7 +164,7 @@ describe('POST /pin/otp — sending the code', () => {
   it('says so honestly when email is not configured — and sends nothing', async () => {
     EMAIL_CONFIGURED = false;
     const res = mockRes();
-    await (await handler('POST /api/secrets/:userId/pin/otp'))(mockReq({ params: { userId: UID }, body: {} }), res);
+    await (await handler('POST /api/app-lock/:userId/otp'))(mockReq({ params: { userId: UID }, body: {} }), res);
     expect(res.statusCode).toBe(503);
     expect(EMAIL_SENDS).toBe(0);
     // No hash is stored either: a code nobody was sent must not become a code somebody could guess into.
@@ -180,7 +174,7 @@ describe('POST /pin/otp — sending the code', () => {
   it('an account with only a mobile number is told the door that DOES work for it', async () => {
     CONTACT = { email: null, emailVerified: false, phone: '+919876543210' };
     const res = mockRes();
-    await (await handler('POST /api/secrets/:userId/pin/otp'))(mockReq({ params: { userId: UID }, body: {} }), res);
+    await (await handler('POST /api/app-lock/:userId/otp'))(mockReq({ params: { userId: UID }, body: {} }), res);
     expect(res.statusCode).toBe(400);
     expect(res.body.channel).toBe('fresh-sign-in');
     expect(res.body.error).toMatch(/sign in again with your mobile number/i);
@@ -189,7 +183,7 @@ describe('POST /pin/otp — sending the code', () => {
 });
 
 describe('POST /pin — setting the PIN', () => {
-  const setPin = () => handler('POST /api/secrets/:userId/pin');
+  const setPin = () => handler('POST /api/app-lock/:userId/pin');
 
   it('refuses a weak PIN before anything else happens', async () => {
     const res = mockRes();
@@ -210,7 +204,7 @@ describe('POST /pin — setting the PIN', () => {
   });
 
   it('sets the PIN with the right code, burns the code, and hands back a real ticket', async () => {
-    const h = await handler('POST /api/secrets/:userId/pin/otp');
+    const h = await handler('POST /api/app-lock/:userId/otp');
     await h(mockReq({ params: { userId: UID }, body: { purpose: 'create' } }), mockRes());
     const code = LAST_EMAIL!.message.match(/\b(\d{6})\b/)![1];
 
@@ -226,7 +220,7 @@ describe('POST /pin — setting the PIN', () => {
 
   it('a reset CLEARS a lock-out — the owner just proved themselves more strongly than the PIN ever could', async () => {
     seedPin('1357', { locked_until_ms: Date.now() + 3600_000, lock_level: 3, fail_count: 2 });
-    const h = await handler('POST /api/secrets/:userId/pin/otp');
+    const h = await handler('POST /api/app-lock/:userId/otp');
     await h(mockReq({ params: { userId: UID }, body: { purpose: 'reset' } }), mockRes());
     const code = LAST_EMAIL!.message.match(/\b(\d{6})\b/)![1];
 
@@ -241,8 +235,8 @@ describe('POST /pin — setting the PIN', () => {
   });
 });
 
-describe('POST /pin/unlock — the only place a PIN is ever compared', () => {
-  const unlock = () => handler('POST /api/secrets/:userId/pin/unlock');
+describe('POST /unlock — the only place a PIN is ever compared', () => {
+  const unlock = () => handler('POST /api/app-lock/:userId/unlock');
 
   it('opens the vault with the right PIN', async () => {
     seedPin();
@@ -303,5 +297,106 @@ describe('POST /pin/unlock — the only place a PIN is ever compared', () => {
       await (await unlock())(mockReq({ params: { userId: UID }, body: { pin: bad } }), res);
       expect(res.statusCode, String(bad)).toBe(401);
     }
+  });
+});
+
+describe('🔒 PUT /areas — the route that makes the App Lock more than a preference', () => {
+  const areas = () => handler('PUT /api/app-lock/:userId/areas');
+  const liveTicket = () => ({ [UNLOCK_TICKET_HEADER]: mintUnlockTicket(UID, Date.now(), unlockSecret()) });
+
+  it('🔴 REFUSES WITHOUT THE PIN — this is the whole feature', async () => {
+    // The attack it stops: somebody picks up an unlocked phone, opens Settings, and switches the lock
+    // off. If this route accepted the request, every other test in this file would be decoration.
+    seedPin();
+    const res = mockRes();
+    await (await areas())(mockReq({ params: { userId: UID }, body: { areas: ['api_keys'] } }), res);
+    expect(res.statusCode).toBe(401);
+    expect(res.body.needsUnlock).toBe(true);
+    expect(readPinRecord(STORE).lockedAreas).toEqual(normaliseLockedAreas([]));
+  });
+
+  it('saves the chosen areas with a live ticket, in canonical order', async () => {
+    seedPin();
+    const res = mockRes();
+    await (await areas())(mockReq({
+      params: { userId: UID },
+      headers: liveTicket(),
+      body: { areas: ['settings', 'billing'] },
+    }), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.areas).toEqual(['api_keys', 'billing', 'settings']);
+    expect(readPinRecord(STORE).lockedAreas).toEqual(['api_keys', 'billing', 'settings']);
+    expect(AUDIT.some((a) => a.action === 'lock-areas-changed')).toBe(true);
+  });
+
+  it('🔒 CANNOT remove the API-keys lock, even asked directly', async () => {
+    // "non removal ✅" is enforced here and in `normaliseLockedAreas`, not by a disabled checkbox — a
+    // disabled input is a picture, and anyone can send the request the screen would have sent.
+    seedPin();
+    const res = mockRes();
+    await (await areas())(mockReq({ params: { userId: UID }, headers: liveTicket(), body: { areas: [] } }), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.areas).toContain('api_keys');
+    expect(readPinRecord(STORE).lockedAreas).toContain('api_keys');
+  });
+
+  it('drops an unknown area rather than storing it', async () => {
+    // A stored id nothing checks would sit in the list looking like a lock that is on. A lock that lies
+    // about itself is worse than no lock.
+    seedPin();
+    const res = mockRes();
+    await (await areas())(mockReq({
+      params: { userId: UID },
+      headers: liveTicket(),
+      body: { areas: ['billing', 'totally_made_up', 42, null] },
+    }), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.areas).toEqual(['api_keys', 'billing']);
+  });
+
+  it('reports what locking the whole Billing screen already covers', async () => {
+    seedPin();
+    const res = mockRes();
+    await (await areas())(mockReq({ params: { userId: UID }, headers: liveTicket(), body: { areas: ['billing'] } }), res);
+    expect(res.body.effectiveAreas).toEqual(expect.arrayContaining(['billing', 'subscription', 'wallet_recharge']));
+    // And the list the SETTINGS screen renders is still only what the user actually ticked, so a tick
+    // does not silently appear in a box they never touched.
+    expect(res.body.areas).toEqual(['api_keys', 'billing']);
+  });
+
+  it('refuses before a PIN exists — locking screens with no PIN would strand the owner outside them', async () => {
+    STORE = null;
+    const res = mockRes();
+    await (await areas())(mockReq({ params: { userId: UID }, headers: liveTicket(), body: { areas: ['settings'] } }), res);
+    expect(res.statusCode).toBe(409);
+    expect(res.body.needsSetup).toBe(true);
+  });
+
+  it('refuses a ticket minted for ANOTHER user', async () => {
+    seedPin();
+    const res = mockRes();
+    await (await areas())(mockReq({
+      params: { userId: UID },
+      headers: { [UNLOCK_TICKET_HEADER]: mintUnlockTicket('someone_else', Date.now(), unlockSecret()) },
+      body: { areas: ['settings'] },
+    }), res);
+    expect(res.statusCode).toBe(401);
+  });
+});
+
+describe('the status route reports the areas both ways', () => {
+  it('sends what was ticked AND what is in force', async () => {
+    seedPin('8274', { locked_areas: ['api_keys', 'billing'] });
+    const res = mockRes();
+    await (await handler('GET /api/app-lock/:userId'))(mockReq({ params: { userId: UID } }), res);
+    expect(res.body.areas).toEqual(['api_keys', 'billing']);
+    expect(res.body.effectiveAreas).toEqual(expect.arrayContaining(['subscription', 'wallet_recharge']));
+  });
+
+  it('a record with no area list reads as the DEFAULT, never as everything locked', async () => {
+    seedPin();
+    const res = mockRes();
+    await (await handler('GET /api/app-lock/:userId'))(mockReq({ params: { userId: UID } }), res);
+    expect(res.body.areas).toEqual(['api_keys']);
   });
 });

@@ -11,6 +11,7 @@ import { getAgentV3WorkspaceId } from '../../lib/agentv3Workspace';
 import { resolveAppSource, hasAnalysableApp } from '../../lib/workspaceSource';
 import { hasConflictMarkers } from '../../lib/merge3';
 import type { User as FirebaseUser } from 'firebase/auth';
+import { AppLockGate } from '../AppLockGate';
 
 // ── Lazy-loaded view components ─────────────────────────────────────────────
 const _lz = <T extends object>(fn: () => Promise<T>, k: keyof T) =>
@@ -166,7 +167,20 @@ export function ViewPanels({
   return (
     <>
       {activeView === 'studio' && (
+        /* 🔒 APP LOCK — Code Studio (admin 2026-09-13). Default OFF: the gate renders its children
+           untouched unless the user ticked this area in Settings → General Settings → App Lock, so a
+           user who never switched it on sees exactly the screen they saw before.
+
+           Wrapping (rather than overlaying, as the Pro builder needs) is right here: CodeStudio already
+           force-remounts on `key={activeAgent}`, so it holds nothing across a remount that a gate could
+           destroy. */
         <div className="flex-1 h-full overflow-hidden">
+          {/* ⚠️ `user`, NOT `firebaseUser`. This file has both, and they are different things: `firebaseUser`
+              is the user's OWN Firebase project connection (BYO database, sitting between `firebaseToken`
+              and `connectFirebase` in the props), while `user` is the signed-in NavBharatAI account. The
+              lock keyed to the wrong one would ask the server about a uid that is not the caller's, be
+              refused by `requireUserMatch`, and then render OPEN — a gate that fails silently. */}
+          <AppLockGate userId={user?.uid ?? ''} area="code_studio" render={() => (
           <CodeStudio
             key={activeAgent}
             activeAgent={activeAgent}
@@ -229,6 +243,7 @@ export function ViewPanels({
             wallet={wallet}
             onSendDirect={(text: string) => handleSendForTab('nbi_pro_chat' as ViewType, text)}
           />
+          )} />
         </div>
       )}
 

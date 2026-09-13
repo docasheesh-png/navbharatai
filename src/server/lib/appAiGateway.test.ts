@@ -7,7 +7,7 @@ import {
   appDailyCapInr, visitorDailyCapInr, DEFAULT_APP_DAILY_CAP_INR, DEFAULT_VISITOR_DAILY_CAP_INR,
   MAX_GATEWAY_PROMPT_CHARS, type GatewayRefusal,
   nonceAccepted, rotateNonce, gatewayScriptHtml, injectGatewayScript, injectGatewayIntoFiles,
-  GATEWAY_PATH, APP_AI_MARKER,
+  appUsesGateway, GATEWAY_PATH, APP_AI_MARKER,
 } from './appAiGateway';
 
 /**
@@ -275,9 +275,45 @@ describe('the snippet stamped into a published page', () => {
   });
 });
 
+describe('🔒 only an app that ASKED for the assistant gets one', () => {
+  // ADMIN 2026-09-13: "user ko lagega ham spy daal rahe hai user ki app me". Nothing is shown and no
+  // app data is read — but the first version stamped the helper into EVERY published page, including
+  // apps that never asked for AI. Something the user did not request has no business in their page.
+  const plain = () => new Map<string, Buffer>([
+    ['index.html', Buffer.from('<!doctype html><html><head></head><body>hi</body></html>')],
+    ['app.js', Buffer.from('console.log("a shop")')],
+  ]);
+  const withAi = () => new Map<string, Buffer>([
+    ['index.html', Buffer.from('<!doctype html><html><head></head><body></body></html>')],
+    ['app.js', Buffer.from('const b=window.NavAI;b.ask("hi")')],
+  ]);
+
+  it('an app with no AI is left completely alone', () => {
+    const files = plain();
+    expect(appUsesGateway(files)).toBe(false);
+    expect(injectGatewayIntoFiles(files, {
+      appId: 'nbai-abc', token: 'tok', origin: 'https://x', env: { APP_AI_GATEWAY: 'on' } as never,
+    })).toBe(0);
+    expect(files.get('index.html')!.toString()).not.toContain(APP_AI_MARKER);
+  });
+
+  it('an app that calls window.NavAI is stamped', () => {
+    expect(appUsesGateway(withAi())).toBe(true);
+  });
+
+  it('🔒 the property survives minification — that is why the PROPERTY is matched, not the variable', () => {
+    // A minifier may rename the variable holding `window`; it never renames the property read off it.
+    expect(appUsesGateway(new Map([['b.js', Buffer.from('var a=globalThis;a.NavAI&&a.NavAI.ask(x)')]]))).toBe(true);
+  });
+
+  it('looks only at code files — a stray mention in an asset name proves nothing', () => {
+    expect(appUsesGateway(new Map([['NavAI-logo.png', Buffer.from('binary')]]))).toBe(false);
+  });
+});
+
 describe('stamping a publish bundle', () => {
   const bundle = () => new Map<string, Buffer>([
-    ['index.html', Buffer.from('<!doctype html><html><head></head><body></body></html>')],
+    ['index.html', Buffer.from('<!doctype html><html><head></head><body></body><script>window.NavAI</script></html>')],
     ['about.html', Buffer.from('<!doctype html><html><head></head><body></body></html>')],
     ['app.js', Buffer.from('console.log(1)')],
   ]);

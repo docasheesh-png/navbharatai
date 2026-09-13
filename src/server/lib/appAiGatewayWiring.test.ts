@@ -130,8 +130,17 @@ describe('minting the token at publish', () => {
   });
 
   it('the whole mint is gated on the master switch and can never break a publish', () => {
-    expect(store).toContain('if (appAiGatewayEnabled())');
-    expect(store).toMatch(/appAiGatewayEnabled\(\)\)\s*\{\s*try\s*\{/s);
+    expect(store).toContain('if (appAiGatewayEnabled() && appUsesGateway(files))');
+    expect(store).toMatch(/appUsesGateway\(files\)\)\s*\{\s*try\s*\{/s);
+  });
+
+  it('🔒 no registry row is minted for an app that never asked for an assistant', () => {
+    // An app with no assistant needs no identity, and minting one on every publish would create a
+    // record about somebody who never opted in.
+    const mint = store.indexOf('appAiRegistryStore.mint(');
+    const gate = store.indexOf('appUsesGateway(files)');
+    expect(gate).toBeGreaterThan(-1);
+    expect(mint).toBeGreaterThan(gate);
   });
 });
 

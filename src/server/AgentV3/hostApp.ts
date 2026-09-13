@@ -49,7 +49,24 @@ export interface Availability {
  * access is the spoof this codebase already guards elsewhere.
  */
 export function hostingAvailability(
-  opts: { isAdmin: boolean; env?: NodeJS.ProcessEnv },
+  opts: {
+    isAdmin: boolean;
+    /**
+     * Does this account hold an active hosting plan?
+     *
+     * 🔴 A SERVER APP RUNS ONLY ON A PLAN, and this parameter is what makes that true rather than
+     * merely written down. Free publishing is real and stays real — five static apps on a CDN, on a
+     * free NavBharatAI link — but a container runs continuously on machines NavBharatAI pays for, and
+     * there is no free tier of that to fall back to. The agreement a buyer ticks now says so in as
+     * many words ("Apps that need a server run only on a plan"), so the code owes the same answer.
+     *
+     * ⚠️ `undefined` means NOT CHECKED and is treated as NO PLAN for a non-admin. An unknown here
+     * must never open a paid path — the opposite direction would host somebody's server for free on
+     * the strength of a lookup that failed.
+     */
+    hasPlan?: boolean;
+    env?: NodeJS.ProcessEnv;
+  },
 ): Availability {
   const env = opts.env ?? process.env;
   if (!navBharatCloudEnabled(env)) {
@@ -57,6 +74,14 @@ export function hostingAvailability(
   }
   if (!navBharatCloudPublic(env) && !opts.isAdmin) {
     return { available: false, message: 'App hosting on NavBharatAI is still being tested and is not open to everyone yet.' };
+  }
+  // The admin is exempt so the path can be tested before anyone can buy into it — the same exemption
+  // the public flag above already makes, for the same reason.
+  if (!opts.isAdmin && opts.hasPlan !== true) {
+    return {
+      available: false,
+      message: 'Apps that need a server run on a hosting plan. Open Billing → Plans to start one — your app and its code are kept exactly as they are until then.',
+    };
   }
   const project = appsProject(env);
   if (!project.projectId) return { available: false, message: project.message };

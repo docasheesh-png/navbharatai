@@ -4528,7 +4528,10 @@ async function noteBuildOutcome(
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
     if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
 
-    const gate = hostingAvailability({ isAdmin: isReportAdmin(email) });
+    // A server app runs only on a plan — the probe is cached and fails CLOSED (`known: false` ⇒ no
+    // plan), so a lookup that could not answer never opens a paid path. See hostApp.hostingAvailability.
+    const hostPlan = await probeHostingPlan(userId).catch(() => ({ active: false, known: false }));
+    const gate = hostingAvailability({ isAdmin: isReportAdmin(email), hasPlan: hostPlan.active === true });
     if (!gate.available) { res.status(503).json({ ok: false, reason: 'unavailable', error: gate.message }); return; }
 
     try {
@@ -8009,7 +8012,11 @@ async function noteBuildOutcome(
             // claimed body identity when there is no token, which is right for a feature gate and
             // wrong for an admin one. No token ⇒ null ⇒ not an admin.
             const identity = await verifyFirebaseIdentity(req).catch(() => null);
-            containerHostingAvailable = hostingAvailability({ isAdmin: isReportAdmin(identity?.email ?? null) }).available;
+            const publishPlan = await probeHostingPlan(userId).catch(() => ({ active: false, known: false }));
+            containerHostingAvailable = hostingAvailability({
+              isAdmin: isReportAdmin(identity?.email ?? null),
+              hasPlan: publishPlan.active === true,
+            }).available;
           } catch { /* unresolvable ⇒ not available ⇒ today's Render path, unchanged */ }
 
           if (choosePublishRoute(plan, { containerHostingAvailable }) === 'container') {

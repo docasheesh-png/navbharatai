@@ -60,64 +60,16 @@ export function lastCompleteDay(nowMs: number): BillingWindow {
   };
 }
 
-/** The store key for one app's one day. The day is IN the key — see the header's second point. */
-export function hostingBillKey(workspaceId: string, day: string): string {
-  return `${workspaceId}_${day}`;
-}
-
-export type HostingDebitReason =
-  | 'billing-off'    // NAVBHARAT_BILL_HOSTING is not on — we absorb it, and say so
-  | 'nothing-to-bill' // measured, and it genuinely cost nothing (or no rate is set for what it used)
-  | 'no-owner'       // an orphaned app with nobody to charge
-  | 'charge';
-
-export interface HostingDebitDecision {
-  charge: boolean;
-  reason: HostingDebitReason;
-  /** ₹ to debit. Always 0 unless `charge`. */
-  billedInr: number;
-}
-
 /**
- * Turn "what this app would be billed in USD" into "what to take from whose wallet, in ₹".
- *
- * 🔒 IT NEVER DECIDES THE USD ITSELF. `hostingBillableUsd` already applies both of the billing law's
- * conditions — the switch is on, and there is a real measured cost to mark up — and an unset rate
- * already contributes ZERO there rather than a guess. This function's whole job is the last two
- * questions: is there anybody to charge, and is the ₹ figure real. PURE.
- *
- * An ORPHANED app (the owner deleted their workspace, or the record predates user ids) is never
- * charged to somebody else and never charged to nobody — it is named, so it appears in the admin's
- * report as an app we are hosting for free rather than as a silent zero.
+ * The store key for one SUBJECT's one day — the subject being the app's OWNER since billing moved to
+ * a per-owner traffic allowance. The day is IN the key; see the header's second point.
  */
-export function decideHostingDebit(opts: {
-  billableUsd: number;
-  usdInr: number;
-  ownerId: string | null;
-  billingEnabled: boolean;
-}): HostingDebitDecision {
-  const no = (reason: HostingDebitReason): HostingDebitDecision => ({ charge: false, reason, billedInr: 0 });
-  if (!opts.billingEnabled) return no('billing-off');
-  if (!opts.ownerId) return no('no-owner');
-
-  const usd = Number(opts.billableUsd);
-  const rate = Number(opts.usdInr);
-  if (!Number.isFinite(usd) || usd <= 0) return no('nothing-to-bill');
-  if (!Number.isFinite(rate) || rate <= 0) return no('nothing-to-bill');
-
-  const inr = Math.round(usd * rate * 100) / 100;
-  // A charge that rounds to nothing IS nothing. Rounding it up to one paisa would be inventing a cost,
-  // and doing that daily for every app would be a real, recurring, invented bill.
-  if (inr <= 0) return no('nothing-to-bill');
-  return { charge: true, reason: 'charge', billedInr: inr };
+export function hostingBillKey(subject: string, day: string): string {
+  return `${subject}_${day}`;
 }
 
-/** One line for the ADMIN report. Never shown to a user — it names our own infrastructure cost. */
-export function hostingDebitNote(d: HostingDebitDecision, day: string): string {
-  switch (d.reason) {
-    case 'charge': return `Hosting for ${day}: charged ₹${d.billedInr.toFixed(2)}.`;
-    case 'billing-off': return `Hosting for ${day}: absorbed by NavBharatAI (NAVBHARAT_BILL_HOSTING is off).`;
-    case 'no-owner': return `Hosting for ${day}: no owner on the record, so nobody was charged.`;
-    default: return `Hosting for ${day}: nothing to bill.`;
-  }
-}
+// 🔴 `decideHostingDebit` / `hostingDebitNote` LIVED HERE AND WERE DELETED 2026-09-13, unused, before
+// either ever charged anybody. They implemented decision D5 — "our cost + 20%", per app — which is not
+// what a plan holder agreed to pay. The rule the user actually ticks is one flat ₹/GB above a stated
+// allowance, and it lives in `lib/hostingOverage.ts`. D5 survives as the ADMIN's own view of what an
+// app costs us (`hostingCost.ts`), which is the only question it was ever asked to answer.

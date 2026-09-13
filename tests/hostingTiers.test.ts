@@ -9,6 +9,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import {
   HOSTING_TIERS, HOSTING_OVERAGE_INR_PER_GB, LEGACY_HOSTING_PLAN_ID, FREE_PUBLISHED_APPS,
   hostingAgreementTerms, isKnownPlanId, overageInr, purchasableTier, tierForPlanId, tierRank,
@@ -67,20 +69,42 @@ describe('the agreement the user ticks', () => {
     }
   });
 
-  it('states plainly that going over does NOT switch the app off', () => {
+  it('🔒 states the CONDITION under which a site can go offline, and what stays true either way', () => {
+    // CHANGED 2026-09-13 with the admin's decision. This used to assert the unconditional promise
+    // "your apps KEEP RUNNING — nothing is switched off", which made an unpaid overage free for ever
+    // and made enforcing it a broken promise. The test is not relaxed — it now pins the three things
+    // a buyer must be able to read BEFORE paying: what keeps it running, that a reminder comes
+    // first, and that nothing is ever deleted.
     for (const t of HOSTING_TIERS) {
-      expect(hostingAgreementTerms(t).join(' ')).toContain('KEEP RUNNING');
+      const text = hostingAgreementTerms(t).join(' ');
+      expect(text).toContain('keep running');
+      expect(text).toContain('while your wallet has balance');
+      expect(text).toContain('reminder');
+      expect(text).toContain('nothing is deleted');
     }
   });
 
-  it('🔒 admits the traffic meter is not live yet, instead of implying a limit nothing enforces', () => {
-    // An agreement describing an enforcement we do not have would be the second absolute rule's
-    // exact case. This line goes the day the meter covers a site — until then it must stand, and
-    // this test is what makes removing it a deliberate act.
+  it('🔒 a SERVER app has no free fallback, and the agreement says so', () => {
+    // The five-free-apps fallback is true only of apps a CDN can serve. An app with a server stops
+    // when the plan ends, because free accounts do not get container hosting at all — and a buyer is
+    // owed that sentence before paying rather than on the morning it happens.
     for (const t of HOSTING_TIERS) {
       const text = hostingAgreementTerms(t).join(' ');
-      expect(text).toContain('Traffic measurement is still being rolled out');
+      expect(text).toContain('Apps that need a server run only on a plan');
+      expect(text).toContain('kept exactly as they are');
+    }
+  });
+
+  it('🔒 says exactly WHERE traffic is measured — the meter is real on our servers and nowhere else', () => {
+    // NARROWED 2026-09-13, not dropped. The meter is now genuinely running for apps on NavBharatAI's
+    // own servers, so a blanket "still being rolled out" would understate what we can charge. It is
+    // still true — and must still be stated — for a site served from a Hosting channel, whose bytes
+    // cannot be attributed to one user. This test is what makes removing it a deliberate act.
+    for (const t of HOSTING_TIERS) {
+      const text = hostingAgreementTerms(t).join(' ');
+      expect(text).toContain("hosted on NavBharatAI's own servers");
       expect(text).toContain('charged the plan price and nothing more');
+      expect(text).toContain('see your measured usage before anything extra is charged');
     }
   });
 
@@ -148,12 +172,15 @@ describe('the lapse demotion — which apps survive, and why', () => {
     for (const t of HOSTING_TIERS) {
       const text = hostingAgreementTerms(t).join(' ');
       expect(text).toContain(`up to ${t.publishedApps} apps published`);
-      expect(text).toContain(`free ${FREE_PUBLISHED_APPS} apps`);
-      expect(text).toContain('PAUSED, never deleted');
-      // The restore is described EXACTLY as it works — open the app, press Publish — because
+      // REWORDED 2026-09-13 on the admin's instruction — "PAUSED" reads as a punishment to a buyer.
+      // The FACTS asserted are unchanged and no weaker: how many survive, that nothing is deleted,
+      // and exactly how they come back.
+      expect(text).toContain(`first ${FREE_PUBLISHED_APPS} apps stay online free`);
+      expect(text).toContain('all of your files are kept');
+      // The restore is described EXACTLY as it works — renew, then press Publish — because
       // republishing re-runs a real build and there is no one-tap Restore button. Promising less
       // friction than exists would be discovered just after the user paid to get their apps back.
-      expect(text).toContain('open a paused app and press Publish');
+      expect(text).toContain('renew and press Publish');
       expect(text).not.toContain('one tap');
     }
   });
@@ -315,5 +342,31 @@ describe('the plan card', () => {
 
   it('prefers the SERVER catalogue over the bundled one, so a price change needs no frontend build', () => {
     expect(card).toContain('Array.isArray(status.tiers) && status.tiers.length ? status.tiers');
+  });
+});
+
+describe('the renewal choice is made BEFORE paying (admin 2026-09-13)', () => {
+  const read = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
+
+  it('🔒 the tick is on the PURCHASE screen, beside the price — not only after paying', () => {
+    // It existed only as a toggle on the plan card, so the first time a buyer learned their plan
+    // renews by itself was the screen after payment, or a month later when it renewed.
+    const ui = read('src/components/panels/HostingPlanCard.tsx');
+    expect(ui).toContain('checked={autoRenew}');
+    expect(ui).toContain('Renew automatically every');
+    expect(ui).toContain('Untick to pay once');
+    // Beside the price, inside the same block as the Pay button.
+    expect(ui.indexOf('checked={autoRenew}')).toBeLessThan(ui.indexOf('from my wallet'));
+  });
+
+  it('the choice actually reaches the server', () => {
+    expect(read('src/components/panels/HostingPlanCard.tsx')).toContain('agreedToTerms: true, autoRenew');
+    expect(read('src/server/routes/wallet.ts')).toContain("typeof req.body?.autoRenew === 'boolean'");
+  });
+
+  it('🔒 an older client that sends nothing keeps today’s behaviour, not a silent one-off', () => {
+    const plan = read('src/server/lib/hostingPlan.ts');
+    expect(plan).toContain("typeof opts.autoRenew === 'boolean'");
+    expect(plan).toContain("? opts.autoRenew");
   });
 });

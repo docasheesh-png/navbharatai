@@ -50420,3 +50420,77 @@ session cannot provide, and that is worth stating plainly rather than leaving as
 Slice 3 and ROADMAP 1.5 / 1.7 need the Cloudflare Worker deployed; Slice 6 needs decision D2; 2.7 (cron)
 needs Cloud Scheduler enabled in the apps project; 2.8 (backend logs) is real but only reaches an admin
 until hosting opens. The unblocked work is finished.
+
+---
+
+## 2026-09-13 — "to hum ₹149 ke plan me user ko kya de rahe hai?"
+
+The admin asked one plain question about the hosting plan and it found a **double charge that was one
+flag away from shipping**.
+
+The daily hosting job priced every app at *our cost + 20%* (decision D5) and knew nothing about hosting
+plans. But a ₹149 Starter holder has already been **sold** 5 GB of visitor traffic — it is written in
+the agreement they tick before paying. Turning `NAVBHARAT_BILL_HOSTING` on would have charged them for
+that 5 GB a second time.
+
+### The agreement wins over D5, and that is the whole change
+
+D5 is an internal decision about recovering our own cost. The agreement is a promise to a paying
+customer. When they disagree, **the promise is what the user is charged**: one meter — visitor traffic,
+summed across all the owner's sites together, because the terms say "across all your connected sites" —
+the plan's included GB free, and ₹20 per GB above it. D5 does not disappear; `hostingCost.ts` still
+computes what an app really costs us, and that number now answers the only question it was ever for:
+is ₹20/GB above our own cost or below it?
+
+Three things fell out of it that were not obvious until the code was written:
+
+- **The allowance is monthly and the job is daily**, so "today's GB minus 5" is wrong in both
+  directions. The period's running total is compared with the allowance and what is already billed is
+  subtracted — a new `hosting_period_usage` record, keyed by the **plan** period rather than the
+  calendar month, because a plan bought on the 19th renews on the 19th.
+- **The day-guard became load-bearing.** Under the old per-app model a re-run merely re-charged; under
+  a running total it would add the same day's GB **twice** and charge for traffic that never happened.
+  It is re-keyed per owner and claimed *before* anything is measured.
+- **A legacy ₹99 plan is never charged overage.** Those records carry no `agreedAt` — the terms did not
+  exist when they were sold. `hostingPlan.ts` already stated that as law; now something enforces it.
+
+### The promise that had to change, and why it could not be done quietly
+
+The agreement said, in capitals, *"your apps KEEP RUNNING — nothing is switched off"*, with no
+condition at all. That made unpaid overage free for ever — and switching a site off anyway would have
+been breaking a promise somebody paid for.
+
+The admin's instruction was to make it conditional. It now reads: keep running **while your wallet has
+balance**; a reminder comes first; offline only if it stays unpaid; **nothing is deleted**, and it
+returns on publish. The wording changed in the **same commit** as `decideDebtAction`, which enforces
+it — so no user is ever subject to a term they were not shown.
+
+🔒 **A user who owes nothing is never touched, whatever their balance.** An empty wallet is not a debt:
+a site inside its included GB costs its owner nothing. That single line is the difference between a
+fair rule and a catastrophic one. An unreadable balance also never takes a site offline.
+
+The admin asked for the word "pause" to be dropped — *"user ko -ve lagega"* — and it is gone from every
+line. What was **not** dropped is the sentence itself: I said plainly that removing it would be worse
+for the user, because a site that dies with no warning is far more negative than one line read before
+paying. They kept it.
+
+### Two more gaps the same conversation opened
+
+- **A server app has no free fallback, and nothing said so.** The five-free-apps demotion is true only
+  of apps a CDN can serve. `hostingAvailability` now requires a plan (an UNKNOWN answer counts as no
+  plan — an unreadable lookup must never open a paid path), and the agreement says it in advance.
+- **The renewal tick was only visible AFTER paying.** So the first time a buyer learned their plan
+  renews by itself was the screen after payment, or a month later. It is now beside the price, ticked
+  by default because that is what the terms already say, and the server honours the choice.
+
+### And the AI gateway, corrected on the admin's objection
+
+*"user ko lagega ham spy daal rahe hai user ki app me."* On the half that matters they were right. No
+bot is shown, nothing is read from anyone's app — but the first version stamped the helper into **every**
+published page, including apps that never asked for AI. Uninvited code in somebody's page is not ours to
+put there. `appUsesGateway` now gates the stamp **and** the registry row, so an app that never mentions
+`window.NavAI` gets nothing at all, not even an identity record.
+
+The other half of their message was a factual misreading — they thought Hindi had reached the app's UI.
+It had not; what they read was my own translation in chat, and the code is English throughout. Saying so
+was worth more than agreeing.

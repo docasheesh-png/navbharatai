@@ -1390,6 +1390,33 @@ the code (it is actually read somewhere) on 2026-07-11.
   Five of the six can be re-checked from a screen in seconds; the sixth cannot, so it stays open here
   until someone reads the console.
 
+- **🔴 THE OVERDRAFT FLOOR — how far a wallet may go negative (admin-mandated 2026-09-13):**
+  `WALLET_OVERDRAFT_FLOOR_INR` — ⚠️ **NOT set; the code default is ₹50 and that is the intended value.**
+  Read by `src/server/lib/walletFloor.ts`, applied inside BOTH `computeDebitedWallet` and
+  `computeRolledUpDebit`.
+  **WHY IT EXISTS:** the admin found two live accounts at **−₹506.03** and **−₹1,198.41**, both with
+  **0 apps built** — *"aise -500₹ har user ko diye to ham barbaad ho jayenge!!!"* Every START gate was
+  already correct (`decideAffordability` refuses a new build at a balance ≤ 0; a chat turn is refused
+  on an empty wallet). What had **no bound at all** was the SETTLEMENT: a build legitimately allowed to
+  begin at ₹1 ran its full wall-clock and then debited whatever it had cost, in one go. The design said
+  so in writing — *"the debt is recorded honestly; the NEXT pre-flight gate then blocks"* — which is
+  exactly right about the next build and silent about the size of this one. `SESSION_COST_CAP_USD` ($5)
+  is not that limit either: it only decides whether an EMPTY build may retry.
+  🔒 **THE FLOOR LIVES AT THE DEBIT, NOT IN A GATE.** Nine paths take money out of a wallet; a limit
+  written into the callers is a limit the tenth caller never gets. Inside the two functions every debit
+  passes through, it is true by construction — including for callers nobody has written yet. A caller
+  that omits it gets the built-in floor rather than unlimited debt: "unset" must never be the single
+  input that restores the bug.
+  ⚠️ **THE SETTING ITSELF IS CAPPED at ₹500** (`MAX_OVERDRAFT_FLOOR_INR`), and a MALFORMED value falls
+  back to ₹50 rather than to "no limit" — the same reasoning `parseRolloutPercent` already uses. A typo
+  of `5000` would otherwise silently reproduce the −₹1,198 account.
+  💸 **WHAT IT DOES NOT DO, stated plainly:** clamping the debit bounds the USER'S BILL; it does not
+  un-spend what the model already cost us. The excess is **absorbed** by NavBharatAI and RECORDED as
+  `absorbedInr` on the ledger row, surfaced on the admin's account panel as *"NavBharatAI absorbed ₹X"*
+  — because a clamp that quietly shrank the number would hide our own bleeding on the exact screen used
+  to judge it. **The real saving is a mid-build stop, which does NOT exist yet — see `PROGRESS.md`
+  2026-09-13 as an OPEN root cause.**
+
 ### 💴 FULL MONEY AUDIT — every paying code path read end to end (admin-asked 2026-09-12)
 
 The admin asked for a microscopic audit of every money path: *"kahi koi money leak to nahi hai."* 53
@@ -2413,6 +2440,13 @@ break):
 
 - **Real, no hacks.** Build the real thing — no fake success, no stubbed
   "it works" when it doesn't, no placeholder/TODO shortcuts shipped as done.
+- **A fix must never trade one problem for another (admin-mandated, 2026-09-13).** Whenever a request
+  is an edit, an upgrade, or a fix, do not touch the code until you have traced who else reads,
+  writes, or depends on what you are about to change — fixing problem A while quietly creating
+  problem X is not an acceptable outcome under any circumstance. Verify this by exercising the
+  affected paths (not just the one line changed) before calling the fix done, exactly as safeguard #5
+  requires; if the blast radius cannot be fully known, that is 0.01% doubt (safeguard #3) and the
+  right move is to say so, not to ship and hope.
 - **Zero bugs before push.** The verification gate (safeguard #5) is the
   floor, not a nicety: `tsc --noEmit` + `tsc -p tsconfig.server.json` (if
   server touched) + `vitest run` (read the real pass/fail line) + boot/smoke

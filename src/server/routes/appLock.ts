@@ -22,13 +22,13 @@
  * cannot be removed at any layer (`normaliseLockedAreas` puts it back whatever arrives).
  */
 import type { Express, Request, Response } from 'express';
-import { doc, getDoc, setDoc, getServerDb as getDb } from '../lib/serverDb';
 import { requireUserMatch, verifyFreshAuth, resolveAccountContact } from '../lib/authMiddleware';
+import { loadLockRecord, saveLockRecord } from '../lib/appLockStore';
 import { unlockSecret, mintUnlockTicket, UNLOCK_REFUSED_MESSAGE, TICKET_TTL_MS } from '../lib/vaultTicket';
 import { ticketFor } from '../lib/vaultTicketHttp';
 import { auditVault } from '../lib/vaultAudit';
 import {
-  readPinRecord, writePinRecord, emptyPinRecord, hasPin, pinGate, afterWrongPin, afterCorrectPin,
+  hasPin, pinGate, afterWrongPin, afterCorrectPin,
   pinRejectReason, newSalt, hashPin, matchesPin, newOtpCode, otpSendGate, afterOtpSent, otpCheck,
   otpDelivery, otpEmailMessage, otpEmailSubject, isFreshSignIn, OTP_RESEND_COOLDOWN_MS,
   MAX_PIN_ATTEMPTS, type OtpPurpose, type VaultPinRecord,
@@ -36,38 +36,13 @@ import {
 import { normaliseLockedAreas, effectiveLockedAreas } from '../../lib/appLockAreas';
 import { resolveEmailConfig, sendAlertEmail } from '../lib/alertEmail';
 
-/** Where each user's PIN hash, lock-out state, pending code and locked-area list live. One doc per user. */
-const VAULT_PIN = 'user_vault_pin';
-
 export function registerAppLockRoutes(app: Express): void {
-  /** Load one user's lock record, or a safe empty one. */
-  async function loadRecord(userId: string): Promise<VaultPinRecord> {
-    const db = getDb() as any;
-    if (!db) return emptyPinRecord();
-    const snap = await getDoc(doc(db, VAULT_PIN, userId));
-    return snap.exists() ? readPinRecord(snap.data()) : emptyPinRecord();
-  }
-
-  /**
-   * Persist a lock record.
-   *
-   * 🔒 A FAILED WRITE MUST FAIL THE REQUEST, which is the opposite of how the audit log behaves, and the
-   * difference is deliberate: this record holds the lock-out counter. If a wrong-PIN attempt could be
-   * swallowed, an attacker whose writes always failed would get unlimited guesses — the lock-out would
-   * silently stop existing. So every caller awaits this and answers an error if it throws.
-   */
-  async function saveRecord(userId: string, record: VaultPinRecord): Promise<void> {
-    const db = getDb() as any;
-    if (!db) throw new Error('app lock store unavailable');
-    await setDoc(doc(db, VAULT_PIN, userId), { user_id: userId, ...writePinRecord(record), updated_at: new Date() }, { merge: true });
-  }
-
   /** The shape every screen reads. Never reveals the PIN, its hash, or a pending code. */
   app.get('/api/app-lock/:userId', requireUserMatch('userId'), async (req: Request, res: Response) => {
     try {
       const { userId } = req.params;
       const now = Date.now();
-      const record = await loadRecord(userId);
+      const record = await loadLockRecord(userId);
       const gate = pinGate(record, now);
       const contact = await resolveAccountContact(userId);
       const delivery = otpDelivery(contact);
@@ -123,7 +98,7 @@ export function registerAppLockRoutes(app: Express): void {
         return;
       }
 
-      const record = await loadRecord(userId);
+      const record = await loadLockRecord(userId);
       const gate = otpSendGate(record, now);
       if (!gate.allowed) {
         res.status(429).json({ error: gate.reason, waitMs: gate.waitMs });
@@ -142,7 +117,7 @@ export function registerAppLockRoutes(app: Express): void {
       const code = newOtpCode();
       // Stored BEFORE the send, so a code that does reach the inbox always has a hash to check it
       // against. The reverse order produces codes that are genuinely delivered and genuinely unusable.
-      await saveRecord(userId, afterOtpSent(record, code, purpose, now));
+      await saveLockRecord(userId, afterOtpSent(record, code, purpose, now));
 
       const sent = await sendAlertEmail({ ...cfg, to: [String(contact.email)] }, otpEmailMessage(code, purpose), {
         subject: otpEmailSubject(),
@@ -182,7 +157,7 @@ export function registerAppLockRoutes(app: Express): void {
 
       const contact = await resolveAccountContact(userId);
       const delivery = otpDelivery(contact);
-      let record = await loadRecord(userId);
+      let record = await loadLockRecord(userId);
 
       if (delivery.channel === 'fresh-sign-in') {
         // An account with no email proves itself by the mobile OTP it signs in with; `auth_time` in the
@@ -195,7 +170,7 @@ export function registerAppLockRoutes(app: Express): void {
       } else {
         const check = otpCheck(record, String(req.body?.otp ?? ''), now);
         // The attempt is recorded either way — a wrong code that cost nothing to try is unlimited tries.
-        await saveRecord(userId, check.next);
+        await saveLockRecord(userId, check.next);
         record = check.next;
         if (!check.ok) {
           res.status(400).json({ error: check.reason });
@@ -207,7 +182,7 @@ export function registerAppLockRoutes(app: Express): void {
       // A new PIN clears the lock-out too: the owner has just proved themselves through the account's own
       // contact, which is strictly stronger proof than the PIN the counter was protecting.
       const next = afterCorrectPin({ ...record, pinHash: hashPin(pin, salt), pinSalt: salt });
-      await saveRecord(userId, next);
+      await saveLockRecord(userId, next);
       auditVault(userId, hasPin(record) ? 'pin-reset' : 'pin-created', {});
       res.json({ success: true, ticket: mintUnlockTicket(userId, now, unlockSecret()), method: 'pin', expiresInMs: TICKET_TTL_MS });
     } catch (err) {
@@ -221,7 +196,7 @@ export function registerAppLockRoutes(app: Express): void {
     try {
       const { userId } = req.params;
       const now = Date.now();
-      const record = await loadRecord(userId);
+      const record = await loadLockRecord(userId);
       if (!hasPin(record)) {
         res.status(409).json({ error: 'Set up your PIN first.', needsSetup: true });
         return;
@@ -242,7 +217,7 @@ export function registerAppLockRoutes(app: Express): void {
         const next = afterWrongPin(record, now);
         // Awaited, and a write failure refuses the request: a lock-out counter that can be dropped is not
         // a lock-out. See `saveRecord`.
-        await saveRecord(userId, next);
+        await saveLockRecord(userId, next);
         const after = pinGate(next, now);
         auditVault(userId, 'pin-refused', { attempts_left: after.attemptsLeft });
         if (after.locked) {
@@ -257,7 +232,7 @@ export function registerAppLockRoutes(app: Express): void {
         return;
       }
 
-      await saveRecord(userId, afterCorrectPin(record));
+      await saveLockRecord(userId, afterCorrectPin(record));
       auditVault(userId, 'unlock', { unlock_method: 'pin' });
       res.json({ ticket: mintUnlockTicket(userId, now, unlockSecret()), method: 'pin', expiresInMs: TICKET_TTL_MS });
     } catch (err) {
@@ -285,7 +260,7 @@ export function registerAppLockRoutes(app: Express): void {
   app.put('/api/app-lock/:userId/areas', requireUserMatch('userId'), async (req: Request, res: Response) => {
     try {
       const { userId } = req.params;
-      const record = await loadRecord(userId);
+      const record = await loadLockRecord(userId);
       if (!hasPin(record)) {
         res.status(409).json({ error: 'Set up your PIN before choosing what to lock.', needsSetup: true });
         return;
@@ -297,7 +272,7 @@ export function registerAppLockRoutes(app: Express): void {
       }
 
       const areas = normaliseLockedAreas(req.body?.areas);
-      await saveRecord(userId, { ...record, lockedAreas: areas });
+      await saveLockRecord(userId, { ...record, lockedAreas: areas });
       auditVault(userId, 'lock-areas-changed', { areas, unlock_method: unlock.method });
       res.json({ areas, effectiveAreas: effectiveLockedAreas(areas) });
     } catch (err) {

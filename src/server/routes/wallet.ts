@@ -5,6 +5,7 @@ import { doc, getDoc, setDoc, runTransaction, collection, query, where, orderBy,
 import { welcomeGrantTokens, buildInitialWallet } from '../lib/welcomeBonus';
 import { giftAfterGrant } from '../lib/giftSpend';
 import { requireUserMatch } from '../lib/authMiddleware';
+import { appLockBlocks } from '../lib/appLockEnforce';
 import { TOKENS_PER_RUPEE, welcomeBonusTokens } from '../lib/payments';
 import { decideWeeklyTopUp, topUpLedgerEntry, summarizeGiftLadder } from '../lib/weeklyTopUp';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from '../lib/walletResolve';
@@ -505,6 +506,10 @@ export function registerWalletRoutes(app: Express): void {
 
   app.post('/api/wallet/:userId/hosting-plan/purchase', requireUserMatch('userId'), async (req: Request, res: Response) => {
     try {
+      // 🔒 APP LOCK (admin 2026-09-13). Checked BEFORE anything is charged, so a refusal costs the user
+      // nothing but a PIN entry. Invisible to everyone who has not set a PIN or locked this area.
+      const blocked = await appLockBlocks(req, req.params.userId, 'hosting-plan-purchase');
+      if (blocked) return res.status(blocked.status).json(blocked.body);
       // The tier and the agreement tick come from the body. `agreedToTerms` is checked SERVER-side
       // (computePlanPurchase refuses without it) rather than trusted to a disabled button: a purchase
       // whose terms were never accepted must be impossible, not merely awkward to reach.
@@ -540,6 +545,11 @@ export function registerWalletRoutes(app: Express): void {
   });
 
   app.post('/api/wallet/:userId/hosting-plan/auto-renew', requireUserMatch('userId'), async (req: Request, res: Response) => {
+    // 🔒 APP LOCK. Auto-renew decides whether this account is charged AGAIN, so it is guarded alongside
+    // the purchase itself — switching it on is a commitment, and switching it off is one a thief would
+    // never make but an argument over a shared phone might.
+    const blockedRenew = await appLockBlocks(req, req.params.userId, 'hosting-plan-auto-renew');
+    if (blockedRenew) return res.status(blockedRenew.status).json(blockedRenew.body);
     const autoRenew = req.body?.autoRenew;
     if (typeof autoRenew !== 'boolean') {
       return res.status(400).json({ error: 'autoRenew must be true or false.' });

@@ -213,6 +213,7 @@ export async function settleRemixPurchase(input: {
 
   // 2) Debit the buyer — the same idempotent path every build charge takes.
   const debit = await debitWalletForBuild(d, buyerUid, {
+    feature: 'remix',
     billedInr: priceInr,
     buildRef: ref,
     // White-label + ledger honesty: the row names the APP the user bought, never internals.

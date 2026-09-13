@@ -24,6 +24,14 @@ export type IssuePhase =
   | 'sandbox' | 'provider' | 'plan' | 'tool' | 'build' | 'readiness' | 'preview' | 'autofix' | 'deploy';
 export type IssueSeverity = 'info' | 'warning' | 'error';
 
+/**
+ * How recently a build must have recorded something to count as STILL RUNNING rather than ended.
+ *
+ * Two heartbeat intervals (the heartbeat is once a minute), so a single missed beat cannot make a live
+ * build read as one that stopped. See `deriveRootCause`'s honesty note for why the slack leans this way.
+ */
+export const STILL_RUNNING_WINDOW_MS = 150_000;
+
 export interface BuildIssue {
   /** When the issue was recorded (ms) — the LATEST occurrence if repeatCount > 1. */
   ts: number;
@@ -457,6 +465,20 @@ export class BuildDiagnostics {
         i.autoResolved !== true &&
         /crash(es)? at runtime/i.test(i.message || ''),
     );
+  }
+
+  /**
+   * Is this build still ALIVE, rather than finished-without-saying-so?
+   *
+   * A live build records a HEARTBEAT every minute, so recent activity with no `endedAt` means it is
+   * working. Two heartbeats of slack, so one missed beat cannot flip a live build to "ended" — and the
+   * lean is deliberate (see the honesty note in `deriveRootCause`). Pure over `this.now()` and the
+   * recorded issues, so it is testable without a clock.
+   */
+  private looksStillRunning(): boolean {
+    if (this.endedAt !== undefined) return false;
+    const last = this.issues.length ? this.issues[this.issues.length - 1].ts : this.startedAt;
+    return this.now() - last <= STILL_RUNNING_WINDOW_MS;
   }
 
   /**
@@ -1431,7 +1453,9 @@ export class BuildDiagnostics {
         issues: this.issues, errors: this.errors, review: this.reviewText, ok: this.ok, commands: this.commands,
         // The serializer is the ONLY caller that can distinguish "this build never reported an
         // ending" from "the caller did not pass ok" — see the field's own comment.
-        endedWithoutOutcome: this.ok === undefined,
+        // …and, since 2026-09-13, "it has not ended YET" from "it ended without saying so".
+        endedWithoutOutcome: this.ok === undefined && !this.looksStillRunning(),
+        stillRunning: this.ok === undefined && this.looksStillRunning(),
       }),
       commands: this.commands.length ? [...this.commands] : undefined,
       llmCalls: this.llmCalls.length ? [...this.llmCalls] : undefined,
@@ -1911,6 +1935,11 @@ export function deriveRootCause(input: {
    * apart from "the caller simply did not pass `ok`" (many do not, and they must keep today's answer).
    */
   endedWithoutOutcome?: boolean;
+  /**
+   * True when this build had NOT ended at the moment the report was taken — i.e. the user asked for the
+   * report mid-build. See `STILL_RUNNING_WINDOW_MS` and the honesty note in `deriveRootCause`.
+   */
+  stillRunning?: boolean;
 }): string | undefined {
   const { issues, errors, review, ok } = input;
   const outcome = [...issues].reverse().find((i) => i.code.startsWith('OUTCOME_'));
@@ -1981,6 +2010,33 @@ export function deriveRootCause(input: {
    * the ending is withdrawn. A build genuinely still running reads the same way, which is correct: we do
    * not know how it ends either.
    */
+  /**
+   * 🔴 "STILL RUNNING" AND "CUT OFF" ARE DIFFERENT SENTENCES, AND SAYING THE WRONG ONE SENDS THE READER
+   * AFTER A PHANTOM (admin build report f04421ef, 2026-09-13).
+   *
+   * The reported build had no `endedAt`, its last recorded event was a command that SUCCEEDED nine
+   * minutes in, and its last heartbeat read "in-flight: bash" — it was alive, and the admin had simply
+   * pressed Report while it worked. The report nonetheless said *"This build ended without recording an
+   * outcome (cut off before it could report one) — so the reason it stopped is NOT known"*, and a whole
+   * autopsy went looking for a build that had stopped, when nothing had stopped at all.
+   *
+   * ⚠️ THIS WAS A KNOWN, ACCEPTED CONFLATION, WHICH IS WHY THE FIX IS HERE AND NOT A TWEAK. The branch
+   * below carried the line *"A build genuinely still running reads the same way, which is correct: we do
+   * not know how it ends either"*. It is correct that we do not know the ENDING. It is not correct to
+   * announce an ending that has not happened: the first tells a reader to wait, the second tells them to
+   * investigate.
+   *
+   * The discriminator is local and needs no new plumbing: a live build records a HEARTBEAT every minute,
+   * so "no `endedAt` AND activity moments ago" is alive. The window is two heartbeats, so one missed
+   * beat cannot flip a live build to "ended" — and it leans toward "still running" on purpose, because
+   * being told to wait a moment for a build that had in fact stopped costs one re-read, while being told
+   * it stopped when it had not costs an investigation of nothing.
+   */
+  if (input.stillRunning === true) {
+    return problem
+      ? `This build was STILL RUNNING when this report was taken — it has not ended, so there is no outcome yet and nothing has "stopped". The most severe issue recorded so far, which the build may still be working on: ${problem.message}`
+      : 'This build was STILL RUNNING when this report was taken — it has not ended, so there is no outcome yet, and no unresolved issue has been recorded so far.';
+  }
   if (input.endedWithoutOutcome === true) {
     return problem
       ? `This build ended without recording an outcome (cut off before it could report one) — so the reason it stopped is NOT known. The most severe issue recorded before it stopped, which may or may not be related: ${problem.message}`

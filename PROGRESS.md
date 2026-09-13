@@ -50853,6 +50853,142 @@ test:bundle ok, boot:check PASS, full vitest suite re-run after the last edit.
 
 ---
 
+## 2026-09-13 — "user ne 0 app banayi aur 250 me se 200 ₹ khatam ho gaye" — where the balance went
+
+**The evidence.** An admin opened a real account: joined 2 hours earlier, **0 apps built**, 0 published,
+`ai chat requests 0 recorded` — and a gifted ₹250 balance down to **₹54.94**. The panel's only spending
+line read *"Spent on builds: ₹0.00"*. The admin: *"kaha khatam hua yeh to dikha hi nahi raha? … aisa
+kaise ho sakta hai!"*
+
+### 🔴 The root cause, and it is not a display bug
+
+Money leaves a wallet down **nine** paths — a build, a publish, an APK/IPA, an App Store remix, a
+hosting plan, the daily hosting bill, voice, the four assistant surfaces, an app's own assistant. Not
+one of them recorded **which feature** it was:
+
+- every debit wrote only a free-text `description`;
+- all **four** assistant surfaces (Doctor AI, Professionals, AI tools, a published app's assistant)
+  shared **ONE** daily bucket labelled *"NavBharatAI assistants"*;
+- the admin panel's only spending figure came from `builds.spentInr`, so **an account that spent
+  nothing on BUILDS read as an account that had spent nothing at all** — while the assistants,
+  hosting and voice were drawing on the same wallet.
+
+So the question had no answer anywhere in the data. No screen could have shown it.
+
+**A second, smaller finding on the way:** the admin route **already read the entire wallet document**,
+ledger included, and threw the ledger away before responding. The per-line history the admin wanted
+had been one field away the whole time.
+
+### What shipped
+
+**`walletFeature.ts` — a CLOSED vocabulary of twelve features.** Free text would drift into
+`chat` / `Chat` / `chat-turn` within a month and the totals would quietly stop adding up, which is the
+same failure as no tag at all, only harder to notice. 🔒 Every label is NavBharatAI's own name for its
+own feature — the ledger is a **user-facing** surface, so the white-label law applies, and a test
+fails on any vendor or model word appearing in one.
+
+**Every debit now names itself**, at all ten call sites, written onto the ledger row.
+
+**The assistant rollup key carries the feature** (`ai_2026-09-13_doctor`). That single change restores
+attribution **without adding one row** to the ledger's real growth rate — the rollup exists because a
+row per turn would fill a 500-entry ledger in a fortnight and push the user's own purchase history off
+the end, and bucketing by day-and-feature keeps exactly that protection.
+
+**The admin sees it, in two places:**
+- **Per user** — *"Where the balance went"*: ₹ and a share bar per feature, plus the full ledger.
+- **Platform-wide** — *"What people used today"* on the Users tab, the admin's actual question
+  (*"kon sa feature jyada use ho raha hai, kon se feacher ko aur strong karna hai"*). It leads with
+  **distinct users**, not rupees: one heavy user and broad adoption produce the same total and mean
+  opposite things.
+
+### The honesty rules, each test-locked
+
+- 🔒 **Untagged history is reported SEPARATELY, never folded into a feature.** Every row written
+  before today has no tag; filing those rupees under "AI tools" would put an invented number on the
+  exact screen built to stop inventing numbers. The panel labels it *"Before this was recorded"*.
+- 🔴 **The breakdown reads the TOKEN column, not `moneySpent`** — that field means money **paid in**
+  and is `0` on every usage row, so a reader trusting it reports every user as having spent nothing.
+  **That is precisely what the old screen did.**
+- An unreadable day and an empty day are different sentences on the card.
+
+### Two things I got wrong and fixed before pushing
+
+1. **I duplicated `TOKENS_PER_RUPEE`** with a comment claiming it "mirrors" the real one — the copied-
+   constant drift this repo has already paid for twice. A breakdown on a stale rate would disagree
+   with the balance printed beside it. Now re-exported from `payments.ts`, the one owner; a test fails
+   if it is ever restated.
+2. **The platform counter was nearly wired call-by-call.** It is written at the ONE choke point every
+   debit passes through (`walletDebit.ts`), because a counter wired per call site is one a tenth
+   caller silently never joins — which is exactly how the attribution drifted away to begin with.
+
+🔒 **Sharded from day one:** one document per feature per day. `CLAUDE.md`'s SCALE PLAN names this
+exact failure — ~1 sustained write/sec to a single document, failing *silently* because swallowed
+telemetry under-counts rather than erroring.
+
+### Honestly NOT covered
+
+**Hosting-plan PURCHASES are absent from the platform counter** (they are in the per-user breakdown).
+Those two debits run inside pure functions that cannot do I/O. It is also arguably right: buying a plan
+is one click, not use of a feature, and a ₹499 purchase beside a day of assistant turns would make the
+tallest bar the one nobody used. The card says so on screen.
+
+**And the reported account cannot be explained retroactively.** Its ₹195 was spent before any of this
+was recorded, so it will show under *"Before this was recorded"* — the honest answer. Every rupee from
+today forward is attributed.
+
+Gate on the final state: `typecheck` 0 · `noUnusedImports` clean · `typecheck:server` 0 · `build` ok ·
+`test:bundle` within budget · `boot:check` PASS · `vitest run` **1,589 files / 22,035 passed / 1
+skipped / 0 failed**. 22 new tests; **three confirmed to fail when the behaviour is reverted.**
+
+### Same day — the floor under every wallet (−₹506 and −₹1,198 on real accounts)
+
+The admin sent a second screenshot: `morphesious@gmail.com` at **−₹506.03** with **0 apps built**, and
+in the list behind it another account at **−1,19,841 tokens = −₹1,198.41**. *"user ka bill -500₹ tak na
+jaye … -50₹ ya -100 tab chala jaye jitna ham jhel sakte hai. aise -500₹ har user ko diye to ham
+barbaad ho jayenge!!!"*
+
+**🔴 Root cause — and every START gate was already correct.** `decideAffordability` refuses a NEW build
+at a balance of 0 or less; a chat turn is refused on an empty wallet. What had **no bound at all** was
+the **SETTLEMENT**. A build legitimately allowed to begin at ₹1 could run its full wall clock and then
+debit whatever it had cost, in one go, at the end. The design states this in writing — *"the debt is
+recorded honestly; the NEXT pre-flight gate then blocks until a recharge"* — which is exactly right
+about the next build and **completely silent about the size of this one**. `SESSION_COST_CAP_USD` ($5)
+is not that limit either: it only decides whether an EMPTY build may retry.
+
+**🔒 The floor lives at the DEBIT, not in a gate.** Nine paths take money out of a wallet; a limit
+written into the callers is a limit the tenth caller never gets. Applied inside the two functions every
+debit passes through, it is true by construction for all of them — including callers nobody has written
+yet. **A caller that omits it gets the built-in floor rather than unlimited debt**: "unset" must never
+be the single input that restores the bug, and a test asserts exactly that.
+
+- Default **₹50**, env `WALLET_OVERDRAFT_FLOOR_INR`, **capped at ₹500** — a typo of `5000` would
+  otherwise silently reproduce the −₹1,198 account. A malformed value falls back to ₹50, never to "no
+  limit" (the same reasoning `parseRolloutPercent` already uses).
+- ⚠️ **The carry follows what was CHARGED, not what was owed** — carrying the absorbed part would
+  quietly re-bill on the next charge the very rupees we just said we would eat.
+- Applied **before** the ₹→token conversion, and measured against the **token** balance, so the floor
+  can never disagree with the number the gates read.
+
+**💸 What it does NOT do, stated plainly.** Clamping the debit bounds the USER'S BILL; it does not
+un-spend what the model already cost us. The excess is **absorbed** and **recorded** as `absorbedInr`
+on the ledger row, shown on the admin panel as *"NavBharatAI absorbed ₹X"* — a clamp that quietly
+shrank the number would hide our own bleeding on the exact screen built to judge it.
+
+**🔴 OPEN ROOT CAUSE (rule 6): there is no MID-BUILD stop.** Nothing checks the running cost while a
+build is in flight, so the model spend itself is still unbounded — only the user's bill is now capped.
+The real saving needs a periodic in-loop check that ends a build once its accumulated cost crosses what
+the account can bear. That is a change inside the build loop and is **not** in this PR; recorded here
+rather than implied as done.
+
+**Also unexplained, honestly:** both accounts show **0 builds** in the panel, which comes from
+`userBuildHistoryStore` — a *different* store from the wallet. Either the spend came from a non-build
+path, or a build debited the wallet without landing in build history. The per-feature attribution
+shipped in this same PR is what will answer that on the next such account; it cannot answer it
+retroactively.
+
+Gate re-run on the final state: `typecheck` 0 · `noUnusedImports` clean · `typecheck:server` 0 ·
+`build` ok · `test:bundle` within budget · `boot:check` PASS · `vitest run` **1,590 files / 22,053
+passed / 1 skipped / 0 failed**. 18 further tests; **three confirmed to fail when the floor is removed.**
 ## 2026-09-13 (later the same day) — THE PIN BECAME A GENERAL APP LOCK: ONE PIN, SEVEN AREAS, THE USER CHOOSES
 
 **Admin, verbatim:** *"yeh PIN system sirf 'secret and api key' ke liye nahi, aur bhi options ke liye lagu
@@ -51173,3 +51309,177 @@ is consulted; an order stays HIGH and instant. The reader's own prompt now state
 `do` was read as interrogative — re-opening the "please continue" amnesia this repo has already fixed
 once. An auxiliary (`do/can/is/should/…`) now counts as interrogative only with a question mark or a
 second-person subject after it (`can you`, `kya aap`); a wh-word always does. Pinned by four tests.
+## 2026-09-13 (third change today) — THE APP LOCK NOW HOLDS ON THE SERVER FOR ANYTHING THAT SPENDS MONEY
+
+**Admin:** *"yeh ban jaye. uske baad aab, ipa bana dena!!!!!"* — i.e. finish the open item from the entry
+above, then cut the store builds. This is that open item, closed.
+
+### WHAT CHANGED, IN ONE LINE
+
+Three actions are now refused by the SERVER without a live PIN ticket, when the user has the matching area
+locked: **starting a wallet recharge**, **buying a Professional Pass**, **buying or renewing a hosting
+plan**, and **flipping auto-renew**. Every one fails BEFORE any money moves, so a refusal costs nothing but
+a PIN entry. `lib/appLockEnforce.ts` + `lib/appLockStore.ts`.
+
+### ⛔ THE LINE THAT MATTERS MOST, AND IT IS THE ROUTES THAT WERE *NOT* TOUCHED
+
+**The return paths are untouched on purpose: payment verify, the Cashfree webhook, the store receipt
+credit, the sign-in reconcile.** A user who has ALREADY PAID is credited with no prompt of any kind.
+Demanding a PIN there would mean **real money taken and not delivered because somebody could not remember
+four digits** — far worse than the gap it would close. This file already records that a payment has THREE
+independent delivery paths by design; none of them may acquire a new way to fail.
+
+`tests/appLockEnforce.test.ts` asserts `payment.ts` contains exactly ONE `appLockBlocks(` call and that no
+verify/webhook/store handler contains one, and that `wallet.ts` contains exactly two. A future change that
+adds a gate to a credit path fails CI.
+
+### ⚠️ `/api/payment/create-order` SELLS TWO PRODUCTS, so the mapping is per-product, not per-route
+
+That one endpoint handles a wallet recharge **and** a Professional Pass. Putting the whole route behind
+`wallet_recharge` would have meant a user who ticked "Wallet recharge" could no longer buy a Pass either —
+which is not what that tick says. So `areaForMoneyAction()` maps the Pass to `subscription` (the area that
+is actually about buying a plan) and the recharge to `wallet_recharge`. Locking the whole Wallet & Billing
+screen covers both through `effectiveLockedAreas`, without the map having to know that.
+
+📌 **Recorded because it surprised me and would surprise the next reader: nothing in the client ever sends
+`productType: 'professional_pass'`.** That branch exists server-side with no caller today. The mapping is
+therefore correct and future-proof rather than currently exercised — stated plainly instead of implying the
+Pass flow was wired and tested end to end.
+
+### 🔴 IT FAILS CLOSED, WHICH IS THE OPPOSITE OF THE BROWSER HALF — AND THE CONTRAST IS THE POINT
+
+The client renders a screen when it cannot read the lock status, because locking somebody out of Settings
+over a dropped request would break the app for the many people who never switched this on. This refuses
+when it cannot read the record, because the question is different: **the client decides whether to SHOW,
+this decides whether to SPEND.** An unreadable record means we cannot establish that the user permitted it,
+so the answer is the one these routes already give on their own internal errors — *nothing was charged,
+please try again*. Nobody loses money either way, and "I made the lookup fail" cannot become a purchase.
+
+The common case is invisible: **an account with no PIN is never blocked**, which is every user who has not
+set one up. A PIN that does not exist cannot be demanded.
+
+### THE CLIENT HAD TO CARRY THE TICKET, OR THE FEATURE WOULD HAVE BROKEN ITS OWN HAPPY PATH
+
+A user who unlocks the Billing screen and then presses Buy must not be asked again. So
+`unlockHeaders()` (in `lib/appLock.ts`) now rides on `HostingPlanCard`'s purchase and auto-renew calls and
+on `usePaymentEngine`'s `create-order`. It returns `{}` when nothing is unlocked, so a user with no lock
+sends a byte-identical request to before.
+
+**A silent failure fixed on the way past:** `toggleAutoRenew` had no `else` branch — a refusal made the
+switch snap back with nothing said, which reads as a broken toggle. It mattered less when the only refusal
+was a 404; it matters now that the app lock can be the reason. It reports the server's message.
+
+### Also
+
+- `routes/appLock.ts` lost its private copy of the Firestore read/write to `lib/appLockStore.ts`, because
+  a second caller needed it and the FAILURE behaviour there is security-relevant — two copies would be two
+  places for it to drift.
+- `AppKnowledgeBase` corrected in the same change: the App Lock entry's "how strong it is, honestly"
+  paragraph now names BOTH server-enforced halves (key values **and** money actions) instead of only the
+  first, and states that money already paid is never PIN-gated. The App Lock settings screen says the same
+  in its own words — a test pins both, because overstating this is the one thing that would make the
+  feature dishonest rather than merely limited.
+
+---
+
+## 2026-09-13 — BUILD-REPORT AUTOPSY `f04421ef` (vite-react, 23 files, kimi-k2.6)
+
+Admin: *"yeh build report autopsy karo, claude.md ke anusar"* — and, in the same message, *"abhi ipa aab
+nahi banao"*, which withdrew the store-build instruction from earlier in the day. No `.aab`/`.ipa` was
+built; the armed trigger that would have built them was deleted.
+
+### 🔴 THE FINDING THAT REFRAMES THE WHOLE REPORT: THE BUILD WAS NOT CUT OFF — IT WAS STILL RUNNING
+
+The report's own `rootCause` read: *"This build ended without recording an outcome (cut off before it could
+report one) — so the reason it stopped is NOT known."* **That sentence is false.** The evidence, all from
+the report itself: no `endedAt`; the last recorded event is `npm run dev` → **exit 0** at 9 m 49 s; the last
+heartbeat says *"minute 9 — still working (**in-flight: bash**)"*; and `billing`, `providerTokens` and
+`cacheReadInputTokens` are all absent because they are written **at settle**, which had not happened.
+
+The admin pressed Report while the build worked. Nothing had stopped.
+
+⚠️ **I started this autopsy from the wrong premise and only the code corrected me.** My first pass
+reasoned about "why did the build die", and my second about "zero cache hits, a 75% saving is available" —
+both wrong, both produced by believing a report field. `cacheReadInputTokens` is absent because the build
+had not settled, not because the cache never hit. **A report field is evidence about the REPORT until the
+code that writes it has been read.**
+
+### Step 1 — the ledger
+
+**✅ Self-healed — 3.** (1) `TS6133` unused imports/vars across ChatPage/LandingPage. (2) `TS2304: Cannot
+find name 'MessageSquare'` ×2 — **self-inflicted**: while clearing "unused" imports it removed one that was
+used at lines 274 and 326; re-added, clean 20 s later. (3) `vitest` added to package.json.
+
+**🔀 Worked around — 2.** (4) `plannedModel` was `claude-haiku-4-5`, `kimi-k2.6` delivered all 54 turns and
+**GLM delivered none** — k2.6 is the SECOND rung of the free Kimi ladder, so earlier rungs failed silently.
+(5) The health-check restarted the dev server **twice** with *"did not start and the log had no recognisable
+error — restarting once"* — a retry around an undiagnosed failure.
+
+**⏭️ Skipped — 1.** (6) Our own `evaluate` tool raised an orphan-components warning; the builder correctly
+identified it as a false positive and moved on. Nothing recorded that the TOOL was wrong.
+
+**❌ Still broken — 1.** (7) No outcome recorded — which turned out to be the honesty defect above, not a
+build failure.
+
+**🥵 Struggle — 6.** (8) The loop detector fired **twice** (4:52, 6:43). (9) `npm install vitest@^2` took
+**80 s** — 14% of the build. (10) `tsc --noEmit` ran **six times**. (11) **91 s** of browser_action +
+screenshots, ending in the first loop nudge. (12) The ETA was wrong every time it spoke: "~2–4 min" → at
+2 min "53 s to go" → at 4 min "3 min more" → at 8 min "6 min more". (13) **1,528,128 input tokens against
+4,286 output** across the 40 logged calls — a 356:1 ratio, ≈ **$0.92** of real provider cost at kimi-k2.6
+rates ($0.60/$2.50 per MTok). The build never settled, so **nothing was billed to the user**.
+
+### Step 2 — the missing subsystem: A BUILD BUDGET GOVERNOR
+
+The prompt was *"Continue from where you left off and finish/fix the build so the app works end-to-end."*
+What the engine did after the types were clean: browsed the app for 91 s, ran `evaluate`, fixed
+accessibility and CSS, **generated tests**, **installed a dev dependency (80 s)**, ran a production build.
+Generating tests is not "finish/fix". **Nothing in the engine converts remaining wall-clock into a
+narrowing of scope** — no component said "six minutes gone, do only what makes the app work".
+
+### Step 3/5 — TWO ROOT CAUSES FIXED, BOTH VERIFIED IN CODE AND BOTH CONFIRMED TO BITE
+
+**A. "Still running" and "cut off" were the same sentence** (`BuildDiagnostics.ts`). This was a KNOWN,
+accepted conflation — the old branch carried the line *"A build genuinely still running reads the same way,
+which is correct: we do not know how it ends either."* It is correct that we do not know the ending; it is
+not correct to announce an ending that has not happened. One sentence tells the reader to wait, the other
+tells them to investigate — and the second cost this autopsy its first hour.
+Fixed with a local discriminator needing no new plumbing: a live build heartbeats every minute, so
+`endedAt === undefined && (now − lastActivity) ≤ STILL_RUNNING_WINDOW_MS` (150 s = two beats) is alive.
+The slack leans toward "still running" deliberately: being told to wait for a build that had stopped costs
+one re-read, while being told it stopped when it had not costs an investigation of nothing.
+
+**B. 🔴 THE ORPHAN WARNING WAS OUR OWN FAULT** (`ArchitectureAnalysis.ts`). `resolveLocalImport` understood
+`./relative` and `@/alias` and returned null for a BARE root-relative import (`stores/useStore`) as "an npm
+package". **Our own scaffold sets these projects up for exactly that style** — its `vite.config.ts` carries
+our comment *"Mirror tsconfig's baseUrl/paths into Vite so a root-relative import such as `import { useStore
+} from 'stores/useStore'` resolves at BUILD & RUNTIME too"*. We generate the import style and could not read
+it back, so every root-relatively imported screen looked un-imported and `findOrphanComponents` called real,
+wired screens unreachable.
+🔒 Widening cannot invent a defect: a bare specifier is tried against the two bases an alias already uses
+and accepted only if a real file matches, so `react` and `lodash` still resolve to null. And
+`unresolvedImports` was already relative-only, so no npm package can become a reported defect. The same
+widening also recovered edges the graph was missing — a front-end file importing `server/db` root-relatively
+is now the layering violation it always was.
+
+### Step 6 — the proactive layer (prevent, don't heal)
+
+1. **The budget governor is the biggest lever.** Past half the estimate, optional work (tests, polish, a dev
+   dependency) should stop and only "does the app run" should remain. This build finishes in ~5 min with it.
+2. **Stop editing code to satisfy TS6133.** The app already compiled; clearing cosmetic unused-variable
+   warnings cost ~95 s **and broke the build in the middle of it** — one self-inflicted error, zero user
+   value. A fix-the-app task should be told these are not worth a build minute.
+3. **The ETA is lying and should be fixed or removed.** Four wrong numbers in one build, and "bigger than
+   expected" read three times is indistinguishable from "I do not know".
+4. **A mid-build report cannot answer "where is the money going?"** Tokens, cost and cache-hit rate are
+   written only at settle — precisely unavailable in the situation where an admin most wants them. The data
+   already exists per call in `llmCalls`; only the total is missing.
+
+### OPEN root causes (rule 6 — recorded, not silently dropped)
+
+- **The budget governor** (Step 2) is a design change, not a patch, and is not built.
+- **Live cost totals in a mid-build report** — small, not built in this change.
+- **Why GLM delivered 0 of 54 turns** cannot be determined from this report: `providerFailures` /
+  `providerFailureReasons` are absent, for the same settle-time reason. Needs a report from a build that
+  finishes, or those fields written live.
+- **The health-check's "no recognisable error" restart** is a retry around an undiagnosed failure. It
+  recovered, so it is debt rather than a defect, and it is untouched here.

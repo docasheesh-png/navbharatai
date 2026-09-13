@@ -154,22 +154,29 @@ export function prefersHindi(text: string | null | undefined): boolean {
 /**
  * What the blocked user reads. Names no rule and no pattern — that is a tuning guide for the next try.
  *
- * 🔴 THE PORNOGRAPHY REFUSAL IS THE ADMIN'S OWN WORDS, KEPT VERBATIM (2026-09-13). It is blunt on
- * purpose: it tells the person that NavBharatAI is an Indian product for decent people and does not
- * want them. That is a statement of who the product is for, and softening it would be editing the
- * owner's decision rather than implementing it. It is also exactly why the rule that triggers it
- * carries a stand-down guard (`exempt`) — a message this direct must never reach a doctor building a
- * sexual-health app.
+ * 🔴 THE PORNOGRAPHY REFUSAL — FIRM ON THE BAN, NOT PERSONAL ABOUT THE USER (admin 2026-09-13).
+ *
+ * The first version was the admin's verbatim wording, and it told the person NavBharatAI had *"no need
+ * of users like you"* and invited them to log out. The admin read it back and said *"yeh thoda jyada hi
+ * ho gaya"* — it went too far. So the BAN is unchanged and absolute; only the insult is gone.
+ *
+ * Why that is also the safer engineering choice, not merely the kinder one: detection can still be
+ * wrong, and the cost of a false positive is asymmetric. A firm refusal that a misclassified user reads
+ * is a misunderstanding they can shrug off; a personal insult from the product is the thing they
+ * screenshot. The ban's force comes from the refusal being absolute — it does not come from the tone.
+ *
+ * It also ends by offering to build something else, because a person testing the boundary is often a
+ * real user on their first day.
  */
 export function blockMessage(contentClass: PublishContentClass = 'illegal', prompt?: string): string {
   if (contentClass === 'adult') {
     return prefersHindi(prompt)
-      ? 'पोर्नोग्राफी बैन है!\n\n'
-        + 'यह भारतीय ऐप है, और सभ्य लोगों के लिए है। आपके जैसे लोगों की नवभारत AI को कोई ज़रूरत नहीं है। '
-        + 'आप लॉगआउट कर सकते हो। थैंक यू!'
+      ? 'पोर्नोग्राफी बैन है।\n\n'
+        + 'नवभारत AI एक भारतीय ऐप है और इस तरह का कोई ऐप नहीं बनाता — चाहे जैसे भी पूछा जाए। '
+        + 'कुछ और बनाना हो तो बताइए, मैं तुरंत शुरू कर देता हूँ।'
       : 'Pornography is banned here.\n\n'
-        + 'This is an Indian app, and it is for decent people. NavBharatAI has no need of users like you. '
-        + 'You may log out. Thank you!';
+        + 'NavBharatAI is an Indian app and does not build this — however it is asked. '
+        + 'Tell me what else you would like to build and I will start right away.';
   }
   return 'NavBharatAI cannot help with this request. It falls under the Acceptable Use rules in our '
     + 'Terms of Service. If you believe this is a mistake, our Grievance Redressal page has the address '

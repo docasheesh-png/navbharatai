@@ -51659,3 +51659,15 @@ already there.
   platform is about to refuse.
 - **The 89-second manifest-planner call** on a prompt every model had already refused once — the
   fast-lane planner does not know what the roadmap planner just learned.
+
+**SAME DAY — the refusal's WORDING was softened on the admin's own second look.** The first version was
+their verbatim instruction (*"आपके जैसे लोगों की नवभारत AI को कोई ज़रूरत नहीं है… आप लॉगआउट कर सकते हो"*);
+they read it back and said *"yeh thoda jyada hi ho gaya"*. **The ban is unchanged and absolute — only the
+personal insult is gone**, and the message now ends by offering to build something else.
+
+Why this is also the safer engineering choice and not merely the kinder one: detection can still be
+wrong, and the cost of a false positive is asymmetric. A firm refusal that a misclassified user reads is
+a misunderstanding they can shrug off; a personal insult from the product is the thing they screenshot.
+The ban's force comes from the refusal being absolute, not from its tone. Four tests pin it: the message
+must say nothing about the PERSON in either language, must still refuse absolutely (no "unless", no 18+
+escape), and must offer a way forward — a person testing the boundary is often a real user on day one.

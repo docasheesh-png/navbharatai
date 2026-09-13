@@ -44,9 +44,9 @@ describe('🔴 the reported prompt is refused before a token is spent', () => {
   });
 });
 
-describe('⚠️ THE MESSAGE IS BLUNT, SO THE DETECTION MUST BE PRECISE', () => {
-  // A false positive here does not cost a build — it tells a real person NavBharatAI does not want
-  // them, and loses them permanently. Every one of these is an app NavBharatAI should WANT.
+describe('⚠️ DETECTION MUST BE PRECISE — a false positive refuses a real app', () => {
+  // Softening the wording did not make precision optional. A misclassified user still gets REFUSED,
+  // and every one of these is an app NavBharatAI should WANT to build.
   it.each([
     'a sexual health education app for teenagers',
     'sex education platform for schools',
@@ -65,19 +65,40 @@ describe('⚠️ THE MESSAGE IS BLUNT, SO THE DETECTION MUST BE PRECISE', () => 
   });
 });
 
-describe("the refusal is the admin's own words, in the user's language", () => {
+describe('the refusal is firm about the ban and not personal about the user', () => {
+  // The first version was the admin's verbatim wording — "NavBharatAI has no need of users like you…
+  // you may log out". They read it back and said "yeh thoda jyada hi ho gaya". The ban is unchanged
+  // and absolute; the insult is gone. Detection can still be wrong, and a misclassified user shrugs
+  // off a firm refusal — they screenshot a personal insult.
   it('Hindi in → Hindi out', () => {
     const m = blockMessage('adult', 'blue film wali website banao');
     expect(m).toContain('पोर्नोग्राफी बैन है');
     expect(m).toContain('भारतीय ऐप');
-    expect(m).toContain('लॉगआउट');
   });
 
   it('English in → English out', () => {
     const m = blockMessage('adult', REPORTED);
     expect(m).toContain('Pornography is banned here.');
     expect(m).toContain('Indian app');
-    expect(m).toContain('log out');
+  });
+
+  it('🔒 says nothing about the PERSON, in either language', () => {
+    for (const prompt of [REPORTED, 'blue film wali website banao']) {
+      const m = blockMessage('adult', prompt);
+      expect(m).not.toMatch(/users like you|no need of|log ?out|लॉगआउट|आपके जैसे|ज़रूरत नहीं|जरूरत नहीं|सभ्य/);
+    }
+  });
+
+  it('still refuses ABSOLUTELY — no conditions, no "unless", no 18+ escape', () => {
+    const m = blockMessage('adult', REPORTED);
+    expect(m).toMatch(/banned/i);
+    expect(m).toContain('does not build this');
+    expect(m).not.toMatch(/18\+|adults? only|if you|unless|verify your age/i);
+  });
+
+  it('offers a way forward — a boundary-tester is often a real user on day one', () => {
+    expect(blockMessage('adult', REPORTED)).toMatch(/what else you would like to build/i);
+    expect(blockMessage('adult', 'blue film wali website banao')).toContain('कुछ और बनाना हो');
   });
 
   it('Devanagari and romanised Hindi both count', () => {

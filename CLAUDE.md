@@ -137,9 +137,16 @@ app). Run all four mandatory steps, in order, every time:
 
 ### 🚫 PORNOGRAPHY IS BANNED — and NavBharatAI enforces it, not the model (admin-mandated 2026-09-13)
 
-Admin's ruling, and their words are the user-facing message, kept verbatim:
-> **"पोर्नोग्राफी बैन है!"**
-> *"यह भारतीय ऐप है, और सभ्य लोगों के लिए है। आपके जैसे लोगों की नवभारत AI को कोई ज़रूरत नहीं है। आप लॉगआउट कर सकते हो। थैंक यू!"*
+Admin's ruling: **"पोर्नोग्राफी बैन है!"** The user-facing refusal is firm about the ban and says
+nothing about the person:
+> *"पोर्नोग्राफी बैन है। नवभारत AI एक भारतीय ऐप है और इस तरह का कोई ऐप नहीं बनाता — चाहे जैसे भी पूछा जाए।
+> कुछ और बनाना हो तो बताइए, मैं तुरंत शुरू कर देता हूँ।"*
+
+⚠️ **The first version was harsher** — it told the person NavBharatAI had *"no need of users like you"*
+and invited them to log out. The admin read it back the same day and said *"yeh thoda jyada hi ho gaya"*.
+**The ban did not change; the insult went.** Keep it that way: detection can still be wrong, and the cost
+is asymmetric — a misclassified user shrugs off a firm refusal and screenshots a personal one. The ban's
+force comes from the refusal being absolute, never from the tone.
 
 **This REVERSES the rule written on 2026-09-12**, which classified adult content as *"NOT illegal —
 lawful, governed by the creator's own +18 setting at PUBLISH"* and returned `flag`, letting the build

@@ -138,7 +138,7 @@ describe('the two tiers (admin 2026-09-10: "do tier banao, credit bundle karo, 2
     // the plan's single largest cost line, larger than its servers and its traffic together, and with
     // server hosting now included it was paying twice for the same upgrade.
     expect(HOSTING_TIERS.map((t) => [t.id, t.priceInr, t.includedBackendGb, t.includedFrontendGb, t.backendApps, t.domains, t.bundledCreditInr]))
-      .toEqual([['starter', 299, 5, 25, 10, 1, 0], ['growth', 599, 12, 100, 30, 3, 0]]);
+      .toEqual([['starter', 299, 5, 25, 10, 1, 0], ['growth', 599, 12, 50, 30, 3, 0]]);
     // A ₹2,999 tier with no customers would be a promise about capacity and support that no code
     // keeps. It is "talk to us" until a real customer defines it.
     expect(HOSTING_TIERS.find((t) => t.priceInr > 999)).toBeUndefined();

@@ -52187,7 +52187,16 @@ Admin decisions, taken across one session of costing (full reasoning in `HOSTING
 |---|---|---|---|---|---|---|
 | Free | ₹0 | 3 | **0** | — | 5 | — |
 | Starter | **₹299** | 10 | **10** | 5 | 25 | **₹0** |
-| Growth | **₹599** | 30 | **30** | 12 | 100 | **₹0** |
+| Growth | **₹599** | 30 | **30** | 12 | 50 | **₹0** |
+
+🔴 **CORRECTED BY THE ADMIN BEFORE MERGE — Growth's visitor allowance is 50 GB, not 100.**
+The session that wrote this entry had proposed 50, read the admin as having chosen 100, and
+recorded 100 as "unka faisla". The admin read it back and said plainly: *"nahi: 50 hi rakha
+hai. 100 nahi, 50"*. Both bundled credits are ₹0, which this change already had right — the
+admin restated it (*"no free credit"*) and it needed no edit.
+⚠️ **The lesson is not the number, it is who it was attributed to.** A figure recorded as an
+admin decision is one no later session will re-question — that is precisely what makes
+mis-attributing one's own suggestion to the admin more expensive than simply getting it wrong.
 
 **🔴 ONE FIELD WAS DESCRIBING TWO DIFFERENT THINGS.** `includedTransferGb` fed the billing sweep, which
 measures `run.googleapis.com/container/network/sent_bytes_count` — a **Cloud Run** metric. A

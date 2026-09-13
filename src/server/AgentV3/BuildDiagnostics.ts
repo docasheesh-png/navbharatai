@@ -761,7 +761,15 @@ export class BuildDiagnostics {
     // misattribution that "sent an autopsy to optimise install". A confident wrong cause is worse than
     // an admitted unknown, because it is acted on. So when the timeline proves a lane consumed this
     // window, the sentence says that instead — it is measured from real recorded events, never guessed.
-    const abandoned = BuildDiagnostics.abandonedLaneWindow(this.issues, this.startedAt);
+    //
+    // ⚠️ ONLY WHEN THE PREPARATION CLAIM IS ITSELF LARGE — and the SECOND report of the day is what
+    // proved this guard necessary (build 5abad374, "Can you generate images?"). There, elapsed was 120s
+    // and the call's own latency 117s, so preparation was correctly reported as 3s — while a lane had
+    // been abandoned at 93s. Those are THE SAME CALL: the lane stopped waiting at 93s and the call
+    // returned at 120s. Attributing 93s to "abandoned lanes" there would have replaced an accurate
+    // sentence with a misleading one, i.e. exactly the failure this fix exists to prevent, committed by
+    // the fix itself. Below the 60s line the ordinary wording is accurate and stays.
+    const abandoned = seconds >= 60 ? BuildDiagnostics.abandonedLaneWindow(this.issues, this.startedAt) : null;
     const attributed = abandoned
       ? `${seconds}s passed before the build's first model call was recorded, and MOST OF IT WAS NOT SETUP: `
         + `${abandoned.seconds}s went to ${abandoned.lanes} fast build lane(s) that were started and then abandoned at their `

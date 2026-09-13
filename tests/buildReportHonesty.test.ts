@@ -55,6 +55,28 @@ describe('TIME_TO_FIRST_CALL — do not blame setup for time a fast lane burned'
     expect(rec!.message).not.toContain('sandbox setup, project restore and secrets loading all happen in it');
   });
 
+  it('THE SECOND REPORT CAUGHT THIS FIX ITSELF: does not override an ALREADY-CORRECT small number', () => {
+    // Build 5abad374, "Can you generate images?". Elapsed to the first recorded call was 120s and the
+    // call's own latency was 117s, so preparation was correctly reported as 3s — while a lane had been
+    // abandoned at 93s. Those are THE SAME CALL: the lane stopped waiting at 93s, the call returned at
+    // 120s. Attributing 93s to "abandoned lanes" here would have replaced an accurate sentence with a
+    // misleading one — this fix committing the exact error it exists to prevent.
+    let clock = 0;
+    const diag = new BuildDiagnostics({ now: () => clock });
+    clock = 93_000;
+    diag.record({ phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_FALLBACK', message: 'handed off', autoResolved: true });
+    clock = 120_000;
+    diag.recordLlmCall({
+      model: 'kimi-k2.6', provider: 'kimi', promptChars: 10, responseChars: 10,
+      finishReason: 'tool_use', toolCalls: 1, inputTokens: 1, outputTokens: 1, latencyMs: 117_000, ok: true,
+    });
+    const rec = diag.report().issues.find((i) => i.code === 'TIME_TO_FIRST_CALL');
+    expect(rec!.message).not.toContain('NOT SETUP');
+    expect(rec!.message).toContain('3s of preparation');
+    // …and it stays an INFO line, because 3s of setup is not worth warning anyone about.
+    expect(rec!.severity).toBe('info');
+  });
+
   it('leaves the ordinary wording alone when no lane was abandoned', () => {
     let clock = 0;
     const diag = new BuildDiagnostics({ now: () => clock });

@@ -51087,3 +51087,72 @@ injected clock (setup 1.5 s, handoffs at 93 s and 243 s, first call at 264 s tak
 - 🟡 **The sandbox was 95% idle** (22.7 of 23.8 min), because the build spent its time waiting on model
   calls rather than touching the machine. Billed either way.
 - 🟡 **ETA said ~3 min; the build took 28.2.** A 9× miss on the number the user plans around.
+
+---
+
+## 2026-09-13 — AUTOPSY `5abad374` ("Can you generate images?"): a four-word question cost 29 minutes
+
+**The report.** 29.0 min · `ok: false` · release gate **RED** · stopped by the **wall-clock cap**
+(`BUILD_TIMEOUT`, 1740s) · 252 timeline items (4 errors, 14 warnings) · 48 delivered Kimi turns,
+**6 Kimi timeouts** · 4× `LLM_TRUNCATED` · cache hit 89% · user billed **₹0**.
+
+**The prompt was `"Can you generate images?"`.** Not a build request — a capability question, the kind
+every new user asks first. The engine built an "AI Image Studio" for 29 minutes, ran out of wall clock,
+and told the user the app was not ready. At minute 8 it had already **answered the question in plain
+text** ("Yes, I can help with images in several ways…") — and carried on building.
+
+**Root cause, located exactly.** `classifyIntentWithConfidence('Can you generate images?')` returned
+`{intent:'new_build', confidence:'HIGH', signal:'generate'}`. `generate` is a NEW_BUILD verb and the
+scanner takes it as decisive — but in *"can you **generate** images?"* the verb is the OBJECT of the
+question, not an imperative. And **HIGH confidence skips the LLM upgrade entirely**
+(`classifyIntentSmart` returns before asking it), so the one component that reads intention with project
+and conversation context never saw the sentence. `"can you build apps?"` behaved identically.
+
+### The fixes
+
+1. **`isCapabilityQuestion` runs BEFORE the verb scanner** — a short, second-person ability question
+   ("can you…", "could you…", "are you able to…", "do you support…", "kya aap … sakte ho") whose object
+   is a **bare plural** noun is a question about our powers, not an order. Returns `chat` at **LOW**
+   confidence on purpose: the LLM upgrade still decides, and all that is removed is the hard lock.
+   **Precision-first, because a false positive refuses a real build**: an article ("a todo app"), a
+   possessive ("my site"), a benefactive ("for me"), a singular object ("dark mode") or a long message
+   all keep today's behaviour exactly. Pinned by 23 tests, including nine that must stay builds.
+2. **The two intent ladders are now ONE.** `classifyIntent` was a second hand-maintained copy of the
+   same rules that the route ALSO calls, and the copies had already drifted — the confidence version
+   uses the whole-word scanner that fixed a real mis-route, this one still used the substring matcher.
+   The capability fix would have had to be written twice. It now delegates
+   (`classifyIntentWithConfidence(message).intent`); all 68 existing tests pass unchanged, proving the
+   two were outcome-equivalent. **This is the same class as the morning's `withTimeout` duplication** —
+   two copies, one fixed, the bug returns through the other.
+
+### 🔴 This report caught a defect in the SAME DAY'S EARLIER FIX, before it merged
+
+`TIME_TO_FIRST_CALL`'s new abandoned-lane attribution would have **misfired here**. Elapsed to the first
+recorded call was 120s and the call's own latency 117s, so preparation was correctly reported as **3s** —
+while a lane had been abandoned at 93s. Those are the same call: the lane stopped *waiting* at 93s and
+the call returned at 120s. The fix would have replaced an accurate sentence with a misleading one — the
+exact error it exists to prevent, committed by the fix itself. Now guarded to `seconds >= 60`, i.e. it
+only speaks when the preparation claim is itself large enough to be worth correcting. Test-locked with
+this build's real numbers.
+
+**And the zombie write appears here too, independently.** `agent=frontend` writes at **+16.5 min** —
+`.gitignore` ×4, `tsconfig.node.json` ×2, `src/vite-env.d.ts`, `src/main.tsx` — 12.5 minutes after the
+one-shot lane was abandoned at +4.0 min, immediately after `FASTLANE_CONTINUED` (3 continuations). Same
+signature as `a38c6fef`, a different user, a different app. Two independent confirmations in one day;
+the fence in the same PR closes both.
+
+### Open root causes from this report (recorded, not patched)
+
+- 🔴 **The output-token ceiling was hit FOUR times and `src/App.tsx` was still dropped**
+  (`FASTLANE_TRUNCATED_FILE_DROPPED` after 3 continuations). Dropping it was the honest choice — a
+  half-written file must never ship — but the app's main file then had to be rebuilt from scratch,
+  deep into the budget. The continuation ceiling (`MAX_CONTINUATIONS`) is the thing to look at, and it
+  needs more than one report to set.
+- 🟡 **6 Kimi timeouts again** (120s each), same as `a38c6fef`. Second sighting of the same open item.
+- 🟡 **The generated app faked its core feature** — 12 `placeholder / not-implemented / fake data`
+  findings, a canvas drawing pretending to be image generation. The readiness gate caught it and the
+  engine was mid-repair (switching to Pollinations.ai) when the clock ran out, so the detection works;
+  what failed is that the FIRST build produced a fake at all. The second absolute rule applies to what
+  v3.0 generates, not only to what we write.
+- 🟡 **Sandbox 90% idle** (28.9 of 32.2 min) and **`SANDBOX_PEAK_MEMORY` "not available"** again.
+- 🟡 **ETA said ~3 min**, then "~53s to go" at minute 2, for a build that ran 29 minutes and failed.

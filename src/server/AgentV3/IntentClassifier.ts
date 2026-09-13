@@ -364,6 +364,37 @@ const STATE_QUESTION_SIGNALS: readonly string[] = [
   'where did', 'where are my', 'where is my', 'what happened', 'how many files', 'how many pages',
 ];
 
+/** A capability question is brief by nature; past this it is a detailed request. */
+const CAPABILITY_QUESTION_MAX_WORDS = 8;
+
+/**
+ * Second-person ability questions: "can you …", "could you …", "are you able to …", "do you support …",
+ * and the Hinglish "kya aap … sakte ho". Deliberately narrow — see the call site for why.
+ *
+ * Pure and exported so the exact sentences that cost 29 minutes are pinned by tests.
+ */
+export function isCapabilityQuestion(lower: string): boolean {
+  const text = lower.trim();
+  if (!text) return false;
+  // Short by nature. A long message that happens to open with "can you" is a real, detailed request.
+  if (text.split(/\s+/).filter(Boolean).length > CAPABILITY_QUESTION_MAX_WORDS) return false;
+  // A SPECIFIC deliverable means it is a polite imperative, not a question about our powers.
+  // ("can you build me a todo app", "can you make a landing page", "can you fix my footer")
+  if (/\b(?:a|an|the|my|our|this|that|me|us|mere|hamare|mera|humara)\b/.test(text)) return false;
+  if (/\bfor (?:me|us)\b|\bmere liye\b|\bhamare liye\b/.test(text)) return false;
+
+  // English: an ability auxiliary aimed at "you", then a verb, then a BARE PLURAL object.
+  // The trailing "s" with no article is what separates the class of thing from one instance of it.
+  if (/^(?:can|could|are)\s+(?:you|u)\b/.test(text) || /^do(?:es)?\s+you\b/.test(text)) {
+    return /\b[a-z]+s\b\s*\??$/.test(text);
+  }
+  // Hinglish: "kya aap/tum … sakte/sakti ho/hain" — the ability auxiliary is the verb tail, so the
+  // sentence shape rather than the leading word is what identifies it.
+  if (/^kya\s+(?:aap|tum)\b/.test(text) && /\bsakt[ae]\s+(?:ho|hain|hai)\b/.test(text)) return true;
+
+  return false;
+}
+
 export function classifyIntentWithConfidence(message: string): IntentWithConfidence {
   const text = typeof message === 'string' ? message.trim() : '';
   if (!text) return { intent: 'new_build', confidence: 'low' };
@@ -377,6 +408,30 @@ export function classifyIntentWithConfidence(message: string): IntentWithConfide
   }
   if (matchesSignal(lower, STATE_QUESTION_SIGNALS)) {
     return { intent: 'chat', confidence: 'high', signal: 'state-question' };
+  }
+
+  // Step 0b — "CAN YOU …?" IS A QUESTION ABOUT US, NOT AN INSTRUCTION TO US.
+  //
+  // ROOT CAUSE (autopsy 5abad374, 2026-09-13). A user typed **"Can you generate images?"** — four words,
+  // a plain capability question of the kind every new user asks first. `generate` is a NEW_BUILD verb, so
+  // the scanner below returned new_build at HIGH confidence, and high confidence SKIPS the LLM upgrade
+  // entirely (`classifyIntentSmart` returns immediately). The engine then spent **29 minutes** building
+  // an "AI Image Studio", hit the wall-clock cap, and told the user their app was not ready. It had even
+  // ANSWERED the question in text at minute 8 — and kept building anyway.
+  //
+  // The verb in such a sentence is the OBJECT of the question, never an imperative. This check runs
+  // before the verb scanner so the wording cannot out-vote the grammar (the same reasoning as Step 0).
+  //
+  // PRECISION-FIRST, because a false positive here refuses a real build. It fires ONLY on a short,
+  // second-person ability question whose object is a BARE PLURAL noun — the CLASS of thing ("images",
+  // "apps", "websites"), which is what one asks about a capability. Anything naming a specific
+  // deliverable keeps today's behaviour exactly: an article ("a todo app"), a possessive ("my site"), a
+  // benefactive ("for me"), or a singular object ("dark mode") all fall through to the scanner below.
+  //
+  // LOW confidence on purpose: the LLM upgrade — which sees the project and the conversation — still
+  // gets the final say. All this removes is the HARD LOCK that kept it from being asked at all.
+  if (isCapabilityQuestion(lower)) {
+    return { intent: 'chat', confidence: 'low', signal: 'capability-question' };
   }
 
   // Steps 1–4 → high confidence (strong, explicit signals). Uses the shared whole-word scanner so an
@@ -507,54 +562,11 @@ export async function classifyIntentSmart(
  * request is never misidentified as an edit.
  */
 export function classifyIntent(message: string): BuildIntent {
-  const text = typeof message === 'string' ? message.trim() : '';
-  if (!text) return 'new_build'; // safe default — never treat an empty/odd input as chat
-
-  const lower = text.toLowerCase();
-
-  // 1) NEW_BUILD signals take TOP priority — any "build/create/make/generate/…" → 'new_build'.
-  //    This ensures "build a page AND fix the footer" stays 'new_build', not 'edit_existing'.
-  if (matchesSignal(lower, NEW_BUILD_SIGNALS)) return 'new_build';
-
-  // 2) Pure edit signals (fix, debug, update, change, refactor, …) → 'edit_existing'.
-  //    Only fires when no new-build signal was found above.
-  if (matchesSignal(lower, EDIT_SIGNALS)) return 'edit_existing';
-
-  // 2.5) A comparison/explanation ask ("compare X and Y") → chat, even if it mentions a build-
-  //      flavored noun in passing (e.g. "compare v5.0 and Claude Code" contains "code").
-  if (matchesSignal(lower, INFORMATIONAL_SIGNALS)) return 'chat';
-
-  // 3) Long messages, code blocks, file paths or URLs → likely a real task → 'new_build'.
-  if (text.length > LONG_MESSAGE_THRESHOLD) return 'new_build';
-  if (hasCodeOrPathOrUrl(text)) return 'new_build';
-
-  // 4) Remaining build signals (tech nouns: 'app', 'react', 'button', etc., and
-  //    ambiguous verbs like 'add', 'install') → conservative 'new_build'.
-  if (matchesSignal(lower, BUILD_SIGNALS)) return 'new_build';
-
-  // 4.5) Continuation of an interrupted/in-progress build ("continue", "go on", "finish it",
-  //      "aage badho", …): short + signal-free, so without this they fall to the short-message →
-  //      'chat' default and lose ALL build context/memory (the "please continue" → amnesia bug).
-  //      Route them to the memory-aware edit/continuation path instead.
-  if (matchesSignal(lower, CONTINUATION_SIGNALS)) return 'edit_existing';
-
-  // 4.6) "Something isn't working" bug report ("preview nahi chala", "not working", …) → edit_existing,
-  //      not chat. Checked BEFORE social patterns: a short complaint containing the bare word "nahi"/
-  //      "not" would otherwise be misread as a standalone chit-chat acknowledgement (see PROBLEM_SIGNALS).
-  if (matchesSignal(lower, PROBLEM_SIGNALS)) return 'edit_existing';
-
-  // 5) Clear social patterns (no build signal present) → 'chat'.
-  for (const pattern of SOCIAL_PATTERNS) {
-    if (pattern.test(lower)) return 'chat';
-  }
-
-  // 6) Very short, signal-free messages (≤ 3 words) are treated as chit-chat.
-  const wordCount = lower.split(/\s+/).filter(Boolean).length;
-  if (wordCount <= SHORT_WORD_COUNT) return 'chat';
-
-  // 7) TRUE last-resort default (admin decision, 2026-07-01: "text reply > build app"). Was
-  // 'new_build'; now 'chat' — the chat reply itself is prompted to offer to build/edit if that's
-  // what's meant, so a real request phrased unusually is never permanently stuck. See the matching
-  // comment in classifyIntentWithConfidence for the full reasoning.
-  return 'chat';
+  // ONE LADDER, NOT TWO. This used to be a second, hand-maintained copy of the rules below, and the
+  // copies had already drifted: the confidence version uses the whole-word scanner that fixed a real
+  // mis-route, while this one still used the substring matcher. On 2026-09-13 the capability-question
+  // fix would have had to be written twice — exactly the duplication that let the July zombie-write fix
+  // reach one of its two lanes and not the other. Delegating removes the class: there is now a single
+  // place where intent is decided, and the confidence tier is simply discarded here.
+  return classifyIntentWithConfidence(message).intent;
 }

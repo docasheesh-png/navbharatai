@@ -294,6 +294,18 @@ export async function saveLockedAreas(userId: string, areas: AppLockArea[]): Pro
 
 // ── Small pure helpers the screens share ───────────────────────────────────────────────────────────
 
+/**
+ * The unlock header for a call that is NOT in this module — the money routes check the same ticket.
+ *
+ * Returns `{}` when nothing is unlocked, so a caller spreads it unconditionally and a user with no lock
+ * sends exactly the request they sent before this feature existed. The SERVER decides whether the header
+ * was needed; this only makes sure a user who has already entered their PIN is not asked twice.
+ */
+export async function unlockHeaders(): Promise<Record<string, string>> {
+  const unlock = currentUnlock();
+  return unlock ? { [UNLOCK_TICKET_HEADER]: unlock.ticket } : {};
+}
+
 /** Exactly four digits, checked here only so the keypad can enable its button — never as the security. */
 export function looksLikePin(pin: string): boolean {
   return /^\d{4}$/.test(String(pin ?? ''));

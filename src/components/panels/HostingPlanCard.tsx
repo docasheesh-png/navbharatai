@@ -24,6 +24,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Globe, Database, Cpu, BadgeCheck, RefreshCw, Check } from 'lucide-react';
 import { authHeaders } from '../../lib/authedFetch';
 import { HOSTING_TIERS, hostingAgreementTerms, type HostingTier, HOSTING_OVERAGE_INR_PER_GB } from '../../lib/hostingTiers';
+import { unlockHeaders } from '../../lib/appLock';
 
 interface PlanStatus {
   enabled: boolean;
@@ -71,9 +72,11 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
     if (busy || !status || !agreed) return;
     setBusy(true);
     try {
+      // 🔒 Carries the app-lock ticket when one is held. The server checks it (appLockEnforce.ts); this
+      // only spares a user who has already entered their PIN from being asked again.
       const res = await fetch(`/api/wallet/${userId}/hosting-plan/purchase`, {
         method: 'POST',
-        headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+        headers: { ...(await authHeaders()), ...(await unlockHeaders()), 'Content-Type': 'application/json' },
         body: JSON.stringify({ tierId: tier.id, agreedToTerms: true, autoRenew }),
       });
       const data = await res.json().catch(() => ({}));
@@ -115,10 +118,17 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
       const next = !(status.plan.autoRenew !== false);
       const res = await fetch(`/api/wallet/${userId}/hosting-plan/auto-renew`, {
         method: 'POST',
-        headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+        // 🔒 The app-lock ticket, when one is held — see the purchase call above.
+        headers: { ...(await authHeaders()), ...(await unlockHeaders()), 'Content-Type': 'application/json' },
         body: JSON.stringify({ autoRenew: next }),
       });
       if (res.ok) { await load(); onToast(next ? 'Auto-renewal is on.' : 'Auto-renewal is off — the plan will simply end on its expiry date.', 'info'); }
+      else {
+        // A refusal was silent before: the switch simply snapped back with nothing said, which reads as a
+        // broken toggle. It matters more now that the app lock can be the reason.
+        const data = await res.json().catch(() => ({} as { error?: string }));
+        onToast(data?.error || 'Could not change auto-renewal. Please try again.', 'error');
+      }
     } catch { /* toggle stays as the server last confirmed it */ } finally { setBusy(false); }
   };
 

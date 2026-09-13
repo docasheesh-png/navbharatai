@@ -17,6 +17,7 @@ import { isNativeApp } from '../lib/mobileNative';
 import { purchaseRail, type StoreConfig, type PurchaseOutcome } from '../lib/storePurchase';
 import { launchPlayPurchase, consumePlayPurchase, pendingPlayPurchases, playBillingAvailable, outcomeForNativeStatus } from '../lib/playBillingNative';
 import { fetchPlatformFeePct, DEFAULT_PLATFORM_FEE_PCT } from '../lib/platformFee';
+import { unlockHeaders } from '../lib/appLock';
 /** Free-tier daily message ceiling for anonymous (not-signed-in) users. */
 export const FREE_DAILY_MESSAGES = 10;
 
@@ -196,11 +197,15 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     setRechargeStatus('Requesting Cashfree checkout protocol...');
     try {
       // The server derives the order's owner from this token (it no longer trusts a body `userId`).
+      // 🔒 The app-lock ticket rides along when one is held (admin 2026-09-13). The SERVER decides whether
+      // it was required; this only spares a user who has already entered their PIN from being asked twice.
+      // Spread unconditionally — `unlockHeaders()` is `{}` for everyone who has not set a PIN, so the
+      // request is byte-identical to before for them.
       const res = await axios.post('/api/payment/create-order', {
         amount,
         userEmail: user.email || '',
         userName: user.displayName || 'NavBharat Client'
-      }, { headers: await authedHeaders() });
+      }, { headers: { ...(await authedHeaders()), ...(await unlockHeaders()) } });
       setPaymentSession(res.data);
       if (res.data.isSimulator) {
         setShowCheckoutModal(true);

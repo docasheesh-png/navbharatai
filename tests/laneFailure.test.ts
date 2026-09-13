@@ -90,7 +90,12 @@ describe('🔴 we do not ask the user to pay for our own outage', () => {
 
   it('the route chooses between the two messages on that evidence, and says when it suppressed one', () => {
     expect(ROUTE).toContain('providerFailuresLookDegraded(buildDiag.providerFailureBreakdown())');
-    expect(ROUTE).toContain('degraded ? providerDegradedMessage() : freeTierUpsellMessage()');
+    // ⚠️ UPDATED 2026-09-13, and the update is the interesting part. `freeTierUpsellMessage` gained a
+    // CAUSE argument on main the same day (#2887: a prompt with nothing to build from is not an engine
+    // limit either), so the two conditions now COMPOSE — degraded first, because it is a statement about
+    // US, and only then a statement about the prompt. Asserted argument-agnostically so a third cause
+    // does not fail this test for the wrong reason; the guard below is what actually holds the line.
+    expect(ROUTE).toMatch(/degraded \? providerDegradedMessage\(\) : freeTierUpsellMessage\(/);
     expect(ROUTE).toContain('UPSELL_SUPPRESSED');
   });
 });
@@ -128,7 +133,15 @@ describe('🔒 the guards that stop this coming back', () => {
   // it straight back and nothing would fail. So: EVERY mention of the upsell must sit next to the
   // evidence check.
   it('no code path can emit the upsell without first asking whether WE were the problem', () => {
-    const sites = [...ROUTE_SRC.matchAll(/freeTierUpsellMessage\(\)/g)].map((m) => m.index ?? 0);
+    // 🔴 THE REGEX MUST NOT PIN THE ARGUMENT LIST, and this is not hypothetical: it was written as
+    // `freeTierUpsellMessage\(\)` and went BLIND within hours, when #2887 added a cause argument on main.
+    // `sites.length` fell to zero and the loop below simply had nothing to check — a guard that passes
+    // by finding nothing is worse than no guard, because it reports success. Hence both the
+    // open-paren-only match and the non-empty assertion that caught it.
+    const sites = [...ROUTE_SRC.matchAll(/freeTierUpsellMessage\(/g)]
+      .map((m) => m.index ?? 0)
+      // The import line names the symbol without calling it.
+      .filter((at) => !/^import /.test(ROUTE_SRC.slice(ROUTE_SRC.lastIndexOf('\n', at) + 1, at)));
     expect(sites.length).toBeGreaterThan(0);
     for (const at of sites) {
       const around = ROUTE_SRC.slice(Math.max(0, at - 900), at + 200);

@@ -51837,3 +51837,27 @@ guard is one refactor away from being a comment:
    asserts the inversion still exists. It is a failing-by-design reminder that inverts the usual
    risk: if someone fixes the deadline propagation, the test fails and makes them delete the
    tripwire, which is how the open item gets closed out of this file instead of rotting in it.
+
+### The guard that went blind within hours of being written (2026-09-13, same PR)
+
+The upsell guard added above scans the route for every `freeTierUpsellMessage()` call and requires
+`providerFailuresLookDegraded` beside it. It was written as the literal `freeTierUpsellMessage\(\)`.
+
+Hours later, PR #2887 landed on `main` and gave that function a CAUSE argument — a prompt with nothing
+to build from is not an engine limit either, so the message now words itself accordingly. The call
+became `freeTierUpsellMessage(emptyCause)`, **the regex matched nothing, and the loop had nothing to
+check.** No failure. A green guard, guarding zero call sites.
+
+**It was caught by one line — `expect(sites.length).toBeGreaterThan(0)` — and that line is the whole
+lesson.** A scanning guard has two failure modes, and only one of them is loud: it can find a site that
+breaks the rule (loud), or it can find NO sites at all (silent, and indistinguishable from compliance).
+**Any test that asserts a property over a set found by searching must first assert the set is not
+empty.** Without it, the strongest-looking guard in a file is the one most likely to be quietly dead.
+
+Fixed by matching the open paren only, filtering the import line, and recording the incident in the
+test itself so the next person to tighten that regex knows what it cost.
+
+The two behaviours were MERGED rather than chosen, and the order is deliberate: **degraded is tested
+first, because it is a statement about US and the cause is a statement about the PROMPT.** When our
+providers are down we do not know whether the prompt was buildable — blaming the user's wording for our
+outage is the same mistake in a politer sentence.

@@ -19,6 +19,7 @@ import { sandboxCost, describeSandboxCost } from './sandboxCost';
 import { redactProvidersText } from '../lib/providerRedaction';
 import { costAlertAdvisory, costAlertThresholdUsd } from './costAlert';
 import { isModelUnavailableError } from './providerErrorClass';
+import { unreachedProvidersNote } from './runnerChainSummary';
 
 export type IssuePhase =
   | 'sandbox' | 'provider' | 'plan' | 'tool' | 'build' | 'readiness' | 'preview' | 'autofix' | 'deploy';
@@ -251,6 +252,36 @@ export interface BuildDiagnosticsReport {
    */
   shadowFastLaneTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
   /**
+   * LIVE, UNRECONCILED token totals — what the provider ledger has attributed SO FAR, updated as the
+   * build runs. Absent once the build settles, because `providerTokens` then holds the real,
+   * reconciled figure.
+   *
+   * WHY IT EXISTS (autopsy f04421ef). A report taken while a build was still running printed
+   * `GLM: 54 call(s) · 0 in · 0 out` — and those zeros are not a measurement, they are the absence of
+   * one. I read that report and reported to the admin that the build had served ZERO tokens from cache
+   * and was leaving a 75% saving on the table. Both claims were false: the field was empty because the
+   * build had not settled, not because the number was zero. A report that can be misread that way by
+   * the person who wrote the renderer is a report that lies.
+   *
+   * 🔒 NEVER REACHES BILLING. This is a snapshot of an in-flight ledger, missing the aux calls that
+   * reconciliation folds into 'other'. Billing reads `providerTokens` and only `providerTokens` — the
+   * same separation `shadowFastLaneTokens` keeps, and for the same reason.
+   */
+  /**
+   * The ordered engine chain this build was ACTUALLY given, e.g.
+   * `GLM(glm-5.2) → KIMI(kimi-k3) → CLAUDE → CLAUDE_HAIKU`.
+   *
+   * Without it, `providerDelivery: { KIMI: 54 }` with no GLM entry is unreadable: GLM might have been
+   * in the chain and never reached, or never configured at all. See runnerChainSummary.ts. Admin-only,
+   * like every other provider name.
+   */
+  providerChain?: string;
+  /** The distinct provider families in that chain, for lining up against providerDelivery. */
+  providerChainNames?: string[];
+  liveTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
+  /** The cache-hit input tokens seen so far, paired with `liveTokens`. Same unreconciled status. */
+  liveCacheReadInputTokens?: number;
+  /**
    * ADMIN-ONLY infrastructure cost: how long this build held a real E2B VM, and our estimated spend on
    * it. Billed by WALL-CLOCK, so it is a completely different cost shape from token spend — a build
    * that used almost no tokens but sat on a VM for forty minutes still cost real money, and nothing in
@@ -391,6 +422,10 @@ export class BuildDiagnostics {
   private readonly providerFailures = new Map<string, number>();
   private providerTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
   private shadowFastLaneTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
+  private providerChain?: string;
+  private providerChainNames?: string[];
+  private liveTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
+  private liveCacheReadInputTokens?: number;
   private sandboxCostRecord?: { seconds: number; usd: number; estimated: true };
   private cacheReadInputTokens?: number;
   private billing?: BuildBillingRecord;
@@ -911,6 +946,8 @@ export class BuildDiagnostics {
       name === 'CLAUDE' || (isClaudeModel(name) && !/haiku/i.test(name));
     for (const name of this.providerDelivery.keys()) if (isViolatingClaude(name)) return name;
     if (this.providerTokens) for (const name of Object.keys(this.providerTokens)) if (isViolatingClaude(name)) return name;
+    // A weak build that leaked Sonnet must be catchable BEFORE it settles, not only after.
+    if (this.liveTokens) for (const name of Object.keys(this.liveTokens)) if (isViolatingClaude(name)) return name;
     return null;
   }
 
@@ -1279,8 +1316,41 @@ export class BuildDiagnostics {
     if (u && Object.keys(u).length > 0) this.shadowFastLaneTokens = u;
   }
 
+  /** Record the ordered engine chain this build was given. Best-effort; a blank value records nothing. */
+  setProviderChain(chain: string, names?: string[]): void {
+    const text = typeof chain === 'string' ? chain.trim() : '';
+    if (!text) return;
+    this.providerChain = text.slice(0, 600);
+    this.providerChainNames = Array.isArray(names) ? names.filter((n) => typeof n === 'string' && n.trim()) : undefined;
+    this.notify();
+  }
+
   setProviderTokens(u: Record<string, { inputTokens: number; outputTokens: number }>): void {
-    if (u && Object.keys(u).length > 0) this.providerTokens = u;
+    if (u && Object.keys(u).length > 0) {
+      this.providerTokens = u;
+      // The reconciled figure supersedes the live snapshot, so drop it rather than leave two answers
+      // to one question on the same report.
+      this.liveTokens = undefined;
+      this.liveCacheReadInputTokens = undefined;
+      this.notify();
+    }
+  }
+
+  /**
+   * Snapshot the in-flight provider ledger so a report taken MID-BUILD carries real numbers instead of
+   * zeros that read like a measurement. Call it as often as you like — it replaces, never accumulates.
+   *
+   * 🔒 Deliberately a different setter from setProviderTokens, and deliberately cleared by it: nothing
+   * written here may reach the billing path, because an in-flight ledger has not yet had the aux calls
+   * reconciled into it and is therefore an UNDER-count of what the build really spent.
+   */
+  setLiveUsage(u: Record<string, { inputTokens: number; outputTokens: number }>, cacheReadInputTokens?: number): void {
+    if (this.providerTokens) return; // settled already — the real figure wins
+    if (!u || Object.keys(u).length === 0) return;
+    this.liveTokens = u;
+    const cache = Number(cacheReadInputTokens);
+    this.liveCacheReadInputTokens = Number.isFinite(cache) && cache > 0 ? cache : undefined;
+    this.notify();
   }
 
   /**
@@ -1297,7 +1367,7 @@ export class BuildDiagnostics {
    *  (GLM/Kimi) served this build. Purely observational: reveals the real cache-hit rate against
    *  providerTokens' input total, so we can see whether the big cheap-floor input is cache-served. */
   setCacheReadInputTokens(n: number): void {
-    if (Number.isFinite(n) && n > 0) this.cacheReadInputTokens = n;
+    if (Number.isFinite(n) && n > 0) { this.cacheReadInputTokens = n; this.notify(); }
   }
 
   /** Fix 37a — stamp how many earlier builds in this workspace ended not-ok (from durable history). */
@@ -1469,6 +1539,10 @@ export class BuildDiagnostics {
       providerFailureReasons: this.providerFailureReasons.size ? this.providerFailureBreakdown() : undefined,
       providerTokens: this.providerTokens,
       shadowFastLaneTokens: this.shadowFastLaneTokens,
+      providerChain: this.providerChain,
+      providerChainNames: this.providerChainNames?.length ? this.providerChainNames : undefined,
+      liveTokens: this.liveTokens,
+      liveCacheReadInputTokens: this.liveCacheReadInputTokens,
       sandboxCost: this.sandboxCostRecord,
       cacheReadInputTokens: this.cacheReadInputTokens,
       billing: this.billing,
@@ -2079,6 +2153,48 @@ export function dominantDeliveryProvider(delivery: ReadonlyMap<string, number>):
 }
 
 /** Render a report as a human/Claude-readable plain-text document (for the .txt download). */
+/**
+ * Which token numbers may this report show, and how must they be labelled?
+ *
+ * Three genuinely different states, and the old renderer collapsed all three into one:
+ *   settled  — `providerTokens` is the reconciled, billed figure. No caveat.
+ *   live     — the build is still running; `liveTokens` is what the ledger has attributed so far.
+ *              Real numbers, an UNDER-count, and never the bill.
+ *   unknown  — neither. The honest output is "tokens not recorded", NOT zeros.
+ *
+ * The third case is the one that caused the harm. `0 in · 0 out` is indistinguishable from a measured
+ * zero, and it was read as one — by me, in an autopsy handed to the admin (report f04421ef).
+ */
+export function tokenUsageView(r: Pick<BuildDiagnosticsReport, 'providerTokens' | 'liveTokens' | 'liveCacheReadInputTokens' | 'cacheReadInputTokens'>): {
+  state: 'settled' | 'live' | 'unknown';
+  tokens?: Record<string, { inputTokens: number; outputTokens: number }>;
+  cacheReadInputTokens?: number;
+  /** Suffix for the section heading — empty when the numbers are final. */
+  label: string;
+  /** A line to print under the table, or null. */
+  caveat: string | null;
+} {
+  const settled = r.providerTokens && Object.keys(r.providerTokens).length > 0 ? r.providerTokens : undefined;
+  if (settled) {
+    return { state: 'settled', tokens: settled, cacheReadInputTokens: r.cacheReadInputTokens, label: '', caveat: null };
+  }
+  const live = r.liveTokens && Object.keys(r.liveTokens).length > 0 ? r.liveTokens : undefined;
+  if (live) {
+    return {
+      state: 'live',
+      tokens: live,
+      cacheReadInputTokens: r.liveCacheReadInputTokens,
+      label: ' — LIVE, build not settled',
+      caveat: 'These totals are a running count, not the bill: aux calls (plan/judge) are folded in only when the build settles, so the real figure is HIGHER.',
+    };
+  }
+  return {
+    state: 'unknown',
+    label: ' — tokens not yet recorded',
+    caveat: 'No token totals were written for this build. That is an absence of measurement, not a measured zero.',
+  };
+}
+
 export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
   const lines: string[] = [];
   lines.push('NavBharatAI Pro — Build Diagnostics Report');
@@ -2104,25 +2220,40 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
   // provider ne use kiya + user se kitna charge kiya") — the report answers, per provider: how many
   // API calls it drove and its input/output/total tokens; then how much the user was actually charged.
   // Joins providerDelivery (call counts) with providerTokens (in/out); 'other' = plan/judge/aux calls.
+  const usage = tokenUsageView(r);
   const provNames = new Set<string>([
-    ...Object.keys(r.providerTokens ?? {}),
+    ...Object.keys(usage.tokens ?? {}),
     ...Object.keys(r.providerDelivery ?? {}),
   ]);
   if (provNames.size > 0) {
-    lines.push('Provider usage (per provider — API calls · input · output · total tokens):');
+    lines.push(`Provider usage (per provider — API calls · input · output · total tokens)${usage.label}:`);
     let totIn = 0, totOut = 0, totCalls = 0;
     const rows = [...provNames]
       .map((name) => {
         const calls = r.providerDelivery?.[name] ?? 0;
-        const t = r.providerTokens?.[name] ?? { inputTokens: 0, outputTokens: 0 };
-        return { name, calls, inTok: t.inputTokens, outTok: t.outputTokens, total: t.inputTokens + t.outputTokens };
+        const t = usage.tokens?.[name];
+        return { name, calls, inTok: t?.inputTokens ?? 0, outTok: t?.outputTokens ?? 0, total: (t?.inputTokens ?? 0) + (t?.outputTokens ?? 0), known: !!t };
       })
       .sort((a, b) => (b.total - a.total) || (b.calls - a.calls));
     for (const row of rows) {
       totIn += row.inTok; totOut += row.outTok; totCalls += row.calls;
-      lines.push(`  ${row.name.padEnd(8)}: ${row.calls} call(s) · ${row.inTok.toLocaleString()} in · ${row.outTok.toLocaleString()} out · ${row.total.toLocaleString()} total`);
+      // HONESTY (autopsy f04421ef): a provider with no ledger entry prints "not recorded", never
+      // "0 in · 0 out". Zeros read as a measurement, and this exact line made me report to the admin
+      // that a build had served zero tokens from cache when in truth nothing had been written yet.
+      const tokenPart = row.known
+        ? `${row.inTok.toLocaleString()} in · ${row.outTok.toLocaleString()} out · ${row.total.toLocaleString()} total`
+        : 'tokens not recorded';
+      lines.push(`  ${row.name.padEnd(8)}: ${row.calls} call(s) · ${tokenPart}`);
     }
-    lines.push(`  ${'TOTAL'.padEnd(8)}: ${totCalls} call(s) · ${totIn.toLocaleString()} in · ${totOut.toLocaleString()} out · ${(totIn + totOut).toLocaleString()} total`);
+    if (usage.tokens) {
+      lines.push(`  ${'TOTAL'.padEnd(8)}: ${totCalls} call(s) · ${totIn.toLocaleString()} in · ${totOut.toLocaleString()} out · ${(totIn + totOut).toLocaleString()} total`);
+    }
+    if (usage.caveat) lines.push(`  ${usage.caveat}`);
+    // WHICH ENGINES WERE EVEN AVAILABLE (autopsy f04421ef). A provider missing from the table above is
+    // ambiguous on its own — never reached, or never configured? The chain answers it.
+    if (r.providerChain) lines.push(`  Chain   : ${r.providerChain}`);
+    const idle = unreachedProvidersNote(r.providerChainNames ?? [], r.providerDelivery ?? {});
+    if (idle) lines.push(`  ${idle}`);
   }
   if (r.billing) {
     const tierTag = r.billing.powerLevel ? ` [power: ${r.billing.powerLevel}${r.billing.noClaude ? ', no-Claude' : ''}]` : '';
@@ -2358,7 +2489,7 @@ export function userFacingReport(report: BuildDiagnosticsReport): BuildDiagnosti
       : {}),
   };
   // Explicitly OMITTED (admin-only / provider-identifying): model, providerDelivery, builtBy, providerFailures,
-  // providerTokens, cacheReadInputTokens, llmCalls, commands, billing, manifest, sandboxCost (our own
+  // providerTokens, providerChain, providerChainNames, liveTokens, liveCacheReadInputTokens, cacheReadInputTokens, llmCalls, commands, billing, manifest, sandboxCost (our own
   // infrastructure spend — never any part of what the user is charged). Because `out` is built by
   // allow-list, they are absent by construction — the user-facing billing surface is userCostBreakdown, not this.
   return out;

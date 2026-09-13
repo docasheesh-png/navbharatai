@@ -51486,6 +51486,148 @@ is now the layering violation it always was.
 
 ---
 
+## 2026-09-13 — AUTOPSY, build 541979d2: 5 min 57 s, zero files, and the question was always the answer
+
+**The whole prompt was one line:** a private Google Drive link to a 169 MB video. No app, no feature,
+not one word. Free tier, weak power level, cheap floor active.
+
+### The five buckets
+
+**✅ Self-healed — 6 classes / 15 events.** Simple-build → full builder · one-shot → full builder ·
+KIMI timeout → next provider ×3 · GLM failure → next provider ×8 · empty-build → retry on a stronger
+model · warm sandbox resume (setup 0 s).
+🔴 **Per the 50/50 law every one of these is a red flag, and five of the six fired for the SAME upstream
+reason: there was nothing to build from.** They are the engine healing a wound nobody needed to make.
+
+**🔀 Worked around — 5.** Both fast lanes routed around their own timeouts · both providers routed
+around their failures · the architect used `browser_action` to try to read a file we cannot read.
+
+**⏭️ Skipped — 7.** Route smoke, page render, E2E scaffold, typecheck, test suite, runtime verification,
+peak memory — all of them skipped **together**, because each needs a running app.
+
+**❌ Still broken — 7.**
+1. No app at all.
+2. `PREVIEW_NEVER_CAME_UP` · 3. `RELEASE_GATE: UNKNOWN` · 4. `RUNTIME_UNCHECKED`.
+5. 🔴 **The build told the user "produced no files" while files existed** — its own `ls` lists 10, and
+   six more `write_file` calls landed **81 seconds AFTER `endedAt`**.
+6. 🔴 **An abandoned lane kept running and kept spending.** The one-shot was given up at 150 s; its GLM
+   call ran to **342,995 ms** and returned 3,978 output tokens — then a `frontend` sub-agent wrote
+   files into a build that had already been declared failed, 102 s after it ended.
+7. 🔴 **The closing line was an upsell for a failure that was not the engine's:** *"Your app needs our
+   strongest engine… add credits."* There was no app, no engine limit was reached, and the only thing
+   missing was a sentence from the user.
+
+**🥵 Struggle points — 8.** The planning call took **150 s** to return 436 characters · simple build
+burned 90 s · one-shot burned 150 s in the foreground · three KIMI timeouts at 120 s each · eight GLM
+failures (7 rate-limit) · the same dead link opened **twice** (9 s, then 22 s) · the same question asked
+**twice** · 5 m 57 s for zero output, all of it ours on the free tier.
+
+### Step 2 — the missing subsystem
+
+**A pre-build check that asks: is there anything here to build from?** Nothing in the engine ever asked
+it. The answer for a bare URL is available in **under a millisecond**, with no model call, before a
+sandbox is even warm — and it is the exact answer the engine eventually produced, at minute four, by
+exhausting every builder it has. *What was wrong was never the answer. It was the routing.*
+
+(Second, named and **not** fixed here: abandoned work is not cancelled. Third: a failure's CAUSE is not
+carried to the message that reports it.)
+
+### What shipped
+
+**`buildableInput.ts`** — pure, no model call, no I/O. `empty` / `link-only` / `too-short`, with a
+reply that names *why* the link could not be used **before** it asks anything (a bare "what should I
+build?" reads as though the link were never seen). It knows only what a URL's own shape proves — a
+Drive link, a video, an archive — and guesses nothing about an ordinary page.
+
+**The turn is routed to CHAT**, which answers in seconds on the cheap path with no sandbox and no
+builder. The model's own reply is already right here: it produced exactly the right words, twice.
+
+⚠️ **Deliberately narrow.** Only `empty` and `link-only` divert — **never `too-short`**, which would
+catch "continue" and re-open the continuation amnesia this repo has already fixed once. An attachment,
+an import turn and an edit are never diverted. Refusing a prompt a user really wrote would be far worse
+than the bug being fixed.
+
+**The closing message now depends on the cause.** `freeTierUpsellMessage('no-instruction')` asks for
+**words, never for money** — a test asserts it contains no credits ask. An upsell attached to our own
+gap is how a product loses trust it cannot buy back.
+
+### 🔴 OPEN ROOT CAUSES — named, not implied fixed
+
+1. **Abandoned provider calls are never cancelled.** The one-shot ran 193 s past its own abandonment,
+   spent real tokens, and wrote files into a finished build. Needs an abort signal threaded into the
+   fast lanes — a change inside the build loop, not in this PR.
+2. **"No files produced" can be false.** It is computed before late writes land. It is what the user is
+   told, and it was wrong here.
+3. **A 150 s planning call for 436 characters, and three 120 s provider timeouts** — the cheap floor's
+   latency is a standing ceiling on every weak build, not a one-off.
+4. **The closing message still says "needs a stronger engine" for a PROVIDER outage** (8 GLM failures,
+   7 of them rate-limit). That is not an engine limit either. The signal exists in the diagnostics but
+   not at the call site; wiring it is a separate change.
+
+Gate on the final state: `typecheck` 0 · `noUnusedImports` clean · `typecheck:server` 0 · `build` ok ·
+`test:bundle` within budget · `boot:check` PASS · `vitest run` **1,594 files / 22,112 passed / 1
+skipped / 0 failed**. 28 new tests; **two confirmed to fail when the behaviour is reverted.**
+
+## 2026-09-13 — THE MID-BUILD STOP: the half the wallet floor could not reach
+
+**The open root cause recorded with PR #2883 is now closed.** That change bounded what a user is
+BILLED (`WALLET_OVERDRAFT_FLOOR_INR`, default ₹50) and said plainly what it did not do: *"Clamping the
+debit bounds the user's bill; it does not un-spend what the model already cost us."*
+
+**What was actually unbounded, stated precisely.** Every START gate was correct — `decideAffordability`
+refuses a new build at a balance of 0 or less, and a chat turn is refused on an empty wallet. Nothing
+looked at the cost of **the build already running**. A build legitimately allowed to begin at ₹1 could
+run its entire wall clock and present the invoice at the end. `SESSION_COST_CAP_USD` is not that limit
+either: it only decides whether an EMPTY build may retry.
+
+### What shipped
+
+**`buildCostCeiling.ts`** — pure, no I/O. `buildCostCeilingUsd()` (default **$5**, cap $50),
+`ledgerCostUsd(entries)`, `checkCostCeiling(cost, ceiling)`, `costCeilingDetail(verdict)`.
+
+**It is evaluated at the CHOKE POINT**, inside `captureTurnUsage` — the single function every build
+turn and every heal turn already flows through, and the same discipline the wallet floor uses. A
+ceiling written into the call sites is one the next call site never gets. Pricing the ledger is a loop
+over a handful of entries, so it costs nothing measurable per turn.
+
+**🔒 IT IS A STOP, NOT A KILL — which is what makes shipping it ON by default safe against the one
+absolute rule.** `AgentRunner` ends BETWEEN turns; the files written so far are already persisted; and
+`abortSummary('cost-cap')` tells the user their work is saved and one message continues it. A build
+that reaches the ceiling loses nothing — it pauses. A new `'cost-cap'` abort cause carries that through
+`buildAbortCause.ts`, so the stop can never be reported as the user pressing Stop (`isUserInitiated`
+returns false) — the exact misattribution that module was built to end.
+
+**📌 THE NUMBER WAS REUSED, NOT INVENTED.** $5 is this repo's own standing answer to a runaway build
+(`sessionCostCapUsd()`, since the "$26 todo app"). Inventing a fresh constant that sounds rigorous is
+precisely the failure CLAUDE.md records for the E2B rate. It sits under its OWN key
+(`AGENTV3_BUILD_COST_CEILING_USD`) because extending `SESSION_COST_CAP_USD` would silently re-purpose a
+value an admin may already have set for something else. **For scale:** real builds in this repo's own
+reports cost **$0.4–$1.0**, so $5 is five to ten times a heavy normal build — far enough away that no
+legitimate build is at risk, and still the difference between a bounded ~₹435 and an unbounded loss.
+
+**⚠️ THE LIVE FIGURE IS AN UNDER-ESTIMATE, AND THAT IS THE SAFE DIRECTION.** The ledger sees the
+architect, its sub-agents and every heal runner; it does NOT see the aux calls (blueprint/plan/judge),
+which reconcile into the 'other' bucket only at settle. So the stop fires LATER than a complete number
+would justify, never earlier. The admin line says so in words rather than presenting the figure as
+complete.
+
+**Honesty by construction, in three places.** A malformed env value falls back to $5 and **never to
+"no ceiling"** — only an explicit `0` disables it, because a typo must not restore the bug. An
+evaluation that throws fails OPEN (a ceiling we cannot read must never end somebody's build — the same
+call the affordability gate makes on an unreadable balance). And the user-facing sentence carries no
+rupee figure, no token count and no provider: what a build cost NavBharatAI is admin-only under the
+White-Label Law's billing half.
+
+### 🔴 OPEN ROOT CAUSE — named, not implied fixed
+
+**The stop does not cancel a call already in flight.** The loop ends between turns, so a provider call
+in progress runs to completion on their side and is paid for. Build `541979d2` showed exactly this: a
+lane abandoned at 150 s whose call ran to 343 s. Cancelling it needs an abort signal threaded into the
+provider clients — a separate change, inside the request path rather than the build loop.
+
+**21 new tests** (`tests/buildCostCeiling.test.ts`), plus the new cause added to
+`buildAbortCause.test.ts`'s exhaustiveness list so it cannot be skipped silently. **Two confirmed to
+fail when the behaviour is reverted:** a malformed env meaning "no ceiling", and the once-guard.
 ## 2026-09-13 — THE AUTOPSY'S MISSING SUBSYSTEM, BUILT: the build now KNOWS its own time budget
 
 Admin: *"han, build report me jo jo problem hai. sabhi ko fix karna hai. next time yeh error na aye!!"* —
@@ -51671,3 +51813,129 @@ a misunderstanding they can shrug off; a personal insult from the product is the
 The ban's force comes from the refusal being absolute, not from its tone. Four tests pin it: the message
 must say nothing about the PERSON in either language, must still refuse absolutely (no "unless", no 18+
 escape), and must offer a way forward — a person testing the boundary is often a real user on day one.
+## 2026-09-13 — Autopsy f04421ef, batch 2: the report's four remaining lies, and one of my own claims retracted
+
+Follows the batch-1 fixes (#2885) and the budget governor + real loop-guard ban (#2888). The admin's
+instruction was unambiguous — *"build report me jo jo problem hai. sabhi ko fix karna hai. next time yeh
+error na aye!!"* — so every remaining item in the ledger is either fixed here or, where the claim itself
+turned out to be wrong, retracted in writing rather than quietly dropped.
+
+**A theme worth naming, because it is the same bug four times: this report could not distinguish an
+ABSENT measurement from a measured value.** Every fix below restores that distinction somewhere.
+
+### 1. `0 in · 0 out` was not a measurement — and I read it as one, to the admin
+
+The mid-flight report printed `GLM: 54 call(s) · 0 in · 0 out` and carried no cache figure, because
+`setProviderTokens` and `setCacheReadInputTokens` are only called when a build SETTLES. From those
+zeros I told the admin the build had served zero tokens from its prefix cache and was leaving a ~75%
+saving on the table. Both claims were false. **A report that its own renderer's author misreads is not
+a formatting problem.**
+
+Three states now exist where one did (`tokenUsageView`):
+- **settled** — `providerTokens`, the reconciled billable figure, rendered exactly as before.
+- **live** — a new `liveTokens` snapshot written on every turn from the running ledger, labelled
+  `LIVE, build not settled` and stating that the real figure is **HIGHER** (aux calls reconcile in at
+  settle), so the direction of the error is never left for the reader to guess.
+- **unknown** — prints `tokens not recorded`, never zeros, with the caveat *"an absence of measurement,
+  not a measured zero"*.
+
+🔒 `setLiveUsage` is a deliberately separate setter from `setProviderTokens`, which CLEARS it on settle —
+the same separation `shadowFastLaneTokens` keeps, for the same reason: an in-flight ledger is an
+UNDER-count and must never reach the billing path. `userFacingReport` is an allow-list, so the new fields
+are absent from the user's view by construction; a test asserts it anyway.
+
+Side benefit, not incidental: `claudeProviderDelivered` now reads the live snapshot too, so a weak build
+leaking Sonnet is catchable **before** it settles rather than only in the post-mortem.
+
+### 2. The admin's own report was less honest than the user's screen
+
+`ETA_BASIS` read `ETA ~3 min · basis heuristic · confidence 0.4` for a build that ran past twenty
+minutes — and any admin reading it would conclude the user had been promised three minutes.
+
+🔴 **THEY WERE NOT, AND MY LEDGER ENTRY ON THIS WAS WRONG.** The entry above says *"`ETA_BASIS` records
+`confidence 0.4` and no user-facing line ever consults it"*. `firstEtaLine` has consulted it since
+2026-08-23: it renders the low–high BAND (which `estimateBuildTime` derives from exactly that
+confidence — `spread = 1 - confidence`) and says outright *"this is a first guess"*. `liveEtaTick` also
+already stops naming numbers after two broken promises. **I asserted a defect from reading one admin
+line instead of the rendering path.** The real defect was the opposite of the one I reported: the
+point estimate was an internal number that only the ADMIN surface displayed as if it were the promise.
+
+`ETA_BASIS` now records the band, keeps the midpoint in parentheses, and quotes the exact sentence the
+user saw — from the same `etaShown` value that is emitted to them, so report and screen cannot drift.
+
+### 3. "restarting once" could print twice
+
+`classifyDevServerFailure` is a pure function of the dev-server log. It cannot know which attempt it is
+on — and one of its strings claimed `restarting once` while `MAX_RECOVERY = 2` lets it print twice.
+
+Fixing that one string would be the surface patch. The class is **"the count lives where the count is
+not known"**, so the count moved to `planDevServerRecovery`, which holds `attempt` and `maxAttempts`:
+every retry detail now carries a true `(attempt 1 of 2)`. Two successive attempts can no longer print
+the same sentence — the precise thing "once" got wrong. `give_up` and `code_fix` are untouched: the
+first already has its honest terminal wording, the second must keep its actionable detail intact.
+
+### 4. "GLM: 0 turns" was unreadable — now it is answerable by looking
+
+The report showed `providerDelivery: { KIMI: 54 }`, no GLM row, no GLM failure. That is equally
+consistent with GLM sitting in the chain and never being reached (fine) and with GLM not being in the
+chain at all (a provider we believe leads our builds silently not running).
+
+⚠️ **`CHEAP_FLOOR_DECISION` cannot settle it, and this is worth knowing on its own: with the floor set
+to `on` its key check is an OR** (`(wantsGlm && hasGlm) || (wantsKimi && hasKimi)`), so it reports
+*"ACTIVE — ON leads"* whenever EITHER key is present. The report could honestly say the floor is active
+while half of it did not exist.
+
+`runnerChainSummary.ts` records the ordered chain the build was ACTUALLY given —
+`GLM(glm-5.2) → KIMI(kimi-k3) → CLAUDE_HAIKU` — taken from `guardedChain`, i.e. **after**
+`enforceNoClaude`, so a weak build can never be reported as containing a rung that was stripped. Under
+the table the report now names the providers that were in the chain and never reached, and states
+plainly that a provider **absent** from the chain is a different thing from one that sat idle. Key-pool
+rungs stay distinct (`GLM → GLM#2 → GLM#3`): three keys tried is not one attempt.
+
+This does not yet answer WHY GLM was idle on that build — that needs a build that settles, on the live
+env. It makes the question answerable from the next report instead of unanswerable from every report.
+
+### The wiring is pinned, because dropping it fails nothing
+
+All four fixes are observational: remove the call and no test breaks, no build fails, no error appears —
+the report just goes quiet and the next autopsy re-derives the same wrong conclusion from the same
+missing numbers. `tests/buildReportWiring.test.ts` asserts each call site against the route's source
+with comments stripped, so a doc block that merely MENTIONS a call cannot satisfy an assertion about it
+(the third time that particular mistake has been caught by a comment-stripper in two weeks).
+
+**Verification:** 43 new tests across five files; every fix checked to FAIL when reverted — the renderer's
+zeros, the settle-clears-live rule, the removed `once`, the missing attempt suffix, the `onChain`
+callback, and the chain line — six reverts, six failures.
+
+### Still OPEN
+
+- **Why GLM delivered 0 of 54 turns on that specific build.** Now diagnosable from the next report
+  (item 4); genuinely unanswerable from this one.
+
+### 2026-09-13 (same day, follow-on) — `CHEAP_FLOOR_DECISION` could call a HALF-configured floor "active"
+
+Found while fixing item 4 above, and worth its own entry because it is a defect in the one line whose
+entire job is to explain routing.
+
+`cheapFloorDecision`'s key check is an **OR**:
+
+```ts
+const keyOk = (wantsGlm && hasGlm) || (wantsKimi && hasKimi) || (wantsBedrock && hasBedrock);
+```
+
+With `AGENTV3_CHEAP_FLOOR=on` — which asks for **both** GLM and Kimi — one key is enough to satisfy it,
+and the report then said *"Cheap floor ACTIVE — ON leads the first attempt"*. So a report could state
+that the floor was fully active while half of it did not exist. Sitting beside
+`providerDelivery: { KIMI: 54 }` with no GLM row and no GLM failure, that line was the natural place to
+look for the answer and the one place guaranteed not to have it.
+
+It now names the engines that actually hold a key, and says plainly when the configured floor asks for
+one that is missing: *"⚠️ 'on' also asks for GLM_API_KEY, which is NOT set — that engine never enters the
+chain, so its absence from this report is configuration, not a routing decision."*
+
+`active` is deliberately still **true** in that case: one engine genuinely is leading, and flipping it to
+false would misreport a working build as a fallen-back one. A floor **pinned** to a single engine
+(`AGENTV3_CHEAP_FLOOR=kimi`) is not half-configured and gets no warning — the warning is about a gap
+between what was asked for and what exists, not about the number of engines.
+
+Four tests; reverting the wording fails three of them.

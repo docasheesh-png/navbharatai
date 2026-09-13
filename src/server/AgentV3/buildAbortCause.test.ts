@@ -13,7 +13,7 @@ import { abortBuild, abortCauseOf, abortSummary, isUserInitiated, type AbortCaus
  * user cannot report a sentence they never saw.
  */
 
-const ALL: AbortCause[] = ['user-stop', 'watchdog', 'advisory-cap', 'deploy-drain', 'lock-reclaimed', 'reaper', 'unknown'];
+const ALL: AbortCause[] = ['user-stop', 'watchdog', 'advisory-cap', 'deploy-drain', 'lock-reclaimed', 'reaper', 'cost-cap', 'unknown'];
 
 describe('the cause survives the abort', () => {
   it('round-trips through a real AbortController', () => {

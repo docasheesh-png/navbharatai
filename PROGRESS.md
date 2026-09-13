@@ -50639,3 +50639,70 @@ log: it now returns a `StreamOutcome` and the streamed turn writes the same row 
 **Three bugs of one shape in one day** — the model pin, Vertex's hardcoded stream model, and this
 missing log — all because the streaming path was forgotten. Recorded in `CLAUDE.md` as a standing check:
 reasoning that stops at `routeDetailed` has now been wrong three times.
+
+---
+
+## 2026-09-13 — The secrets vault: the lock could not be opened at all, and the door was in the wrong place
+
+Admin, with a screenshot of Settings → Secrets & API Keys on the phone: *"yeh to kaam hi nahi kar raha
+hai!"* — `Firebase: Error (auth/argument-error)` on the only button on screen. Three separate defects,
+and the error message was only the first.
+
+### 🔴 1. THE UNLOCK CONTRADICTED THE SIGN-IN, SO THE APP HAD NO WORKING DOOR
+
+`VaultLockGate` re-authenticated with `reauthenticateWithPopup` — the WEB flow, which needs
+`window.open` and the Firebase auth handler on an http(s) origin. The native shell has neither, and
+`AuthComponent` has known this for months: it signs users in through the native
+`@capacitor-firebase/authentication` plugin *"because embedded-webview OAuth is blocked/hangs"*.
+
+So the unlock path contradicted the sign-in path. Combined with WebAuthn being unavailable in that same
+WebView, the account door was the ONLY door left — and it could not open. **The feature was unusable on
+a phone, not merely strict.**
+
+**Root cause fixed as a CLASS, not an instance.** The same popup call was written out TWICE in the gate
+(once to unlock, once to enrol a device), so fixing one would have left the other broken. There is now
+ONE `lib/vaultReauth.ts` that decides native-vs-web the same way the sign-in does, and it also covers
+Apple and GitHub — previously treated as password accounts and shown a field they can never fill.
+Nothing is weakened: it still ends in a real Firebase re-authentication, so `auth_time` genuinely moves
+and the SERVER is still what decides. Test-locked, and **confirmed to bite**: forcing the popup path
+back fails two assertions.
+
+### 🔴 2. THE LOCK WAS HALFWAY DOWN THE SCREEN
+
+Admin: *"jab bhi 'secret and api key' par click kiye jaye, phone lock … se hi open hona chahiye! aur …
+ke andar koi lock nahi ho, andar user ki old credentials dikhe"*.
+
+The gate wrapped only the saved-key LIST; the add-key form sat open above it. The old reasoning is kept
+in the code rather than deleted (writing a secret you already hold reveals nothing) — but it produced
+the half-locked room in the screenshot. **The lock is now the DOOR:** nothing of the panel renders until
+the vault is open, and once it is there is no second prompt. Security is identical either way, because
+the lock was never the React flag — the server refuses to decrypt without the ticket.
+
+### 🔴 3. A SAVED KEY COULD NOT BE EDITED
+
+Admin: *"old ko edit/copy and delete kar sake"*. Copy and delete worked; the value box was `readOnly`.
+The backend already REPLACES a key when the same name is saved (`routes/secrets.ts`), so rotating a
+leaked key was supported server-side and simply unreachable — the user had to delete the row and retype
+the name, where a typo silently creates a second key no build reads. The value is now editable with an
+explicit "Save new value". The NAME stays fixed (a different name is a different key). **The scope rides
+along** — without the row's `workspace_id` the new value would land in the SHARED scope while the
+app-scoped row kept the old one, so the build would read the stale key while this screen showed the new
+one. An empty value is refused; blanking a live key is what the bin is for, and the bin asks twice.
+
+### THE HONEST PART: THE PHONE LOCK STILL CANNOT BE OFFERED *INSIDE THE APP*
+
+The screen used to say *"This device has no face, fingerprint or PIN lock available"* — which is false on
+a modern phone and sends the user into their own settings hunting for something already switched on.
+WebAuthn binds a credential to an ORIGIN, and the Capacitor shell's origin is a custom scheme (iOS) with
+varying WebView support (Android). **The phone's lock is fine; the app's browser layer cannot ask for
+it.** The copy now says that, and says the phone lock does work on navbharatai.com in the phone's own
+browser. Making Face ID work INSIDE the app needs a native biometric plugin — a new dependency, native
+config, and a fresh `.aab`/`.ipa` — and is recorded here as an OPEN item rather than faked with a
+client-side boolean, which CLAUDE.md forbids for good reason: a plugin's yes/no is unverifiable.
+
+`AppKnowledgeBase` updated in the same change: both stale claims corrected (the old "no lock available"
+line and "adding a key does NOT need an unlock"), plus edit/rotate and the native limitation, with the
+words a user types — `key edit`, `key badlo`, `rotate key`, `lock nahi khul raha`, `auth/argument-error`.
+
+**Gate on the final state:** typecheck 0, noUnusedImports clean, typecheck:server 0, build ok,
+test:bundle ok, boot:check PASS, vitest 1585 files / 21,974 passed / 1 skipped / 0 failed.

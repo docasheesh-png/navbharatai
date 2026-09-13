@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Lock, ShieldCheck, Fingerprint, KeyRound, AlertTriangle } from 'lucide-react';
-import { EmailAuthProvider, GoogleAuthProvider, reauthenticateWithCredential, reauthenticateWithPopup } from 'firebase/auth';
+import { reauthenticateNow, reauthMethodFor, reauthMethodLabel, deviceLockUnavailableReason } from '../lib/vaultReauth';
 import { auth } from '../lib/firebase';
 import {
   deviceLockAvailable, lockStatus, registerDeviceLock, unlockWithDevice, unlockWithAccount,
@@ -114,15 +114,11 @@ export const VaultLockGate: React.FC<{
   const unlockViaAccount = async () => {
     const user = auth.currentUser;
     if (!user) { setError('Please sign in again.'); return; }
-    const isGoogle = user.providerData.some((p) => p.providerId === GoogleAuthProvider.PROVIDER_ID);
     await run('account', async () => {
-      if (isGoogle) {
-        await reauthenticateWithPopup(user, new GoogleAuthProvider());
-      } else {
-        if (!user.email) throw new Error('This account has no password to confirm. Use your device lock instead.');
-        if (!password) throw new Error('Enter your account password.');
-        await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, password));
-      }
+      // ONE shared re-authentication (`lib/vaultReauth.ts`). It was a web-only popup call here and in
+      // setUpDeviceLock below, which is why the app showed `auth/argument-error` and no door opened at
+      // all: the native shell has no popup, and the sign-in it contradicted uses the native plugin.
+      await reauthenticateNow(user, password);
       // The fresh token has to be in hand before the server reads auth_time off it.
       await user.getIdToken(true);
       setPassword('');
@@ -137,14 +133,7 @@ export const VaultLockGate: React.FC<{
       // 🔒 Registering a device is gated by a fresh sign-in on the SERVER too. Without that, a stolen
       // session could enrol the thief's own face and hold the vault open forever — the lock would be
       // handing out keys instead of withholding them.
-      const isGoogle = user.providerData.some((p) => p.providerId === GoogleAuthProvider.PROVIDER_ID);
-      if (isGoogle) {
-        await reauthenticateWithPopup(user, new GoogleAuthProvider());
-      } else {
-        if (!password) throw new Error('Enter your account password to set up the device lock.');
-        if (!user.email) throw new Error('This account has no password. Device lock cannot be set up here.');
-        await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, password));
-      }
+      await reauthenticateNow(user, password);
       await user.getIdToken(true);
       setPassword('');
       const state = await registerDeviceLock(userId, user.email || user.displayName || 'NavBharatAI account');
@@ -182,11 +171,14 @@ export const VaultLockGate: React.FC<{
     );
   }
 
-  const isGoogleAccount = !!auth.currentUser
-    && auth.currentUser.providerData.some((p) => p.providerId === GoogleAuthProvider.PROVIDER_ID);
+  // Which door this ACCOUNT actually has — read from its real providers rather than testing for Google
+  // alone. An Apple or GitHub account was previously treated as a password account, so it was shown a
+  // password field it can never fill; now each one is offered its own provider.
+  const accountMethod = auth.currentUser ? reauthMethodFor(auth.currentUser) : null;
+  const isSocialAccount = accountMethod === 'google' || accountMethod === 'apple' || accountMethod === 'github';
 
-  // A Google account has no password to type, so the field would be an empty box that explains nothing.
-  const showPasswordField = askPassword && !!auth.currentUser && !isGoogleAccount;
+  // A social account has no password to type, so the field would be an empty box that explains nothing.
+  const showPasswordField = askPassword && accountMethod === 'password';
 
   /**
    * 🔴 WHICH DOOR LOOKS LIKE THE MAIN ONE (admin 2026-09-12, from a real screenshot of this screen).
@@ -214,8 +206,8 @@ export const VaultLockGate: React.FC<{
    */
   const accountLabel = busy === 'account'
     ? 'Checking…'
-    : isGoogleAccount
-      ? 'Confirm with Google'
+    : isSocialAccount
+      ? reauthMethodLabel(accountMethod)
       : askPassword
         ? 'Confirm and unlock'
         : 'Use my account password';
@@ -260,7 +252,7 @@ export const VaultLockGate: React.FC<{
                   // A password account has to type it first. Firing the registration now would only
                   // raise an error saying what the field itself is about to ask for — an error as a
                   // form of instruction, which is how a one-tap feature comes to feel broken.
-                  if (!isGoogleAccount && !password) { setAskPassword(true); return; }
+                  if (!isSocialAccount && !password) { setAskPassword(true); return; }
                   void setUpDeviceLock();
                 }}
                 disabled={!!busy}
@@ -289,7 +281,7 @@ export const VaultLockGate: React.FC<{
           )}
 
           <button
-            onClick={() => (askPassword || isGoogleAccount ? void unlockViaAccount() : setAskPassword(true))}
+            onClick={() => (askPassword || isSocialAccount ? void unlockViaAccount() : setAskPassword(true))}
             disabled={!!busy}
             className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold disabled:opacity-50 ${
               deviceIsPrimary ? secondaryButton : primaryButton
@@ -299,10 +291,17 @@ export const VaultLockGate: React.FC<{
             {accountLabel}
           </button>
 
+          {/* 🔴 HONEST ABOUT WHOSE LIMITATION IT IS (admin 2026-09-13, from a screenshot on the app).
+              This used to claim the device had no face, fingerprint or PIN lock available — which is
+              simply false on a modern phone and sends the user into their own settings looking for
+              something already switched on. Inside the app the phone's lock is unreachable because
+              WebAuthn binds to an ORIGIN and the shell's origin is a custom scheme, not because the
+              phone lacks a lock. Say that, and say what to do instead. */}
           {canUseDevice === false && (
             <p className="text-[10px] leading-snug text-gray-500">
-              This device has no face, fingerprint or PIN lock available to the browser, so your account
-              password is used instead. It is checked on our server, not here.
+              {deviceLockUnavailableReason() === 'native-shell'
+                ? 'Face ID, fingerprint and PIN are not reachable from inside the app yet — your phone\'s lock is fine, the app\'s browser layer cannot ask for it. Confirming your account does the same job and is checked on our server, not here. On navbharatai.com in your phone\'s browser, the phone lock works.'
+                : 'This browser cannot offer face, fingerprint or PIN, so confirming your account is used instead. It is checked on our server, not here.'}
             </p>
           )}
         </div>

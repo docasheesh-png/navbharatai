@@ -52314,3 +52314,57 @@ Publish sheet's analytics tile now shows the period's traffic beside the visitor
 
 ⚠️ **Stacked on PR #2905** (the ₹299/₹599 catalogue), because the frontend/backend allowance split it
 compares against does not exist on `main` yet. 27 tests.
+
+## 2026-09-13 — P4: usage warnings at 50% / 80% / 100%, and the noise rule that shapes them
+
+**Why it is not optional.** The plan agreement a user ticks before paying says, in its own words,
+*"You can see your usage in the app at any time, so this is never a surprise."* A screen they have to
+go and look at is half of that promise. The half that actually prevents a surprise is being TOLD
+before the charge — without this, the first a user hears about going over is a rupee figure in their
+ledger.
+
+**What shipped.** `src/server/lib/hostingUsageWarning.ts` (pure: `decideUsageWarning`, `warnKey`,
+`USAGE_WARN_PERCENTS`), a `warnedFor` map and a running `frontendGb` total on `PeriodUsageRecord` with
+their own narrow writers (`markWarned`, `recordFrontend`), and `warnOnUsage` in the hosting sweep,
+called for BOTH allowances.
+
+🔴 **THE LARGEST REACHED THRESHOLD FIRES — the MIRROR of the expiry reminders, and copying that file
+blindly would get it backwards.** `hostingPlan.ts` records, in a comment written after the bug bit,
+that its reminder loop used to fire the LARGEST reached window first and so told a user "5 days ahead"
+when five days did not exist. Its fix was smallest-first, because the windows count DOWN and the
+smallest is the only accurate description. Here the thresholds count UP, so the accurate one is the
+LARGEST: a user who jumps from 40% to 100% overnight must be told they are AT the limit, and "you have
+used half your traffic" said on the day the wallet starts being charged is the false statement. Every
+smaller threshold is burned in the same write, because none of them can be said truthfully afterwards.
+
+🔒 **The dedupe is keyed on the PLAN PERIOD, not cleared on renewal** — `remindedFor`'s pattern, where
+the stored VALUE is the period, so a renewal makes every key stale at once and there is no reset step
+to forget. This is what CLAUDE.md's alert-noise law requires: a daily job with no memory would send
+"you are at 80%" every day for three weeks, which is how a useful warning becomes something people
+filter. A test runs thirty consecutive sweeps at 85% and asserts exactly one message.
+
+Decisions worth recording:
+
+- **The warning is sent BEFORE the branches, not inside one.** Every path after the overage decision
+  either charges, absorbs or skips — and all three are moments the user deserved a warning about.
+  Putting it inside any one of them would make the warning depend on which outcome the day happened to
+  take, which is "works on the path I tested" wiring.
+- **The dedupe is burned only AFTER the notification resolves.** A failure to send can never look like
+  a warning that was sent: a Firestore hiccup costs a repeat tomorrow rather than silence for the rest
+  of the period. Repeating a true message is a far smaller failure than never sending it.
+- **`markWarned` is its own write, touching only `warnedFor`.** Threading it through `record()` would
+  mean every future call site has to remember to carry it, and one that forgot would silently re-arm a
+  warning the user already had — the exact daily-repeat this feature exists to prevent. It also cannot
+  disturb a money field, whichever order the two writes land in.
+- **Frontend usage now accumulates a period total too** (`frontendGb`), because a warning about "50% of
+  your allowance" needs a period, not a day. It is a separate field from the backend total because the
+  agreement says the two allowances are "counted separately, not added together".
+- **A FREE account gets no warning at all, deliberately.** It has no plan period to accumulate against
+  and no agreement under which anything could be charged — and a warning about a charge that cannot
+  happen is not a kindness, it is a false alarm.
+- **A zero or unreadable allowance never warns.** There is no percentage of zero, and "you have used
+  Infinity%" is worse than silence.
+- **The message quotes the real ₹/GB when it knows it and invents nothing when it does not** — and a
+  test asserts no message names a vendor, because the White-Label Law reaches every user-facing string.
+
+18 tests in `tests/hostingUsageWarning.test.ts`.

@@ -885,7 +885,7 @@ setInterval(() => {
                 .then(({ runHostingBillingSweep }) => runHostingBillingSweep())
                 .then((r) => {
                   if (r.considered > 0 || !r.registryComplete) {
-                    console.log(`[hosting-bill] ${r.day}: considered ${r.considered}, charged ${r.charged} (₹${r.totalInr}), skipped ${r.skipped}${r.registryComplete ? '' : ' ⚠️ registry read INCOMPLETE — some apps may not have been billed'}`);
+                    console.log(`[hosting-bill] ${r.day}: considered ${r.considered}, charged ${r.charged} (₹${r.totalInr}), skipped ${r.skipped}, frontend reported ${r.frontendOwnersReported}, warnings ${r.warningsSent}${r.registryComplete ? '' : ' ⚠️ registry read INCOMPLETE — some apps may not have been billed'}`);
                     for (const n of r.notes) console.log(`[hosting-bill] ${n}`);
                   }
                 })

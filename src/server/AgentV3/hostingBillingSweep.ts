@@ -55,6 +55,7 @@ import { readHostingPlanStatus, planDays } from '../lib/hostingPlan';
 import { siteIdForWorkspace } from '../lib/firebaseCustomDomain';
 import { siteAnalyticsStore } from '../lib/siteAnalyticsStore';
 import { sumFrontendBytes, judgeFrontendUsage } from './frontendUsage';
+import { decideUsageWarning, type UsageMeterKind } from '../lib/hostingUsageWarning';
 import { HOSTING_OVERAGE_INR_PER_GB } from '../../lib/hostingTiers';
 import { readWalletBalanceInr, firestoreWalletReader } from './WalletBalance';
 import { saveNotification } from '../lib/AdminNotificationStore';
@@ -91,6 +92,8 @@ export interface SweepResult {
    * would make it impossible to tell which half a figure came from.
    */
   frontendOwnersReported: number;
+  /** Usage warnings sent to owners this run (50% / 80% / 100%, at most one per threshold per period). */
+  warningsSent: number;
 }
 
 /** Is this record a NavBharat Cloud app that is live right now? */
@@ -119,7 +122,7 @@ export async function runHostingBillingSweep(opts?: {
   const win = opts?.window ?? lastCompleteDay(nowMs);
   const out: SweepResult = {
     day: win.day, considered: 0, charged: 0, totalInr: 0, skipped: 0, notes: [], registryComplete: false,
-    frontendOwnersReported: 0,
+    frontendOwnersReported: 0, warningsSent: 0,
   };
 
   const project = appsProject(env);
@@ -252,6 +255,15 @@ export async function runHostingBillingSweep(opts?: {
         agreed,
       });
 
+      // 🔒 ONE CALL, BEFORE THE BRANCHES. Every path below this point either charges, absorbs or
+      // skips — and all three are moments the user deserves to have been warned about. Putting the
+      // warning inside any one of them would make it depend on which outcome the day happened to
+      // take, which is exactly the kind of "works on the path I tested" wiring this file avoids.
+      await warnOnUsage({
+        ownerId, meter: 'backend', usedGb: decision.periodGb, includedGb: tier.includedBackendGb,
+        periodStart, warnedFor: usage.warnedFor, out,
+      });
+
       const costNote = `our cost $${costUsd.toFixed(6)} for the day`;
       const usedNote = `${decision.periodGb.toFixed(3)} GB of ${tier.includedBackendGb} GB (server) used this period`;
       if (!decision.charge) {
@@ -372,6 +384,63 @@ async function reportFrontendTraffic(
     });
     out.frontendOwnersReported++;
     out.notes.push(`${ownerId}: ${verdict.note}.`);
+
+    // A plan holder gets a RUNNING period total and the same 50/80/100 warnings the server allowance
+    // gets. A free account deliberately gets neither: it has no plan period to accumulate against and
+    // no agreement to warn about a charge under — and a warning about a charge that cannot happen is
+    // not a kindness, it is a false alarm.
+    const plan = status?.active ? status.plan : null;
+    const periodStart = plan ? periodStartFrom(plan.expiresAt, planDays(plan.id)) : '';
+    if (!periodStart || !verdict.includedGb) continue;
+    const record = await hostingPeriodUsageStore.read(ownerId, periodStart).catch(() => null);
+    if (!record) continue;  // unreadable ⇒ do not advance a total or warn off a number we do not have
+    const periodGb = Math.round((Math.max(0, Number(record.frontendGb) || 0) + verdict.gb) * 1e6) / 1e6;
+    await hostingPeriodUsageStore.recordFrontend(ownerId, periodStart, periodGb);
+    await warnOnUsage({
+      ownerId, meter: 'frontend', usedGb: periodGb, includedGb: verdict.includedGb,
+      periodStart, warnedFor: record.warnedFor, out,
+    });
+  }
+}
+
+/**
+ * "YOU HAVE USED 80% OF YOUR TRAFFIC" — sent once per threshold per plan period.
+ *
+ * The rule is pure and lives in `hostingUsageWarning.ts`; this is the I/O around it. It is written so
+ * that a failure to SEND can never look like a warning that was sent: the dedupe is only burned after
+ * `saveNotification` resolves, so a Firestore hiccup costs a repeat tomorrow rather than silence for
+ * the rest of the period. Repeating a true message is a much smaller failure than never sending it.
+ */
+async function warnOnUsage(o: {
+  ownerId: string;
+  meter: UsageMeterKind;
+  usedGb: number;
+  includedGb: number;
+  periodStart: string;
+  warnedFor: Record<string, string> | undefined;
+  out: SweepResult;
+}): Promise<void> {
+  try {
+    const decision = decideUsageWarning({
+      usedGb: o.usedGb,
+      includedGb: o.includedGb,
+      meter: o.meter,
+      periodStart: o.periodStart,
+      warnedFor: o.warnedFor,
+      overageInrPerGb: HOSTING_OVERAGE_INR_PER_GB,
+    });
+    if (!decision.warn) return;
+    const sent = await saveNotification({
+      message: decision.message,
+      target: { type: 'user', userId: o.ownerId },
+      createdBy: 'system',
+    }).then(() => true).catch(() => false);
+    if (!sent) return;
+    await hostingPeriodUsageStore.markWarned(o.ownerId, o.periodStart, decision.warnedFor);
+    o.out.warningsSent++;
+    o.out.notes.push(`${o.ownerId}: told they are at ${decision.percent}% of their ${o.meter} allowance.`);
+  } catch {
+    // A warning must never affect a bill. Silence here costs a repeat, not a rupee.
   }
 }
 

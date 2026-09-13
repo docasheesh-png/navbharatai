@@ -211,7 +211,7 @@ export function computePlanPurchase(
   current: Record<string, any>,
   nowIso: string,
   tierId: HostingTierId | string = HOSTING_TIERS[0].id,
-  opts: { agreedToTerms?: boolean } = {},
+  opts: { agreedToTerms?: boolean; autoRenew?: boolean } = {},
 ): PlanPurchaseOutcome {
   if (!hostingPlansEnabled()) return { ok: false, reason: 'disabled' };
   const tier = purchasableTier(tierId);
@@ -279,7 +279,14 @@ export function computePlanPurchase(
     id: tier.id,
     purchasedAt: (samePlan && prior!.purchasedAt) || nowIso,
     expiresAt,
-    autoRenew: samePlan ? prior!.autoRenew !== false : true,
+    /**
+     * The BUYER'S choice when they made one (2026-09-13) — the purchase screen now shows the renewal
+     * tick beside the price, so a person who unticks it must actually get a one-off period. Absent
+     * ⇒ the previous behaviour exactly: renew on, or whatever a same-plan renewal already carried.
+     */
+    autoRenew: typeof opts.autoRenew === 'boolean'
+      ? opts.autoRenew
+      : (samePlan ? prior!.autoRenew !== false : true),
     agreedAt: nowIso,
     agreedTerms: hostingAgreementTerms(tier),
     lapsedAt: null,
@@ -613,7 +620,7 @@ export async function purchaseHostingPlan(
   userId: string,
   nowIso?: string,
   tierId: HostingTierId | string = HOSTING_TIERS[0].id,
-  opts: { agreedToTerms?: boolean } = {},
+  opts: { agreedToTerms?: boolean; autoRenew?: boolean } = {},
 ): Promise<PlanPurchaseResult> {
   if (!hostingPlansEnabled()) {
     return { ok: false, error: 'Hosting plans are not available right now.', reason: 'disabled' };

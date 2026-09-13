@@ -12,7 +12,13 @@
 // admin report, and recoverable by hand. The reverse order risks charging somebody twice for the same
 // day, which is the one outcome the billing law never permits. When in doubt, we eat it.
 //
-// Collection: `hosting_billing`   ·   Doc ID: `<workspaceId>_<YYYY-MM-DD>`
+// 🔴 IT IS KEYED BY OWNER SINCE 2026-09-13, NOT BY APP, AND IT IS NOT OPTIONAL. Billing moved to a
+// per-owner traffic allowance, and the running total it bills against is ACCUMULATED — so a job that
+// ran twice on the same day would add the same day's GB to that total twice, and the user would be
+// charged for traffic that never happened. The old per-app `create` guard was what made a re-run
+// harmless; keeping it, re-keyed, is what keeps the new model honest.
+//
+// Collection: `hosting_billing`   ·   Doc ID: `<ownerId>_<YYYY-MM-DD>`
 
 import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
@@ -21,7 +27,8 @@ import { hostingBillKey } from './hostingBillingDay';
 const COLLECTION = 'hosting_billing';
 
 export interface HostingBillRecord {
-  workspaceId: string;
+  /** The OWNER this day was processed for — the allowance and the debt are both theirs. */
+  subject: string;
   day: string;
   userId: string;
   /** ₹ reserved for this app-day. */
@@ -61,9 +68,9 @@ class HostingBillingStore {
    */
   async claim(rec: Omit<HostingBillRecord, 'reservedAt' | 'debited'>): Promise<boolean> {
     const db = this.getDb();
-    if (!db || !rec.workspaceId || !rec.day) return false;
+    if (!db || !rec.subject || !rec.day) return false;
     try {
-      await db.collection(COLLECTION).doc(hostingBillKey(rec.workspaceId, rec.day)).create({
+      await db.collection(COLLECTION).doc(hostingBillKey(rec.subject, rec.day)).create({
         ...rec, debited: false, reservedAt: Date.now(),
       } satisfies HostingBillRecord);
       return true;
@@ -76,11 +83,11 @@ class HostingBillingStore {
   }
 
   /** Record that the debit really landed. Best-effort: the claim above is what prevents a re-charge. */
-  async markDebited(workspaceId: string, day: string, tokensDebited: number): Promise<void> {
+  async markDebited(subject: string, day: string, tokensDebited: number): Promise<void> {
     const db = this.getDb();
     if (!db) return;
     try {
-      await db.collection(COLLECTION).doc(hostingBillKey(workspaceId, day)).set(
+      await db.collection(COLLECTION).doc(hostingBillKey(subject, day)).set(
         { debited: true, tokensDebited, debitedAt: Date.now() }, { merge: true },
       );
     } catch { /* the money moved; a telemetry write failing must not undo that fact */ }

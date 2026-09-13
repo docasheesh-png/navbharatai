@@ -24,7 +24,7 @@ import { GoogleAuth } from 'google-auth-library';
 import { injectBadgeIntoFiles } from '../lib/madeWithBadge';
 import { injectBeaconIntoFiles, publicOrigin } from '../lib/siteAnalytics';
 import {
-  appAiGatewayEnabled, gatewaySecret, injectGatewayIntoFiles, mintAppAiToken,
+  appAiGatewayEnabled, appUsesGateway, gatewaySecret, injectGatewayIntoFiles, mintAppAiToken,
 } from '../lib/appAiGateway';
 import { appAiRegistryStore } from '../lib/AppAiRegistryStore';
 import { siteIdForWorkspace } from '../lib/firebaseCustomDomain';
@@ -529,7 +529,10 @@ export function withDeploymentPersistence(
       // write means no stamp, and the app simply has no assistant. Republishing rotates the nonce;
       // the previous one stays valid for one generation so a deploy cannot break a page a visitor
       // already has open (see appAiGateway.ts). Off unless APP_AI_GATEWAY=on.
-      if (appAiGatewayEnabled()) {
+      // 🔴 AND ONLY FOR AN APP THAT ASKED FOR IT (admin 2026-09-13). The registry row is not written
+      // either — an app with no assistant needs no identity, and minting one for every publish would
+      // create a record about somebody who never opted in. `appUsesGateway` reads the app's own code.
+      if (appAiGatewayEnabled() && appUsesGateway(files)) {
         try {
           const appId = siteIdForWorkspace(workspaceId);
           const nonce = randomBytes(9).toString('base64url');

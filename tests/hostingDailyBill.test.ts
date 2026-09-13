@@ -3,8 +3,10 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   lastCompleteDay, hostingBillKey, hostingLedgerRef, HOSTING_LEDGER_LABEL,
-  decideHostingDebit, hostingDebitNote,
 } from '../src/server/AgentV3/hostingBillingDay';
+import {
+  decideOverage, decideDebtAction, periodStartFrom, daysBetween, HOSTING_DEBT_GRACE_DAYS,
+} from '../src/server/lib/hostingOverage';
 
 /**
  * THE DAILY HOSTING BILL (ROADMAP §11 slice 2.1).
@@ -60,33 +62,68 @@ describe('the billing window', () => {
   });
 });
 
-describe('what to debit', () => {
-  const base = { billableUsd: 1, usdInr: 87, ownerId: 'u1', billingEnabled: true };
+describe('what a plan holder is charged', () => {
+  const base = {
+    gbToday: 1 as number | null,
+    usage: { gbBefore: 0, gbBilled: 0 },
+    includedGb: 5,
+    ratePerGb: 20,
+    hasPlan: true,
+    agreed: true,
+  };
 
-  it('charges the rupee value of what hostingBillableUsd already decided', () => {
-    expect(decideHostingDebit(base)).toEqual({ charge: true, reason: 'charge', billedInr: 87 });
+  it('🔒 charges NOTHING inside the allowance the plan already sold them', () => {
+    // This is the double charge the admin caught: a ₹149 holder has BOUGHT 5 GB in the terms they
+    // ticked. Billing them from the first byte takes money for something already paid for.
+    const d = decideOverage({ ...base, gbToday: 4.9 });
+    expect(d.charge).toBe(false);
+    expect(d.reason).toBe('within-allowance');
+    expect(d.periodGb).toBeCloseTo(4.9, 6);
   });
 
-  it('🔒 charges NOTHING while the switch is off — measured, recorded, absorbed', () => {
-    expect(decideHostingDebit({ ...base, billingEnabled: false }))
-      .toEqual({ charge: false, reason: 'billing-off', billedInr: 0 });
+  it('charges ₹20 per GB, but only for the GB above the allowance', () => {
+    const d = decideOverage({ ...base, gbToday: 7 });
+    expect(d.charge).toBe(true);
+    expect(d.billableGb).toBeCloseTo(2, 6);
+    expect(d.inr).toBeCloseTo(40, 2);
   });
 
-  it('🔒 an ORPHANED app is named, never charged to somebody else and never a silent zero', () => {
-    const d = decideHostingDebit({ ...base, ownerId: null });
-    expect(d).toEqual({ charge: false, reason: 'no-owner', billedInr: 0 });
-    expect(hostingDebitNote(d, '2026-09-11')).toContain('no owner');
+  it('🔒 bills the DIFFERENCE, so the allowance is not handed back every day', () => {
+    // The allowance is monthly and the job is daily. "Today minus 5 GB" would charge nothing until a
+    // single day passed 5 GB, then grant the whole allowance again tomorrow.
+    const day1 = decideOverage({ ...base, gbToday: 7 });                       // 7 total, 2 billable
+    const day2 = decideOverage({
+      ...base, gbToday: 1, usage: { gbBefore: day1.periodGb, gbBilled: day1.billableGb },
+    });
+    expect(day2.charge).toBe(true);
+    expect(day2.billableGb).toBeCloseTo(1, 6);   // the new GB only — not 3
+    expect(day2.periodGb).toBeCloseTo(8, 6);
   });
 
-  it('🔒 a charge that rounds to nothing IS nothing — never rounded up to a paisa', () => {
-    // Doing that daily, for every app, would be a real recurring invented bill.
-    expect(decideHostingDebit({ ...base, billableUsd: 0.00001 }).charge).toBe(false);
-    expect(decideHostingDebit({ ...base, billableUsd: 0 }).charge).toBe(false);
+  it('🔒 a LEGACY ₹99 plan is never charged overage — its holder never saw the terms', () => {
+    const d = decideOverage({ ...base, gbToday: 50, agreed: false });
+    expect(d.charge).toBe(false);
+    expect(d.reason).toBe('not-agreed');
   });
 
-  it('an unusable FX rate charges nothing rather than guessing one', () => {
-    expect(decideHostingDebit({ ...base, usdInr: 0 }).charge).toBe(false);
-    expect(decideHostingDebit({ ...base, usdInr: Number.NaN }).charge).toBe(false);
+  it('🔒 NO PLAN means nothing is billed here — an app running without one is a leaked gate', () => {
+    const d = decideOverage({ ...base, gbToday: 50, hasPlan: false });
+    expect(d.charge).toBe(false);
+    expect(d.reason).toBe('no-plan');
+  });
+
+  it('🔒 an UNMEASURED day charges nothing AND adds nothing to the total', () => {
+    // A gap treated as zero would shrink the total the user is eventually billed on. Carried
+    // honestly instead — under-charging, which is the only safe direction.
+    const d = decideOverage({ ...base, gbToday: null, usage: { gbBefore: 6, gbBilled: 1 } });
+    expect(d.charge).toBe(false);
+    expect(d.reason).toBe('nothing-measured');
+    expect(d.periodGb).toBe(6);
+  });
+
+  it('🔒 a part-GB that rounds to nothing IS nothing — never a daily invented paisa', () => {
+    const d = decideOverage({ ...base, gbToday: 5.0000001 });
+    expect(d.charge).toBe(false);
   });
 
   it('the ledger row is one bucket per user per day, in NavBharatAI’s own words', () => {
@@ -95,6 +132,52 @@ describe('what to debit', () => {
     for (const vendor of ['Google', 'Cloud Run', 'GCP']) {
       expect(HOSTING_LEDGER_LABEL, vendor).not.toContain(vendor);
     }
+  });
+});
+
+describe('when the money does not arrive', () => {
+  const base = { owedInr: 50, balanceInr: 0, owedForDays: 0, graceDays: HOSTING_DEBT_GRACE_DAYS };
+
+  it('🔒 a user who owes NOTHING is never touched, whatever their balance is', () => {
+    // An empty wallet is not a debt. A site inside its included GB costs its owner nothing, so ₹0
+    // changes nothing for them — this is the line between fair and catastrophic.
+    expect(decideDebtAction({ ...base, owedInr: 0 })).toBe('none');
+    expect(decideDebtAction({ ...base, owedInr: 0, owedForDays: 99 })).toBe('none');
+  });
+
+  it('with balance left, nothing happens — the charge simply goes through next time', () => {
+    expect(decideDebtAction({ ...base, balanceInr: 10 })).toBe('none');
+  });
+
+  it('🔒 an UNREADABLE balance never takes a site offline', () => {
+    // A Firestore hiccup must not put somebody's site off the internet.
+    expect(decideDebtAction({ ...base, balanceInr: null })).toBe('none');
+    expect(decideDebtAction({ ...base, balanceInr: Number.NaN })).toBe('none');
+  });
+
+  it('🔒 a reminder ALWAYS comes first, and the grace clock starts at the reminder', () => {
+    expect(decideDebtAction({ ...base, owedForDays: 0 })).toBe('warn');
+    expect(decideDebtAction({ ...base, owedForDays: HOSTING_DEBT_GRACE_DAYS - 1 })).toBe('warn');
+    expect(decideDebtAction({ ...base, owedForDays: HOSTING_DEBT_GRACE_DAYS })).toBe('take-offline');
+  });
+});
+
+describe('the plan period', () => {
+  it('resets with the PLAN, not with the calendar month', () => {
+    // A plan bought on the 19th renews on the 19th. An allowance that reset on the 1st would give
+    // that user a second free 5 GB in the middle of every period they paid for.
+    expect(periodStartFrom('2026-10-19T00:00:00.000Z', 30)).toBe('2026-09-19');
+  });
+
+  it('an unreadable expiry yields no period rather than a wrong one', () => {
+    expect(periodStartFrom('', 30)).toBe('');
+    expect(periodStartFrom('2026-10-19T00:00:00.000Z', 0)).toBe('');
+  });
+
+  it('counts whole days from when the debt was first recorded', () => {
+    const now = Date.parse('2026-09-13T06:00:00Z');
+    expect(daysBetween('2026-09-10T00:00:00Z', now)).toBe(3);
+    expect(daysBetween(null, now)).toBe(0);
   });
 });
 
@@ -116,13 +199,27 @@ describe('the guard', () => {
 describe('the sweep', () => {
   const sweep = codeOf(read('src/server/AgentV3/hostingBillingSweep.ts'));
 
-  it('🔒 reserves BEFORE it debits', () => {
-    // If the reservation lands and the debit fails we absorb one day of one app. The reverse order
-    // risks charging twice, which is the outcome the billing law never permits.
+  it('🔒 claims the day BEFORE it measures anything', () => {
+    // The allowance is billed against a RUNNING TOTAL, so a job that ran twice would add the same
+    // day's GB twice and charge for traffic that never happened.
     const claim = sweep.indexOf('hostingBillingStore.claim(');
+    const measure = sweep.indexOf('readHostingUsage(');
     const debit = sweep.indexOf('debitWalletRolledUp(');
     expect(claim).toBeGreaterThan(-1);
+    expect(measure).toBeGreaterThan(claim);
     expect(debit).toBeGreaterThan(claim);
+  });
+
+  it('🔒 the allowance is the OWNER’S, across all their sites — not one per app', () => {
+    // Billing each app against its own 5 GB would hand somebody with three sites fifteen free GB,
+    // while the terms they ticked promise five.
+    expect(sweep).toContain('const byOwner = new Map<string, DeploymentRecord[]>()');
+    expect(sweep).toContain('for (const [ownerId, owned] of byOwner)');
+  });
+
+  it('🔒 an app with NO plan is reported, never charged', () => {
+    expect(sweep).toContain('NO active plan');
+    expect(sweep).toMatch(/if \(!tier\) \{[\s\S]{0,400}continue;/);
   });
 
   it('🔒 a failed claim charges nothing and says so', () => {
@@ -150,9 +247,29 @@ describe('the sweep', () => {
     expect(sweep).toContain("(r.status ?? 'active') === 'active'");
   });
 
-  it('🔒 does not pause anybody’s app — that decision is the admin’s', () => {
-    expect(sweep).not.toContain('plan_paused');
-    expect(sweep).not.toContain('setStatus');
+  it('🔒 takes a site offline ONLY through the decision that requires a reminder first', () => {
+    // CHANGED 2026-09-13 on the admin's instruction, and only together with the agreement wording
+    // that now states it. The test is not relaxed: it pins that the status change is reachable
+    // solely from `decideDebtAction` returning 'take-offline', never from an ad-hoc condition.
+    expect(sweep).toContain("decideDebtAction({");
+    expect(sweep).toContain("if (action === 'none') return;");
+    expect(sweep).toContain("if (action === 'warn')");
+    expect(sweep).toMatch(/action === 'warn'[\s\S]*?setStatus\(app\.workspaceId, 'plan_paused'\)/);
+    // Marked, never deleted — the files stay and the app returns on publish.
+    expect(sweep).not.toContain('deleteHostedService');
+  });
+
+  it('🔒 the user is TOLD, both times, in NavBharatAI’s own words', () => {
+    expect(sweep).toContain('please top up within');
+    expect(sweep).toContain('Nothing has been deleted');
+    // Only the MESSAGES the user reads are checked for vendor names — the file itself legitimately
+    // imports GoogleAuth to read the meter, and asserting over the whole source would be asserting
+    // that admin-side code cannot name the cloud it talks to.
+    const messages = [...sweep.matchAll(/message: `([^`]*)`/g)].map((m) => m[1]).join(' ');
+    expect(messages.length).toBeGreaterThan(50);
+    for (const vendor of ['Google', 'Cloud Run', 'GCP', 'Firebase']) {
+      expect(messages, vendor).not.toContain(vendor);
+    }
   });
 });
 

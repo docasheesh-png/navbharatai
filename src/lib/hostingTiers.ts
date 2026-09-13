@@ -190,9 +190,22 @@ export function hostingAgreementTerms(tier: HostingTier): readonly string[] {
     // tap" implied a Restore button that does not exist. Republishing re-runs a real build, so it is
     // done by opening the app and pressing Publish. Promising less friction than there is would be
     // discovered at the worst possible moment — just after the user paid to get their apps back.
-    `If the plan ends and you do not renew, you go back to the free ${FREE_PUBLISHED_APPS} apps: anything above that is PAUSED, never deleted. All your files are kept — renew, then open a paused app and press Publish to put it back online. Your domain pauses too (that one reconnects on its own), and the "Made with NavBharatAI" badge returns.`,
+    `If you do not renew, your plan simply ends on its expiry date. Your first ${FREE_PUBLISHED_APPS} apps stay online free and all of your files are kept. Apps beyond those ${FREE_PUBLISHED_APPS} wait offline until you renew and press Publish, your domain reconnects by itself, and the "Made with NavBharatAI" badge returns.`,
+    // 🔴 THE SENTENCE THAT DID NOT EXIST UNTIL NavBharat Cloud DID. The line above describes the
+    // STATIC fallback — five apps stay online free — and that is true only of apps a CDN can serve. An
+    // app with a server has no free tier to fall back to, because free accounts do not get container
+    // hosting at all. So for those apps "the plan ends" means the app stops, and a buyer is owed that
+    // sentence BEFORE paying rather than on the morning it happens.
+    `Apps that need a server run only on a plan. If the plan ends, they wait offline until you renew — your code and your data are kept exactly as they are.`,
     `The plan includes ${tier.includedTransferGb} GB of visitor traffic every ${tier.days} days, across all your connected sites.`,
-    `If your sites go past ${tier.includedTransferGb} GB, your apps KEEP RUNNING — nothing is switched off. The extra traffic is charged from your wallet at ₹${HOSTING_OVERAGE_INR_PER_GB} per GB, and every charge appears in your ledger.`,
+    // 🔴 THIS LINE PROMISED THE OPPOSITE UNTIL 2026-09-13, IN CAPITALS: "your apps KEEP RUNNING —
+    // nothing is switched off", with no condition at all. Under that wording a site whose owner never
+    // paid for its overage had to be served free, for ever — and switching it off anyway would have
+    // been breaking a promise somebody had paid for. It is corrected here, in the same change as the
+    // rule that enforces it (`hostingOverage.decideDebtAction`), so nobody is ever subject to a term
+    // they were not shown. What was NOT weakened: the app keeps running while there is balance, going
+    // over does not switch anything off by itself, and nothing is ever deleted.
+    `Your apps keep running — nothing is switched off while your wallet has balance. Traffic beyond your included GB is charged at ₹${HOSTING_OVERAGE_INR_PER_GB} per GB from your wallet, and every charge appears in your ledger. If your balance reaches ₹0 while extra traffic is owed, we send you a reminder first, and your site goes offline only if it stays unpaid — nothing is deleted, and your site comes back when you top up and press Publish.`,
     // 🔴 THIS LINE IS HERE BECAUSE THE METER IS NOT LIVE YET, and an agreement that quietly implies
     // otherwise would be describing a system we do not have (rule 2: fully working, or honestly not
     // built). Traffic can only be measured where published apps pass through our own serving path,
@@ -200,7 +213,12 @@ export function hostingAgreementTerms(tier: HostingTier): readonly string[] {
     // user. Until a site's traffic is genuinely measured, NOTHING beyond the plan price is charged —
     // the error is entirely in the user's favour. Delete this line the day the meter covers a site,
     // and not one day earlier.
-    `Traffic measurement is still being rolled out. Until your site's traffic is actually measured, you are charged the plan price and nothing more — you will always see your measured usage before anything extra is charged.`,
+    // 🔒 NARROWED, NOT DELETED (2026-09-13). The meter is now real for apps on NavBharatAI's own
+    // servers, so the old blanket "still being rolled out" would have understated what we can charge.
+    // It stays true, and stays here, for every site served from a Hosting channel, whose bytes cannot
+    // be attributed to one user — and those sites are still charged the plan price and nothing more.
+    // Delete it the day every serving path is metered, and not one day earlier.
+    `Traffic is measured on apps hosted on NavBharatAI's own servers. For a site served any other way, your traffic is not measured yet and you are charged the plan price and nothing more. You will always see your measured usage before anything extra is charged.`,
     `You can connect up to ${tier.domains} domain${tier.domains === 1 ? '' : 's'} of your own on this plan.`,
     ...(tier.bundledCreditInr > 0
       ? [`₹${tier.bundledCreditInr} of build credit is added to your wallet with each ${tier.days}-day period. It is ordinary credit — it does not expire separately from your balance.`]

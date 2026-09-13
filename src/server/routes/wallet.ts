@@ -507,8 +507,12 @@ export function registerWalletRoutes(app: Express): void {
       // buys something real. It cannot silently buy the expensive one.
       const tierId = typeof req.body?.tierId === 'string' ? req.body.tierId : undefined;
       const agreedToTerms = req.body?.agreedToTerms === true;
+      // The renewal choice is now made ON the purchase screen. ABSENT means "not sent" — an older
+      // client keeps today's behaviour (renew on) rather than being silently switched to one-off.
+      const autoRenew = typeof req.body?.autoRenew === 'boolean' ? req.body.autoRenew : undefined;
       const result = await purchaseHostingPlan(
-        getDb() as any, req.params.userId, undefined, tierId ?? HOSTING_TIERS[0].id, { agreedToTerms },
+        getDb() as any, req.params.userId, undefined, tierId ?? HOSTING_TIERS[0].id,
+        { agreedToTerms, ...(autoRenew === undefined ? {} : { autoRenew }) },
       );
       if (!result.ok) {
         // insufficient → 402 (recharge first); a missing tick or an unbuyable tier is the caller's

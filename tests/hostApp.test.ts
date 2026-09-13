@@ -53,7 +53,25 @@ describe('🔒 the two flags — inert by default, admin-only after that', () =>
   it('a non-admin is refused while the feature is still being tested', () => {
     expect(hostingAvailability({ isAdmin: false, env: ON }).available).toBe(false);
     expect(hostingAvailability({ isAdmin: true, env: ON }).available).toBe(true);
-    expect(hostingAvailability({ isAdmin: false, env: { ...ON, NAVBHARAT_CLOUD_PUBLIC: 'on' } as NodeJS.ProcessEnv }).available).toBe(true);
+    const open = { ...ON, NAVBHARAT_CLOUD_PUBLIC: 'on' } as NodeJS.ProcessEnv;
+    // Public now means "open to plan holders", not "open to everyone" — see the plan gate below.
+    expect(hostingAvailability({ isAdmin: false, hasPlan: true, env: open }).available).toBe(true);
+  });
+
+  it('🔒 a SERVER app runs only on a plan — and an unknown answer is treated as NO plan', () => {
+    // Free publishing stays real (five static apps on a CDN), but a container runs continuously on
+    // machines NavBharatAI pays for and has no free tier to fall back to. The agreement a buyer ticks
+    // now says exactly that, so the gate has to say it too. `undefined` means the lookup did not
+    // answer, and an unknown must never open a paid path.
+    const open = { ...ON, NAVBHARAT_CLOUD_PUBLIC: 'on' } as NodeJS.ProcessEnv;
+    for (const hasPlan of [false, undefined]) {
+      const a = hostingAvailability({ isAdmin: false, hasPlan, env: open });
+      expect(a.available, String(hasPlan)).toBe(false);
+      expect(a.message).toMatch(/hosting plan/i);
+      expect(a.message).toMatch(/kept exactly as they are/i);
+    }
+    // The admin is exempt so the path can be tested before anyone can buy into it.
+    expect(hostingAvailability({ isAdmin: true, env: open }).available).toBe(true);
   });
 
   it('🔒 an OFF feature does not leak that the project is misconfigured — the flag is checked first', () => {

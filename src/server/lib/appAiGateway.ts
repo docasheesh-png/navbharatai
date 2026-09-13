@@ -316,13 +316,44 @@ export function injectGatewayScript(html: string, appId: string, token: string, 
   return html + '\n' + tag;
 }
 
-/** Stamp every HTML file in a publish bundle IN PLACE. Returns how many files were stamped. */
+/**
+ * Does this bundle actually USE the gateway?
+ *
+ * 🔴 ADMIN, 2026-09-13: *"user ko lagega ham spy daal rahe hai user ki app me"* — and on the half that
+ * matters, they were right. Nothing is shown to anyone and no app data is read, but the first version
+ * stamped the helper into EVERY published page, including apps that never asked for AI. Something the
+ * user did not request has no business being in their page, however small or inert it is.
+ *
+ * So the stamp now follows the app's own code. `generate_ai` writes a helper that calls
+ * `window.NavAI`, and that property access survives bundling and minification (a minifier may rename
+ * the variable holding `window`, never the property being read off it). An app that never asked for
+ * AI contains the string nowhere, and gets nothing.
+ *
+ * 🔒 CONSERVATIVE BY DESIGN: when in doubt it stamps NOTHING. A false negative means one app's
+ * assistant does not work until it is republished with the helper actually referenced — visible,
+ * fixable, and honestly reported by `isAiReady()`. A false positive puts uninvited code in somebody's
+ * page, which is the thing being corrected.
+ */
+export function appUsesGateway(files: Map<string, Buffer>): boolean {
+  for (const [path, buf] of files) {
+    if (!/\.(html?|js|mjs|cjs)$/i.test(path)) continue;
+    if (buf.toString('utf8').includes('NavAI')) return true;
+  }
+  return false;
+}
+
+/**
+ * Stamp every HTML file in a publish bundle IN PLACE. Returns how many files were stamped.
+ *
+ * Stamps nothing at all unless the app's own code references the assistant — see `appUsesGateway`.
+ */
 export function injectGatewayIntoFiles(
   files: Map<string, Buffer>,
   opts: { appId: string; token: string; origin: string; env?: NodeJS.ProcessEnv },
 ): number {
   if (!appAiGatewayEnabled(opts.env)) return 0;
   if (!opts.appId || !opts.token) return 0;
+  if (!appUsesGateway(files)) return 0;
   let stamped = 0;
   for (const [path, buf] of files) {
     if (!/\.html?$/i.test(path)) continue;

@@ -1047,6 +1047,27 @@ the code (it is actually read somewhere) on 2026-07-11.
   is no separate hosting pot: THE ONE-WALLET LAW says a user has one balance, and the gifted welcome
   balance is already the free allowance for everything else. A hosting-only second currency would be
   one more thing to explain, top up and keep in sync.
+  🔴 **CORRECTED 2026-09-13, BEFORE IT EVER CHARGED ANYBODY — D5 IS NOT WHAT THE USER AGREED TO PAY.**
+  The job priced every hosted app at "our cost + 20%" and knew nothing about hosting plans. But a ₹149
+  Starter holder has already been SOLD 5 GB of traffic, in the agreement they tick before paying, so
+  billing them from the first byte would have taken money for something they had already bought. The
+  admin found it by asking the plain question: *"to hum ₹149 ke plan me user ko kya de rahe hai?"*
+  **What the wallet is charged now is exactly the ticked terms:** ONE meter — visitor traffic, summed
+  across ALL of the owner's hosted sites — the plan's included GB free (Starter 5 GB, Growth 20 GB),
+  and **₹20 per GB above it** (`HOSTING_OVERAGE_INR_PER_GB`). D5 survives as the ADMIN's own view:
+  `hostingCost.ts` still computes what an app really costs US, and that number answers the only
+  question it was ever for — is ₹20/GB above our own cost or below it? The rates below are what make
+  that comparison possible; they no longer decide anybody's bill.
+  🔒 **A LEGACY ₹99 PLAN IS NEVER CHARGED OVERAGE** — those records carry no `agreedAt` because the
+  overage terms did not exist when they were sold. **NO PLAN ⇒ NO SERVER HOSTING AT ALL**
+  (`hostingAvailability` now takes `hasPlan`, and an UNKNOWN answer counts as no plan — an unreadable
+  lookup must never open a paid path). Free publishing is untouched: five static apps, free link, badge.
+  ⚠️ **AND THE AGREEMENT'S CENTRAL PROMISE WAS CHANGED IN THE SAME COMMIT, deliberately.** It read
+  *"your apps KEEP RUNNING — nothing is switched off"*, unconditionally, which made unpaid overage free
+  for ever and made enforcing it a broken promise. It now reads: keep running **while your wallet has
+  balance**; a reminder first; offline only if it stays unpaid; **nothing deleted**, back on publish.
+  `decideDebtAction` enforces exactly that — and a user who owes NOTHING is never touched whatever
+  their balance is, because an empty wallet is not a debt. Unreadable balance ⇒ never offline.
   📅 The job is `hosting-daily-bill` (04:00 UTC, **exclusive**), and it bills the last COMPLETE UTC day —
   never a partial one, because a partial day would be re-billed on the next run. Idempotency is a
   Firestore **`create`** on `hosting_billing/<workspaceId>_<YYYY-MM-DD>`, written BEFORE the wallet
@@ -1087,6 +1108,14 @@ the code (it is actually read somewhere) on 2026-07-11.
   ⚠️ **A Professional Pass does NOT make an app's public traffic free**, and neither does the free list.
   The Pass pays for the HOLDER's own assistant use; treating it as a licence for an unlimited number of
   strangers would quietly resize a product that was already sold.
+  🔒 **ONLY AN APP THAT ASKED FOR IT IS EVER STAMPED (admin 2026-09-13).** The first version put the
+  helper into EVERY published page, including apps that never requested AI — and the admin's objection
+  was exactly right in the half that matters: *"user ko lagega ham spy daal rahe hai user ki app me"*.
+  Nothing is displayed and no app data is read, but uninvited code in somebody's page is not ours to
+  put there. `appUsesGateway(files)` now gates both the stamp AND the registry row: an app whose own
+  code never references `window.NavAI` gets nothing at all, not even an identity record. Conservative
+  by design — in doubt it stamps nothing, because a false negative is a republish away while a false
+  positive is the thing being corrected.
   ⚠️ **BEFORE FLIPPING IT ON:** the switch changes what a PUBLISH does, not what an existing app does —
   apps published before it was set carry no token and are unaffected until they are published again.
   The per-app cap is the platform default for every app; there is deliberately **no owner-facing

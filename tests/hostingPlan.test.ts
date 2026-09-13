@@ -130,11 +130,14 @@ describe('the two tiers (admin 2026-09-10: "do tier banao, credit bundle karo, 2
     expect(r.reason).toBe('agreement_required');
   });
 
-  it('the agreement says the limit, the overage rate, AND that the app is never switched off', () => {
+  it('the agreement says the limit, the overage rate, AND what keeps the app running', () => {
     const terms = hostingAgreementTerms(GROWTH).join(' ');
     expect(terms).toContain('20 GB');
     expect(terms).toContain('₹20 per GB');
-    expect(terms).toContain('KEEP RUNNING');
+    // The unconditional "KEEP RUNNING" promise was replaced 2026-09-13 by the conditional one the
+    // admin approved — it keeps running while the wallet has balance. See tests/hostingTiers.test.ts.
+    expect(terms).toContain('keep running');
+    expect(terms).toContain('while your wallet has balance');
     expect(terms).toContain('₹499');
     expect(terms).toContain('₹150');
     // The terms are generated FROM the tier, so a price change cannot leave the agreement quoting

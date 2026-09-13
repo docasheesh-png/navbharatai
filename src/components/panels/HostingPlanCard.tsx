@@ -48,6 +48,15 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
   /** The tier whose terms are open for review. null = no purchase in progress. */
   const [reviewing, setReviewing] = useState<HostingTier | null>(null);
   const [agreed, setAgreed] = useState(false);
+  /**
+   * Auto-renew, chosen BEFORE paying (admin 2026-09-13: "renew ka tick bhi dikhao jab koi purchase kare").
+   *
+   * It existed only AFTER the purchase, as a toggle on the plan card — so the first time a buyer
+   * learned their plan renews by itself was on the screen they landed on afterwards, or a month later
+   * when it renewed. Defaulted ON because that is what the terms above already say happens; the point
+   * is that it is now VISIBLE and changeable at the moment of paying, not hidden until after.
+   */
+  const [autoRenew, setAutoRenew] = useState(true);
 
   const load = useCallback(async () => {
     try {
@@ -65,7 +74,7 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
       const res = await fetch(`/api/wallet/${userId}/hosting-plan/purchase`, {
         method: 'POST',
         headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tierId: tier.id, agreedToTerms: true }),
+        body: JSON.stringify({ tierId: tier.id, agreedToTerms: true, autoRenew }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -96,6 +105,7 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
   const openTerms = (tier: HostingTier) => {
     setReviewing((cur) => (cur?.id === tier.id ? null : tier));
     setAgreed(false); // re-opening always starts unticked — consent is per purchase, not sticky
+    setAutoRenew(true);
   };
 
   const toggleAutoRenew = async () => {
@@ -219,6 +229,21 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
                         className="mt-0.5 accent-emerald-500 w-3.5 h-3.5"
                       />
                       <span className="text-[10px] font-bold text-white">OK — I have read and accept these terms.</span>
+                    </label>
+                    {/* The renewal choice belongs HERE, beside the price, not on the screen after
+                        payment. It is ticked by default because the terms above already say the plan
+                        renews — what was missing was the chance to see and change it while deciding. */}
+                    <label className="flex items-start gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={autoRenew}
+                        onChange={(e) => setAutoRenew(e.target.checked)}
+                        className="mt-0.5 accent-emerald-500 w-3.5 h-3.5"
+                      />
+                      <span className="text-[10px] text-[#c9d1d9] leading-relaxed">
+                        Renew automatically every {tier.days} days (₹{tier.priceInr} each time). Untick to pay once — the
+                        plan then simply ends on its expiry date. You can change this any time.
+                      </span>
                     </label>
                     <button
                       onClick={() => purchase(tier)}

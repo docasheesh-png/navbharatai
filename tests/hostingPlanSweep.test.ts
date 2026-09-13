@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import { publishedAppCap } from '../src/server/lib/HostingQuota';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
@@ -263,7 +264,10 @@ describe('sweepOneWallet', () => {
     };
     const paused: string[] = [];
     let notice = '';
-    // Seven live apps, one of them holding the custom domain. The free cap is 5, so two must go.
+    // Seven live apps, one of them holding the custom domain. However many the free cap allows, the
+    // REST must go — and the rule under test is which ones, not how many.
+    // ⚠️ The assertions below used to name `['w-1','w-2']`, i.e. they silently encoded "the free cap
+    // is 5". When it became 3 they failed while the behaviour was exactly right. Derived now.
     const apps = [
       { workspaceId: 'w-domain', status: 'active', updatedAt: 1 },       // oldest, but has the domain
       { workspaceId: 'w-6', status: 'active', updatedAt: 60 },
@@ -284,13 +288,21 @@ describe('sweepOneWallet', () => {
     });
     expect(await sweepOneWallet(fakeAdminDb(docs), 'u1')).toEqual({ kind: 'lapse' });
 
-    // Exactly the two least-defensible apps, and NEVER the one with a real domain pointed at it.
-    expect(paused.sort()).toEqual(['w-1', 'w-2']);
+    // Exactly the least-defensible apps — the OLDEST first — and NEVER the one with a real domain
+    // pointed at it. Seven live apps demote to the free cap, so `7 - cap` come down.
+    const liveCount = apps.filter((a) => a.status === 'active').length;
+    const mustPause = liveCount - publishedAppCap();
+    const oldestFirst = apps
+      .filter((a) => a.status === 'active' && a.workspaceId !== 'w-domain')
+      .sort((a, b) => a.updatedAt - b.updatedAt)
+      .slice(0, mustPause)
+      .map((a) => a.workspaceId);
+    expect(paused.sort()).toEqual([...oldestFirst].sort());
     expect(paused).not.toContain('w-domain');
     // An already-unpublished app was never live, so pausing it would be an action that does nothing.
     expect(paused).not.toContain('w-gone');
     // The user is told the count and the limits of the damage.
-    expect(notice).toContain('2 apps');
+    expect(notice).toContain(`${mustPause} apps`);
     expect(notice).toContain('nothing was deleted');
   });
 
@@ -314,8 +326,13 @@ describe('sweepOneWallet', () => {
       notify: async (_u, msg) => { notice = msg; },
     });
     expect(await sweepOneWallet(fakeAdminDb(docs), 'u1')).toEqual({ kind: 'lapse' });
-    expect(paused).toEqual(['w-5', 'w-7']);          // w-6 threw; the others still went down
-    expect(notice).toContain('2 apps');              // the count is what REALLY happened, not what was tried
+    // 8 live apps demote to the free cap, so `8 - cap` are attempted and `w-6` throws — leaving one
+    // fewer actually paused. Derived from the cap, because the RULE under test is "a throw does not
+    // stop the rest and is never recorded as paused", not any particular allowance.
+    const attempted = 8 - publishedAppCap();
+    expect(paused).not.toContain('w-6');              // it threw, so it stays live AND active
+    expect(paused).toHaveLength(attempted - 1);       // the others still went down
+    expect(notice).toContain(`${attempted - 1} app`); // the count is what REALLY happened, not what was tried
   });
 
   it('a lapse for a user at or under the free allowance pauses nothing at all', async () => {

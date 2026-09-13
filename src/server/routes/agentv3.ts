@@ -2554,7 +2554,20 @@ export function cheapFloorDecision(env: NodeJS.ProcessEnv, ctx: {
     if (!ctx.tierAllowed) return { active: false, reason: 'This app tier is not eligible for the cheap floor (escalation off + complex app) → strong model leads.' };
     return { active: false, reason: 'Cheap floor not allowed for this build → Claude leads.' };
   }
-  return { active: true, reason: `Cheap floor ACTIVE — ${floor.toUpperCase()} leads the first attempt; Claude/Haiku only backstop on failure.` };
+  // NAME THE ENGINES THAT ACTUALLY HAVE A KEY (autopsy f04421ef).
+  //
+  // `keyOk` above is an OR, so with the floor set to `on` — which asks for BOTH GLM and Kimi — this line
+  // used to read "ACTIVE — ON leads" when only ONE of the two was configured. The report then showed
+  // `providerDelivery: { KIMI: 54 }` with no GLM row and no GLM failure, and the one line whose entire
+  // job is to explain the routing could not distinguish "GLM never got a turn" from "GLM was never
+  // there". A half-configured floor is a real operational state and must read as one.
+  const configured = [wantsGlm && hasGlm ? 'GLM' : '', wantsKimi && hasKimi ? 'KIMI' : '', wantsBedrock && hasBedrock ? 'BEDROCK' : ''].filter(Boolean);
+  const missing = [wantsGlm && !hasGlm ? 'GLM_API_KEY' : '', wantsKimi && !hasKimi ? 'KIMI_API_KEY' : ''].filter(Boolean);
+  const lead = `${configured.join(' + ')} lead${configured.length === 1 ? 's' : ''} the first attempt`;
+  const gap = missing.length > 0
+    ? ` ⚠️ '${floor}' also asks for ${missing.join(' and ')}, which ${missing.length === 1 ? 'is' : 'are'} NOT set — that engine never enters the chain, so its absence from this report is configuration, not a routing decision.`
+    : '';
+  return { active: true, reason: `Cheap floor ACTIVE — ${lead}; Claude/Haiku only backstop on failure.${gap}` };
 }
 
 /**

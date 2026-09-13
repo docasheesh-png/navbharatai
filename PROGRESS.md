@@ -51677,3 +51677,31 @@ callback, and the chain line — six reverts, six failures.
 
 - **Why GLM delivered 0 of 54 turns on that specific build.** Now diagnosable from the next report
   (item 4); genuinely unanswerable from this one.
+
+### 2026-09-13 (same day, follow-on) — `CHEAP_FLOOR_DECISION` could call a HALF-configured floor "active"
+
+Found while fixing item 4 above, and worth its own entry because it is a defect in the one line whose
+entire job is to explain routing.
+
+`cheapFloorDecision`'s key check is an **OR**:
+
+```ts
+const keyOk = (wantsGlm && hasGlm) || (wantsKimi && hasKimi) || (wantsBedrock && hasBedrock);
+```
+
+With `AGENTV3_CHEAP_FLOOR=on` — which asks for **both** GLM and Kimi — one key is enough to satisfy it,
+and the report then said *"Cheap floor ACTIVE — ON leads the first attempt"*. So a report could state
+that the floor was fully active while half of it did not exist. Sitting beside
+`providerDelivery: { KIMI: 54 }` with no GLM row and no GLM failure, that line was the natural place to
+look for the answer and the one place guaranteed not to have it.
+
+It now names the engines that actually hold a key, and says plainly when the configured floor asks for
+one that is missing: *"⚠️ 'on' also asks for GLM_API_KEY, which is NOT set — that engine never enters the
+chain, so its absence from this report is configuration, not a routing decision."*
+
+`active` is deliberately still **true** in that case: one engine genuinely is leading, and flipping it to
+false would misreport a working build as a fallen-back one. A floor **pinned** to a single engine
+(`AGENTV3_CHEAP_FLOOR=kimi`) is not half-configured and gets no warning — the warning is about a gap
+between what was asked for and what exists, not about the number of engines.
+
+Four tests; reverting the wording fails three of them.

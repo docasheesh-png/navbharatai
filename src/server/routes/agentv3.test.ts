@@ -508,6 +508,40 @@ describe('cheapFloorDecision — honest routing reason for every build report', 
     const d = cheapFloorDecision({ GLM_API_KEY: 'k' } as any, base);
     expect(d.active).toBe(true);
   });
+
+  /**
+   * Autopsy f04421ef. `keyOk` is an OR, so 'on' — which asks for BOTH engines — reported
+   * "ACTIVE — ON leads" with only one key set. The report then showed KIMI driving all 54 turns, no GLM
+   * row and no GLM failure, and the one line whose job is to explain routing could not say whether GLM
+   * had been skipped or had never existed.
+   */
+  it('THE BUG: a HALF-configured floor no longer reads as fully active', () => {
+    const d = cheapFloorDecision({ AGENTV3_CHEAP_FLOOR: 'on', KIMI_API_KEY: 'k' } as any, base);
+    expect(d.active).toBe(true); // still active — one engine is genuinely leading
+    expect(d.reason).toMatch(/KIMI leads the first attempt/);
+    expect(d.reason).toMatch(/GLM_API_KEY, which is NOT set/);
+    // The distinction that was missing must be stated, not left to the reader.
+    expect(d.reason).toMatch(/configuration, not a routing decision/);
+  });
+
+  it('names BOTH engines when both are configured, and warns about neither', () => {
+    const d = cheapFloorDecision({ AGENTV3_CHEAP_FLOOR: 'on', GLM_API_KEY: 'k', KIMI_API_KEY: 'k' } as any, base);
+    expect(d.reason).toMatch(/GLM \+ KIMI lead the first attempt/);
+    expect(d.reason).not.toMatch(/NOT set/);
+  });
+
+  it('a floor PINNED to one engine is not half-configured — no warning for the engine it never asked for', () => {
+    const d = cheapFloorDecision({ AGENTV3_CHEAP_FLOOR: 'kimi', KIMI_API_KEY: 'k' } as any, base);
+    expect(d.reason).toMatch(/KIMI leads/);
+    expect(d.reason).not.toMatch(/NOT set/);
+  });
+
+  it('singular/plural stay correct, because a line that reads wrong gets trusted less', () => {
+    const one = cheapFloorDecision({ AGENTV3_CHEAP_FLOOR: 'glm', GLM_API_KEY: 'k' } as any, base);
+    expect(one.reason).toMatch(/GLM leads /);
+    const both = cheapFloorDecision({ AGENTV3_CHEAP_FLOOR: 'on', GLM_API_KEY: 'k', KIMI_API_KEY: 'k' } as any, base);
+    expect(both.reason).toMatch(/lead the/);
+  });
 });
 
 describe('parseKeyPool — provider key rotation pool (ROADMAP Tier-4)', () => {

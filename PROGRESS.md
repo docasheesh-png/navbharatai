@@ -52178,3 +52178,83 @@ was taken; an E2B derivation that "could not fail"). Mine failed the same way �
 from my summary of the report instead of from the report.** The remaining `541979d2` open items are
 unchanged: the cheap-floor latency ceiling, and in-flight provider-call cancellation (owned by PR
 #2889's session, not this one).
+
+## 2026-09-13 — P2: the one hosting cost that only ever went up, and nothing deleted it
+
+**The gap.** Every publish of a user app pushes a NEW immutable container image to Artifact Registry —
+`containerBuild.ts` tags each build with the moment it was requested, deliberately, so a deploy can
+never serve a previous build by accident. **Nothing removed the previous one.** Not a republish, not a
+takedown: `deleteHostedService` gives the Cloud Run service slot back and leaves every image the app
+ever built sitting in the registry, billed per GB-month, for ever.
+
+**Why this ranked above the traffic meter among the buildable items.** Every other hosting cost is a
+FLOW — it rises with visitors, falls when they leave, and the ₹20/GB overage is sized against it.
+Registry storage is a STOCK: it only accumulates, no overage offsets it, and an app nobody has opened
+in a year still pays for it every month. A buildpacks Node image is a few hundred MB.
+
+**Why it is NOT an Artifact Registry cleanup policy**, which would be free, server-side and off our
+path — and is genuinely the better tool for the shape of problem it fits. A native policy can keep the
+N newest versions and delete the rest, but **it cannot see Cloud Run**. It would delete the image the
+live service is still running, and with `minInstanceCount: 0` a cold start RE-PULLS that image, so the
+app dies at the next visitor with nothing in our code to explain it. "Keep the newest N" is not a
+substitute for that guard, and the case where it is worst is the one that matters most: when a publish
+has FAILED, traffic stays on an OLDER revision while the newer, broken images push the live one out of
+the newest-N window. That is this repo's own hard-won finding — `cloudbuild.yaml` Step 5 says it in
+those words about the PLATFORM's image, and these are the same guards, moved server-side.
+
+**What shipped.** `imageRetention.ts` (pure rules) + `imageCleanupSweep.ts` (the job), registered as
+`image-cleanup`, **exclusive**, 05:00 UTC — an hour after `hosting-daily-bill` so the two never contend
+for the same Google quota.
+
+🔴 **THE DESIGN DECISION THE WHOLE FEATURE TURNS ON: a confirmed 404 and a failed read are DIFFERENT
+FACTS.** The natural design is two answers — "either we read the revisions, or we prune nothing" —
+and it is correct about safety and catastrophic about the largest pile of waste there is. An app that
+was TAKEN DOWN has no service, so the revision list 404s, so the cautious rule refuses to prune it
+**for ever**. The images of every deleted app would be the one thing the sweep could never touch,
+which is exactly backwards: they are the only images nothing can possibly be running. So `ServiceUsage`
+has three cases — `in-use` (protected), `no-service` (a fact; only the age floor applies), `unknown`
+(prune nothing).
+
+The other guards, each with a test that fails if it is removed:
+
+- **In-use beats keep-newest, and the order is load-bearing.** The digest check runs BEFORE the count,
+  so a running image is protected whether or not it is recent — the failed-publish case above.
+- **Tags as well as digests.** Cloud Run may hold either shape; matching one and not the other is the
+  quiet version of deleting a running image. A registry port (`host:443/…`) is not a tag.
+- **Age from `uploadTime`, never `buildTime`.** Buildpacks reuse cached layers, so a freshly pushed
+  image can carry a build time from days ago — which would make a brand-new image look deletable.
+  `cloudbuild.yaml` records hitting exactly this with `--sort-by=TIMESTAMP`.
+- **A 24h age floor** protects a publish in flight; **keep the 3 newest** for rollback; **50 deletes
+  per run** so this can never become the 2026-08-02 regression where an unbounded cleanup loop ran for
+  an hour and turned 5-minute deploys into timeouts.
+- **An undateable image is never deleted** — we cannot prove it is old.
+- **The reclaimed MB is null, not 0, when the registry reported no sizes.** Zero is a measurement; the
+  absence of one must not print as a number on the admin's own cost report.
+
+**Default is `on`, which for a deleting job is not the obvious choice and is stated rather than
+assumed.** Hosting is admin-only today (`NAVBHARAT_CLOUD_PUBLIC` deliberately unset), so the only apps
+that exist to clean are the admin's own — the sweep proves itself on them before any user has an app,
+and by the time hosting opens the cost is already bounded. An opt-in flag would mean the one cost that
+never goes down carries on not going down until somebody remembers.
+`NAVBHARAT_IMAGE_CLEANUP=report` measures and names everything it WOULD delete without deleting;
+`=off` stops it. Knobs: `NAVBHARAT_IMAGE_KEEP` (3), `NAVBHARAT_IMAGE_MIN_AGE_HOURS` (24),
+`NAVBHARAT_IMAGE_MAX_DELETES` (50) — all treating an empty value as unset rather than as zero.
+
+🔎 **THE SIBLING, hunted and fixed in the same change (rule 3).** The same root cause lives one layer
+down: every publish ALSO uploads a source tarball to the Cloud Build staging bucket
+(`sourceObjectFor`), and nothing ever deleted one of those either. Its retention rule is simpler and
+the reason is worth stating rather than assuming — a source object is read EXACTLY ONCE, by the build
+it was uploaded for, so there is no rollback value and therefore no keep-newest-N. The age floor is the
+whole policy. It shares the per-run delete budget, so one run cannot double-spend it. Anything outside
+our own `nbai-source/` prefix is ignored even though the listing filtered for it: the bucket is Cloud
+Build's shared staging bucket, and what we DELETE must not be decided by a parameter we sent.
+⚠️ A **GCS lifecycle rule** genuinely IS the better tool here (no in-use guard to enforce), and it is
+not set from code because that rewrites the configuration of a bucket the admin owns — their decision,
+not a side effect of a cleanup job. Until they set one, the sweep does the work.
+
+🐛 **A real bug the tests caught before it shipped.** The sweep returned early on an empty registry —
+and that made the sibling fix dead code in exactly the case it was needed most, because staged sources
+OUTLIVE their images: a repository drained to zero can still be holding a bucket full of tarballs. The
+early return is gone and a test pins its absence.
+
+43 tests across `tests/imageRetention.test.ts` and `tests/imageCleanupSweep.test.ts`.

@@ -28,7 +28,8 @@ import { goldenScaffoldForPrompt, goldenScaffoldFiles } from '../AgentV3/goldenS
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
 import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
-import { measuredRemainingMs, measuredEtaText, firstEtaLine } from '../AgentV3/progressEta';
+import { measuredRemainingMs, measuredEtaText, firstEtaLine, formatEtaRange } from '../AgentV3/progressEta';
+import { describeRunnerChain, chainProviders, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction } from '../AgentV3/AuthenticityAnalysis';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
@@ -342,6 +343,7 @@ import { groundingProvenance, dominantGroundingBlock } from '../AgentV3/contextB
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, type RuntimeError } from '../AgentV3/AutoFix';
 import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
+import { buildCostCeilingUsd, ledgerCostUsd, checkCostCeiling, costCeilingDetail } from '../AgentV3/buildCostCeiling';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
  *  Set SESSION_COST_CAP_USD in env to override. Default: $5. */
 function sessionCostCapUsd(): number {
@@ -414,6 +416,7 @@ import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
 import { classifyIntentSmart, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild } from '../AgentV3/IntentClassifier';
+import { assessBuildInput } from '../AgentV3/buildableInput';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
 import { realismIntent } from '../lib/realismIntent';
@@ -2553,7 +2556,20 @@ export function cheapFloorDecision(env: NodeJS.ProcessEnv, ctx: {
     if (!ctx.tierAllowed) return { active: false, reason: 'This app tier is not eligible for the cheap floor (escalation off + complex app) → strong model leads.' };
     return { active: false, reason: 'Cheap floor not allowed for this build → Claude leads.' };
   }
-  return { active: true, reason: `Cheap floor ACTIVE — ${floor.toUpperCase()} leads the first attempt; Claude/Haiku only backstop on failure.` };
+  // NAME THE ENGINES THAT ACTUALLY HAVE A KEY (autopsy f04421ef).
+  //
+  // `keyOk` above is an OR, so with the floor set to `on` — which asks for BOTH GLM and Kimi — this line
+  // used to read "ACTIVE — ON leads" when only ONE of the two was configured. The report then showed
+  // `providerDelivery: { KIMI: 54 }` with no GLM row and no GLM failure, and the one line whose entire
+  // job is to explain the routing could not distinguish "GLM never got a turn" from "GLM was never
+  // there". A half-configured floor is a real operational state and must read as one.
+  const configured = [wantsGlm && hasGlm ? 'GLM' : '', wantsKimi && hasKimi ? 'KIMI' : '', wantsBedrock && hasBedrock ? 'BEDROCK' : ''].filter(Boolean);
+  const missing = [wantsGlm && !hasGlm ? 'GLM_API_KEY' : '', wantsKimi && !hasKimi ? 'KIMI_API_KEY' : ''].filter(Boolean);
+  const lead = `${configured.join(' + ')} lead${configured.length === 1 ? 's' : ''} the first attempt`;
+  const gap = missing.length > 0
+    ? ` ⚠️ '${floor}' also asks for ${missing.join(' and ')}, which ${missing.length === 1 ? 'is' : 'are'} NOT set — that engine never enters the chain, so its absence from this report is configuration, not a routing decision.`
+    : '';
+  return { active: true, reason: `Cheap floor ACTIVE — ${lead}; Claude/Haiku only backstop on failure.${gap}` };
 }
 
 /**
@@ -2693,7 +2709,7 @@ export function enforceNoClaude<T extends { name: string }>(chain: T[], noClaude
   return [...kept.filter((r) => r.name !== 'CLAUDE_HAIKU'), ...haiku];
 }
 
-function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; cheapOnly?: boolean; free?: boolean; flagship?: boolean; heal?: boolean; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void }): TurnRunner {
+function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; cheapOnly?: boolean; free?: boolean; flagship?: boolean; heal?: boolean; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void; onChain?: (chain: ChainRung[]) => void }): TurnRunner {
   // Explicit env overrides always win; absent them the cost-ladder tier model
   // (when supplied) is preferred over the fixed gemini-2.5-pro default.
   const buildModel = (envName: string): string =>
@@ -2799,6 +2815,9 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; a
   // a Sonnet call onto a free build — and keeps ONLY the model-pinned 'CLAUDE_HAIKU' backstop, moved to
   // the END ("haiku … to last me"). Weak order: cheap floor → Vertex/Gemini → Haiku last.
   const guardedChain = enforceNoClaude(chain, opts?.noClaude === true);
+  // Hand the caller the chain it is ACTUALLY getting, so the build report can say which providers were
+  // configured — the only way to read "GLM: 0 turns" as "never reached" rather than "never present".
+  try { opts?.onChain?.(guardedChain as ChainRung[]); } catch { /* observation only — never affects a build */ }
   return makeMultiProviderTurnRunner(guardedChain, {
     onProviderUsed: (used, from) => {
       if (from.length) console.log(`[AGENTV3] build turn via ${used} (after ${from.join(' → ')})`);
@@ -9472,6 +9491,48 @@ async function noteBuildOutcome(
         'classifyIntentSmart',
       );
     } catch { /* LLM upgrade is best-effort — keyword result stands */ }
+
+    /**
+     * 🔴 NOTHING TO BUILD FROM — the 5 minute 57 second question (build report 2026-09-13, 541979d2).
+     *
+     * The whole prompt was one private Google Drive link to a 169 MB video. The engine planned a file
+     * list for an app it had invented (a 150s model call), ran the Simple Builder (timed out at 90s),
+     * abandoned the One-Shot (150s), opened the dead link, ASKED THE USER WHAT TO BUILD, decided the
+     * attempt had been too WEAK, retried on a stronger model, opened the same dead link again, asked
+     * the same question a second time — and closed by telling them to buy credits for a stronger
+     * engine. Three provider timeouts and eight failures happened inside that. On the free tier every
+     * token of it was ours.
+     *
+     * The question at minute four was always the right answer. Routing the turn to CHAT reaches it in
+     * seconds, on the cheap path, with no sandbox and no builder — and the model's own reply is
+     * already correct here: it produced exactly the right words, twice, after six minutes of trying
+     * to build first. What was wrong was never the answer. It was the routing.
+     *
+     * ⚠️ DELIBERATELY NARROW, because refusing a real prompt would be far worse than the bug it fixes.
+     * Only `empty` and `link-only` divert — never `too-short`, which would catch "continue" and
+     * re-open the continuation amnesia this repo has already fixed once. An attachment counts as
+     * content and is never diverted; nor is an import turn; nor an edit to an existing project, where
+     * a short message legitimately means "carry on".
+     */
+    const inputCheck = assessBuildInput(prompt);
+    if (
+      !inputCheck.buildable
+      && (inputCheck.reason === 'link-only' || inputCheck.reason === 'empty')
+      && intent !== 'chat'
+      && intent !== 'edit_existing'
+      // An IMPORT turn carries its content outside the prompt, so a bare URL there is not "nothing".
+      // Checked from the same two expressions `hasImportIntent` is built from, because that constant
+      // is declared further down and this must run BEFORE anything is spent.
+      && zipImports.length === 0
+      && !(typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== '')
+      && rawAttachments.length === 0
+    ) {
+      // No diagnostics recorder exists this early — by design, since the whole point is to decide
+      // before a build (and therefore a build report) begins. The honest reply IS the record.
+      console.log(`[AGENTV3] nothing to build from (${inputCheck.reason}) — answering as a question instead of starting a build`);
+      intent = 'chat';
+    }
+
     /**
      * WHAT THE USER ASKED FOR, captured BEFORE the workspace's state gets a vote.
      *
@@ -11331,6 +11392,8 @@ async function noteBuildOutcome(
       // (they share this client) + the escalation runner. Observational: it never changes billing
       // with the per-tier flag off. Aux calls (blueprint/plan/judge) reconcile into 'other' at settle.
       const providerLedger = createProviderUsageLedger();
+      /** The cost ceiling fires at most once per build — see captureTurnUsage below. */
+      let costCeilingFired = false;
       /**
        * SHADOW ledger — fast-lane turns, recorded for OBSERVATION and never for billing.
        *
@@ -11357,6 +11420,44 @@ async function noteBuildOutcome(
         // …and accumulate the build total for the diagnostics report's cache-hit rate line.
         if (cacheRead > 0) {
           billingCtx.cacheReadInputTokens = (billingCtx.cacheReadInputTokens ?? 0) + cacheRead;
+        }
+        // Autopsy f04421ef — mirror the running ledger into the report so a build report READ WHILE THE
+        // BUILD IS STILL RUNNING carries real token numbers. Before this, such a report printed
+        // "GLM: 54 call(s) · 0 in · 0 out" and those zeros were read (by me, to the admin) as a measured
+        // zero rather than an empty field. setLiveUsage is a strictly separate channel from
+        // setProviderTokens and can never reach billing — see its doc comment.
+        try { buildDiag.setLiveUsage(providerLedger.byProvider(), billingCtx.cacheReadInputTokens); }
+        catch { /* diagnostics are best-effort — never affects a build */ }
+        // THE MID-BUILD STOP. Every build turn and every heal turn passes through here — the same
+        // choke-point discipline the wallet floor uses, and for the same reason: a ceiling written
+        // into the call sites is one the next call site never gets. Pricing the ledger is a loop over
+        // a handful of entries, so this costs nothing measurable per turn.
+        //
+        // It fires ONCE. A second abort would be harmless (AbortController is idempotent) but would
+        // record a second identical finding, and a report that says the same thing twice reads like
+        // two events.
+        if (!costCeilingFired) {
+          try {
+            const verdict = checkCostCeiling(ledgerCostUsd(providerLedger.entries()), buildCostCeilingUsd());
+            if (verdict.stop) {
+              costCeilingFired = true;
+              try {
+                buildDiag.record({
+                  phase: 'build', severity: 'warning', code: 'COST_CEILING_REACHED',
+                  // NOT auto-resolved: the build really did stop. Marking it resolved would let a
+                  // report summarise a halted build as one that healed itself.
+                  autoResolved: false,
+                  message: 'Build stopped at its cost ceiling',
+                  detail: costCeilingDetail(verdict),
+                });
+              } catch { /* diagnostics are best-effort — they must never block the stop */ }
+              console.log(`[AGENTV3] cost ceiling reached ($${verdict.costUsd.toFixed(2)} >= $${verdict.ceilingUsd.toFixed(2)}) — stopping build between turns`);
+              abortBuild({ abort: (r?: unknown) => abort.abort(r) }, 'cost-cap');
+            }
+          } catch {
+            // A ceiling we could not evaluate must never end somebody's build. Failing OPEN here is
+            // the same call the affordability gate makes on an unreadable balance.
+          }
         }
       };
       // The cheap floor (GLM/Kimi) leads a build's FIRST attempt for simple/medium apps for allowlisted
@@ -11428,6 +11529,12 @@ async function noteBuildOutcome(
         onProviderUsed: captureProvider,
         onTurnComplete: captureTurnUsage,
         onProviderError: recordProviderFallback,
+        // Autopsy f04421ef — see runnerChainSummary.ts. Recorded once (record() collapses an identical
+        // repeat), admin-only like every other provider name.
+        onChain: (chain) => {
+          try { buildDiag.setProviderChain(describeRunnerChain(chain), chainProviders(chain)); }
+          catch { /* diagnostics are best-effort — never affects a build */ }
+        },
       });
       // WHY THIS BUILD'S ENGINES ARE IN THIS ORDER. The floor can now put the healthier cheap coder
       // first (floorLead.ts), which changes WHICH engine writes the user's app — so it is stated in
@@ -11601,10 +11708,17 @@ async function noteBuildOutcome(
           const est = estimateBuildTime(etaComplexity, past);
           etaTotalMs = est.estimateMs; // feed the live heartbeat so it can revise the remaining time
           etaBaseMs = est.estimateMs;  // the ORIGINAL estimate — sizes each overrun re-baseline step
+          // RECORD WHAT THE USER WAS ACTUALLY TOLD, not the point estimate behind it (autopsy f04421ef).
+          // This line used to read "ETA ~3 min · confidence 0.4" for a build that ran past twenty
+          // minutes — and the admin reading that report would reasonably conclude the user had been
+          // promised three minutes. They had not: `firstEtaLine` shows the BAND and says outright that
+          // the figure is a first guess. The admin's own report was the least honest surface in the
+          // system, which is backwards. It now carries the same band the user saw, verbatim.
+          const etaShown = firstEtaLine(est, past.length);
           buildDiag.record({
             phase: 'plan', severity: 'info', code: 'ETA_BASIS',
-            message: `ETA ${est.etaText} · basis ${est.basis} · confidence ${est.confidence}`,
-            detail: etaBasisNote(past),
+            message: `ETA ${formatEtaRange(est.lowMs, est.highMs, est.estimateMs)} (midpoint ${est.etaText}) · basis ${est.basis} · confidence ${est.confidence}`,
+            detail: `${etaBasisNote(past)} Shown to the user: "${etaShown.replace(/^⏱️\s*/, '')}"`,
             autoResolved: true,
           });
           // THE POINT ESTIMATE IS NOT WHAT WE KNOW. `estimateBuildTime` returns lowMs/highMs and a
@@ -11612,7 +11726,7 @@ async function noteBuildOutcome(
           // midpoint as "~3 min" was the code being more honest with itself than with the user. A first
           // build also now says outright that the figure will be replaced, which is what makes the later
           // measured update read as information instead of as a broken promise.
-          events.emit({ type: 'narration', agent: 'architect', text: firstEtaLine(est, past.length), ts: Date.now(), id: 'eta-live' });
+          events.emit({ type: 'narration', agent: 'architect', text: etaShown, ts: Date.now(), id: 'eta-live' });
         } catch { /* ETA is best-effort — never affects the build */ }
       }
       const budget = maxBuildBudgetUsd();
@@ -18017,7 +18131,12 @@ async function noteBuildOutcome(
         // spend the very budget free-tier protects). Instead, honestly invite the user to add credits
         // and finish on the strongest engine — converting the user to paid without shipping a broken app.
         if (freeTierBuildActive) {
-          events.emit({ type: 'narration', agent: 'architect', text: freeTierUpsellMessage(), ts: Date.now() });
+          // WHY it was empty decides what we may honestly say. A prompt with nothing to build from is
+          // not an engine limit, and asking such a user for money would be an upsell attached to our
+          // own gap. (The diversion above catches this case before a build starts; this covers the
+          // paths that still reach here — an edit turn, or an attachment that carried no instruction.)
+          const emptyCause = assessBuildInput(prompt).buildable ? 'engine' : 'no-instruction';
+          events.emit({ type: 'narration', agent: 'architect', text: freeTierUpsellMessage(emptyCause), ts: Date.now() });
         }
       }
       // Admin rule (2026-07-07): the server's own eyes saw the preview NOT render after the heal

@@ -63,15 +63,38 @@ export function isFreeTierBuild(inputs: FreeTierInputs): boolean {
   );
 }
 
+/** Why a free-tier build ended with no files. Decides what we may honestly say about it. */
+export type EmptyBuildCause =
+  /** The engine tried and could not finish — the case this message was written for. */
+  | 'engine'
+  /** There was never an instruction to build from (a bare link, an empty prompt). Not our engine's fault, and not the user's to pay for. */
+  | 'no-instruction';
+
 /**
- * The honest message shown when a free-tier (cheap-only) build could not deliver — instead of shipping
- * a broken app or spending Claude to rescue it, we invite the user to add credits and finish on the
- * strongest engine. Displayed to end users, so it is friendly and provider-agnostic (no model names).
+ * The message shown when a free-tier (cheap-only) build could not deliver.
+ *
+ * 🔴 IT USED TO SAY ONE THING FOR EVERY FAILURE, AND THAT MADE IT DISHONEST (build report
+ * 2026-09-13, 541979d2). The user pasted a private Google Drive link and nothing else. The engine
+ * could not read it, asked them twice what to build — and then told them *"your app needs our
+ * strongest engine, add credits"*. Nothing about that was true: there was no app, no engine limit was
+ * reached, and the one thing missing was a sentence from the user. An upsell attached to a failure we
+ * caused by not handling their input is the kind of thing a user remembers, and rule 3 does not stop
+ * applying because the sentence is friendly.
+ *
+ * Displayed to end users, so it stays provider-agnostic (white-label law §2 — no model names).
  */
-export function freeTierUpsellMessage(): string {
+export function freeTierUpsellMessage(cause: EmptyBuildCause = 'engine'): string {
+  if (cause === 'no-instruction') {
+    // 🔒 NO ASK FOR MONEY. Credits would not have helped, and charging the user's attention for our
+    // own gap is how a product loses trust it cannot buy back.
+    return (
+      'I could not tell what to build from that. Tell me in a line or two what the app should do — '
+      + 'what it is for, and the two or three things it must let people do — and I will build it right away.'
+    );
+  }
   return (
-    '✨ Your app needs our strongest engine to finish cleanly. ' +
-    'Add credits and I will complete it on the best engine — nothing you have done so far is lost.'
+    '✨ Your app needs our strongest engine to finish cleanly. '
+    + 'Add credits and I will complete it on the best engine — nothing you have done so far is lost.'
   );
 }
 

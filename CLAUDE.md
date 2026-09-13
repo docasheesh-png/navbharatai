@@ -1231,6 +1231,32 @@ the code (it is actually read somewhere) on 2026-07-11.
   override yet**, because nothing in the product can set one and a field with no screen behind it is a
   promise. Reverting is one key: unset it and new publishes stamp nothing, while apps already carrying
   a token get an honest "not available" from the endpoint.
+- **The MID-BUILD cost stop (shipped 2026-09-13):** `AGENTV3_BUILD_COST_CEILING_USD` — ⚠️ **NOT set,
+  and the code default is what governs today.** The ceiling on ONE build's REAL provider cost, in USD.
+  **Default $5**, capped at $50, read by `src/server/AgentV3/buildCostCeiling.ts` and evaluated inside
+  `captureTurnUsage` in `routes/agentv3.ts` — the one point every build turn and every heal turn passes
+  through.
+  🔴 **WHY IT EXISTS, AND WHAT THE WALLET FLOOR DOES NOT DO.** The floor (`WALLET_OVERDRAFT_FLOOR_INR`)
+  bounds what the USER is billed; it cannot un-spend what the model already cost us. Every START gate
+  was already correct — a new build is refused at a balance of 0 or less — but nothing looked at the
+  cost of the build ALREADY RUNNING, so one legitimately allowed to begin could spend for its whole
+  wall clock and present the invoice at the end. This is the other half.
+  🔒 **IT IS A STOP, NOT A KILL, which is why it can ship on by default.** `AgentRunner` ends BETWEEN
+  turns, the files written so far are already persisted, and the user is told their work is saved and
+  one message resumes it (`abortSummary('cost-cap')`). No work is lost — the build pauses.
+  📌 **THE NUMBER WAS REUSED, NOT INVENTED.** $5 is this repo's own existing answer to a runaway build
+  (`sessionCostCapUsd()`, since the "$26 todo app"). It sits under its OWN key because extending
+  `SESSION_COST_CAP_USD` would silently re-purpose a value an admin may have set for the empty-build
+  retry budget. For scale, real builds here cost **$0.4–$1.0** (the ₹566.96 Shiv Medical Store build;
+  PaisaTrack's real ₹39 ≈ $0.45), so $5 is five to ten times a heavy normal build.
+  ⚠️ **THE LIVE FIGURE IS AN UNDER-ESTIMATE, DELIBERATELY.** The ledger sees the architect, its
+  sub-agents and every heal runner, but NOT the aux calls (blueprint/plan/judge), which reconcile into
+  'other' only at settle. So the stop fires LATER than a complete number would justify — never earlier.
+  A malformed value falls back to $5, **never to "no ceiling"**; only an explicit `0` disables it.
+  Report code: `COST_CEILING_REACHED` (admin-only). Test-locked in `tests/buildCostCeiling.test.ts`.
+  🔴 **STILL OPEN:** an abandoned provider call is not cancelled by this stop — the loop ends between
+  turns, so a call already in flight runs to completion on the provider's side and is paid for.
+
 - **Visitor analytics for published apps (shipped 2026-09-10, ROADMAP §13 item 1.1):**
   `AGENTV3_SITE_ANALYTICS` (kill switch — **default ON**; `off` stops the beacon being stamped at
   publish and the hit route recording; apps already published keep their script until republished,

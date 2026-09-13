@@ -107,6 +107,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   // ── User reports (admin 2026-08-21) ──────────────────────────────────────
   const [userReports, setUserReports] = useState<any[]>([]);
   /** The admin's half of a report conversation — see the reply box in the report modal. */
+  /** Platform-wide "which feature is being used" for one day — see the card on the Users tab. */
+  const [featureSpend, setFeatureSpend] = useState<any>(null);
+  const [featureSpendLoading, setFeatureSpendLoading] = useState(false);
   const [reportReply, setReportReply] = useState('');
   const [reportReplyShot, setReportReplyShot] = useState('');
   const [reportReplyBusy, setReportReplyBusy] = useState(false);
@@ -958,7 +961,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
   useEffect(() => { fetchAnalytics(); }, [fetchAnalytics]);
   useEffect(() => { if (activeTab === 'monitor') { fetchHealthScore(); fetchInsights(); fetchChannels(); } }, [activeTab, fetchHealthScore, fetchInsights, fetchChannels]);
-  useEffect(() => { if (activeTab === 'users') fetchUsers(); }, [activeTab, fetchUsers]);
+  const fetchFeatureSpend = useCallback(async () => {
+    setFeatureSpendLoading(true);
+    try {
+      const r = await fetch('/api/admin/feature-spend', { headers });
+      const d = await r.json();
+      // An unreadable day is null, an empty day is a real payload with no rows. The card tells them
+      // apart, because "nobody used anything today" and "we could not read it" are different facts.
+      setFeatureSpend(r.ok && d && typeof d === 'object' ? d : null);
+    } catch { setFeatureSpend(null); } finally { setFeatureSpendLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+
+  useEffect(() => { if (activeTab === 'users') { fetchUsers(); void fetchFeatureSpend(); } }, [activeTab, fetchUsers, fetchFeatureSpend]);
   useEffect(() => { if (activeTab === 'settings') { fetchPromos(); fetchUpdateCohort(); } }, [activeTab, fetchPromos, fetchUpdateCohort]);
   useEffect(() => { if (activeTab === 'revenue') { fetchCostTelemetry(); fetchFinOps(); } }, [activeTab, fetchCostTelemetry, fetchFinOps]);
   useEffect(() => { if (activeTab === 'reports') { fetchBuildReports(); fetchFirstPass(); } }, [activeTab, fetchBuildReports, fetchFirstPass]);
@@ -1467,6 +1482,50 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           {/* ── USERS TAB ── */}
           {activeTab === 'users' && (
             <div className="space-y-4">
+              {/* WHICH FEATURE IS BEING USED (admin 2026-09-13: "kon sa feature jyada use ho raha hai,
+                  kon se feacher ko aur strong karna hai"). Today, across every user. */}
+              <div className="rounded-2xl border border-white/10 bg-[#161b22] p-4">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <h4 className="text-sm font-black text-white tracking-tight">
+                    What people used today
+                    {featureSpend?.date && <span className="ml-2 text-[10px] font-normal text-white/35">{featureSpend.date}</span>}
+                  </h4>
+                  <button onClick={() => void fetchFeatureSpend()} className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/50" aria-label="Refresh">
+                    <RefreshCw size={13} />
+                  </button>
+                </div>
+                {featureSpendLoading && !featureSpend ? (
+                  <p className="mt-2 text-[11px] text-white/40">Reading…</p>
+                ) : !featureSpend ? (
+                  <p className="mt-2 text-[11px] text-amber-300/80">Could not be read just now — this is not the same as nobody using anything.</p>
+                ) : (featureSpend.rows?.length ?? 0) === 0 ? (
+                  <p className="mt-2 text-[11px] text-white/40">Nothing has been charged to any wallet today yet.</p>
+                ) : (
+                  <div className="mt-3 space-y-1.5">
+                    {featureSpend.rows.map((r: { feature: string; label: string; inr: number; charges: number; users: number }) => {
+                      const total = Number(featureSpend.totalInr) || 0;
+                      const pct = total > 0 ? Math.round((r.inr / total) * 100) : 0;
+                      return (
+                        <div key={r.feature} className="flex items-center gap-2 text-[11px]">
+                          <span className="text-white/70 w-40 shrink-0 truncate">{r.label}</span>
+                          <span className="flex-1 h-1.5 rounded-full bg-white/5 overflow-hidden min-w-0">
+                            <span className="block h-full rounded-full bg-emerald-500/70" style={{ width: `${pct}%` }} />
+                          </span>
+                          {/* USERS first — the admin is deciding what to invest in, and one heavy
+                              user is not the same signal as many people choosing a feature. */}
+                          <span className="text-white/50 tabular-nums w-24 text-right shrink-0">{r.users} user{r.users === 1 ? '' : 's'}</span>
+                          <span className="text-white/80 tabular-nums w-16 text-right shrink-0">₹{r.inr.toFixed(2)}</span>
+                        </div>
+                      );
+                    })}
+                    <p className="pt-1 text-[10px] text-white/30">
+                      Counts what a feature COST, across every user. Buying a hosting plan is not counted —
+                      that is a purchase, not use of a feature.
+                    </p>
+                  </div>
+                )}
+              </div>
+
               {/* Search + Sort */}
               <div className="flex flex-wrap gap-3 items-center">
                 <div className="flex-1 min-w-[200px] relative">
@@ -2117,6 +2176,90 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   {account.payments?.ok && <> · Paid in: ₹{Number(account.payments.totalInr).toFixed(2)} over {account.payments.successful} recharge{account.payments.successful === 1 ? '' : 's'}</>}
                   {account.builds?.ok && <> · {account.builds.totalBuilds} builds ({account.builds.failed} failed)</>}
                 </p>
+
+                {/* 🔴 WHERE THE BALANCE WENT (admin 2026-09-13: "user ne 0 app banayi aur 250 me se
+                    200 ₹ khatam ho gaye … kaha khatam hua yeh to dikha hi nahi raha?").
+
+                    The line above answers only "spent on BUILDS", so an account that spent nothing on
+                    builds read as an account that spent nothing at all — while the assistants, the
+                    tools, hosting and voice were all drawing on the same wallet. This block is the
+                    rest of the answer, and it comes from ledger rows that were already being written. */}
+                {account.wallet?.ok && (
+                  <div className="mt-4">
+                    <p className="text-[9px] uppercase tracking-widest font-black text-white/40 mb-2">
+                      Where the balance went
+                    </p>
+                    {(account.wallet.spend?.rows?.length ?? 0) === 0 && !account.wallet.spend?.unattributedInr ? (
+                      <p className="text-[11px] text-white/40">Nothing has been spent from this wallet.</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {(account.wallet.spend?.rows ?? []).map((r: { feature: string; label: string; inr: number; entries: number }) => {
+                          const total = Number(account.wallet.spend?.totalInr) || 0;
+                          const pct = total > 0 ? Math.round((r.inr / total) * 100) : 0;
+                          return (
+                            <div key={r.feature} className="flex items-center gap-2 text-[11px]">
+                              <span className="text-white/70 w-40 shrink-0 truncate">{r.label}</span>
+                              {/* The bar is the point: the admin asked which feature is used MOST,
+                                  and a column of numbers does not answer that at a glance. */}
+                              <span className="flex-1 h-1.5 rounded-full bg-white/5 overflow-hidden min-w-0">
+                                <span className="block h-full rounded-full bg-indigo-500/70" style={{ width: `${pct}%` }} />
+                              </span>
+                              <span className="text-white/80 tabular-nums w-16 text-right shrink-0">₹{r.inr.toFixed(2)}</span>
+                              <span className="text-white/30 tabular-nums w-9 text-right shrink-0">{pct}%</span>
+                            </div>
+                          );
+                        })}
+                        {Number(account.wallet.spend?.absorbedInr) > 0 && (
+                          /* 🔴 OUR loss, not their debt (admin 2026-09-13: "aise -500₹ har user ko
+                             diye to ham barbaad ho jayenge"). The overdraft floor stopped the charge
+                             here and NavBharatAI ate the rest — shown so the bleeding is visible on
+                             the screen used to judge it, never folded into the user's number. */
+                          <div className="flex items-center gap-2 text-[11px] pt-1">
+                            <span className="text-rose-300/80 w-40 shrink-0">NavBharatAI absorbed</span>
+                            <span className="flex-1 min-w-0" />
+                            <span className="text-rose-300/90 tabular-nums w-16 text-right shrink-0">
+                              ₹{Number(account.wallet.spend.absorbedInr).toFixed(2)}
+                            </span>
+                            <span className="w-9 shrink-0" />
+                          </div>
+                        )}
+                        {Number(account.wallet.spend?.unattributedInr) > 0 && (
+                          /* 🔒 NEVER filed under a real feature name. Every ledger row written before
+                             this recording existed has no feature on it, and putting those rupees
+                             under "AI tools" would be an invented number on the exact screen that
+                             exists to stop inventing numbers. */
+                          <div className="flex items-center gap-2 text-[11px] pt-1">
+                            <span className="text-amber-300/70 w-40 shrink-0">Before this was recorded</span>
+                            <span className="flex-1 min-w-0" />
+                            <span className="text-amber-300/80 tabular-nums w-16 text-right shrink-0">
+                              ₹{Number(account.wallet.spend.unattributedInr).toFixed(2)}
+                            </span>
+                            <span className="w-9 shrink-0" />
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {(account.wallet.ledger?.length ?? 0) > 0 && (
+                      <details className="mt-3">
+                        <summary className="text-[10px] text-white/40 cursor-pointer hover:text-white/70">
+                          Every line on this wallet ({account.wallet.ledger.length})
+                        </summary>
+                        <div className="mt-2 space-y-1 max-h-56 overflow-y-auto">
+                          {account.wallet.ledger.map((e: { description: string; tokens: number; at: string; featureLabel: string | null }, i: number) => (
+                            <div key={`${e.at}-${i}`} className="flex items-start gap-2 text-[10px]">
+                              <span className={`tabular-nums w-20 shrink-0 text-right ${e.tokens < 0 ? 'text-rose-300/80' : 'text-emerald-300/80'}`}>
+                                {e.tokens > 0 ? '+' : ''}{Number(e.tokens).toLocaleString('en-IN')}
+                              </span>
+                              <span className="text-white/60 flex-1 min-w-0 break-words">{e.description || e.featureLabel || '—'}</span>
+                              <span className="text-white/25 shrink-0">{e.at ? new Date(e.at).toLocaleDateString() : ''}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+                  </div>
+                )}
 
                 {/* PER APP — one app is many builds, so this is grouped by app, not by build. The unit
                     is ₹ because that is what the record holds and what actually left the wallet;

@@ -50853,6 +50853,142 @@ test:bundle ok, boot:check PASS, full vitest suite re-run after the last edit.
 
 ---
 
+## 2026-09-13 — "user ne 0 app banayi aur 250 me se 200 ₹ khatam ho gaye" — where the balance went
+
+**The evidence.** An admin opened a real account: joined 2 hours earlier, **0 apps built**, 0 published,
+`ai chat requests 0 recorded` — and a gifted ₹250 balance down to **₹54.94**. The panel's only spending
+line read *"Spent on builds: ₹0.00"*. The admin: *"kaha khatam hua yeh to dikha hi nahi raha? … aisa
+kaise ho sakta hai!"*
+
+### 🔴 The root cause, and it is not a display bug
+
+Money leaves a wallet down **nine** paths — a build, a publish, an APK/IPA, an App Store remix, a
+hosting plan, the daily hosting bill, voice, the four assistant surfaces, an app's own assistant. Not
+one of them recorded **which feature** it was:
+
+- every debit wrote only a free-text `description`;
+- all **four** assistant surfaces (Doctor AI, Professionals, AI tools, a published app's assistant)
+  shared **ONE** daily bucket labelled *"NavBharatAI assistants"*;
+- the admin panel's only spending figure came from `builds.spentInr`, so **an account that spent
+  nothing on BUILDS read as an account that had spent nothing at all** — while the assistants,
+  hosting and voice were drawing on the same wallet.
+
+So the question had no answer anywhere in the data. No screen could have shown it.
+
+**A second, smaller finding on the way:** the admin route **already read the entire wallet document**,
+ledger included, and threw the ledger away before responding. The per-line history the admin wanted
+had been one field away the whole time.
+
+### What shipped
+
+**`walletFeature.ts` — a CLOSED vocabulary of twelve features.** Free text would drift into
+`chat` / `Chat` / `chat-turn` within a month and the totals would quietly stop adding up, which is the
+same failure as no tag at all, only harder to notice. 🔒 Every label is NavBharatAI's own name for its
+own feature — the ledger is a **user-facing** surface, so the white-label law applies, and a test
+fails on any vendor or model word appearing in one.
+
+**Every debit now names itself**, at all ten call sites, written onto the ledger row.
+
+**The assistant rollup key carries the feature** (`ai_2026-09-13_doctor`). That single change restores
+attribution **without adding one row** to the ledger's real growth rate — the rollup exists because a
+row per turn would fill a 500-entry ledger in a fortnight and push the user's own purchase history off
+the end, and bucketing by day-and-feature keeps exactly that protection.
+
+**The admin sees it, in two places:**
+- **Per user** — *"Where the balance went"*: ₹ and a share bar per feature, plus the full ledger.
+- **Platform-wide** — *"What people used today"* on the Users tab, the admin's actual question
+  (*"kon sa feature jyada use ho raha hai, kon se feacher ko aur strong karna hai"*). It leads with
+  **distinct users**, not rupees: one heavy user and broad adoption produce the same total and mean
+  opposite things.
+
+### The honesty rules, each test-locked
+
+- 🔒 **Untagged history is reported SEPARATELY, never folded into a feature.** Every row written
+  before today has no tag; filing those rupees under "AI tools" would put an invented number on the
+  exact screen built to stop inventing numbers. The panel labels it *"Before this was recorded"*.
+- 🔴 **The breakdown reads the TOKEN column, not `moneySpent`** — that field means money **paid in**
+  and is `0` on every usage row, so a reader trusting it reports every user as having spent nothing.
+  **That is precisely what the old screen did.**
+- An unreadable day and an empty day are different sentences on the card.
+
+### Two things I got wrong and fixed before pushing
+
+1. **I duplicated `TOKENS_PER_RUPEE`** with a comment claiming it "mirrors" the real one — the copied-
+   constant drift this repo has already paid for twice. A breakdown on a stale rate would disagree
+   with the balance printed beside it. Now re-exported from `payments.ts`, the one owner; a test fails
+   if it is ever restated.
+2. **The platform counter was nearly wired call-by-call.** It is written at the ONE choke point every
+   debit passes through (`walletDebit.ts`), because a counter wired per call site is one a tenth
+   caller silently never joins — which is exactly how the attribution drifted away to begin with.
+
+🔒 **Sharded from day one:** one document per feature per day. `CLAUDE.md`'s SCALE PLAN names this
+exact failure — ~1 sustained write/sec to a single document, failing *silently* because swallowed
+telemetry under-counts rather than erroring.
+
+### Honestly NOT covered
+
+**Hosting-plan PURCHASES are absent from the platform counter** (they are in the per-user breakdown).
+Those two debits run inside pure functions that cannot do I/O. It is also arguably right: buying a plan
+is one click, not use of a feature, and a ₹499 purchase beside a day of assistant turns would make the
+tallest bar the one nobody used. The card says so on screen.
+
+**And the reported account cannot be explained retroactively.** Its ₹195 was spent before any of this
+was recorded, so it will show under *"Before this was recorded"* — the honest answer. Every rupee from
+today forward is attributed.
+
+Gate on the final state: `typecheck` 0 · `noUnusedImports` clean · `typecheck:server` 0 · `build` ok ·
+`test:bundle` within budget · `boot:check` PASS · `vitest run` **1,589 files / 22,035 passed / 1
+skipped / 0 failed**. 22 new tests; **three confirmed to fail when the behaviour is reverted.**
+
+### Same day — the floor under every wallet (−₹506 and −₹1,198 on real accounts)
+
+The admin sent a second screenshot: `morphesious@gmail.com` at **−₹506.03** with **0 apps built**, and
+in the list behind it another account at **−1,19,841 tokens = −₹1,198.41**. *"user ka bill -500₹ tak na
+jaye … -50₹ ya -100 tab chala jaye jitna ham jhel sakte hai. aise -500₹ har user ko diye to ham
+barbaad ho jayenge!!!"*
+
+**🔴 Root cause — and every START gate was already correct.** `decideAffordability` refuses a NEW build
+at a balance of 0 or less; a chat turn is refused on an empty wallet. What had **no bound at all** was
+the **SETTLEMENT**. A build legitimately allowed to begin at ₹1 could run its full wall clock and then
+debit whatever it had cost, in one go, at the end. The design states this in writing — *"the debt is
+recorded honestly; the NEXT pre-flight gate then blocks until a recharge"* — which is exactly right
+about the next build and **completely silent about the size of this one**. `SESSION_COST_CAP_USD` ($5)
+is not that limit either: it only decides whether an EMPTY build may retry.
+
+**🔒 The floor lives at the DEBIT, not in a gate.** Nine paths take money out of a wallet; a limit
+written into the callers is a limit the tenth caller never gets. Applied inside the two functions every
+debit passes through, it is true by construction for all of them — including callers nobody has written
+yet. **A caller that omits it gets the built-in floor rather than unlimited debt**: "unset" must never
+be the single input that restores the bug, and a test asserts exactly that.
+
+- Default **₹50**, env `WALLET_OVERDRAFT_FLOOR_INR`, **capped at ₹500** — a typo of `5000` would
+  otherwise silently reproduce the −₹1,198 account. A malformed value falls back to ₹50, never to "no
+  limit" (the same reasoning `parseRolloutPercent` already uses).
+- ⚠️ **The carry follows what was CHARGED, not what was owed** — carrying the absorbed part would
+  quietly re-bill on the next charge the very rupees we just said we would eat.
+- Applied **before** the ₹→token conversion, and measured against the **token** balance, so the floor
+  can never disagree with the number the gates read.
+
+**💸 What it does NOT do, stated plainly.** Clamping the debit bounds the USER'S BILL; it does not
+un-spend what the model already cost us. The excess is **absorbed** and **recorded** as `absorbedInr`
+on the ledger row, shown on the admin panel as *"NavBharatAI absorbed ₹X"* — a clamp that quietly
+shrank the number would hide our own bleeding on the exact screen built to judge it.
+
+**🔴 OPEN ROOT CAUSE (rule 6): there is no MID-BUILD stop.** Nothing checks the running cost while a
+build is in flight, so the model spend itself is still unbounded — only the user's bill is now capped.
+The real saving needs a periodic in-loop check that ends a build once its accumulated cost crosses what
+the account can bear. That is a change inside the build loop and is **not** in this PR; recorded here
+rather than implied as done.
+
+**Also unexplained, honestly:** both accounts show **0 builds** in the panel, which comes from
+`userBuildHistoryStore` — a *different* store from the wallet. Either the spend came from a non-build
+path, or a build debited the wallet without landing in build history. The per-feature attribution
+shipped in this same PR is what will answer that on the next such account; it cannot answer it
+retroactively.
+
+Gate re-run on the final state: `typecheck` 0 · `noUnusedImports` clean · `typecheck:server` 0 ·
+`build` ok · `test:bundle` within budget · `boot:check` PASS · `vitest run` **1,590 files / 22,053
+passed / 1 skipped / 0 failed**. 18 further tests; **three confirmed to fail when the floor is removed.**
 ## 2026-09-13 (later the same day) — THE PIN BECAME A GENERAL APP LOCK: ONE PIN, SEVEN AREAS, THE USER CHOOSES
 
 **Admin, verbatim:** *"yeh PIN system sirf 'secret and api key' ke liye nahi, aur bhi options ke liye lagu

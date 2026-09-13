@@ -161,11 +161,16 @@ describe('the settings screen that turns it all on', () => {
     expect(lockSection).toContain('const dirty =');
   });
 
-  it('tells the user which lock is server-enforced and which is a screen lock', () => {
+  it('tells the user which locks are server-enforced and which are screen locks', () => {
     // The honest line. Overstating this is the one thing that would make the feature dishonest rather
-    // than merely limited.
-    expect(lockSection).toContain('values stay encrypted until the PIN is');
+    // than merely limited — so it names BOTH server-enforced halves (the key values and the money
+    // actions) and still says plainly that the rest is a screen lock.
+    expect(lockSection).toContain('Two things are protected on our server');
+    expect(lockSection).toContain('encrypted until the PIN is accepted');
+    expect(lockSection).toContain('is refused without it');
     expect(lockSection).toContain('keeps the screen closed on this device');
+    // And the one thing the PIN is never asked for.
+    expect(lockSection).toContain('already paid is always credited');
   });
 
   it('points a user with no PIN at the one screen that can create one', () => {

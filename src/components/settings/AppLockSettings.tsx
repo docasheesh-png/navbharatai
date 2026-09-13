@@ -263,9 +263,12 @@ export const AppLockSettings: React.FC<{ userId: string | undefined }> = ({ user
             {/* Said once, plainly, rather than implied. The admin is the person who decides whether this
                 trade is acceptable, and they cannot decide it if the screen overstates what it does. */}
             <p className="text-[10px] leading-snug text-gray-500">
-              Your API keys are protected on our server — their values stay encrypted until the PIN is
-              accepted. On the other screens the PIN keeps the screen closed on this device, which is what
-              stops someone who picks up your phone.
+              Two things are protected on our server, not just on your screen: your API key values stay
+              encrypted until the PIN is accepted, and anything that <strong className="text-gray-400">spends
+              money</strong> — a recharge, buying or renewing a plan, auto-renew — is refused without it, with
+              nothing charged. On the other screens the PIN keeps the screen closed on this device, which is
+              what stops someone who picks up your phone. Money you have already paid is always credited
+              without a PIN.
             </p>
           </>
         )}

@@ -22,6 +22,7 @@ import {
 } from '../professionals/professionalPaid';
 import { splitPayment, platformFeePct } from '../lib/platformFee';
 import { couponValueInr } from '../lib/promoCoupons';
+import { appLockBlocks } from '../lib/appLockEnforce';
 
 /**
  * Verify a Cashfree webhook signature. CRITICAL: the HMAC MUST be computed over the EXACT raw bytes
@@ -50,8 +51,13 @@ export function isValidCashfreeSignature(opts: {
 
 /**
  * Payment routes (Cashfree order creation, verification, webhook, coupon redeem)
- * extracted from the server.ts monolith (Phase 1). Behavior unchanged. The
- * payment rate limiter is injected so its config stays owned by the bootstrap.
+ * extracted from the server.ts monolith (Phase 1). The payment rate limiter is injected so its config
+ * stays owned by the bootstrap.
+ *
+ * 🔒 THE APP LOCK TOUCHES EXACTLY ONE ROUTE IN THIS FILE — `create-order`, which STARTS a purchase and
+ * fails before any money moves. The verification, webhook, store-receipt and reconcile paths are
+ * deliberately untouched: they CREDIT money somebody has already paid, and a PIN prompt there would mean
+ * real money taken and not delivered. See appLockEnforce.ts.
  */
 export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitRequestHandler): void {
   app.post('/api/payment/create-order', paymentLimiter, async (req: Request, res: Response) => {
@@ -73,6 +79,18 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
     // tokens); anything else is the existing wallet recharge. Untrusted, but harmless — the fulfilment
     // path re-derives days/plan from the server config, and the amount is reconciled against Cashfree.
     const isProfessionalPass = String(productType || '') === 'professional_pass';
+
+    // 🔒 APP LOCK (admin 2026-09-13), mapped PER PRODUCT rather than per route.
+    //
+    // This one endpoint sells two different things. Putting the whole route behind "Wallet recharge"
+    // would stop a user who ticked that box from buying a Professional Pass as well, which is not what
+    // that tick says — so the Pass answers to "Subscription & plans" instead. `areaForMoneyAction` holds
+    // the mapping, and locking the whole Wallet & Billing screen covers both without this line knowing.
+    //
+    // Checked here, before the order exists: a refusal creates nothing and charges nothing.
+    const lockBlocked = await appLockBlocks(req, userId, isProfessionalPass ? 'professional-pass' : 'wallet-recharge');
+    if (lockBlocked) return res.status(lockBlocked.status).json(lockBlocked.body);
+
     const orderAmount = parseFloat(amount);
     if (isNaN(orderAmount) || orderAmount <= 0) {
       return res.status(400).json({ error: 'Invalid order amount' });

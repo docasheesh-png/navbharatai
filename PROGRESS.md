@@ -50990,3 +50990,76 @@ full seven-item list, how the PIN is created, that changing the toggles needs th
 strong-vs-screen-lock difference, and the words a user really types (`app lock kaise lagaye`, `pin lagao`,
 `lock hata do`, `pin bhul gaya`, `koi aur na dekhe`, `phone kisi ke hath`). `settings_general` and
 `settings_secrets` corrected to point at it.
+
+---
+
+## 2026-09-13 (third change today) — THE APP LOCK NOW HOLDS ON THE SERVER FOR ANYTHING THAT SPENDS MONEY
+
+**Admin:** *"yeh ban jaye. uske baad aab, ipa bana dena!!!!!"* — i.e. finish the open item from the entry
+above, then cut the store builds. This is that open item, closed.
+
+### WHAT CHANGED, IN ONE LINE
+
+Three actions are now refused by the SERVER without a live PIN ticket, when the user has the matching area
+locked: **starting a wallet recharge**, **buying a Professional Pass**, **buying or renewing a hosting
+plan**, and **flipping auto-renew**. Every one fails BEFORE any money moves, so a refusal costs nothing but
+a PIN entry. `lib/appLockEnforce.ts` + `lib/appLockStore.ts`.
+
+### ⛔ THE LINE THAT MATTERS MOST, AND IT IS THE ROUTES THAT WERE *NOT* TOUCHED
+
+**The return paths are untouched on purpose: payment verify, the Cashfree webhook, the store receipt
+credit, the sign-in reconcile.** A user who has ALREADY PAID is credited with no prompt of any kind.
+Demanding a PIN there would mean **real money taken and not delivered because somebody could not remember
+four digits** — far worse than the gap it would close. This file already records that a payment has THREE
+independent delivery paths by design; none of them may acquire a new way to fail.
+
+`tests/appLockEnforce.test.ts` asserts `payment.ts` contains exactly ONE `appLockBlocks(` call and that no
+verify/webhook/store handler contains one, and that `wallet.ts` contains exactly two. A future change that
+adds a gate to a credit path fails CI.
+
+### ⚠️ `/api/payment/create-order` SELLS TWO PRODUCTS, so the mapping is per-product, not per-route
+
+That one endpoint handles a wallet recharge **and** a Professional Pass. Putting the whole route behind
+`wallet_recharge` would have meant a user who ticked "Wallet recharge" could no longer buy a Pass either —
+which is not what that tick says. So `areaForMoneyAction()` maps the Pass to `subscription` (the area that
+is actually about buying a plan) and the recharge to `wallet_recharge`. Locking the whole Wallet & Billing
+screen covers both through `effectiveLockedAreas`, without the map having to know that.
+
+📌 **Recorded because it surprised me and would surprise the next reader: nothing in the client ever sends
+`productType: 'professional_pass'`.** That branch exists server-side with no caller today. The mapping is
+therefore correct and future-proof rather than currently exercised — stated plainly instead of implying the
+Pass flow was wired and tested end to end.
+
+### 🔴 IT FAILS CLOSED, WHICH IS THE OPPOSITE OF THE BROWSER HALF — AND THE CONTRAST IS THE POINT
+
+The client renders a screen when it cannot read the lock status, because locking somebody out of Settings
+over a dropped request would break the app for the many people who never switched this on. This refuses
+when it cannot read the record, because the question is different: **the client decides whether to SHOW,
+this decides whether to SPEND.** An unreadable record means we cannot establish that the user permitted it,
+so the answer is the one these routes already give on their own internal errors — *nothing was charged,
+please try again*. Nobody loses money either way, and "I made the lookup fail" cannot become a purchase.
+
+The common case is invisible: **an account with no PIN is never blocked**, which is every user who has not
+set one up. A PIN that does not exist cannot be demanded.
+
+### THE CLIENT HAD TO CARRY THE TICKET, OR THE FEATURE WOULD HAVE BROKEN ITS OWN HAPPY PATH
+
+A user who unlocks the Billing screen and then presses Buy must not be asked again. So
+`unlockHeaders()` (in `lib/appLock.ts`) now rides on `HostingPlanCard`'s purchase and auto-renew calls and
+on `usePaymentEngine`'s `create-order`. It returns `{}` when nothing is unlocked, so a user with no lock
+sends a byte-identical request to before.
+
+**A silent failure fixed on the way past:** `toggleAutoRenew` had no `else` branch — a refusal made the
+switch snap back with nothing said, which reads as a broken toggle. It mattered less when the only refusal
+was a 404; it matters now that the app lock can be the reason. It reports the server's message.
+
+### Also
+
+- `routes/appLock.ts` lost its private copy of the Firestore read/write to `lib/appLockStore.ts`, because
+  a second caller needed it and the FAILURE behaviour there is security-relevant — two copies would be two
+  places for it to drift.
+- `AppKnowledgeBase` corrected in the same change: the App Lock entry's "how strong it is, honestly"
+  paragraph now names BOTH server-enforced halves (key values **and** money actions) instead of only the
+  first, and states that money already paid is never PIN-gated. The App Lock settings screen says the same
+  in its own words — a test pins both, because overstating this is the one thing that would make the
+  feature dishonest rather than merely limited.

@@ -15,11 +15,12 @@ import { repairSystemPrompt, repairUserPrompt } from './SimpleBuilder';
 import { parseFileBlocks } from './OneShotBuilder';
 import { findSyntaxErrors } from './SyntaxCheck';
 import { textMarkerFilePaths, truncationRecoverySteer, truncationRecoveryNarration } from './TruncationRecovery';
-import { newRepeatProbeState, collectRepeatProbeSteer, loopGuardEnabled, loopGuardThreshold } from './RepeatProbeGuard';
+import { newRepeatProbeState, collectRepeatProbeSteer, loopGuardEnabled, loopGuardThreshold, isProbeBanned, bannedProbeMessage } from './RepeatProbeGuard';
 import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { missingFeatureNotice } from './missingFeatureNotice';
 import { describeContextUsage, shouldEmitContextUsage, type ContextUsage } from './contextUsage';
 import { abortCauseOf, abortSummary } from './buildAbortCause';
+import { budgetSteer, type BudgetStage } from './buildBudgetSteer';
 
 /**
  * AgentRunner — the native tool-use loop (RC-1), the heart of P1.
@@ -329,6 +330,18 @@ export class AgentRunner {
     const modelKeepRecent = Math.max(2, parseInt(process.env.AGENTV3_MODEL_COMPACT_KEEP_RECENT || '', 10) || 6);
     const modelMaxOldToolResultChars = Math.max(500, parseInt(process.env.AGENTV3_MODEL_COMPACT_MAX_CHARS || '', 10) || 2_000);
     const buildStartMs = Date.now();
+    /**
+     * 🔴 THE TIME BUDGET, TOLD TO THE MODEL (f04421ef autopsy, 2026-09-13).
+     *
+     * The wall clock already existed here as a GUILLOTINE — `buildTimedOut` below ends the build and
+     * `maxBuildMs` bounds it — and the model was never told any of it. So on a build whose prompt was
+     * "finish/fix the app", it generated tests and installed a dev dependency with ninety seconds of
+     * budget left, because nothing gave it a reason to believe the job was nearly out of time.
+     *
+     * This set is what keeps each stage to ONE delivery: a budget warning repeated every turn is noise
+     * the model learns to skim, which is how a real warning stops working.
+     */
+    const budgetStagesSent = new Set<BudgetStage>();
     // Total tool calls across the whole run — a build that never called a tool built nothing.
     let totalToolUses = 0;
     // How many times we've nudged a build that only NARRATED (described its plan / said it would
@@ -792,6 +805,23 @@ export class AgentRunner {
         // watchdog/budget, so a cap here would wrongly kill a legitimate long sub-agent. On timeout the
         // tool yields an honest is_error result (never a throw) so the model can retry or route around it.
         const dispatchWithBudget = async (tu: ToolUse) => {
+          /**
+           * 🔴 THE LOOP GUARD'S "BANNED" IS ENFORCED HERE, AND THIS IS THE ONLY PLACE IT CAN BE.
+           *
+           * The FINAL steer has always told the model "This call is banned for the rest of this build".
+           * Nothing refused it, so a model that ignored the words simply kept calling — which is exactly
+           * what the f04421ef build did, twice, over nine minutes. Refusing it BEFORE dispatch costs
+           * nothing at all: no sandbox round trip, no browser, no tokens spent re-answering a question
+           * already answered five times.
+           *
+           * 🔒 Narrow by construction: `isProbeBanned` returns false for anything outside `PROBE_TOOLS`,
+           * so `bash`, `write_file` and `edit_file` can never be refused. A repeated `tsc --noEmit` is
+           * usually a build converging, and blocking that would stop a build from finishing — a worse
+           * failure than the wasted minutes this guard exists to prevent.
+           */
+          if (loopGuardOn && isProbeBanned(repeatProbe, tu.name, tu.input)) {
+            return { tool_use_id: tu.id, content: bannedProbeMessage(tu.name), is_error: true };
+          }
           if (toolTimeoutMs <= 0 || tu.name === 'task') return dispatcher.dispatch(tu, agentRole);
           try {
             return await withTimeout(dispatcher.dispatch(tu, agentRole), toolTimeoutMs, `tool ${tu.name}`);
@@ -884,7 +914,19 @@ export class AgentRunner {
               : '⚠️ Noticed a repeated step that isn\'t making progress — nudging a change of approach.',
           });
         }
-        const steer = [truncationSteer, loopSteer].filter(Boolean).join('\n\n') || null;
+        // TIME BUDGET — the one thing the model was never told (see `budgetStagesSent` above). Rides the
+        // message the runner already appends, so it costs no call and cannot block a build.
+        let budgetText: string | null = null;
+        try {
+          const bs = budgetSteer(Date.now() - buildStartMs, maxBuildMs ?? 0, budgetStagesSent);
+          if (bs) {
+            budgetStagesSent.add(bs.stage);
+            budgetText = bs.text;
+            // Narrated, because a build that silently stops polishing looks like a build that gave up.
+            events.emit({ type: 'narration', agent: agentRole, text: bs.narration, ts: Date.now() });
+          }
+        } catch { /* the budget steer is advisory — it must never break a build */ }
+        const steer = [truncationSteer, loopSteer, budgetText].filter(Boolean).join('\n\n') || null;
         messages.push({ role: 'user', content: steer ? [...resultBlocks, { type: 'text', text: steer }] : resultBlocks });
         messageTs.push(Date.now());
 

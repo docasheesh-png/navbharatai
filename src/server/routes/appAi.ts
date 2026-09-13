@@ -157,7 +157,7 @@ export function registerAppAiRoutes(app: Express): void {
       // testing NavBharatAI itself — this spend is a published app's public traffic, which is the one
       // place the courtesy would be unbounded. Both would also need a lookup the deployment record
       // cannot answer, so inventing either would mean guessing about somebody's billing.
-      { userId: ownerId || null },
+      { userId: ownerId || null, feature: 'app-assistant' },
       run.spend,
       usdInr,
       Date.now(),

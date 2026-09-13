@@ -23,6 +23,7 @@
 
 import { chatTurnCost, sumChatTurnCosts, type ChatTurnUsage, type ChatTurnCost } from './chatSpend';
 import { debitWalletRolledUp } from './walletDebit';
+import { featureLabel, featureRollupRef, type WalletFeature } from './walletFeature';
 
 /** The master switch. Off unless explicitly enabled, so shipping this changes nothing by itself. */
 export function aiWalletSpendEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -30,6 +31,16 @@ export function aiWalletSpendEnabled(env: NodeJS.ProcessEnv = process.env): bool
 }
 
 export interface AiChargeContext {
+  /**
+   * WHICH assistant is spending (admin 2026-09-13).
+   *
+   * 🔴 Before this, all four assistant surfaces — Doctor AI, Professionals, the AI tools and a
+   * published app's own assistant — shared ONE daily bucket called "NavBharatAI assistants", so a
+   * user whose balance had drained could not be told what had drained it, and the admin could not
+   * see which feature people actually use. It defaults to 'tools' only because the tool gate was the
+   * first caller; every live caller names its own.
+   */
+  feature?: WalletFeature;
   /** Server-VERIFIED uid. Never a client-claimed field — it decides whose money moves. */
   userId: string | null;
   /** True for an admin/test free-list account. */
@@ -169,10 +180,15 @@ async function applyAiCharge(
 ): Promise<AiChargeResult> {
   if (!decision.charge || !ctx.userId) return { ...decision, debited: false, tokensDebited: 0 };
 
+  // ONE BUCKET PER FEATURE PER DAY. The ledger stays bounded exactly as before (a handful of rows a
+  // day at the very most), and the wallet history finally says "Doctor AI" instead of a word that
+  // covered four different products.
+  const feature: WalletFeature = ctx.feature ?? 'tools';
   const res = await debitWalletRolledUp(db, ctx.userId, {
     billedInr: decision.billedInr,
-    rollupRef: aiSpendRollupRef(nowMs),
-    description: AI_SPEND_LEDGER_LABEL,
+    rollupRef: featureRollupRef(feature, nowMs),
+    description: featureLabel(feature) || AI_SPEND_LEDGER_LABEL,
+    feature,
   }).catch(() => ({ ok: false as const, error: 'debit threw' }));
 
   if (!res.ok) {

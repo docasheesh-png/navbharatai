@@ -34,6 +34,8 @@ import { getServerDb } from '../lib/serverDb';
 import { audit } from '../lib/audit';
 import { activeHostingTier } from '../lib/hostingPlan';
 import { adultPreferenceFrom } from '../../lib/adultContent';
+import { spendByFeature, featureLabel, isWalletFeature } from '../lib/walletFeature';
+import { featureSpendStore, spendDayKey } from '../lib/FeatureSpendStore';
 import { professionalPassStore } from '../professionals/ProfessionalPassStore';
 import {
   fetchAuthMetadata, firebaseAuthBatch, resolveJoinedAt, resolveLastActiveAt,
@@ -321,6 +323,25 @@ export function registerReportRoutes(app: Express): void {
     res.json({ dataUrl });
   });
 
+  /**
+   * WHICH FEATURE IS BEING USED — platform-wide, for one day (admin 2026-09-13).
+   *
+   * The per-user panel answers "where did this person's balance go"; this answers the product
+   * question the admin asked next: which feature to strengthen, and which to invest more work in.
+   *
+   * ⚠️ IT COUNTS FEATURE USAGE, NOT REVENUE — so a hosting-PLAN purchase is deliberately absent.
+   * Buying a plan is one click, not use of a feature, and folding a ₹499 purchase in beside a day of
+   * assistant turns would make the tallest bar the one nobody actually used. Plan purchases are
+   * already visible as payments and entitlements on the account panel.
+   */
+  app.get('/api/admin/feature-spend', requireAdmin, async (req: Request, res: Response) => {
+    const raw = typeof req.query.date === 'string' ? req.query.date.trim() : '';
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : spendDayKey();
+    const rows = await featureSpendStore.day(date);
+    // 🔒 An empty day and an unreadable one must not look alike: the card says which.
+    res.json({ date, rows, totalInr: Math.round(rows.reduce((s, r) => s + r.inr, 0) * 100) / 100 });
+  });
+
   /** Every report, newest first. `?status=open` narrows it. */
   app.get('/api/admin/reports', requireAdmin, async (req: Request, res: Response) => {
     const status = typeof req.query.status === 'string' ? req.query.status : '';
@@ -501,6 +522,25 @@ export function registerReportRoutes(app: Express): void {
         totalSpentInr: Number(w.total_money_spent ?? 0),
         banned: w.banned === true,
         banReason: typeof w.banReason === 'string' ? w.banReason : '',
+        // 🔴 WHERE THE BALANCE WENT (admin 2026-09-13). This route already READ the whole wallet
+        // document — the ledger was in its hand the entire time and was thrown away before the
+        // response, which is why an admin looking at a drained account could only see that it was
+        // drained. Nothing new is fetched here; a field is simply no longer discarded.
+        spend: spendByFeature(Array.isArray(w.walletLedger) ? (w.walletLedger as never[]) : []),
+        // The raw lines, newest first — the answer to "what happened on this account" when the
+        // per-feature totals are not enough. Bounded so one account cannot make the response huge.
+        ledger: (Array.isArray(w.walletLedger) ? (w.walletLedger as Array<Record<string, unknown>>) : [])
+          .slice(-60)
+          .reverse()
+          .map((e) => ({
+            type: typeof e?.type === 'string' ? e.type : '',
+            feature: isWalletFeature(e?.feature) ? e.feature : null,
+            featureLabel: featureLabel(e?.feature) || null,
+            description: typeof e?.description === 'string' ? e.description.slice(0, 200) : '',
+            tokens: Number.isFinite(Number(e?.amountCoinsOrTokens)) ? Number(e.amountCoinsOrTokens) : 0,
+            absorbedInr: Number.isFinite(Number(e?.absorbedInr)) ? Number(e.absorbedInr) : 0,
+            at: typeof e?.timestamp === 'string' ? e.timestamp : '',
+          })),
       },
       builds: { ok: buildRows.ok, ...builds },
       publishedApps: {

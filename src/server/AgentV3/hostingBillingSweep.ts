@@ -260,6 +260,7 @@ export async function runHostingBillingSweep(opts?: {
       }
 
       const res = await debitWalletRolledUp(db as never, ownerId, {
+        feature: 'hosting',
         billedInr: decision.inr,
         rollupRef: hostingLedgerRef(win.day),
         description: HOSTING_LEDGER_LABEL,

@@ -722,7 +722,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       // After the answer, never awaited into the response, inert while AI_WALLET_SPEND is off.
       void chargeForAiTurn(
         getServerDb() as any,
-        { userId: sdaGate.uid, isFreeListed: sdaGate.isFreeListed, hasActivePass: sdaGate.hasActivePass },
+        { userId: sdaGate.uid, isFreeListed: sdaGate.isFreeListed, hasActivePass: sdaGate.hasActivePass, feature: 'doctor' },
         sdaSpend,
         usdInrRate(),
         Date.now(),

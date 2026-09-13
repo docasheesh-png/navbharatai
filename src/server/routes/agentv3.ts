@@ -10937,6 +10937,7 @@ async function noteBuildOutcome(
               const debitRes = await debitWalletForBuild(getDb() as any, userId, {
                 billedInr: watchdogBilledUsd * usdInrRate(),
                 buildRef: `${workspaceId}_${billingCtx.buildStartedAt}`,
+                feature: 'build',
                 description: 'NavBharatAI Pro build (time-capped)',
               });
               if (debitRes.ok) watchdogWalletDebit = { tokensDebited: debitRes.tokensDebited, tokenBalance: debitRes.tokenBalance };
@@ -18093,6 +18094,7 @@ async function noteBuildOutcome(
           const debitRes = await debitWalletForBuild(getDb() as any, userId, {
             billedInr: effectiveBilledUsd * usdInrRate(),
             buildRef: `${workspaceId}_${buildStartedAt}`,
+            feature: 'build',
             description: 'NavBharatAI Pro build',
           });
           if (debitRes.ok) {

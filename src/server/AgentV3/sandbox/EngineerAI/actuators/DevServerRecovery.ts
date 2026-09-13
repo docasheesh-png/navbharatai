@@ -604,7 +604,10 @@ export function classifyDevServerFailure(log: string): DevServerDiagnosis {
   }
 
   // 6) Nothing recognisable — retry once, then report honestly.
-  return make('unknown', 'The dev server did not start and the log had no recognisable error — restarting once.');
+  // NOT "restarting once": this function is given only the log, so it cannot know which attempt this
+  // is or how many remain — and with MAX_RECOVERY = 2 the line could print twice, contradicting itself
+  // on the second pass. The true count is added by planDevServerRecovery, which actually holds it.
+  return make('unknown', 'The dev server did not start and the log had no recognisable error — restarting.');
 }
 
 /**
@@ -734,7 +737,21 @@ export function planDevServerRecovery(log: string, attempt: number, maxAttempts:
   // instance: every `code_fix` recovery short-circuits with its detail intact.
   if (d.recovery === 'code_fix') return d;
   if (attempt >= Math.max(1, maxAttempts)) return { ...d, recovery: 'give_up', detail: terminalDetail(d) };
-  return d;
+  // State the REAL position in the retry budget. Every "restarting"/"retrying" detail above is written
+  // by a pure classifier that sees only the log, so none of them can know whether this is the first
+  // restart or the last — one of them used to claim "restarting once" and could print twice.
+  // The count belongs here, where it is actually known.
+  return { ...d, detail: `${d.detail} ${attemptSuffix(attempt, maxAttempts)}`.trim() };
+}
+
+/**
+ * "(attempt 1 of 2)" — the honest position in the retry budget, for a diagnosis that is about to be
+ * retried. Clamped so a nonsense argument cannot produce a nonsense promise. PURE.
+ */
+export function attemptSuffix(attempt: number, maxAttempts: number): string {
+  const max = Math.max(1, Math.floor(Number(maxAttempts) || 1));
+  const n = Math.min(max, Math.max(1, Math.floor(Number(attempt) || 1)));
+  return `(attempt ${n} of ${max})`;
 }
 
 /**

@@ -51396,3 +51396,104 @@ removed a `MessageSquare` import that was in use at lines 274 and 326, breaking 
 - **Why GLM delivered 0 of 54 turns** — still unanswerable without a build that settles.
 - **The health-check's "no recognisable error" restart** — it prints "restarting once" but can print twice,
   and `MAX_RECOVERY = 2` means two blind restarts. Cosmetic-but-dishonest wording; not fixed here.
+
+---
+
+## 2026-09-13 — Autopsy f04421ef, batch 2: the report's four remaining lies, and one of my own claims retracted
+
+Follows the batch-1 fixes (#2885) and the budget governor + real loop-guard ban (#2888). The admin's
+instruction was unambiguous — *"build report me jo jo problem hai. sabhi ko fix karna hai. next time yeh
+error na aye!!"* — so every remaining item in the ledger is either fixed here or, where the claim itself
+turned out to be wrong, retracted in writing rather than quietly dropped.
+
+**A theme worth naming, because it is the same bug four times: this report could not distinguish an
+ABSENT measurement from a measured value.** Every fix below restores that distinction somewhere.
+
+### 1. `0 in · 0 out` was not a measurement — and I read it as one, to the admin
+
+The mid-flight report printed `GLM: 54 call(s) · 0 in · 0 out` and carried no cache figure, because
+`setProviderTokens` and `setCacheReadInputTokens` are only called when a build SETTLES. From those
+zeros I told the admin the build had served zero tokens from its prefix cache and was leaving a ~75%
+saving on the table. Both claims were false. **A report that its own renderer's author misreads is not
+a formatting problem.**
+
+Three states now exist where one did (`tokenUsageView`):
+- **settled** — `providerTokens`, the reconciled billable figure, rendered exactly as before.
+- **live** — a new `liveTokens` snapshot written on every turn from the running ledger, labelled
+  `LIVE, build not settled` and stating that the real figure is **HIGHER** (aux calls reconcile in at
+  settle), so the direction of the error is never left for the reader to guess.
+- **unknown** — prints `tokens not recorded`, never zeros, with the caveat *"an absence of measurement,
+  not a measured zero"*.
+
+🔒 `setLiveUsage` is a deliberately separate setter from `setProviderTokens`, which CLEARS it on settle —
+the same separation `shadowFastLaneTokens` keeps, for the same reason: an in-flight ledger is an
+UNDER-count and must never reach the billing path. `userFacingReport` is an allow-list, so the new fields
+are absent from the user's view by construction; a test asserts it anyway.
+
+Side benefit, not incidental: `claudeProviderDelivered` now reads the live snapshot too, so a weak build
+leaking Sonnet is catchable **before** it settles rather than only in the post-mortem.
+
+### 2. The admin's own report was less honest than the user's screen
+
+`ETA_BASIS` read `ETA ~3 min · basis heuristic · confidence 0.4` for a build that ran past twenty
+minutes — and any admin reading it would conclude the user had been promised three minutes.
+
+🔴 **THEY WERE NOT, AND MY LEDGER ENTRY ON THIS WAS WRONG.** The entry above says *"`ETA_BASIS` records
+`confidence 0.4` and no user-facing line ever consults it"*. `firstEtaLine` has consulted it since
+2026-08-23: it renders the low–high BAND (which `estimateBuildTime` derives from exactly that
+confidence — `spread = 1 - confidence`) and says outright *"this is a first guess"*. `liveEtaTick` also
+already stops naming numbers after two broken promises. **I asserted a defect from reading one admin
+line instead of the rendering path.** The real defect was the opposite of the one I reported: the
+point estimate was an internal number that only the ADMIN surface displayed as if it were the promise.
+
+`ETA_BASIS` now records the band, keeps the midpoint in parentheses, and quotes the exact sentence the
+user saw — from the same `etaShown` value that is emitted to them, so report and screen cannot drift.
+
+### 3. "restarting once" could print twice
+
+`classifyDevServerFailure` is a pure function of the dev-server log. It cannot know which attempt it is
+on — and one of its strings claimed `restarting once` while `MAX_RECOVERY = 2` lets it print twice.
+
+Fixing that one string would be the surface patch. The class is **"the count lives where the count is
+not known"**, so the count moved to `planDevServerRecovery`, which holds `attempt` and `maxAttempts`:
+every retry detail now carries a true `(attempt 1 of 2)`. Two successive attempts can no longer print
+the same sentence — the precise thing "once" got wrong. `give_up` and `code_fix` are untouched: the
+first already has its honest terminal wording, the second must keep its actionable detail intact.
+
+### 4. "GLM: 0 turns" was unreadable — now it is answerable by looking
+
+The report showed `providerDelivery: { KIMI: 54 }`, no GLM row, no GLM failure. That is equally
+consistent with GLM sitting in the chain and never being reached (fine) and with GLM not being in the
+chain at all (a provider we believe leads our builds silently not running).
+
+⚠️ **`CHEAP_FLOOR_DECISION` cannot settle it, and this is worth knowing on its own: with the floor set
+to `on` its key check is an OR** (`(wantsGlm && hasGlm) || (wantsKimi && hasKimi)`), so it reports
+*"ACTIVE — ON leads"* whenever EITHER key is present. The report could honestly say the floor is active
+while half of it did not exist.
+
+`runnerChainSummary.ts` records the ordered chain the build was ACTUALLY given —
+`GLM(glm-5.2) → KIMI(kimi-k3) → CLAUDE_HAIKU` — taken from `guardedChain`, i.e. **after**
+`enforceNoClaude`, so a weak build can never be reported as containing a rung that was stripped. Under
+the table the report now names the providers that were in the chain and never reached, and states
+plainly that a provider **absent** from the chain is a different thing from one that sat idle. Key-pool
+rungs stay distinct (`GLM → GLM#2 → GLM#3`): three keys tried is not one attempt.
+
+This does not yet answer WHY GLM was idle on that build — that needs a build that settles, on the live
+env. It makes the question answerable from the next report instead of unanswerable from every report.
+
+### The wiring is pinned, because dropping it fails nothing
+
+All four fixes are observational: remove the call and no test breaks, no build fails, no error appears —
+the report just goes quiet and the next autopsy re-derives the same wrong conclusion from the same
+missing numbers. `tests/buildReportWiring.test.ts` asserts each call site against the route's source
+with comments stripped, so a doc block that merely MENTIONS a call cannot satisfy an assertion about it
+(the third time that particular mistake has been caught by a comment-stripper in two weeks).
+
+**Verification:** 43 new tests across five files; every fix checked to FAIL when reverted — the renderer's
+zeros, the settle-clears-live rule, the removed `once`, the missing attempt suffix, the `onChain`
+callback, and the chain line — six reverts, six failures.
+
+### Still OPEN
+
+- **Why GLM delivered 0 of 54 turns on that specific build.** Now diagnosable from the next report
+  (item 4); genuinely unanswerable from this one.

@@ -205,3 +205,61 @@ export async function hostAppOnNavBharatCloud(
     envNote: backendEnvNote(envPlan),
   };
 }
+
+/**
+ * HOW MANY OF THIS OWNER'S APPS MAY RUN A SERVER — the gate behind `HostingTier.backendApps`.
+ *
+ * 🔴 WHY A SECOND CAP, WHEN `publishedAppCap` ALREADY EXISTS. That one bounds how many apps EXIST; it
+ * says nothing about how many hold a container image and a Cloud Run service. Those are different
+ * costs and only one of them is paid for by traffic: a static app is a file on a CDN, while a server
+ * app carries an image in Artifact Registry whether or not a single visitor arrives. Without this,
+ * a 30-app plan implies 30 servers, and the image storage alone outgrows the plan price with nobody
+ * visiting at all — the one cost line that no traffic overage offsets.
+ *
+ * 🔒 RE-HOSTING AN APP THAT IS ALREADY A SERVER APP IS ALWAYS FREE. The cap is on how many run at
+ * once, not on how often they are deployed; counting a redeploy would make the last app on a plan
+ * un-updatable, which is the shape of bug that turns a limit into a trap.
+ *
+ * ⚠️ IT FAILS OPEN ON AN UNREADABLE COUNT, and that direction is deliberate and NOT the direction
+ * `hasPlan` fails. An unknown PLAN must read as "no plan", because guessing yes gives away a paid
+ * product. An unknown COUNT is different: guessing "at the cap" refuses a publish a paying customer
+ * is entitled to, on the strength of a Firestore hiccup, while guessing "under it" costs at most one
+ * extra idle service — which is nearly free, and self-corrects on the next deploy once the registry
+ * reads. The expensive mistake is the visible one.
+ *
+ * PURE — no store, no clock, so every branch is tested without a network.
+ */
+export function serverAppLimit(input: {
+  isAdmin: boolean;
+  /** Workspace ids that already run a server for this owner. `null` = the registry could not be read. */
+  liveServerWorkspaceIds: readonly string[] | null;
+  /** The workspace being hosted right now. */
+  workspaceId: string;
+  /** The tier's `backendApps`. `null`/0 = no tier, which the plan gate above has already refused. */
+  cap: number | null | undefined;
+}): Availability {
+  // The admin is exempt for the same reason the flags above exempt them: the path has to be testable
+  // before anyone can buy into it.
+  if (input.isAdmin) return { available: true, message: '' };
+
+  const cap = Number(input.cap);
+  if (!Number.isFinite(cap) || cap <= 0) return { available: true, message: '' };
+
+  const live = input.liveServerWorkspaceIds;
+  if (!Array.isArray(live)) return { available: true, message: '' }; // unreadable ⇒ open; see above
+
+  // Already a server app ⇒ this is an update, and updates never spend the allowance.
+  const already = live.some((id) => String(id) === String(input.workspaceId));
+  if (already) return { available: true, message: '' };
+
+  const used = new Set(live.map((id) => String(id))).size;
+  if (used < cap) return { available: true, message: '' };
+
+  return {
+    available: false,
+    message: `You already have ${used} app${used === 1 ? '' : 's'} running a server, which is your plan's limit of ${cap}. `
+      + `Updating one you have already hosted is always free and does not count against this. To host a NEW one, `
+      + `take a server off an app you no longer need, or move to a bigger plan in Billing → Plans. Apps without a `
+      + `server do not count towards this at all.`,
+  };
+}

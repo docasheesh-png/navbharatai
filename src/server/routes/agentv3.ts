@@ -232,7 +232,8 @@ import { analyzeApiWiring, buildEnvForSplit, buildEnvForWhole, mergeEnvFile } fr
 import { repoAvailableForDeploy, resolveDeployRepo, ownRepoMemoryPatch, renameStorageRepoPatch } from '../AgentV3/deployRepoMemory';
 import { githubGateVerdict, githubGateMessage, githubGateCode, GITHUB_GATE_CODE } from '../../lib/publishGithubGate';
 import { decidePushBranch } from '../AgentV3/pushAppTarget';
-import { hostingAvailability, hostAppOnNavBharatCloud } from '../AgentV3/hostApp';
+import { hostingAvailability, serverAppLimit, hostAppOnNavBharatCloud } from '../AgentV3/hostApp';
+import { NAVBHARAT_CLOUD_PROVIDER } from '../AgentV3/hostedDeploymentRecord';
 import { appsProject, appsRegion, serviceNameFor, deleteHostedService } from '../AgentV3/cloudRunHosting';
 import { readHostingUsage, usageGapNote } from '../AgentV3/hostingUsage';
 import {
@@ -247,7 +248,7 @@ import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { prepareSandboxForBuild } from '../AgentV3/sandboxSeed';
 import { summarizeRestore, type SandboxRestoreOutcome } from '../AgentV3/sandboxRestore';
-import { publishedAppCap, publishedAppCapForTier } from '../lib/HostingQuota';
+import { publishedAppCap, publishedAppCapForTier, readHostingTierForQuota } from '../lib/HostingQuota';
 import { hostingPlansEnabled, hostingPlanPriceInr, readHostingPlanStatus } from '../lib/hostingPlan';
 import { bundlerFallbackCommand, composeBuildFailureDetail, TYPECHECK_SKIPPED_WARNING } from '../AgentV3/publishBuild';
 import {
@@ -3142,6 +3143,27 @@ async function probeFreeProviders(): Promise<Array<{ name: string; ok: boolean; 
 /** Throttle the public live-probe so it can't be abused for cost (one per 30s). */
 let lastDiagProbeTs = 0;
 
+/**
+ * The workspaces that already run a SERVER for this owner, for `serverAppLimit`.
+ *
+ * Returns `null` when the registry could not be read — NOT an empty array. The two mean opposite
+ * things to the cap ("nobody is hosting" would spend the allowance from zero), and this file has
+ * already paid for that confusion once: `null` and `0` are kept distinct for the identical reason in
+ * the hosting usage meter.
+ */
+async function liveServerWorkspaceIdsFor(userId: string): Promise<string[] | null> {
+  if (!userId || userId === 'anon') return [];
+  try {
+    const records = await deploymentStore.listByUser(userId, 200);
+    return records
+      .filter((r) => String(r.providerId ?? '') === NAVBHARAT_CLOUD_PROVIDER && (r.status ?? 'active') === 'active')
+      .map((r) => String(r.workspaceId ?? ''))
+      .filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+
 export function registerAgentV3Routes(app: Express): void {
   // WHY WAS THIS SANDBOX STARTED? One zone per request, opened before every route below, so a create
   // or resume deep inside any handler can name its cause (sandboxSessionZone.ts). Decides nothing.
@@ -4569,6 +4591,18 @@ async function noteBuildOutcome(
     const hostPlan = await probeHostingPlan(userId).catch(() => ({ active: false, known: false }));
     const gate = hostingAvailability({ isAdmin: isReportAdmin(email), hasPlan: hostPlan.active === true });
     if (!gate.available) { res.status(503).json({ ok: false, reason: 'unavailable', error: gate.message }); return; }
+
+    // …and how many servers the plan actually bought. `publishedAppCap` bounds how many apps EXIST;
+    // this bounds how many hold a container image, which is the cost no traffic overage offsets.
+    const serverGate = serverAppLimit({
+      isAdmin: isReportAdmin(email),
+      liveServerWorkspaceIds: await liveServerWorkspaceIdsFor(userId ?? ''),
+      workspaceId,
+      // The SAME plain read the publish quota uses, so "which tier does this user hold" has one answer
+      // on both hot paths rather than two that can disagree.
+      cap: (await readHostingTierForQuota(userId).catch(() => null))?.backendApps ?? null,
+    });
+    if (!serverGate.available) { res.status(403).json({ ok: false, reason: 'server_app_limit', error: serverGate.message }); return; }
 
     try {
       const files = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));

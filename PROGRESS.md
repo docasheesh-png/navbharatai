@@ -52178,3 +52178,61 @@ was taken; an E2B derivation that "could not fail"). Mine failed the same way �
 from my summary of the report instead of from the report.** The remaining `541979d2` open items are
 unchanged: the cheap-floor latency ceiling, and in-flight provider-call cancellation (owned by PR
 #2889's session, not this one).
+
+## 2026-09-13 — Hosting P5: the catalogue the plans are actually sold from
+
+Admin decisions, taken across one session of costing (full reasoning in `HOSTING_ECONOMICS_ROADMAP.md`).
+
+| Plan | Price | Apps | Server apps | Server GB | Visitor GB | Credit |
+|---|---|---|---|---|---|---|
+| Free | ₹0 | 3 | **0** | — | 5 | — |
+| Starter | **₹299** | 10 | **10** | 5 | 25 | **₹0** |
+| Growth | **₹599** | 30 | **30** | 12 | 100 | **₹0** |
+
+**🔴 ONE FIELD WAS DESCRIBING TWO DIFFERENT THINGS.** `includedTransferGb` fed the billing sweep, which
+measures `run.googleapis.com/container/network/sent_bytes_count` — a **Cloud Run** metric. A
+frontend-only app on Firebase Hosting has no Cloud Run service, so it is never counted and never
+billable. The agreement generated from that one field nevertheless said *"across all your connected
+sites"*. It is now `includedBackendGb` + `includedFrontendGb`, the agreement names both and says they
+are counted separately, and `overageFrontendInr` exists beside `overageInr` at the same rate so the
+price is already the one the user ticked on the day the meter lands.
+
+**🔴 `backendApps` SHIPPED WITH A GATE, NOT AS A NUMBER ON A CARD.** `publishedAppCap` bounds how many
+apps EXIST; nothing bounded how many hold a container image. Those are different costs and only one is
+covered by traffic overage — an image sits in Artifact Registry at ~500 MB whether or not a visitor
+arrives, **and nothing deletes it** (P2). Without the cap a 30-app plan implies 30 servers and the
+storage alone outgrows the plan price with every app idle. `serverAppLimit` is pure and wired into the
+host route; a redeploy of an app already hosted never spends the allowance.
+
+⚠️ **IT FAILS OPEN ON AN UNREADABLE COUNT — the opposite of how `hasPlan` fails, deliberately.** An
+unknown PLAN must read as "no plan" (guessing yes gives away a paid product). An unknown COUNT is the
+other way round: guessing "at the cap" refuses a publish a paying customer is entitled to on the
+strength of a Firestore hiccup, while guessing "under it" costs at most one extra idle service and
+self-corrects on the next deploy. **The expensive mistake is the visible one.**
+
+🔒 **A FREE ACCOUNT CAN NEVER BE CHARGED FOR TRAFFIC, and zero server apps is what makes that
+structural rather than merely forbidden.** No Cloud Run service ⇒ the meter has nothing to read ⇒ no
+charge can be derived even by a caller that forgets the rule. `FREE_FRONTEND_GB` is 5, never 0 — at 0
+the first visitor to a free app would start eating the welcome gift and "free" would stop being true.
+
+**Growth's ₹150 credit is gone (admin: "credit = 0").** On the costing that preceded the Cloud Run move
+it was that plan's single largest cost line — larger than its servers and its traffic together — and
+with server hosting now included it was paying twice for the same upgrade. The `bundledCreditInr`
+machinery is deliberately NOT deleted: a future tier can bundle credit without rebuilding the path.
+
+### 🔎 Eleven tests failed, and every one was pinning a number rather than a rule
+
+Worth recording as a class, because the fix was the same each time and the tests are stronger for it:
+`publishedAppCap()` asserted `toBe(5)`; the lapse sweep asserted `['w-1','w-2']`, silently encoding
+"the free cap is 5"; `overageInr` asserted Starter's old 5 GB and Growth's old 20 GB — which happened
+to be the **server** allowance for one tier and the **frontend** one for the other, so it would have
+kept passing for the wrong reason; and one agreement test searched for the literal `₹149`, so the
+re-price made `findIndex` return −1 and the test would have passed vacuously had a second assertion
+not caught it.
+
+**All are now derived from the catalogue.** A test that names a price cannot survive a re-price, and
+none of these were testing a price — they were testing proration, ordering, and that the list a user
+is shown matches the number the gate counts.
+
+**Gate on the final state:** typecheck 0 · noUnusedImports clean · typecheck:server 0 · build ok ·
+bundle within budget · boot PASS · **vitest 1,612 files / 22,421 passed / 1 skipped / 0 failed**.

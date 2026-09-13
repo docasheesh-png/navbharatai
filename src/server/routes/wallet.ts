@@ -3,6 +3,7 @@ import type { Express, Request, Response } from 'express';
 // which navbharat-prod's rules restrict to the owner (server is unauthenticated → was denied).
 import { doc, getDoc, setDoc, runTransaction, collection, query, where, orderBy, limit, getDocs, getServerDb as getDb } from '../lib/serverDb';
 import { welcomeGrantTokens, buildInitialWallet } from '../lib/welcomeBonus';
+import { giftAfterGrant } from '../lib/giftSpend';
 import { requireUserMatch } from '../lib/authMiddleware';
 import { TOKENS_PER_RUPEE, welcomeBonusTokens } from '../lib/payments';
 import { decideWeeklyTopUp, topUpLedgerEntry, summarizeGiftLadder } from '../lib/weeklyTopUp';
@@ -218,6 +219,9 @@ export function registerWalletRoutes(app: Express): void {
                 // The running total that ENDS the ladder. Written in the same transaction as the credit,
                 // so a grant can never land without being counted against the lifetime cap.
                 patch.freeGiftedTokens = given2 + d2.grantTokens;
+                // ...and how much of the balance is STILL gift, which is what stops it buying a plan
+                // (giftSpend.ts). Different question from the line above: that one only ever grows.
+                patch.giftTokensRemaining = giftAfterGrant(w, d2.grantTokens);
                 const creditInr = d2.grantTokens / TOKENS_PER_RUPEE;
                 patch.remaining_balance = (Number(w.remaining_balance) || 0) + creditInr;
                 patch.total_balance = (Number(w.total_balance) || 0) + creditInr;
@@ -436,6 +440,8 @@ export function registerWalletRoutes(app: Express): void {
           // Counted against the lifetime total in the same write as the credit, so a grant can never
           // land without being recorded — that gap is how an account gets paid twice.
           freeGiftedTokens: gifted + claim.tokens,
+          // A phone bonus is money the user did not pay, so it is bound by the plan rule too.
+          giftTokensRemaining: giftAfterGrant(w, claim.tokens),
           remaining_balance: (Number(w.remaining_balance) || 0) + creditInr,
           total_balance: (Number(w.total_balance) || 0) + creditInr,
           phoneVerifiedGift: true,
@@ -517,7 +523,9 @@ export function registerWalletRoutes(app: Express): void {
       if (!result.ok) {
         // insufficient → 402 (recharge first); a missing tick or an unbuyable tier is the caller's
         // request being wrong → 400; disabled/unavailable → 503. Nothing was charged on any path.
-        const status = result.reason === 'insufficient' ? 402
+        // `gift_only` is 402 alongside `insufficient`: in both the answer is "add money", and the
+        // body carries the honest reason so the screen can say which of the two it was.
+        const status = (result.reason === 'insufficient' || result.reason === 'gift_only') ? 402
           : (result.reason === 'agreement_required' || result.reason === 'unknown_tier') ? 400
           : 503;
         return res.status(status).json(result);

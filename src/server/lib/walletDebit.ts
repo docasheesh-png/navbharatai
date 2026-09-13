@@ -1,5 +1,6 @@
 import { doc, getDoc, runTransaction } from './serverDb'; // admin-SDK binding (bypasses rules) — see serverDb.ts
 import { inrToDebitTokens, TOKENS_PER_RUPEE } from './payments';
+import { giftAfterSpend, giftRemaining } from './giftSpend';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletResolve';
 
 // BILLING PHASE 1 (admin plan 2026-07-10) — the missing HALF of the money path.
@@ -38,6 +39,17 @@ export interface WalletDebitTx {
   buildRef: string;
   /** Human-readable ledger line, shown in the wallet history. */
   description: string;
+  /**
+   * Whose money this charge comes out of (see `giftSpend.ts`).
+   *
+   * `gift-first` (the default, and what every build and chat turn uses) spends the welcome gift
+   * before the user's own money. `paid-only` is for a PLAN, which the gift may not buy — the balance
+   * still falls, but the gift figure is left alone, because the rupees that moved were paid ones.
+   *
+   * ⚠️ The CALLER must have already established that enough paid money exists (`checkPlanPayable`).
+   * This field records which bucket the money came from; it is not itself the gate.
+   */
+  spends?: 'gift-first' | 'paid-only';
 }
 
 export interface DebitedWallet {
@@ -110,12 +122,21 @@ export function computeDebitedWallet(
   };
   const nextLedger = [...ledger, ledgerEntry].slice(-MAX_WALLET_LEDGER_ENTRIES);
 
+  const nextBalance = n(w.tokenBalance) - tokens;
+  // WHOSE MONEY LEFT THE WALLET. Ordinary spending eats the gift first; a plan may not touch it. The
+  // figure is clamped to the new balance either way, so it can never claim there is more gift left
+  // than there is money — including on a wallet that went negative through build overdraft.
+  const nextGift = tx.spends === 'paid-only'
+    ? Math.max(0, Math.min(giftRemaining(w), nextBalance))
+    : Math.max(0, Math.min(giftAfterSpend(w, tokens), nextBalance));
+
   const wallet: Record<string, any> = {
     ...w,
-    tokenBalance: n(w.tokenBalance) - tokens,
+    tokenBalance: nextBalance,
     totalTokensUsed: n(w.totalTokensUsed) + tokens,
     remaining_balance: Math.round((n(w.remaining_balance) - billedInr) * 100) / 100,
     [TOKEN_CARRY_FIELD]: carryOut,
+    giftTokensRemaining: nextGift,
     walletLedger: nextLedger,
     updatedAt: now,
   };
@@ -187,12 +208,16 @@ export function computeRolledUpDebit(
     ? [...ledger.slice(0, existingIndex), ...ledger.slice(existingIndex + 1), row].slice(-MAX_WALLET_LEDGER_ENTRIES)
     : [...ledger, row].slice(-MAX_WALLET_LEDGER_ENTRIES);
 
+  const rollupBalance = n(w.tokenBalance) - tokens;
   const wallet: Record<string, any> = {
     ...w,
-    tokenBalance: n(w.tokenBalance) - tokens,
+    tokenBalance: rollupBalance,
     totalTokensUsed: n(w.totalTokensUsed) + tokens,
     remaining_balance: Math.round((n(w.remaining_balance) - chargeInr) * 100) / 100,
     [TOKEN_CARRY_FIELD]: carryOut,
+    // A chat turn is ordinary spending, so it eats the gift first — there is deliberately no
+    // `paid-only` option here: a rollup can only ever be assistant usage, never a plan.
+    giftTokensRemaining: Math.max(0, Math.min(giftAfterSpend(w, tokens), rollupBalance)),
     walletLedger: nextLedger,
     updatedAt: now,
   };

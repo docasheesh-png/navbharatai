@@ -54,6 +54,10 @@ export function buildInitialWallet(i: NewWalletInput): Record<string, unknown> {
     // Running total of everything EVER gifted to this account. The weekly ladder stops permanently once
     // this reaches the lifetime cap (₹650), so it must start at whatever the signup grant actually was.
     freeGiftedTokens: i.welcomeTokens,
+    // How much of the CURRENT balance is our gift (giftSpend.ts). At creation the whole balance is,
+    // by definition. This is what stops the welcome gift from buying a hosting plan, and it is set
+    // here rather than inferred later because a brand-new wallet is the one moment we know for sure.
+    giftTokensRemaining: i.welcomeTokens,
     walletLedger:
       i.welcomeTokens > 0
         ? [

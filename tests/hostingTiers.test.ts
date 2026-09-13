@@ -9,8 +9,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { readFileSync } from 'fs';
-import { join } from 'path';
 import {
   HOSTING_TIERS, HOSTING_OVERAGE_INR_PER_GB, LEGACY_HOSTING_PLAN_ID, FREE_PUBLISHED_APPS,
   hostingAgreementTerms, isKnownPlanId, overageInr, purchasableTier, tierForPlanId, tierRank,
@@ -80,7 +78,11 @@ describe('the agreement the user ticks', () => {
       expect(text).toContain('keep running');
       expect(text).toContain('while your wallet has balance');
       expect(text).toContain('reminder');
-      expect(text).toContain('nothing is deleted');
+      // CHANGED 2026-09-13: the sentence now reads "Nothing is ever deleted" — a stronger promise
+      // than the old "nothing is deleted", so the assertion follows the real words rather than
+      // forcing weaker ones back into the agreement. Matched case-insensitively because the phrase
+      // now begins a sentence.
+      expect(text.toLowerCase()).toContain('nothing is ever deleted');
     }
   });
 
@@ -368,5 +370,38 @@ describe('the renewal choice is made BEFORE paying (admin 2026-09-13)', () => {
     const plan = read('src/server/lib/hostingPlan.ts');
     expect(plan).toContain("typeof opts.autoRenew === 'boolean'");
     expect(plan).toContain("? opts.autoRenew");
+  });
+});
+
+// The agreement PROMISES a grace window ("stays online for 3 more days") and a different module
+// ENFORCES it. A promise the enforcement does not honour is worse than no promise, so the two
+// constants are pinned to each other rather than left to agree by memory.
+describe('the agreement quotes the grace window the sweep actually applies', () => {
+  it('the promised days equal the enforced days', async () => {
+    const { HOSTING_AGREEMENT_GRACE_DAYS } = await import('../src/lib/hostingTiers');
+    const { HOSTING_DEBT_GRACE_DAYS } = await import('../src/server/lib/hostingOverage');
+    expect(HOSTING_AGREEMENT_GRACE_DAYS).toBe(HOSTING_DEBT_GRACE_DAYS);
+  });
+
+  it('and the agreement really states it, so the number is not merely defined', () => {
+    const terms = hostingAgreementTerms(HOSTING_TIERS[0]).join(' ');
+    expect(terms).toContain('3 more days');
+  });
+});
+
+// The admin's objection, encoded: the buyer must read what the price COVERS before they read what
+// can cost extra. A future edit that moves the traffic charge back to the top fails here.
+describe('the agreement states the inclusion before the exception', () => {
+  it('names what ₹149 includes first, and the per-GB charge only after it', () => {
+    const terms = hostingAgreementTerms(HOSTING_TIERS[0]);
+    const included = terms.findIndex((t) => t.includes('is included in the ₹149'));
+    const charged = terms.findIndex((t) => t.includes('per GB from your wallet'));
+    expect(included).toBeGreaterThanOrEqual(0);
+    expect(charged).toBeGreaterThan(included);
+  });
+
+  it('tells the buyer the welcome gift cannot buy a plan, before they pay', () => {
+    const terms = hostingAgreementTerms(HOSTING_TIERS[0]).join(' ');
+    expect(terms).toContain('welcome gift is for building apps, not for buying a plan');
   });
 });

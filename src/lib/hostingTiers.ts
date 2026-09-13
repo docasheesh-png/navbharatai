@@ -80,6 +80,15 @@ export interface HostingTier {
 export const HOSTING_OVERAGE_INR_PER_GB = 20;
 
 /**
+ * How many days a site with unpaid traffic stays online AFTER the reminder.
+ *
+ * 🔒 The agreement quotes this number, so it lives beside the price rather than only in the server
+ * sweep: a promise of "3 more days" that the enforcement does not honour is worse than no promise.
+ * `hostingOverage.HOSTING_DEBT_GRACE_DAYS` is the enforcing copy and a test pins the two together.
+ */
+export const HOSTING_AGREEMENT_GRACE_DAYS = 3;
+
+/**
  * Apps a FREE account may keep published on NavBharatAI's hosting.
  *
  * 🔑 THIS IS THE FLOOR A LAPSED PLAN FALLS BACK TO — never zero, and that is the whole design. Free
@@ -179,7 +188,19 @@ export function tierRank(planId: string | null | undefined): number {
  */
 export function hostingAgreementTerms(tier: HostingTier): readonly string[] {
   return [
+    // 🔴 THE ORDER OF THESE LINES IS THE FIX, NOT THEIR CONTENT (admin 2026-09-13: "isko padhne se
+    // aisa lag raha hai, ki 149₹ bhi dega user aur wallet se paise bhi dega"). The list used to open
+    // with the traffic charge and the words "goes offline", so a buyer who will never exceed their
+    // included GB — which is most of them — still read it as paying twice. Every rule below is
+    // unchanged; what changed is that the agreement now states what the price COVERS before it
+    // states the one case where something else is owed. An exception read first stops being an
+    // exception and becomes the deal.
+    `Everything listed on this plan is included in the ₹${tier.priceInr} — your ${tier.includedTransferGb} GB of visitor traffic, your ${tier.domains === 1 ? 'domain' : 'domains'}, and up to ${tier.publishedApps} published apps. Nothing else is taken from your wallet for them.`,
     `₹${tier.priceInr} is taken from your NavBharatAI wallet now, and again every ${tier.days} days while auto-renew is on. You can switch auto-renew off at any time.`,
+    // 🔒 THE WELCOME GIFT IS NOT PLAN MONEY (admin 2026-09-13: "gift ... plan purchase me kam nahi
+    // ayenge"). Enforced by `giftSpend.ts`, and said HERE because a rule the user meets for the first
+    // time at the payment button is a trap, however well it is implemented.
+    `Your NavBharatAI welcome gift is for building apps, not for buying a plan — a plan is paid for from money you have added yourself. Your gift is not touched by this purchase and stays available for building.`,
     `The plan lets you keep up to ${tier.publishedApps} apps published at once. Free accounts keep ${FREE_PUBLISHED_APPS}.`,
     // 🔒 THE HONEST WARNING ABOUT WHAT LAPSING COSTS. The admin asked for a lapse with real bite; the
     // user is owed the same sentence BEFORE they buy, not discovered afterwards. It says exactly what
@@ -205,7 +226,8 @@ export function hostingAgreementTerms(tier: HostingTier): readonly string[] {
     // rule that enforces it (`hostingOverage.decideDebtAction`), so nobody is ever subject to a term
     // they were not shown. What was NOT weakened: the app keeps running while there is balance, going
     // over does not switch anything off by itself, and nothing is ever deleted.
-    `Your apps keep running — nothing is switched off while your wallet has balance. Traffic beyond your included GB is charged at ₹${HOSTING_OVERAGE_INR_PER_GB} per GB from your wallet, and every charge appears in your ledger. If your balance reaches ₹0 while extra traffic is owed, we send you a reminder first, and your site goes offline only if it stays unpaid — nothing is deleted, and your site comes back when you top up and press Publish.`,
+    `If your sites go past ${tier.includedTransferGb} GB in a period, the extra traffic is ₹${HOSTING_OVERAGE_INR_PER_GB} per GB from your wallet, and every charge appears in your ledger. You can see your usage in the app at any time, so this is never a surprise.`,
+    `Your apps keep running while your wallet has balance. If your balance reaches ₹0 while extra traffic is owed, we send you a reminder first and your site stays online for ${HOSTING_AGREEMENT_GRACE_DAYS} more days; it goes offline only if it is still unpaid after that. Nothing is ever deleted, and your site comes back when you top up and press Publish.`,
     // 🔴 THIS LINE IS HERE BECAUSE THE METER IS NOT LIVE YET, and an agreement that quietly implies
     // otherwise would be describing a system we do not have (rule 2: fully working, or honestly not
     // built). Traffic can only be measured where published apps pass through our own serving path,

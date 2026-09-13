@@ -27,19 +27,33 @@
 // live here, and `walletCreditIsTransactional` in the tests is what pins it at the call sites.
 
 import { TOKENS_PER_RUPEE } from '../../lib/walletPricing';
+import { giftAfterGrant, giftRemaining, type GiftWalletView } from './giftSpend';
 
 /** The two views of one balance, as they sit on the wallet document. */
-export interface WalletViews {
+export interface WalletViews extends GiftWalletView {
   tokenBalance?: unknown;
   remaining_balance?: unknown;
   total_balance?: unknown;
 }
+
+/**
+ * Whose money this credit is (`giftSpend.ts`).
+ *
+ * 🔒 REQUIRED, WITH NO DEFAULT, AND THAT IS THE POINT. A default would decide the question silently
+ * for whoever adds the next credit path, and silence is exactly how the coupon writer came to move
+ * one view and not the other. Making the compiler ask means a new writer cannot ship without an
+ * answer: 'gift' is anything NavBharatAI hands over (welcome bonus, weekly top-up, coupon, admin
+ * grant); 'paid' is money that genuinely arrived from the user.
+ */
+export type CreditSource = 'gift' | 'paid';
 
 /** The fields a credit writes. `total_balance` is the lifetime figure and only ever grows. */
 export interface MirroredPatch {
   tokenBalance: number;
   remaining_balance: number;
   total_balance?: number;
+  /** How much of the new balance is gift money. Written on every credit, so it can never go stale. */
+  giftTokensRemaining: number;
 }
 
 function num(v: unknown): number {
@@ -62,7 +76,11 @@ export function rupeesToTokens(inr: number): number {
  * `total_balance` (the lifetime-credited figure) is moved only by a genuine CREDIT: a deduction is not
  * an un-purchase, and reducing it would misreport what the user has ever put in.
  */
-export function mirroredCreditPatch(current: WalletViews | null | undefined, tokensDelta: number): MirroredPatch {
+export function mirroredCreditPatch(
+  current: WalletViews | null | undefined,
+  tokensDelta: number,
+  source: CreditSource,
+): MirroredPatch {
   const w = current || {};
   const delta = Number.isFinite(tokensDelta) ? tokensDelta : 0;
   const heldTokens = num(w.tokenBalance);
@@ -72,9 +90,17 @@ export function mirroredCreditPatch(current: WalletViews | null | undefined, tok
   const appliedTokens = nextTokens - heldTokens;
   const appliedInr = TOKENS_PER_RUPEE > 0 ? appliedTokens / TOKENS_PER_RUPEE : 0;
 
+  // A GIFT raises the gift figure; PAID money leaves it alone. Either way it is clamped to the new
+  // balance, so a DEDUCTION (a negative delta, which only the admin path sends) takes the gift down
+  // with it rather than leaving a wallet claiming more gift than it holds money.
+  const giftNow = source === 'gift' && appliedTokens > 0
+    ? giftAfterGrant(w, appliedTokens)
+    : giftRemaining(w);
+
   const patch: MirroredPatch = {
     tokenBalance: nextTokens,
     remaining_balance: Math.max(0, num(w.remaining_balance) + appliedInr),
+    giftTokensRemaining: Math.max(0, Math.min(giftNow, nextTokens)),
   };
   if (appliedTokens > 0) patch.total_balance = num(w.total_balance) + appliedInr;
   return patch;

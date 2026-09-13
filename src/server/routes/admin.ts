@@ -1547,7 +1547,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         const fresh = await tx.get(walletRef);
         if (!fresh.exists()) return null;
         const w = fresh.data();
-        const patch = mirroredCreditPatch(w, delta);
+        const patch = mirroredCreditPatch(w, delta, 'gift');
         tx.update(walletRef, {
           ...patch,
           walletLedger: [...(w.walletLedger || []), { type: 'admin_adjustment', amountCoinsOrTokens: delta, reason: reason || 'Admin adjustment', timestamp: new Date().toISOString() }],

@@ -50494,3 +50494,59 @@ put there. `appUsesGateway` now gates the stamp **and** the registry row, so an 
 The other half of their message was a factual misreading — they thought Hindi had reached the app's UI.
 It had not; what they read was my own translation in chat, and the code is English throughout. Saying so
 was worth more than agreeing.
+## 2026-09-13 — Four more India-first templates, behind "More templates", plus the Settings version badge
+
+Admin: *"Report milne ke baad → 4 naye India templates (courier, wedding RSVP, NGO, school ERP) → more
+button ke andar"* and *"Settings footer ka 'Navbharat AI v5.0.0' hatana"* — then **"bana hi do"**, i.e.
+build both now rather than waiting for the build report I had made them conditional on. Their call; built.
+
+### THE FOUR APPS, AND WHY EACH ONE IS REAL RATHER THAN PLAUSIBLE
+
+Each is software an Indian organisation keeps in a paper register today, and each has one design decision
+that separates the real version from the demo:
+
+- **Shaadi RSVP** (free/simple) — an Indian wedding is SEVERAL functions, so the number a caterer needs is
+  a **head count per function**, not "120 guests". Only CONFIRMED guests count, and each row contributes
+  `1 + the people with them`, so a family of four is one row. Counting "invited" or "no reply" in that
+  total is exactly how a caterer cooks for people who never came.
+- **Courier** (pro) — a parcel's status is a **HISTORY, appended**, never one overwritten field.
+  Overwriting is how a courier loses the answer to "when did it leave Kanpur?", which is the only question
+  a caller ever asks. Charge is computed from weight × zone and shown before booking.
+- **NGO / Trust** (pro) — the receipt number is **stored on the donation**, and the next one is "one past
+  the highest ever issued", so deleting a row can never reissue a number two donors now hold. The year is
+  the Indian financial year (April–March), not the calendar year.
+- **School ERP** (pro) — attendance is stored **per student per date**, and the percentage is DERIVED.
+  A stored percentage would have to be un-arithmetic-ed by hand when a day was marked wrongly; this way
+  correcting the day fixes the figure by itself. The report card computes its own total, percentage and
+  grade.
+
+All four ship **golden scaffolds** (the free tier's "first build is correct by construction" path), so the
+suite's 321 checks now prove each one parses under esbuild AND compiles under the in-browser Babel preview.
+
+### 🔴 "MORE BUTTON KE ANDAR" NEEDED MORE THAN NOT SETTING `featured`
+
+`pickerSections` **tops the first screen up** to its limit from the un-featured remainder, in category
+order, so a tier whose featured chips are mostly locked never shows a sparse first screen. A FREE user has
+only **nine** featured *simple* chips — so three un-featured chips are already on their first screen, and a
+new un-featured chip earlier in category order would have silently taken one of those slots and appeared
+on the first screen with nobody having marked it featured.
+
+So: `wedding-rsvp` is deliberately **last in Personal** (the final category), and the other three are
+`pro` without `showcase` (a free user is not offered them at all). **Verified by running the real
+function, not by reasoning**: both tiers' first screens are byte-identical to before, and all four chips
+are in `more`. The test asserts that OUTCOME rather than the mechanism, and was **confirmed to bite** —
+moving the wedding chip to the `Social` category fails two assertions.
+
+### THE SETTINGS FOOTER
+
+`Navbharat AI v5.0.0` → `Navbharat AI`. It read as the BUILDER being version 5, which is what the
+2026-09-12 rename removed everywhere else. And a **bundled** Capacitor shell has no single honest version
+to print there: the web app updates on every merge while an installed `.aab` stays on its own build, so
+one hardcoded string is wrong for one of them at any moment. Pinned by a test.
+
+`AppKnowledgeBase.ts` updated in the same change (the sync rule): all four described with what each does
+and does not do, the tier split, the instruction to tell a user to open "More templates" because these are
+not on the first screen, and the words a user actually types — courier, parcel, docket, AWB, chanda, 80G,
+daan, vidyalaya, marksheet, haziri, shaadi, RSVP, mehendi, sangeet, nimantran.
+
+**Gate on the final state:** see the commit.

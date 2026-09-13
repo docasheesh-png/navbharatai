@@ -17,7 +17,8 @@ import { goldenBaseFiles } from './base';
 import { todoAppTsx, calculatorAppTsx, stopwatchAppTsx, pomodoroAppTsx, tipSplitAppTsx } from './appsA';
 import { unitConverterAppTsx, qrMakerAppTsx, quickNotesAppTsx, passwordGenAppTsx, loginPageAppTsx } from './appsB';
 import { memoryAppTsx, puzzleAppTsx, arcadeAppTsx } from './games';
-import { gstBillAppTsx, examPrepAppTsx, societyAppTsx, coachingAppTsx } from './indiaApps';
+import { gstBillAppTsx, examPrepAppTsx, societyAppTsx, coachingAppTsx, weddingRsvpAppTsx } from './indiaApps';
+import { courierAppTsx, ngoAppTsx, schoolErpAppTsx } from './indiaOrgs';
 import { geetaAppTsx, quranAppTsx } from './indiaFaith';
 import { panchangAppTsx, kundaliAppTsx } from './indiaPanchang';
 import { proUiTsx, proStoreTs } from './proShell';
@@ -71,6 +72,7 @@ export const GOLDEN_SCAFFOLDS: readonly GoldenScaffold[] = [
   { id: 'panchang', label: 'Panchang & muhurat', title: 'Panchang', appTsx: panchangAppTsx, tier: 'simple' },
   { id: 'geeta', label: 'Bhagavad Gita reader', title: 'Bhagavad Gita', appTsx: geetaAppTsx, tier: 'simple' },
   { id: 'quran', label: 'Quran reader', title: 'Quran', appTsx: quranAppTsx, tier: 'simple' },
+  { id: 'wedding-rsvp', label: 'Wedding RSVP manager', title: 'Shaadi RSVP', appTsx: weddingRsvpAppTsx, tier: 'simple' },
   // ── PRO tier: a compile-proven architecture the builder extends ──
   // The arcade game is the one PRO scaffold that is a finished app rather than an architecture: a game
   // loop is not furniture the builder decorates, it is the thing that must already be correct.
@@ -93,6 +95,9 @@ export const GOLDEN_SCAFFOLDS: readonly GoldenScaffold[] = [
   { id: 'society', label: 'Society / RWA', title: 'Society', appTsx: societyAppTsx, tier: 'pro' },
   { id: 'coaching', label: 'Coaching class', title: 'Coaching', appTsx: coachingAppTsx, tier: 'pro' },
   { id: 'kundali', label: 'Janam Kundali', title: 'Janam Kundali', appTsx: kundaliAppTsx, tier: 'pro' },
+  { id: 'courier', label: 'Courier & parcel tracking', title: 'Courier', appTsx: courierAppTsx, tier: 'pro' },
+  { id: 'ngo', label: 'NGO donations & volunteers', title: 'Trust Office', appTsx: ngoAppTsx, tier: 'pro' },
+  { id: 'school-erp', label: 'School management', title: 'School Office', appTsx: schoolErpAppTsx, tier: 'pro' },
 ];
 
 /**

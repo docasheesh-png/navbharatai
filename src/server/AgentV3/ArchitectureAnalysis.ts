@@ -71,9 +71,31 @@ export function resolveLocalImport(fromFile: string, spec: string, files: Set<st
     const baseDir = path.posix.dirname(fromFile);
     bases.push(path.posix.normalize(path.posix.join(baseDir, spec)).replace(/^\.\//, ''));
   } else {
+    /**
+     * 🔴 A BARE ROOT-RELATIVE IMPORT IS A LOCAL FILE, AND WE WERE BLIND TO IT (build-report autopsy
+     * f04421ef, 2026-09-13) — and the blindness was SELF-INFLICTED.
+     *
+     * This branch used to accept only `@/…` and `~/…` and return null for everything else as "an npm
+     * package". But OUR OWN scaffold sets these projects up for tsconfig `baseUrl` imports — its
+     * `vite.config.ts` carries the comment *"Mirror tsconfig's baseUrl/paths into Vite so a root-relative
+     * import such as `import { useStore } from 'stores/useStore'` resolves at BUILD & RUNTIME too"*. So we
+     * generate that import style and then could not read it back.
+     *
+     * WHAT IT COST, on the reported build: every component imported that way looked un-imported, so
+     * `findOrphanComponents` reported real, wired screens as "created but never shown". The builder was
+     * right and our tool was wrong — it said so in its own narration, *"the evaluate tool's orphan warning
+     * is a false positive"* — and it spent a turn of a build that was already running long arguing with us.
+     * A tool that lies to the builder is worse than one that says nothing.
+     *
+     * 🔒 WHY WIDENING THIS CANNOT INVENT A DEFECT. A bare specifier is tried against the same two bases an
+     * alias already uses and is accepted ONLY if a real file in the set matches. `react` and `lodash` have
+     * no `src/react.tsx`, so they still resolve to null and are still treated as external exactly as
+     * before. The only reachable change is FEWER false orphans — never a new "unresolved import".
+     */
     const alias = /^(?:@|~)\/(.+)$/.exec(spec);
-    if (!alias) return null; // an npm package or unknown bare specifier — not a local file
-    const rest = alias[1];
+    // A bare specifier's own path is the candidate: `stores/useStore` → `src/stores/useStore`.
+    const rest = alias ? alias[1] : spec;
+    if (!alias && (spec.startsWith('node:') || !/^[a-zA-Z_][\w.-]*(\/|$)/.test(spec))) return null;
     // Derive the alias root from the IMPORTING file, so `@/` maps to the app's REAL source dir. A
     // FULLSTACK app keeps its frontend under `client/src/` (or `frontend/src/`, `apps/web/src/`, …), and
     // Vite/Next alias `@/` to THAT dir — not a top-level `src/`. Resolving only against `src/`/bare made
@@ -179,6 +201,25 @@ export function analyzeArchitecture(graph: ProjectGraph): ArchitectureReport {
         const root = spec.replace(/^node:/, '').split('/')[0];
         if (frontend && SERVER_ONLY_BUILTINS.has(root)) {
           nodeBuiltinsInFrontend.push(`${file} -> ${spec}`);
+        }
+        /**
+         * …but a non-relative specifier is not automatically external: an alias (`@/x`) or a bare
+         * root-relative import (`stores/useStore`, resolved by tsconfig `baseUrl` — the style our own
+         * scaffold sets up) is a LOCAL edge. Counting it as external left the graph missing those edges,
+         * so a cycle through them was invisible and a front-end file importing `server/db` was not a
+         * layering violation (2026-09-13 autopsy).
+         *
+         * 🔒 Strictly additive: it joins the graph ONLY if it resolves to a real file in the set.
+         * Anything that does not — every npm package — takes the same `continue` it always did, and is
+         * never pushed to `unresolvedImports`. That list still contains relative specs only, so this
+         * cannot turn a dependency into a reported defect.
+         */
+        const localFromBare = resolveLocalImport(file, spec, files);
+        if (!localFromBare) continue;
+        edges.push(localFromBare);
+        edgeCount++;
+        if (frontend && /(^|\/)(src\/)?server\b/i.test(localFromBare)) {
+          layeringViolations.push(`${file} -> ${localFromBare}`);
         }
         continue;
       }

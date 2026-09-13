@@ -51063,3 +51063,107 @@ was a 404; it matters now that the app lock can be the reason. It reports the se
   first, and states that money already paid is never PIN-gated. The App Lock settings screen says the same
   in its own words — a test pins both, because overstating this is the one thing that would make the
   feature dishonest rather than merely limited.
+
+---
+
+## 2026-09-13 — BUILD-REPORT AUTOPSY `f04421ef` (vite-react, 23 files, kimi-k2.6)
+
+Admin: *"yeh build report autopsy karo, claude.md ke anusar"* — and, in the same message, *"abhi ipa aab
+nahi banao"*, which withdrew the store-build instruction from earlier in the day. No `.aab`/`.ipa` was
+built; the armed trigger that would have built them was deleted.
+
+### 🔴 THE FINDING THAT REFRAMES THE WHOLE REPORT: THE BUILD WAS NOT CUT OFF — IT WAS STILL RUNNING
+
+The report's own `rootCause` read: *"This build ended without recording an outcome (cut off before it could
+report one) — so the reason it stopped is NOT known."* **That sentence is false.** The evidence, all from
+the report itself: no `endedAt`; the last recorded event is `npm run dev` → **exit 0** at 9 m 49 s; the last
+heartbeat says *"minute 9 — still working (**in-flight: bash**)"*; and `billing`, `providerTokens` and
+`cacheReadInputTokens` are all absent because they are written **at settle**, which had not happened.
+
+The admin pressed Report while the build worked. Nothing had stopped.
+
+⚠️ **I started this autopsy from the wrong premise and only the code corrected me.** My first pass
+reasoned about "why did the build die", and my second about "zero cache hits, a 75% saving is available" —
+both wrong, both produced by believing a report field. `cacheReadInputTokens` is absent because the build
+had not settled, not because the cache never hit. **A report field is evidence about the REPORT until the
+code that writes it has been read.**
+
+### Step 1 — the ledger
+
+**✅ Self-healed — 3.** (1) `TS6133` unused imports/vars across ChatPage/LandingPage. (2) `TS2304: Cannot
+find name 'MessageSquare'` ×2 — **self-inflicted**: while clearing "unused" imports it removed one that was
+used at lines 274 and 326; re-added, clean 20 s later. (3) `vitest` added to package.json.
+
+**🔀 Worked around — 2.** (4) `plannedModel` was `claude-haiku-4-5`, `kimi-k2.6` delivered all 54 turns and
+**GLM delivered none** — k2.6 is the SECOND rung of the free Kimi ladder, so earlier rungs failed silently.
+(5) The health-check restarted the dev server **twice** with *"did not start and the log had no recognisable
+error — restarting once"* — a retry around an undiagnosed failure.
+
+**⏭️ Skipped — 1.** (6) Our own `evaluate` tool raised an orphan-components warning; the builder correctly
+identified it as a false positive and moved on. Nothing recorded that the TOOL was wrong.
+
+**❌ Still broken — 1.** (7) No outcome recorded — which turned out to be the honesty defect above, not a
+build failure.
+
+**🥵 Struggle — 6.** (8) The loop detector fired **twice** (4:52, 6:43). (9) `npm install vitest@^2` took
+**80 s** — 14% of the build. (10) `tsc --noEmit` ran **six times**. (11) **91 s** of browser_action +
+screenshots, ending in the first loop nudge. (12) The ETA was wrong every time it spoke: "~2–4 min" → at
+2 min "53 s to go" → at 4 min "3 min more" → at 8 min "6 min more". (13) **1,528,128 input tokens against
+4,286 output** across the 40 logged calls — a 356:1 ratio, ≈ **$0.92** of real provider cost at kimi-k2.6
+rates ($0.60/$2.50 per MTok). The build never settled, so **nothing was billed to the user**.
+
+### Step 2 — the missing subsystem: A BUILD BUDGET GOVERNOR
+
+The prompt was *"Continue from where you left off and finish/fix the build so the app works end-to-end."*
+What the engine did after the types were clean: browsed the app for 91 s, ran `evaluate`, fixed
+accessibility and CSS, **generated tests**, **installed a dev dependency (80 s)**, ran a production build.
+Generating tests is not "finish/fix". **Nothing in the engine converts remaining wall-clock into a
+narrowing of scope** — no component said "six minutes gone, do only what makes the app work".
+
+### Step 3/5 — TWO ROOT CAUSES FIXED, BOTH VERIFIED IN CODE AND BOTH CONFIRMED TO BITE
+
+**A. "Still running" and "cut off" were the same sentence** (`BuildDiagnostics.ts`). This was a KNOWN,
+accepted conflation — the old branch carried the line *"A build genuinely still running reads the same way,
+which is correct: we do not know how it ends either."* It is correct that we do not know the ending; it is
+not correct to announce an ending that has not happened. One sentence tells the reader to wait, the other
+tells them to investigate — and the second cost this autopsy its first hour.
+Fixed with a local discriminator needing no new plumbing: a live build heartbeats every minute, so
+`endedAt === undefined && (now − lastActivity) ≤ STILL_RUNNING_WINDOW_MS` (150 s = two beats) is alive.
+The slack leans toward "still running" deliberately: being told to wait for a build that had stopped costs
+one re-read, while being told it stopped when it had not costs an investigation of nothing.
+
+**B. 🔴 THE ORPHAN WARNING WAS OUR OWN FAULT** (`ArchitectureAnalysis.ts`). `resolveLocalImport` understood
+`./relative` and `@/alias` and returned null for a BARE root-relative import (`stores/useStore`) as "an npm
+package". **Our own scaffold sets these projects up for exactly that style** — its `vite.config.ts` carries
+our comment *"Mirror tsconfig's baseUrl/paths into Vite so a root-relative import such as `import { useStore
+} from 'stores/useStore'` resolves at BUILD & RUNTIME too"*. We generate the import style and could not read
+it back, so every root-relatively imported screen looked un-imported and `findOrphanComponents` called real,
+wired screens unreachable.
+🔒 Widening cannot invent a defect: a bare specifier is tried against the two bases an alias already uses
+and accepted only if a real file matches, so `react` and `lodash` still resolve to null. And
+`unresolvedImports` was already relative-only, so no npm package can become a reported defect. The same
+widening also recovered edges the graph was missing — a front-end file importing `server/db` root-relatively
+is now the layering violation it always was.
+
+### Step 6 — the proactive layer (prevent, don't heal)
+
+1. **The budget governor is the biggest lever.** Past half the estimate, optional work (tests, polish, a dev
+   dependency) should stop and only "does the app run" should remain. This build finishes in ~5 min with it.
+2. **Stop editing code to satisfy TS6133.** The app already compiled; clearing cosmetic unused-variable
+   warnings cost ~95 s **and broke the build in the middle of it** — one self-inflicted error, zero user
+   value. A fix-the-app task should be told these are not worth a build minute.
+3. **The ETA is lying and should be fixed or removed.** Four wrong numbers in one build, and "bigger than
+   expected" read three times is indistinguishable from "I do not know".
+4. **A mid-build report cannot answer "where is the money going?"** Tokens, cost and cache-hit rate are
+   written only at settle — precisely unavailable in the situation where an admin most wants them. The data
+   already exists per call in `llmCalls`; only the total is missing.
+
+### OPEN root causes (rule 6 — recorded, not silently dropped)
+
+- **The budget governor** (Step 2) is a design change, not a patch, and is not built.
+- **Live cost totals in a mid-build report** — small, not built in this change.
+- **Why GLM delivered 0 of 54 turns** cannot be determined from this report: `providerFailures` /
+  `providerFailureReasons` are absent, for the same settle-time reason. Needs a report from a build that
+  finishes, or those fields written live.
+- **The health-check's "no recognisable error" restart** is a retry around an undiagnosed failure. It
+  recovered, so it is debt rather than a defect, and it is untouched here.

@@ -51999,3 +51999,40 @@ false would misreport a working build as a fallen-back one. A floor **pinned** t
 between what was asked for and what exists, not about the number of engines.
 
 Four tests; reverting the wording fails three of them.
+
+## 2026-09-13 — CORRECTION: my `541979d2` open item "'no files produced' can be false" does not survive its own evidence
+
+Recorded against my own earlier entry rather than erasing it, per this file's append-only rule. The
+open item read:
+
+> 🔴 **The build told the user "produced no files" while files existed** — its own `ls` lists 10, and
+> six more `write_file` calls landed **81 seconds AFTER `endedAt`**.
+
+**Half of that is wrong, and it is the half I offered as proof.** Re-read from the report's actual
+`commands[0]` output rather than from my summary of it, those ten entries are:
+
+```
+.gitignore  index.html  package.json  src/  tsconfig.build.json
+tsconfig.json  tsconfig.node.json  vite.config.ts  .  ..
+```
+
+That is the **Vite scaffold**, not the user's app. `emptyBuildMessage` counts AI-written files, so
+"the build produced no files" was **true** about the only thing the sentence is claiming. I counted
+directory entries and called them files the build had produced.
+
+**The other half is real, and belongs to someone else.** The timestamps hold: `endedAt`
+1789274151642, a `write_file` from `agent=frontend` at 1789274232363 (**+80.7 s**), further
+completions at +94–96 s and a checkpoint at **+102 s**. But that is not a reporting bug — it is an
+abandoned lane still writing into a finished build, which is exactly the failure PR #2886 root-caused
+(`laneWriteFence.ts`, now on `main`: a lane writes through a writer bound to its own lease, and a
+lease dies the moment another lane opens or the workspace is handed off). Verified against `main`,
+not assumed.
+
+🔒 **So the item is CLOSED, not deferred — and the lesson is not "check your arithmetic".** A false
+open root cause is worse than no entry: it is a specific, confident instruction to the next session
+to go and fix something that is not broken, sitting in the file they are told to trust. This repo
+already records that shape twice (an idle-minutes default that said "NOT taken" eight days after it
+was taken; an E2B derivation that "could not fail"). Mine failed the same way — **I wrote the finding
+from my summary of the report instead of from the report.** The remaining `541979d2` open items are
+unchanged: the cheap-floor latency ceiling, and in-flight provider-call cancellation (owned by PR
+#2889's session, not this one).

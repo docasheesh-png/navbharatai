@@ -275,3 +275,107 @@ html[data-theme] .placeholder-white\/30::placeholder { color: color-mix(in srgb,
 html[data-theme] .ring-white\/10 { --tw-ring-color: color-mix(in srgb, var(--text-primary) 10%, transparent); }
 html[data-theme] .ring-white\/40 { --tw-ring-color: color-mix(in srgb, var(--text-primary) 40%, transparent); }
 html[data-theme] .via-white { --tw-gradient-via: var(--text-primary); }
+
+/* ── BRAND TEXT ON A SURFACE (admin 2026-09-13: "yeh button dikh hi nahi rahe hai") ─────────────
+   THE BUG, and why this file caused it. The header above says brand colours are "deliberately NOT
+   remapped", and for a white label on a solid indigo button that is exactly right. But Tailwind's
+   LIGHT brand shades are used as FOREGROUND text in ~1,459 places — `text-indigo-300` for a price,
+   `text-emerald-400` for a tick, `text-amber-300` for a warning — and those sit on a CARD, whose
+   background this file already flips to white on a light theme. Light text on a light card is
+   invisible, which is precisely what the admin photographed: the ₹149 and ₹499 prices unreadable.
+
+   So the rule is not "leave brand colours alone" — it is "leave brand colours alone WHERE THEY SIT
+   ON A BRAND BACKGROUND". That distinction is what the guard below encodes.
+
+   🔒 THE GUARD, AND WHY IT IS A VARIABLE RESET RATHER THAN A SELECTOR MATRIX. 117 elements carry a
+   SOLID brand background AND tinted text; remapping those would swap one invisible combination for
+   another. Rather than enumerate every bg × text pair, a solid brand background RE-DECLARES these
+   variables locally, so the text class on that element — and anything inside it — reads the original
+   light Tailwind value again. One block, every combination, including ones written later.
+   ⚠️ It works because Tailwind escapes an opacity modifier into a DIFFERENT class name:
+   `bg-indigo-500/5` is `.bg-indigo-500\/5`, which `.bg-indigo-500` does not match. So a faint 5%
+   TINT (a card wash) is correctly remapped while a SOLID 500 (a button) is correctly protected.
+
+   On dark and dim the variables equal the original hexes, so this whole section is a visual no-op —
+   the same safety property the rest of the file is built on. */
+html[data-theme] .text-indigo-300,
+html[data-theme] .text-violet-300,
+html[data-theme] .text-purple-300            { color: var(--brand-accent-text); }
+html[data-theme] .text-indigo-400,
+html[data-theme] .text-violet-400,
+html[data-theme] .text-blue-400              { color: var(--brand-accent-strong); }
+html[data-theme] .text-emerald-400,
+html[data-theme] .text-green-400,
+html[data-theme] .text-teal-400              { color: var(--brand-success-text); }
+html[data-theme] .text-emerald-300,
+html[data-theme] .text-green-300             { color: var(--brand-success-strong); }
+html[data-theme] .text-amber-300,
+html[data-theme] .text-yellow-300            { color: var(--brand-warn-text); }
+html[data-theme] .text-amber-400,
+html[data-theme] .text-orange-400,
+html[data-theme] .text-yellow-400            { color: var(--brand-warn-strong); }
+html[data-theme] .text-red-400,
+html[data-theme] .text-rose-400              { color: var(--brand-danger-text); }
+html[data-theme] .text-sky-300,
+html[data-theme] .text-sky-400,
+html[data-theme] .text-cyan-300,
+html[data-theme] .text-cyan-400              { color: var(--brand-info-text); }
+
+/* ⚠️ THE 100/200 SHADES ARE THE WORST OFFENDERS, AND THE FIRST VERSION OF THIS SECTION MISSED THEM
+   (caught 2026-09-13 by COUNTING every brand text class actually used, instead of listing the ones
+   I had noticed — the same "my search found nothing" failure this project's safeguards warn about,
+   caught here by an inventory rather than by a user). `text-amber-100` on white is effectively
+   blank paper; `text-indigo-200` and `text-red-200` are barely better. They are ~250 usages between
+   them — the lightest shades in the app, on the theme where light IS the problem.
+
+   They map to the SAME readable variables: on a light ground there is no useful difference between
+   a 100 and a 300, and inventing a second, paler scale would only re-create the bug one step along.
+   On dark the variables hold the original Tailwind values, so those themes stay a no-op here too. */
+html[data-theme] .text-indigo-200,
+html[data-theme] .text-violet-200,
+html[data-theme] .text-blue-200,
+html[data-theme] .text-blue-300              { color: var(--brand-accent-text); }
+html[data-theme] .text-indigo-500,
+html[data-theme] .text-violet-500,
+html[data-theme] .text-blue-500              { color: var(--brand-accent-strong); }
+html[data-theme] .text-emerald-200,
+html[data-theme] .text-green-200,
+html[data-theme] .text-teal-200,
+html[data-theme] .text-teal-300              { color: var(--brand-success-strong); }
+html[data-theme] .text-emerald-500,
+html[data-theme] .text-green-500             { color: var(--brand-success-text); }
+html[data-theme] .text-amber-100,
+html[data-theme] .text-amber-200,
+html[data-theme] .text-yellow-100,
+html[data-theme] .text-yellow-200,
+html[data-theme] .text-orange-200,
+html[data-theme] .text-orange-300            { color: var(--brand-warn-text); }
+html[data-theme] .text-amber-500,
+html[data-theme] .text-orange-500            { color: var(--brand-warn-strong); }
+html[data-theme] .text-red-200,
+html[data-theme] .text-red-300,
+html[data-theme] .text-red-500,
+html[data-theme] .text-rose-200,
+html[data-theme] .text-rose-300              { color: var(--brand-danger-text); }
+html[data-theme] .text-sky-200,
+html[data-theme] .text-cyan-200              { color: var(--brand-info-text); }
+
+/* The guard: a SOLID brand background restores the original light values for itself and its
+   children, so white-ish brand text on a coloured button stays readable. */
+html[data-theme] .bg-indigo-500,  html[data-theme] .bg-indigo-600,  html[data-theme] .bg-indigo-700,
+html[data-theme] .bg-violet-500,  html[data-theme] .bg-violet-600,  html[data-theme] .bg-purple-600,
+html[data-theme] .bg-blue-500,    html[data-theme] .bg-blue-600,    html[data-theme] .bg-blue-700,
+html[data-theme] .bg-emerald-500, html[data-theme] .bg-emerald-600, html[data-theme] .bg-emerald-700,
+html[data-theme] .bg-green-600,   html[data-theme] .bg-teal-600,
+html[data-theme] .bg-amber-500,   html[data-theme] .bg-amber-600,   html[data-theme] .bg-orange-600,
+html[data-theme] .bg-red-500,     html[data-theme] .bg-red-600,     html[data-theme] .bg-red-700,
+html[data-theme] .bg-rose-600,    html[data-theme] .bg-sky-500,     html[data-theme] .bg-sky-600 {
+  --brand-accent-text: #a5b4fc;
+  --brand-accent-strong: #c7d2fe;
+  --brand-success-text: #34d399;
+  --brand-success-strong: #6ee7b7;
+  --brand-warn-text: #fcd34d;
+  --brand-warn-strong: #fde68a;
+  --brand-danger-text: #fca5a5;
+  --brand-info-text: #7dd3fc;
+}

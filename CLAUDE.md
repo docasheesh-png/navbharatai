@@ -2358,6 +2358,13 @@ break):
 
 - **Real, no hacks.** Build the real thing — no fake success, no stubbed
   "it works" when it doesn't, no placeholder/TODO shortcuts shipped as done.
+- **A fix must never trade one problem for another (admin-mandated, 2026-09-13).** Whenever a request
+  is an edit, an upgrade, or a fix, do not touch the code until you have traced who else reads,
+  writes, or depends on what you are about to change — fixing problem A while quietly creating
+  problem X is not an acceptable outcome under any circumstance. Verify this by exercising the
+  affected paths (not just the one line changed) before calling the fix done, exactly as safeguard #5
+  requires; if the blast radius cannot be fully known, that is 0.01% doubt (safeguard #3) and the
+  right move is to say so, not to ship and hope.
 - **Zero bugs before push.** The verification gate (safeguard #5) is the
   floor, not a nicety: `tsc --noEmit` + `tsc -p tsconfig.server.json` (if
   server touched) + `vitest run` (read the real pass/fail line) + boot/smoke

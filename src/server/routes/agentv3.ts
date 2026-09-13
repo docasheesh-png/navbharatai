@@ -415,6 +415,7 @@ import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
 import { classifyIntentSmart, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild } from '../AgentV3/IntentClassifier';
+import { assessBuildInput } from '../AgentV3/buildableInput';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
 import { realismIntent } from '../lib/realismIntent';
@@ -9476,6 +9477,48 @@ async function noteBuildOutcome(
         'classifyIntentSmart',
       );
     } catch { /* LLM upgrade is best-effort — keyword result stands */ }
+
+    /**
+     * 🔴 NOTHING TO BUILD FROM — the 5 minute 57 second question (build report 2026-09-13, 541979d2).
+     *
+     * The whole prompt was one private Google Drive link to a 169 MB video. The engine planned a file
+     * list for an app it had invented (a 150s model call), ran the Simple Builder (timed out at 90s),
+     * abandoned the One-Shot (150s), opened the dead link, ASKED THE USER WHAT TO BUILD, decided the
+     * attempt had been too WEAK, retried on a stronger model, opened the same dead link again, asked
+     * the same question a second time — and closed by telling them to buy credits for a stronger
+     * engine. Three provider timeouts and eight failures happened inside that. On the free tier every
+     * token of it was ours.
+     *
+     * The question at minute four was always the right answer. Routing the turn to CHAT reaches it in
+     * seconds, on the cheap path, with no sandbox and no builder — and the model's own reply is
+     * already correct here: it produced exactly the right words, twice, after six minutes of trying
+     * to build first. What was wrong was never the answer. It was the routing.
+     *
+     * ⚠️ DELIBERATELY NARROW, because refusing a real prompt would be far worse than the bug it fixes.
+     * Only `empty` and `link-only` divert — never `too-short`, which would catch "continue" and
+     * re-open the continuation amnesia this repo has already fixed once. An attachment counts as
+     * content and is never diverted; nor is an import turn; nor an edit to an existing project, where
+     * a short message legitimately means "carry on".
+     */
+    const inputCheck = assessBuildInput(prompt);
+    if (
+      !inputCheck.buildable
+      && (inputCheck.reason === 'link-only' || inputCheck.reason === 'empty')
+      && intent !== 'chat'
+      && intent !== 'edit_existing'
+      // An IMPORT turn carries its content outside the prompt, so a bare URL there is not "nothing".
+      // Checked from the same two expressions `hasImportIntent` is built from, because that constant
+      // is declared further down and this must run BEFORE anything is spent.
+      && zipImports.length === 0
+      && !(typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== '')
+      && rawAttachments.length === 0
+    ) {
+      // No diagnostics recorder exists this early — by design, since the whole point is to decide
+      // before a build (and therefore a build report) begins. The honest reply IS the record.
+      console.log(`[AGENTV3] nothing to build from (${inputCheck.reason}) — answering as a question instead of starting a build`);
+      intent = 'chat';
+    }
+
     /**
      * WHAT THE USER ASKED FOR, captured BEFORE the workspace's state gets a vote.
      *
@@ -18041,7 +18084,12 @@ async function noteBuildOutcome(
         // spend the very budget free-tier protects). Instead, honestly invite the user to add credits
         // and finish on the strongest engine — converting the user to paid without shipping a broken app.
         if (freeTierBuildActive) {
-          events.emit({ type: 'narration', agent: 'architect', text: freeTierUpsellMessage(), ts: Date.now() });
+          // WHY it was empty decides what we may honestly say. A prompt with nothing to build from is
+          // not an engine limit, and asking such a user for money would be an upsell attached to our
+          // own gap. (The diversion above catches this case before a build starts; this covers the
+          // paths that still reach here — an edit turn, or an attachment that carried no instruction.)
+          const emptyCause = assessBuildInput(prompt).buildable ? 'engine' : 'no-instruction';
+          events.emit({ type: 'narration', agent: 'architect', text: freeTierUpsellMessage(emptyCause), ts: Date.now() });
         }
       }
       // Admin rule (2026-07-07): the server's own eyes saw the preview NOT render after the heal

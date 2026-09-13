@@ -51486,6 +51486,87 @@ is now the layering violation it always was.
 
 ---
 
+## 2026-09-13 — AUTOPSY, build 541979d2: 5 min 57 s, zero files, and the question was always the answer
+
+**The whole prompt was one line:** a private Google Drive link to a 169 MB video. No app, no feature,
+not one word. Free tier, weak power level, cheap floor active.
+
+### The five buckets
+
+**✅ Self-healed — 6 classes / 15 events.** Simple-build → full builder · one-shot → full builder ·
+KIMI timeout → next provider ×3 · GLM failure → next provider ×8 · empty-build → retry on a stronger
+model · warm sandbox resume (setup 0 s).
+🔴 **Per the 50/50 law every one of these is a red flag, and five of the six fired for the SAME upstream
+reason: there was nothing to build from.** They are the engine healing a wound nobody needed to make.
+
+**🔀 Worked around — 5.** Both fast lanes routed around their own timeouts · both providers routed
+around their failures · the architect used `browser_action` to try to read a file we cannot read.
+
+**⏭️ Skipped — 7.** Route smoke, page render, E2E scaffold, typecheck, test suite, runtime verification,
+peak memory — all of them skipped **together**, because each needs a running app.
+
+**❌ Still broken — 7.**
+1. No app at all.
+2. `PREVIEW_NEVER_CAME_UP` · 3. `RELEASE_GATE: UNKNOWN` · 4. `RUNTIME_UNCHECKED`.
+5. 🔴 **The build told the user "produced no files" while files existed** — its own `ls` lists 10, and
+   six more `write_file` calls landed **81 seconds AFTER `endedAt`**.
+6. 🔴 **An abandoned lane kept running and kept spending.** The one-shot was given up at 150 s; its GLM
+   call ran to **342,995 ms** and returned 3,978 output tokens — then a `frontend` sub-agent wrote
+   files into a build that had already been declared failed, 102 s after it ended.
+7. 🔴 **The closing line was an upsell for a failure that was not the engine's:** *"Your app needs our
+   strongest engine… add credits."* There was no app, no engine limit was reached, and the only thing
+   missing was a sentence from the user.
+
+**🥵 Struggle points — 8.** The planning call took **150 s** to return 436 characters · simple build
+burned 90 s · one-shot burned 150 s in the foreground · three KIMI timeouts at 120 s each · eight GLM
+failures (7 rate-limit) · the same dead link opened **twice** (9 s, then 22 s) · the same question asked
+**twice** · 5 m 57 s for zero output, all of it ours on the free tier.
+
+### Step 2 — the missing subsystem
+
+**A pre-build check that asks: is there anything here to build from?** Nothing in the engine ever asked
+it. The answer for a bare URL is available in **under a millisecond**, with no model call, before a
+sandbox is even warm — and it is the exact answer the engine eventually produced, at minute four, by
+exhausting every builder it has. *What was wrong was never the answer. It was the routing.*
+
+(Second, named and **not** fixed here: abandoned work is not cancelled. Third: a failure's CAUSE is not
+carried to the message that reports it.)
+
+### What shipped
+
+**`buildableInput.ts`** — pure, no model call, no I/O. `empty` / `link-only` / `too-short`, with a
+reply that names *why* the link could not be used **before** it asks anything (a bare "what should I
+build?" reads as though the link were never seen). It knows only what a URL's own shape proves — a
+Drive link, a video, an archive — and guesses nothing about an ordinary page.
+
+**The turn is routed to CHAT**, which answers in seconds on the cheap path with no sandbox and no
+builder. The model's own reply is already right here: it produced exactly the right words, twice.
+
+⚠️ **Deliberately narrow.** Only `empty` and `link-only` divert — **never `too-short`**, which would
+catch "continue" and re-open the continuation amnesia this repo has already fixed once. An attachment,
+an import turn and an edit are never diverted. Refusing a prompt a user really wrote would be far worse
+than the bug being fixed.
+
+**The closing message now depends on the cause.** `freeTierUpsellMessage('no-instruction')` asks for
+**words, never for money** — a test asserts it contains no credits ask. An upsell attached to our own
+gap is how a product loses trust it cannot buy back.
+
+### 🔴 OPEN ROOT CAUSES — named, not implied fixed
+
+1. **Abandoned provider calls are never cancelled.** The one-shot ran 193 s past its own abandonment,
+   spent real tokens, and wrote files into a finished build. Needs an abort signal threaded into the
+   fast lanes — a change inside the build loop, not in this PR.
+2. **"No files produced" can be false.** It is computed before late writes land. It is what the user is
+   told, and it was wrong here.
+3. **A 150 s planning call for 436 characters, and three 120 s provider timeouts** — the cheap floor's
+   latency is a standing ceiling on every weak build, not a one-off.
+4. **The closing message still says "needs a stronger engine" for a PROVIDER outage** (8 GLM failures,
+   7 of them rate-limit). That is not an engine limit either. The signal exists in the diagnostics but
+   not at the call site; wiring it is a separate change.
+
+Gate on the final state: `typecheck` 0 · `noUnusedImports` clean · `typecheck:server` 0 · `build` ok ·
+`test:bundle` within budget · `boot:check` PASS · `vitest run` **1,594 files / 22,112 passed / 1
+skipped / 0 failed**. 28 new tests; **two confirmed to fail when the behaviour is reverted.**
 ## 2026-09-13 — THE AUTOPSY'S MISSING SUBSYSTEM, BUILT: the build now KNOWS its own time budget
 
 Admin: *"han, build report me jo jo problem hai. sabhi ko fix karna hai. next time yeh error na aye!!"* —

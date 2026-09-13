@@ -122,6 +122,41 @@ Verified in `cloudRunHosting.ts` — `HOSTING_CAPS`:
 
 ## 5 · The work, in priority order
 
+> ✅ **STATUS, 2026-09-13 — P1 to P5 are BUILT and open as PRs. P6 and P7 are admin-only and untouched.**
+>
+> | | Item | PR | Note |
+> |---|---|---|---|
+> | 🥇 | P1 Frontend traffic meter | **#2908** | ⚠️ Ships as a MEASUREMENT, not a bill — see the correction below |
+> | 🥈 | P2 Image cleanup | **#2907** | Also fixed the sibling: staged build sources |
+> | 🥉 | P3 Size cap | **#2906** | ⚠️ The premise was wrong — see the correction below |
+> | | P4 Usage warnings | **#2909** | 50 / 80 / 100%, once each per plan period |
+> | | P5 Catalogue | **#2905** | ₹299 / ₹599, credit ₹0, server-app caps |
+> | | P6 Worker deploy | — | Admin only |
+> | | P7 Bot blocking | — | Admin only, after P6 |
+>
+> They are a **stack**: #2909 → #2908 → #2905. Merge in that order (#2905 first), or merge #2905 and
+> then retarget. #2906 and #2907 are independent of the stack and of each other.
+>
+> 🔴 **TWO THINGS IN THIS SECTION TURNED OUT TO BE WRONG, and the corrections matter more than the
+> ticks.**
+>
+> **P3's premise was wrong.** "One 500 MB video in an app" is already impossible: `maxDeployMb()` has
+> capped a publish at **50 MB** since 2026-08-21 and ships ON. The real gap was somewhere else
+> entirely — `enforceHostingQuota` bounds a publish only for a FIRST-PARTY provider, and
+> `FIRST_PARTY_PROVIDERS` is `['firebase','cloudflare']`. NavBharat Cloud publishes under
+> `navbharat-cloud`, so it returned ALLOW on its first branch and **the container path had no ceiling
+> at all** — which matters far more now that the plans grant 10 and 30 SERVER apps.
+>
+> **P1 cannot bill, and saying so is the point.** There is no server-side number to read: Google's
+> Firebase Hosting meters are per SITE, and every published app is a channel on one shared site, so no
+> Google metric can attribute a byte to an app. The meter that shipped reads the DELIVERING BROWSER's
+> own `transferSize` — a real measurement, but blind to any caller that runs no JavaScript (a bot, a
+> scraper) and to an owner who strips the beacon. Both gaps **under**-count, so neither can ever
+> over-charge — but a floor is not a bill, so the sweep REPORTS it and charges ₹0. **The ₹19,000 swing
+> in §3 is therefore NOT yet captured**; capturing it needs a meter in the SERVING path, which is P6's
+> Worker or a per-host log-based metric. That is an open root cause, not a finished item.
+
+
 ### 🥇 P1 — Frontend traffic meter 🔴 **Nothing else works without it**
 
 The meter reads `run.googleapis.com/container/network/sent_bytes_count` — **Cloud Run only**. A

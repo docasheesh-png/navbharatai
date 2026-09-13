@@ -118,3 +118,92 @@ describe('the panel is actually wired to it', () => {
     expect(panel.slice(at - 600, at)).not.toContain('startersExpanded');
   });
 });
+
+/**
+ * THE SECOND INDIA BATCH LIVES BEHIND "MORE TEMPLATES" (admin 2026-09-13, verbatim: the four new India
+ * templates go *"more button ke andar"*).
+ *
+ * 🔴 WHY THIS NEEDS A TEST RATHER THAN JUST NOT SETTING `featured`. `pickerSections` TOPS THE FIRST
+ * SCREEN UP to its limit from the un-featured remainder, in category order, so that a tier whose
+ * featured chips are mostly locked away never shows a sparse first screen. A FREE user has only nine
+ * featured *simple* chips, so three un-featured chips ARE pulled onto their first screen today — and a
+ * new un-featured chip sitting earlier in category order would silently take one of those slots and
+ * appear on the first screen despite nobody marking it featured.
+ *
+ * That is why `wedding-rsvp` is deliberately LAST in the Personal category (the final category), and why
+ * the other three are `pro` without `showcase` (so a free user is not offered them at all). Neither fact
+ * is self-evident from reading the chip list, and both are invisible until someone reorders a category —
+ * hence this test, which asserts the OUTCOME the admin asked for rather than the mechanism.
+ */
+describe('the 2026-09-13 India batch is inside "More templates", for every tier', () => {
+  const NEW_BATCH = ['wedding-rsvp', 'courier', 'ngo', 'school-erp'];
+
+  it('all four chips exist', () => {
+    for (const id of NEW_BATCH) {
+      expect(STARTER_TEMPLATES.find((t) => t.id === id), id + ' chip missing').toBeTruthy();
+    }
+  });
+
+  it('none of them is marked featured — the first screen is a curated decision', () => {
+    for (const id of NEW_BATCH) {
+      expect(STARTER_TEMPLATES.find((t) => t.id === id)!.featured, id).not.toBe(true);
+    }
+  });
+
+  for (const powerUnlocked of [false, true]) {
+    it('a ' + (powerUnlocked ? 'paid' : 'free') + ' user finds them under "More", never on the first screen', () => {
+      const { tappable } = partitionStarters(powerUnlocked);
+      const { initial, more } = pickerSections(tappable);
+      const offered = new Set(tappable.map((t) => t.id));
+      for (const id of NEW_BATCH) {
+        // A chip this tier is not offered at all (the pro ones, for a free user) passes trivially —
+        // what must never happen is it appearing on the FIRST screen.
+        if (!offered.has(id)) continue;
+        expect(initial.map((t) => t.id), id + ' reached the first screen').not.toContain(id);
+        expect(more.map((t) => t.id), id + ' is not reachable at all').toContain(id);
+      }
+    });
+  }
+
+  it('a free user is offered the wedding planner but not the three organisation apps', () => {
+    // The tier split is a real decision: a guest list is one list and the weak tier ships it; a courier,
+    // a trust and a school are each several linked entities, which is where a weak build half-works.
+    const free = new Set(partitionStarters(false).tappable.map((t) => t.id));
+    expect(free.has('wedding-rsvp')).toBe(true);
+    for (const id of ['courier', 'ngo', 'school-erp']) expect(free.has(id), id).toBe(false);
+  });
+
+  it('adding them did NOT change either tier\'s first screen', () => {
+    // The whole point of "more button ke andar": the twelve chips a user already sees are untouched.
+    expect(pickerSections(partitionStarters(false).tappable).initial.map((t) => t.id)).toEqual([
+      'gst-bill', 'todo', 'quick-notes', 'calculator', 'memory', 'exam-prep',
+      'panchang', 'geeta', 'quran', 'pomodoro', 'unit-converter', 'qr-generator',
+    ]);
+    expect(pickerSections(partitionStarters(true).tappable).initial.map((t) => t.id)).toEqual([
+      'gst-bill', 'saas-dashboard', 'store', 'todo', 'quick-notes', 'calculator',
+      'memory', 'exam-prep', 'panchang', 'geeta', 'quran', 'kundali',
+    ]);
+  });
+
+  it('every category a new chip uses is a real category the picker renders', () => {
+    const rendered = new Set(startersByCategory(STARTER_TEMPLATES).map((g) => g.category));
+    for (const id of NEW_BATCH) {
+      expect(rendered.has(STARTER_TEMPLATES.find((t) => t.id === id)!.category), id).toBe(true);
+    }
+  });
+});
+
+/**
+ * The Settings footer no longer prints a version (admin 2026-09-13: "Settings footer ka Navbharat AI
+ * v5.0.0 hatana"). Pinned because a version string beside the product's name is exactly what the
+ * 2026-09-12 rename removed everywhere else, and because a BUNDLED native shell has no single honest
+ * version to print — the web app updates on every merge while an installed build stays on its own.
+ */
+describe('the Settings footer carries the name without a version', () => {
+  const settings = readFileSync(join(__dirname, '..', 'src/components/panels/SettingsPanel.tsx'), 'utf8');
+
+  it('shows "Navbharat AI" and no version number after it', () => {
+    expect(settings).toContain('>Navbharat AI</p>');
+    expect(settings).not.toMatch(/Navbharat AI v\d/);
+  });
+});

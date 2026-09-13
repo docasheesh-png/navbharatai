@@ -699,7 +699,13 @@ export function SettingsPanel({
                   <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-600/30 mb-3">
                     <span className="text-white font-black text-xs">NB</span>
                   </div>
-                  <p className="text-[9px] text-[#484f58] font-black uppercase tracking-[0.3em]">Navbharat AI v5.0.0</p>
+                  {/* The version number is gone (admin 2026-09-13: "Settings footer ka Navbharat AI
+                      v5.0.0 hatana"). It said "v5.0.0" beside the app's name, which read as the BUILDER
+                      being version 5 — the exact thing the 2026-09-12 rename removed everywhere else. A
+                      bundled Capacitor shell has no single honest version to print here anyway: the web
+                      app updates on every merge while an installed .aab stays on its own build, so one
+                      hardcoded string is wrong for one of them at any moment. The name alone is true. */}
+                  <p className="text-[9px] text-[#484f58] font-black uppercase tracking-[0.3em]">Navbharat AI</p>
                 </div>
               </motion.div>
             )}

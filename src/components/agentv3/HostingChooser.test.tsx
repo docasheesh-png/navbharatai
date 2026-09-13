@@ -1,8 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { HostingChooser, type HostingProvider, type OwnRepoInfo } from './HostingChooser';
+import { ADVANCED_PUBLISH_LABEL, ADVANCED_PUBLISH_HINT } from '../../lib/advancedPublish';
 
 const P = (id: string, name: string, configured: boolean): HostingProvider => ({ id, name, configured, requirement: '' });
+
+// THE BRING-YOUR-OWN CARD IS COLLAPSED BY DEFAULT since ROADMAP §11 slice 5 (one Publish button), so a
+// test that wants its contents has to render it the way a user who is already on that path sees it:
+// expanded, because they have a provider connected or their own repo. That is the rule in
+// `advancedPublish.ts`, not a test convenience — a user with neither is exactly who the collapse is for.
+const BYO_OPEN: HostingProvider[] = [P('firebase', 'Firebase Hosting', true), P('vercel', 'Vercel', true)];
 
 function render(providers: HostingProvider[], extra: Partial<React.ComponentProps<typeof HostingChooser>> = {}) {
   return renderToStaticMarkup(
@@ -11,13 +18,22 @@ function render(providers: HostingProvider[], extra: Partial<React.ComponentProp
 }
 
 describe('HostingChooser — the two-path Publish surface', () => {
+  // CHANGED 2026-09-13 (slice 5's last half): path 2 is now a disclosure, so its old title is only on
+  // screen once it is open. The assertion did not get weaker — it still proves both paths are offered,
+  // and now also proves the collapsed one names itself well enough to find.
   it('always shows both paths + the honest full-stack "coming soon" note', () => {
     const html = render([P('firebase', 'Firebase Hosting', true)]);
     expect(html).toContain('Host on NavBharatAI');
-    expect(html).toContain('Host somewhere else');
+    expect(html).toContain(ADVANCED_PUBLISH_LABEL);   // path 2, collapsed but named
+    expect(html).toContain(ADVANCED_PUBLISH_HINT);    // and readable without opening it
     expect(html).toContain('Publish on NavBharatAI');
     expect(html).toContain('coming soon'); // full-stack honesty
     expect(html).toContain('Free');
+    // Open, it is the same card it always was — both sub-choices, nothing dropped.
+    const open = render(BYO_OPEN);
+    expect(open).toContain('We deploy to your provider');
+    expect(open).toContain('I host it myself');
+    expect(open).toContain('your cloud, your bill, free from us');
   });
 
   it('offers a BYO button only for CONFIGURED non-NavBharatAI providers', () => {
@@ -30,11 +46,17 @@ describe('HostingChooser — the two-path Publish surface', () => {
     expect(html).not.toContain('Publish to Netlify');
   });
 
+  // CHANGED 2026-09-13: the empty state lives inside the collapsed card, so it is asserted on a user
+  // who HAS the card open — one with their own repo, which is the other way the rule opens it. The
+  // "never offered as a BYO row" half is checked on the default screen too, where it matters most.
   it('never lists NavBharatAI\'s own host as a "bring your own" option', () => {
     const html = render([P('firebase', 'Firebase Hosting', true)]);
-    // firebase is the NavBharatAI path, not a BYO row
     expect(html).not.toContain('Publish to Firebase Hosting');
-    expect(html).toContain('No provider connected yet'); // BYO empty state
+    const opened = render([P('firebase', 'Firebase Hosting', true)], {
+      ownRepo: { owner: 'aashish', repo: 'mitrify', workBranch: 'navbharatai/work', baseBranch: 'main' },
+    });
+    expect(opened).not.toContain('Publish to Firebase Hosting');
+    expect(opened).toContain('No provider connected yet'); // BYO empty state
   });
 
   it('disables the NavBharatAI publish button when our host is not configured', () => {
@@ -75,16 +97,26 @@ describe('HostingChooser — the two-path Publish surface', () => {
 describe('HostingChooser — "I host it myself" (BYO hosting via own-repo git storage)', () => {
   const OWN_REPO: OwnRepoInfo = { owner: 'aashish', repo: 'mitrify', workBranch: 'navbharatai/work', baseBranch: 'main' };
 
+  // CHANGED 2026-09-13: "independent of configured deploy providers" still holds — with Vercel
+  // connected and with none, the self-host sub-choice is there in full. What changed is that a user
+  // with NEITHER a provider nor a repo sees it folded, so the open case is asserted with each of the
+  // two signals that legitimately open it, not with one convenient fixture.
   it('always offers the third "I host it myself" path, independent of configured deploy providers', () => {
-    const html = render([P('firebase', 'Firebase Hosting', true)]);
-    expect(html).toContain('I host it myself');
-    expect(html).toContain('We never touch your hosting');
-    expect(html).toContain('We only write code and open a pull request into your own GitHub repo');
+    for (const html of [
+      render(BYO_OPEN),                                             // opened by a connected provider
+      render([P('firebase', 'Firebase Hosting', true)], { ownRepo: OWN_REPO }), // opened by their repo
+    ]) {
+      expect(html).toContain('I host it myself');
+      expect(html).toContain('We never touch your hosting');
+      expect(html).toContain('We only write code and open a pull request into your own GitHub repo');
+    }
   });
 
+  // CHANGED 2026-09-13: a user with no repo AND no provider now sees this folded, so the case is
+  // rendered with a connected provider — which is precisely the user who has no repo yet but is
+  // already hosting elsewhere, and the one who most needs the button to say "Set up".
   it('shows "Set up" when no own-repo is connected yet for this workspace', () => {
-    const html = render([P('firebase', 'Firebase Hosting', true)]);
-    expect(html).toContain('Set up');
+    expect(render(BYO_OPEN)).toContain('Set up');
   });
 
   it('shows the connected repo name on the button once own-repo storage is active', () => {
@@ -115,10 +147,23 @@ describe('HostingChooser — "Make an Android app" (APK) path', () => {
   });
 
   it('self-hosting now lives INSIDE "Host somewhere else" (folded in, not a separate card)', () => {
-    const html = render([P('firebase', 'Firebase Hosting', true)]);
+    // CHANGED 2026-09-13: rendered with the card open, since that card is now collapsed by default.
+    const html = render(BYO_OPEN);
     // Both sub-choices of path 2 are present in one card.
     expect(html).toContain('We deploy to your provider');
     expect(html).toContain('I host it myself');
+  });
+
+  // THE REGRESSION THIS WHOLE CHANGE COULD HAVE BEEN. Collapsing a path is only acceptable because a
+  // user who is already on it never meets the collapsed version — hiding a control somebody relies on
+  // behind a click they have no reason to make is, from their side, the same as deleting it.
+  it('never folds the bring-your-own paths away from a user already using them', () => {
+    expect(render(BYO_OPEN)).toContain('Publish to Vercel');
+    expect(render([P('firebase', 'Firebase Hosting', true)], {
+      ownRepo: { owner: 'aashish', repo: 'mitrify', workBranch: 'navbharatai/work', baseBranch: 'main' },
+    })).toContain('Connected: aashish/mitrify');
+    // And the default screen really is the collapsed one, or the change did nothing.
+    expect(render([P('firebase', 'Firebase Hosting', true)])).not.toContain('We deploy to your provider');
   });
 });
 
@@ -174,8 +219,11 @@ describe('HostingChooser — the sheet must scroll on a phone (clipped-content f
     expect(html).toContain('overscroll-contain');
   });
 
+  // CHANGED 2026-09-13: path 3's button now sits inside the collapsed bring-your-own card, so the
+  // scroll assertion renders it open. The point of this test — nothing is clipped away — is unchanged,
+  // and folding is not clipping: the card is one press from open and says what it holds.
   it('still renders the content that used to be clipped below the fold', () => {
-    const html = render([P('firebase', 'Firebase Hosting', true)]);
+    const html = render(BYO_OPEN);
     expect(html).toContain('Set up');                 // path 3's button
     expect(html).toContain('coming soon');            // the full-stack note under it
     expect(html).toContain('always the same app you built');

@@ -51303,3 +51303,148 @@ is now the layering violation it always was.
   finishes, or those fields written live.
 - **The health-check's "no recognisable error" restart** is a retry around an undiagnosed failure. It
   recovered, so it is debt rather than a defect, and it is untouched here.
+
+---
+
+## 2026-09-13 — AUTOPSY, build 541979d2: 5 min 57 s, zero files, and the question was always the answer
+
+**The whole prompt was one line:** a private Google Drive link to a 169 MB video. No app, no feature,
+not one word. Free tier, weak power level, cheap floor active.
+
+### The five buckets
+
+**✅ Self-healed — 6 classes / 15 events.** Simple-build → full builder · one-shot → full builder ·
+KIMI timeout → next provider ×3 · GLM failure → next provider ×8 · empty-build → retry on a stronger
+model · warm sandbox resume (setup 0 s).
+🔴 **Per the 50/50 law every one of these is a red flag, and five of the six fired for the SAME upstream
+reason: there was nothing to build from.** They are the engine healing a wound nobody needed to make.
+
+**🔀 Worked around — 5.** Both fast lanes routed around their own timeouts · both providers routed
+around their failures · the architect used `browser_action` to try to read a file we cannot read.
+
+**⏭️ Skipped — 7.** Route smoke, page render, E2E scaffold, typecheck, test suite, runtime verification,
+peak memory — all of them skipped **together**, because each needs a running app.
+
+**❌ Still broken — 7.**
+1. No app at all.
+2. `PREVIEW_NEVER_CAME_UP` · 3. `RELEASE_GATE: UNKNOWN` · 4. `RUNTIME_UNCHECKED`.
+5. 🔴 **The build told the user "produced no files" while files existed** — its own `ls` lists 10, and
+   six more `write_file` calls landed **81 seconds AFTER `endedAt`**.
+6. 🔴 **An abandoned lane kept running and kept spending.** The one-shot was given up at 150 s; its GLM
+   call ran to **342,995 ms** and returned 3,978 output tokens — then a `frontend` sub-agent wrote
+   files into a build that had already been declared failed, 102 s after it ended.
+7. 🔴 **The closing line was an upsell for a failure that was not the engine's:** *"Your app needs our
+   strongest engine… add credits."* There was no app, no engine limit was reached, and the only thing
+   missing was a sentence from the user.
+
+**🥵 Struggle points — 8.** The planning call took **150 s** to return 436 characters · simple build
+burned 90 s · one-shot burned 150 s in the foreground · three KIMI timeouts at 120 s each · eight GLM
+failures (7 rate-limit) · the same dead link opened **twice** (9 s, then 22 s) · the same question asked
+**twice** · 5 m 57 s for zero output, all of it ours on the free tier.
+
+### Step 2 — the missing subsystem
+
+**A pre-build check that asks: is there anything here to build from?** Nothing in the engine ever asked
+it. The answer for a bare URL is available in **under a millisecond**, with no model call, before a
+sandbox is even warm — and it is the exact answer the engine eventually produced, at minute four, by
+exhausting every builder it has. *What was wrong was never the answer. It was the routing.*
+
+(Second, named and **not** fixed here: abandoned work is not cancelled. Third: a failure's CAUSE is not
+carried to the message that reports it.)
+
+### What shipped
+
+**`buildableInput.ts`** — pure, no model call, no I/O. `empty` / `link-only` / `too-short`, with a
+reply that names *why* the link could not be used **before** it asks anything (a bare "what should I
+build?" reads as though the link were never seen). It knows only what a URL's own shape proves — a
+Drive link, a video, an archive — and guesses nothing about an ordinary page.
+
+**The turn is routed to CHAT**, which answers in seconds on the cheap path with no sandbox and no
+builder. The model's own reply is already right here: it produced exactly the right words, twice.
+
+⚠️ **Deliberately narrow.** Only `empty` and `link-only` divert — **never `too-short`**, which would
+catch "continue" and re-open the continuation amnesia this repo has already fixed once. An attachment,
+an import turn and an edit are never diverted. Refusing a prompt a user really wrote would be far worse
+than the bug being fixed.
+
+**The closing message now depends on the cause.** `freeTierUpsellMessage('no-instruction')` asks for
+**words, never for money** — a test asserts it contains no credits ask. An upsell attached to our own
+gap is how a product loses trust it cannot buy back.
+
+### 🔴 OPEN ROOT CAUSES — named, not implied fixed
+
+1. **Abandoned provider calls are never cancelled.** The one-shot ran 193 s past its own abandonment,
+   spent real tokens, and wrote files into a finished build. Needs an abort signal threaded into the
+   fast lanes — a change inside the build loop, not in this PR.
+2. **"No files produced" can be false.** It is computed before late writes land. It is what the user is
+   told, and it was wrong here.
+3. **A 150 s planning call for 436 characters, and three 120 s provider timeouts** — the cheap floor's
+   latency is a standing ceiling on every weak build, not a one-off.
+4. **The closing message still says "needs a stronger engine" for a PROVIDER outage** (8 GLM failures,
+   7 of them rate-limit). That is not an engine limit either. The signal exists in the diagnostics but
+   not at the call site; wiring it is a separate change.
+
+Gate on the final state: `typecheck` 0 · `noUnusedImports` clean · `typecheck:server` 0 · `build` ok ·
+`test:bundle` within budget · `boot:check` PASS · `vitest run` **1,594 files / 22,112 passed / 1
+skipped / 0 failed**. 28 new tests; **two confirmed to fail when the behaviour is reverted.**
+
+## 2026-09-13 — THE MID-BUILD STOP: the half the wallet floor could not reach
+
+**The open root cause recorded with PR #2883 is now closed.** That change bounded what a user is
+BILLED (`WALLET_OVERDRAFT_FLOOR_INR`, default ₹50) and said plainly what it did not do: *"Clamping the
+debit bounds the user's bill; it does not un-spend what the model already cost us."*
+
+**What was actually unbounded, stated precisely.** Every START gate was correct — `decideAffordability`
+refuses a new build at a balance of 0 or less, and a chat turn is refused on an empty wallet. Nothing
+looked at the cost of **the build already running**. A build legitimately allowed to begin at ₹1 could
+run its entire wall clock and present the invoice at the end. `SESSION_COST_CAP_USD` is not that limit
+either: it only decides whether an EMPTY build may retry.
+
+### What shipped
+
+**`buildCostCeiling.ts`** — pure, no I/O. `buildCostCeilingUsd()` (default **$5**, cap $50),
+`ledgerCostUsd(entries)`, `checkCostCeiling(cost, ceiling)`, `costCeilingDetail(verdict)`.
+
+**It is evaluated at the CHOKE POINT**, inside `captureTurnUsage` — the single function every build
+turn and every heal turn already flows through, and the same discipline the wallet floor uses. A
+ceiling written into the call sites is one the next call site never gets. Pricing the ledger is a loop
+over a handful of entries, so it costs nothing measurable per turn.
+
+**🔒 IT IS A STOP, NOT A KILL — which is what makes shipping it ON by default safe against the one
+absolute rule.** `AgentRunner` ends BETWEEN turns; the files written so far are already persisted; and
+`abortSummary('cost-cap')` tells the user their work is saved and one message continues it. A build
+that reaches the ceiling loses nothing — it pauses. A new `'cost-cap'` abort cause carries that through
+`buildAbortCause.ts`, so the stop can never be reported as the user pressing Stop (`isUserInitiated`
+returns false) — the exact misattribution that module was built to end.
+
+**📌 THE NUMBER WAS REUSED, NOT INVENTED.** $5 is this repo's own standing answer to a runaway build
+(`sessionCostCapUsd()`, since the "$26 todo app"). Inventing a fresh constant that sounds rigorous is
+precisely the failure CLAUDE.md records for the E2B rate. It sits under its OWN key
+(`AGENTV3_BUILD_COST_CEILING_USD`) because extending `SESSION_COST_CAP_USD` would silently re-purpose a
+value an admin may already have set for something else. **For scale:** real builds in this repo's own
+reports cost **$0.4–$1.0**, so $5 is five to ten times a heavy normal build — far enough away that no
+legitimate build is at risk, and still the difference between a bounded ~₹435 and an unbounded loss.
+
+**⚠️ THE LIVE FIGURE IS AN UNDER-ESTIMATE, AND THAT IS THE SAFE DIRECTION.** The ledger sees the
+architect, its sub-agents and every heal runner; it does NOT see the aux calls (blueprint/plan/judge),
+which reconcile into the 'other' bucket only at settle. So the stop fires LATER than a complete number
+would justify, never earlier. The admin line says so in words rather than presenting the figure as
+complete.
+
+**Honesty by construction, in three places.** A malformed env value falls back to $5 and **never to
+"no ceiling"** — only an explicit `0` disables it, because a typo must not restore the bug. An
+evaluation that throws fails OPEN (a ceiling we cannot read must never end somebody's build — the same
+call the affordability gate makes on an unreadable balance). And the user-facing sentence carries no
+rupee figure, no token count and no provider: what a build cost NavBharatAI is admin-only under the
+White-Label Law's billing half.
+
+### 🔴 OPEN ROOT CAUSE — named, not implied fixed
+
+**The stop does not cancel a call already in flight.** The loop ends between turns, so a provider call
+in progress runs to completion on their side and is paid for. Build `541979d2` showed exactly this: a
+lane abandoned at 150 s whose call ran to 343 s. Cancelling it needs an abort signal threaded into the
+provider clients — a separate change, inside the request path rather than the build loop.
+
+**21 new tests** (`tests/buildCostCeiling.test.ts`), plus the new cause added to
+`buildAbortCause.test.ts`'s exhaustiveness list so it cannot be skipped silently. **Two confirmed to
+fail when the behaviour is reverted:** a malformed env meaning "no ceiling", and the once-guard.

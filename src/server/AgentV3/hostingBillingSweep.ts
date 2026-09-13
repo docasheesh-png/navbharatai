@@ -52,6 +52,9 @@ import {
 import { hostingBillingStore } from './HostingBillingStore';
 import { hostingPeriodUsageStore } from './HostingPeriodUsageStore';
 import { readHostingPlanStatus, planDays } from '../lib/hostingPlan';
+import { siteIdForWorkspace } from '../lib/firebaseCustomDomain';
+import { siteAnalyticsStore } from '../lib/siteAnalyticsStore';
+import { sumFrontendBytes, judgeFrontendUsage } from './frontendUsage';
 import { HOSTING_OVERAGE_INR_PER_GB } from '../../lib/hostingTiers';
 import { readWalletBalanceInr, firestoreWalletReader } from './WalletBalance';
 import { saveNotification } from '../lib/AdminNotificationStore';
@@ -80,6 +83,14 @@ export interface SweepResult {
    * exactly like a quiet month. An incomplete read is a gap in the billing, and it is named.
    */
   registryComplete: boolean;
+  /**
+   * Owners whose FRONTEND traffic was reported (never charged — see `reportFrontendTraffic`).
+   *
+   * Deliberately its own counter rather than folded into `considered`: these are a different set of
+   * apps measured by a different meter against a different allowance, and one number covering both
+   * would make it impossible to tell which half a figure came from.
+   */
+  frontendOwnersReported: number;
 }
 
 /** Is this record a NavBharat Cloud app that is live right now? */
@@ -108,6 +119,7 @@ export async function runHostingBillingSweep(opts?: {
   const win = opts?.window ?? lastCompleteDay(nowMs);
   const out: SweepResult = {
     day: win.day, considered: 0, charged: 0, totalInr: 0, skipped: 0, notes: [], registryComplete: false,
+    frontendOwnersReported: 0,
   };
 
   const project = appsProject(env);
@@ -303,7 +315,64 @@ export async function runHostingBillingSweep(opts?: {
     }
   }
 
+  await reportFrontendTraffic(db, listing.records, win.day, out).catch((e) => {
+    // Reporting must never affect billing. It runs after every charge is settled, and a failure here
+    // costs a line in the admin log, not a rupee.
+    out.notes.push(`frontend traffic report failed (${e instanceof Error ? e.message : String(e)}).`);
+  });
+
   return out;
+}
+
+/**
+ * WHAT THE FRONTEND-ONLY APPS SERVED — reported, never charged.
+ *
+ * 🔴 THIS IS A SECOND PASS OVER A DIFFERENT SET OF APPS, and the reason is the gap itself. The loop
+ * above filters to `NAVBHARAT_CLOUD_PROVIDER` — Cloud Run apps — because that is the only thing the
+ * Google meter can see. An owner with ten published frontend apps and no server app is therefore
+ * never CONSIDERED at all, and `includedFrontendGb` has never had anything to compare against.
+ *
+ * 🔒 IT CHARGES NOTHING, AND THAT IS A DECISION RATHER THAN AN UNFINISHED EDGE. The figure comes from
+ * the delivering browser (`parseBytesReport`), which cannot see a caller that runs no JavaScript — a
+ * bot, a scraper, `curl`. It is a FLOOR. Taking money against a floor would bill honest owners for
+ * what we could measure while the ones costing us most paid least, so the number is shown to the
+ * admin until a meter in the SERVING path exists. Same shape as slice 2 before slice 2.1: measure,
+ * report, and let the switch be its own decision.
+ */
+async function reportFrontendTraffic(
+  db: unknown,
+  records: readonly DeploymentRecord[],
+  day: string,
+  out: SweepResult,
+): Promise<void> {
+  const byOwner = new Map<string, DeploymentRecord[]>();
+  for (const r of records) {
+    // Live, published, and NOT a container app — the container apps are billed by the loop above and
+    // counting them here as well would report the same traffic under two meters.
+    if (String(r.providerId ?? '') === NAVBHARAT_CLOUD_PROVIDER) continue;
+    if ((r.status ?? 'active') !== 'active' || !r.url) continue;
+    const ownerId = String(r.userId ?? '').trim();
+    if (!ownerId || ownerId === 'anon') continue;
+    const list = byOwner.get(ownerId) ?? [];
+    list.push(r);
+    byOwner.set(ownerId, list);
+  }
+  if (byOwner.size === 0) return;
+
+  for (const [ownerId, owned] of byOwner) {
+    const perApp = await Promise.all(owned.map((r) =>
+      siteAnalyticsStore.bytesForDay(siteIdForWorkspace(String(r.workspaceId ?? '')), day).catch(() => null)));
+    const usage = sumFrontendBytes(perApp);
+    // Nothing measured and nothing to say — an account whose apps had no visitors does not need a line.
+    if (usage.bytes === 0 && usage.appsUnmeasured === 0) continue;
+    const status = await readHostingPlanStatus(db as never, ownerId).catch(() => null);
+    const verdict = judgeFrontendUsage({
+      usage,
+      planId: status?.active ? status.plan?.id ?? null : null,
+    });
+    out.frontendOwnersReported++;
+    out.notes.push(`${ownerId}: ${verdict.note}.`);
+  }
 }
 
 /**

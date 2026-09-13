@@ -52245,3 +52245,72 @@ is shown matches the number the gate counts.
 
 **Gate on the final state:** typecheck 0 · noUnusedImports clean · typecheck:server 0 · build ok ·
 bundle within budget · boot PASS · **vitest 1,612 files / 22,421 passed / 1 skipped / 0 failed**.
+
+## 2026-09-13 — P1: the frontend traffic meter, and the honest reason it does not bill yet
+
+**The gap.** `hostingUsage.ts` reads `run.googleapis.com/container/network/sent_bytes_count` — a
+**Cloud Run** metric. A frontend-only app has no Cloud Run service at all, so it was never counted and
+never billable. Every `includedFrontendGb` figure in the new plans (Free 5, Starter 25, Growth) was
+decoration. Worse than that: the hosting sweep filters to `NAVBHARAT_CLOUD_PROVIDER`, so an owner with
+ten published frontend apps and no server app was **never considered at all**.
+
+🔴 **AND THERE IS NO SERVER-SIDE NUMBER TO READ, which is why this looks the way it does.** Google's
+Firebase Hosting meters are per **SITE**. Every published app is a CHANNEL on one shared site, so no
+Google metric can attribute a byte to an app. (Google's docs are unreachable from a Claude session, so
+the Hosting metric names were deliberately NOT guessed into a billing path — this repo has been burned
+by stale third-party identifiers before.)
+
+**What can measure it is the delivering browser, and that is a measurement rather than an estimate.**
+The beacon that has been stamped into every published page since 2026-09-10 now sends a SECOND report
+on the way out (`pagehide` + `visibilitychange`, guarded so it fires once) carrying the sum of
+`PerformanceResourceTiming.transferSize`. Three properties of that figure look like bugs and are
+exactly right for OUR bill: a **cache hit** reports ~0 (correct — we served no bytes); a
+**cross-origin** asset without `Timing-Allow-Origin` reports 0 (correct — somebody else's CDN served
+it); and it counts the **compressed bytes on the wire**, which is what we are billed for.
+
+🔴 **IT IS A FLOOR, NOT A BILL — and nothing charges for it. That is a decision, not an unfinished
+edge.** Two gaps, both under-counting: (1) a caller that runs no JavaScript — a bot, a scraper,
+`curl` — costs real egress and is invisible; (2) an owner who strips the beacon from their own HTML
+reports nothing. Under-counting can never over-charge, which is the only direction the billing law
+permits being wrong in — but taking money against a floor would bill honest owners for what we could
+measure while the ones costing us most paid least. So the sweep REPORTS it to the admin and charges
+₹0, exactly as slice 2 did before slice 2.1. **Closing the gaps needs a meter in the SERVING path**
+(the Cloudflare Worker, or a per-host log-based metric on the Hosting request logs) — recorded here as
+an **open root cause**, not papered over with an estimate.
+
+**What shipped:** the second beacon report + `parseBytesReport`; `bytes` on the shard document and in
+`summarize`; `siteAnalyticsStore.recordBytes` and `bytesForDay`; `frontendUsage.ts`
+(`sumFrontendBytes` / `judgeFrontendUsage`, pure); a second pass in the hosting sweep
+(`reportFrontendTraffic`) that runs AFTER every charge is settled and adds notes only — it touches no
+charging arithmetic, and a failure in it costs a log line, not a rupee.
+
+Decisions worth recording:
+
+- **An absurd byte figure is DROPPED, not clamped.** The number comes from a stranger's browser, so it
+  can be anything. Clamping keeps a fabrication and merely makes it smaller; dropping keeps only what
+  is plausible, and under-counting is the safe side.
+- **The two beacon shapes are DISJOINT and a test pins it.** `parseBytesReport` refuses any payload
+  carrying a path and `parseHit` requires one, so one report can never be counted as both a page view
+  and an egress total.
+- **`recordBytes` touches neither `views` nor `uniq`.** The bytes report comes from a visitor whose hit
+  was already counted; adding to either would double-count a real person, and dropping the report
+  instead would lose the only egress figure there is.
+- **An unreadable app is UNMEASURED, never a zero** — a zero looks exactly like an app nobody visited.
+  `bytesForDay` returns `null` on a failed read, and a day whose shard documents simply do not exist IS
+  a real zero, because the ids are deterministic.
+- **A FREE account has a real allowance (`FREE_FRONTEND_GB`), not a zero one**, and no hypothetical
+  charge at all — it agreed to no overage terms, so there is nothing it COULD be charged.
+- **The allowance is the owner's, spent once across all their sites** — the same rule the backend meter
+  and the agreement already state.
+
+🔒 **The privacy-policy guard did its job.** The beacon now collects a fourth thing, and
+`tests/privacyPolicyTruth.test.ts` imports `POLICY_PHRASES` from the code — so the change failed CI
+until §12 disclosed it. The policy now names "**how many bytes** the page and its files transferred (a
+number the browser itself measures … it describes the page, not the person)".
+
+**And the owner can see it**, because the plan agreement promises "you can see your usage in the app at
+any time, so this is never a surprise" — a promise with no screen behind it is not a promise. The
+Publish sheet's analytics tile now shows the period's traffic beside the visitor counts.
+
+⚠️ **Stacked on PR #2905** (the ₹299/₹599 catalogue), because the frontend/backend allowance split it
+compares against does not exist on `main` yet. 27 tests.

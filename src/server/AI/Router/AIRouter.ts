@@ -1,7 +1,32 @@
+
 import { AIProvider, AIProviderResponse, ProviderTelemetry } from './ProviderTypes';
 import { providerCooldownStore } from '../../lib/ProviderCooldownStore';
 import { getBreaker, allBreakerNames } from './CircuitBreaker';
 import { tracer } from '../../observability/Tracer';
+import { shouldRaceStreams } from './streamRacePolicy';
+
+/**
+ * Which rung actually served a streamed turn.
+ *
+ * 🔴 `routeStream` used to return `Promise<void>` — it reported NOTHING. So `ai_usage_logs`, which the
+ * admin dashboard is built on, was written only on the NON-streaming branch of the chat route, and
+ * chat streams. The provider, the model and the outcome of real chat traffic were therefore invisible:
+ * there was no way to see which rung served, whether a paid one was firing, or whether removing the
+ * last-resort rungs had started costing users an answer. Found the same day as two other bugs of this
+ * exact shape (the model pin and Vertex's hardcoded stream model) — the streaming path in this repo
+ * has a habit of being forgotten.
+ */
+export interface StreamOutcome {
+  ok: boolean;
+  /** The provider that actually delivered, when one did. */
+  provider?: string;
+  /** The model that rung pins, when it pins one (see `slot()`). */
+  model?: string;
+  latencyMs?: number;
+  /** Did this turn pay for a second model to save latency? */
+  raced?: boolean;
+  reason?: 'aborted' | 'no-provider' | 'all-failed';
+}
 
 // P1.3 — per-provider state is now backed by a real CircuitBreaker (CLOSED / OPEN /
 // HALF_OPEN) instead of a flat cooldown map. The three router chokepoints below
@@ -93,6 +118,8 @@ export class AIRouter {
    * health signal that SHOULD back every universe off, whereas concurrency is local capacity.
    */
   private readonly universe: string;
+
+
 
   constructor(universe: string = 'default') {
     this.universe = universe;
@@ -217,13 +244,48 @@ export class AIRouter {
     return JSON.parse(response.content);
   }
 
+  /**
+   * Walk the ladder in order, paying for a rung only when the one before it did not deliver.
+   *
+   * This is what the FREE universe does on every streamed turn, and what ANY universe does when only
+   * one provider is available. A rung that throws is cooled down and the next is tried; a rung that
+   * delivers ends the walk. Nothing runs concurrently, so nothing is billed speculatively.
+   */
+  private async streamSequential(
+    providers: AIProvider[],
+    prompt: string,
+    systemPrompt: string | undefined,
+    onChunk: (text: string) => void,
+    signal?: AbortSignal,
+  ): Promise<StreamOutcome> {
+    for (const p of providers) {
+      if (signal?.aborted) return { ok: false, reason: 'aborted' };
+      if (!p.executeStream) continue;
+      if (!this.acquire(p.name)) continue;
+      const t = Date.now();
+      try {
+        await p.executeStream(prompt, systemPrompt, onChunk);
+        recordProviderLatency(p.name, Date.now() - t, false);
+        return { ok: true, provider: p.name, model: p.pinnedModel, latencyMs: Date.now() - t, raced: false };
+      } catch (err: any) {
+        setCooldown(p.name, cooldownSeconds(err));
+        recordProviderLatency(p.name, 0, true);
+        console.warn(`[STREAM] ${p.name} failed: ${String(err?.message).slice(0, 60)} — next rung`);
+      } finally { this.release(p.name); }
+    }
+    // Every rung failed. An HONEST refusal, never a silent escalation to something dearer — the same
+    // posture `buildProfessionalFreeFallback` states for the free build path.
+    if (!signal?.aborted) onChunk('AI service temporarily busy. Please try again. 🙏');
+    return { ok: false, reason: 'all-failed' };
+  }
+
   async routeStream(
     prompt: string,
     systemPrompt: string | undefined,
     onChunk: (text: string) => void,
     signal?: AbortSignal,
-  ): Promise<void> {
-    if (signal?.aborted) return;
+  ): Promise<StreamOutcome> {
+    if (signal?.aborted) return { ok: false, reason: 'aborted' };
 
     // Get available providers (skip cooldowns on first pass)
     const available = this.providers.filter(p => !isOnCooldown(p.name) && p.executeStream);
@@ -231,28 +293,22 @@ export class AIRouter {
 
     if (allProviders.length === 0) {
       if (!signal?.aborted) onChunk('AI service temporarily unavailable. 🙏');
-      return;
+      return { ok: false, reason: 'no-provider' };
     }
 
-    // ── Race top 2 providers: first chunk sent commits that provider ─────────
     const [p1, p2, ...rest] = allProviders;
 
-    if (!p2) {
-      // Only one available — use it directly
-      if (!this.acquire(p1.name)) { onChunk('AI service at capacity. Try again.'); return; }
-      const t = Date.now();
-      try {
-        await p1.executeStream!(prompt, systemPrompt, onChunk);
-        recordProviderLatency(p1.name, Date.now() - t, false);
-      } catch (err: any) {
-        setCooldown(p1.name, cooldownSeconds(err));
-        recordProviderLatency(p1.name, 0, true);
-        if (!signal?.aborted) onChunk('AI service temporarily busy. Please try again. 🙏');
-      } finally { this.release(p1.name); }
-      return;
+    // 🔴 A RACE COSTS TWO MODELS AND BUYS ONE SECOND. See `streamRacePolicy.ts`: starting the top two
+    // providers concurrently bills BOTH — the loser's answer is discarded, its invoice is not. On the
+    // FREE universe that meant every single turn also paid for the second rung (which, until the money
+    // audit of 2026-09-12, was `gemini-2.5-pro` at $10/MTok). Paid universes still race; free walks the
+    // ladder, paying for a second model only when the first genuinely failed.
+    if (!p2 || !shouldRaceStreams(this.universe)) {
+      return await this.streamSequential(allProviders, prompt, systemPrompt, onChunk, signal);
     }
 
     // Race p1 and p2
+    const raceStartedAt = Date.now();
     let committed: string | null = null;
     let commitResolve!: () => void;
     const commitPromise = new Promise<void>(res => { commitResolve = res; });
@@ -289,30 +345,17 @@ export class AIRouter {
     await Promise.race([commitPromise, commitTimeout]);
 
     if (!committed) {
-      // Neither committed in time — try sequential fallbacks
+      // Neither committed in time — walk the REST of the ladder, one rung at a time. Same walker the
+      // free universe uses, so "what happens when a rung fails" has one implementation, not two.
       console.warn('[RACE_STREAM] No commit in 12s — trying sequential fallbacks');
-      for (const p of rest) {
-        if (signal?.aborted || !p.executeStream) continue;
-        if (!this.acquire(p.name)) continue;
-        const t = Date.now();
-        try {
-          await p.executeStream(prompt, systemPrompt, onChunk);
-          recordProviderLatency(p.name, Date.now() - t, false);
-          this.release(p.name);
-          return;
-        } catch (err: any) {
-          setCooldown(p.name, cooldownSeconds(err));
-          recordProviderLatency(p.name, 0, true);
-          this.release(p.name);
-        }
-      }
-      if (!signal?.aborted) onChunk('AI service temporarily busy. Please try again in 1-2 minutes. 🙏');
-      return;
+      return await this.streamSequential(rest, prompt, systemPrompt, onChunk, signal);
     }
 
     // Wait for the committed provider to finish its stream
     if (committed === p1.name) await s1.catch(() => {});
     else await s2.catch(() => {});
+    const winner = committed === p1.name ? p1 : p2;
+    return { ok: true, provider: winner.name, model: winner.pinnedModel, latencyMs: Date.now() - raceStartedAt, raced: true };
   }
 
   private async execute(prompt: string, schema?: any, systemPrompt?: string, images?: string[], modelOverride?: string): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {

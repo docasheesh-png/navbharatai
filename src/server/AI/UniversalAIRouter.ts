@@ -1,6 +1,7 @@
 import { AIRouterManager } from './AIRouterManager';
 import type { TraceContext } from '../../../server';
 import type { ProviderUsage } from './Router/ProviderTypes';
+import type { StreamOutcome } from './Router/AIRouter';
 
 /**
  * What one routed call really was.
@@ -101,11 +102,11 @@ export class UniversalAIRouter {
     systemPrompt: string | undefined,
     onChunk: (text: string) => void,
     signal?: AbortSignal,
-  ): Promise<void> {
+  ): Promise<StreamOutcome> {
     const ns = this.namespaceFor(tier);
     const router = AIRouterManager.getRouter(ns);
     const fullPrompt = this.buildPrompt(message, history);
-    await router.routeStream(fullPrompt, systemPrompt, onChunk, signal);
+    return await router.routeStream(fullPrompt, systemPrompt, onChunk, signal);
   }
 
   // Map a request tier to its ISOLATED router universe. Every professional AI —

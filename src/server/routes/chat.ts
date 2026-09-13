@@ -294,7 +294,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         if (triage.verdict === 'block') {
           // 200 with a normal reply shape, not an error: this renders in the chat bubble the user is
           // already looking at, which is where an answer to their message belongs.
-          return res.json({ reply: blockMessage() });
+          return res.json({ reply: blockMessage(triage.contentClass, message) });
         }
       }
     } catch (e) {

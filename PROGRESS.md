@@ -51576,3 +51576,86 @@ removed a `MessageSquare` import that was in use at lines 274 and 326, breaking 
 - **Why GLM delivered 0 of 54 turns** — still unanswerable without a build that settles.
 - **The health-check's "no recognisable error" restart** — it prints "restarting once" but can print twice,
   and `MAX_RECOVERY = 2` means two blind restarts. Cosmetic-but-dishonest wording; not fixed here.
+
+---
+
+## 2026-09-13 — AUTOPSY `03997004`: the platform spent 171 seconds trying to build a porn site, then asked the user to pay for it
+
+**The report.** Prompt: *"Create a porn websites where anyone can upload watch porns can live stream
+annonymous chat all for completely freeee."* 2 min 51 s · `ok: false` · 8 model calls · **119,851 input
+tokens, all ours** (free tier) · 0 files · release gate RED.
+
+**The models were right every single time.** All eight calls refused, in clear terms. What the platform
+did *around* those refusals is the report:
+
+| | |
+|---|---|
+| +0 s | `REQUIREMENT_GAPS` analysed it as **domain=social** and suggested it needed *"moderation / reporting"* — the engine helpfully spec'ing a porn site |
+| +0 s | `APP_SCOPE`: **LARGE** — *"needs audio / video calling"*. It sized it. |
+| +27 s | mega-app **roadmap planner** → refused |
+| +89 s | **file-manifest planner** → refused |
+| +9 s | **one-shot builder** → refused |
+| ×3 | **full agentic builder** → refused, refused, refused |
+| +155 s | `EMPTY_BUILD_RETRY` — *"first attempt produced no files — retried the whole build on a **stronger model**"* |
+| ×2 | → refused, refused |
+| +171 s | **"Your app needs our strongest engine to finish cleanly. Add credits and I will complete it on the best engine."** |
+
+### Root cause 1 — it ran BY DESIGN, and that is the finding
+
+`triagePrompt` **did** detect the prompt. It returned `verdict: 'flag'`, with the rule's own description
+reading *"contains adult sexual content. **Lawful, and allowed** for a creator who has turned on the 18+
+setting."* The comment in `promptSafety.ts` said so explicitly: *"Lawful adult content asked for in a
+message is not a refusal — the +18 setting governs where it may go, and that decision is made at
+PUBLISH, not here."* Written 2026-09-12, one day earlier.
+
+So the request was recognised, judged lawful, and passed to the builders. **The only thing that stopped
+a porn site being built was eight models choosing not to.** That is the model's virtue, not the
+platform's design — and a stronger model, which this build went looking for, might not have.
+
+The admin reversed the policy: *"पोर्नोग्राफी बैन है"*. `ADULT_CONTENT` now returns **`block`** at the
+prompt, before a sandbox is warm. Because `triagePrompt` already served both the build route and the
+chat route, the ban covers both by construction.
+
+**The subject regex also missed every brand and every Hinglish spelling** — verified, not assumed:
+`"onlyfans clone with premium subscribe"` was **allowed outright**. Widened to cover onlyfans, hentai,
+camgirl, rule34, nudify, blue film, chudai, sexy video and the rest.
+
+### Root cause 2 — a refusal was read as a capability failure
+
+`shouldRetryEmptyBuild` exists because a cheap model sometimes chatters instead of building; the cure is
+a stronger model. **A refusal writes zero files too**, so the platform's answer to a moral refusal was to
+escalate until something complied. Now `modelRefused` (from `looksLikeRefusal`, matched on the refusal's
+opening shape rather than its topic, so it holds for any policy refusal) makes a refusal final: never
+retried, never escalated.
+
+### Root cause 3 — 🔴 the worst line in the report, and no model wrote it
+
+The free-tier upsell fires on "zero files produced", which a refusal also satisfies. So NavBharatAI
+**asked a person who wanted a pornography site for money, and promised to build it on a better engine.**
+For an Indian consumer app that is a legal, reputational and Play-policy exposure, produced entirely by
+our own plumbing. The upsell can no longer follow a refusal.
+
+### ⚠️ Why the detection is precision-first
+
+The admin's message is blunt — it tells the person NavBharatAI does not want them. Correct for someone
+who asked for this; a disaster for a doctor building a sexual-health app, an NGO building a
+harassment-reporting tool, or a school building a safety curriculum. The rule now carries an `exempt`
+stand-down naming those contexts, and **twelve** such prompts are pinned as ALLOWED. Missing a cleverly
+worded request costs one model refusal — which demonstrably works; insulting a doctor loses a user
+forever.
+
+### What I did NOT do
+
+I started writing a new `contentPolicy.ts`, then found `promptSafety.ts` already existed and deleted it
+unwritten. **A second detector would have been exactly the duplication that cost this repo a build two
+days running** (the `withTimeout` copies, the two intent ladders). The fix went into the system that was
+already there.
+
+### Open, recorded not patched
+
+- **`REQUIREMENT_GAPS` and `APP_SCOPE` ran before any safety verdict** and cheerfully analysed the
+  request (domain=social, "needs audio/video calling", "needs moderation"). Harmless now that the prompt
+  is refused earlier, but the ordering is wrong in principle: nothing should characterise a request the
+  platform is about to refuse.
+- **The 89-second manifest-planner call** on a prompt every model had already refused once — the
+  fast-lane planner does not know what the roadmap planner just learned.

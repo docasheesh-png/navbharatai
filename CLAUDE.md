@@ -135,6 +135,32 @@ rule says *how* to fix; this fifth rule says *every real report is the trigger a
 of what to fix*. Both are non-negotiable and reinforce the one absolute rule (never break the
 app). Run all four mandatory steps, in order, every time:
 
+### 🚫 PORNOGRAPHY IS BANNED — and NavBharatAI enforces it, not the model (admin-mandated 2026-09-13)
+
+Admin's ruling, and their words are the user-facing message, kept verbatim:
+> **"पोर्नोग्राफी बैन है!"**
+> *"यह भारतीय ऐप है, और सभ्य लोगों के लिए है। आपके जैसे लोगों की नवभारत AI को कोई ज़रूरत नहीं है। आप लॉगआउट कर सकते हो। थैंक यू!"*
+
+**This REVERSES the rule written on 2026-09-12**, which classified adult content as *"NOT illegal —
+lawful, governed by the creator's own +18 setting at PUBLISH"* and returned `flag`, letting the build
+run. Report `03997004` is what that looked like: a request for a porn site with uploads, streaming and
+anonymous chat consumed **171 seconds and eight model calls**, the platform read the refusals as a
+capability failure and **retried on a stronger model**, and it closed by telling the user *"add credits
+and I will complete it on the best engine"*. **We asked a person who wanted a porn site for money and
+promised to build it.** Every model refused — the model's virtue, never our design.
+
+- `ILLEGAL_RULES.ADULT_CONTENT` → `triagePrompt` returns **`block`**, before a sandbox or a token.
+  One triage serves BOTH the build route and the chat route, so the ban covers both by construction.
+- **A refusal is a FINAL answer**: `shouldRetryEmptyBuild` never escalates one, and the free-tier
+  upsell can never follow one (`looksLikeRefusal`). "Zero files" is not always a capability failure.
+- ⚠️ **The message is blunt on purpose, so detection must stay PRECISION-FIRST.** The rule carries an
+  `exempt` stand-down: a sexual-health clinic, a school safety curriculum, a harassment or trafficking
+  reporting tool, a parental filter, a moderation dashboard and a legal-compliance page all contain
+  both halves of the pair and must never see this message. **Missing a cleverly-worded request costs
+  one model refusal, which already works; insulting a doctor loses a user forever.**
+- The `adult` CONTENT CLASS is unchanged for the publish scanner (tagging still works); only the
+  PROMPT verdict changed.
+
 ### 🙋 READ THE MOOD FIRST — a question gets an answer, not an app (admin-mandated 2026-09-13)
 
 > *"Simple question ka just simple answer dena chahiye — app banane ki yahan jarurat hi kahan hai.

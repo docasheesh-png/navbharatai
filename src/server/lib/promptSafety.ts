@@ -66,16 +66,33 @@ export function triagePrompt(text: string | null | undefined): PromptTriage {
 
   for (const rule of ILLEGAL_RULES) {
     if (!rule.subject.test(body)) continue;
+    // A rule may name a context that makes its subject innocent. See `exempt` in illegalContentRules:
+    // a sexual-health clinic app and a harassment-reporting tool both contain the pair, and both are
+    // apps NavBharatAI should want.
+    if (rule.exempt?.test(body)) continue;
 
     // The prompt carries the offending thing itself — the same pairing the publish scanner blocks on.
     if (rule.context.test(body)) {
       if (rule.contentClass === 'illegal') {
         return { verdict: 'block', ruleId: rule.id, contentClass: 'illegal', description: rule.description };
       }
-      // Lawful adult content asked for in a message is not a refusal — the +18 setting governs where
-      // it may go, and that decision is made at PUBLISH, not here.
-      flagged ??= { verdict: 'flag', ruleId: rule.id, contentClass: 'adult', description: rule.description };
-      continue;
+      /**
+       * 🔴 PORNOGRAPHY IS BANNED — admin decision 2026-09-13, REVERSING the line that stood here.
+       *
+       * It read: *"Lawful adult content asked for in a message is not a refusal — the +18 setting
+       * governs where it may go, and that decision is made at PUBLISH, not here."* That is why build
+       * 03997004 ran: a request for a porn site with uploads, streaming and anonymous chat was
+       * FLAGGED and allowed through, and the platform then spent 171 seconds and eight model calls
+       * asking models to build it. All eight refused — the model's virtue, never the platform's
+       * design. A stronger model that complied would have shipped it.
+       *
+       * The admin's ruling is that this is not a publish-time question at all: *"पोर्नोग्राफी बैन है"*.
+       * So it refuses HERE, before a sandbox is warm and before a token is spent — and because
+       * `triagePrompt` serves the build route AND the chat route, the ban covers both by construction.
+       * The flag is still RECORDED (the caller writes it either way), so the admin keeps the visibility
+       * the old behaviour gave.
+       */
+      return { verdict: 'block', ruleId: rule.id, contentClass: 'adult', description: rule.description };
     }
 
     /**
@@ -124,9 +141,59 @@ export function safetyExcerpt(text: string | null | undefined): string {
   }
 }
 
-/** What the blocked user reads. Names no rule and no pattern — that is a tuning guide for the next try. */
-export function blockMessage(): string {
+/**
+ * Devanagari, or the romanised Hindi a real NavBharatAI user types. Decides which language the
+ * refusal is written in — the product's own rule is to mirror the user, never to default. Pure.
+ */
+export function prefersHindi(text: string | null | undefined): boolean {
+  const t = String(text ?? '');
+  if (/[\u0900-\u097F]/.test(t)) return true;
+  return /\b(?:banao|banado|bana|chahiye|karo|kardo|mujhe|hume|humein|aap|tum|kaise|kyun|kyu|nahi|hai|wala|wali|sakte|sakta)\b/i.test(t);
+}
+
+/**
+ * What the blocked user reads. Names no rule and no pattern — that is a tuning guide for the next try.
+ *
+ * 🔴 THE PORNOGRAPHY REFUSAL IS THE ADMIN'S OWN WORDS, KEPT VERBATIM (2026-09-13). It is blunt on
+ * purpose: it tells the person that NavBharatAI is an Indian product for decent people and does not
+ * want them. That is a statement of who the product is for, and softening it would be editing the
+ * owner's decision rather than implementing it. It is also exactly why the rule that triggers it
+ * carries a stand-down guard (`exempt`) — a message this direct must never reach a doctor building a
+ * sexual-health app.
+ */
+export function blockMessage(contentClass: PublishContentClass = 'illegal', prompt?: string): string {
+  if (contentClass === 'adult') {
+    return prefersHindi(prompt)
+      ? 'पोर्नोग्राफी बैन है!\n\n'
+        + 'यह भारतीय ऐप है, और सभ्य लोगों के लिए है। आपके जैसे लोगों की नवभारत AI को कोई ज़रूरत नहीं है। '
+        + 'आप लॉगआउट कर सकते हो। थैंक यू!'
+      : 'Pornography is banned here.\n\n'
+        + 'This is an Indian app, and it is for decent people. NavBharatAI has no need of users like you. '
+        + 'You may log out. Thank you!';
+  }
   return 'NavBharatAI cannot help with this request. It falls under the Acceptable Use rules in our '
     + 'Terms of Service. If you believe this is a mistake, our Grievance Redressal page has the address '
     + 'to write to and the time we must answer within.';
+}
+
+/**
+ * Did a model REFUSE, rather than fail to build?
+ *
+ * 🔴 THE DISTINCTION THE PLATFORM DID NOT MAKE, and the second root cause in report 03997004. "Zero
+ * files produced" is the signal for "the cheap model chattered instead of building", and the cure is
+ * to retry on a STRONGER model. A refusal produces zero files too — so the platform's answer to a
+ * moral refusal was to escalate until something complied, and then to tell the user *"add credits and
+ * I will complete it on the best engine"*. We asked a person who wanted a pornography site for money,
+ * and promised to build it. No model said that; our own plumbing did.
+ *
+ * A refusal is a FINAL answer: no retry, no stronger model, and never an upsell. Matched on the
+ * refusal's opening shape, which every major model shares, so it holds for any policy refusal rather
+ * than only this one. Pure.
+ */
+export function looksLikeRefusal(text: string | null | undefined): boolean {
+  const head = String(text ?? '').toLowerCase().trim().slice(0, 400);
+  if (!head) return false;
+  return /\b(?:i (?:cannot|can't|can not|won't|will not)|i'm not able to|i am not able to)\b[^.]{0,80}\b(?:create|build|make|generate|help|assist|produce|write|provide)\b/.test(head)
+    || /\bmy refusal stands\b/.test(head)
+    || /\bi (?:cannot|can't|won't) help with\b/.test(head);
 }

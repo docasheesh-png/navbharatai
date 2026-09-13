@@ -414,6 +414,7 @@ import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
 import { classifyIntentSmart, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild } from '../AgentV3/IntentClassifier';
+import { looksLikeRefusal } from '../lib/promptSafety';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
 import { realismIntent } from '../lib/realismIntent';
@@ -1032,8 +1033,22 @@ export function shouldRetryEmptyBuild(opts: {
    * "why is this failing", not for "build me a to-do app".
    */
   userAskedToBuildAnApp?: boolean;
+  /**
+   * Did the model REFUSE on policy grounds, rather than fail to build?
+   *
+   * 🔴 THE CASE THIS GUARD MISSED, AND IT IS THE WORST ONE (report 03997004, 2026-09-11). A user
+   * asked for a pornography site. Every model call refused — correctly — and a refusal writes no
+   * files, so this function said "empty build, retry on a STRONGER model". The platform read a moral
+   * refusal as a capability failure and went looking for a model that would comply, then closed by
+   * telling the user *"add credits and I will complete it on the best engine"*. We asked a person who
+   * wanted a porn site for money and promised to build it. No model said that; this line did.
+   *
+   * A refusal is a FINAL answer. Never retried, never escalated, never upsold.
+   */
+  modelRefused?: boolean;
 }): boolean {
   if (!opts.expectsArtifacts || opts.filesWritten > 0 || opts.aborted || !opts.withinCostCap) return false;
+  if (opts.modelRefused) return false;
   // An edit on a project that already exists may legitimately change nothing…
   // …UNLESS the user asked for an APP TO BE BUILT and only the workspace's existing contents turned
   // that request into an "edit" (build 5b4f9b63). "Build a to-do list app" that writes zero files has
@@ -8972,7 +8987,7 @@ async function noteBuildOutcome(
           uid: flaggedUid, triage, surface: 'build', excerpt: safetyExcerpt(prompt), at: Date.now(),
         })).catch(() => { /* the decision stands either way — see recordSafetyFlag */ });
         if (triage.verdict === 'block') {
-          res.status(403).json({ error: blockMessage() });
+          res.status(403).json({ error: blockMessage(triage.contentClass, prompt) });
           return;
         }
       }
@@ -14395,6 +14410,9 @@ async function noteBuildOutcome(
           ts: Date.now(),
         });
       }
+      // A policy refusal is not a capability failure — see `modelRefused`. Read from the answer the
+      // model actually gave, so it holds for any refusal rather than only the pornography one.
+      const firstAttemptRefused = looksLikeRefusal(result.summary);
       if (shouldRetryEmptyBuild({
         expectsArtifacts,
         filesWritten: writtenFiles.size,
@@ -14403,6 +14421,7 @@ async function noteBuildOutcome(
         aborted: abort.signal.aborted,
         withinCostCap: costAfterFirstAttempt <= capUsd,
         userAskedToBuildAnApp,
+        modelRefused: firstAttemptRefused,
       })) {
         buildDiag.record({
           phase: 'build', severity: 'warning', code: 'EMPTY_BUILD_RETRY',
@@ -18016,7 +18035,17 @@ async function noteBuildOutcome(
         // FREE-TIER: a cheap-only free build that produced nothing is NOT rescued on Claude (that would
         // spend the very budget free-tier protects). Instead, honestly invite the user to add credits
         // and finish on the strongest engine — converting the user to paid without shipping a broken app.
-        if (freeTierBuildActive) {
+        // 🔴 NEVER SELL A REFUSAL (report 03997004, 2026-09-11). The user asked for a pornography
+        // site; the models refused eight times; and this line then told them *"Your app needs our
+        // strongest engine to finish cleanly. Add credits and I will complete it on the best engine."*
+        // Read plainly, NavBharatAI asked a person who wanted a porn site for money and promised to
+        // build it on a better one. No model said that — our own plumbing did, because "zero files"
+        // was read as an engine limit when it was a moral answer.
+        //
+        // An upsell may only follow a build the engine genuinely could not FINISH. The prompt gate
+        // above now refuses this class before a token is spent, so this is the second line of defence
+        // for a refusal that arrives some other way.
+        if (freeTierBuildActive && !looksLikeRefusal(result.summary)) {
           events.emit({ type: 'narration', agent: 'architect', text: freeTierUpsellMessage(), ts: Date.now() });
         }
       }

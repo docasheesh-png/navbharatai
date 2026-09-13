@@ -1719,6 +1719,14 @@ the flag entries above promise.
   controls" list above. It is live: a finished build fails on real ESLint **errors** (warnings/formatting
   never block). Watch the first few real builds; if a genuinely-working app gets blocked, set it `off`.
 
+## ⛔ CLOSED: the inline button-description sweep (admin, 2026-09-12). DO NOT REOPEN.
+
+The admin re-checked the app and closed it: *"is kaam ko band kar do, agar bhi koi agent is par kaam na
+kare."* The two descriptions they had marked were already removed (#2828); the rest stay. **This entry
+exists only because those strings are still in the code, so the pattern is re-discoverable from any
+screen — if a future session thinks ONE description is wrong, it raises that one. It does not restart
+the sweep.**
+
 ## Play Store release — build a signed `.aab` on every roadmap/checkpoint completion (mandatory, admin-mandated 2026-07-10)
 
 **NavBharatAI is now LIVE on the Google Play Store** (Android app package `com.navbharat.ai`,

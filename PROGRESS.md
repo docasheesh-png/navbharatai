@@ -50587,3 +50587,31 @@ needing a server, which is the one moment those words belong on the screen.
 `AppKnowledgeBase.ts` updated in the same commit (the navigation changed, so every AI that answers
 "where is X?" had to change with it), and ROADMAP 2.4 marked done — with the caveat stated rather than
 implied: the code is complete and `NAVBHARAT_CLOUD_PUBLIC` is what still keeps it admin-only.
+### 2026-09-12 — the inline-description sweep is CLOSED by the admin
+
+The admin re-checked the app and found the remaining inline descriptions acceptable: *"isko mat banao…
+is kaam ko band kar do, agar bhi koi agent is par kaam na kare."* Work stopped immediately; the
+`InfoDot` control that had just been written for it was discarded unbuilt, and nothing was committed.
+
+The two descriptions the admin had specifically marked were removed earlier the same day and are
+already merged — that half is shipped and is not affected by this closure.
+
+Recorded as a ⛔ entry in `CLAUDE.md` because the 67 candidate strings are still in the code: the next
+session to read one of those screens will find the same pattern and propose the same sweep in good
+faith. A closed decision that is not written down is a decision that gets re-litigated.
+
+### 2026-09-12 (correction) — the closure note was too long, and for the wrong reason
+
+The admin's reaction to the ⛔ entry was fair: *"yeh likhne se accha tha sab detele kar dete… sabut hi
+mita dete."* Half of that is right and half would backfire, and both halves are worth recording.
+
+**Right:** the entry ran 25 lines and carried the whole four-bucket analysis. I kept that because the
+analysis was work I had just done — not because any future session needs it. `CLAUDE.md` is read by
+every session and a CLOSED non-issue does not earn that much of it. Cut to three lines; the analysis
+lives here in the append-only log instead, where it costs nobody anything.
+
+**Backfires:** deleting the record entirely. The sweep was never found in a document — the admin found
+it by LOOKING AT A SCREEN, and those 67 strings are still in the app. Erasing the note does not erase
+the source; it erases the fact that the question has already been asked and answered. The next session
+would propose it again in good faith and the admin would have to refuse it a second time, with nothing
+to show it had been settled. A closed decision with no record is a decision that gets re-litigated.

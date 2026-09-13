@@ -51719,6 +51719,55 @@ removed a `MessageSquare` import that was in use at lines 274 and 326, breaking 
 - **The health-check's "no recognisable error" restart** — it prints "restarting once" but can print twice,
   and `MAX_RECOVERY = 2` means two blind restarts. Cosmetic-but-dishonest wording; not fixed here.
 
+## 2026-09-13 — CLAUDE.md's founding premise was false: sessions run CONCURRENTLY, and the admin confirmed it is deliberate
+
+**The line, verbatim, that stood at the top of the Session Constitution since it was written:**
+*"more than one Claude account/session works on this project, **sequentially (never at the same
+time)**"*. Asked directly whether the other live sessions were intentional, the admin answered
+**"हाँ"**.
+
+**Why this was worth stopping for rather than editing quietly.** That sentence is not a description —
+it is the PREMISE the seven safeguards were written on. A session that believes it holds the repo
+alone reasons that `main` moves only between its own turns and that nothing else is being built right
+now. Both are false, and both lead straight to the duplicated work safeguard #6 exists to prevent.
+
+**It had already happened, to me, in this session.** I announced in-flight provider-call cancellation
+as my next task. PR #2889 already carried it, in its own words: *"the real fix threads the lane's
+remaining budget down into the provider chain… is the next thing to take."* I found it only because I
+listed the open PRs before starting — which nothing in the file told me to do, because under the old
+premise there was nothing to list. Five sessions were live within one hour (#2886–#2891, four
+sessions, all in the build engine).
+
+### What shipped
+
+The opening paragraph is CORRECTED IN PLACE with the old wording quoted, not erased — the same
+discipline the rest of this file uses for the idle-minutes and E2B-rate drifts, so the change of
+premise stays legible. A new section, **"Working alongside other live sessions"**, states the four
+things that actually change:
+
+1. **`git log` is not the state of the work — OPEN PRs are.** In-flight work exists in no tree you
+   can grep.
+2. **🔴 Another session's "open root cause" is a CLAIM on that work.** The new half of safeguard
+   #2's phase lock.
+3. **A merge conflict is expected, not a mistake** — `main` moves DURING a change now, so the fresh-
+   state check is no longer a startup ritual, and the gate must run on the MERGED state.
+4. **Do not "fix" another session's file mid-flight** — say so to the admin instead of racing them.
+
+Safeguards #2 and #6 carry pointers to it, so a session that reads only the numbered list still
+arrives at the rule.
+
+**What deliberately did NOT change:** everything else. The absolute rules, the verification gate and
+branch → PR → CI green → merge are what make concurrency survivable at all — concurrency is a reason
+to hold them tighter, never looser, and the new section says so in those words.
+
+### Also recorded: a real GitHub failure, and the escape hatch working
+
+GitHub never created a `pull_request` CI run for PR #2890 — the checks tab stayed empty for twenty
+minutes. This is the incident `ci.yml` already documents in its own header ("event-triggered runs
+silently stopped being created while workflow_dispatch kept working"), which is why that escape hatch
+exists. Dispatched manually on the branch; run 8653 on head `1ee3737c`, matching the PR's head.
+⚠️ A dispatched run is NOT attached to the PR's checks tab, so the SHA must be compared by hand
+before it counts as the merge gate — a green run on a different commit is not evidence.
 ---
 
 ## 2026-09-13 — Autopsy f04421ef, batch 2: the report's four remaining lies, and one of my own claims retracted

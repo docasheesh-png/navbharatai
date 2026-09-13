@@ -2,11 +2,19 @@
 
 This file is auto-loaded at the start of every Claude Code session in this
 repo. It exists because **more than one Claude account/session works on this
-project, sequentially (never at the same time)** — credits run out on one,
-work continues later from another account/session. These rules exist to stop
-that handoff from breaking the app or wasting work. They rarely change; the
-living, constantly-updated status (current phase, exact resume point, what's
-done) lives in `PROGRESS.md`, not here.
+project — and, since 2026-09-13, SEVERAL AT THE SAME TIME, deliberately.**
+These rules exist to stop that from breaking the app or wasting work. They
+rarely change; the living, constantly-updated status (current phase, exact
+resume point, what's done) lives in `PROGRESS.md`, not here.
+
+🔴 **CORRECTED 2026-09-13 — this paragraph said "sequentially (never at the
+same time)" and that is FALSE.** The admin confirmed, asked directly, that the
+concurrent sessions are intentional. The old wording was not a stale detail: it
+was the PREMISE the 7 safeguards were written on, so a session reading it would
+reason that `main` only moves BETWEEN its turns and that nothing else is being
+built right now. Both are wrong, and both produce exactly the duplicated work
+safeguard #6 exists to prevent. See **"Working alongside other live sessions"**
+below for what actually changes.
 
 ## THE AIM (admin-mandated, 2026-07-17)
 
@@ -295,6 +303,42 @@ An autopsy that ends at "fixed the reported bug" WITHOUT this forward-looking la
 AIM. The reactive five steps keep the app from breaking; this sixth, proactive step is how it becomes the
 best. Both layers — reactive autopsy AND proactive world-best suggestions — with every single report.
 
+## Working alongside other live sessions (admin-confirmed 2026-09-13)
+
+**Several Claude sessions run on this repo at the same time, on purpose.** On the day this was
+written, five were live within one hour — PRs #2886, #2887, #2888, #2889, #2890 and #2891, from four
+different sessions, all touching the build engine. That is the normal condition now, not an incident.
+
+**What it changes, concretely. Four things, and none of them is optional.**
+
+1. **`git log` is not the state of the work — OPEN PRs are.** A session's work in progress is
+   invisible in `main` until it merges, so a redundant-work check (safeguard #6) that reads only the
+   committed tree is answering a question nobody asked. **Before starting anything, list the open
+   PRs and read their titles and their "still open / open root cause" sections.** That takes one call
+   and is the only place another session's in-flight work exists.
+
+2. **🔴 ANOTHER SESSION'S "OPEN ROOT CAUSE" IS A CLAIM ON THAT WORK — treat it as taken.** This is
+   the new half of safeguard #2's phase lock, and it was learned the same day: I announced in-flight
+   provider-call cancellation as my next task, then found PR #2889 already carried it, in its own
+   words — *"the real fix threads the lane's remaining budget down into the provider chain… is the
+   next thing to take."* Building it would have been PR #1 and PR #4 a third time. If a PR names a
+   root cause as its next step, it owns it; pick something else or say so and ask.
+
+3. **A merge conflict is expected, not a mistake.** `main` moves DURING a change now, not only
+   before it. So safeguard #1's fresh-state check is no longer a once-at-startup ritual: re-fetch
+   before opening a PR and again before merging. When `main` has moved, merge it in and **re-run the
+   FULL gate on the merged state** — this is why safeguard #5 insists the gate runs last, on the
+   final state; with concurrent sessions a gate run before the merge proves nothing at all.
+
+4. **Do not "fix" another session's file while it is mid-flight.** Two sessions editing the same
+   region produce a conflict whoever is right. If their change is wrong, say so to the admin rather
+   than racing them to the file.
+
+⚠️ **What has NOT changed:** everything else in this file. The absolute rules, the verification gate
+and the branch → PR → CI green → merge cycle are what make concurrency survivable in the first place
+— a green CI on a merged state is the only thing standing between five parallel sessions and a
+broken `main`. Concurrency is a reason to hold those tighter, never looser.
+
 ## The 7 safeguards (mandatory, every session)
 
 1. **Fresh-state check before trusting any doc.** At the start of every
@@ -305,7 +349,10 @@ best. Both layers — reactive autopsy AND proactive world-best suggestions — 
    stale picture of `main`). Treat the actual git state as ground truth;
    treat the doc as a hint.
 
-2. **Phase-level lock + exact resume point.** Don't start, redo, or
+2. **Phase-level lock + exact resume point.** ⚠️ Since 2026-09-13 "another
+   session" usually means one running RIGHT NOW, not one that finished — so the
+   lock signal is an OPEN PR as much as a `PROGRESS.md` entry (see "Working
+   alongside other live sessions" above). Don't start, redo, or
    "improve" a phase another session is actively working on or has already
    completed — find the exact next un-done item and continue from there, not
    from a clean slate. A lock is only released when a phase is marked
@@ -371,6 +418,13 @@ best. Both layers — reactive autopsy AND proactive world-best suggestions — 
    new feature or fix, grep/search the current `main` to confirm it doesn't
    already exist. This is not optional housekeeping — it is what would have
    prevented PR #1 and PR #4 from being built at all.
+
+   ⚠️ **AND SEARCHING `main` IS NO LONGER ENOUGH (2026-09-13).** With sessions
+   running concurrently, the work most likely to be duplicated is the work that
+   has not merged yet — it is in an OPEN PR and therefore in no tree you can
+   grep. **List the open PRs first**, and read their "still open / open root
+   cause" sections: a root cause another PR names as its next step is taken. See
+   "Working alongside other live sessions" above.
 
    🔴 **"MY SEARCH FOUND NOTHING" IS NOT "IT DOES NOT EXIST." IT USUALLY MEANS
    I GUESSED THE WRONG WORD.** This is the single most expensive mistake in this

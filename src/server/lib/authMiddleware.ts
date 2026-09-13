@@ -132,10 +132,13 @@ export async function verifyFirebaseIdentityDiag(req: Request): Promise<Identity
 /**
  * The uid AND the moment the user actually signed in, read from the ID token.
  *
- * `auth_time` is stamped by the identity provider when the password / passkey / social login was
- * accepted, and it is INSIDE the signed token — so a client cannot turn a token from this morning into
- * proof of a sign-in a moment ago. That is what lets the secret vault's fallback ("confirm your account
- * password") be a real server-side check rather than a client claim; see `deviceUnlock.ts`.
+ * `auth_time` is stamped by the identity provider when the sign-in was accepted, and it is INSIDE the
+ * signed token — so a client cannot turn a token from this morning into proof of a sign-in a moment ago.
+ *
+ * ⚠️ ONE CALLER, ONE REASON. The secret vault's PIN is created against a code emailed to the account's
+ * own address. An account that signs in by MOBILE NUMBER ONLY has no address to email, and must not be
+ * stranded outside its own API keys — so for those accounts a genuinely fresh sign-in stands in for the
+ * code, and the sign-in they do is itself a mobile OTP. See `vaultPin.ts` (`isFreshSignIn`).
  *
  * Returns null for an unverifiable token, exactly like `verifyFirebaseToken`, so a caller can never
  * mistake "no proof" for "old proof".
@@ -275,6 +278,47 @@ export async function resolveVerifiedNameWith(
 export async function resolveVerifiedName(uid: string): Promise<string | null> {
   if (process.env.VITEST || !uid) return null;
   return resolveVerifiedNameWith(uid, getAdminAuth as unknown as () => Promise<UserLookupAuth | null>);
+}
+
+/**
+ * WHERE A VERIFICATION CODE CAN BE SENT for an already-verified uid.
+ *
+ * Returns BOTH channels because the vault's PIN screen has to tell the user which one will be used, and
+ * an account may have either or both. Best-effort: every failure degrades to "no contact", which the
+ * caller reports honestly rather than treating as an empty address.
+ */
+export interface ContactLookupAuth {
+  getUser(uid: string): Promise<{ email?: string | null; emailVerified?: boolean; phoneNumber?: string | null }>;
+}
+
+export interface AccountContact {
+  email: string | null;
+  emailVerified: boolean;
+  phone: string | null;
+}
+
+/** Testable CORE — the provider is injected, so every branch can be exercised without firebase-admin. */
+export async function resolveAccountContactWith(
+  uid: string,
+  getAuth: () => Promise<ContactLookupAuth | null>,
+): Promise<AccountContact> {
+  const none: AccountContact = { email: null, emailVerified: false, phone: null };
+  if (!uid) return none;
+  try {
+    const auth = await getAuth();
+    if (!auth) return none;
+    const user = await auth.getUser(uid);
+    const email = typeof user.email === 'string' && user.email.trim() ? user.email.trim() : null;
+    const phone = typeof user.phoneNumber === 'string' && user.phoneNumber.trim() ? user.phoneNumber.trim() : null;
+    return { email, emailVerified: user.emailVerified !== false, phone };
+  } catch {
+    return none;
+  }
+}
+
+export async function resolveAccountContact(uid: string): Promise<AccountContact> {
+  if (process.env.VITEST || !uid) return { email: null, emailVerified: false, phone: null };
+  return resolveAccountContactWith(uid, getAdminAuth as unknown as () => Promise<ContactLookupAuth | null>);
 }
 
 export function requireUserMatch(paramName = 'userId') {

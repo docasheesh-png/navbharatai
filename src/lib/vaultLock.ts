@@ -1,23 +1,27 @@
-// THE BROWSER HALF OF THE VAULT'S DEVICE LOCK (admin 2026-09-12).
+// THE BROWSER HALF OF THE VAULT'S PIN LOCK (admin 2026-09-13: *"bas PIN banao, mobile number/email otp
+// se PIN banao, PIN (4 digit pin se hi open ho) … waaki sab hata do, simple rahne do"*).
 //
 // What this file is NOT: a security check. Everything here can be bypassed by anyone who can edit the
-// page, which is why nothing here decides whether the vault opens. Its job is to collect a proof the
-// SERVER can verify — a signature from the device's secure hardware, or a genuinely fresh sign-in — and
-// to carry the resulting ticket on every call that reads or destroys a key. The decision lives in
-// `server/lib/deviceUnlock.ts`.
+// page, which is why nothing here decides whether the vault opens — and in particular, the PIN is never
+// compared in the browser. It is sent, the server answers right-or-wrong and nothing else, and on success
+// hands back a short-lived ticket that this module carries on every call that reads or destroys a key.
+// The decision lives in `server/lib/vaultPin.ts` and `server/lib/vaultTicket.ts`.
 //
-// WHY WebAuthn RATHER THAN A PLUGIN. The admin asked for "phone lock / face lock / pin". A biometric
-// plugin can show that prompt, but a plugin's answer is a boolean inside the app — trivially faked and
-// worthless to the server. A WebAuthn platform authenticator produces a signature over OUR challenge,
-// made by a private key the device releases only after the same face / fingerprint / PIN check. Same
-// prompt, real proof.
+// 🔴 WHAT WAS DELETED HERE, AND WHY IT IS NOT A DOWNGRADE. This file used to run a WebAuthn ceremony —
+// the phone's own face / fingerprint / PIN, which is genuinely stronger proof than four digits. It could
+// not be reached from inside the app at all: WebAuthn binds a credential to an ORIGIN and the Capacitor
+// shell's origin is a custom scheme. So the stronger lock was, on the platform most users hold, no lock
+// at all, and its fallback used a web popup the WebView blocks. A server-verified PIN with a real
+// lock-out works identically on the app, on the web and on a borrowed laptop — a slightly weaker secret
+// that actually exists beats a stronger one nobody can open.
 
 import { authHeaders } from './authedFetch';
 
 /** The header the server reads the unlock ticket from. Must match UNLOCK_TICKET_HEADER on the server. */
 export const UNLOCK_TICKET_HEADER = 'x-vault-unlock';
 
-export type UnlockMethod = 'device-lock' | 'account-reauth';
+/** How the vault was opened. One value — the ticket exists so this can change without the callers doing. */
+export type UnlockMethod = 'pin';
 
 export interface UnlockState {
   ticket: string;
@@ -26,179 +30,95 @@ export interface UnlockState {
   expiresAt: number;
 }
 
-export interface LockStatus {
-  challenge: string;
-  credentialIds: string[];
-  hasDeviceLock: boolean;
+/** Where a verification code can go for this account. `none` is honest, not an error. */
+export type OtpChannel = 'email' | 'fresh-sign-in' | 'none';
+
+export interface PinStatus {
+  hasPin: boolean;
+  locked: boolean;
+  lockedForMs: number;
+  attemptsLeft: number;
+  maxAttempts: number;
+  channel: OtpChannel;
+  /** Masked destination, e.g. `aa•••@gmail.com` — enough to recognise, not enough to disclose. */
+  destination: string;
+  resendInMs: number;
+  codePending: boolean;
 }
 
-/**
- * Can this browser offer a device lock at all?
- *
- * Checked rather than assumed, because the answer decides which door the user is shown FIRST. A desktop
- * with no Hello, an older Android WebView, or a browser with WebAuthn disabled all land here — and for
- * them the account-password path is not a downgrade, it is the only honest option. Treating it as an
- * error would lock someone out of their own keys, which is a worse failure than a weaker prompt.
- */
-export async function deviceLockAvailable(): Promise<boolean> {
-  try {
-    const w = window as unknown as {
-      PublicKeyCredential?: { isUserVerifyingPlatformAuthenticatorAvailable?: () => Promise<boolean> };
-      isSecureContext?: boolean;
-    };
-    if (!w.isSecureContext) return false; // WebAuthn needs https; http would fail mid-ceremony instead
-    if (!navigator.credentials || !w.PublicKeyCredential?.isUserVerifyingPlatformAuthenticatorAvailable) return false;
-    return await w.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-  } catch {
-    return false;
-  }
-}
+export type VaultError = Error & {
+  status?: number;
+  /** The account has no email, so the code path is a fresh sign-in instead. */
+  needsFreshSignIn?: boolean;
+  /** There is no PIN yet — the screen must offer setup rather than an unlock field. */
+  needsSetup?: boolean;
+  /** The ticket lapsed mid-action: the vault has re-locked, and the screen should say so by re-locking. */
+  needsUnlock?: boolean;
+  /** Milliseconds of lock-out remaining, when the server refused for that reason. */
+  lockedForMs?: number;
+  attemptsLeft?: number;
+};
 
-// ── byte/base64url plumbing (the browser APIs speak ArrayBuffer, the wire speaks base64url) ─────────
-
-export function toBase64url(buf: ArrayBuffer | Uint8Array): string {
-  const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
-  let binary = '';
-  for (const b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-export function fromBase64url(value: string): Uint8Array {
-  const padded = value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (value.length % 4)) % 4);
-  const binary = atob(padded);
-  const out = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
-  return out;
-}
-
-async function post<T>(url: string, body: unknown, fallback: string): Promise<T> {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
-    body: JSON.stringify(body ?? {}),
-  });
+async function call<T>(url: string, init: RequestInit, fallback: string): Promise<T> {
+  const res = await fetch(url, { ...init, headers: { ...(init.headers ?? {}), ...(await authHeaders()) } });
   if (!res.ok) {
     let message = fallback;
-    let needsReauth = false;
+    let extra: Record<string, unknown> = {};
     try {
       const parsed = await res.json();
       if (parsed?.error) message = String(parsed.error);
-      needsReauth = !!parsed?.needsReauth;
+      extra = parsed ?? {};
     } catch { /* non-JSON body */ }
-    const err = new Error(message) as Error & { needsReauth?: boolean; status?: number };
-    err.needsReauth = needsReauth;
+    const err = new Error(message) as VaultError;
     err.status = res.status;
+    err.needsFreshSignIn = !!extra.needsFreshSignIn;
+    err.needsSetup = !!extra.needsSetup;
+    err.needsUnlock = res.status === 401 && !!extra.needsUnlock;
+    if (typeof extra.lockedForMs === 'number') err.lockedForMs = extra.lockedForMs;
+    if (typeof extra.attemptsLeft === 'number') err.attemptsLeft = extra.attemptsLeft;
     throw err;
   }
   return res.json() as Promise<T>;
 }
 
-/** Ask the server for a challenge and whether this account already has a device registered. */
-export function lockStatus(userId: string): Promise<LockStatus> {
-  return post<LockStatus>(`/api/secrets/${userId}/lock/challenge`, {}, 'Could not reach your vault. Please try again.');
+const jsonPost = (body: unknown): RequestInit => ({
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body ?? {}),
+});
+
+/** Does this account have a PIN, is it locked out, and where would a code be sent? */
+export function pinStatus(userId: string): Promise<PinStatus> {
+  return call<PinStatus>(`/api/secrets/${userId}/pin`, { method: 'GET' }, 'Could not reach your vault. Please try again.');
+}
+
+/** Ask the server to email a verification code. The code itself never comes back to the browser. */
+export function sendPinCode(userId: string, purpose: 'create' | 'reset'): Promise<{ sent: boolean; destination: string; resendInMs: number }> {
+  return call(`/api/secrets/${userId}/pin/otp`, jsonPost({ purpose }), 'Could not send your code. Please try again.');
 }
 
 /**
- * Register this device's lock. Shows the OS prompt once, then the device can open the vault by itself.
+ * Set the PIN — used for both the first setup and a reset after "Forgot PIN".
  *
- * `residentKey: 'discouraged'` and a named allow-list on unlock keep this a SECOND factor for an
- * already-signed-in account rather than a passwordless login — the account sign-in is unchanged, and
- * this feature cannot become a new way in.
+ * One call for both, because both need the same proof; a separate reset path would be a second place for
+ * that requirement to weaken. Returns a live unlock, so the user lands inside their keys rather than
+ * being asked immediately for the PIN they just chose.
  */
-export async function registerDeviceLock(userId: string, userLabel: string): Promise<UnlockState> {
-  const { challenge } = await lockStatus(userId);
-  const created = (await navigator.credentials.create({
-    publicKey: {
-      challenge: new TextEncoder().encode(challenge),
-      rp: { name: 'NavBharatAI' },
-      user: {
-        id: new TextEncoder().encode(userId),
-        name: userLabel || 'NavBharatAI account',
-        displayName: userLabel || 'NavBharatAI account',
-      },
-      // ES256 then RS256 — the two the server accepts, because both verify under one code path there.
-      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
-      authenticatorSelection: {
-        // The built-in lock, not a USB key: this is meant to be the phone's own face/fingerprint/PIN.
-        authenticatorAttachment: 'platform',
-        // 🔒 The whole point. 'required' makes the device refuse to sign unless it verified the PERSON,
-        // and the server independently checks the resulting flag — so this is not a request we trust.
-        userVerification: 'required',
-        residentKey: 'discouraged',
-      },
-      timeout: 90_000,
-      attestation: 'none',
-    },
-  })) as (PublicKeyCredential & { response: AuthenticatorAttestationResponse }) | null;
-
-  if (!created) throw new Error('Your device did not complete the setup. Please try again.');
-  const response = created.response;
-  const spki = typeof response.getPublicKey === 'function' ? response.getPublicKey() : null;
-  if (!spki) {
-    // getPublicKey() returns null for a key type we deliberately do not accept. Saying so plainly beats
-    // storing something the server will refuse on every future unlock.
-    throw new Error('This device\'s lock is not supported by the vault. Use your account password instead.');
-  }
-  const algorithm = typeof response.getPublicKeyAlgorithm === 'function' ? response.getPublicKeyAlgorithm() : -7;
-
-  return post<{ ticket: string; expiresInMs: number }>(
-    `/api/secrets/${userId}/lock/register`,
-    {
-      credentialId: created.id,
-      publicKeySpki: toBase64url(spki),
-      alg: algorithm,
-      clientDataJSON: toBase64url(response.clientDataJSON),
-      authenticatorData: toBase64url(
-        typeof response.getAuthenticatorData === 'function' ? response.getAuthenticatorData() : new ArrayBuffer(0),
-      ),
-      label: deviceLabel(),
-    },
-    'Could not register this device.',
-  ).then((r) => ({ ticket: r.ticket, method: 'device-lock' as const, expiresAt: Date.now() + r.expiresInMs }));
-}
-
-/** Open the vault with the device lock. Throws if the user cancels or the device refuses. */
-export async function unlockWithDevice(userId: string): Promise<UnlockState> {
-  const status = await lockStatus(userId);
-  if (!status.hasDeviceLock) throw new Error('No device lock is set up for this account yet.');
-
-  const assertion = (await navigator.credentials.get({
-    publicKey: {
-      challenge: new TextEncoder().encode(status.challenge),
-      allowCredentials: status.credentialIds.map((id) => ({ type: 'public-key' as const, id: fromBase64url(id) })),
-      userVerification: 'required',
-      timeout: 90_000,
-    },
-  })) as (PublicKeyCredential & { response: AuthenticatorAssertionResponse }) | null;
-
-  if (!assertion) throw new Error('Your device did not confirm it is you. Please try again.');
-  const r = assertion.response;
-  const out = await post<{ ticket: string; expiresInMs: number; method: UnlockMethod }>(
-    `/api/secrets/${userId}/unlock`,
-    {
-      mode: 'device',
-      credentialId: assertion.id,
-      clientDataJSON: toBase64url(r.clientDataJSON),
-      authenticatorData: toBase64url(r.authenticatorData),
-      signature: toBase64url(r.signature),
-    },
-    'Could not confirm it is you.',
+export async function setPin(userId: string, pin: string, otp: string): Promise<UnlockState> {
+  const out = await call<{ ticket: string; expiresInMs: number; method: UnlockMethod }>(
+    `/api/secrets/${userId}/pin`,
+    jsonPost({ pin, otp }),
+    'Could not save your PIN. Please try again.',
   );
   return { ticket: out.ticket, method: out.method, expiresAt: Date.now() + out.expiresInMs };
 }
 
-/**
- * Open the vault with a just-completed account sign-in.
- *
- * The caller re-authenticates through Firebase FIRST (which is what refreshes `auth_time` inside the ID
- * token); this only asks the server to check it. Splitting it that way keeps every Firebase credential
- * type — password, Google, phone — working without this module knowing about any of them.
- */
-export async function unlockWithAccount(userId: string): Promise<UnlockState> {
-  const out = await post<{ ticket: string; expiresInMs: number; method: UnlockMethod }>(
-    `/api/secrets/${userId}/unlock`,
-    { mode: 'account' },
-    'Could not confirm your account.',
+/** Open the vault with the PIN. The comparison happens on the server; this only carries the answer. */
+export async function unlockWithPin(userId: string, pin: string): Promise<UnlockState> {
+  const out = await call<{ ticket: string; expiresInMs: number; method: UnlockMethod }>(
+    `/api/secrets/${userId}/pin/unlock`,
+    jsonPost({ pin }),
+    'Could not open your vault. Please try again.',
   );
   return { ticket: out.ticket, method: out.method, expiresAt: Date.now() + out.expiresInMs };
 }
@@ -215,40 +135,20 @@ export interface RevealedSecret {
 
 /** Read the real values. Requires a live ticket; the server refuses otherwise. */
 export async function revealSecrets(userId: string, ticket: string): Promise<RevealedSecret[]> {
-  const res = await fetch(`/api/secrets/${userId}/reveal`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', [UNLOCK_TICKET_HEADER]: ticket, ...(await authHeaders()) },
-    body: '{}',
-  });
-  if (!res.ok) {
-    let message = 'Could not read your keys.';
-    try {
-      const parsed = await res.json();
-      if (parsed?.error) message = String(parsed.error);
-    } catch { /* non-JSON */ }
-    const err = new Error(message) as Error & { needsUnlock?: boolean };
-    err.needsUnlock = res.status === 401;
-    throw err;
-  }
-  return res.json();
+  return call<RevealedSecret[]>(
+    `/api/secrets/${userId}/reveal`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json', [UNLOCK_TICKET_HEADER]: ticket }, body: '{}' },
+    'Could not read your keys.',
+  );
 }
 
 /** Delete one key for good. Requires a live ticket — deleting is destructive, so it needs the same proof. */
 export async function deleteSecretLocked(userId: string, secretId: string, ticket: string): Promise<void> {
-  const res = await fetch(`/api/secrets/${userId}/${secretId}`, {
-    method: 'DELETE',
-    headers: { [UNLOCK_TICKET_HEADER]: ticket, ...(await authHeaders()) },
-  });
-  if (!res.ok) {
-    let message = 'Could not delete the key.';
-    try {
-      const parsed = await res.json();
-      if (parsed?.error) message = String(parsed.error);
-    } catch { /* non-JSON */ }
-    const err = new Error(message) as Error & { needsUnlock?: boolean };
-    err.needsUnlock = res.status === 401;
-    throw err;
-  }
+  await call<unknown>(
+    `/api/secrets/${userId}/${secretId}`,
+    { method: 'DELETE', headers: { [UNLOCK_TICKET_HEADER]: ticket } },
+    'Could not delete the key.',
+  );
 }
 
 /** Is this unlock still good? Pure, so the screen can re-lock itself on a timer without guessing. */
@@ -262,14 +162,12 @@ export function secondsRemaining(state: UnlockState | null, nowMs: number = Date
   return Math.max(0, Math.floor((state.expiresAt - nowMs) / 1000));
 }
 
-/** A short, non-identifying name for the registered device, so a user can tell two entries apart. */
-export function deviceLabel(ua: string = typeof navigator === 'undefined' ? '' : navigator.userAgent): string {
-  const s = ua.toLowerCase();
-  if (/iphone/.test(s)) return 'iPhone';
-  if (/ipad/.test(s)) return 'iPad';
-  if (/android/.test(s)) return 'Android phone';
-  if (/mac os x|macintosh/.test(s)) return 'Mac';
-  if (/windows/.test(s)) return 'Windows PC';
-  if (/linux/.test(s)) return 'Linux PC';
-  return 'This device';
+/** Exactly four digits, checked here only so the keypad can enable its button — never as the security. */
+export function looksLikePin(pin: string): boolean {
+  return /^\d{4}$/.test(String(pin ?? ''));
+}
+
+/** A whole-minutes countdown for a lock-out, so the screen says "in 14 minutes" rather than milliseconds. */
+export function lockoutMinutes(lockedForMs: number): number {
+  return Math.max(1, Math.ceil((Number(lockedForMs) || 0) / 60_000));
 }

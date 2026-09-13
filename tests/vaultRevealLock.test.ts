@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
-import { mintUnlockTicket, unlockSecret, TICKET_TTL_MS } from '../src/server/lib/deviceUnlock';
+import { mintUnlockTicket, unlockSecret, TICKET_TTL_MS } from '../src/server/lib/vaultTicket';
 import { encrypt } from '../src/server/lib/secrets';
 
 process.env.VITEST = 'true';
@@ -46,7 +46,7 @@ async function listHandler() {
 }
 
 const UID = 'owner_uid';
-const goodTicket = (uid = UID) => ({ 'x-vault-unlock': mintUnlockTicket(uid, Date.now(), unlockSecret(), 'device-lock') });
+const goodTicket = (uid = UID) => ({ 'x-vault-unlock': mintUnlockTicket(uid, Date.now(), unlockSecret(), 'pin') });
 
 beforeEach(() => {
   for (const k of Object.keys(DOCS)) delete DOCS[k];
@@ -67,13 +67,13 @@ describe('the reveal route refuses without real proof', () => {
   it('🔒 401 with a FORGED ticket', async () => {
     DOCS['a'] = { user_id: UID, secret_name: 'K', encrypted_secret_value: encrypt('v') };
     const res = mockRes();
-    await (await revealHandler())(mockReq({ params: { userId: UID }, headers: { 'x-vault-unlock': `device-lock.${Date.now() + 60_000}.0000` } }), res);
+    await (await revealHandler())(mockReq({ params: { userId: UID }, headers: { 'x-vault-unlock': `pin.${Date.now() + 60_000}.0000` } }), res);
     expect(res.statusCode).toBe(401);
   });
 
   it('🔒 401 with an EXPIRED ticket — the vault really does re-lock itself', async () => {
     DOCS['a'] = { user_id: UID, secret_name: 'K', encrypted_secret_value: encrypt('v') };
-    const stale = mintUnlockTicket(UID, Date.now() - TICKET_TTL_MS - 5_000, unlockSecret(), 'device-lock');
+    const stale = mintUnlockTicket(UID, Date.now() - TICKET_TTL_MS - 5_000, unlockSecret(), 'pin');
     const res = mockRes();
     await (await revealHandler())(mockReq({ params: { userId: UID }, headers: { 'x-vault-unlock': stale } }), res);
     expect(res.statusCode).toBe(401);
@@ -140,7 +140,7 @@ describe('with a live ticket it returns the real values, and tells the truth abo
     await new Promise((r) => setTimeout(r, 0));
     const audit = ADDED.find((a) => a.action === 'reveal');
     expect(audit).toBeTruthy();
-    expect(audit).toMatchObject({ collection: 'secret_vault_audit', user_id: UID, key_count: 1, unlock_method: 'device-lock' });
+    expect(audit).toMatchObject({ collection: 'secret_vault_audit', user_id: UID, key_count: 1, unlock_method: 'pin' });
     // 🔒 The log records THAT a key was read, never the key itself.
     expect(JSON.stringify(audit)).not.toContain('sk_live_UNIQUE_0fb7');
   });

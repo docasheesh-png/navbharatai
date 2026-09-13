@@ -28,7 +28,8 @@ import { goldenScaffoldForPrompt, goldenScaffoldFiles } from '../AgentV3/goldenS
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
 import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
-import { measuredRemainingMs, measuredEtaText, firstEtaLine } from '../AgentV3/progressEta';
+import { measuredRemainingMs, measuredEtaText, firstEtaLine, formatEtaRange } from '../AgentV3/progressEta';
+import { describeRunnerChain, chainProviders, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction } from '../AgentV3/AuthenticityAnalysis';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
@@ -2693,7 +2694,7 @@ export function enforceNoClaude<T extends { name: string }>(chain: T[], noClaude
   return [...kept.filter((r) => r.name !== 'CLAUDE_HAIKU'), ...haiku];
 }
 
-function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; cheapOnly?: boolean; free?: boolean; flagship?: boolean; heal?: boolean; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void }): TurnRunner {
+function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; cheapOnly?: boolean; free?: boolean; flagship?: boolean; heal?: boolean; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void; onChain?: (chain: ChainRung[]) => void }): TurnRunner {
   // Explicit env overrides always win; absent them the cost-ladder tier model
   // (when supplied) is preferred over the fixed gemini-2.5-pro default.
   const buildModel = (envName: string): string =>
@@ -2799,6 +2800,9 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; a
   // a Sonnet call onto a free build — and keeps ONLY the model-pinned 'CLAUDE_HAIKU' backstop, moved to
   // the END ("haiku … to last me"). Weak order: cheap floor → Vertex/Gemini → Haiku last.
   const guardedChain = enforceNoClaude(chain, opts?.noClaude === true);
+  // Hand the caller the chain it is ACTUALLY getting, so the build report can say which providers were
+  // configured — the only way to read "GLM: 0 turns" as "never reached" rather than "never present".
+  try { opts?.onChain?.(guardedChain as ChainRung[]); } catch { /* observation only — never affects a build */ }
   return makeMultiProviderTurnRunner(guardedChain, {
     onProviderUsed: (used, from) => {
       if (from.length) console.log(`[AGENTV3] build turn via ${used} (after ${from.join(' → ')})`);
@@ -11358,6 +11362,13 @@ async function noteBuildOutcome(
         if (cacheRead > 0) {
           billingCtx.cacheReadInputTokens = (billingCtx.cacheReadInputTokens ?? 0) + cacheRead;
         }
+        // Autopsy f04421ef — mirror the running ledger into the report so a build report READ WHILE THE
+        // BUILD IS STILL RUNNING carries real token numbers. Before this, such a report printed
+        // "GLM: 54 call(s) · 0 in · 0 out" and those zeros were read (by me, to the admin) as a measured
+        // zero rather than an empty field. setLiveUsage is a strictly separate channel from
+        // setProviderTokens and can never reach billing — see its doc comment.
+        try { buildDiag.setLiveUsage(providerLedger.byProvider(), billingCtx.cacheReadInputTokens); }
+        catch { /* diagnostics are best-effort — never affects a build */ }
       };
       // The cheap floor (GLM/Kimi) leads a build's FIRST attempt for simple/medium apps for allowlisted
       // users — OR is forced ON+cheap-ONLY for a not-yet-paying free-tier user. Computed ONCE here and
@@ -11428,6 +11439,12 @@ async function noteBuildOutcome(
         onProviderUsed: captureProvider,
         onTurnComplete: captureTurnUsage,
         onProviderError: recordProviderFallback,
+        // Autopsy f04421ef — see runnerChainSummary.ts. Recorded once (record() collapses an identical
+        // repeat), admin-only like every other provider name.
+        onChain: (chain) => {
+          try { buildDiag.setProviderChain(describeRunnerChain(chain), chainProviders(chain)); }
+          catch { /* diagnostics are best-effort — never affects a build */ }
+        },
       });
       // WHY THIS BUILD'S ENGINES ARE IN THIS ORDER. The floor can now put the healthier cheap coder
       // first (floorLead.ts), which changes WHICH engine writes the user's app — so it is stated in
@@ -11601,10 +11618,17 @@ async function noteBuildOutcome(
           const est = estimateBuildTime(etaComplexity, past);
           etaTotalMs = est.estimateMs; // feed the live heartbeat so it can revise the remaining time
           etaBaseMs = est.estimateMs;  // the ORIGINAL estimate — sizes each overrun re-baseline step
+          // RECORD WHAT THE USER WAS ACTUALLY TOLD, not the point estimate behind it (autopsy f04421ef).
+          // This line used to read "ETA ~3 min · confidence 0.4" for a build that ran past twenty
+          // minutes — and the admin reading that report would reasonably conclude the user had been
+          // promised three minutes. They had not: `firstEtaLine` shows the BAND and says outright that
+          // the figure is a first guess. The admin's own report was the least honest surface in the
+          // system, which is backwards. It now carries the same band the user saw, verbatim.
+          const etaShown = firstEtaLine(est, past.length);
           buildDiag.record({
             phase: 'plan', severity: 'info', code: 'ETA_BASIS',
-            message: `ETA ${est.etaText} · basis ${est.basis} · confidence ${est.confidence}`,
-            detail: etaBasisNote(past),
+            message: `ETA ${formatEtaRange(est.lowMs, est.highMs, est.estimateMs)} (midpoint ${est.etaText}) · basis ${est.basis} · confidence ${est.confidence}`,
+            detail: `${etaBasisNote(past)} Shown to the user: "${etaShown.replace(/^⏱️\s*/, '')}"`,
             autoResolved: true,
           });
           // THE POINT ESTIMATE IS NOT WHAT WE KNOW. `estimateBuildTime` returns lowMs/highMs and a
@@ -11612,7 +11636,7 @@ async function noteBuildOutcome(
           // midpoint as "~3 min" was the code being more honest with itself than with the user. A first
           // build also now says outright that the figure will be replaced, which is what makes the later
           // measured update read as information instead of as a broken promise.
-          events.emit({ type: 'narration', agent: 'architect', text: firstEtaLine(est, past.length), ts: Date.now(), id: 'eta-live' });
+          events.emit({ type: 'narration', agent: 'architect', text: etaShown, ts: Date.now(), id: 'eta-live' });
         } catch { /* ETA is best-effort — never affects the build */ }
       }
       const budget = maxBuildBudgetUsd();

@@ -171,14 +171,20 @@ describe('the phone lock is the door this screen offers first', () => {
     expect(src).toContain('const offerSetUp = canUseDevice === true && hasDeviceLock !== true;');
   });
 
-  it('a Google account confirms in one tap, and the button says Google rather than password', () => {
+  it('a SOCIAL account confirms in one tap, and the button names its own provider', () => {
     // It used to take two: the first tap only revealed a password field that a Google user never gets.
-    expect(src).toContain('askPassword || isGoogleAccount ? void unlockViaAccount() : setAskPassword(true)');
-    expect(src).toMatch(/isGoogleAccount[\s\S]{0,60}'Confirm with Google'/);
-    expect(src).toContain('const showPasswordField = askPassword && !!auth.currentUser && !isGoogleAccount;');
+    //
+    // WIDENED 2026-09-13: this was written as `isGoogleAccount`, which treated an Apple or GitHub
+    // account as a password account and showed it a field it can never fill. The check now reads the
+    // account's real provider (`reauthMethodFor`), so the same one-tap path covers all three and the
+    // button is labelled from the provider instead of being hardcoded to Google.
+    expect(src).toContain('askPassword || isSocialAccount ? void unlockViaAccount() : setAskPassword(true)');
+    expect(src).toMatch(/isSocialAccount[\s\S]{0,80}reauthMethodLabel\(accountMethod\)/);
+    expect(src).toContain("const showPasswordField = askPassword && accountMethod === 'password';");
+    expect(src).toContain("const accountMethod = auth.currentUser ? reauthMethodFor(auth.currentUser) : null;");
   });
 
   it('setting up on a password account reveals the field instead of raising an error that says the same thing', () => {
-    expect(src).toContain("if (!isGoogleAccount && !password) { setAskPassword(true); return; }");
+    expect(src).toContain("if (!isSocialAccount && !password) { setAskPassword(true); return; }");
   });
 });

@@ -51567,6 +51567,67 @@ gap is how a product loses trust it cannot buy back.
 Gate on the final state: `typecheck` 0 · `noUnusedImports` clean · `typecheck:server` 0 · `build` ok ·
 `test:bundle` within budget · `boot:check` PASS · `vitest run` **1,594 files / 22,112 passed / 1
 skipped / 0 failed**. 28 new tests; **two confirmed to fail when the behaviour is reverted.**
+
+## 2026-09-13 — THE MID-BUILD STOP: the half the wallet floor could not reach
+
+**The open root cause recorded with PR #2883 is now closed.** That change bounded what a user is
+BILLED (`WALLET_OVERDRAFT_FLOOR_INR`, default ₹50) and said plainly what it did not do: *"Clamping the
+debit bounds the user's bill; it does not un-spend what the model already cost us."*
+
+**What was actually unbounded, stated precisely.** Every START gate was correct — `decideAffordability`
+refuses a new build at a balance of 0 or less, and a chat turn is refused on an empty wallet. Nothing
+looked at the cost of **the build already running**. A build legitimately allowed to begin at ₹1 could
+run its entire wall clock and present the invoice at the end. `SESSION_COST_CAP_USD` is not that limit
+either: it only decides whether an EMPTY build may retry.
+
+### What shipped
+
+**`buildCostCeiling.ts`** — pure, no I/O. `buildCostCeilingUsd()` (default **$5**, cap $50),
+`ledgerCostUsd(entries)`, `checkCostCeiling(cost, ceiling)`, `costCeilingDetail(verdict)`.
+
+**It is evaluated at the CHOKE POINT**, inside `captureTurnUsage` — the single function every build
+turn and every heal turn already flows through, and the same discipline the wallet floor uses. A
+ceiling written into the call sites is one the next call site never gets. Pricing the ledger is a loop
+over a handful of entries, so it costs nothing measurable per turn.
+
+**🔒 IT IS A STOP, NOT A KILL — which is what makes shipping it ON by default safe against the one
+absolute rule.** `AgentRunner` ends BETWEEN turns; the files written so far are already persisted; and
+`abortSummary('cost-cap')` tells the user their work is saved and one message continues it. A build
+that reaches the ceiling loses nothing — it pauses. A new `'cost-cap'` abort cause carries that through
+`buildAbortCause.ts`, so the stop can never be reported as the user pressing Stop (`isUserInitiated`
+returns false) — the exact misattribution that module was built to end.
+
+**📌 THE NUMBER WAS REUSED, NOT INVENTED.** $5 is this repo's own standing answer to a runaway build
+(`sessionCostCapUsd()`, since the "$26 todo app"). Inventing a fresh constant that sounds rigorous is
+precisely the failure CLAUDE.md records for the E2B rate. It sits under its OWN key
+(`AGENTV3_BUILD_COST_CEILING_USD`) because extending `SESSION_COST_CAP_USD` would silently re-purpose a
+value an admin may already have set for something else. **For scale:** real builds in this repo's own
+reports cost **$0.4–$1.0**, so $5 is five to ten times a heavy normal build — far enough away that no
+legitimate build is at risk, and still the difference between a bounded ~₹435 and an unbounded loss.
+
+**⚠️ THE LIVE FIGURE IS AN UNDER-ESTIMATE, AND THAT IS THE SAFE DIRECTION.** The ledger sees the
+architect, its sub-agents and every heal runner; it does NOT see the aux calls (blueprint/plan/judge),
+which reconcile into the 'other' bucket only at settle. So the stop fires LATER than a complete number
+would justify, never earlier. The admin line says so in words rather than presenting the figure as
+complete.
+
+**Honesty by construction, in three places.** A malformed env value falls back to $5 and **never to
+"no ceiling"** — only an explicit `0` disables it, because a typo must not restore the bug. An
+evaluation that throws fails OPEN (a ceiling we cannot read must never end somebody's build — the same
+call the affordability gate makes on an unreadable balance). And the user-facing sentence carries no
+rupee figure, no token count and no provider: what a build cost NavBharatAI is admin-only under the
+White-Label Law's billing half.
+
+### 🔴 OPEN ROOT CAUSE — named, not implied fixed
+
+**The stop does not cancel a call already in flight.** The loop ends between turns, so a provider call
+in progress runs to completion on their side and is paid for. Build `541979d2` showed exactly this: a
+lane abandoned at 150 s whose call ran to 343 s. Cancelling it needs an abort signal threaded into the
+provider clients — a separate change, inside the request path rather than the build loop.
+
+**21 new tests** (`tests/buildCostCeiling.test.ts`), plus the new cause added to
+`buildAbortCause.test.ts`'s exhaustiveness list so it cannot be skipped silently. **Two confirmed to
+fail when the behaviour is reverted:** a malformed env meaning "no ceiling", and the once-guard.
 ## 2026-09-13 — THE AUTOPSY'S MISSING SUBSYSTEM, BUILT: the build now KNOWS its own time budget
 
 Admin: *"han, build report me jo jo problem hai. sabhi ko fix karna hai. next time yeh error na aye!!"* —

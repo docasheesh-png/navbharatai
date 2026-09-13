@@ -344,6 +344,7 @@ import { groundingProvenance, dominantGroundingBlock } from '../AgentV3/contextB
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, type RuntimeError } from '../AgentV3/AutoFix';
 import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
+import { buildCostCeilingUsd, ledgerCostUsd, checkCostCeiling, costCeilingDetail } from '../AgentV3/buildCostCeiling';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
  *  Set SESSION_COST_CAP_USD in env to override. Default: $5. */
 function sessionCostCapUsd(): number {
@@ -2556,7 +2557,20 @@ export function cheapFloorDecision(env: NodeJS.ProcessEnv, ctx: {
     if (!ctx.tierAllowed) return { active: false, reason: 'This app tier is not eligible for the cheap floor (escalation off + complex app) → strong model leads.' };
     return { active: false, reason: 'Cheap floor not allowed for this build → Claude leads.' };
   }
-  return { active: true, reason: `Cheap floor ACTIVE — ${floor.toUpperCase()} leads the first attempt; Claude/Haiku only backstop on failure.` };
+  // NAME THE ENGINES THAT ACTUALLY HAVE A KEY (autopsy f04421ef).
+  //
+  // `keyOk` above is an OR, so with the floor set to `on` — which asks for BOTH GLM and Kimi — this line
+  // used to read "ACTIVE — ON leads" when only ONE of the two was configured. The report then showed
+  // `providerDelivery: { KIMI: 54 }` with no GLM row and no GLM failure, and the one line whose entire
+  // job is to explain the routing could not distinguish "GLM never got a turn" from "GLM was never
+  // there". A half-configured floor is a real operational state and must read as one.
+  const configured = [wantsGlm && hasGlm ? 'GLM' : '', wantsKimi && hasKimi ? 'KIMI' : '', wantsBedrock && hasBedrock ? 'BEDROCK' : ''].filter(Boolean);
+  const missing = [wantsGlm && !hasGlm ? 'GLM_API_KEY' : '', wantsKimi && !hasKimi ? 'KIMI_API_KEY' : ''].filter(Boolean);
+  const lead = `${configured.join(' + ')} lead${configured.length === 1 ? 's' : ''} the first attempt`;
+  const gap = missing.length > 0
+    ? ` ⚠️ '${floor}' also asks for ${missing.join(' and ')}, which ${missing.length === 1 ? 'is' : 'are'} NOT set — that engine never enters the chain, so its absence from this report is configuration, not a routing decision.`
+    : '';
+  return { active: true, reason: `Cheap floor ACTIVE — ${lead}; Claude/Haiku only backstop on failure.${gap}` };
 }
 
 /**
@@ -11379,6 +11393,8 @@ async function noteBuildOutcome(
       // (they share this client) + the escalation runner. Observational: it never changes billing
       // with the per-tier flag off. Aux calls (blueprint/plan/judge) reconcile into 'other' at settle.
       const providerLedger = createProviderUsageLedger();
+      /** The cost ceiling fires at most once per build — see captureTurnUsage below. */
+      let costCeilingFired = false;
       /**
        * SHADOW ledger — fast-lane turns, recorded for OBSERVATION and never for billing.
        *
@@ -11413,6 +11429,37 @@ async function noteBuildOutcome(
         // setProviderTokens and can never reach billing — see its doc comment.
         try { buildDiag.setLiveUsage(providerLedger.byProvider(), billingCtx.cacheReadInputTokens); }
         catch { /* diagnostics are best-effort — never affects a build */ }
+        // THE MID-BUILD STOP. Every build turn and every heal turn passes through here — the same
+        // choke-point discipline the wallet floor uses, and for the same reason: a ceiling written
+        // into the call sites is one the next call site never gets. Pricing the ledger is a loop over
+        // a handful of entries, so this costs nothing measurable per turn.
+        //
+        // It fires ONCE. A second abort would be harmless (AbortController is idempotent) but would
+        // record a second identical finding, and a report that says the same thing twice reads like
+        // two events.
+        if (!costCeilingFired) {
+          try {
+            const verdict = checkCostCeiling(ledgerCostUsd(providerLedger.entries()), buildCostCeilingUsd());
+            if (verdict.stop) {
+              costCeilingFired = true;
+              try {
+                buildDiag.record({
+                  phase: 'build', severity: 'warning', code: 'COST_CEILING_REACHED',
+                  // NOT auto-resolved: the build really did stop. Marking it resolved would let a
+                  // report summarise a halted build as one that healed itself.
+                  autoResolved: false,
+                  message: 'Build stopped at its cost ceiling',
+                  detail: costCeilingDetail(verdict),
+                });
+              } catch { /* diagnostics are best-effort — they must never block the stop */ }
+              console.log(`[AGENTV3] cost ceiling reached ($${verdict.costUsd.toFixed(2)} >= $${verdict.ceilingUsd.toFixed(2)}) — stopping build between turns`);
+              abortBuild({ abort: (r?: unknown) => abort.abort(r) }, 'cost-cap');
+            }
+          } catch {
+            // A ceiling we could not evaluate must never end somebody's build. Failing OPEN here is
+            // the same call the affordability gate makes on an unreadable balance.
+          }
+        }
       };
       // The cheap floor (GLM/Kimi) leads a build's FIRST attempt for simple/medium apps for allowlisted
       // users — OR is forced ON+cheap-ONLY for a not-yet-paying free-tier user. Computed ONCE here and

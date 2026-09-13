@@ -51758,3 +51758,53 @@ callback, and the chain line — six reverts, six failures.
 
 - **Why GLM delivered 0 of 54 turns on that specific build.** Now diagnosable from the next report
   (item 4); genuinely unanswerable from this one.
+## 2026-09-13 — 🔴 CLOSED: deadline propagation. A parent's clock now reaches the child that spends it.
+
+This was recorded as an OPEN root cause the same day (rule 6) because fixing it touches every build's
+timing and did not belong beside four safe fixes. It is now fixed, and the shape of the bug is worth
+keeping because it will recur in any system with two people choosing two numbers.
+
+**THE INVERSION.** The fast lane caps its plan call at 90 s. The Kimi rung's own client timeout is
+120 s. The parent's deadline was SHORTER than its child's, and `withTimeout` only RACES — it stops the
+WAIT, never the CALL. So the abandoned request kept running: that build logged provider events **148
+seconds after it had ended**, on a sandbox still billed by the minute, generating tokens nobody would
+ever read.
+
+**Neither number was wrong, and that is the point.** They answered different questions — *"how long may
+this lane wait?"* and *"how long may this provider take?"* — in different files, months apart, and no
+mechanism existed for the first answer to reach the second. So the fix is a CONTRACT
+(`src/server/AgentV3/turnDeadline.ts`), not a smaller number somewhere.
+
+**THE SHAPE: an absolute instant, never a duration.** `RunTurnParams.deadlineAt` is an epoch-ms moment.
+A duration would have to be decremented at every hop, and the multi-provider chain walks several rungs
+per call — the second rung would silently be handed the whole budget again. An absolute instant
+composes for free: every hop subtracts nothing and asks how much clock is left.
+
+**🔒 IT CAN ONLY EVER SHORTEN A CALL.** With no deadline the answer is the configured bound, unchanged
+to the byte — which is what makes adopting it one caller at a time safe, and why every unmeasurable
+value (undefined, NaN, 0, a string) resolves to "no deadline" rather than to "expired". The single case
+where it lengthens nothing is a runner that had no bound at all, where bounding is the safe direction.
+
+**🔴 AND IT MUST NOT LIE ABOUT WHOSE FAULT THE FAILURE WAS.** `isTimeoutProviderError` benches a rung
+after two consecutive timeouts. A provider handed eight seconds because the LANE had eight seconds left
+has not failed at anything, and benching it would punish it for our budgeting — the next build then
+starts a rung down for no reason. So `turnDeadline` reports `source`, and a call ended by OUR clock
+throws `BUDGET_REACHED_MESSAGE`, deliberately worded so `isTimeoutProviderError` does **not** match it.
+Test-locked in both directions: the budget messages must not bench, and a real provider timeout still
+must.
+
+**Siblings hunted and fixed together (rule 3):** every leaf runner that bounds itself —
+`OpenAiToolRunner` (GLM/Kimi/Grok), `GeminiToolRunner` (Gemini/Vertex), `ClaudeClient`. Two ladders had
+the same gap inside them and are closed too: **Claude's RETRY loop** (a retry is a new call carrying the
+full 120 s bound, so bounding only the opening request left the expensive half unbounded — it now
+rethrows the ORIGINAL provider error rather than a budget one, because what failed was the provider) and
+the fast lane's **CONTINUATION ladder** (same reasoning, same fix).
+
+**Adopted by exactly two callers today** — the fast lane's plan and contract calls, the two the report
+caught. Every other lane passes nothing and is byte-identical. Widening it is now a one-line change per
+caller, which is the property worth having.
+
+**What it does NOT do, stated plainly:** the two numbers are still 90 and 120, deliberately. Kimi really
+does need 120 s on a large prompt when the lane has 120 s to give (admin decision 2026-07-13). What
+changed is that the lane's budget now wins when it is smaller, instead of being a suggestion the
+provider never heard.

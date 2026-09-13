@@ -7,6 +7,7 @@
 // without a network call or key. Errors propagate so the orchestrator can fall through.
 
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
+import { turnDeadline, BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE } from '../turnDeadline';
 import {
   toolDefsToGemini,
   transcriptToGemini,
@@ -75,14 +76,18 @@ export class GeminiToolRunner implements TurnRunner {
     if (systemInstruction) config.systemInstruction = systemInstruction;
     if (tools) config.tools = tools;
 
+    // SIBLING of the same root cause (rule 3): this family bounds itself exactly like the GLM/Kimi one,
+    // so it needed the caller's budget for exactly the same reason. With no deadline, unchanged.
+    const bound = turnDeadline(this.opts.timeoutMs ?? 120_000, params.deadlineAt);
+    if (bound.expired) throw new Error(BUDGET_EXHAUSTED_MESSAGE);
     const response = await withTimeout(
       this.client.models.generateContent({
         model: this.opts.model || params.model,
         contents,
         config,
       }),
-      this.opts.timeoutMs ?? 120_000,
-      `Gemini/Vertex call exceeded ${this.opts.timeoutMs ?? 120_000}ms`,
+      bound.timeoutMs,
+      bound.source === 'deadline' ? BUDGET_REACHED_MESSAGE : `Gemini/Vertex call exceeded ${bound.timeoutMs}ms`,
     );
 
     const result = parseGeminiResponse(response);

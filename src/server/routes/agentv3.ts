@@ -417,6 +417,7 @@ import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
 import { classifyIntentSmart, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild } from '../AgentV3/IntentClassifier';
+import { looksLikeRefusal } from '../lib/promptSafety';
 import { assessBuildInput } from '../AgentV3/buildableInput';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
@@ -1036,8 +1037,22 @@ export function shouldRetryEmptyBuild(opts: {
    * "why is this failing", not for "build me a to-do app".
    */
   userAskedToBuildAnApp?: boolean;
+  /**
+   * Did the model REFUSE on policy grounds, rather than fail to build?
+   *
+   * 🔴 THE CASE THIS GUARD MISSED, AND IT IS THE WORST ONE (report 03997004, 2026-09-11). A user
+   * asked for a pornography site. Every model call refused — correctly — and a refusal writes no
+   * files, so this function said "empty build, retry on a STRONGER model". The platform read a moral
+   * refusal as a capability failure and went looking for a model that would comply, then closed by
+   * telling the user *"add credits and I will complete it on the best engine"*. We asked a person who
+   * wanted a porn site for money and promised to build it. No model said that; this line did.
+   *
+   * A refusal is a FINAL answer. Never retried, never escalated, never upsold.
+   */
+  modelRefused?: boolean;
 }): boolean {
   if (!opts.expectsArtifacts || opts.filesWritten > 0 || opts.aborted || !opts.withinCostCap) return false;
+  if (opts.modelRefused) return false;
   // An edit on a project that already exists may legitimately change nothing…
   // …UNLESS the user asked for an APP TO BE BUILT and only the workspace's existing contents turned
   // that request into an "edit" (build 5b4f9b63). "Build a to-do list app" that writes zero files has
@@ -8992,7 +9007,7 @@ async function noteBuildOutcome(
           uid: flaggedUid, triage, surface: 'build', excerpt: safetyExcerpt(prompt), at: Date.now(),
         })).catch(() => { /* the decision stands either way — see recordSafetyFlag */ });
         if (triage.verdict === 'block') {
-          res.status(403).json({ error: blockMessage() });
+          res.status(403).json({ error: blockMessage(triage.contentClass, prompt) });
           return;
         }
       }
@@ -14526,6 +14541,9 @@ async function noteBuildOutcome(
           ts: Date.now(),
         });
       }
+      // A policy refusal is not a capability failure — see `modelRefused`. Read from the answer the
+      // model actually gave, so it holds for any refusal rather than only the pornography one.
+      const firstAttemptRefused = looksLikeRefusal(result.summary);
       if (shouldRetryEmptyBuild({
         expectsArtifacts,
         filesWritten: writtenFiles.size,
@@ -14534,6 +14552,7 @@ async function noteBuildOutcome(
         aborted: abort.signal.aborted,
         withinCostCap: costAfterFirstAttempt <= capUsd,
         userAskedToBuildAnApp,
+        modelRefused: firstAttemptRefused,
       })) {
         buildDiag.record({
           phase: 'build', severity: 'warning', code: 'EMPTY_BUILD_RETRY',
@@ -18148,33 +18167,54 @@ async function noteBuildOutcome(
         // spend the very budget free-tier protects). Instead, honestly invite the user to add credits
         // and finish on the strongest engine — converting the user to paid without shipping a broken app.
         if (freeTierBuildActive) {
-          // 🔴 TWO INDEPENDENT REASONS NOT TO ASK FOR MONEY, AND THEY COMPOSE — do not collapse them.
+          // 🔴 THREE INDEPENDENT REASONS NOT TO ASK FOR MONEY, AND THEY COMPOSE. Three sessions each
+          // found one of them on the same day, in this one guard; a merge that kept only one would
+          // silently restore the other two bugs, so the order below is the whole resolution.
           //
-          // (a) OUR OWN OUTAGE (admin report 2026-09-13). This message used to fire on EVERY free build
-          // that produced nothing, without asking why. In that report the engine was never the problem —
-          // the model's plan was correct and simply arrived 178s late because the providers were degraded
-          // (3 timeouts on one, 7 rate-limits out of 8 on the other) — so the user was invited to pay for
-          // OUR slowness. The evidence needed to tell the two apart had been recorded since 2026-09-01;
-          // nothing had ever asked for it.
+          // (a) THE MODELS REFUSED (report 03997004). The user asked for a pornography site; the
+          // models refused eight times; this line then said *"Your app needs our strongest engine…
+          // Add credits and I will complete it on the best engine."* NavBharatAI asked a person who
+          // wanted a porn site for money and promised to build it on a better one. No model said
+          // that — our own plumbing did, because "zero files" was read as an engine limit when it
+          // was a moral answer.
           //
-          // (b) NOTHING TO BUILD FROM (#2887). A prompt carrying no instruction is not an engine limit
-          // either, so `freeTierUpsellMessage` takes the cause and words itself accordingly.
+          // (b) OUR OWN OUTAGE (admin report 2026-09-13). The message used to fire on EVERY free
+          // build that produced nothing, without asking why. In that report the engine was never the
+          // problem — the plan was correct and arrived 178s late because the providers were degraded
+          // (3 timeouts on one, 7 rate-limits out of 8 on the other) — so the user was invited to pay
+          // for OUR slowness. The evidence had been recorded since 2026-09-01; nothing ever asked.
           //
-          // Degraded is tested FIRST because it is a statement about US and (b) is a statement about the
-          // PROMPT: when our providers were down we do not know whether the prompt was buildable, and
-          // blaming the user's wording for our outage is the same mistake in a politer sentence.
-          const degraded = providerFailuresLookDegraded(buildDiag.providerFailureBreakdown());
-          const emptyCause = assessBuildInput(prompt).buildable ? 'engine' : 'no-instruction';
-          events.emit({
-            type: 'narration',
-            agent: 'architect',
-            text: degraded ? providerDegradedMessage() : freeTierUpsellMessage(emptyCause),
-            ts: Date.now(),
-          });
-          if (degraded) {
+          // (c) NOTHING TO BUILD FROM (#2887, report 541979d2 — a bare Drive link). A prompt carrying
+          // no instruction is not an engine limit either, so `freeTierUpsellMessage` takes the cause
+          // and asks for words rather than money. (The diversion earlier in this route catches that
+          // case before a build starts; this covers the paths that still reach here — an edit turn,
+          // or an attachment that carried no instruction.)
+          //
+          // WHY THIS ORDER. A refusal is tested FIRST because it is the only one of the three that is
+          // POSITIVE evidence: a model answered, and what it said was no. That rules out (b) for the
+          // same call — a provider that refused was plainly not down — and it settles (c), since the
+          // engine's objection was to the content, not the wording. Nothing is said at all in that
+          // case: an upsell sells a refusal, and "our providers were slow" would be a lie about why.
+          // Degraded is then tested before (c) for the reason its own author gives: when our
+          // providers are down we do not know whether the prompt was buildable, and blaming the
+          // user's wording for our outage is the same mistake in a politer sentence.
+          const refused = looksLikeRefusal(result.summary);
+          const degraded = !refused && providerFailuresLookDegraded(buildDiag.providerFailureBreakdown());
+          if (!refused) {
+            const emptyCause = assessBuildInput(prompt).buildable ? 'engine' : 'no-instruction';
+            events.emit({
+              type: 'narration',
+              agent: 'architect',
+              text: degraded ? providerDegradedMessage() : freeTierUpsellMessage(emptyCause),
+              ts: Date.now(),
+            });
+          }
+          if (refused || degraded) {
             buildDiag.record({
               phase: 'build', severity: 'warning', code: 'UPSELL_SUPPRESSED', autoResolved: false,
-              message: 'Did not ask this user to add credits: the build failed because the engine did not respond, not because the app needed a stronger one. Charging for our own slowness is what this check exists to prevent.',
+              message: refused
+                ? 'Did not ask this user to add credits: the engine REFUSED this request on policy grounds. A refusal is an answer, not a capability limit — selling a stronger engine after one offers to do the very thing we just declined to do.'
+                : 'Did not ask this user to add credits: the build failed because the engine did not respond, not because the app needed a stronger one. Charging for our own slowness is what this check exists to prevent.',
             });
           }
         }

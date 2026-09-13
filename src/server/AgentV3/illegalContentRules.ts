@@ -59,6 +59,15 @@ export interface IllegalRule {
    * already the whole test) simply omits it and never reaches the weaker tier at all.
    */
   intent?: RegExp;
+  /**
+   * A context that makes the subject INNOCENT, cancelling the rule outright.
+   *
+   * Added 2026-09-13 with the pornography ban. The refusal the admin wrote is deliberately blunt — it
+   * tells the person NavBharatAI does not want them — which is exactly right for someone who asked
+   * for a porn site and a disaster for a doctor building a sexual-health app or an NGO building a
+   * harassment-reporting tool. A rule whose refusal is harsh must be able to stand down.
+   */
+  exempt?: RegExp;
 }
 
 /**
@@ -127,13 +136,38 @@ export const ILLEGAL_RULES: readonly IllegalRule[] = [
   },
   {
     id: 'ADULT_CONTENT',
-    // NOT illegal — lawful adult content. Governed by the creator's own +18 setting (Phase 2).
     contentClass: 'adult',
+    /**
+     * 🔴 BANNED ON NAVBHARATAI — admin decision 2026-09-13, and it REVERSES what this rule said
+     * yesterday.
+     *
+     * This entry used to read *"NOT illegal — lawful adult content. Governed by the creator's own +18
+     * setting"*, and `promptSafety` therefore returned FLAG: the request was recorded and the build
+     * ran. Build report 03997004 is what that looked like in production — a user asked for a porn
+     * site with uploads, streaming and anonymous chat, and the platform spent 171 seconds and eight
+     * model calls asking models to build it. Every model refused, which is the model's virtue and was
+     * never the platform's design.
+     *
+     * The admin's ruling is not "lawful, tag it at publish". It is *"पोर्नोग्राफी बैन है"* — this is an
+     * Indian product and it does not build this, for anyone, at any tier. So the class stays `adult`
+     * (the publish scanner's tagging is unchanged and still useful) while the PROMPT verdict becomes a
+     * refusal — see `triagePrompt`.
+     */
     description:
-      'contains adult sexual content. Lawful, and allowed for a creator who has turned on the 18+ setting.',
-    subject: /\b(porn|pornography|xxx|hardcore|erotica|nsfw|adult[-\s]?(video|content|film)s?)\b/i,
-    context: /\b(watch|stream|gallery|videos|category|categories|subscribe|premium|18\+|adults?[-\s]only)\b/i,
+      'asks for pornographic or sexually explicit content. Banned on NavBharatAI — refused at the prompt.',
+    // Widened the same day: the original subject missed every brand and every Hinglish spelling a real
+    // user types, so "onlyfans clone with premium subscribe" was ALLOWED outright (verified, not assumed).
+    subject: /\b(porn|porno|pornography|pornographic|pornhub|xvideos|xnxx|xhamster|redtube|youporn|brazzers|onlyfans|hentai|rule34|camgirl|cam[-\s]?girl|camwhore|sex[-\s]?cam|nudify|deepnude|xxx|hardcore|erotica|nsfw|adult[-\s]?(video|content|film)s?|blue[-\s]?film|chudai|chodai|randi|nang[ai][-\s]?video|sexy[-\s]?video|sex[-\s]?videos?)\b/i,
+    context: /\b(watch|stream|streaming|live|upload|uploads|gallery|video|videos|clip|clips|category|categories|subscribe|subscription|premium|paywall|webcam|chat|site|website|app|platform|tube|18\+|adults?[-\s]only|banao|bana)\b/i,
     intent: /\b(site|website|app|platform|streaming|gallery|tube)\b/i,
+    /**
+     * 🔒 THE STAND-DOWN. Any of these anywhere in the text cancels the rule, because each names an app
+     * NavBharatAI should WANT: a sexual-health clinic, a school safety curriculum, a harassment or
+     * trafficking reporting tool, a parental filter, a moderation dashboard, a legal-compliance page.
+     * All of them legitimately contain both halves of the pair. Missing a cleverly-worded porn request
+     * costs one model refusal, which already works; insulting a doctor costs a user forever.
+     */
+    exempt: /\b(education|educational|educate|awareness|health|healthcare|clinic|doctor|medical|hospital|patient|therapy|therapist|counsel(?:l?ing)?|consent|hygiene|reproductive|fertility|pregnan(?:cy|t)|maternity|harassment|assault|traffick(?:ing)?|exploitation|prevent(?:ion)?|protect(?:ion)?|parental|moderation|moderate|filter|blocker|detect(?:ion)?|report(?:ing)?|complaint|helpline|ngo|police|legal|compliance|policy|banned|restrict|age[-\s]verification|safeguard(?:ing)?)\b/i,
   },
 ];
 

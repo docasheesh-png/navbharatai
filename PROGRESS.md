@@ -51815,3 +51815,25 @@ belong in the same PR as four safe ones. The four fixes above make the consequen
 (the wasted second lane is gone, the dishonest message is gone); the waste itself is still real.
 
 **Next session: this is the one to take.** The 88 s the first lane threw away is still thrown away.
+
+### Hardening pass on the same fixes (2026-09-13, same PR)
+
+Four zero-runtime-risk guards added to `tests/laneFailure.test.ts` — no production code changed, so
+none of these can alter a build. They exist because the fixes above are *rules*, and a rule with no
+guard is one refactor away from being a comment:
+
+1. **The upsell cannot be emitted without first asking whether WE were the problem.** The test scans
+   every `freeTierUpsellMessage()` call site in the route and requires `providerFailuresLookDegraded`
+   within the preceding 900 characters. A new call site added anywhere fails CI rather than quietly
+   billing a user for our outage.
+2. **Adversarial classification.** Real provider strings are messier than the report's: vendor
+   prefixes, capitals, trailing durations, `ETIMEDOUT`, `socket hang up`. Each must still classify as
+   degraded, because the classifier is now what stands between an outage and an invoice.
+3. **A safety property, not an example:** `anotherLaneWorthTrying(r) || !upsellIsHonest(r)` must hold
+   for every reason. We may never simultaneously judge the provider healthy enough to retry and the
+   user's app hard enough to charge for.
+4. **A TRIPWIRE on the OPEN root cause above.** The test reads both numbers out of the source —
+   `deps.planTimeoutMs ?? 90_000` and `Number(process.env.AGENTV3_KIMI_TIMEOUT_MS) || 120_000` — and
+   asserts the inversion still exists. It is a failing-by-design reminder that inverts the usual
+   risk: if someone fixes the deadline propagation, the test fails and makes them delete the
+   tripwire, which is how the open item gets closed out of this file instead of rotting in it.

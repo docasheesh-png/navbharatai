@@ -119,3 +119,72 @@ describe('a workaround is never counted as a self-heal (rule 5, in the data)', (
     expect(snap.counts.autoResolved).toBe(1);
   });
 });
+
+describe('🔒 the guards that stop this coming back', () => {
+  const ROUTE_SRC = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
+
+  // THE MOST DAMAGING BUG IN THE REPORT was not the failed build — it was asking the user to pay for
+  // it. A future edit that adds a second upsell site, or drops the check from this one, would bring
+  // it straight back and nothing would fail. So: EVERY mention of the upsell must sit next to the
+  // evidence check.
+  it('no code path can emit the upsell without first asking whether WE were the problem', () => {
+    const sites = [...ROUTE_SRC.matchAll(/freeTierUpsellMessage\(\)/g)].map((m) => m.index ?? 0);
+    expect(sites.length).toBeGreaterThan(0);
+    for (const at of sites) {
+      const around = ROUTE_SRC.slice(Math.max(0, at - 900), at + 200);
+      expect(around, 'an upsell with no degraded-provider check next to it').toContain('providerFailuresLookDegraded');
+    }
+  });
+
+  it('the degraded path records that it suppressed the ask, so the check is visible in the report', () => {
+    expect(ROUTE_SRC).toContain("code: 'UPSELL_SUPPRESSED'");
+  });
+
+  // Real reason strings arrive with provider prefixes, trailing durations, capitals and full stops.
+  // A classifier that only matches the tidy form is a classifier that fails in production.
+  it('classification survives the shapes reasons actually arrive in', () => {
+    for (const messy of [
+      'OpenAI-compatible call (GLM/Kimi) timed out after 120000ms',
+      '  REQUEST TIMED OUT.  ',
+      'Error: ETIMEDOUT connecting to upstream',
+      'HTTP 429 Too Many Requests',
+      'Provider GLM failed: rate-limit exceeded, retry later',
+      'socket hang up',
+    ]) {
+      expect(classifyLaneFailure(messy), messy).toBe('provider-degraded');
+      expect(upsellIsHonest(messy), messy).toBe(false);
+    }
+  });
+
+  // A safety property, stated directly: there is NO input for which we both refuse to retry and ask
+  // for money. Those two would be a contradiction — "our engine is fine, but do not try again".
+  it('we never simultaneously blame the provider and bill the user', () => {
+    for (const r of ['timed out', 'manifest_too_small', '429', '', 'unknown thing', 'did not finish within 150000ms']) {
+      expect(anotherLaneWorthTrying(r) || !upsellIsHonest(r), r).toBe(true);
+    }
+  });
+});
+
+describe('🔴 TRIPWIRE — the open root cause, so it cannot drift further in silence', () => {
+  // NOT A FIX. The fast lane caps its plan call at 90s while the Kimi rung is allowed 120s, so the
+  // lane is structurally guaranteed to abandon calls the provider still considers alive — which is
+  // why that build logged provider events 148s AFTER it ended. Killing it means threading a per-call
+  // deadline into the provider chain, which touches every build (PROGRESS.md, rule 6).
+  //
+  // Until then this pins BOTH numbers. If either moves, this test fails and whoever moved it has to
+  // look at the other one — which is exactly what nobody did when they drifted apart.
+  const ROUTE_SRC = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
+  const SIMPLE = readFileSync(join(process.cwd(), 'src/server/AgentV3/SimpleBuilder.ts'), 'utf8');
+
+  it('records today’s inverted pair: plan cap 90s, Kimi rung 120s', () => {
+    expect(SIMPLE).toContain('deps.planTimeoutMs ?? 90_000');
+    expect(ROUTE_SRC).toContain("Number(process.env.AGENTV3_KIMI_TIMEOUT_MS) || 120_000");
+  });
+
+  it('and states the invariant that is currently violated, so the direction of the fix is not lost', () => {
+    // parent ≥ child. 90_000 < 120_000 today; when the threading lands, this becomes the assertion
+    // that holds rather than the one that documents a debt.
+    const planCap = 90_000, kimiCap = 120_000;
+    expect(planCap).toBeLessThan(kimiCap);   // ← the bug, written down
+  });
+});

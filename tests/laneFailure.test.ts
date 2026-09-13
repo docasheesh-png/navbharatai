@@ -178,26 +178,43 @@ describe('🔒 the guards that stop this coming back', () => {
   });
 });
 
-describe('🔴 TRIPWIRE — the open root cause, so it cannot drift further in silence', () => {
-  // NOT A FIX. The fast lane caps its plan call at 90s while the Kimi rung is allowed 120s, so the
-  // lane is structurally guaranteed to abandon calls the provider still considers alive — which is
-  // why that build logged provider events 148s AFTER it ended. Killing it means threading a per-call
-  // deadline into the provider chain, which touches every build (PROGRESS.md, rule 6).
+describe('the two caps, and the contract that now reconciles them', () => {
+  // ✅ CLOSED. This block was written as a TRIPWIRE on an OPEN root cause: the fast lane capped its
+  // plan call at 90s while the Kimi rung was allowed 120s, so the lane was structurally guaranteed to
+  // abandon calls the provider still considered alive — which is why that build logged provider
+  // events 148s AFTER it ended, on a sandbox still being billed.
   //
-  // Until then this pins BOTH numbers. If either moves, this test fails and whoever moved it has to
-  // look at the other one — which is exactly what nobody did when they drifted apart.
+  // `turnDeadline.ts` closed it: the lane's cap is handed DOWN as an absolute epoch-ms instant, so the
+  // call a lane starts can no longer outlive the wait. Its author wrote that when the threading
+  // landed this would "become the assertion that holds rather than the one that documents a debt" —
+  // this is that moment, and the wording is updated rather than left describing a fixed bug as open.
+  //
+  // 🔒 BOTH NUMBERS ARE STILL PINNED, and deliberately. They were never wrong — they answer different
+  // questions ("how long may this lane wait?" and "how long may this provider take?") and Kimi really
+  // does need 120s on a large prompt when the lane has 120s to give. What changed is that the lane's
+  // budget now WINS when it is smaller, instead of being a suggestion the provider never heard. If
+  // either number moves, this still fails and whoever moved it has to look at the other one.
   const ROUTE_SRC = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
   const SIMPLE = readFileSync(join(process.cwd(), 'src/server/AgentV3/SimpleBuilder.ts'), 'utf8');
 
-  it('records today’s inverted pair: plan cap 90s, Kimi rung 120s', () => {
+  it('records the pair the contract reconciles: plan cap 90s, Kimi rung 120s', () => {
     expect(SIMPLE).toContain('deps.planTimeoutMs ?? 90_000');
     expect(ROUTE_SRC).toContain("Number(process.env.AGENTV3_KIMI_TIMEOUT_MS) || 120_000");
   });
 
-  it('and states the invariant that is currently violated, so the direction of the fix is not lost', () => {
-    // parent ≥ child. 90_000 < 120_000 today; when the threading lands, this becomes the assertion
-    // that holds rather than the one that documents a debt.
+  it('the parent cap is still the SMALLER number — which is exactly why the contract has to exist', () => {
+    // A configured parent < child is no longer a bug, because the parent's budget now reaches the
+    // child. This records WHY the contract is load-bearing: remove it and the inversion is a live
+    // leak again, not a tidy-up.
     const planCap = 90_000, kimiCap = 120_000;
-    expect(planCap).toBeLessThan(kimiCap);   // ← the bug, written down
+    expect(planCap).toBeLessThan(kimiCap);
+  });
+
+  it('🔒 and the contract that reconciles them is actually wired — not merely present', () => {
+    // The assertions above would still pass if turnDeadline.ts existed and nothing called it, which
+    // is the state this whole block exists to make impossible to reach quietly.
+    const SIMPLE_SRC = readFileSync(join(process.cwd(), 'src/server/AgentV3/SimpleBuilder.ts'), 'utf8');
+    expect(SIMPLE_SRC).toContain('deadlineFromBudget');
+    expect(SIMPLE_SRC).toMatch(/deadlineAt/);
   });
 });

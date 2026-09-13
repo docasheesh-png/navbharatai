@@ -12,6 +12,7 @@
 // orchestrator can fall through to the next (ultimately Claude) provider.
 
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
+import { turnDeadline, BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE } from '../turnDeadline';
 import {
   toolDefsToOpenAI,
   transcriptToOpenAI,
@@ -104,7 +105,14 @@ export class OpenAiToolRunner implements TurnRunner {
       ? { thinking: { type: params.thinking ? 'enabled' as const : 'disabled' as const } }
       : {};
 
-    const timeoutMs = this.opts.timeoutMs ?? 120_000;
+    // The caller's remaining budget, if it gave us one, reconciled with this runner's own bound. With
+    // no deadline this is `this.opts.timeoutMs` unchanged — see turnDeadline.ts for why that matters.
+    const bound = turnDeadline(this.opts.timeoutMs ?? 120_000, params.deadlineAt);
+    // 🔴 REFUSE BEFORE SPENDING. The lane that asked has already run out of clock, so this call's answer
+    // can no longer be read by anybody. Starting it would buy nothing and bill for it — which is exactly
+    // the 148 seconds of post-mortem provider traffic in the report that produced this contract.
+    if (bound.expired) throw new Error(BUDGET_EXHAUSTED_MESSAGE);
+    const timeoutMs = bound.timeoutMs;
     const completion = await withTimeout(
       this.client.chat.completions.create({
         // The OpenAI-compatible provider has its own model ids, so an explicit option
@@ -116,9 +124,13 @@ export class OpenAiToolRunner implements TurnRunner {
         ...thinking,
       }),
       timeoutMs,
-      // "timed out" is deliberate: MultiProviderTurnRunner's isTimeout matches it, so a repeatedly
-      // stalling GLM/Kimi rung gets benched + re-raced instead of hanging the build again.
-      `OpenAI-compatible call (GLM/Kimi) timed out after ${timeoutMs}ms`,
+      // WHOSE CLOCK RAN OUT DECIDES THE WORDING, and it is not a detail. "timed out" is matched by
+      // MultiProviderTurnRunner's isTimeout, which benches a rung after two in a row — correct when the
+      // PROVIDER was slow, and a lie when we handed it eight seconds because the LANE had eight seconds
+      // left. A provider must never be benched for our budgeting.
+      bound.source === 'deadline'
+        ? BUDGET_REACHED_MESSAGE
+        : `OpenAI-compatible call (GLM/Kimi) timed out after ${timeoutMs}ms`,
     );
 
     const result = parseOpenAiCompletion(completion);

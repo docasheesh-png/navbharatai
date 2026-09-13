@@ -13892,7 +13892,7 @@ async function noteBuildOutcome(
         // ONE fast-lane model round trip. Returns the provider's stop reason alongside the text so the
         // continuation wrapper below can tell "the model finished" from "the model ran out of budget"
         // — a distinction the lane previously threw away, which is how a truncated app shipped as done.
-        const fastGenerateOnce = async (system: string, user: string): Promise<{ text: string; stopReason: string | null }> => {
+        const fastGenerateOnce = async (system: string, user: string, deadlineAt?: number): Promise<{ text: string; stopReason: string | null }> => {
           // #2 — capture this fast-lane model call's I/O into the diagnosis bundle. The fast lane
           // (Simple Builder / OneShot) does NOT go through AgentRunner, so its model calls were a
           // blind spot — a truncated (max_tokens) per-file generation is exactly what produces broken
@@ -13923,6 +13923,10 @@ async function noteBuildOutcome(
               // force their own ladder, so this is the model billed/recorded only when Claude delivers.
               model: fbModel, system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000,
               thinking,
+              // The lane's own remaining budget, carried into the provider chain so the call cannot
+              // outlive the wait (turnDeadline.ts). Undefined for every caller that does not set one,
+              // which is every lane except the fast lane's plan and contract calls today.
+              deadlineAt,
               onThinking: (delta: string) =>
                 events.emit({ type: 'stream_delta', agent: 'architect', id: fastTurnId, kind: 'thinking', delta, ts: Date.now() }),
             });
@@ -13953,8 +13957,8 @@ async function noteBuildOutcome(
         // on text we discarded. Continuing is provider-cap-agnostic (raising max_tokens only moves the
         // ceiling and can 400 on a provider whose real cap is lower), bounded to MAX_CONTINUATIONS, and
         // a continuation that FAILS never loses the work already produced — we keep what we have.
-        const fastGenerate = async (system: string, user: string): Promise<string> => {
-          const first = await fastGenerateOnce(system, user);
+        const fastGenerate = async (system: string, user: string, genOpts?: { deadlineAt?: number }): Promise<string> => {
+          const first = await fastGenerateOnce(system, user, genOpts?.deadlineAt);
           let text = first.text;
           let stopReason = first.stopReason;
           let attempts = 0;
@@ -13963,7 +13967,10 @@ async function noteBuildOutcome(
             events.emit({ type: 'narration', agent: 'architect', text: `✍️ That file list was longer than one response allows — continuing it (${attempts}/${MAX_CONTINUATIONS}) so nothing is left half-written…`, ts: Date.now() });
             let next: { text: string; stopReason: string | null };
             try {
-              next = await fastGenerateOnce(system, continuationPrompt(text));
+              // A CONTINUATION FACES THE SAME DEADLINE AS THE CALL IT CONTINUES. It is a fresh provider
+              // call, so without this the budget would bound only the first one and the continuation
+              // ladder would walk straight past it — the same gap the Claude retry loop had.
+              next = await fastGenerateOnce(system, continuationPrompt(text), genOpts?.deadlineAt);
             } catch (err) {
               // A failed continuation must never discard the complete files we already have.
               buildDiag.record({ phase: 'build', severity: 'warning', code: 'FASTLANE_CONTINUATION_FAILED', message: `A continuation of a truncated generation failed after ${attempts - 1} successful continuation(s) — keeping the files produced so far.`, autoResolved: false, detail: err instanceof Error ? err.message : String(err) });

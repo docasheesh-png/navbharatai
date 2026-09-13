@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { modelSupportsAdaptiveThinking } from './models';
 import { claudeBlockedInZone, NoClaudeInWeakBuildError } from './noClaudeZone';
+import { turnDeadline, BUDGET_EXHAUSTED_MESSAGE } from './turnDeadline';
 
 /**
  * ClaudeClient — the v5.0 engine's wrapper over the Anthropic SDK for native
@@ -126,6 +127,20 @@ export interface RunTurnParams {
    * deltas token-by-token when `thinking` is on and streaming is active.
    */
   onThinking?: (delta: string) => void;
+  /**
+   * ABSOLUTE epoch-ms instant after which the CALLER no longer wants this answer.
+   *
+   * THE BUG IT CLOSES (admin report 2026-09-13): the fast lane capped its plan call at 90 s while the
+   * Kimi rung's own client timeout was 120 s — a parent deadline SHORTER than its child's. `withTimeout`
+   * only races, so the abandoned call kept running: that build logged provider events 148 s after it had
+   * ended, on a sandbox still being billed. Nothing was misconfigured; the two numbers simply had no way
+   * to reach each other.
+   *
+   * Absolute, not a duration, so it composes through the multi-provider chain without any hop having to
+   * decrement it (see turnDeadline.ts). Omitted → every runner keeps its own bound exactly as before,
+   * which is what makes callers able to adopt it one at a time.
+   */
+  deadlineAt?: number;
 }
 
 /** The slice of ClaudeClient the AgentRunner loop depends on (DI/testing). */
@@ -310,6 +325,13 @@ export class ClaudeClient implements TurnRunner {
     if (claudeBlockedInZone(params.model)) {
       throw new NoClaudeInWeakBuildError(params.model);
     }
+    // THE CALLER'S BUDGET (turnDeadline.ts). Claude's bound is pinned on the SDK CLIENT, not per call,
+    // so this family could not be shortened per request at all — which is why the refusal is what
+    // matters here: a lane that has already run out of clock must not open a 120 s request whose answer
+    // nobody will read. Retries are held to the same deadline in createWithRetry below.
+    if (turnDeadline(llmRequestTimeoutMs(), params.deadlineAt).expired) {
+      throw new Error(BUDGET_EXHAUSTED_MESSAGE);
+    }
     const cache = params.cache !== false; // default ON
     const createParams: Record<string, unknown> = {
       model: params.model,
@@ -377,7 +399,7 @@ export class ClaudeClient implements TurnRunner {
       }
     }
 
-    const resp = await this.createWithRetry(createParams);
+    const resp = await this.createWithRetry(createParams, params.deadlineAt);
     return parseMessage(resp);
   }
 
@@ -411,7 +433,7 @@ export class ClaudeClient implements TurnRunner {
    * This keeps a long multi-step build alive through provider hiccups instead of
    * dying on the first blip.
    */
-  private async createWithRetry(createParams: Record<string, unknown>): Promise<AnthropicMessageLike> {
+  private async createWithRetry(createParams: Record<string, unknown>, deadlineAt?: number): Promise<AnthropicMessageLike> {
     let attempt = 0;
     for (;;) {
       try {
@@ -419,6 +441,12 @@ export class ClaudeClient implements TurnRunner {
       } catch (err) {
         attempt++;
         if (attempt > this.maxRetries || !isRetryableError(err)) throw err;
+        // 🔴 A RETRY IS A NEW CALL, AND IT MUST FACE THE SAME DEADLINE AS THE FIRST ONE. Without this,
+        // the budget bounded only the opening request and the retry ladder walked straight past it —
+        // which for this family is the expensive half, since each attempt carries the full 120 s bound.
+        // The ORIGINAL error is rethrown, not a budget one: what failed was the provider, and replacing
+        // its message would hide the real reason the build has nothing to show.
+        if (turnDeadline(llmRequestTimeoutMs(), deadlineAt).expired) throw err;
         await this.sleep(retryDelayMs(err, attempt, this.baseDelayMs));
       }
     }

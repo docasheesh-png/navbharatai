@@ -7,9 +7,33 @@
 // should notice and steer it to change approach instead of letting it burn the step budget.
 //
 // This is a PURE, deterministic detector: it counts identical tool calls (tool name + normalized input) and,
-// when the same call crosses a threshold, returns ONE corrective steer for that signature (never repeated,
-// never blocking — it only advises). Flag-gated (AGENTV3_LOOP_GUARD, default ON; =off disables). Best-effort:
-// a bad signature never throws.
+// when the same call crosses a threshold, returns ONE corrective steer for that signature. Flag-gated
+// (AGENTV3_LOOP_GUARD, default ON; =off disables). Best-effort: a bad signature never throws.
+//
+// 🔴 AND SINCE 2026-09-13 THE FINAL STEER'S 'BANNED' IS TRUE (f04421ef autopsy). It never was: this header
+// used to say "never blocking — it only advises" while the escalated text told the model "This call is
+// banned for the rest of this build". Nothing enforced it, so a model that ignored the words simply kept
+// calling — which is exactly what the reported build did, twice, for nine minutes. A capability the engine
+// announces and does not have is the state the second absolute rule forbids; either the claim goes or the
+// ban becomes real. The ban became real — see `PROBE_TOOLS` for the narrow set it applies to.
+
+/**
+ * 🔒 THE ONLY TOOLS A BAN MAY EVER APPLY TO — and the narrowness is the whole safety argument.
+ *
+ * These are READ-ONLY probes: they answer a question and change nothing. The SAME probe with the SAME
+ * input returning the same answer for the sixth time is useless by definition, which is precisely the
+ * loop this guard was written for (a weak model ran the identical `grep` six times, each returning no
+ * match, and never learned the thing it sought did not exist).
+ *
+ * ⚠️ `bash`, `write_file`, `edit_file` and every other state-changing tool are DELIBERATELY absent. A
+ * repeated `tsc --noEmit` looks identical to a loop and is usually a build legitimately converging —
+ * check, fix, check again. Blocking those would turn a guard against wasted time into a guard that stops
+ * a build from finishing, which is a far worse failure than the one it prevents. They still get the
+ * escalating STEER; they simply cannot be refused.
+ */
+export const PROBE_TOOLS: ReadonlySet<string> = new Set([
+  'grep', 'read_file', 'list_files', 'screenshot', 'console_errors', 'evaluate', 'browser_action',
+]);
 
 export interface RepeatProbeState {
   /** signature → how many times this exact call has been seen. */
@@ -20,10 +44,15 @@ export interface RepeatProbeState {
    * real loop, sparse enough never to spam a turn.
    */
   steerAt: Map<string, number>;
+  /**
+   * Signatures that reached the FINAL steer and are now genuinely refused — see `PROBE_TOOLS`. Populated
+   * only for read-only probes, so a ban can never stop a build from finishing.
+   */
+  banned: Set<string>;
 }
 
 export function newRepeatProbeState(): RepeatProbeState {
-  return { counts: new Map(), steerAt: new Map() };
+  return { counts: new Map(), steerAt: new Map(), banned: new Set() };
 }
 
 export function loopGuardEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -83,6 +112,8 @@ export function recordAndCheckRepeat(
   // saying nothing more. Now the next steer is scheduled at double the current count, so a model that
   // keeps repeating the same dead call is told again — louder each time — instead of silently looping.
   state.steerAt.set(sig, n * 2);
+  // The FINAL steer says "banned". Make that true — but only for a read-only probe (see PROBE_TOOLS).
+  if (n >= threshold * 2 && PROBE_TOOLS.has(toolName)) state.banned.add(sig);
   return repeatProbeSteer(toolName, n, threshold);
 }
 
@@ -109,6 +140,30 @@ export function repeatProbeSteer(toolName: string, times: number, threshold = 3)
       `• If an edit keeps failing, read_file the target FIRST and copy the exact current text before editing.\n` +
       `• Do not re-issue this identical call again. Take the next concrete step toward finishing the app.`;
   return head + body;
+}
+
+/**
+ * Is this exact call refused? Asked by the runner BEFORE dispatching, so a banned probe costs nothing at
+ * all — no sandbox round trip, no browser, no tokens spent on an answer already given five times.
+ *
+ * Returns false for every tool outside `PROBE_TOOLS`, whatever its count, and false when the guard is off.
+ * Pure over the injected state; never throws.
+ */
+export function isProbeBanned(state: RepeatProbeState, toolName: string, input: unknown): boolean {
+  try {
+    if (!PROBE_TOOLS.has(toolName)) return false;
+    return state.banned.has(probeSignature(toolName, input));
+  } catch {
+    return false;
+  }
+}
+
+/** What the model is told INSTEAD of the probe's answer. Honest about what happened and what to do. */
+export function bannedProbeMessage(toolName: string): string {
+  return `This \`${toolName}\` call was refused: you have already made the IDENTICAL call several times `
+    + 'in this build and were asked twice to stop. Repeating it cannot produce a different answer. '
+    + 'Accept what you already know, move to the next unfinished item, and if you are genuinely blocked '
+    + 'say so in your summary rather than probing again.';
 }
 
 /**

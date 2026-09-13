@@ -221,7 +221,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [allBuildsLoading, setAllBuildsLoading] = useState(false);
   const [allBuildsSearch, setAllBuildsSearch] = useState('');
   // Four filters, deliberately (see server/lib/buildListFilter.ts for why not more).
-  const [allBuildsStatus, setAllBuildsStatus] = useState<'all' | 'failed' | 'succeeded'>('all');
+  const [allBuildsStatus, setAllBuildsStatus] = useState<'all' | 'failed' | 'succeeded' | 'unknown'>('all');
   const [allBuildsDate, setAllBuildsDate] = useState<'all' | 'today' | '7d' | '30d'>('all');
   const [allBuildsUid, setAllBuildsUid] = useState('');
   const [allBuildsCounts, setAllBuildsCounts] = useState<{ all: number; failed: number; succeeded: number; unknown: number } | null>(null);
@@ -681,14 +681,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   }, [adminToken]);
 
   // ALL BUILDS browser helpers — the admin's window over EVERY workspace's durable reports.
-  const fetchAllBuilds = useCallback(async () => {
+  // ⚠️ TAKES EXPLICIT OVERRIDES, and that is not a convenience. React state is set
+  // asynchronously, so a control that calls `setX(v)` and then fetches would send the PREVIOUS
+  // value — the filter would always lag one click behind, which is a subtler version of the bug
+  // this whole change exists to fix. `Clear` uses this; the effect below passes nothing and reads
+  // live state.
+  const fetchAllBuilds = useCallback(async (override?: {
+    q?: string; status?: typeof allBuildsStatus; date?: typeof allBuildsDate; uid?: string;
+  }) => {
+    const q = override?.q ?? allBuildsSearch;
+    const status = override?.status ?? allBuildsStatus;
+    const date = override?.date ?? allBuildsDate;
+    const uid = override?.uid ?? allBuildsUid;
     setAllBuildsLoading(true);
     try {
       const params = new URLSearchParams();
-      if (allBuildsSearch.trim()) params.set('q', allBuildsSearch.trim());
-      if (allBuildsStatus !== 'all') params.set('status', allBuildsStatus);
-      if (allBuildsDate !== 'all') params.set('date', allBuildsDate);
-      if (allBuildsUid) params.set('uid', allBuildsUid);
+      if (q.trim()) params.set('q', q.trim());
+      if (status !== 'all') params.set('status', status);
+      if (date !== 'all') params.set('date', date);
+      if (uid) params.set('uid', uid);
       const qs = params.toString() ? `?${params}` : '';
       const r = await fetch(`/api/admin/all-builds${qs}`, { headers });
       const d = await r.json();
@@ -700,6 +711,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     finally { setAllBuildsLoading(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken, allBuildsSearch, allBuildsStatus, allBuildsDate, allBuildsUid]);
+
+  // Always the LATEST closure, so the effect above can leave `fetchAllBuilds` out of its deps (which
+  // would re-run it on every keystroke) without ever calling a stale one that forgets the search box.
+  const fetchAllBuildsRef = useRef(fetchAllBuilds);
+  fetchAllBuildsRef.current = fetchAllBuilds;
 
   const expandWorkspaceBuilds = useCallback(async (workspaceId: string) => {
     if (expandedWorkspace === workspaceId) { setExpandedWorkspace(null); setExpandedHistory([]); return; }
@@ -977,6 +993,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   useEffect(() => { if (activeTab === 'settings') { fetchPromos(); fetchUpdateCohort(); } }, [activeTab, fetchPromos, fetchUpdateCohort]);
   useEffect(() => { if (activeTab === 'revenue') { fetchCostTelemetry(); fetchFinOps(); } }, [activeTab, fetchCostTelemetry, fetchFinOps]);
   useEffect(() => { if (activeTab === 'reports') { fetchBuildReports(); fetchFirstPass(); } }, [activeTab, fetchBuildReports, fetchFirstPass]);
+  // 🔴 THE BUG THIS FIXES (admin screenshot 2026-09-13: "Failed" selected, worked builds still
+  // listed). Every control in the All-builds bar — the status chips, the date select, the user
+  // select — only called its setter. `fetchAllBuilds` was reachable ONLY from the Load button and
+  // the search box's Enter key, so the chip highlighted and the list never changed. Four dead
+  // controls, one missing effect.
+  //
+  // ⚠️ THE SEARCH BOX IS DELIBERATELY NOT IN THESE DEPS. It is free text; re-fetching per keystroke
+  // would hit the endpoint on every letter. It keeps its Enter/Load trigger, and the ref below is
+  // what lets this effect still send whatever the box currently holds.
+  useEffect(() => {
+    if (activeTab !== 'reports') return;
+    void fetchAllBuildsRef.current();
+  }, [activeTab, allBuildsStatus, allBuildsDate, allBuildsUid]);
   useEffect(() => { if (activeTab === 'userreports') fetchUserReports(); }, [activeTab, fetchUserReports]);
   const fetchLatencyAnomaly = useCallback(async () => {
     setAnomalyLoading(true);
@@ -2917,6 +2946,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     ['all', 'All', allBuildsCounts?.all],
                     ['failed', 'Failed', allBuildsCounts?.failed],
                     ['succeeded', 'Worked', allBuildsCounts?.succeeded],
+                    // Shown only when there ARE any: the chips used to read "All 100 · Failed 25 ·
+                    // Worked 70" and those five builds could be reached by no filter at all.
+                    ...(allBuildsCounts?.unknown ? [['unknown', 'No outcome', allBuildsCounts.unknown] as const] : []),
                   ] as const).map(([value, label, count]) => (
                     <button
                       key={value}
@@ -2925,6 +2957,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         allBuildsStatus === value
                           ? value === 'failed' ? 'border-rose-500/60 bg-rose-500/15 text-rose-200'
                             : value === 'succeeded' ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-200'
+                            // Amber, not indigo — indigo is "All", and two chips that look identical
+                            // when selected is how an admin loses track of what they are looking at.
+                            : value === 'unknown' ? 'border-amber-500/60 bg-amber-500/15 text-amber-200'
                             : 'border-indigo-500/60 bg-indigo-500/15 text-indigo-200'
                           : 'border-white/10 text-[#8b949e] hover:text-white hover:border-white/20'
                       }`}
@@ -2961,7 +2996,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
                   {(allBuildsStatus !== 'all' || allBuildsDate !== 'all' || allBuildsUid || allBuildsSearch) && (
                     <button
-                      onClick={() => { setAllBuildsStatus('all'); setAllBuildsDate('all'); setAllBuildsUid(''); setAllBuildsSearch(''); }}
+                      onClick={() => {
+                        setAllBuildsStatus('all'); setAllBuildsDate('all'); setAllBuildsUid(''); setAllBuildsSearch('');
+                        // Explicit, because Clear can change ONLY the search box — which the effect
+                        // ignores by design — and because the overrides beat React's async state.
+                        void fetchAllBuilds({ q: '', status: 'all', date: 'all', uid: '' });
+                      }}
                       className="text-[10px] font-bold px-2 py-1.5 rounded-lg text-[#8b949e] hover:text-white underline"
                     >
                       Clear

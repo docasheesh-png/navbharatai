@@ -273,6 +273,7 @@ import {
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { auditConnectedProject } from '../AgentV3/ConnectAudit';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, oneShotStillViable, oneShotSkipReason, parseFileBlocks } from '../AgentV3/OneShotBuilder';
+import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/laneFailure';
 import { shouldContinue, continuationPrompt, joinContinuation, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
@@ -325,7 +326,7 @@ import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective, classifyFailure } from '../lib/BuildRetrospectiveEngine';
 import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
-import { outcomeCodeOf } from '../AgentV3/BuildDiagnostics';
+import { outcomeCodeOf, providerFailuresLookDegraded } from '../AgentV3/BuildDiagnostics';
 import { estimateBuildTime, complexityFromPrompt, liveEtaTick } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
@@ -14293,12 +14294,21 @@ async function noteBuildOutcome(
         if (!sb.ok && classifyForOneShot(analysis?.startTier) && !oneShotStillViable(sb)) {
           buildDiag.record({ phase: 'build', severity: 'info', code: 'ONESHOT_SKIPPED', message: oneShotSkipReason(sb) ?? 'Skipped the one-shot fast lane — going straight to the full builder.', autoResolved: true });
         }
+        // 🔴 THE SECOND WAY THIS LANE WAS WASTED, and the one the file-count gate above cannot see
+        // (admin report 2026-09-13). There the simple lane's PLAN CALL timed out, so it measured
+        // nothing — `plannedFiles` stayed 0, which reads as "never measured" and leaves the one-shot
+        // viable. It then ran for 150 seconds on the SAME degraded provider chain that had just
+        // failed three times, and failed the same way. Re-running a lane against a provider that is
+        // timing out is not a retry; it is the identical failure at full price.
+        else if (!sb.ok && classifyForOneShot(analysis?.startTier) && !anotherLaneWorthTrying(sb.reason)) {
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'ONESHOT_SKIPPED', message: 'Skipped the one-shot fast lane: the previous lane failed because the engine did not respond in time, not because of the app — a second lane on the same engine would fail the same way. Going straight to the full builder.', autoResolved: true, detail: sb.reason });
+        }
         if (sb.ok) {
           if (sb.typecheckRan === false) {
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'VERIFY_DID_NOT_RUN', message: 'The fast-lane type-check could not execute in the sandbox (after one retry) — the app shipped unverified; the agentic readiness gate stays ON.', autoResolved: false });
           }
           fastResult(sb.summary, sb.filesWritten, sb.typecheckRan !== false);
-        } else if (classifyForOneShot(analysis?.startTier) && oneShotStillViable(sb)) {
+        } else if (classifyForOneShot(analysis?.startTier) && oneShotStillViable(sb) && anotherLaneWorthTrying(sb.reason)) {
           // 2) ONE-SHOT (secondary) — a single call still suits a TRIVIAL one-file app the manifest
           //    skips. Gated to the simple tiers only: a sonnet-tier (complex) prompt can never fit in
           //    one 8k-token call — it falls straight through to the agentic loop instead.
@@ -18131,12 +18141,35 @@ async function noteBuildOutcome(
         // spend the very budget free-tier protects). Instead, honestly invite the user to add credits
         // and finish on the strongest engine — converting the user to paid without shipping a broken app.
         if (freeTierBuildActive) {
-          // WHY it was empty decides what we may honestly say. A prompt with nothing to build from is
-          // not an engine limit, and asking such a user for money would be an upsell attached to our
-          // own gap. (The diversion above catches this case before a build starts; this covers the
-          // paths that still reach here — an edit turn, or an attachment that carried no instruction.)
+          // 🔴 TWO INDEPENDENT REASONS NOT TO ASK FOR MONEY, AND THEY COMPOSE — do not collapse them.
+          //
+          // (a) OUR OWN OUTAGE (admin report 2026-09-13). This message used to fire on EVERY free build
+          // that produced nothing, without asking why. In that report the engine was never the problem —
+          // the model's plan was correct and simply arrived 178s late because the providers were degraded
+          // (3 timeouts on one, 7 rate-limits out of 8 on the other) — so the user was invited to pay for
+          // OUR slowness. The evidence needed to tell the two apart had been recorded since 2026-09-01;
+          // nothing had ever asked for it.
+          //
+          // (b) NOTHING TO BUILD FROM (#2887). A prompt carrying no instruction is not an engine limit
+          // either, so `freeTierUpsellMessage` takes the cause and words itself accordingly.
+          //
+          // Degraded is tested FIRST because it is a statement about US and (b) is a statement about the
+          // PROMPT: when our providers were down we do not know whether the prompt was buildable, and
+          // blaming the user's wording for our outage is the same mistake in a politer sentence.
+          const degraded = providerFailuresLookDegraded(buildDiag.providerFailureBreakdown());
           const emptyCause = assessBuildInput(prompt).buildable ? 'engine' : 'no-instruction';
-          events.emit({ type: 'narration', agent: 'architect', text: freeTierUpsellMessage(emptyCause), ts: Date.now() });
+          events.emit({
+            type: 'narration',
+            agent: 'architect',
+            text: degraded ? providerDegradedMessage() : freeTierUpsellMessage(emptyCause),
+            ts: Date.now(),
+          });
+          if (degraded) {
+            buildDiag.record({
+              phase: 'build', severity: 'warning', code: 'UPSELL_SUPPRESSED', autoResolved: false,
+              message: 'Did not ask this user to add credits: the build failed because the engine did not respond, not because the app needed a stronger one. Charging for our own slowness is what this check exists to prevent.',
+            });
+          }
         }
       }
       // Admin rule (2026-07-07): the server's own eyes saw the preview NOT render after the heal

@@ -29,10 +29,20 @@ import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletRes
 //     a money-path failure must never be silently swallowed, but must also never block the
 //     user's build result.
 
+import type { WalletFeature } from './walletFeature';
+
 /** Oldest ledger entries roll off past this bound (doc-size protection; totals are unaffected). */
 export const MAX_WALLET_LEDGER_ENTRIES = 500;
 
 export interface WalletDebitTx {
+  /**
+   * WHICH FEATURE took this money (admin 2026-09-13).
+   *
+   * Optional only so a row written before this existed stays readable; every live caller passes one,
+   * and `spendByFeature` reports an untagged row as UNATTRIBUTED rather than guessing a feature for
+   * it — see `walletFeature.ts`.
+   */
+  feature?: WalletFeature;
   /** The customer-facing ₹ amount to debit (billedUsd × USD→INR rate). */
   billedInr: number;
   /** Unique per build (e.g. `${workspaceId}_${buildStartedAt}`) — the idempotency key. */
@@ -119,6 +129,7 @@ export function computeDebitedWallet(
       ? `${tx.description} — ${tokens.toLocaleString()} tokens (₹${billedInr.toFixed(2)})`
       : `${tx.description} — under ₹0.01, carried to your next charge`,
     buildRef: tx.buildRef,
+    ...(tx.feature ? { feature: tx.feature } : {}),
   };
   const nextLedger = [...ledger, ledgerEntry].slice(-MAX_WALLET_LEDGER_ENTRIES);
 
@@ -144,6 +155,8 @@ export function computeDebitedWallet(
 }
 
 export interface WalletRollupTx {
+  /** Which feature this bucket belongs to — see WalletDebitTx.feature. */
+  feature?: WalletFeature;
   /** The customer-facing ₹ amount to debit for this one turn. */
   billedInr: number;
   /** The bucket this turn belongs to, e.g. `ai_2026-08-02`. Turns sharing a ref share ONE ledger row. */
@@ -200,6 +213,7 @@ export function computeRolledUpDebit(
     timestamp: now,
     description: `${tx.description} — ${bucketTokens.toLocaleString()} tokens (₹${bucketInr.toFixed(2)})`,
     rollupRef: tx.rollupRef,
+    ...(tx.feature ? { feature: tx.feature } : {}),
   };
 
   // The updated row moves to the END so the ledger stays in time order and the ledger cap trims the
@@ -227,6 +241,25 @@ export function computeRolledUpDebit(
 export type WalletDebitResult =
   | { ok: true; tokensDebited: number; tokenBalance: number }
   | { ok: false; error: string };
+
+
+/**
+ * Record one charge against the PLATFORM's per-feature counters (admin 2026-09-13).
+ *
+ * 🔒 CALLED FROM HERE, THE ONE CHOKE POINT EVERY DEBIT PASSES THROUGH, rather than from each of the
+ * nine callers. A counter wired call-by-call is one that a tenth caller silently never joins — and
+ * the whole reason the admin could not see where money went is that per-call-site recording had
+ * already drifted exactly that way.
+ *
+ * Dynamically imported so the store's firebase-admin graph never loads for a caller that only wants
+ * the pure math, and fire-and-forget because telemetry must never cost a user their result.
+ */
+function recordFeatureSpend(tx: { feature?: WalletFeature; billedInr?: number }, userId: string): void {
+  if (!tx.feature || !(Number(tx.billedInr) > 0)) return;
+  void import('./FeatureSpendStore')
+    .then((m) => m.featureSpendStore.record(tx.feature as WalletFeature, Number(tx.billedInr), userId))
+    .catch(() => { /* telemetry only */ });
+}
 
 /**
  * Atomically debit a user's wallet for a finished build. Reads + writes the SAME doc the wallet
@@ -265,6 +298,7 @@ export async function debitWalletForBuild(
       if (result.applied) t.set(walletRef, result.wallet);
       return result;
     });
+    if (debited.applied) recordFeatureSpend(tx, userId);
     return {
       ok: true,
       tokensDebited: debited.tokensDebited,
@@ -312,6 +346,7 @@ export async function debitWalletRolledUp(
       if (result.applied) t.set(walletRef, result.wallet);
       return result;
     });
+    if (debited.applied) recordFeatureSpend(tx, userId);
     return {
       ok: true,
       tokensDebited: debited.tokensDebited,

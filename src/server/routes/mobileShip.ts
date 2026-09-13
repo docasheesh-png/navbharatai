@@ -327,6 +327,7 @@ export function registerMobileShipRoutes(app: Express): void {
           void appBuildStore.setLatestRun(identity.uid, String(owner), String(repo), String(runId));
           if (isAgentV3FreeUser(identity.uid, identity.email)) break;
           void debitWalletForBuild(getServerDb() as any, identity.uid, {
+            feature: 'mobile-build',
             billedInr: apkChargeInr(),
             buildRef: apkChargeRef(owner, repo, String(a.id)),
             description: chargeDescription(String(a.name)),

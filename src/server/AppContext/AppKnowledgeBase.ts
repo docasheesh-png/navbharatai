@@ -2230,7 +2230,16 @@ NOTE: Does NOT build apps (use NavBharatAI Pro for that).`,
   },
 
   // ─── SETTINGS ─────────────────────────────────────────────────────────────
-  {
+    {
+    id: 'wallet_history',
+    name: 'Where your balance went — your wallet history',
+    path: 'Wallet & Billing → your balance and its history',
+    description: 'Every rupee that leaves your NavBharatAI balance is recorded with the FEATURE that spent it, so "where did my balance go?" always has an answer. The features that can draw on your balance are: App building, Publishing an app, Android / iOS build, App Store purchase, Hosting plan, App hosting (daily), Doctor AI, Professionals AI, AI tools, your published app\'s own assistant, and Voice chat. Small assistant charges are grouped into ONE line per feature per day rather than one line per message — so the history stays readable and your purchase history is never pushed off the end. A build that did not succeed is never charged, and a service that reported no usage is charged nothing rather than an invented amount.',
+    howToUse: 'Open Wallet & Billing to see your balance and the list of what was charged. Each line names the feature, the tokens and the rupees. If a line says a feature you do not recognise, that feature is listed in the description above.',
+    relatedFeatures: ['recharge_tokens', 'hosting_plans'],
+    keywords: ['balance', 'wallet', 'kahan kharch hua', 'paisa kahan gaya', 'balance khatam', 'token khatam', 'history', 'kharcha', 'spending', 'charges', 'kitna kharch', 'bill'],
+  },
+{
     id: 'report_problem',
     name: 'Report a problem — tell NavBharatAI what went wrong',
     path: 'Sidebar menu → "Report a problem" · or SHAKE your phone anywhere in the app',

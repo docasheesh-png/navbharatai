@@ -119,6 +119,7 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage, uid?: string) => {
     billedSeconds = through;
     try {
       await debitWalletForBuild(getServerDb() as any, uid, {
+        feature: 'voice',
         billedInr: voiceSecondsCostInr(owed),
         buildRef: voiceDebitRef(callId, through),
         description: voiceChargeDescription(owed),

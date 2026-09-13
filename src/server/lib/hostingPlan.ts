@@ -293,6 +293,7 @@ export function computePlanPurchase(
   const debited = computeDebitedWallet(startWallet, {
     billedInr: tier.priceInr,
     buildRef,
+    feature: 'hosting-plan',
     description: `Hosting plan — ${tier.name} (${tier.days} days)`,
     // Paid money only — the gate above proved there is enough of it, and the gift must survive the
     // purchase so it can still do what it is for: build apps.
@@ -412,6 +413,7 @@ export function computeLazyRenewal(current: Record<string, any>, nowIso: string)
   const debited = computeDebitedWallet(w, {
     billedInr: price,
     buildRef: renewRef,
+    feature: 'hosting-plan',
     description: `Hosting plan — ${label} (auto-renewal, ${days} days)`,
     spends: 'paid-only',
   }, nowIso);

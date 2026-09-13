@@ -197,7 +197,7 @@ export function burnToolAction(uid: string | null | undefined, bucket: ToolBucke
 export function chargeToolAction(gate: Extract<ToolGateResult, { allow: true }>): void {
   void chargeForAiTurns(
     getServerDb() as any,
-    { userId: gate.uid, isFreeListed: gate.isFreeListed, hasActivePass: gate.hasActivePass },
+    { userId: gate.uid, isFreeListed: gate.isFreeListed, hasActivePass: gate.hasActivePass, feature: 'tools' },
     currentAiSpend(),
     usdInrRate(),
     Date.now(),

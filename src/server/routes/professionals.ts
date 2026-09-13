@@ -177,7 +177,7 @@ export function registerProfessionalsRoutes(app: Express): void {
       // Entirely inert while AI_WALLET_SPEND is off (the default), and never charges an unmeasured turn.
       void chargeForAiTurn(
         getServerDb() as any,
-        { userId: verifiedUserId, isFreeListed: gate.isFreeListed, hasActivePass: gate.hasActivePass },
+        { userId: verifiedUserId, isFreeListed: gate.isFreeListed, hasActivePass: gate.hasActivePass, feature: 'professionals' },
         spend,
         usdInrRate(),
         Date.now(),

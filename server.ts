@@ -18,6 +18,7 @@ import { responseCompression } from './src/server/lib/responseCompression';
 import { setDb as setSharedDb } from './src/server/lib/db';
 import { registerWalletRoutes } from './src/server/routes/wallet';
 import { registerSecretsRoutes } from './src/server/routes/secrets';
+import { registerAppLockRoutes } from './src/server/routes/appLock';
 import { registerPushRoutes } from './src/server/routes/push';
 import { registerSbomRoutes } from './src/server/routes/sbom';
 import { registerLegalRoutes } from './src/server/routes/legal';
@@ -660,6 +661,9 @@ setInterval(() => {
   // P-CGE.9 — deploy artifact generator (stateless → Dockerfile / compose / CI workflow).
   registerDeployArtifactsRoutes(app);
   registerSecretsRoutes(app);
+  // The App Lock's own PIN routes. Separate from the secrets CRUD above because the PIN now guards
+  // several parts of the app, not just the vault (admin 2026-09-13).
+  registerAppLockRoutes(app);
   registerPushRoutes(app); // Push-notification device-token registration (native mobile app)
   registerSbomRoutes(app);
   // PUBLIC legal pages (/privacy, /terms) — server-rendered HTML, no auth, no JavaScript required.

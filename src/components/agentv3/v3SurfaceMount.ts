@@ -36,6 +36,14 @@ export function shouldRenderV3Surface(activeView: string, v3BuildRunning: boolea
  * and `hidden` (display:none) when the surface is kept mounted in the background under another tab.
  * Pure + unit-testable.
  */
-export function v3SurfaceDisplayClass(activeView: string): 'contents' | 'hidden' {
+export function v3SurfaceDisplayClass(activeView: string, locked = false): 'contents' | 'hidden' {
+  /**
+   * 🔒 `locked` is the App Lock (admin 2026-09-13), and it reuses `hidden` ON PURPOSE rather than adding
+   * a third state. `hidden` is the branch this module already trusts to keep a mid-stream build alive
+   * while the surface is invisible — so a locked surface takes the exact path a backgrounded one takes,
+   * and the PIN card is rendered in its place by the caller. A gate that unmounted the surface instead
+   * would kill the build the user is waiting for, which is the failure this whole file exists to prevent.
+   */
+  if (locked) return 'hidden';
   return activeView === V3_VIEW ? 'contents' : 'hidden';
 }

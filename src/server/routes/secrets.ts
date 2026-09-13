@@ -3,18 +3,9 @@ import type { Express, Request, Response } from 'express';
 import { doc, getDoc, updateDoc, deleteDoc, setDoc, collection, addDoc, getDocs, query, where, getServerDb as getDb } from '../lib/serverDb';
 import { encrypt, decrypt, loadUserVaultSecrets, secretCreatedAtMs } from '../lib/secrets';
 import { planSecretWrite } from '../lib/secretScope';
-import { requireUserMatch, trackDevice, verifyFreshAuth, resolveAccountContact } from '../lib/authMiddleware';
-import {
-  unlockSecret, mintUnlockTicket, verifyUnlockTicket, UNLOCK_REFUSED_MESSAGE, TICKET_TTL_MS,
-  type UnlockMethod,
-} from '../lib/vaultTicket';
-import {
-  readPinRecord, writePinRecord, emptyPinRecord, hasPin, pinGate, afterWrongPin, afterCorrectPin,
-  pinRejectReason, newSalt, hashPin, matchesPin, newOtpCode, otpSendGate, afterOtpSent, otpCheck,
-  otpDelivery, otpEmailMessage, otpEmailSubject, isFreshSignIn, OTP_RESEND_COOLDOWN_MS,
-  MAX_PIN_ATTEMPTS, type OtpPurpose, type VaultPinRecord,
-} from '../lib/vaultPin';
-import { resolveEmailConfig, sendAlertEmail } from '../lib/alertEmail';
+import { requireUserMatch, trackDevice } from '../lib/authMiddleware';
+import { ticketFor } from '../lib/vaultTicketHttp';
+import { auditVault } from '../lib/vaultAudit';
 import { allowAfterCooldown } from '../lib/callCooldown';
 import { probeCredentials, realProbeFetch } from '../AgentV3/credentialProbe';
 
@@ -47,60 +38,20 @@ export function allowVerify(state: Map<string, number>, userId: string, now: num
  */
 
 /**
- * THE VAULT'S OWN DOOR — a 4-digit PIN (admin 2026-09-13: *"bas PIN banao, mobile number/email otp se
- * PIN banao, PIN (4 digit pin se hi open ho) … pin bhul jaye to, forget pin — otp — pin reset! waaki
- * sab hata do"*).
+ * THE VAULT'S OWN DOOR — the App Lock's 4-digit PIN.
  *
- * Everything below this line exists so that the routes which can hand back a DECRYPTED key refuse to do
- * so unless the person proved, moments ago, that they are the account owner. The rules live in
- * `vaultPin.ts` (the PIN, the lock-out and the OTP) and `vaultTicket.ts` (the ticket) as pure functions;
- * these routes are the plumbing and the only part that touches Firestore.
+ * 🔴 THE LOCK ITSELF NO LONGER LIVES IN THIS FILE, and the move is the point (admin 2026-09-13: *"yeh PIN
+ * system sirf 'secret and api key' ke liye nahi … general pin system banana hai"*). The PIN now guards
+ * several parts of the app, so it is owned by `routes/appLock.ts` and its rules by `lib/vaultPin.ts`.
+ * What stays here is the CHECK: the two routes below that can hand back a DECRYPTED key, or destroy one,
+ * refuse to act without a live ticket from that lock (`lib/vaultTicketHttp.ts`).
  *
- * 🔴 WHY THE PIN IS VERIFIED HERE AND NOT IN THE BROWSER. Four digits are 10,000 guesses; a client-side
- * check would be tried exhaustively in under a second, and a client that is TOLD whether a digit was
- * right has already given the attacker everything. So the browser sends the PIN, learns only
- * right-or-wrong, and earns a short-lived ticket on success. Five wrong attempts and the vault locks
- * itself for an escalating window — that lock-out, not the PIN's length, is what makes four digits safe.
+ * 🔒 WHY THAT SPLIT MATTERS FOR HONESTY. On most screens the App Lock protects the SCREEN — the data
+ * behind it is the user's own and their session already entitles them to it. Here it protects the DATA:
+ * the values stay encrypted on the server until a ticket is presented, so removing every line of the
+ * unlock UI would make these keys unreadable rather than public. That difference is real and is stated
+ * to the user rather than glossed over.
  */
-
-/** Where each user's PIN hash, lock-out state and pending OTP live. One document per user. */
-const VAULT_PIN = 'user_vault_pin';
-/** Where reveals and deletions are recorded. A vault without a log cannot answer "who read this key?". */
-const VAULT_AUDIT = 'secret_vault_audit';
-
-/** The ticket header. A header rather than a body field so GET-shaped calls could use it too. */
-export const UNLOCK_TICKET_HEADER = 'x-vault-unlock';
-
-/**
- * Read the unlock ticket off a request and confirm it belongs to this user, right now.
- *
- * Returns null on anything that is not a live ticket, and callers answer 401 — never a partial result.
- * A vault that returns SOME keys without proof is an open vault with extra steps.
- */
-function ticketFor(req: Request, userId: string, now = Date.now()): { method: UnlockMethod } | null {
-  const raw = req.header(UNLOCK_TICKET_HEADER) ?? (typeof req.body?.ticket === 'string' ? req.body.ticket : '');
-  if (!raw) return null;
-  return verifyUnlockTicket(String(raw), userId, now, unlockSecret());
-}
-
-/**
- * Record what happened, best-effort.
- *
- * Deliberately NOT awaited into the response and never allowed to fail the action: an audit write that
- * can break a delete would make the logging itself a denial-of-service on the user's own vault. A write
- * that fails is logged server-side, which is the honest outcome — we do not pretend it was recorded.
- */
-function auditVault(userId: string, action: string, detail: Record<string, unknown>): void {
-  const db = getDb() as any;
-  if (!db) return;
-  void (async () => {
-    try {
-      await addDoc(collection(db, VAULT_AUDIT), { user_id: userId, action, at: new Date(), ...detail });
-    } catch (err) {
-      console.error('[vault-audit] could not record', action, err instanceof Error ? err.message : err);
-    }
-  })();
-}
 
 export function registerSecretsRoutes(app: Express): void {
   app.get('/api/secrets/:userId', requireUserMatch('userId'), trackDevice('userId'), async (req: Request, res: Response) => {
@@ -256,234 +207,6 @@ export function registerSecretsRoutes(app: Express): void {
       res.json({ success: true, deleted: true })
     } catch (err) {
       res.status(500).json({ error: 'Failed to delete secret' });
-    }
-  });
-
-  // ════════════════════════════════════════════════════════════════════════════════════════════════
-  // THE PIN. Four endpoints: status → send a code → set the PIN → unlock with it.
-  // ════════════════════════════════════════════════════════════════════════════════════════════════
-
-  /** Load one user's PIN record, or a safe empty one. Throws only when the database itself is missing. */
-  async function loadPinRecord(userId: string): Promise<VaultPinRecord> {
-    const db = getDb() as any;
-    if (!db) return emptyPinRecord();
-    const snap = await getDoc(doc(db, VAULT_PIN, userId));
-    return snap.exists() ? readPinRecord(snap.data()) : emptyPinRecord();
-  }
-
-  /**
-   * Persist a PIN record.
-   *
-   * 🔒 A FAILED WRITE MUST FAIL THE REQUEST, which is the opposite of how the audit log above behaves,
-   * and the difference is deliberate: this record holds the lock-out counter. If a wrong-PIN attempt
-   * could be swallowed, an attacker whose writes always failed would get unlimited guesses — the
-   * lock-out would silently stop existing. So every caller awaits this and answers an error if it throws.
-   */
-  async function savePinRecord(userId: string, record: VaultPinRecord): Promise<void> {
-    const db = getDb() as any;
-    if (!db) throw new Error('vault store unavailable');
-    await setDoc(doc(db, VAULT_PIN, userId), { user_id: userId, ...writePinRecord(record), updated_at: new Date() }, { merge: true });
-  }
-
-  /** What the screen needs to decide which of the three states to render. Never reveals the PIN or code. */
-  app.get('/api/secrets/:userId/pin', requireUserMatch('userId'), async (req: Request, res: Response) => {
-    try {
-      const { userId } = req.params;
-      const now = Date.now();
-      const record = await loadPinRecord(userId);
-      const gate = pinGate(record, now);
-      const contact = await resolveAccountContact(userId);
-      const delivery = otpDelivery(contact);
-      res.set('Cache-Control', 'no-store, max-age=0');
-      res.json({
-        hasPin: hasPin(record),
-        locked: gate.locked,
-        lockedForMs: gate.lockedForMs,
-        attemptsLeft: gate.attemptsLeft,
-        maxAttempts: MAX_PIN_ATTEMPTS,
-        channel: delivery.channel,
-        destination: delivery.destination,
-        resendInMs: Math.max(0, record.otpSentAtMs + OTP_RESEND_COOLDOWN_MS - now),
-        /** True when a code has been sent and is still usable, so a reopened screen resumes mid-flow. */
-        codePending: !!record.otpHash && record.otpExpiresAtMs > now,
-      });
-    } catch (err) {
-      console.error('[vault-pin] status failed', err instanceof Error ? err.message : err);
-      res.status(500).json({ error: 'Could not check your vault just now. Please try again.' });
-    }
-  });
-
-  /**
-   * Send the verification code that authorises creating or resetting the PIN.
-   *
-   * 🔒 THE CODE IS NEVER RETURNED TO THE CLIENT, and the response does not say whether the account has
-   * an address — it says where the code WENT, masked, which the owner recognises and nobody else learns
-   * anything from.
-   */
-  app.post('/api/secrets/:userId/pin/otp', requireUserMatch('userId'), async (req: Request, res: Response) => {
-    try {
-      const { userId } = req.params;
-      const now = Date.now();
-      const purpose: OtpPurpose = String(req.body?.purpose ?? '') === 'reset' ? 'reset' : 'create';
-
-      const contact = await resolveAccountContact(userId);
-      const delivery = otpDelivery(contact);
-      if (delivery.channel !== 'email') {
-        // Honest, and it names the door that DOES work for this account rather than just refusing.
-        res.status(400).json({
-          error: delivery.channel === 'fresh-sign-in'
-            ? 'Your account has no email address, so we cannot send a code to it. Sign in again with your mobile number — that OTP is your verification — then create your PIN.'
-            : 'Your account has no email address or mobile number on it, so we cannot send a verification code. Add one to your profile, then come back.',
-          channel: delivery.channel,
-        });
-        return;
-      }
-
-      const record = await loadPinRecord(userId);
-      const gate = otpSendGate(record, now);
-      if (!gate.allowed) {
-        res.status(429).json({ error: gate.reason, waitMs: gate.waitMs });
-        return;
-      }
-
-      const cfg = resolveEmailConfig();
-      if (!cfg.configured) {
-        // NOT a silent failure and NOT a pretend send: the admin-facing reason is logged and the user is
-        // told plainly that the code could not be sent, so nobody sits waiting for an email that is
-        // never coming.
-        console.error('[vault-pin] cannot send code — email is not configured:', cfg.reason);
-        res.status(503).json({ error: 'We could not send your code just now. Please try again in a few minutes.' });
-        return;
-      }
-
-      const code = newOtpCode();
-      // The record is stored BEFORE the send, so a code that does reach the inbox always has a hash to
-      // check it against. The reverse order would produce codes that are genuinely delivered and
-      // genuinely unusable, which is the worst of both.
-      await savePinRecord(userId, afterOtpSent(record, code, purpose, now));
-
-      const sent = await sendAlertEmail({ ...cfg, to: [String(contact.email)] }, otpEmailMessage(code, purpose), {
-        subject: otpEmailSubject(),
-        footer: '— NavBharatAI\nYou are receiving this because someone asked to set the PIN on your saved keys.',
-      });
-      if (!sent.sent) {
-        console.error('[vault-pin] code email not sent:', sent.error);
-        res.status(502).json({ error: 'We could not send your code just now. Please try again in a moment.' });
-        return;
-      }
-
-      auditVault(userId, 'pin-code-sent', { purpose });
-      res.json({ sent: true, channel: 'email', destination: delivery.destination, resendInMs: OTP_RESEND_COOLDOWN_MS });
-    } catch (err) {
-      console.error('[vault-pin] send code failed', err instanceof Error ? err.message : err);
-      res.status(500).json({ error: 'Could not send your code just now. Please try again.' });
-    }
-  });
-
-  /**
-   * Create or reset the PIN.
-   *
-   * Creating and resetting are ONE endpoint on purpose: both need exactly the same proof, and a separate
-   * "reset" path would be a second place for that requirement to weaken. The ticket is returned with it
-   * so the user lands inside their keys instead of being asked for the PIN they just chose.
-   */
-  app.post('/api/secrets/:userId/pin', requireUserMatch('userId'), async (req: Request, res: Response) => {
-    try {
-      const { userId } = req.params;
-      const now = Date.now();
-      const pin = String(req.body?.pin ?? '').trim();
-      const reject = pinRejectReason(pin);
-      if (reject) {
-        res.status(400).json({ error: reject });
-        return;
-      }
-
-      const contact = await resolveAccountContact(userId);
-      const delivery = otpDelivery(contact);
-      let record = await loadPinRecord(userId);
-
-      if (delivery.channel === 'fresh-sign-in') {
-        // An account with no email proves itself by the mobile OTP it signs in with; `auth_time` in the
-        // SIGNED token is what we read, so this is not a claim the client can make on its own.
-        const fresh = process.env.VITEST ? { uid: userId, authTimeSec: Math.floor(now / 1000) } : await verifyFreshAuth(req);
-        if (!fresh || !isFreshSignIn(fresh.authTimeSec, now)) {
-          res.status(401).json({
-            error: 'Sign in again with your mobile number, then set your PIN.',
-            needsFreshSignIn: true,
-          });
-          return;
-        }
-      } else {
-        const check = otpCheck(record, String(req.body?.otp ?? ''), now);
-        // The attempt is recorded either way — a wrong code that cost nothing to try is unlimited tries.
-        await savePinRecord(userId, check.next);
-        record = check.next;
-        if (!check.ok) {
-          res.status(400).json({ error: check.reason });
-          return;
-        }
-      }
-
-      const salt = newSalt();
-      // A new PIN clears the lock-out too: the owner has just proved themselves through the account's own
-      // contact, which is strictly stronger proof than the PIN the counter was protecting.
-      const next = afterCorrectPin({ ...record, pinHash: hashPin(pin, salt), pinSalt: salt });
-      await savePinRecord(userId, next);
-      auditVault(userId, hasPin(record) ? 'pin-reset' : 'pin-created', {});
-      res.json({ success: true, ticket: mintUnlockTicket(userId, now, unlockSecret()), method: 'pin', expiresInMs: TICKET_TTL_MS });
-    } catch (err) {
-      console.error('[vault-pin] set failed', err instanceof Error ? err.message : err);
-      res.status(500).json({ error: 'Could not save your PIN just now. Please try again.' });
-    }
-  });
-
-  /** Open the vault with the PIN. The only place a PIN is ever compared, and it is compared here. */
-  app.post('/api/secrets/:userId/pin/unlock', requireUserMatch('userId'), async (req: Request, res: Response) => {
-    try {
-      const { userId } = req.params;
-      const now = Date.now();
-      const record = await loadPinRecord(userId);
-      if (!hasPin(record)) {
-        res.status(409).json({ error: 'Set up your PIN first.', needsSetup: true });
-        return;
-      }
-
-      const gate = pinGate(record, now);
-      if (gate.locked) {
-        const mins = Math.ceil(gate.lockedForMs / 60_000);
-        res.status(429).json({
-          error: `Too many wrong PINs. Try again in ${mins} minute${mins === 1 ? '' : 's'}, or use "Forgot PIN".`,
-          lockedForMs: gate.lockedForMs,
-        });
-        return;
-      }
-
-      const pin = String(req.body?.pin ?? '').trim();
-      if (!matchesPin(pin, record.pinSalt, record.pinHash)) {
-        const next = afterWrongPin(record, now);
-        // Awaited, and a write failure refuses the request: a lock-out counter that can be dropped is
-        // not a lock-out. See `savePinRecord`.
-        await savePinRecord(userId, next);
-        const after = pinGate(next, now);
-        auditVault(userId, 'pin-refused', { attempts_left: after.attemptsLeft });
-        if (after.locked) {
-          const mins = Math.ceil(after.lockedForMs / 60_000);
-          res.status(429).json({ error: `Too many wrong PINs. Your vault is locked for ${mins} minute${mins === 1 ? '' : 's'}.`, lockedForMs: after.lockedForMs });
-          return;
-        }
-        res.status(401).json({
-          error: `That PIN is not right. ${after.attemptsLeft} ${after.attemptsLeft === 1 ? 'try' : 'tries'} left before your vault locks.`,
-          attemptsLeft: after.attemptsLeft,
-        });
-        return;
-      }
-
-      await savePinRecord(userId, afterCorrectPin(record));
-      auditVault(userId, 'unlock', { unlock_method: 'pin' });
-      res.json({ ticket: mintUnlockTicket(userId, now, unlockSecret()), method: 'pin', expiresInMs: TICKET_TTL_MS });
-    } catch (err) {
-      console.error('[vault-pin] unlock failed', err instanceof Error ? err.message : err);
-      res.status(500).json({ error: UNLOCK_REFUSED_MESSAGE });
     }
   });
 

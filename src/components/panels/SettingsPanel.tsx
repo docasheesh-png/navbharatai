@@ -10,6 +10,8 @@ import { LEGAL_META } from '../../content/legal/meta';
 import { LegalDocPage } from './LegalDocPage';
 import { DangerZone } from '../settings/DangerZone';
 import { AdultContentToggle } from '../settings/AdultContentToggle';
+import { AppLockSettings } from '../settings/AppLockSettings';
+import { AppLockGate } from '../AppLockGate';
 import {
   type MotionMode, getStoredMotionMode, applyMotionMode,
   getStoredFontScale, applyFontScale, FONT_SCALE_MIN, FONT_SCALE_MAX, FONT_SCALE_STEP, FONT_SCALE_DEFAULT,
@@ -458,6 +460,19 @@ export function SettingsPanel({
           masonry grid (see the root motion.div) so a wide screen no longer shows the narrow,
           stretched-mobile column. Sub-screens (General, Connections, …) are designed for a single
           reading column, so they stay capped at max-w-xl. */}
+      {/* 🔒 THE `settings` AREA OF THE APP LOCK WRAPS THE CONTENT, NOT THE PANEL — and that is the whole
+          reason the gate is here and not around <SettingsPanel> in App.tsx.
+
+          Gating the panel would hide the sticky header above, including its ✕ Close button, so a user who
+          locked Settings and then opened it would be looking at a PIN card with no way back except the
+          sidebar. A lock must never be a trap: the header stays, the content is what closes.
+
+          The gate renders its children untouched when this area is not locked (the default for everyone),
+          so a user who never switched this on sees exactly the screen they saw before. */}
+      <AppLockGate
+        userId={user?.uid ?? ''}
+        area="settings"
+        render={() => (
       <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#0d1117]">
         <div
           className={cn(
@@ -816,6 +831,16 @@ export function SettingsPanel({
                             the tick or the buzz distracting, this IS an accessibility control. */}
                         <TouchFeedbackControl />
                      </div>
+
+                     {/* 🔒 APP LOCK (admin 2026-09-13): *"setting me general settings me, user ko option do
+                         kahan kahan pin lagana hai"*. One PIN, and the user ticks which parts of the app it
+                         guards. It sits directly under Accessibility because it is the other setting that
+                         changes how the whole app behaves rather than how one screen looks.
+
+                         ⚠️ Unlike every other control on this screen it does NOT persist on tap — see
+                         AppLockSettings for why (a stray tap would lock somebody out of a screen they use,
+                         and each save costs a PIN entry). */}
+                     <AppLockSettings userId={user?.uid} />
 
                      {/* The "Description" textarea was REMOVED here (admin 2026-08-14). It was
                          uncontrolled (`defaultValue`, no onChange, no save) and nothing anywhere read
@@ -1507,6 +1532,8 @@ export function SettingsPanel({
           </AnimatePresence>
         </div>
       </div>
+        )}
+      />
     </div>
   );
 }

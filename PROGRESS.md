@@ -51303,3 +51303,96 @@ is now the layering violation it always was.
   finishes, or those fields written live.
 - **The health-check's "no recognisable error" restart** is a retry around an undiagnosed failure. It
   recovered, so it is debt rather than a defect, and it is untouched here.
+
+---
+
+## 2026-09-13 — THE AUTOPSY'S MISSING SUBSYSTEM, BUILT: the build now KNOWS its own time budget
+
+Admin: *"han, build report me jo jo problem hai. sabhi ko fix karna hai. next time yeh error na aye!!"* —
+so the open items from the `f04421ef` autopsy are being worked through. This entry is the first two.
+
+### 🔴 FIX 1 — THE WALL CLOCK EXISTED ONLY AS A GUILLOTINE, AND THE MODEL WAS NEVER TOLD
+
+On the reported build the prompt was *"finish/fix the build so the app works end-to-end"*. After the
+typecheck was clean at 2m23s the engine browsed the running app for 91 seconds, ran an audit, fixed CSS
+and accessibility, **generated two test files**, **installed a dev dependency (80 seconds)**, and ran a
+production build — and at 9m49s was still going with no outcome.
+
+None of that is wrong work. It is wrong work **for the time remaining**, and nothing could say so: the
+clock was `buildTimedOut()` ending the build, `maxBuildMs` bounding it and `finalizeOnDeadline` cleaning
+up afterwards. **The model was told none of it**, so it optimised for a complete job because it had no
+reason to believe the job was nearly out of time.
+
+`buildBudgetSteer.ts` is that missing figure, delivered as a steer at 50% / 75% / 90% of the budget:
+- **half** — finish only what makes the app work; explicitly no tests, no new dependency, no polish, no
+  re-auditing something that already passed;
+- **wrapping** — stop exploring; make it build and run, then summarise;
+- **final** — stop everything except saving and writing an honest summary.
+
+🔒 **It is a steer, not a new cap.** It spends no model call and no tool call — the text rides the message
+the runner already appends after each turn, beside the loop-guard steer, through the same path. Nothing is
+forbidden in code. A build with no cap configured is never steered, so that case is byte-identical.
+
+⚠️ **Each stage speaks ONCE.** A budget warning repeated every turn is noise the model learns to skim,
+which is how a real warning stops working. And a build crossing two stages at once hears only the later,
+cumulative one.
+
+🔒 **It never overrides the user.** If tests (or a dependency) are the ONLY thing the user actually asked
+for, the steer says to do it. A budget rule that overruled the user's own request would be a worse failure
+than the overrun it prevents — test-locked.
+
+📌 **Verified it is not dead code**: `maxBuildMs: effectiveBuildSeconds * 1000` is in `baseRunnerOpts`
+(`agentv3.ts:13143`), which is spread into the architect runner and every heal/escalated runner.
+
+⚠️ **AND THE SURVEY THAT PRECEDED THIS WAS WRONG ON THE KEY POINT** — it reported "AgentRunner never reads
+a clock — it has no startedAt, no elapsedMs, no deadline parameter". It has all three (`buildStartMs` at
+:331, `maxBuildMs` at :321, `buildTimedOut` at :499). Checking rather than trusting made the fix much
+smaller: the numbers were already there and simply never spoken.
+
+### 🔴 FIX 2 — THE LOOP GUARD'S "BANNED" WAS A LIE, AND NOW IT IS NOT
+
+The escalated steer has always told the model *"This call is banned for the rest of this build"*, while
+`RepeatProbeGuard`'s own header said *"never blocking — it only advises"*. **Nothing enforced it.** So the
+reported build heard the warning twice and kept looping for nine minutes. A capability the engine ANNOUNCES
+and does not have is exactly the state the second absolute rule forbids: either the claim goes or the ban
+becomes real.
+
+The ban is now real — refused at the ONE dispatch choke point in `AgentRunner`, BEFORE the call is made, so
+a banned probe costs no sandbox round trip, no browser and no tokens.
+
+🔒 **AND IT IS DELIBERATELY NARROW, which is the whole safety argument.** `PROBE_TOOLS` holds read-only
+probes only — grep, read_file, list_files, screenshot, console_errors, evaluate, browser_action. The same
+probe with the same input returning the same answer a sixth time is useless by definition; that is the loop
+this guard was written for.
+
+⚠️ **`bash`, `write_file` and `edit_file` can NEVER be banned, however often they repeat.** A repeated
+`tsc --noEmit` looks identical to a loop and is usually a build legitimately converging — check, fix, check.
+Refusing those would turn a guard against wasted minutes into a guard that stops a build from FINISHING,
+which is a far worse failure than the one it prevents. They still get the escalating steer; they simply
+cannot be refused. Test-locked in both directions.
+
+### The TS6133 question, settled by running it rather than reasoning
+
+Earlier today I told the admin unused-import warnings were "cosmetic, zero user value", then **retracted
+it** on the grounds that `npm run build` runs `tsc -p tsconfig.build.json` and would fail. **The retraction
+was wrong.** Verified empirically with the scaffold's exact tsconfig and a real `tsc` run: with no
+`noUnusedLocals` an unused local and an unused parameter produce **no output and exit 0**; adding
+`noUnusedLocals` produces TS6133. The scaffold sets neither (`ViteReactProviderContents.ts:70-93`), and
+`tsconfig.build.json` only subtracts tests.
+
+So: **for a scaffold-default app it is cosmetic; for the reported app — an existing 23-file project whose
+own tsconfig evidently enables it — the errors were real and blocked `tsc`.** Both of my earlier statements
+were too absolute. The defect in that episode is narrower and still real: the fix was applied carelessly and
+removed a `MessageSquare` import that was in use at lines 274 and 326, breaking the build for 20 seconds.
+
+### Still OPEN from the autopsy
+
+- **Live cost/token totals in a mid-build report** — the recipe is known (call `setProviderTokens` /
+  `setCacheReadInputTokens` from `captureTurnUsage`, and add the missing `notify()`), but settle-time
+  numbers are RECONCILED and billable while mid-build ones are not, so they need a separate, clearly
+  unreconciled field rather than reusing the billable one.
+- **The ETA promises a number it does not have.** `ETA_BASIS` records `confidence 0.4` and no user-facing
+  line ever consults it; the countdown only stops after two broken promises. Not fixed here.
+- **Why GLM delivered 0 of 54 turns** — still unanswerable without a build that settles.
+- **The health-check's "no recognisable error" restart** — it prints "restarting once" but can print twice,
+  and `MAX_RECOVERY = 2` means two blind restarts. Cosmetic-but-dishonest wording; not fixed here.

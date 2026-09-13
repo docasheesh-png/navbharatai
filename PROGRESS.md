@@ -50990,3 +50990,100 @@ full seven-item list, how the PIN is created, that changing the toggles needs th
 strong-vs-screen-lock difference, and the words a user really types (`app lock kaise lagaye`, `pin lagao`,
 `lock hata do`, `pin bhul gaya`, `koi aur na dekhe`, `phone kisi ke hath`). `settings_general` and
 `settings_secrets` corrected to point at it.
+
+---
+
+## 2026-09-13 — AUTOPSY `a38c6fef` ("Music player for Android 16"): a working app was failed by a lane that had been abandoned twenty minutes earlier
+
+**The report.** 28.2 min · `ok: false` · release gate **RED** · readiness **26/100** · 311 timeline items
+(2 errors, 21 warnings) · 53 delivered model turns, **26 provider failures** (Kimi 8 timeouts, GLM 17
+rate-limits + 1 timeout) · cache hit **95.4%** · billed to the user **₹0** (correct — the build did not
+succeed) · real cost to NavBharatAI **≈ ₹44**.
+
+**What the report SAID failed the build:** readiness 26/100, from "11 component(s) created but never
+used" plus "No tests at all". That is the symptom.
+
+**What actually failed it.** The one-shot fast lane was abandoned at its 150 s deadline and the build
+moved on. `withTimeout` in `OneShotBuilder` only RACED — losing the race abandoned the WAIT, never the
+WORK — so the closure kept generating for a further **seventeen minutes**, through two output-ceiling
+continuations on Vertex, and then ran `await deps.writeFiles(parsed)`: **fourteen files written over the
+finished app the full builder had produced in the meantime.** The architect noticed at +1350 s, ran its
+own `rm`, and missed three (`src/icons.tsx`, `src/VolumeControl.css`, `src/types.d.ts`). The eleven
+unused exports in `icons.tsx` are the "11 components created but never used".
+
+The arithmetic closes exactly: `100 − (6 × 11 orphans) − 8 (no tests) = 26/100`, under the 50/100 bar →
+`READINESS_BLOCKER` (error) → `f.blockers > 0` → gate RED → `OUTCOME_RELEASE_GATE_RED` → `ok:false`.
+**Without the zombie's debris the score is 92/100 and the build ships.** The app itself rendered cleanly
+in a real browser (`RENDER_RESCUE`, `GREEN_GUARD_SAVE`, two clean typechecks) — the user was told their
+working app was not ready to use.
+
+Worse than debris: `src/main.tsx`, `src/App.css` and `src/data/songs.ts` were overwritten by the zombie
+and never rewritten by the architect, so **the abandoned lane's code shipped inside the delivered app** —
+and the integrity gate then dutifully wired the zombie's `App.css` into it.
+
+🔴 **THE PART THAT MATTERS MOST: this exact bug was root-caused in July and only half-fixed.**
+`SimpleBuilder.ts:656` carries the `lapsed` flag and a comment naming the StudySync incident — same
+race, same late write, same two-module-tree outcome. `OneShotBuilder` has the identical shape and never
+got one. **Why the sibling was missed (rule 3): it kept its own PRIVATE copy of `withTimeout`,** so a
+search for the shared helper never reached the file. The instance was fixed; the class was not.
+
+### The fixes
+
+1. **`laneWriteFence.ts` (new) — the architecture, not another convention.** Every fast lane now writes
+   through a writer bound to its own lease; opening another lane or handing off to the full builder kills
+   that lease, and a dead lease refuses the write. A lane that forgets to cancel itself, a deadline
+   implemented some new way, a lane written next year — none can produce a zombie write. Wired in
+   `routes/agentv3.ts`: `laneFence.open('simple-build')`, `laneFence.open('one-shot')`, and
+   `if (!result) laneFence.handoff();`. A refusal records **`ZOMBIE_WRITE_REFUSED`** naming the lane and
+   the paths — the original left no trace at all, which is why it took two months and a second incident.
+   ⚠️ The fence revokes on HANDOFF, never on timeout, so `SimpleBuilder`'s salvage write (which runs in
+   its own catch, before returning) still works — test-locked, because breaking it would turn the fix
+   into a regression.
+2. **`OneShotBuilder` — the lane's own `lapsed` guard**, matching `SimpleBuilder`'s proven shape, checked
+   before parsing and again before writing.
+3. **The private `withTimeout` copy is DELETED** — the file now imports the shared `asyncUtils` one, so
+   every lane that races a deadline is findable in one search. Test-locked against a third copy.
+4. **`oneShotStillViable` narrowed: a lane that TIMED OUT has proven the engine is stalling.** The old
+   rule read "no manifest" as "never measured, still worth a try" — right about the app's size, wrong
+   about everything else. It spent 150 s on a strictly LARGER call to the engine that had just stalled,
+   and that lane is the one that came back and overwrote the app. Only a timeout declines; a parse or
+   verify failure met a responsive provider and stays viable. `oneShotSkipReason` reports WHICH of the
+   two measurements ruled it out.
+5. **The release gate is now TOLD when a real browser rendered the app.** `previewVerifiedRendered` was
+   declared four lines BELOW the render-rescue block that proves it, so the strongest evidence this
+   platform can produce was physically unrecordable — and the verify block below is skipped for a rescued
+   build (`!renderRescued`), so nothing else set it. The gate printed *"a live preview came up but was
+   never confirmed to render, so nothing here was proven to RUN"* **1.4 seconds after watching it
+   render.** Declaration moved above; the rescue sets it where the proof is obtained.
+6. **`TIME_TO_FIRST_CALL` no longer blames setup for time a fast lane burned.** It claimed *"243s of
+   preparation — sandbox setup, project restore and secrets loading"* for a build whose own `SETUP_TIMING`
+   lines, in the same report, measured setup at **1.5 seconds**. The 243 s was two abandoned lanes
+   (90 + 150). New `BuildDiagnostics.abandonedLaneWindow` measures it from the lanes' own recorded handoff
+   events and says so. (The comment above that sentence had been written to fix an EARLIER
+   misattribution that "sent an autopsy to optimise install" — a confident wrong cause is worse than an
+   admitted unknown, because it gets acted on.)
+
+Tests: `tests/zombieLaneWrite.test.ts` (11) and `tests/buildReportHonesty.test.ts` (10). The two guards
+that matter were **verified to bite** — removing the `lapsed` guard, and replacing the lease check with
+the naive "is some lane open?", each fails its test. The honesty test replays the real build on an
+injected clock (setup 1.5 s, handoffs at 93 s and 243 s, first call at 264 s taking 21 s).
+
+### Open root causes — recorded, NOT silently patched (rule 6)
+
+- 🔴 **Kimi's 8 timeouts cost ~16 minutes of a 28-minute build.** I proposed cutting the 120 s call
+  timeout to 60 s and then **withdrew it against this very report's own evidence**: two Kimi calls that
+  eventually SUCCEEDED took 164.7 s and 108.2 s, and one of them wrote the app's largest file. A 60 s cut
+  would have destroyed real work to save wall-clock. The honest fix needs the latency DISTRIBUTION across
+  many builds, which nobody has measured — same shape as the open "10-minute slow-build threshold"
+  question. **Do not change this number from a single report.**
+- 🟡 **GLM's 429 storm persists** (17 rate-limits in one build) despite the pacer, the key pool and the
+  circuit breaker. It self-heals into Kimi, which is exactly what makes it invisible — a self-heal that
+  fires every build IS the ceiling.
+- 🟡 **`AGENTV3_DESIGN_GATE` is `on` but no heal ran.** `DESIGN_PAGE_INCONSISTENT` was recorded and
+  neither `DESIGN_HEALED` nor `DESIGN_PARTIALLY_HEALED` followed. Paid-for flag, finding but no repair.
+- 🟡 **`SANDBOX_PEAK_MEMORY` reported "not available on this machine (no cgroup accounting exposed)".**
+  The instrument shipped 2026-09-11 carries the rule "no RAM change to the template until it says it
+  fits" — so that decision is now blocked, quietly, by an instrument that never answers.
+- 🟡 **The sandbox was 95% idle** (22.7 of 23.8 min), because the build spent its time waiting on model
+  calls rather than touching the machine. Billed either way.
+- 🟡 **ETA said ~3 min; the build took 28.2.** A 9× miss on the number the user plans around.

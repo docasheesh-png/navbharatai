@@ -135,6 +135,34 @@ rule says *how* to fix; this fifth rule says *every real report is the trigger a
 of what to fix*. Both are non-negotiable and reinforce the one absolute rule (never break the
 app). Run all four mandatory steps, in order, every time:
 
+### 🫰 THE BAR EVERY AUTOPSY IS MEASURED AGAINST (admin-mandated 2026-09-13, verbatim)
+
+> *"NavBharatAI koi bhi app — kitni bhi badi aur complex — bina kisi struggle ke, minutes me bana de.
+> Aisa lage ki yeh app banana to baaye haath ka kaam hai, chutkiyon 🫰 ka kaam hai!
+> Jo jo problem aayi hai, unka root cause dhoond ke DNA 🧬 level par problem jad se khatam karni hai."*
+
+**So "the build succeeded" is NOT the bar. The bar is that it looked EFFORTLESS** — big or small, simple
+or complex, the app arrives in minutes and nothing about the run reads as a struggle. Judge every report
+against that, not against whether it eventually produced something:
+
+- **A retry, a fallback, a heal, a long silence — each is a visible struggle even when it ends in success.**
+  A build that self-heals three times has not met this bar; it has hidden a failure behind a green tick.
+  Count them, and kill the reason each one existed.
+- **Complexity must not cost struggle.** If a big app struggles more than a small one, that gap IS the
+  defect — name it and remove it. "It was a complex app" is an explanation, never an excuse.
+- **Minutes, and the minutes must be WORKING minutes.** Time spent waiting on a stalled call, on an
+  abandoned lane, or on a gate nobody reads is time the user is watching a spinner. Every such minute is
+  a ledger item in its own right, whatever the build's final verdict.
+- **DNA level, not the instance.** Fix the CONDITION that let the problem exist, then make the wrong
+  branch impossible (the 50/50 law below). A fix that only stops today's occurrence is half a fix.
+
+⚠️ **The real cost of stopping at "it works": autopsy `a38c6fef` (2026-09-13).** The exact same
+zombie-write bug had been root-caused in July, fixed in ONE of the two lanes that carry it, and the
+sibling was never hunted — because that lane kept a private copy of the shared helper, so no search
+reached it. Two months later it failed a 28-minute build whose app had already rendered perfectly, and
+told the user their app was not ready. **The instance was fixed; the class was not. That is what this
+bar forbids.**
+
 **Step 1 — Read the WHOLE report and build an itemized ledger (every flaw, however small).**
 Read the report end to end — never a truncated tail. Enumerate EVERY issue, imperfection,
 warning, retry, and rough edge, no matter how tiny, and classify each into exactly one bucket,

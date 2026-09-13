@@ -706,6 +706,30 @@ export class BuildDiagnostics {
     return { seconds: best.seconds, after: best.after.split('\n')[0].slice(0, 120) };
   }
 
+  /**
+   * How much of the pre-first-call window was spent inside fast build lanes that were started and then
+   * abandoned. Measured from the lanes' OWN recorded handoff events, so it is evidence rather than an
+   * estimate; returns `null` when no lane was abandoned (then the ordinary setup sentence is correct).
+   *
+   * Static + pure so it is unit-testable without a build. See `recordTimeToFirstCall` for why it exists.
+   */
+  static abandonedLaneWindow(
+    issues: Array<{ ts: number; code?: string }>,
+    startedAt: number,
+  ): { seconds: number; lanes: number } | null {
+    // Only the HANDOFF events — the moment a lane gave up. A lane that SUCCEEDED never reaches this
+    // code path (its build is already done), so there is nothing to exclude.
+    const HANDOFF = new Set(['SIMPLE_BUILD_FALLBACK', 'ONESHOT_FALLBACK']);
+    const marks = (issues ?? []).filter((i) => i && typeof i.ts === 'number' && HANDOFF.has(String(i.code)));
+    if (marks.length === 0) return null;
+    // The LAST handoff is where the window really ended: the lanes run in sequence, so the final one's
+    // timestamp is how far into the build the fast path was still being attempted.
+    const last = Math.max(...marks.map((m) => m.ts));
+    const seconds = Math.round(Math.max(0, last - startedAt) / 1000);
+    if (seconds <= 0) return null;
+    return { seconds, lanes: marks.length };
+  }
+
   private recordTimeToFirstCall(latencyMs?: number): void {
     if (this.llmCalls.length > 0) return; // only the first
     const elapsedMs = Math.max(0, this.now() - this.startedAt);
@@ -726,13 +750,32 @@ export class BuildDiagnostics {
       // this first call — and a resumed sandbox already carries node_modules. Naming it here sent an
       // autopsy to optimise install when the real cost was the cold sandbox and its round-trips.
       : `${seconds}s of preparation before the build's first model call began — sandbox setup, project restore and secrets loading all happen in it, and the user waits through every second. (Dependency install is NOT part of this wait: it runs in the background boot, concurrent with the build.) The first call itself then took ${Math.round(lat / 1000)}s; that is model time, not setup.`;
+    // …UNLESS A FAST LANE ALREADY BURNED THAT WINDOW, IN WHICH CASE NONE OF THE ABOVE IS TRUE
+    // (autopsy a38c6fef, 2026-09-13). A lane's model call is not RECORDED until it returns, so a lane
+    // that is abandoned at its deadline leaves this window looking like pure setup. In the real report
+    // that produced a confident "243s of preparation … sandbox setup, project restore and secrets
+    // loading" for a build whose own SETUP_TIMING lines, in the same report, measured setup at 1.5
+    // SECONDS. The 243s was two fast lanes started and abandoned (90s + 150s).
+    //
+    // The irony worth keeping: the comment above this sentence was itself written to fix an EARLIER
+    // misattribution that "sent an autopsy to optimise install". A confident wrong cause is worse than
+    // an admitted unknown, because it is acted on. So when the timeline proves a lane consumed this
+    // window, the sentence says that instead — it is measured from real recorded events, never guessed.
+    const abandoned = BuildDiagnostics.abandonedLaneWindow(this.issues, this.startedAt);
+    const attributed = abandoned
+      ? `${seconds}s passed before the build's first model call was recorded, and MOST OF IT WAS NOT SETUP: `
+        + `${abandoned.seconds}s went to ${abandoned.lanes} fast build lane(s) that were started and then abandoned at their `
+        + `deadline. Their model calls are only recorded when they return, so the window looks like preparation and is not. `
+        + `Setup itself is measured separately — read the SETUP_TIMING lines for the real number.`
+        + (lat === undefined ? '' : ` The first recorded call then took ${Math.round(lat / 1000)}s.`)
+      : message;
     // WHERE THE TIME WENT — see longestSilentGap. Appended rather than replacing the sentence above,
     // because the total and the biggest single stretch answer two different questions, and the second
     // one is what an autopsy actually acts on. Only stated when a real gap exists.
     const gap = BuildDiagnostics.longestSilentGap(this.issues, this.startedAt, this.now() - (lat ?? 0));
     const withGap = gap
-      ? `${message} The longest single stretch with NOTHING recorded was ${gap.seconds}s, beginning right after: "${gap.after}" — that is where to look first (it names when the silence started, not what caused it).`
-      : message;
+      ? `${attributed} The longest single stretch with NOTHING recorded was ${gap.seconds}s, beginning right after: "${gap.after}" — that is where to look first (it names when the silence started, not what caused it).`
+      : attributed;
     this.record({
       phase: 'plan',
       // Loud past the point where a user starts wondering whether anything is happening. Judged on

@@ -28,7 +28,8 @@ import { goldenScaffoldForPrompt, goldenScaffoldFiles } from '../AgentV3/goldenS
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
 import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
-import { measuredRemainingMs, measuredEtaText, firstEtaLine } from '../AgentV3/progressEta';
+import { measuredRemainingMs, measuredEtaText, firstEtaLine, formatEtaRange } from '../AgentV3/progressEta';
+import { describeRunnerChain, chainProviders, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction } from '../AgentV3/AuthenticityAnalysis';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
@@ -271,7 +272,7 @@ import {
 } from '../AgentV3/RouteSmokeCheck';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { auditConnectedProject } from '../AgentV3/ConnectAudit';
-import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, oneShotStillViable, parseFileBlocks } from '../AgentV3/OneShotBuilder';
+import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, oneShotStillViable, oneShotSkipReason, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { shouldContinue, continuationPrompt, joinContinuation, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
@@ -290,6 +291,7 @@ import { projectModeEnabled, detectMegaProject, isContinuationMessage, parsePlan
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
+import { createLaneWriteFence } from '../AgentV3/laneWriteFence';
 import { analyzePreviewHtml, hasFrontendSource, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
 import { checkFeaturePresence, featurePresenceSummary, featurePresenceRepairPrompt, featureHealEnabled } from '../AgentV3/FeaturePresence';
 import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, suitePresentButRunnerMissing, withSandboxBrowsers } from '../AgentV3/testRunner';
@@ -414,6 +416,7 @@ import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
 import { classifyIntentSmart, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild } from '../AgentV3/IntentClassifier';
+import { assessBuildInput } from '../AgentV3/buildableInput';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
 import { realismIntent } from '../lib/realismIntent';
@@ -2693,7 +2696,7 @@ export function enforceNoClaude<T extends { name: string }>(chain: T[], noClaude
   return [...kept.filter((r) => r.name !== 'CLAUDE_HAIKU'), ...haiku];
 }
 
-function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; cheapOnly?: boolean; free?: boolean; flagship?: boolean; heal?: boolean; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void }): TurnRunner {
+function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; cheapOnly?: boolean; free?: boolean; flagship?: boolean; heal?: boolean; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void; onChain?: (chain: ChainRung[]) => void }): TurnRunner {
   // Explicit env overrides always win; absent them the cost-ladder tier model
   // (when supplied) is preferred over the fixed gemini-2.5-pro default.
   const buildModel = (envName: string): string =>
@@ -2799,6 +2802,9 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; a
   // a Sonnet call onto a free build — and keeps ONLY the model-pinned 'CLAUDE_HAIKU' backstop, moved to
   // the END ("haiku … to last me"). Weak order: cheap floor → Vertex/Gemini → Haiku last.
   const guardedChain = enforceNoClaude(chain, opts?.noClaude === true);
+  // Hand the caller the chain it is ACTUALLY getting, so the build report can say which providers were
+  // configured — the only way to read "GLM: 0 turns" as "never reached" rather than "never present".
+  try { opts?.onChain?.(guardedChain as ChainRung[]); } catch { /* observation only — never affects a build */ }
   return makeMultiProviderTurnRunner(guardedChain, {
     onProviderUsed: (used, from) => {
       if (from.length) console.log(`[AGENTV3] build turn via ${used} (after ${from.join(' → ')})`);
@@ -9472,6 +9478,48 @@ async function noteBuildOutcome(
         'classifyIntentSmart',
       );
     } catch { /* LLM upgrade is best-effort — keyword result stands */ }
+
+    /**
+     * 🔴 NOTHING TO BUILD FROM — the 5 minute 57 second question (build report 2026-09-13, 541979d2).
+     *
+     * The whole prompt was one private Google Drive link to a 169 MB video. The engine planned a file
+     * list for an app it had invented (a 150s model call), ran the Simple Builder (timed out at 90s),
+     * abandoned the One-Shot (150s), opened the dead link, ASKED THE USER WHAT TO BUILD, decided the
+     * attempt had been too WEAK, retried on a stronger model, opened the same dead link again, asked
+     * the same question a second time — and closed by telling them to buy credits for a stronger
+     * engine. Three provider timeouts and eight failures happened inside that. On the free tier every
+     * token of it was ours.
+     *
+     * The question at minute four was always the right answer. Routing the turn to CHAT reaches it in
+     * seconds, on the cheap path, with no sandbox and no builder — and the model's own reply is
+     * already correct here: it produced exactly the right words, twice, after six minutes of trying
+     * to build first. What was wrong was never the answer. It was the routing.
+     *
+     * ⚠️ DELIBERATELY NARROW, because refusing a real prompt would be far worse than the bug it fixes.
+     * Only `empty` and `link-only` divert — never `too-short`, which would catch "continue" and
+     * re-open the continuation amnesia this repo has already fixed once. An attachment counts as
+     * content and is never diverted; nor is an import turn; nor an edit to an existing project, where
+     * a short message legitimately means "carry on".
+     */
+    const inputCheck = assessBuildInput(prompt);
+    if (
+      !inputCheck.buildable
+      && (inputCheck.reason === 'link-only' || inputCheck.reason === 'empty')
+      && intent !== 'chat'
+      && intent !== 'edit_existing'
+      // An IMPORT turn carries its content outside the prompt, so a bare URL there is not "nothing".
+      // Checked from the same two expressions `hasImportIntent` is built from, because that constant
+      // is declared further down and this must run BEFORE anything is spent.
+      && zipImports.length === 0
+      && !(typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== '')
+      && rawAttachments.length === 0
+    ) {
+      // No diagnostics recorder exists this early — by design, since the whole point is to decide
+      // before a build (and therefore a build report) begins. The honest reply IS the record.
+      console.log(`[AGENTV3] nothing to build from (${inputCheck.reason}) — answering as a question instead of starting a build`);
+      intent = 'chat';
+    }
+
     /**
      * WHAT THE USER ASKED FOR, captured BEFORE the workspace's state gets a vote.
      *
@@ -11360,6 +11408,13 @@ async function noteBuildOutcome(
         if (cacheRead > 0) {
           billingCtx.cacheReadInputTokens = (billingCtx.cacheReadInputTokens ?? 0) + cacheRead;
         }
+        // Autopsy f04421ef — mirror the running ledger into the report so a build report READ WHILE THE
+        // BUILD IS STILL RUNNING carries real token numbers. Before this, such a report printed
+        // "GLM: 54 call(s) · 0 in · 0 out" and those zeros were read (by me, to the admin) as a measured
+        // zero rather than an empty field. setLiveUsage is a strictly separate channel from
+        // setProviderTokens and can never reach billing — see its doc comment.
+        try { buildDiag.setLiveUsage(providerLedger.byProvider(), billingCtx.cacheReadInputTokens); }
+        catch { /* diagnostics are best-effort — never affects a build */ }
         // THE MID-BUILD STOP. Every build turn and every heal turn passes through here — the same
         // choke-point discipline the wallet floor uses, and for the same reason: a ceiling written
         // into the call sites is one the next call site never gets. Pricing the ledger is a loop over
@@ -11461,6 +11516,12 @@ async function noteBuildOutcome(
         onProviderUsed: captureProvider,
         onTurnComplete: captureTurnUsage,
         onProviderError: recordProviderFallback,
+        // Autopsy f04421ef — see runnerChainSummary.ts. Recorded once (record() collapses an identical
+        // repeat), admin-only like every other provider name.
+        onChain: (chain) => {
+          try { buildDiag.setProviderChain(describeRunnerChain(chain), chainProviders(chain)); }
+          catch { /* diagnostics are best-effort — never affects a build */ }
+        },
       });
       // WHY THIS BUILD'S ENGINES ARE IN THIS ORDER. The floor can now put the healthier cheap coder
       // first (floorLead.ts), which changes WHICH engine writes the user's app — so it is stated in
@@ -11634,10 +11695,17 @@ async function noteBuildOutcome(
           const est = estimateBuildTime(etaComplexity, past);
           etaTotalMs = est.estimateMs; // feed the live heartbeat so it can revise the remaining time
           etaBaseMs = est.estimateMs;  // the ORIGINAL estimate — sizes each overrun re-baseline step
+          // RECORD WHAT THE USER WAS ACTUALLY TOLD, not the point estimate behind it (autopsy f04421ef).
+          // This line used to read "ETA ~3 min · confidence 0.4" for a build that ran past twenty
+          // minutes — and the admin reading that report would reasonably conclude the user had been
+          // promised three minutes. They had not: `firstEtaLine` shows the BAND and says outright that
+          // the figure is a first guess. The admin's own report was the least honest surface in the
+          // system, which is backwards. It now carries the same band the user saw, verbatim.
+          const etaShown = firstEtaLine(est, past.length);
           buildDiag.record({
             phase: 'plan', severity: 'info', code: 'ETA_BASIS',
-            message: `ETA ${est.etaText} · basis ${est.basis} · confidence ${est.confidence}`,
-            detail: etaBasisNote(past),
+            message: `ETA ${formatEtaRange(est.lowMs, est.highMs, est.estimateMs)} (midpoint ${est.etaText}) · basis ${est.basis} · confidence ${est.confidence}`,
+            detail: `${etaBasisNote(past)} Shown to the user: "${etaShown.replace(/^⏱️\s*/, '')}"`,
             autoResolved: true,
           });
           // THE POINT ESTIMATE IS NOT WHAT WE KNOW. `estimateBuildTime` returns lowMs/highMs and a
@@ -11645,7 +11713,7 @@ async function noteBuildOutcome(
           // midpoint as "~3 min" was the code being more honest with itself than with the user. A first
           // build also now says outright that the figure will be replaced, which is what makes the later
           // measured update read as information instead of as a broken promise.
-          events.emit({ type: 'narration', agent: 'architect', text: firstEtaLine(est, past.length), ts: Date.now(), id: 'eta-live' });
+          events.emit({ type: 'narration', agent: 'architect', text: etaShown, ts: Date.now(), id: 'eta-live' });
         } catch { /* ETA is best-effort — never affects the build */ }
       }
       const budget = maxBuildBudgetUsd();
@@ -13906,7 +13974,7 @@ async function noteBuildOutcome(
           }
           return text;
         };
-        const fastWrite = async (files: { path: string; content: string }[]): Promise<void> => {
+        const fastWriteRaw = async (files: { path: string; content: string }[]): Promise<void> => {
           // Write files with bounded concurrency instead of one serial E2B round trip each (SPEED).
           // Paths are distinct by construction (de-duped by path upstream), so concurrent writes to
           // different files never conflict; the E2B round-trip latency (~150-300ms each) now overlaps.
@@ -13914,6 +13982,30 @@ async function noteBuildOutcome(
           await mapWithConcurrency(files, 6, (f, i) =>
             dispatcher.dispatch({ id: `fast-w${i}`, name: 'write_file', input: { path: f.path, content: f.content } }, 'frontend'),
           );
+        };
+        // THE WRITE FENCE (autopsy a38c6fef, 2026-09-13). Every fast lane writes through this one
+        // function, so this is the single place where "is this lane still allowed to touch the
+        // workspace?" can be answered for all of them — including lanes nobody has written yet. A lane
+        // that has been handed off is refused here even if it forgot to stop itself, which is what turns
+        // the July `lapsed` convention into an architecture. See `laneWriteFence.ts` for the full story.
+        const laneFence = createLaneWriteFence(fastWriteRaw, ({ lane, holder, paths }) => {
+          // EVIDENCE, LOUDLY. The original zombie write left no trace whatsoever — the autopsy had to
+          // reconstruct it from write timestamps two months after an identical incident. A refusal now
+          // names itself in the build report, so this class can never again be invisible (rule 5).
+          try {
+            buildDiag.record({
+              phase: 'build', severity: 'warning', code: 'ZOMBIE_WRITE_REFUSED',
+              message: `An abandoned build lane (${lane}) finished late and tried to write ${paths.length} file(s) `
+                + `over the app that replaced it — refused. The app you have is the one ${holder ?? 'the full builder'} produced.`,
+              autoResolved: true,
+              detail: paths.slice(0, 20).join(', '),
+            });
+          } catch { /* diagnostics are best-effort — the refusal itself is not */ }
+        });
+        // Kept for the route's OWN in-lane writes (the deterministic mispath auto-fix inside fastVerify,
+        // and the one-shot's post-success repair). Both run while their lane still owns the workspace.
+        const fastWrite = async (files: { path: string; content: string }[]): Promise<void> => {
+          await fastWriteRaw(files);
         };
         const fastPreview = async (): Promise<void> => {
           // FOUNDATION GUARANTEE (deep-test Level-1, build 7c56b35a): the file-list planner can OMIT the
@@ -14144,7 +14236,7 @@ async function noteBuildOutcome(
           merge: mergeWorkspaceFiles,
           emit: (e) => events.emit(e),
         });
-        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
+        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
         // OBSERVABILITY (deep-test App #2, 2026-07-13): when the fast lane falls back after a verify
         // failure, record the ACTUAL compiler error text so the report can be mined for the true cause
@@ -14186,7 +14278,7 @@ async function noteBuildOutcome(
         // HONESTY (rule 5): a lane we DECIDED not to run must say so, and say why. Silence here would
         // read in the report as "the one-shot was never eligible", which is a different fact.
         if (!sb.ok && classifyForOneShot(analysis?.startTier) && !oneShotStillViable(sb)) {
-          buildDiag.record({ phase: 'build', severity: 'info', code: 'ONESHOT_SKIPPED', message: `Skipped the one-shot fast lane: the file plan had already found ${sb.plannedFiles} files, and that lane only fits a single-file app — going straight to the full builder instead of spending a generation call proving it.`, autoResolved: true });
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'ONESHOT_SKIPPED', message: oneShotSkipReason(sb) ?? 'Skipped the one-shot fast lane — going straight to the full builder.', autoResolved: true });
         }
         if (sb.ok) {
           if (sb.typecheckRan === false) {
@@ -14200,7 +14292,7 @@ async function noteBuildOutcome(
           //    …and gated on what the lane above just MEASURED. See oneShotStillViable: in the dukaan
           //    report the manifest had planned 8 files, so "the manifest skips it" was already false,
           //    and this lane still ran for 150 seconds to fail at something a single call cannot do.
-          const os = await runOneShot({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, log: fastLog });
+          const os = await runOneShot({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: laneFence.open('one-shot'), startPreview: fastPreview, log: fastLog });
           buildDiag.record({ phase: 'build', severity: 'info', code: os.ok ? 'ONESHOT_SUCCESS' : 'ONESHOT_FALLBACK', message: os.summary, autoResolved: true, detail: os.reason });
           if (os.ok) {
             // VERIFY GATE for the one-shot lane too (autopsy 2026-07-07: a NowPlaying.tsx TRUNCATED
@@ -14234,6 +14326,13 @@ async function noteBuildOutcome(
             }
           }
         }
+        // HANDOFF — the workspace now belongs to the full agentic builder, and no fast lane may write
+        // to it again (autopsy a38c6fef). This single line is what the whole fence exists for: it does
+        // not matter which lane forgot to cancel itself, how its deadline was implemented, or whether a
+        // future lane remembers to stop — after this, an abandoned lane's write is refused and said out
+        // loud. `result` being set means a fast lane SUCCEEDED and still owns the app, so we leave its
+        // lease alone: its own post-success repairs must keep working.
+        if (!result) laneFence.handoff();
         // C — BULLETPROOF PREVIEW: persist the produced files to the durable store SYNCHRONOUSLY the
         // moment the fast lane succeeds — not via the 3s debounce or the fire-and-forget end-of-flow
         // save, both of which can be cut off (the reviewer still running, a dropped stream, an
@@ -15808,6 +15907,21 @@ async function noteBuildOutcome(
           }
         } catch { /* diagnostics are best-effort — never blocks a build */ }
       }
+      let previewVerifiedFailed = false;
+      // The POSITIVE counterpart. Without it the runtime verdict below could report "no live preview
+      // session" for a build whose preview had just been opened and confirmed rendering — the
+      // self-contradicting report from the Shiv Medical Store autopsy (2026-08-10).
+      //
+      // 🔴 THESE TWO DECLARATIONS MUST STAY ABOVE THE RENDER RESCUE, AND THAT IS THE WHOLE FIX
+      // (autopsy a38c6fef, 2026-09-13). They used to sit immediately BELOW the rescue block, so the one
+      // piece of code that proves an app renders — in a real browser, which is the strongest evidence
+      // this platform can produce — was physically unable to record it: the variable did not exist yet
+      // at that point in the function. And because the verify block below is deliberately skipped for a
+      // rescued build (`!renderRescued`), nothing else could set it either. A rescued build therefore
+      // reached the release gate with `preview: 'not-run'`, and the gate printed "a live preview came up
+      // but was never confirmed to render, so nothing here was proven to RUN" — 1.4 seconds after the
+      // same build had watched it render. Nothing failed, nothing logged; the report simply lied.
+      let previewVerifiedRendered = false;
       if (
         process.env.AGENTV3_RENDER_RESCUE !== 'off'
         && renderRescueEligible({ ok: result.ok, expectsArtifacts, filesWritten: writtenFiles.size })
@@ -15857,6 +15971,9 @@ async function noteBuildOutcome(
               }
             } catch { /* latching is best-effort — never affects a build */ }
             try { buildDiag.recordPreviewVerified(); } catch { /* diagnostics best-effort */ }
+            // THE EVIDENCE REACHES THE GATE. A real browser just rendered this app, so every later
+            // verdict — the release gate above all — must be told, not left to infer it from silence.
+            previewVerifiedRendered = true;
             buildDiag.record({ phase: 'preview', severity: 'info', code: 'RENDER_RESCUE', message: 'Build finished not-ok but the live preview renders cleanly (real-browser verified) — upgraded to success so health, billing and the verdict are honest.', autoResolved: true });
             events.emit({ type: 'narration', agent: 'architect', text: '✅ Your app is built and the live preview renders correctly.', ts: Date.now() });
           } else if (runtimeCrashBlocker && verdict.rendered) {
@@ -15867,11 +15984,6 @@ async function noteBuildOutcome(
         } catch { /* rescue is best-effort — on any failure the build stays ok:false (never a fake success) */ }
       }
 
-      let previewVerifiedFailed = false;
-      // The POSITIVE counterpart. Without it the runtime verdict below could report "no live preview
-      // session" for a build whose preview had just been opened and confirmed rendering — the
-      // self-contradicting report from the Shiv Medical Store autopsy (2026-08-10).
-      let previewVerifiedRendered = false;
       if (
         process.env.AGENTV3_PREVIEW_VERIFY !== 'off' && result.ok && !renderRescued && lastPreviewUrl && actuator.browseUrl
         && !abort.signal.aborted
@@ -18006,7 +18118,12 @@ async function noteBuildOutcome(
         // spend the very budget free-tier protects). Instead, honestly invite the user to add credits
         // and finish on the strongest engine — converting the user to paid without shipping a broken app.
         if (freeTierBuildActive) {
-          events.emit({ type: 'narration', agent: 'architect', text: freeTierUpsellMessage(), ts: Date.now() });
+          // WHY it was empty decides what we may honestly say. A prompt with nothing to build from is
+          // not an engine limit, and asking such a user for money would be an upsell attached to our
+          // own gap. (The diversion above catches this case before a build starts; this covers the
+          // paths that still reach here — an edit turn, or an attachment that carried no instruction.)
+          const emptyCause = assessBuildInput(prompt).buildable ? 'engine' : 'no-instruction';
+          events.emit({ type: 'narration', agent: 'architect', text: freeTierUpsellMessage(emptyCause), ts: Date.now() });
         }
       }
       // Admin rule (2026-07-07): the server's own eyes saw the preview NOT render after the heal

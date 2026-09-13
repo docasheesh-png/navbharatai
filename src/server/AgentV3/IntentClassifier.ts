@@ -364,6 +364,57 @@ const STATE_QUESTION_SIGNALS: readonly string[] = [
   'where did', 'where are my', 'where is my', 'what happened', 'how many files', 'how many pages',
 ];
 
+/**
+ * Words that ALWAYS open a question, in either language. A wh-word is interrogative whether or not the
+ * user bothered with a question mark, and plenty of real users do not.
+ */
+const WH_OPENERS =
+  /^(?:what|whats|what's|how|why|which|who|whom|whose|when|where|kya|kaise|kaisa|kaisi|kyun|kyu|kyon|kaun|kab|kahan|kahaan|kitna|kitne|kitni|konsa|konsi)\b/;
+
+/**
+ * Auxiliaries that open a question OR an order, and cannot be told apart on their own.
+ *
+ * 🔴 THIS DISTINCTION IS NOT PEDANTRY — it was a real regression, caught by the existing suite before
+ * this shipped. **"do it again"** is a retry, and treating `do` as interrogative turned a continuation
+ * into small talk — re-opening the "please continue" amnesia this repo has already fixed once. So an
+ * auxiliary counts as a question only with a question mark, or when a SECOND-PERSON subject follows it
+ * ("can you …", "kya aap …"), which is the one shape that is never an order.
+ */
+const AUX_OPENERS = /^(?:can|could|would|will|shall|should|do|does|did|is|are|am|may|might)\b/;
+const AUX_ASKS_US = /^(?:can|could|would|will|do|does|did|are)\s+(?:you|u|aap|tum)\b/;
+
+/**
+ * Does this message READ as a question — a request for an answer rather than an order to act? Pure.
+ */
+export function readsAsQuestion(lower: string): boolean {
+  const text = lower.trim();
+  if (!text) return false;
+  if (text.endsWith('?')) return true;
+  if (WH_OPENERS.test(text)) return true;
+  if (AUX_OPENERS.test(text)) return AUX_ASKS_US.test(text);
+  // "kya aap … sakte ho" — the Hinglish ability question, whose opener is a wh-word anyway but whose
+  // mark is very often missing.
+  return /^kya\s+(?:aap|tum|main|mai)\b/.test(text);
+}
+
+/**
+ * Does the message name a SPECIFIC thing to produce — an article + noun ("a todo app"), something of
+ * the user's ("my site"), something pointed at ("this page"), or something asked for on their behalf
+ * ("build me …", "mere liye")?
+ *
+ * This is the line between *asking about* app-building and *asking for* an app. "Can you build me a
+ * todo app?" is a question in form and an order in substance; "Can you generate images?" is neither.
+ * Pure.
+ */
+export function namesSpecificDeliverable(lower: string): boolean {
+  const text = lower.trim();
+  if (!text) return false;
+  if (/\b(?:a|an|the|my|our|your|this|that|these|those|ek|mera|meri|mere|hamara|hamari|apna|apni|yeh|ye|is|iska|isko)\b/.test(text)) return true;
+  if (/\b(?:me|us|humein|hume|mujhe)\b/.test(text)) return true;
+  if (/\bfor (?:me|us)\b|\bmere liye\b|\bhamare liye\b/.test(text)) return true;
+  return false;
+}
+
 export function classifyIntentWithConfidence(message: string): IntentWithConfidence {
   const text = typeof message === 'string' ? message.trim() : '';
   if (!text) return { intent: 'new_build', confidence: 'low' };
@@ -379,12 +430,48 @@ export function classifyIntentWithConfidence(message: string): IntentWithConfide
     return { intent: 'chat', confidence: 'high', signal: 'state-question' };
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────────────────────
+  // Step 0b — READ THE MOOD BEFORE OBEYING A KEYWORD (admin-mandated 2026-09-13, after autopsy
+  // 5abad374). Admin, verbatim: *"simple question ka just simple answer dena chahiye — app banane ki
+  // yahan jarurat hi kahan hai. Direct app mat bana do! Yeh system control karo — pehle dekhu user ka
+  // mood kya hai, kya woh sirf answer chahta hai, ya app banwana chahta hai."*
+  //
+  // WHAT WENT WRONG. A user typed **"Can you generate images?"**. `generate` is a build verb, so the
+  // scanner below returned new_build at HIGH confidence — and HIGH confidence SKIPS the LLM upgrade
+  // entirely (`classifyIntentSmart` returns before asking it). The engine built an "AI Image Studio"
+  // for 29 minutes, hit the wall-clock cap, and told the user their app was not ready. At minute 8 it
+  // had already ANSWERED the question in plain text, and kept building anyway.
+  //
+  // It was never one sentence. Measured across ordinary phrasings, ALL of these hard-locked to
+  // "build an app" without the intention reader ever being consulted:
+  //     "can I make money from this?"      "what can you generate?"
+  //     "how do I make a login page?"      "should I create a react app or next js?"
+  // A pricing question built an app. That is the class, and the keyword is not the bug — the HARD LOCK
+  // is: one matched word ending a decision that the sentence's own grammar contradicts.
+  //
+  // THE RULE, IN TWO PARTS, AND THE ASYMMETRY THAT JUSTIFIES IT.
+  // Being wrong toward CHAT costs one extra message — and the chat reply is already prompted to offer
+  // to build, so the user answers "yes" and the build starts. Being wrong toward BUILD costs what this
+  // autopsy measured: 29 minutes, a failed app, real money, and a user who never asked for any of it.
+  const question = readsAsQuestion(lower);
+  //   (a) A question that names NOTHING to produce is a question. Answer it.
+  if (question && !namesSpecificDeliverable(lower)) {
+    return { intent: 'chat', confidence: 'low', signal: 'question-no-deliverable' };
+  }
+
   // Steps 1–4 → high confidence (strong, explicit signals). Uses the shared whole-word scanner so an
   // embedded first occurrence can't hide a valid standalone one later (the mis-route root cause).
+  //   (b) A question that DOES name something to produce ("can you build me a todo app?") keeps its
+  //       intent — but never its HARD LOCK. Dropping to LOW is what finally sends the sentence to the
+  //       intention reader, which sees the project and the conversation that a keyword cannot.
+  //       ⚠️ The INTENT is unchanged, so nothing regresses when the reader is slow or down: the
+  //       keyword answer still stands. All this buys is that the question gets READ. And an ORDER
+  //       ("build a notes app", "ek billing app banao") is not a question, so it stays HIGH and
+  //       instant — the common path pays nothing for this.
   const nbSignal = firstSignalWord(lower, NEW_BUILD_SIGNALS);
-  if (nbSignal) return { intent: 'new_build', confidence: 'high', signal: nbSignal };
+  if (nbSignal) return { intent: 'new_build', confidence: question ? 'low' : 'high', signal: nbSignal };
   const editSignal = firstSignalWord(lower, EDIT_SIGNALS);
-  if (editSignal) return { intent: 'edit_existing', confidence: 'high', signal: editSignal };
+  if (editSignal) return { intent: 'edit_existing', confidence: question ? 'low' : 'high', signal: editSignal };
   // A comparison/explanation ask ("compare X and Y") → chat, even if it mentions a build-flavored
   // noun in passing. High confidence so length/code-heuristics below can't override it either.
   if (matchesSignal(lower, INFORMATIONAL_SIGNALS)) {
@@ -476,6 +563,11 @@ export async function classifyIntentSmart(
 
   const prompt = [
     'Decide what the user actually WANTS — read their intention, do NOT just match keywords.',
+    // The admin's rule, stated to the reader in the reader's own terms: a question deserves an answer.
+    // Building an app for someone who asked a question wastes their time and ours, and the reply is
+    // already free to OFFER to build — so "chat" is never a refusal, only a faster first response.
+    'If they are ASKING something, the answer is "chat" — even when their sentence contains a word like',
+    'build, make, create or generate. Choose "build" only when they want an app produced NOW.',
     'Choose exactly one of three categories:',
     '  chat    — plain conversation, a greeting, a question, thanks, or asking how something works',
     '  build   — create a NEW app / feature / component from scratch',
@@ -507,54 +599,11 @@ export async function classifyIntentSmart(
  * request is never misidentified as an edit.
  */
 export function classifyIntent(message: string): BuildIntent {
-  const text = typeof message === 'string' ? message.trim() : '';
-  if (!text) return 'new_build'; // safe default — never treat an empty/odd input as chat
-
-  const lower = text.toLowerCase();
-
-  // 1) NEW_BUILD signals take TOP priority — any "build/create/make/generate/…" → 'new_build'.
-  //    This ensures "build a page AND fix the footer" stays 'new_build', not 'edit_existing'.
-  if (matchesSignal(lower, NEW_BUILD_SIGNALS)) return 'new_build';
-
-  // 2) Pure edit signals (fix, debug, update, change, refactor, …) → 'edit_existing'.
-  //    Only fires when no new-build signal was found above.
-  if (matchesSignal(lower, EDIT_SIGNALS)) return 'edit_existing';
-
-  // 2.5) A comparison/explanation ask ("compare X and Y") → chat, even if it mentions a build-
-  //      flavored noun in passing (e.g. "compare v5.0 and Claude Code" contains "code").
-  if (matchesSignal(lower, INFORMATIONAL_SIGNALS)) return 'chat';
-
-  // 3) Long messages, code blocks, file paths or URLs → likely a real task → 'new_build'.
-  if (text.length > LONG_MESSAGE_THRESHOLD) return 'new_build';
-  if (hasCodeOrPathOrUrl(text)) return 'new_build';
-
-  // 4) Remaining build signals (tech nouns: 'app', 'react', 'button', etc., and
-  //    ambiguous verbs like 'add', 'install') → conservative 'new_build'.
-  if (matchesSignal(lower, BUILD_SIGNALS)) return 'new_build';
-
-  // 4.5) Continuation of an interrupted/in-progress build ("continue", "go on", "finish it",
-  //      "aage badho", …): short + signal-free, so without this they fall to the short-message →
-  //      'chat' default and lose ALL build context/memory (the "please continue" → amnesia bug).
-  //      Route them to the memory-aware edit/continuation path instead.
-  if (matchesSignal(lower, CONTINUATION_SIGNALS)) return 'edit_existing';
-
-  // 4.6) "Something isn't working" bug report ("preview nahi chala", "not working", …) → edit_existing,
-  //      not chat. Checked BEFORE social patterns: a short complaint containing the bare word "nahi"/
-  //      "not" would otherwise be misread as a standalone chit-chat acknowledgement (see PROBLEM_SIGNALS).
-  if (matchesSignal(lower, PROBLEM_SIGNALS)) return 'edit_existing';
-
-  // 5) Clear social patterns (no build signal present) → 'chat'.
-  for (const pattern of SOCIAL_PATTERNS) {
-    if (pattern.test(lower)) return 'chat';
-  }
-
-  // 6) Very short, signal-free messages (≤ 3 words) are treated as chit-chat.
-  const wordCount = lower.split(/\s+/).filter(Boolean).length;
-  if (wordCount <= SHORT_WORD_COUNT) return 'chat';
-
-  // 7) TRUE last-resort default (admin decision, 2026-07-01: "text reply > build app"). Was
-  // 'new_build'; now 'chat' — the chat reply itself is prompted to offer to build/edit if that's
-  // what's meant, so a real request phrased unusually is never permanently stuck. See the matching
-  // comment in classifyIntentWithConfidence for the full reasoning.
-  return 'chat';
+  // ONE LADDER, NOT TWO. This used to be a second, hand-maintained copy of the rules below, and the
+  // copies had already drifted: the confidence version uses the whole-word scanner that fixed a real
+  // mis-route, while this one still used the substring matcher. On 2026-09-13 the capability-question
+  // fix would have had to be written twice — exactly the duplication that let the July zombie-write fix
+  // reach one of its two lanes and not the other. Delegating removes the class: there is now a single
+  // place where intent is decided, and the confidence tier is simply discarded here.
+  return classifyIntentWithConfidence(message).intent;
 }

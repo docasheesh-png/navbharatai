@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { oneShotStillViable, classifyForOneShot } from '../src/server/AgentV3/OneShotBuilder';
+import { oneShotStillViable, oneShotSkipReason, classifyForOneShot } from '../src/server/AgentV3/OneShotBuilder';
 import { runSimpleBuild } from '../src/server/AgentV3/SimpleBuilder';
 
 /**
@@ -121,8 +121,22 @@ describe('WIRING — and the report says what we decided', () => {
     // the kind of gap that makes the next autopsy misdiagnose a build.
     expect(route).toContain("code: 'ONESHOT_SKIPPED'");
     const at = route.indexOf("code: 'ONESHOT_SKIPPED'");
-    expect(route.slice(at, at + 400)).toMatch(/only fits a single-file app/);
-    expect(route.slice(at, at + 400)).toContain('${sb.plannedFiles}');
+    // The sentence itself moved OUT of this 17k-line route and into `oneShotSkipReason` on 2026-09-13,
+    // when a SECOND reason to skip appeared (a lane that timed out has proven the engine is stalling).
+    // One stock line would now be true only half the time, so the message is chosen by a pure function
+    // — and asserted against that function below, which is a stronger check than a string in a route.
+    expect(route.slice(at, at + 400)).toContain('oneShotSkipReason(sb)');
+  });
+
+  it('the recorded sentence names WHICH measurement declined the lane', () => {
+    // Both reasons must be specific: an autopsy that reads "skipped" without knowing why cannot tell a
+    // deliberate, measured decline from a lane that silently never ran.
+    expect(oneShotSkipReason({ plannedFiles: 8 })).toMatch(/only fits a single-file app/);
+    expect(oneShotSkipReason({ plannedFiles: 8 })).toContain('8 files');
+    expect(oneShotSkipReason({ plannedFiles: 0, reason: 'simple-plan timed out after 90000ms' }))
+      .toMatch(/timed out waiting on the engine/);
+    // …and nothing is recorded when the lane really was viable.
+    expect(oneShotSkipReason({ plannedFiles: 1 })).toBeNull();
   });
 
   it('it is only recorded when the lane was genuinely eligible and we declined it', () => {

@@ -51129,6 +51129,186 @@ strong-vs-screen-lock difference, and the words a user really types (`app lock k
 
 ---
 
+## 2026-09-13 — AUTOPSY `a38c6fef` ("Music player for Android 16"): a working app was failed by a lane that had been abandoned twenty minutes earlier
+
+**The report.** 28.2 min · `ok: false` · release gate **RED** · readiness **26/100** · 311 timeline items
+(2 errors, 21 warnings) · 53 delivered model turns, **26 provider failures** (Kimi 8 timeouts, GLM 17
+rate-limits + 1 timeout) · cache hit **95.4%** · billed to the user **₹0** (correct — the build did not
+succeed) · real cost to NavBharatAI **≈ ₹44**.
+
+**What the report SAID failed the build:** readiness 26/100, from "11 component(s) created but never
+used" plus "No tests at all". That is the symptom.
+
+**What actually failed it.** The one-shot fast lane was abandoned at its 150 s deadline and the build
+moved on. `withTimeout` in `OneShotBuilder` only RACED — losing the race abandoned the WAIT, never the
+WORK — so the closure kept generating for a further **seventeen minutes**, through two output-ceiling
+continuations on Vertex, and then ran `await deps.writeFiles(parsed)`: **fourteen files written over the
+finished app the full builder had produced in the meantime.** The architect noticed at +1350 s, ran its
+own `rm`, and missed three (`src/icons.tsx`, `src/VolumeControl.css`, `src/types.d.ts`). The eleven
+unused exports in `icons.tsx` are the "11 components created but never used".
+
+The arithmetic closes exactly: `100 − (6 × 11 orphans) − 8 (no tests) = 26/100`, under the 50/100 bar →
+`READINESS_BLOCKER` (error) → `f.blockers > 0` → gate RED → `OUTCOME_RELEASE_GATE_RED` → `ok:false`.
+**Without the zombie's debris the score is 92/100 and the build ships.** The app itself rendered cleanly
+in a real browser (`RENDER_RESCUE`, `GREEN_GUARD_SAVE`, two clean typechecks) — the user was told their
+working app was not ready to use.
+
+Worse than debris: `src/main.tsx`, `src/App.css` and `src/data/songs.ts` were overwritten by the zombie
+and never rewritten by the architect, so **the abandoned lane's code shipped inside the delivered app** —
+and the integrity gate then dutifully wired the zombie's `App.css` into it.
+
+🔴 **THE PART THAT MATTERS MOST: this exact bug was root-caused in July and only half-fixed.**
+`SimpleBuilder.ts:656` carries the `lapsed` flag and a comment naming the StudySync incident — same
+race, same late write, same two-module-tree outcome. `OneShotBuilder` has the identical shape and never
+got one. **Why the sibling was missed (rule 3): it kept its own PRIVATE copy of `withTimeout`,** so a
+search for the shared helper never reached the file. The instance was fixed; the class was not.
+
+### The fixes
+
+1. **`laneWriteFence.ts` (new) — the architecture, not another convention.** Every fast lane now writes
+   through a writer bound to its own lease; opening another lane or handing off to the full builder kills
+   that lease, and a dead lease refuses the write. A lane that forgets to cancel itself, a deadline
+   implemented some new way, a lane written next year — none can produce a zombie write. Wired in
+   `routes/agentv3.ts`: `laneFence.open('simple-build')`, `laneFence.open('one-shot')`, and
+   `if (!result) laneFence.handoff();`. A refusal records **`ZOMBIE_WRITE_REFUSED`** naming the lane and
+   the paths — the original left no trace at all, which is why it took two months and a second incident.
+   ⚠️ The fence revokes on HANDOFF, never on timeout, so `SimpleBuilder`'s salvage write (which runs in
+   its own catch, before returning) still works — test-locked, because breaking it would turn the fix
+   into a regression.
+2. **`OneShotBuilder` — the lane's own `lapsed` guard**, matching `SimpleBuilder`'s proven shape, checked
+   before parsing and again before writing.
+3. **The private `withTimeout` copy is DELETED** — the file now imports the shared `asyncUtils` one, so
+   every lane that races a deadline is findable in one search. Test-locked against a third copy.
+4. **`oneShotStillViable` narrowed: a lane that TIMED OUT has proven the engine is stalling.** The old
+   rule read "no manifest" as "never measured, still worth a try" — right about the app's size, wrong
+   about everything else. It spent 150 s on a strictly LARGER call to the engine that had just stalled,
+   and that lane is the one that came back and overwrote the app. Only a timeout declines; a parse or
+   verify failure met a responsive provider and stays viable. `oneShotSkipReason` reports WHICH of the
+   two measurements ruled it out.
+5. **The release gate is now TOLD when a real browser rendered the app.** `previewVerifiedRendered` was
+   declared four lines BELOW the render-rescue block that proves it, so the strongest evidence this
+   platform can produce was physically unrecordable — and the verify block below is skipped for a rescued
+   build (`!renderRescued`), so nothing else set it. The gate printed *"a live preview came up but was
+   never confirmed to render, so nothing here was proven to RUN"* **1.4 seconds after watching it
+   render.** Declaration moved above; the rescue sets it where the proof is obtained.
+6. **`TIME_TO_FIRST_CALL` no longer blames setup for time a fast lane burned.** It claimed *"243s of
+   preparation — sandbox setup, project restore and secrets loading"* for a build whose own `SETUP_TIMING`
+   lines, in the same report, measured setup at **1.5 seconds**. The 243 s was two abandoned lanes
+   (90 + 150). New `BuildDiagnostics.abandonedLaneWindow` measures it from the lanes' own recorded handoff
+   events and says so. (The comment above that sentence had been written to fix an EARLIER
+   misattribution that "sent an autopsy to optimise install" — a confident wrong cause is worse than an
+   admitted unknown, because it gets acted on.)
+
+Tests: `tests/zombieLaneWrite.test.ts` (11) and `tests/buildReportHonesty.test.ts` (10). The two guards
+that matter were **verified to bite** — removing the `lapsed` guard, and replacing the lease check with
+the naive "is some lane open?", each fails its test. The honesty test replays the real build on an
+injected clock (setup 1.5 s, handoffs at 93 s and 243 s, first call at 264 s taking 21 s).
+
+### Open root causes — recorded, NOT silently patched (rule 6)
+
+- 🔴 **Kimi's 8 timeouts cost ~16 minutes of a 28-minute build.** I proposed cutting the 120 s call
+  timeout to 60 s and then **withdrew it against this very report's own evidence**: two Kimi calls that
+  eventually SUCCEEDED took 164.7 s and 108.2 s, and one of them wrote the app's largest file. A 60 s cut
+  would have destroyed real work to save wall-clock. The honest fix needs the latency DISTRIBUTION across
+  many builds, which nobody has measured — same shape as the open "10-minute slow-build threshold"
+  question. **Do not change this number from a single report.**
+- 🟡 **GLM's 429 storm persists** (17 rate-limits in one build) despite the pacer, the key pool and the
+  circuit breaker. It self-heals into Kimi, which is exactly what makes it invisible — a self-heal that
+  fires every build IS the ceiling.
+- 🟡 **`AGENTV3_DESIGN_GATE` is `on` but no heal ran.** `DESIGN_PAGE_INCONSISTENT` was recorded and
+  neither `DESIGN_HEALED` nor `DESIGN_PARTIALLY_HEALED` followed. Paid-for flag, finding but no repair.
+- 🟡 **`SANDBOX_PEAK_MEMORY` reported "not available on this machine (no cgroup accounting exposed)".**
+  The instrument shipped 2026-09-11 carries the rule "no RAM change to the template until it says it
+  fits" — so that decision is now blocked, quietly, by an instrument that never answers.
+- 🟡 **The sandbox was 95% idle** (22.7 of 23.8 min), because the build spent its time waiting on model
+  calls rather than touching the machine. Billed either way.
+- 🟡 **ETA said ~3 min; the build took 28.2.** A 9× miss on the number the user plans around.
+
+---
+
+## 2026-09-13 — AUTOPSY `5abad374` ("Can you generate images?"): a four-word question cost 29 minutes
+
+**The report.** 29.0 min · `ok: false` · release gate **RED** · stopped by the **wall-clock cap**
+(`BUILD_TIMEOUT`, 1740s) · 252 timeline items (4 errors, 14 warnings) · 48 delivered Kimi turns,
+**6 Kimi timeouts** · 4× `LLM_TRUNCATED` · cache hit 89% · user billed **₹0**.
+
+**The prompt was `"Can you generate images?"`.** Not a build request — a capability question, the kind
+every new user asks first. The engine built an "AI Image Studio" for 29 minutes, ran out of wall clock,
+and told the user the app was not ready. At minute 8 it had already **answered the question in plain
+text** ("Yes, I can help with images in several ways…") — and carried on building.
+
+**Root cause, located exactly.** `classifyIntentWithConfidence('Can you generate images?')` returned
+`{intent:'new_build', confidence:'HIGH', signal:'generate'}`. `generate` is a NEW_BUILD verb and the
+scanner takes it as decisive — but in *"can you **generate** images?"* the verb is the OBJECT of the
+question, not an imperative. And **HIGH confidence skips the LLM upgrade entirely**
+(`classifyIntentSmart` returns before asking it), so the one component that reads intention with project
+and conversation context never saw the sentence. `"can you build apps?"` behaved identically.
+
+### The fixes
+
+1. **`isCapabilityQuestion` runs BEFORE the verb scanner** — a short, second-person ability question
+   ("can you…", "could you…", "are you able to…", "do you support…", "kya aap … sakte ho") whose object
+   is a **bare plural** noun is a question about our powers, not an order. Returns `chat` at **LOW**
+   confidence on purpose: the LLM upgrade still decides, and all that is removed is the hard lock.
+   **Precision-first, because a false positive refuses a real build**: an article ("a todo app"), a
+   possessive ("my site"), a benefactive ("for me"), a singular object ("dark mode") or a long message
+   all keep today's behaviour exactly. Pinned by 23 tests, including nine that must stay builds.
+2. **The two intent ladders are now ONE.** `classifyIntent` was a second hand-maintained copy of the
+   same rules that the route ALSO calls, and the copies had already drifted — the confidence version
+   uses the whole-word scanner that fixed a real mis-route, this one still used the substring matcher.
+   The capability fix would have had to be written twice. It now delegates
+   (`classifyIntentWithConfidence(message).intent`); all 68 existing tests pass unchanged, proving the
+   two were outcome-equivalent. **This is the same class as the morning's `withTimeout` duplication** —
+   two copies, one fixed, the bug returns through the other.
+
+### 🔴 This report caught a defect in the SAME DAY'S EARLIER FIX, before it merged
+
+`TIME_TO_FIRST_CALL`'s new abandoned-lane attribution would have **misfired here**. Elapsed to the first
+recorded call was 120s and the call's own latency 117s, so preparation was correctly reported as **3s** —
+while a lane had been abandoned at 93s. Those are the same call: the lane stopped *waiting* at 93s and
+the call returned at 120s. The fix would have replaced an accurate sentence with a misleading one — the
+exact error it exists to prevent, committed by the fix itself. Now guarded to `seconds >= 60`, i.e. it
+only speaks when the preparation claim is itself large enough to be worth correcting. Test-locked with
+this build's real numbers.
+
+**And the zombie write appears here too, independently.** `agent=frontend` writes at **+16.5 min** —
+`.gitignore` ×4, `tsconfig.node.json` ×2, `src/vite-env.d.ts`, `src/main.tsx` — 12.5 minutes after the
+one-shot lane was abandoned at +4.0 min, immediately after `FASTLANE_CONTINUED` (3 continuations). Same
+signature as `a38c6fef`, a different user, a different app. Two independent confirmations in one day;
+the fence in the same PR closes both.
+
+### Open root causes from this report (recorded, not patched)
+
+- 🔴 **The output-token ceiling was hit FOUR times and `src/App.tsx` was still dropped**
+  (`FASTLANE_TRUNCATED_FILE_DROPPED` after 3 continuations). Dropping it was the honest choice — a
+  half-written file must never ship — but the app's main file then had to be rebuilt from scratch,
+  deep into the budget. The continuation ceiling (`MAX_CONTINUATIONS`) is the thing to look at, and it
+  needs more than one report to set.
+- 🟡 **6 Kimi timeouts again** (120s each), same as `a38c6fef`. Second sighting of the same open item.
+- 🟡 **The generated app faked its core feature** — 12 `placeholder / not-implemented / fake data`
+  findings, a canvas drawing pretending to be image generation. The readiness gate caught it and the
+  engine was mid-repair (switching to Pollinations.ai) when the clock ran out, so the detection works;
+  what failed is that the FIRST build produced a fake at all. The second absolute rule applies to what
+  v3.0 generates, not only to what we write.
+- 🟡 **Sandbox 90% idle** (28.9 of 32.2 min) and **`SANDBOX_PEAK_MEMORY` "not available"** again.
+- 🟡 **ETA said ~3 min**, then "~53s to go" at minute 2, for a build that ran 29 minutes and failed.
+
+**FOLLOW-UP, same day — the admin widened the fix from one sentence to a SYSTEM.** Verbatim: *"simple
+question ka just simple answer dena chahiye… direct app mat bana do! Yeh system control karo — pehle
+dekhu user ka mood kya hai."* They were right, and measuring proved it: the narrow capability rule
+caught `"Can you generate images?"` and missed **`"can I make money from this?"`**,
+`"what can you generate?"`, `"how do I make a login page?"` and `"should I create a react app or next
+js?"` — every one of them hard-locked to `new_build` at HIGH confidence with the intention reader never
+consulted. **A pricing question built an app.** The keyword was never the bug; the HARD LOCK was.
+
+Replaced with two rules (`readsAsQuestion` + `namesSpecificDeliverable`): a question naming nothing to
+produce is answered; a question that does name something keeps its intent but drops to LOW so the reader
+is consulted; an order stays HIGH and instant. The reader's own prompt now states the rule in its terms.
+
+🔴 **The existing suite caught a regression before this shipped:** `"do it again"` became `chat`, because
+`do` was read as interrogative — re-opening the "please continue" amnesia this repo has already fixed
+once. An auxiliary (`do/can/is/should/…`) now counts as interrogative only with a question mark or a
+second-person subject after it (`can you`, `kya aap`); a wh-word always does. Pinned by four tests.
 ## 2026-09-13 (third change today) — THE APP LOCK NOW HOLDS ON THE SERVER FOR ANYTHING THAT SPENDS MONEY
 
 **Admin:** *"yeh ban jaye. uske baad aab, ipa bana dena!!!!!"* — i.e. finish the open item from the entry
@@ -51448,3 +51628,194 @@ provider clients — a separate change, inside the request path rather than the 
 **21 new tests** (`tests/buildCostCeiling.test.ts`), plus the new cause added to
 `buildAbortCause.test.ts`'s exhaustiveness list so it cannot be skipped silently. **Two confirmed to
 fail when the behaviour is reverted:** a malformed env meaning "no ceiling", and the once-guard.
+## 2026-09-13 — THE AUTOPSY'S MISSING SUBSYSTEM, BUILT: the build now KNOWS its own time budget
+
+Admin: *"han, build report me jo jo problem hai. sabhi ko fix karna hai. next time yeh error na aye!!"* —
+so the open items from the `f04421ef` autopsy are being worked through. This entry is the first two.
+
+### 🔴 FIX 1 — THE WALL CLOCK EXISTED ONLY AS A GUILLOTINE, AND THE MODEL WAS NEVER TOLD
+
+On the reported build the prompt was *"finish/fix the build so the app works end-to-end"*. After the
+typecheck was clean at 2m23s the engine browsed the running app for 91 seconds, ran an audit, fixed CSS
+and accessibility, **generated two test files**, **installed a dev dependency (80 seconds)**, and ran a
+production build — and at 9m49s was still going with no outcome.
+
+None of that is wrong work. It is wrong work **for the time remaining**, and nothing could say so: the
+clock was `buildTimedOut()` ending the build, `maxBuildMs` bounding it and `finalizeOnDeadline` cleaning
+up afterwards. **The model was told none of it**, so it optimised for a complete job because it had no
+reason to believe the job was nearly out of time.
+
+`buildBudgetSteer.ts` is that missing figure, delivered as a steer at 50% / 75% / 90% of the budget:
+- **half** — finish only what makes the app work; explicitly no tests, no new dependency, no polish, no
+  re-auditing something that already passed;
+- **wrapping** — stop exploring; make it build and run, then summarise;
+- **final** — stop everything except saving and writing an honest summary.
+
+🔒 **It is a steer, not a new cap.** It spends no model call and no tool call — the text rides the message
+the runner already appends after each turn, beside the loop-guard steer, through the same path. Nothing is
+forbidden in code. A build with no cap configured is never steered, so that case is byte-identical.
+
+⚠️ **Each stage speaks ONCE.** A budget warning repeated every turn is noise the model learns to skim,
+which is how a real warning stops working. And a build crossing two stages at once hears only the later,
+cumulative one.
+
+🔒 **It never overrides the user.** If tests (or a dependency) are the ONLY thing the user actually asked
+for, the steer says to do it. A budget rule that overruled the user's own request would be a worse failure
+than the overrun it prevents — test-locked.
+
+📌 **Verified it is not dead code**: `maxBuildMs: effectiveBuildSeconds * 1000` is in `baseRunnerOpts`
+(`agentv3.ts:13143`), which is spread into the architect runner and every heal/escalated runner.
+
+⚠️ **AND THE SURVEY THAT PRECEDED THIS WAS WRONG ON THE KEY POINT** — it reported "AgentRunner never reads
+a clock — it has no startedAt, no elapsedMs, no deadline parameter". It has all three (`buildStartMs` at
+:331, `maxBuildMs` at :321, `buildTimedOut` at :499). Checking rather than trusting made the fix much
+smaller: the numbers were already there and simply never spoken.
+
+### 🔴 FIX 2 — THE LOOP GUARD'S "BANNED" WAS A LIE, AND NOW IT IS NOT
+
+The escalated steer has always told the model *"This call is banned for the rest of this build"*, while
+`RepeatProbeGuard`'s own header said *"never blocking — it only advises"*. **Nothing enforced it.** So the
+reported build heard the warning twice and kept looping for nine minutes. A capability the engine ANNOUNCES
+and does not have is exactly the state the second absolute rule forbids: either the claim goes or the ban
+becomes real.
+
+The ban is now real — refused at the ONE dispatch choke point in `AgentRunner`, BEFORE the call is made, so
+a banned probe costs no sandbox round trip, no browser and no tokens.
+
+🔒 **AND IT IS DELIBERATELY NARROW, which is the whole safety argument.** `PROBE_TOOLS` holds read-only
+probes only — grep, read_file, list_files, screenshot, console_errors, evaluate, browser_action. The same
+probe with the same input returning the same answer a sixth time is useless by definition; that is the loop
+this guard was written for.
+
+⚠️ **`bash`, `write_file` and `edit_file` can NEVER be banned, however often they repeat.** A repeated
+`tsc --noEmit` looks identical to a loop and is usually a build legitimately converging — check, fix, check.
+Refusing those would turn a guard against wasted minutes into a guard that stops a build from FINISHING,
+which is a far worse failure than the one it prevents. They still get the escalating steer; they simply
+cannot be refused. Test-locked in both directions.
+
+### The TS6133 question, settled by running it rather than reasoning
+
+Earlier today I told the admin unused-import warnings were "cosmetic, zero user value", then **retracted
+it** on the grounds that `npm run build` runs `tsc -p tsconfig.build.json` and would fail. **The retraction
+was wrong.** Verified empirically with the scaffold's exact tsconfig and a real `tsc` run: with no
+`noUnusedLocals` an unused local and an unused parameter produce **no output and exit 0**; adding
+`noUnusedLocals` produces TS6133. The scaffold sets neither (`ViteReactProviderContents.ts:70-93`), and
+`tsconfig.build.json` only subtracts tests.
+
+So: **for a scaffold-default app it is cosmetic; for the reported app — an existing 23-file project whose
+own tsconfig evidently enables it — the errors were real and blocked `tsc`.** Both of my earlier statements
+were too absolute. The defect in that episode is narrower and still real: the fix was applied carelessly and
+removed a `MessageSquare` import that was in use at lines 274 and 326, breaking the build for 20 seconds.
+
+### Still OPEN from the autopsy
+
+- **Live cost/token totals in a mid-build report** — the recipe is known (call `setProviderTokens` /
+  `setCacheReadInputTokens` from `captureTurnUsage`, and add the missing `notify()`), but settle-time
+  numbers are RECONCILED and billable while mid-build ones are not, so they need a separate, clearly
+  unreconciled field rather than reusing the billable one.
+- **The ETA promises a number it does not have.** `ETA_BASIS` records `confidence 0.4` and no user-facing
+  line ever consults it; the countdown only stops after two broken promises. Not fixed here.
+- **Why GLM delivered 0 of 54 turns** — still unanswerable without a build that settles.
+- **The health-check's "no recognisable error" restart** — it prints "restarting once" but can print twice,
+  and `MAX_RECOVERY = 2` means two blind restarts. Cosmetic-but-dishonest wording; not fixed here.
+
+---
+
+## 2026-09-13 — Autopsy f04421ef, batch 2: the report's four remaining lies, and one of my own claims retracted
+
+Follows the batch-1 fixes (#2885) and the budget governor + real loop-guard ban (#2888). The admin's
+instruction was unambiguous — *"build report me jo jo problem hai. sabhi ko fix karna hai. next time yeh
+error na aye!!"* — so every remaining item in the ledger is either fixed here or, where the claim itself
+turned out to be wrong, retracted in writing rather than quietly dropped.
+
+**A theme worth naming, because it is the same bug four times: this report could not distinguish an
+ABSENT measurement from a measured value.** Every fix below restores that distinction somewhere.
+
+### 1. `0 in · 0 out` was not a measurement — and I read it as one, to the admin
+
+The mid-flight report printed `GLM: 54 call(s) · 0 in · 0 out` and carried no cache figure, because
+`setProviderTokens` and `setCacheReadInputTokens` are only called when a build SETTLES. From those
+zeros I told the admin the build had served zero tokens from its prefix cache and was leaving a ~75%
+saving on the table. Both claims were false. **A report that its own renderer's author misreads is not
+a formatting problem.**
+
+Three states now exist where one did (`tokenUsageView`):
+- **settled** — `providerTokens`, the reconciled billable figure, rendered exactly as before.
+- **live** — a new `liveTokens` snapshot written on every turn from the running ledger, labelled
+  `LIVE, build not settled` and stating that the real figure is **HIGHER** (aux calls reconcile in at
+  settle), so the direction of the error is never left for the reader to guess.
+- **unknown** — prints `tokens not recorded`, never zeros, with the caveat *"an absence of measurement,
+  not a measured zero"*.
+
+🔒 `setLiveUsage` is a deliberately separate setter from `setProviderTokens`, which CLEARS it on settle —
+the same separation `shadowFastLaneTokens` keeps, for the same reason: an in-flight ledger is an
+UNDER-count and must never reach the billing path. `userFacingReport` is an allow-list, so the new fields
+are absent from the user's view by construction; a test asserts it anyway.
+
+Side benefit, not incidental: `claudeProviderDelivered` now reads the live snapshot too, so a weak build
+leaking Sonnet is catchable **before** it settles rather than only in the post-mortem.
+
+### 2. The admin's own report was less honest than the user's screen
+
+`ETA_BASIS` read `ETA ~3 min · basis heuristic · confidence 0.4` for a build that ran past twenty
+minutes — and any admin reading it would conclude the user had been promised three minutes.
+
+🔴 **THEY WERE NOT, AND MY LEDGER ENTRY ON THIS WAS WRONG.** The entry above says *"`ETA_BASIS` records
+`confidence 0.4` and no user-facing line ever consults it"*. `firstEtaLine` has consulted it since
+2026-08-23: it renders the low–high BAND (which `estimateBuildTime` derives from exactly that
+confidence — `spread = 1 - confidence`) and says outright *"this is a first guess"*. `liveEtaTick` also
+already stops naming numbers after two broken promises. **I asserted a defect from reading one admin
+line instead of the rendering path.** The real defect was the opposite of the one I reported: the
+point estimate was an internal number that only the ADMIN surface displayed as if it were the promise.
+
+`ETA_BASIS` now records the band, keeps the midpoint in parentheses, and quotes the exact sentence the
+user saw — from the same `etaShown` value that is emitted to them, so report and screen cannot drift.
+
+### 3. "restarting once" could print twice
+
+`classifyDevServerFailure` is a pure function of the dev-server log. It cannot know which attempt it is
+on — and one of its strings claimed `restarting once` while `MAX_RECOVERY = 2` lets it print twice.
+
+Fixing that one string would be the surface patch. The class is **"the count lives where the count is
+not known"**, so the count moved to `planDevServerRecovery`, which holds `attempt` and `maxAttempts`:
+every retry detail now carries a true `(attempt 1 of 2)`. Two successive attempts can no longer print
+the same sentence — the precise thing "once" got wrong. `give_up` and `code_fix` are untouched: the
+first already has its honest terminal wording, the second must keep its actionable detail intact.
+
+### 4. "GLM: 0 turns" was unreadable — now it is answerable by looking
+
+The report showed `providerDelivery: { KIMI: 54 }`, no GLM row, no GLM failure. That is equally
+consistent with GLM sitting in the chain and never being reached (fine) and with GLM not being in the
+chain at all (a provider we believe leads our builds silently not running).
+
+⚠️ **`CHEAP_FLOOR_DECISION` cannot settle it, and this is worth knowing on its own: with the floor set
+to `on` its key check is an OR** (`(wantsGlm && hasGlm) || (wantsKimi && hasKimi)`), so it reports
+*"ACTIVE — ON leads"* whenever EITHER key is present. The report could honestly say the floor is active
+while half of it did not exist.
+
+`runnerChainSummary.ts` records the ordered chain the build was ACTUALLY given —
+`GLM(glm-5.2) → KIMI(kimi-k3) → CLAUDE_HAIKU` — taken from `guardedChain`, i.e. **after**
+`enforceNoClaude`, so a weak build can never be reported as containing a rung that was stripped. Under
+the table the report now names the providers that were in the chain and never reached, and states
+plainly that a provider **absent** from the chain is a different thing from one that sat idle. Key-pool
+rungs stay distinct (`GLM → GLM#2 → GLM#3`): three keys tried is not one attempt.
+
+This does not yet answer WHY GLM was idle on that build — that needs a build that settles, on the live
+env. It makes the question answerable from the next report instead of unanswerable from every report.
+
+### The wiring is pinned, because dropping it fails nothing
+
+All four fixes are observational: remove the call and no test breaks, no build fails, no error appears —
+the report just goes quiet and the next autopsy re-derives the same wrong conclusion from the same
+missing numbers. `tests/buildReportWiring.test.ts` asserts each call site against the route's source
+with comments stripped, so a doc block that merely MENTIONS a call cannot satisfy an assertion about it
+(the third time that particular mistake has been caught by a comment-stripper in two weeks).
+
+**Verification:** 43 new tests across five files; every fix checked to FAIL when reverted — the renderer's
+zeros, the settle-clears-live rule, the removed `once`, the missing attempt suffix, the `onChain`
+callback, and the chain line — six reverts, six failures.
+
+### Still OPEN
+
+- **Why GLM delivered 0 of 54 turns on that specific build.** Now diagnosable from the next report
+  (item 4); genuinely unanswerable from this one.

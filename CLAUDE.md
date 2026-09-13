@@ -2071,6 +2071,10 @@ Do NOT sit and watch any single CI run. The rule, every time you push:
 This applies to the deep-test autopsy loop too: after pushing a root-cause fix, don't watch its CI —
 start the next autopsy / next fix, and let the background timer bring you back to merge when it's green.
 
+⚠️ Every "merge it" / "merge when green" instruction above is superseded by the 2026-09-13 correction
+after the cycle below: the background timer still brings you back on green, but what it does on
+arrival is now tell the admin and wait, not merge — see that correction for the exact rule.
+
 **The cycle (repeat for every phase):**
 
 1. **Complete the next phase** — real, fully-wired work (the two absolute rules apply:
@@ -2094,6 +2098,17 @@ each phase, you make the PR, you wait for green, you merge, you move on — over
 **Only stop the cycle when:** the admin explicitly says stop/pause, there is no next phase
 left, or you hit real doubt/ambiguity/breakage risk (safeguard #3 — then ask the admin).
 A transient CI failure is NOT a stop: diagnose, fix, re-push, wait for green, merge, continue.
+
+🔴 **CORRECTION 2026-09-13 (admin-mandated, verbatim: "jab tak kaha na jaye, CI merge na ki
+jaye") — THIS SUPERSEDES STEP 6 ABOVE, UNTIL THE ADMIN SAYS OTHERWISE.** After any edit, the
+cycle still runs through branch → commit → push → open the PR → wait for CI to go green
+(steps 1–5 are unchanged). But the merge itself is no longer Claude's to decide on green: once
+CI is green, STOP at that PR, tell the admin it is open and green, and wait — do not merge
+until the admin explicitly says to merge THAT PR. This applies to every PR, including small or
+documentation-only ones, and holds until the admin lifts it. Nothing else about the gate
+changes: CI still must be green before a merge ever happens, and a red or pending PR is still
+worked to green in the background exactly as before — only the final "merge it" decision moved
+from Claude to the admin.
 
 ### The 60-second auto-answer rule (admin-mandated, 2026-07-06 — keeps the cycle from stalling)
 

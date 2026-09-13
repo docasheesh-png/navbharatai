@@ -50550,3 +50550,40 @@ not on the first screen, and the words a user actually types — courier, parcel
 daan, vidyalaya, marksheet, haziri, shaadi, RSVP, mehendi, sangeet, nimantran.
 
 **Gate on the final state:** see the commit.
+## 2026-09-13 — Slice 5's last half: the bring-your-own paths move behind a disclosure
+
+ROADMAP §11 slice 5 promised **one Publish button**. The server half landed on 2026-09-12 — a fullstack
+app is no longer refused, NavBharat Cloud runs it, and the app is recorded so "Your published apps" and
+"Take offline" have a row to act on. The screen, though, still opened with four equally-weighted cards,
+and the second of them asked somebody who has never heard of Vercel to choose between their own cloud
+account and ours before anything at all had happened.
+
+So the bring-your-own paths — "We deploy to your provider" and "I host it myself" (a pull request into
+the user's own GitHub repo) — are now folded behind a disclosure titled **"Host it somewhere else
+instead"**, with a one-line hint naming what is inside so the choice can be made without opening it.
+Nothing was removed. Every path still works and is one press away.
+
+🔒 **THE RULE THAT KEEPS THIS FROM BEING A REGRESSION, and the reason it is a module rather than a
+`useState(false)`: a path somebody is already using is never hidden.** A user who has connected Vercel,
+or whose app already lives in their own repo, has told us in the strongest way available which path is
+theirs — collapsing it would be a default overruling a decision. `advancedPublishStartsOpen` opens the
+section for them, and the disclosure is then only a way to fold it away.
+
+Hiding a control somebody relies on behind a click they have no reason to make is, from their side,
+indistinguishable from the feature having been deleted. That is the failure this change had to avoid,
+and it is asserted directly: *"never folds the bring-your-own paths away from a user already using
+them"*, which also checks that the default screen really is the collapsed one — a test that would pass
+on a no-op is not a test of this change.
+
+One detail worth writing down because it would have failed silently: the open state is
+`advancedToggled ?? advancedPublishStartsOpen(...)`, where `null` means "the user has not pressed it".
+A plain boolean seeded at first render would have been computed before the provider list and the repo
+arrive as props — collapsing the section on exactly the users the rule exists to protect, with nothing
+anywhere reporting a fault.
+
+The Render backend offer needed no move: it already appears only after a publish was refused for
+needing a server, which is the one moment those words belong on the screen.
+
+`AppKnowledgeBase.ts` updated in the same commit (the navigation changed, so every AI that answers
+"where is X?" had to change with it), and ROADMAP 2.4 marked done — with the caveat stated rather than
+implied: the code is complete and `NAVBHARAT_CLOUD_PUBLIC` is what still keeps it admin-only.

@@ -21,7 +21,7 @@
 // (static = Free); it is the single place to change when the admin sets real numbers.
 
 import { useEffect, useState, useRef } from 'react';
-import { Rocket, X, Globe, Server, Link2, GitBranch, ExternalLink, AlertCircle, Database, Smartphone, Store, Clipboard, Sparkles, Loader2, Check } from 'lucide-react';
+import { Rocket, X, Globe, Server, Link2, GitBranch, ExternalLink, AlertCircle, Database, Smartphone, Store, Clipboard, Sparkles, Loader2, Check, ChevronDown } from 'lucide-react';
 import { readStoreIcon, readStoreIconFromClipboard, type IconCheck } from '../../lib/appIcon';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { NbaiDomainConnect } from './NbaiDomainConnect';
@@ -30,6 +30,7 @@ import { needsPublishDot } from '../../lib/publishFreshness';
 import { backendDeployOffer, DEPLOY_BACKEND_LABEL, type BackendKeySource, shouldAutoDeployBackend } from '../../lib/backendDeployOffer';
 import { managedDeployRequest, managedDeployOutcome, renderConnectSteps } from '../../lib/backendDeployWiring';
 import { LONG_REQUEST_TIMEOUT_MS, fetchFailureLine, isFetchTimeout } from '../../lib/longRequest';
+import { advancedPublishStartsOpen, ADVANCED_PUBLISH_LABEL, ADVANCED_PUBLISH_HINT } from '../../lib/advancedPublish';
 import {
   DEPLOY_BACKEND_FAILURE, PROVISION_DB_FAILURE, PUSH_APP_FAILURE, PUSH_APP_UNCONFIRMED_LINE,
   pushSavedLine, repoFactOf, type PushAppResult,
@@ -706,6 +707,16 @@ export function HostingChooser({
   const showPublishDot = needsPublishDot(publishState?.freshness);
   const hasOurHosting = providers.some((p) => p.id === NBAI_HOST_ID && p.configured);
   const byo = providers.filter((p) => p.configured && p.id !== NBAI_HOST_ID);
+  // THE BRING-YOUR-OWN PATHS ARE COLLAPSED BY DEFAULT (ROADMAP §11 slice 5 — one Publish button), but
+  // never for somebody already on one of them; `advancedPublish.ts` holds that rule and why it exists.
+  // The user's own press wins over the default, and `null` means "not pressed yet" rather than
+  // "closed" so the default is re-evaluated as props arrive — providers and the repo load after mount,
+  // so a boolean frozen at first render would collapse the section on the very users it must not.
+  const [advancedToggled, setAdvancedToggled] = useState<boolean | null>(null);
+  const advancedOpen = advancedToggled ?? advancedPublishStartsOpen({
+    connectedProviders: byo.length,
+    hasOwnRepo: !!ownRepo,
+  });
   // "Connect your own domain" is offered only when the server feature is on AND we have a workspace
   // to attach it to AND our hosting is available (a Firebase custom domain lives on our site).
   const canConnectDomain = !!customDomainsEnabled && !!workspaceId && hasOurHosting;
@@ -1428,16 +1439,32 @@ export function HostingChooser({
 
           {/* Path 2 — Host somewhere else: EITHER we deploy to the user's provider, OR they host it
               themselves (we only open a PR into their repo). Both are "off NavBharatAI", so they live in
-              one card as two clear sub-choices (admin 2026-08-13). */}
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 flex flex-col gap-2.5">
-            <div className="flex items-center justify-between">
-              <span className="text-[13px] font-bold text-white">Host somewhere else</span>
-              <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded-full">Your account</span>
-            </div>
-            <p className="text-[11.5px] text-zinc-400 leading-relaxed">
-              Keep it off NavBharatAI — your cloud, your bill, free from us.
-            </p>
+              one card as two clear sub-choices (admin 2026-08-13).
 
+              COLLAPSED BY DEFAULT since ROADMAP §11 slice 5 — the screen's job is one Publish button,
+              and a card asking a first-time user to choose between their own cloud account and ours is
+              a fork they cannot answer yet. Nothing was removed: both sub-choices are one press away,
+              and for anyone already using them the section opens itself (`advancedPublish.ts`). */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 flex flex-col gap-2.5">
+            <button
+              type="button"
+              onClick={() => setAdvancedToggled(!advancedOpen)}
+              aria-expanded={advancedOpen}
+              className="w-full text-left flex flex-col gap-1"
+            >
+              <span className="flex items-center justify-between gap-2">
+                <span className="text-[13px] font-bold text-white">{ADVANCED_PUBLISH_LABEL}</span>
+                <span className="flex items-center gap-1.5 shrink-0">
+                  <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded-full">Your account</span>
+                  <ChevronDown className={`w-3.5 h-3.5 text-zinc-500 transition-transform ${advancedOpen ? 'rotate-180' : ''}`} />
+                </span>
+              </span>
+              <span className="text-[11.5px] text-zinc-400 leading-relaxed">
+                {advancedOpen ? 'Keep it off NavBharatAI — your cloud, your bill, free from us.' : ADVANCED_PUBLISH_HINT}
+              </span>
+            </button>
+
+            {advancedOpen && (<>
             {/* Sub-choice A — we deploy to the user's connected provider */}
             <div className="mt-0.5">
               <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1.5">We deploy to your provider</p>
@@ -1479,6 +1506,7 @@ export function HostingChooser({
                 {ownRepo ? `Connected: ${ownRepo.owner}/${ownRepo.repo}` : 'Set up'}
               </button>
             </div>
+            </>)}
           </div>
 
           {/* Path 3 — Make an Android app (APK) via the APK Builder, pre-targeted to THIS app (admin 2026-08-13). */}

@@ -50850,3 +50850,143 @@ the vault to destroy.
 
 **Gate on the final state:** typecheck 0, noUnusedImports clean, typecheck:server 0, build ok,
 test:bundle ok, boot:check PASS, full vitest suite re-run after the last edit.
+
+---
+
+## 2026-09-13 (later the same day) — THE PIN BECAME A GENERAL APP LOCK: ONE PIN, SEVEN AREAS, THE USER CHOOSES
+
+**Admin, verbatim:** *"yeh PIN system sirf 'secret and api key' ke liye nahi, aur bhi options ke liye lagu
+karna hoga, jaise ki subscription, delete profile etc … ro generalised pin system banana hai. setting me
+general settings me, user ko option do kaha kaha pin lagana hai. settings — general setting — app lock —
+tick ✅ toggles. 1- api keys and secret (non removal ✅) 2- user chahe to (on/off) default off: navbharatai
+pro, billings, subscription, wallet recharge, code studio, settings"*
+
+Shipped exactly that list. `api_keys` always on and not removable; the other six default OFF, so a user
+who ticks nothing sees an app byte-identical to before.
+
+### 🔒 THE ONE ROUTE THAT DECIDES WHETHER THIS IS A LOCK OR A PREFERENCE
+
+`PUT /api/app-lock/:userId/areas` **requires a live unlock ticket.** Without that, somebody holding an
+unlocked phone opens Settings and switches the lock off, and every other line of this feature is theatre.
+The same ticket a reveal spends, so a user who just typed their PIN is not asked twice.
+
+Three more rules on that route, each a defect it prevents rather than a nicety:
+- **It refuses before a PIN exists** (409 + `needsSetup`). Locking screens with no PIN set would shut the
+  owner out of their own app with no way back — the worst outcome available, and the first absolute rule.
+- **`api_keys` cannot be dropped**, enforced in `normaliseLockedAreas` on BOTH sides, not by a disabled
+  checkbox. A disabled input is a picture; anyone can send the request the screen would have sent.
+- **Unknown ids are dropped, not stored.** A stale id would sit in the list looking like a lock that is on
+  while nothing checks it, and a lock that lies about itself is worse than no lock.
+
+### 🔴 THE HONEST PART, SAID ON THE SCREEN ITSELF AND NOT ONLY HERE
+
+The seven areas are **not equally protected**, and the settings screen says so in its own words:
+
+- **API keys** — the PIN is REAL protection. The values stay encrypted and the server will not decrypt
+  without a ticket, so deleting every line of the unlock UI makes them *unreadable*, not public.
+- **Everything else** — there is nothing to withhold: it is the user's own data and their session already
+  reaches it. The PIN keeps the SCREEN closed on that device, which is precisely what an app lock is and
+  what stops somebody who picks up your phone. It is not server-level secrecy and is not sold as such.
+
+A session that later "hardens" this by claiming more should read `appLockAreas.ts` and the closing
+paragraph of `AppLockSettings.tsx` first — the wording is deliberate.
+
+### THREE THINGS THE SURVEY OF THE REAL SCREENS CHANGED, AND ALL THREE WOULD HAVE BEEN BUGS
+
+**1. There is no `subscription` view and no `wallet` view.** All three money words land on ONE screen,
+`activeView === 'billing'` (`BillingPanel`). So the admin's three toggles are one outer gate plus two
+inner ones: the whole screen, the `HostingPlanCard` (plans + auto-renew), and the `activeBillingDetailTab
+=== 'purchase'` body. `coveredByBilling()` + `effectiveLockedAreas()` exist because of this: locking the
+whole screen already covers the two inside it, and the settings list SAYS so rather than leaving two ticks
+that appear to do nothing.
+
+**2. 🔴 THE PRO BUILDER MUST NOT BE UNMOUNTED, so it is not wrapped in a gate at all.** That surface is
+deliberately kept mounted across tab switches (`v3SurfaceMount.ts` records two rounds of root-causing) so
+a mid-stream build survives. A gate that unmounted it would **kill the build the user is waiting for** —
+a lock causing data loss. The first attempt at this was an absolute overlay, and it could not have worked
+either: the keep-alive wrapper uses `display: contents` when active, which removes its box, so
+`absolute inset-0` inside it would have covered some ancestor further up. The shipped answer adds no new
+idea: `v3SurfaceDisplayClass(activeView, locked)` returns the SAME `hidden` the keep-alive already uses,
+and `<AppLockScreen>` renders in its place. Hidden is the branch already proven to preserve a build.
+
+**3. Gating Settings at the panel would have been a TRAP.** `SettingsPanel`'s sticky header holds the
+✕ Close button, so wrapping the whole panel would leave a user who locked Settings looking at a PIN card
+with no way out but the sidebar. The gate wraps the CONTENT only; a test asserts the close button is still
+above it. And yes — the App Lock toggles are inside that locked content, so turning Settings lock off needs
+the PIN. That is intended and is not a dead end, because "Forgot PIN" resets through an emailed code.
+
+### 💰 THE MONEY PATH: WHERE THE PIN IS ASKED, AND WHERE IT DELIBERATELY IS NOT
+
+The recharge gate sits on the purchase TAB, so the four balance cards above it (which are that screen's
+own tab bar) stay visible — a user can still read their balance and history while the buy flow is locked.
+
+**The checkout modal is NOT gated, on purpose.** It lives in `AppModals.tsx` and a payment return can
+re-open it without passing through Billing. A PIN prompt there would meet a user who has **already paid**,
+instead of their confirmation — a money path interrupted by a lock, which is strictly worse than the hole
+it closes. **Reaching the pay button needs the PIN; crediting money that was genuinely paid never does.**
+Pinned by a test that asserts no gate appears in that file.
+
+⚠️ **WHAT IS NOT DONE, AND WAS PROMISED IN CONVERSATION EARLIER TODAY.** I told the admin I would also
+enforce the PIN **server-side** on the actions that spend money or change a subscription. It is NOT in this
+change. The three honest candidates are `/api/wallet/:id/hosting-plan/purchase`,
+`/hosting-plan/auto-renew` and `/api/payment/create-order` — all three fail BEFORE any money moves, so a
+ticket check there is safe, but it touches money routes and deserves its own focused change and tests
+rather than riding along with a UI feature. Recorded here as an OPEN item (rule 6) instead of quietly
+dropped. Until it ships, those three are screen-gated only.
+
+### WHAT MOVED, AND WHY THE ROUTES WERE RENAMED
+
+`/api/secrets/:userId/pin*` → **`/api/app-lock/:userId/*`**, in a new `routes/appLock.ts`. Safe to rename
+because those routes had existed for about an hour and had never been deployed — and leaving a lock that
+guards Code Studio under `/api/secrets` is exactly the doc-vs-code drift this file records elsewhere.
+`secrets.ts` keeps only the ticket CHECK on reveal and delete.
+
+Extracted so the check exists once, not twice: `lib/vaultTicketHttp.ts` (`UNLOCK_TICKET_HEADER` +
+`ticketFor`) and `lib/vaultAudit.ts`. The shared area list is `src/lib/appLockAreas.ts` — in `src/lib/`
+because **both** the browser and the server import it, the way `lib/phoneNumber.ts` already does. Two
+copies of a security list is how one side comes to believe an area is lockable while the other ignores it.
+
+### TWO CLIENT DECISIONS THAT ARE LOAD-BEARING
+
+**The unlock is module-level, not per-component** (`lib/appLock.ts`). Six gates each holding their own
+ticket would ask for the PIN on every screen, while the ticket is per USER — friction buying nothing. One
+store, one timer, every gate subscribes, so they open and re-lock together. Expiry is re-checked on READ
+as well as by the timer, because a suspended tab's `setTimeout` may never fire.
+
+**The status is fetched once and shared.** Six gates mounting would otherwise fire six identical requests.
+
+🔒 **AND WHAT HAPPENS WHEN THAT REQUEST FAILS, stated because it is a real trade and not an oversight.** A
+gate falls back to the last answer the device received; with none at all it RENDERS. Failing closed would
+lock a user out of Settings over a dropped request — breaking the app for the many who never switched this
+on, to deter an attacker who can already open devtools. The exception is `api_keys`, which never renders
+without a real unlock, because the server refuses to decrypt regardless: that lock does not depend on the
+browser being honest, which is the whole reason it is the one that is more than a screen lock.
+
+### A BUG CAUGHT WHILE WIRING, WORTH RECORDING BECAUSE IT WOULD HAVE FAILED SILENTLY
+
+`ViewPanels.tsx` has **both** `user` and `firebaseUser`, and they are different things: `firebaseUser` is
+the user's OWN Firebase project connection (BYO database — it sits between `firebaseToken` and
+`connectFirebase` in the props), while `user` is the signed-in NavBharatAI account. The first wiring used
+`firebaseUser?.uid`. A gate keyed to the wrong uid asks the server about a caller it is not, gets refused
+by `requireUserMatch`, and then **renders OPEN** — a lock that silently does nothing. A test now pins
+which prop is used.
+
+### Tests
+
+- `tests/appLockAreas.test.ts` (12) — the default is "only the mandatory area", junk degrades to the
+  DEFAULT and never to everything-locked, `api_keys` survives any input, containment runs one way only.
+- `tests/appLockRoutes.test.ts` (27, renamed from `vaultPinRoutes`) — plus the areas route: refuses without
+  a ticket, refuses another user's ticket, refuses before a PIN exists, cannot drop `api_keys`, drops
+  unknown ids.
+- `tests/appLockWiring.test.ts` (16) — **every area in the settings list must name its area in the file
+  that guards it**, so a future area cannot ship as a tick with nothing behind it. Plus: Pro is hidden not
+  unmounted, Settings' ✕ stays above the gate, the recharge gate is on the tab body, and the checkout modal
+  has no gate.
+- Re-anchored without weakening: `secretVaultDoor`, `vaultLockWiring` (its per-component re-lock timer
+  assertion now pins the shared store, which is where that behaviour moved).
+
+`AppKnowledgeBase` updated in the same change (the sync rule): a new `settings_app_lock` entry with the
+full seven-item list, how the PIN is created, that changing the toggles needs the PIN, the honest
+strong-vs-screen-lock difference, and the words a user really types (`app lock kaise lagaye`, `pin lagao`,
+`lock hata do`, `pin bhul gaya`, `koi aur na dekhe`, `phone kisi ke hath`). `settings_general` and
+`settings_secrets` corrected to point at it.

@@ -11,6 +11,7 @@
 import { cn } from '../../lib/utils';
 import { FreeGiftBanner } from './FreeGiftBanner';
 import { HostingPlanCard } from './HostingPlanCard';
+import { AppLockGate } from '../AppLockGate';
 import {
   Wallet, Zap, RefreshCw, AlertCircle, Sparkles, Gift, CreditCard,
   Activity, CheckCircle2, ShieldCheck, ExternalLink,
@@ -179,7 +180,15 @@ export function BillingPanel(props: BillingPanelProps) {
           {/* Plans (admin 2026-08-06): the whole account story in one card — Hosting plan (₹99
               Custom Domain, bought from THIS wallet), Database (free, user's own account), Coding
               (pay-per-use). Self-contained: talks to the ownership-checked wallet routes itself. */}
-          <HostingPlanCard userId={user.uid} onWalletChanged={onFetchWallet} onToast={onToast} />
+          {/* 🔒 APP LOCK — "Subscription & plans" (admin 2026-09-13). This card IS the subscription surface:
+              buying a plan spends the wallet, and the auto-renew switch decides whether it is charged
+              again. Default OFF, so a user who never ticked it sees the card exactly as before. */}
+          <AppLockGate
+            userId={user.uid}
+            area="subscription"
+            embedded
+            render={() => <HostingPlanCard userId={user.uid} onWalletChanged={onFetchWallet} onToast={onToast} />}
+          />
 
           {/* Phase 4.2 — This Month's AI Cost card */}
           {monthlyAiCost !== undefined && (
@@ -670,7 +679,18 @@ export function BillingPanel(props: BillingPanelProps) {
             )}
 
             {/* DETAILED TAB 3: BUY CREDIT */}
+            {/* 🔒 APP LOCK — "Wallet recharge" (admin 2026-09-13). The gate sits around the TAB BODY, not
+                the whole panel, so the four balance cards above (which are this tab's own tab bar) stay
+                visible and the user can still read their balance and history.
+
+                ⚠️ IT GATES STARTING A PURCHASE, NOT FINISHING ONE. The checkout completes in a modal
+                rendered from App.tsx, and a payment return can re-open that modal without passing through
+                here. Gating it too would mean a user who has ALREADY PAID comes back to a PIN prompt
+                instead of their confirmation — a money path interrupted by a lock, which is strictly worse
+                than the hole it would close. Reaching the pay button needs the PIN; crediting money that
+                was genuinely paid never does. */}
             {activeBillingDetailTab === 'purchase' && (
+              <AppLockGate userId={user.uid} area="wallet_recharge" embedded render={() => (
               <div className="space-y-6 animate-in fade-in duration-300">
                 <div className="flex flex-wrap items-center justify-between border-b border-white/5 pb-4 gap-4">
                   <div>
@@ -839,6 +859,7 @@ export function BillingPanel(props: BillingPanelProps) {
                   </div>
                 </div>
               </div>
+              )} />
             )}
 
             {/* DETAILED TAB 4: BUDGET & REMINDER SRE */}

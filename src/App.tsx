@@ -15,6 +15,7 @@ import { HistoryPopup } from './components/history/HistoryPopup';
 // FilesPanel → moved to ViewPanels.tsx
 import { v3MobileFooterActive, type V3FooterApi } from './components/agentv3/v3FooterApi';
 import { shouldRenderV3Surface, v3SurfaceDisplayClass } from './components/agentv3/v3SurfaceMount';
+import { AppLockGate, AppLockScreen, useAreaLocked } from './components/AppLockGate';
 import { restoreV3Tab, v3TabIsOpen, v3IsActive, V3_TAB_FLAG, V3_ACTIVE_FLAG } from './components/agentv3/v3TabPersistence';
 import { clearStickySession } from './components/agentv3/v3SessionContinuity';
 // Lazy — keeps the bundled AppKnowledgeBase (imported by the Offline AI) OUT of the main index chunk,
@@ -316,6 +317,16 @@ export default function App() {
 
   // hinglishMode → from useSettings() hook
   const [loadingUser, setLoadingUser] = useState(true);
+  /**
+   * 🔒 APP LOCK — is NavBharatAI Pro locked right now? (admin 2026-09-13.)
+   *
+   * Asked here rather than by a wrapper around the surface, because that surface must NOT be unmounted:
+   * it is kept alive across tab switches so a mid-stream build survives, and a gate that unmounted it
+   * would destroy the build the user is waiting for. So the answer is read here, the surface is hidden
+   * with the same `hidden` class the keep-alive already uses, and the PIN card renders in its place.
+   * Default OFF — `useAreaLocked` is false for every user who has not ticked this area.
+   */
+  const proLocked = useAreaLocked(user?.uid ?? '', 'pro_builder');
   // v5.0 continuity: a hard browser reload must land BACK in NavBharatAI Pro with the same
   // project restored (messages/files/preview) — not dumped to Home. We persist ONLY the v5.0 view
   // (narrow scope; other views still default to Home on reload) in sessionStorage so it survives a
@@ -3015,7 +3026,7 @@ export default function App() {
                was active unmounted the surface in the background and the chat evaporated → "blank page,
                new chat". Unmounts only on explicit tab close (and never mid-build). `contents` when
                active is a layout no-op; `hidden` keeps it alive invisibly. See v3SurfaceMount. */
-          <div className={v3SurfaceDisplayClass(activeView)} aria-hidden={activeView !== 'nbi_pro_chat'}>
+          <div className={v3SurfaceDisplayClass(activeView, proLocked)} aria-hidden={activeView !== 'nbi_pro_chat' || proLocked}>
             <ProV3Surface
               userId={user?.uid}
               email={user?.email}
@@ -3083,6 +3094,12 @@ export default function App() {
               }}
             />
           </div>
+          )}
+
+          {/* The PIN card that stands in for the Pro builder while it is locked. The surface above is
+              still mounted and, if a build was running, still running — it is only invisible. */}
+          {activeView === 'nbi_pro_chat' && proLocked && user?.uid && (
+            <AppLockScreen userId={user.uid} area="pro_builder" />
           )}
 
           {/* ── Senior Doctor Assistant (hidden in the Play native shell — playCompliance) ── */}
@@ -3575,6 +3592,11 @@ export default function App() {
          )}
 
           {activeView === 'billing' && (
+            /* 🔒 APP LOCK — "Wallet & Billing" (admin 2026-09-13). The OUTER lock: ticking this covers the
+               whole screen, including the plans card and the recharge tab that have their own finer
+               toggles inside it (see `coveredByBilling` — the settings list says so rather than leaving
+               two ticks that appear to do nothing). Default OFF. */
+            <AppLockGate userId={user?.uid ?? ''} area="billing" render={() => (
             <BillingPanel
               user={user}
               wallet={wallet}
@@ -3623,6 +3645,7 @@ export default function App() {
               onToast={addToast}
               monthlyAiCost={monthlyAiCost}
             />
+            )} />
           )}
 
           {activeView === 'my_profile' && (

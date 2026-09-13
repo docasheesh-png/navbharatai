@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { unlockIsLive, secondsRemaining, looksLikePin, lockoutMinutes, UNLOCK_TICKET_HEADER } from '../src/lib/vaultLock';
-import { UNLOCK_TICKET_HEADER as SERVER_HEADER } from '../src/server/routes/secrets';
+import { unlockIsLive, secondsRemaining, looksLikePin, lockoutMinutes, UNLOCK_TICKET_HEADER } from '../src/lib/appLock';
+import { UNLOCK_TICKET_HEADER as SERVER_HEADER } from '../src/server/lib/vaultTicketHttp';
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), 'utf8');
 
@@ -26,9 +26,9 @@ describe('the client and the server agree on the ticket header', () => {
 describe('the Secrets screen is behind the gate', () => {
   const src = read('src/components/SecretManager.tsx');
 
-  it('wraps the saved-key list in VaultLockGate', () => {
-    expect(src).toContain("import { VaultLockGate } from './VaultLockGate'");
-    expect(src).toMatch(/<VaultLockGate/);
+  it('wraps the saved-key list in the app lock', () => {
+    expect(src).toContain("import { AppLockGate } from './AppLockGate'");
+    expect(src).toMatch(/<AppLockGate/);
   });
 
   it('reads values ONLY through the ticketed reveal call', () => {
@@ -51,7 +51,7 @@ describe('the Secrets screen is behind the gate', () => {
     // defensible — and it produced the screen the admin photographed: a form, then a lock card halfway
     // down, which reads as a half-locked room. Since the rows themselves are now editable in place there
     // is no separate form left to leave outside, and the panel has one door.
-    const gateAt = src.indexOf('<VaultLockGate');
+    const gateAt = src.indexOf('<AppLockGate');
     expect(gateAt).toBeGreaterThan(-1);
     expect(src.indexOf('<CredentialTable')).toBeGreaterThan(gateAt);
     // The old top-of-screen form is gone entirely, not merely moved.
@@ -143,7 +143,7 @@ describe('the client helpers a screen depends on', () => {
  * rather than a dead end, because a vault nobody can open loses somebody their keys for good.
  */
 describe('every state of the door offers a real way forward', () => {
-  const src = read('src/components/VaultLockGate.tsx');
+  const src = read('src/components/AppLockGate.tsx');
 
   it('a fresh account is taken straight to setup, not asked for a PIN that does not exist', () => {
     expect(src).toContain("setMode(s.hasPin ? 'unlock' : 'setup')");
@@ -165,11 +165,19 @@ describe('every state of the door offers a real way forward', () => {
   });
 
   it('the server is the authority on lock-outs: a refusal re-reads the status instead of guessing', () => {
-    expect(src).toContain("if (typeof e?.lockedForMs === 'number' || e?.needsSetup) void refreshStatus();");
+    expect(src).toContain("if (typeof e?.lockedForMs === 'number' || e?.needsSetup) void refreshStatus(true);");
   });
 
-  it('the vault re-locks itself on a timer, and "Lock now" is one tap', () => {
-    expect(src).toContain('if (!live) relock();');
+  it('the lock closes ITSELF, and the timer lives in the shared store rather than per screen', () => {
+    // MOVED, not dropped (2026-09-13): with one PIN in front of six screens, a per-component timer would
+    // let one screen sit open while another had already re-locked. `appLock.ts` holds ONE timer and every
+    // gate subscribes, so they close together — and the expiry is re-checked on READ as well, because a
+    // suspended tab's timeout may never fire.
+    const store = read('src/lib/appLock.ts');
+    expect(store).toContain('expiryTimer = setTimeout(');
+    expect(store).toContain('export function subscribeAppLock');
+    expect(store).toMatch(/export function currentUnlock[\s\S]{0,200}unlockIsLive\(unlockState\)/);
+    // And the user can still close it by hand, on the screen where that matters.
     expect(src).toContain('Lock now');
   });
 });

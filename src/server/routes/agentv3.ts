@@ -271,7 +271,7 @@ import {
 } from '../AgentV3/RouteSmokeCheck';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { auditConnectedProject } from '../AgentV3/ConnectAudit';
-import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, oneShotStillViable, parseFileBlocks } from '../AgentV3/OneShotBuilder';
+import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, oneShotStillViable, oneShotSkipReason, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { shouldContinue, continuationPrompt, joinContinuation, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
@@ -290,6 +290,7 @@ import { projectModeEnabled, detectMegaProject, isContinuationMessage, parsePlan
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
+import { createLaneWriteFence } from '../AgentV3/laneWriteFence';
 import { analyzePreviewHtml, hasFrontendSource, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
 import { checkFeaturePresence, featurePresenceSummary, featurePresenceRepairPrompt, featureHealEnabled } from '../AgentV3/FeaturePresence';
 import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, suitePresentButRunnerMissing, withSandboxBrowsers } from '../AgentV3/testRunner';
@@ -13872,7 +13873,7 @@ async function noteBuildOutcome(
           }
           return text;
         };
-        const fastWrite = async (files: { path: string; content: string }[]): Promise<void> => {
+        const fastWriteRaw = async (files: { path: string; content: string }[]): Promise<void> => {
           // Write files with bounded concurrency instead of one serial E2B round trip each (SPEED).
           // Paths are distinct by construction (de-duped by path upstream), so concurrent writes to
           // different files never conflict; the E2B round-trip latency (~150-300ms each) now overlaps.
@@ -13880,6 +13881,30 @@ async function noteBuildOutcome(
           await mapWithConcurrency(files, 6, (f, i) =>
             dispatcher.dispatch({ id: `fast-w${i}`, name: 'write_file', input: { path: f.path, content: f.content } }, 'frontend'),
           );
+        };
+        // THE WRITE FENCE (autopsy a38c6fef, 2026-09-13). Every fast lane writes through this one
+        // function, so this is the single place where "is this lane still allowed to touch the
+        // workspace?" can be answered for all of them — including lanes nobody has written yet. A lane
+        // that has been handed off is refused here even if it forgot to stop itself, which is what turns
+        // the July `lapsed` convention into an architecture. See `laneWriteFence.ts` for the full story.
+        const laneFence = createLaneWriteFence(fastWriteRaw, ({ lane, holder, paths }) => {
+          // EVIDENCE, LOUDLY. The original zombie write left no trace whatsoever — the autopsy had to
+          // reconstruct it from write timestamps two months after an identical incident. A refusal now
+          // names itself in the build report, so this class can never again be invisible (rule 5).
+          try {
+            buildDiag.record({
+              phase: 'build', severity: 'warning', code: 'ZOMBIE_WRITE_REFUSED',
+              message: `An abandoned build lane (${lane}) finished late and tried to write ${paths.length} file(s) `
+                + `over the app that replaced it — refused. The app you have is the one ${holder ?? 'the full builder'} produced.`,
+              autoResolved: true,
+              detail: paths.slice(0, 20).join(', '),
+            });
+          } catch { /* diagnostics are best-effort — the refusal itself is not */ }
+        });
+        // Kept for the route's OWN in-lane writes (the deterministic mispath auto-fix inside fastVerify,
+        // and the one-shot's post-success repair). Both run while their lane still owns the workspace.
+        const fastWrite = async (files: { path: string; content: string }[]): Promise<void> => {
+          await fastWriteRaw(files);
         };
         const fastPreview = async (): Promise<void> => {
           // FOUNDATION GUARANTEE (deep-test Level-1, build 7c56b35a): the file-list planner can OMIT the
@@ -14110,7 +14135,7 @@ async function noteBuildOutcome(
           merge: mergeWorkspaceFiles,
           emit: (e) => events.emit(e),
         });
-        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
+        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
         // OBSERVABILITY (deep-test App #2, 2026-07-13): when the fast lane falls back after a verify
         // failure, record the ACTUAL compiler error text so the report can be mined for the true cause
@@ -14152,7 +14177,7 @@ async function noteBuildOutcome(
         // HONESTY (rule 5): a lane we DECIDED not to run must say so, and say why. Silence here would
         // read in the report as "the one-shot was never eligible", which is a different fact.
         if (!sb.ok && classifyForOneShot(analysis?.startTier) && !oneShotStillViable(sb)) {
-          buildDiag.record({ phase: 'build', severity: 'info', code: 'ONESHOT_SKIPPED', message: `Skipped the one-shot fast lane: the file plan had already found ${sb.plannedFiles} files, and that lane only fits a single-file app — going straight to the full builder instead of spending a generation call proving it.`, autoResolved: true });
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'ONESHOT_SKIPPED', message: oneShotSkipReason(sb) ?? 'Skipped the one-shot fast lane — going straight to the full builder.', autoResolved: true });
         }
         if (sb.ok) {
           if (sb.typecheckRan === false) {
@@ -14166,7 +14191,7 @@ async function noteBuildOutcome(
           //    …and gated on what the lane above just MEASURED. See oneShotStillViable: in the dukaan
           //    report the manifest had planned 8 files, so "the manifest skips it" was already false,
           //    and this lane still ran for 150 seconds to fail at something a single call cannot do.
-          const os = await runOneShot({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, log: fastLog });
+          const os = await runOneShot({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: laneFence.open('one-shot'), startPreview: fastPreview, log: fastLog });
           buildDiag.record({ phase: 'build', severity: 'info', code: os.ok ? 'ONESHOT_SUCCESS' : 'ONESHOT_FALLBACK', message: os.summary, autoResolved: true, detail: os.reason });
           if (os.ok) {
             // VERIFY GATE for the one-shot lane too (autopsy 2026-07-07: a NowPlaying.tsx TRUNCATED
@@ -14200,6 +14225,13 @@ async function noteBuildOutcome(
             }
           }
         }
+        // HANDOFF — the workspace now belongs to the full agentic builder, and no fast lane may write
+        // to it again (autopsy a38c6fef). This single line is what the whole fence exists for: it does
+        // not matter which lane forgot to cancel itself, how its deadline was implemented, or whether a
+        // future lane remembers to stop — after this, an abandoned lane's write is refused and said out
+        // loud. `result` being set means a fast lane SUCCEEDED and still owns the app, so we leave its
+        // lease alone: its own post-success repairs must keep working.
+        if (!result) laneFence.handoff();
         // C — BULLETPROOF PREVIEW: persist the produced files to the durable store SYNCHRONOUSLY the
         // moment the fast lane succeeds — not via the 3s debounce or the fire-and-forget end-of-flow
         // save, both of which can be cut off (the reviewer still running, a dropped stream, an
@@ -15774,6 +15806,21 @@ async function noteBuildOutcome(
           }
         } catch { /* diagnostics are best-effort — never blocks a build */ }
       }
+      let previewVerifiedFailed = false;
+      // The POSITIVE counterpart. Without it the runtime verdict below could report "no live preview
+      // session" for a build whose preview had just been opened and confirmed rendering — the
+      // self-contradicting report from the Shiv Medical Store autopsy (2026-08-10).
+      //
+      // 🔴 THESE TWO DECLARATIONS MUST STAY ABOVE THE RENDER RESCUE, AND THAT IS THE WHOLE FIX
+      // (autopsy a38c6fef, 2026-09-13). They used to sit immediately BELOW the rescue block, so the one
+      // piece of code that proves an app renders — in a real browser, which is the strongest evidence
+      // this platform can produce — was physically unable to record it: the variable did not exist yet
+      // at that point in the function. And because the verify block below is deliberately skipped for a
+      // rescued build (`!renderRescued`), nothing else could set it either. A rescued build therefore
+      // reached the release gate with `preview: 'not-run'`, and the gate printed "a live preview came up
+      // but was never confirmed to render, so nothing here was proven to RUN" — 1.4 seconds after the
+      // same build had watched it render. Nothing failed, nothing logged; the report simply lied.
+      let previewVerifiedRendered = false;
       if (
         process.env.AGENTV3_RENDER_RESCUE !== 'off'
         && renderRescueEligible({ ok: result.ok, expectsArtifacts, filesWritten: writtenFiles.size })
@@ -15823,6 +15870,9 @@ async function noteBuildOutcome(
               }
             } catch { /* latching is best-effort — never affects a build */ }
             try { buildDiag.recordPreviewVerified(); } catch { /* diagnostics best-effort */ }
+            // THE EVIDENCE REACHES THE GATE. A real browser just rendered this app, so every later
+            // verdict — the release gate above all — must be told, not left to infer it from silence.
+            previewVerifiedRendered = true;
             buildDiag.record({ phase: 'preview', severity: 'info', code: 'RENDER_RESCUE', message: 'Build finished not-ok but the live preview renders cleanly (real-browser verified) — upgraded to success so health, billing and the verdict are honest.', autoResolved: true });
             events.emit({ type: 'narration', agent: 'architect', text: '✅ Your app is built and the live preview renders correctly.', ts: Date.now() });
           } else if (runtimeCrashBlocker && verdict.rendered) {
@@ -15833,11 +15883,6 @@ async function noteBuildOutcome(
         } catch { /* rescue is best-effort — on any failure the build stays ok:false (never a fake success) */ }
       }
 
-      let previewVerifiedFailed = false;
-      // The POSITIVE counterpart. Without it the runtime verdict below could report "no live preview
-      // session" for a build whose preview had just been opened and confirmed rendering — the
-      // self-contradicting report from the Shiv Medical Store autopsy (2026-08-10).
-      let previewVerifiedRendered = false;
       if (
         process.env.AGENTV3_PREVIEW_VERIFY !== 'off' && result.ok && !renderRescued && lastPreviewUrl && actuator.browseUrl
         && !abort.signal.aborted

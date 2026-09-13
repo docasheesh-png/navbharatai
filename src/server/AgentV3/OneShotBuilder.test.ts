@@ -127,7 +127,11 @@ describe('runOneShot', () => {
       overallTimeoutMs: 30,
     }));
     expect(r.ok).toBe(false);
-    expect(r.reason).toContain('did not finish');
+    // The wording comes from the SHARED `asyncUtils.withTimeout` since 2026-09-13 (the private copy
+    // this module used to carry is what hid the zombie-write sibling for two months). It is not
+    // cosmetic: `oneShotStillViable` reads "timed out" out of this very string to decline a lane on a
+    // stalling engine, so changing this phrase silently disables that gate.
+    expect(r.reason).toContain('timed out');
   });
 
   it('a HUNG generate (model call never returns) does NOT hang — bails to fallback within the overall timeout', async () => {
@@ -138,7 +142,7 @@ describe('runOneShot', () => {
       overallTimeoutMs: 30,
     }));
     expect(r.ok).toBe(false);
-    expect(r.reason).toContain('did not finish');
+    expect(r.reason).toContain('timed out');
   });
 
   it('STICKY SUCCESS: once files are written, a slow/hung preview never discards the build', async () => {

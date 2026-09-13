@@ -15,6 +15,12 @@
 // INJECTED, so the parsing/classification/prompt logic is fully unit-testable without a sandbox.
 
 import type { StartTier } from './RequestAnalyser';
+// ONE timeout helper for the whole build pipeline. This module used to carry its own private copy,
+// and that duplication is the direct reason the July zombie-write fix landed in `SimpleBuilder` and
+// not here: a grep for the shared helper simply did not reach this file, so the sibling was never
+// hunted (fourth absolute rule, step 3) and the same failure returned two months later. Centralised
+// so a future reader finds every lane that races a deadline in one search.
+import { withTimeout } from './asyncUtils';
 
 /** Whether this build should TRY the OneShot lane. Simple/medium tiers (gemini/haiku) → yes;
  *  complex tiers (sonnet/opus) keep the full agentic loop. Pure + exported for testing. */
@@ -70,11 +76,44 @@ export function classifyForSimpleLane(startTier: StartTier | undefined): boolean
  * multi-file. Unknown (no manifest — the plan call itself failed or returned nothing parseable) stays
  * VIABLE, because a lane that never planned has proven nothing. Pure + tested.
  */
-export function oneShotStillViable(sb: { plannedFiles?: number } | null | undefined): boolean {
+export function oneShotStillViable(sb: { plannedFiles?: number; reason?: string } | null | undefined): boolean {
+  // A LANE THAT TIMED OUT HAS PROVEN SOMETHING ABOUT THE PROVIDER, NOT JUST ABOUT THE APP
+  // (autopsy a38c6fef, 2026-09-13). The rule above reads "no manifest" as "never measured, so still
+  // worth a try". That was right about the app's SIZE and wrong about everything else: when the
+  // sibling lane died because its own model call never came back, we have just watched this build's
+  // provider stall. Sending it a STRICTLY LARGER single call is not an unknown bet — it is a worse
+  // one on a stalling provider, and it is the exact 150 seconds this build spent to learn nothing.
+  //
+  // It also mattered far beyond the time: that abandoned one-shot is what came back seventeen minutes
+  // later and overwrote the finished app. The cheapest way to never have a zombie lane is to not open
+  // one we can already see is doomed.
+  //
+  // Deliberately narrow: only a TIMEOUT declines. A lane that failed to parse, or failed verify, met a
+  // provider that WAS answering — a single call may genuinely do better there, so that stays viable.
+  // The full agentic builder remains the safety net in every case, so declining only ever costs a lane
+  // we had measured to be a bad bet.
+  if (typeof sb?.reason === 'string' && sb.reason.includes('timed out')) return false;
   const planned = sb?.plannedFiles;
   if (typeof planned !== 'number' || !Number.isFinite(planned) || planned <= 0) return true; // never measured
   // ONE file is exactly the case this lane owns. TWO or more is an app a single call truncates.
   return planned <= 1;
+}
+
+/**
+ * The honest, specific sentence for why the one-shot lane was declined — the report must say WHICH of
+ * the two measurements ruled it out, never a single stock line that is now true only half the time
+ * (rule 5: fix the system's honesty alongside the code). Pure; returns `null` when the lane is viable.
+ */
+export function oneShotSkipReason(sb: { plannedFiles?: number; reason?: string } | null | undefined): string | null {
+  if (oneShotStillViable(sb)) return null;
+  if (typeof sb?.reason === 'string' && sb.reason.includes('timed out')) {
+    return 'Skipped the one-shot fast lane: the previous lane had just timed out waiting on the engine, '
+      + 'so a single, larger call to the same engine was a worse bet, not an untried one — going straight '
+      + 'to the full builder instead of spending another generation call and another two minutes proving it.';
+  }
+  return `Skipped the one-shot fast lane: the file plan had already found ${sb?.plannedFiles} files, and that `
+    + 'lane only fits a single-file app — going straight to the full builder instead of spending a generation '
+    + 'call proving it.';
 }
 
 /** Whether the OneShot lane is enabled. On by default (the agentic loop is the safety net);
@@ -182,16 +221,6 @@ export interface OneShotDeps {
   overallTimeoutMs?: number;
 }
 
-/** Resolve `p`, but reject with a timeout error if it has not settled within `ms`. */
-async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  return await new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`operation did not finish within ${ms}ms`)), ms);
-    p.then(
-      (v) => { clearTimeout(timer); resolve(v); },
-      (e) => { clearTimeout(timer); reject(e); },
-    );
-  });
-}
 
 /**
  * Run the OneShot lane. Best-effort: returns ok:false (never throws) when it could not produce a
@@ -207,6 +236,18 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 export async function runOneShot(deps: OneShotDeps): Promise<OneShotResult> {
   const minFiles = deps.minFiles ?? 1;
   let files: OneShotFile[];
+  // ZOMBIE-WRITE KILL (autopsy a38c6fef, 2026-09-13 — the SIBLING of the StudySync fix that
+  // `SimpleBuilder` got in July and this lane did not). `withTimeout` only RACES: losing the race
+  // abandons the WAIT, never the WORK. In the real failure this closure kept generating for a further
+  // seventeen minutes — through two output-ceiling continuations — and then wrote its fourteen files
+  // straight over the app the full builder had finished in the meantime. The debris it left behind
+  // (eleven unused components in `src/icons.tsx`) cost 66 readiness points and turned a working,
+  // real-browser-verified build RED.
+  //
+  // `lapsed` flips the instant the race is lost, so the orphan refuses to write even though its own
+  // generation succeeded. It is the lane's own conscience; the caller's write fence
+  // (`laneWriteFence.ts`) is the architecture that no longer depends on every lane having one.
+  let lapsed = false;
   try {
     deps.log?.('Trying a fast one-shot build…');
     // Bound the ENTIRE generate+parse+write phase together (audit P0-B): writeFiles was previously
@@ -214,12 +255,17 @@ export async function runOneShot(deps: OneShotDeps): Promise<OneShotResult> {
     // of generate / write falls back fast to the agentic loop.
     files = await withTimeout((async () => {
       const text = await deps.generate(oneShotSystemPrompt(deps.framework), oneShotUserPrompt(deps.prompt, deps.scaffoldPaths));
+      // Checked BEFORE parsing as well as before writing: a lane that has already been handed off must
+      // stop at the first opportunity, not merely stop short of the damage.
+      if (lapsed) throw new Error('one-shot-cancelled');
       const parsed = parseFileBlocks(text);
       if (parsed.length < minFiles) throw new Error('no_files_parsed');
+      if (lapsed) throw new Error('one-shot-cancelled');
       await deps.writeFiles(parsed);
       return parsed;
-    })(), deps.overallTimeoutMs ?? 150_000);
+    })(), deps.overallTimeoutMs ?? 150_000, 'one-shot');
   } catch (e) {
+    lapsed = true; // from this instant the orphaned closure can never touch the workspace
     // Generation / write failed or timed out → no app produced, fall back to the full builder.
     const reason = e instanceof Error ? e.message : String(e);
     const summary = reason === 'no_files_parsed'
@@ -234,7 +280,7 @@ export async function runOneShot(deps: OneShotDeps): Promise<OneShotResult> {
   deps.log?.(`Generated ${files.length} file(s) in one shot.`);
   if (deps.startPreview) {
     try {
-      await withTimeout(deps.startPreview(), deps.previewTimeoutMs ?? 90_000);
+      await withTimeout(deps.startPreview(), deps.previewTimeoutMs ?? 90_000, 'one-shot-preview');
     } catch {
       deps.log?.('Preview is still starting — your files are ready; opening the preview will reconnect it.');
     }

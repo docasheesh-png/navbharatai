@@ -35,6 +35,7 @@ export type AbortCause =
   | 'deploy-drain'   // the server is restarting; the build resumes on its own
   | 'lock-reclaimed' // a newer build took over an abandoned lock
   | 'reaper'         // the zombie reaper cleaned up a build that stopped reporting
+  | 'cost-cap'       // the build spent past its cost ceiling (buildCostCeiling.ts)
   | 'unknown';       // aborted with no cause recorded — reported as unknown, never guessed
 
 const TAG = '__nbaiAbortCause';
@@ -113,6 +114,13 @@ export function abortSummary(cause: AbortCause, ctx: AbortSummaryContext = {}): 
       return 'This build was replaced by a newer one you started on the same project.' + (saved ? ' Its files so far are saved.' : '');
     case 'reaper':
       return `This build stopped responding and was cleaned up.${resume}`;
+    case 'cost-cap':
+      // NOT a failure of the user's app, and NOT the user's doing — so neither is implied. The White-
+      // Label Law's billing half applies: the user learns that a limit was reached and that their work
+      // survived, never what the build cost NavBharatAI (that stays in the admin report).
+      return saved
+        ? "This build reached its size limit, so I stopped it here rather than let it run on. Your files so far are saved — send another message and I'll continue from here."
+        : 'This build reached its size limit before it produced anything. Nothing was lost — try again with a smaller first step.';
     case 'unknown':
     default:
       // Honest about not knowing, rather than picking a plausible culprit.

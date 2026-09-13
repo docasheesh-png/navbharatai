@@ -113,7 +113,11 @@ describe('WIRING — and the report says what we decided', () => {
   const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
 
   it('the one-shot gate reads the sibling lane\'s measurement', () => {
-    expect(route).toContain('} else if (classifyForOneShot(analysis?.startTier) && oneShotStillViable(sb)) {');
+    // STRENGTHENED 2026-09-13: the gate now also refuses when the sibling lane died of a slow
+    // provider rather than of a hard app. In that report the plan call timed out, so `plannedFiles`
+    // stayed 0 — "never measured" — and this lane ran anyway, for 150 s, on the same chain that had
+    // just failed three times. The file-count check alone cannot see that case.
+    expect(route).toContain('} else if (classifyForOneShot(analysis?.startTier) && oneShotStillViable(sb) && anotherLaneWorthTrying(sb.reason)) {');
   });
 
   it('a skipped lane is RECORDED, not silently absent', () => {

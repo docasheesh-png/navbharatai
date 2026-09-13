@@ -209,6 +209,13 @@ export interface BuildDiagnosticsReport {
     errors: number;
     warnings: number;
     autoResolved: number;
+    /**
+     * Times the engine ROUTED AROUND a problem instead of fixing it — a fallback to another
+     * provider or another lane. Deliberately NOT folded into `autoResolved`: rule 5 calls a
+     * workaround a deferred root cause, and a tally that counts them as heals hides exactly the
+     * debt the tally exists to surface.
+     */
+    workarounds?: number;
     unresolved: number;
     /** Advisory notes about the user's PRE-EXISTING code — not our defects and not our fixes. */
     observations?: number;
@@ -1487,7 +1494,20 @@ export class BuildDiagnostics {
     // ZERO real heals reported healCount 32, because every heartbeat, tool call and narration line is
     // recorded `severity:'info', autoResolved:true`. Narration is not a fix; a heal tally that counts
     // heartbeats is a green number wearing a lie. Only a WARNING/ERROR that v5 genuinely resolved counts.
-    const autoResolved = this.issues.filter((i) => i.autoResolved && i.observation !== true && i.severity !== 'info').length;
+    // 🔴 A WORKAROUND IS NOT A SELF-HEAL (CLAUDE.md rule 5's five buckets, enforced in the DATA at
+    // last — admin report 2026-09-13). That build's counts read `autoResolved: 4`, and all four were
+    // PROVIDER_FALLBACK warnings. Not one of them resolved anything: every fallback also failed, the
+    // build produced ZERO files, and the user stopped it. Four deferred root causes were reported to
+    // the admin as four things the engine fixed itself.
+    //
+    // The constitution already says a workaround is "a DEFERRED root cause — flag it as debt, never
+    // as a win". This is that sentence made true of the number the admin actually reads. Counted by
+    // CODE rather than by a flag each call site sets, so a new fallback cannot forget to declare
+    // itself into the honest bucket.
+    const isWorkaround = (i: { code?: string }) => WORKAROUND_CODES.has(String(i.code ?? ''));
+    const autoResolved = this.issues.filter((i) =>
+      i.autoResolved && i.observation !== true && i.severity !== 'info' && !isWorkaround(i)).length;
+    const workarounds = this.issues.filter((i) => isWorkaround(i) && i.severity !== 'info').length;
     return {
       schema: 'navbharatai.v3.build-diagnostics/1',
       buildId: this.meta.buildId,
@@ -1514,6 +1534,7 @@ export class BuildDiagnostics {
         errors,
         warnings,
         autoResolved,
+        ...(workarounds > 0 ? { workarounds } : {}),
         unresolved: this.issues.filter((i) => !i.autoResolved && i.observation !== true).length,
         ...(observations > 0 ? { observations } : {}),
       },
@@ -1822,6 +1843,56 @@ export function classifyProviderFailure(reason: unknown): string {
   if (/econnreset|enotfound|econnrefused|socket hang up|network/.test(t)) return 'network';
   if (/context length|too long|max tokens|token limit/.test(t)) return 'context-length';
   return `other: ${text.split('\n')[0].slice(0, 60)}`;
+}
+
+/**
+ * Buckets that mean THE PROVIDER did not answer — nothing about the user's app caused them.
+ *
+ * `model-unavailable` and `auth` are deliberately EXCLUDED even though they are also not the user's
+ * fault: those are OUR configuration being wrong, they never come right on a retry, and lumping them
+ * in here would tell a user to "try again in a few minutes" about a ladder that will still be broken
+ * tomorrow. They get their own, louder treatment.
+ */
+const DEGRADED_BUCKETS = new Set(['timeout', 'rate-limit', 'server-error', 'network']);
+
+/**
+ * Codes that mean "we went around it", not "we fixed it". See the tally in `report()`.
+ *
+ * ⚠️ Keep this list in sync with any NEW fallback code. The counting reads the code rather than a
+ * per-call-site flag precisely so that adding a fallback and forgetting to mark it cannot quietly
+ * inflate the self-heal number again.
+ */
+const WORKAROUND_CODES = new Set([
+  'PROVIDER_FALLBACK',
+  'SIMPLE_BUILD_FALLBACK',
+  'ONESHOT_FALLBACK',
+  'SIMPLE_BUILD_OUTCOME',
+]);
+
+/**
+ * Did THIS build fail because the engine could not answer, rather than because the app was hard?
+ *
+ * 🔴 WHY THIS IS A PREDICATE AND NOT A GUESS (admin report 2026-09-13). A free build produced zero
+ * files after 4 min 18 s and the user was shown "Your app needs our strongest engine to finish
+ * cleanly. Add credits." The engine was never the problem: the model's answer was CORRECT and
+ * arrived — 178 seconds late, because the providers were degraded (3 timeouts on one, 7 rate-limits
+ * out of 8 on the other). Asking that user for money was charging them for our own outage.
+ *
+ * The evidence was already here the whole time: `recordProviderFailure` has been bucketing every
+ * failure by cause since 2026-09-01. Nothing had ever asked it this question.
+ *
+ * Reads the RECORDED buckets, so it cannot disagree with the report the admin is looking at. PURE.
+ */
+export function providerFailuresLookDegraded(
+  reasons: Record<string, string> | null | undefined,
+): boolean {
+  const rows = Object.values(reasons ?? {});
+  if (!rows.length) return false;
+  // One bucket string per provider, e.g. "7 rate-limit, 1 timeout".
+  return rows.some((row) => String(row)
+    .split(',')
+    .map((part) => part.trim().replace(/^\d+\s*/, ''))
+    .some((bucket) => DEGRADED_BUCKETS.has(bucket)));
 }
 
 /**

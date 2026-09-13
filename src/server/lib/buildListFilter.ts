@@ -26,7 +26,14 @@
 
 import { identityMatches, type UserIdentity } from './adminUserLookup';
 
-export type BuildStatusFilter = 'all' | 'failed' | 'succeeded';
+/**
+ * ⚠️ `unknown` EXISTS BECAUSE THE CHIPS DID NOT ADD UP (admin screenshot, 2026-09-13): the bar read
+ * "All 100 · Failed 25 · Worked 70". Those five missing builds are reports whose `ok` was never
+ * recorded — and with only two narrowing choices they were reachable by NO filter at all, which is
+ * the one thing a filter bar must never do. `statusCounts` already counted them; nothing could ask
+ * for them.
+ */
+export type BuildStatusFilter = 'all' | 'failed' | 'succeeded' | 'unknown';
 export type BuildDateFilter = 'all' | 'today' | '7d' | '30d';
 
 /** The row shape this module filters — only the fields it actually reads. */
@@ -41,7 +48,7 @@ export interface FilterableBuild {
 }
 
 export function parseStatusFilter(v: unknown): BuildStatusFilter {
-  return v === 'failed' || v === 'succeeded' ? v : 'all';
+  return v === 'failed' || v === 'succeeded' || v === 'unknown' ? v : 'all';
 }
 
 export function parseDateFilter(v: unknown): BuildDateFilter {
@@ -86,6 +93,9 @@ export function buildMatchesFilters(
   const status = opts.status ?? 'all';
   if (status === 'failed' && build.ok !== false) return false;
   if (status === 'succeeded' && build.ok !== true) return false;
+  // Matches `statusCounts`' own definition of unknown — neither a true nor a false outcome — so the
+  // chip's number and the rows it produces can never disagree.
+  if (status === 'unknown' && typeof build.ok === 'boolean') return false;
 
   if (typeof opts.sinceMs === 'number' && (build.savedAt ?? 0) < opts.sinceMs) return false;
 

@@ -273,6 +273,7 @@ import {
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { auditConnectedProject } from '../AgentV3/ConnectAudit';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, oneShotStillViable, oneShotSkipReason, parseFileBlocks } from '../AgentV3/OneShotBuilder';
+import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/laneFailure';
 import { shouldContinue, continuationPrompt, joinContinuation, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
@@ -325,7 +326,7 @@ import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective, classifyFailure } from '../lib/BuildRetrospectiveEngine';
 import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
-import { outcomeCodeOf } from '../AgentV3/BuildDiagnostics';
+import { outcomeCodeOf, providerFailuresLookDegraded } from '../AgentV3/BuildDiagnostics';
 import { estimateBuildTime, complexityFromPrompt, liveEtaTick } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
@@ -343,6 +344,7 @@ import { groundingProvenance, dominantGroundingBlock } from '../AgentV3/contextB
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, type RuntimeError } from '../AgentV3/AutoFix';
 import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
+import { buildCostCeilingUsd, ledgerCostUsd, checkCostCeiling, costCeilingDetail } from '../AgentV3/buildCostCeiling';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
  *  Set SESSION_COST_CAP_USD in env to override. Default: $5. */
 function sessionCostCapUsd(): number {
@@ -2555,7 +2557,20 @@ export function cheapFloorDecision(env: NodeJS.ProcessEnv, ctx: {
     if (!ctx.tierAllowed) return { active: false, reason: 'This app tier is not eligible for the cheap floor (escalation off + complex app) → strong model leads.' };
     return { active: false, reason: 'Cheap floor not allowed for this build → Claude leads.' };
   }
-  return { active: true, reason: `Cheap floor ACTIVE — ${floor.toUpperCase()} leads the first attempt; Claude/Haiku only backstop on failure.` };
+  // NAME THE ENGINES THAT ACTUALLY HAVE A KEY (autopsy f04421ef).
+  //
+  // `keyOk` above is an OR, so with the floor set to `on` — which asks for BOTH GLM and Kimi — this line
+  // used to read "ACTIVE — ON leads" when only ONE of the two was configured. The report then showed
+  // `providerDelivery: { KIMI: 54 }` with no GLM row and no GLM failure, and the one line whose entire
+  // job is to explain the routing could not distinguish "GLM never got a turn" from "GLM was never
+  // there". A half-configured floor is a real operational state and must read as one.
+  const configured = [wantsGlm && hasGlm ? 'GLM' : '', wantsKimi && hasKimi ? 'KIMI' : '', wantsBedrock && hasBedrock ? 'BEDROCK' : ''].filter(Boolean);
+  const missing = [wantsGlm && !hasGlm ? 'GLM_API_KEY' : '', wantsKimi && !hasKimi ? 'KIMI_API_KEY' : ''].filter(Boolean);
+  const lead = `${configured.join(' + ')} lead${configured.length === 1 ? 's' : ''} the first attempt`;
+  const gap = missing.length > 0
+    ? ` ⚠️ '${floor}' also asks for ${missing.join(' and ')}, which ${missing.length === 1 ? 'is' : 'are'} NOT set — that engine never enters the chain, so its absence from this report is configuration, not a routing decision.`
+    : '';
+  return { active: true, reason: `Cheap floor ACTIVE — ${lead}; Claude/Haiku only backstop on failure.${gap}` };
 }
 
 /**
@@ -11378,6 +11393,8 @@ async function noteBuildOutcome(
       // (they share this client) + the escalation runner. Observational: it never changes billing
       // with the per-tier flag off. Aux calls (blueprint/plan/judge) reconcile into 'other' at settle.
       const providerLedger = createProviderUsageLedger();
+      /** The cost ceiling fires at most once per build — see captureTurnUsage below. */
+      let costCeilingFired = false;
       /**
        * SHADOW ledger — fast-lane turns, recorded for OBSERVATION and never for billing.
        *
@@ -11412,6 +11429,37 @@ async function noteBuildOutcome(
         // setProviderTokens and can never reach billing — see its doc comment.
         try { buildDiag.setLiveUsage(providerLedger.byProvider(), billingCtx.cacheReadInputTokens); }
         catch { /* diagnostics are best-effort — never affects a build */ }
+        // THE MID-BUILD STOP. Every build turn and every heal turn passes through here — the same
+        // choke-point discipline the wallet floor uses, and for the same reason: a ceiling written
+        // into the call sites is one the next call site never gets. Pricing the ledger is a loop over
+        // a handful of entries, so this costs nothing measurable per turn.
+        //
+        // It fires ONCE. A second abort would be harmless (AbortController is idempotent) but would
+        // record a second identical finding, and a report that says the same thing twice reads like
+        // two events.
+        if (!costCeilingFired) {
+          try {
+            const verdict = checkCostCeiling(ledgerCostUsd(providerLedger.entries()), buildCostCeilingUsd());
+            if (verdict.stop) {
+              costCeilingFired = true;
+              try {
+                buildDiag.record({
+                  phase: 'build', severity: 'warning', code: 'COST_CEILING_REACHED',
+                  // NOT auto-resolved: the build really did stop. Marking it resolved would let a
+                  // report summarise a halted build as one that healed itself.
+                  autoResolved: false,
+                  message: 'Build stopped at its cost ceiling',
+                  detail: costCeilingDetail(verdict),
+                });
+              } catch { /* diagnostics are best-effort — they must never block the stop */ }
+              console.log(`[AGENTV3] cost ceiling reached ($${verdict.costUsd.toFixed(2)} >= $${verdict.ceilingUsd.toFixed(2)}) — stopping build between turns`);
+              abortBuild({ abort: (r?: unknown) => abort.abort(r) }, 'cost-cap');
+            }
+          } catch {
+            // A ceiling we could not evaluate must never end somebody's build. Failing OPEN here is
+            // the same call the affordability gate makes on an unreadable balance.
+          }
+        }
       };
       // The cheap floor (GLM/Kimi) leads a build's FIRST attempt for simple/medium apps for allowlisted
       // users — OR is forced ON+cheap-ONLY for a not-yet-paying free-tier user. Computed ONCE here and
@@ -14253,12 +14301,21 @@ async function noteBuildOutcome(
         if (!sb.ok && classifyForOneShot(analysis?.startTier) && !oneShotStillViable(sb)) {
           buildDiag.record({ phase: 'build', severity: 'info', code: 'ONESHOT_SKIPPED', message: oneShotSkipReason(sb) ?? 'Skipped the one-shot fast lane — going straight to the full builder.', autoResolved: true });
         }
+        // 🔴 THE SECOND WAY THIS LANE WAS WASTED, and the one the file-count gate above cannot see
+        // (admin report 2026-09-13). There the simple lane's PLAN CALL timed out, so it measured
+        // nothing — `plannedFiles` stayed 0, which reads as "never measured" and leaves the one-shot
+        // viable. It then ran for 150 seconds on the SAME degraded provider chain that had just
+        // failed three times, and failed the same way. Re-running a lane against a provider that is
+        // timing out is not a retry; it is the identical failure at full price.
+        else if (!sb.ok && classifyForOneShot(analysis?.startTier) && !anotherLaneWorthTrying(sb.reason)) {
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'ONESHOT_SKIPPED', message: 'Skipped the one-shot fast lane: the previous lane failed because the engine did not respond in time, not because of the app — a second lane on the same engine would fail the same way. Going straight to the full builder.', autoResolved: true, detail: sb.reason });
+        }
         if (sb.ok) {
           if (sb.typecheckRan === false) {
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'VERIFY_DID_NOT_RUN', message: 'The fast-lane type-check could not execute in the sandbox (after one retry) — the app shipped unverified; the agentic readiness gate stays ON.', autoResolved: false });
           }
           fastResult(sb.summary, sb.filesWritten, sb.typecheckRan !== false);
-        } else if (classifyForOneShot(analysis?.startTier) && oneShotStillViable(sb)) {
+        } else if (classifyForOneShot(analysis?.startTier) && oneShotStillViable(sb) && anotherLaneWorthTrying(sb.reason)) {
           // 2) ONE-SHOT (secondary) — a single call still suits a TRIVIAL one-file app the manifest
           //    skips. Gated to the simple tiers only: a sonnet-tier (complex) prompt can never fit in
           //    one 8k-token call — it falls straight through to the agentic loop instead.
@@ -18091,12 +18148,35 @@ async function noteBuildOutcome(
         // spend the very budget free-tier protects). Instead, honestly invite the user to add credits
         // and finish on the strongest engine — converting the user to paid without shipping a broken app.
         if (freeTierBuildActive) {
-          // WHY it was empty decides what we may honestly say. A prompt with nothing to build from is
-          // not an engine limit, and asking such a user for money would be an upsell attached to our
-          // own gap. (The diversion above catches this case before a build starts; this covers the
-          // paths that still reach here — an edit turn, or an attachment that carried no instruction.)
+          // 🔴 TWO INDEPENDENT REASONS NOT TO ASK FOR MONEY, AND THEY COMPOSE — do not collapse them.
+          //
+          // (a) OUR OWN OUTAGE (admin report 2026-09-13). This message used to fire on EVERY free build
+          // that produced nothing, without asking why. In that report the engine was never the problem —
+          // the model's plan was correct and simply arrived 178s late because the providers were degraded
+          // (3 timeouts on one, 7 rate-limits out of 8 on the other) — so the user was invited to pay for
+          // OUR slowness. The evidence needed to tell the two apart had been recorded since 2026-09-01;
+          // nothing had ever asked for it.
+          //
+          // (b) NOTHING TO BUILD FROM (#2887). A prompt carrying no instruction is not an engine limit
+          // either, so `freeTierUpsellMessage` takes the cause and words itself accordingly.
+          //
+          // Degraded is tested FIRST because it is a statement about US and (b) is a statement about the
+          // PROMPT: when our providers were down we do not know whether the prompt was buildable, and
+          // blaming the user's wording for our outage is the same mistake in a politer sentence.
+          const degraded = providerFailuresLookDegraded(buildDiag.providerFailureBreakdown());
           const emptyCause = assessBuildInput(prompt).buildable ? 'engine' : 'no-instruction';
-          events.emit({ type: 'narration', agent: 'architect', text: freeTierUpsellMessage(emptyCause), ts: Date.now() });
+          events.emit({
+            type: 'narration',
+            agent: 'architect',
+            text: degraded ? providerDegradedMessage() : freeTierUpsellMessage(emptyCause),
+            ts: Date.now(),
+          });
+          if (degraded) {
+            buildDiag.record({
+              phase: 'build', severity: 'warning', code: 'UPSELL_SUPPRESSED', autoResolved: false,
+              message: 'Did not ask this user to add credits: the build failed because the engine did not respond, not because the app needed a stronger one. Charging for our own slowness is what this check exists to prevent.',
+            });
+          }
         }
       }
       // Admin rule (2026-07-07): the server's own eyes saw the preview NOT render after the heal

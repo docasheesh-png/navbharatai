@@ -78,7 +78,12 @@ describe('BuildDiagnostics', () => {
     expect(r.issues).toHaveLength(1);
     expect(r.issues[0].code).toBe('PROVIDER_FALLBACK');
     expect(r.counts.warnings).toBe(1);
-    expect(r.counts.autoResolved).toBe(1);
+    // CHANGED 2026-09-13, and this is a CORRECTION rather than a relaxation. A provider fallback is
+    // a WORKAROUND — rule 5 calls it "a DEFERRED root cause … never a win" — so it no longer counts
+    // as a self-heal. The admin report that forced this read `autoResolved: 4` when all four were
+    // failed fallbacks on a build that produced zero files: four debts shown as four fixes.
+    expect(r.counts.autoResolved).toBe(0);
+    expect(r.counts.workarounds).toBe(1);
   });
 
   it('classifies a dead-sandbox "exit -1 (0s, empty)" as SANDBOX_UNAVAILABLE, not an app-build error (ShopSphere autopsy)', () => {

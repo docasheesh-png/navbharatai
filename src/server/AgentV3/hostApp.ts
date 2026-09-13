@@ -101,7 +101,7 @@ export type HostAppOutcome =
     }
   | {
       ok: false;
-      reason: 'unavailable' | 'no-source' | 'unpackable' | 'build-failed' | 'deploy-failed';
+      reason: 'unavailable' | 'no-source' | 'too-large' | 'unpackable' | 'build-failed' | 'deploy-failed';
       message: string;
       /** Provider detail for the ADMIN report only — never rendered to a user. */
       detail?: string;
@@ -143,6 +143,16 @@ export async function hostAppOnNavBharatCloud(
       reason: 'no-source',
       message: 'There are no app files to host yet. Build your app first, then publish it.',
     };
+  }
+  /**
+   * THE SIZE CEILING — see `hostedSourceWithinCap` for why this path had none while the static one
+   * has had 50 MB since 2026-08-21. Checked on the PACKED archive, which is what Cloud Build is
+   * actually handed, rather than on the loose files: gzip is the difference between refusing a large
+   * app and refusing a large amount of repeated text.
+   */
+  const size = hostedSourceWithinCap(archive.data.byteLength, env);
+  if (!size.ok) {
+    return { ok: false, reason: 'too-large', message: size.message, detail: `${size.mb} MB packed, cap ${size.capMb} MB` };
   }
   /**
    * 🔒 A PARTIAL ARCHIVE IS NEVER SHIPPED. A source file missing from the build surfaces as an import
@@ -203,5 +213,70 @@ export async function hostAppOnNavBharatCloud(
     ready: deployed.ready,
     buildId: built.buildId,
     envNote: backendEnvNote(envPlan),
+  };
+}
+
+/**
+ * THE SIZE CEILING ON A CONTAINER PUBLISH — the one the static path has had since 2026-08-21 and this
+ * path never got.
+ *
+ * 🔴 HOW THE GAP EXISTS, because it is not an oversight anybody would spot by reading either file.
+ * `enforceHostingQuota` bounds a publish at `maxDeployMb()` (50 MB, ships ON) — but only for a
+ * FIRST-PARTY provider, and `FIRST_PARTY_PROVIDERS` is `['firebase', 'cloudflare']`. NavBharat Cloud
+ * publishes under `navbharat-cloud`, so that function returns ALLOW on its very first branch and
+ * **nothing downstream measures anything**. A static app cannot exceed 50 MB; a container app had no
+ * ceiling at all.
+ *
+ * 🔑 WHY IT MATTERS MORE NOW THAN IT DID YESTERDAY. The tiers shipped on 2026-09-13 grant 10 and 30
+ * SERVER apps. An unbounded source archive is three unbounded costs at once: Cloud Build minutes
+ * (billed per minute), the container image in Artifact Registry (**the one cost no traffic overage
+ * offsets, and nothing deletes**), and the bytes served to every visitor.
+ *
+ * ⚠️ IT IS NOT `maxDeployMb()`, DELIBERATELY, AND NOT BECAUSE A SEPARATE KEY IS TIDIER. The two bound
+ * different things: that one measures a BUILT bundle (`dist/`), this one measures SOURCE, which is
+ * what Cloud Build is handed. They are not comparable quantities, so making a container publish obey
+ * a number tuned for built output would refuse legitimate apps for a reason nobody could act on.
+ *
+ * 🔒 AND `navbharat-cloud` WAS NOT ADDED TO `FIRST_PARTY_PROVIDERS` TO GET THIS, which would have been
+ * the one-line version. That set also drives the monthly deploy count and the total-storage
+ * accounting, so joining it would have silently changed two unrelated behaviours for every container
+ * app — fixing one problem by creating two. A fix must never trade one problem for another.
+ *
+ * PURE, and generous on purpose: a real app's SOURCE is a few MB (no `node_modules` — they are
+ * installed inside the image), so this bounds abuse and cannot reach use.
+ */
+export function maxHostedSourceMb(env: NodeJS.ProcessEnv = process.env): number {
+  // ⚠️ EMPTY MEANS UNSET, NOT ZERO — `Number('')` is 0, which is finite and non-negative, so the
+  // obvious implementation turns a key set with no value in Cloud Run into a silent, total removal of
+  // the ceiling with nothing in the logs to explain it. Only a deliberate "0" disables it. The exact
+  // trap `hostingStorageCapMb` documents, and the reason this is spelled out rather than inlined.
+  const raw = String(env.NAVBHARAT_MAX_SOURCE_MB ?? '').trim();
+  if (!raw) return 40;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : 40;
+}
+
+/** Is this source archive small enough to host? PURE. `{ ok: true }` when the cap is disabled. */
+export function hostedSourceWithinCap(
+  archiveBytes: number,
+  env: NodeJS.ProcessEnv = process.env,
+): { ok: true } | { ok: false; message: string; mb: number; capMb: number } {
+  const capMb = maxHostedSourceMb(env);
+  if (!(capMb > 0)) return { ok: true };
+  const bytes = Number(archiveBytes);
+  // An unmeasurable size is NOT refused. A publish blocked by a number we could not compute is a
+  // refusal nobody can act on, and the size is measured from a Buffer we already hold — so an
+  // unreadable one means our own bug, not the user's app.
+  if (!Number.isFinite(bytes) || bytes < 0) return { ok: true };
+  const mb = bytes / (1024 * 1024);
+  if (mb <= capMb) return { ok: true };
+  return {
+    ok: false,
+    mb: Math.round(mb * 100) / 100,
+    capMb,
+    message: `Your app's source is ${mb.toFixed(1)} MB packed, over the ${capMb} MB limit for apps that run a `
+      + `server. Large files — videos, datasets, images — should be served from storage rather than shipped `
+      + `inside the app: they make every build slower and every visitor download more. Remove them and publish `
+      + `again, and nothing about your app's code needs to change.`,
   };
 }

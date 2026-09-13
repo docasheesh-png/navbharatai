@@ -52178,3 +52178,50 @@ was taken; an E2B derivation that "could not fail"). Mine failed the same way �
 from my summary of the report instead of from the report.** The remaining `541979d2` open items are
 unchanged: the cheap-floor latency ceiling, and in-flight provider-call cancellation (owned by PR
 #2889's session, not this one).
+
+## 2026-09-13 — P3: a container publish had NO size ceiling at all (and my first premise for this task was wrong)
+
+**The premise I started with was wrong, and correcting it is what makes this a real finding rather
+than a duplicate.** I set out to stop "a user publishing a 500 MB video". That is already impossible:
+`maxDeployMb()` caps a publish at **50 MB** and has shipped ON since 2026-08-21. Had I not checked, I
+would have built a second ceiling beside a working one and reported a fix for a bug that does not
+exist.
+
+**What is actually uncapped is a different path.** `enforceHostingQuota` bounds a publish — but only
+for a FIRST-PARTY provider, and `FIRST_PARTY_PROVIDERS` is `['firebase', 'cloudflare']`. NavBharat
+Cloud publishes under `navbharat-cloud`, so that function returns ALLOW on its **first branch** and
+nothing downstream measures anything. Verified, not reasoned about: a test in
+`tests/hostedSourceCap.test.ts` asserts `FIRST_PARTY_PROVIDERS.has(NAVBHARAT_CLOUD_PROVIDER) ===
+false` and that `enforceHostingQuota` today permits a **500 MB** container publish. A static app
+cannot exceed 50 MB; a container app had no ceiling at all.
+
+**Why it matters more today than it did last week.** The tiers that shipped this morning grant **10
+and 30 SERVER apps**. An unbounded source archive is three unbounded costs at once: Cloud Build
+minutes (billed per minute), the container image in Artifact Registry — **the one cost no traffic
+overage offsets, and nothing deletes it** — and the bytes served to every visitor.
+
+**The fix.** `maxHostedSourceMb()` + `hostedSourceWithinCap()` in `hostApp.ts`, both pure, wired
+immediately before `buildAppContainer`, with `'too-large'` added to the outcome's reason union.
+Default **40 MB**, key `NAVBHARAT_MAX_SOURCE_MB`.
+
+Four decisions worth recording, because each one is a place the obvious version is wrong:
+
+- **It measures the PACKED archive, not the loose files.** Gzip is the difference between refusing a
+  large app and refusing a large amount of repeated text, and the packed bytes are what Cloud Build is
+  actually handed.
+- **It is NOT `maxDeployMb()`.** That number bounds a BUILT bundle (`dist/`); this one bounds SOURCE.
+  They are not comparable quantities, so making a container publish obey a number tuned for built
+  output would refuse legitimate apps for a reason nobody could act on.
+- **`navbharat-cloud` was NOT added to `FIRST_PARTY_PROVIDERS`**, which was the one-line version. That
+  set also drives the monthly deploy count and the total-storage accounting, so joining it would have
+  silently changed two unrelated behaviours for every container app — *a fix must never trade one
+  problem for another*.
+- **Empty means unset, not zero.** `Number('')` is 0, which is finite and non-negative, so the obvious
+  parser turns a key set with no value in Cloud Run into a silent, total removal of the ceiling with
+  nothing in the logs to explain it. Only a deliberate `0` disables it — the exact trap
+  `hostingStorageCapMb` already documents.
+
+An unmeasurable size is never refused (a publish blocked by a number we could not compute is a refusal
+nobody can act on, and the size comes from a Buffer we already hold — so an unreadable one is our bug,
+not the user's app). The message names the real remedy (serve large media from storage) and says
+plainly that no code needs to change, rather than just stating a limit. 12 tests.

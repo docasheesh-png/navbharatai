@@ -134,26 +134,42 @@ describe('the ADMIN line', () => {
 describe('the wiring — the ceiling lives at the CHOKE POINT, not in the call sites', () => {
   const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
 
-  it('is evaluated inside captureTurnUsage, which every build and heal turn passes through', () => {
+  /**
+   * The body of `captureTurnUsage`, bounded by the declaration that FOLLOWS it rather than by a
+   * character count.
+   *
+   * 🔴 The first version of this helper sliced a fixed 2,600 characters and broke the day another
+   * session added eight lines to the same function — a test that fails on a merge it should not care
+   * about teaches the next reader to widen the number instead of reading the code. An anchor cannot
+   * drift with the length of what sits between.
+   */
+  const captureTurnUsageBody = (): string => {
     const start = route.indexOf('const captureTurnUsage =');
     expect(start).toBeGreaterThan(0);
-    const body = route.slice(start, start + 2600);
+    const end = route.indexOf('const cheapTierAllowed', start);
+    expect(end).toBeGreaterThan(start);
+    return route.slice(start, end);
+  };
+
+  it('is evaluated inside captureTurnUsage, which every build and heal turn passes through', () => {
+    const body = captureTurnUsageBody();
     expect(body).toContain('checkCostCeiling');
     expect(body).toContain("'cost-cap'");
   });
 
   it('🔒 fires at most once per build', () => {
     expect(route).toContain('let costCeilingFired = false;');
-    const start = route.indexOf('const captureTurnUsage =');
-    const body = route.slice(start, start + 2600);
+    const body = captureTurnUsageBody();
     expect(body).toContain('if (!costCeilingFired)');
     expect(body).toContain('costCeilingFired = true;');
   });
 
   it('🔒 an evaluation that throws never ends a build (fails OPEN)', () => {
-    const start = route.indexOf('if (!costCeilingFired)');
-    const body = route.slice(start, start + 1600);
-    expect(body).toMatch(/try\s*\{/);
-    expect(body).toMatch(/\}\s*catch\s*\{/);
+    const body = captureTurnUsageBody();
+    const start = body.indexOf('if (!costCeilingFired)');
+    expect(start).toBeGreaterThan(0);
+    const block = body.slice(start);
+    expect(block).toMatch(/try\s*\{/);
+    expect(block).toMatch(/\}\s*catch\s*\{/);
   });
 });

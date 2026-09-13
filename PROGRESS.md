@@ -51758,3 +51758,60 @@ callback, and the chain line — six reverts, six failures.
 
 - **Why GLM delivered 0 of 54 turns on that specific build.** Now diagnosable from the next report
   (item 4); genuinely unanswerable from this one.
+## 2026-09-13 — autopsy: 4m18s, zero files, and the user was asked to pay for our outage
+
+Admin sent a real free-tier build report ("Mujhe english automation app banana hai"). It produced
+**zero files in 4 min 18 s** and the user stopped it.
+
+**Tally:** ✅ 0 self-heals · 🔀 5 workaround classes / 13 events · ⏭️ 5 skips · ❌ 5 still broken ·
+🥵 6 struggle points.
+
+### What actually happened
+
+| | |
+|---|---|
+| 4.6 s | "Planning the file list…" |
+| **94.6 s** | the plan cap (90 s) fired — the lane gave up |
+| **183 s** | **the plan arrived, and it was CORRECT** — a clean five-file manifest |
+| 244 s | the one-shot lane burned 150 s more and failed the same way |
+| 257 s | the user stopped the build |
+
+The model was never the problem. Kimi answered correctly; it took 178 s because the providers were
+degraded — 3 timeouts on Kimi, 7 rate-limits out of 8 on GLM. Every lane then failed for the same
+external reason, one after another, each paying full price to discover it.
+
+### The four DNA fixes
+
+1. **A lane now knows WHY it died** (`laneFailure.ts`). `provider-degraded` (timeout, rate limit,
+   exhausted chain — the model never got to answer) is a different fact from `content` (the model
+   answered and the answer was unusable), and almost everything downstream should branch on it.
+   Degraded is checked FIRST: a reason carrying both is a timeout whose symptom is emptiness, and
+   reading it the other way round is how an outage gets reported as the user's app being too hard.
+2. **A second lane is no longer run on a sick provider.** The existing `oneShotStillViable` gate only
+   knew about file COUNT, and the plan call had timed out — so `plannedFiles` stayed 0, read as
+   "never measured", and the one-shot ran anyway. That is the 150 seconds.
+3. 🔴 **We no longer ask the user to pay for our own outage.** `freeTierUpsellMessage()` fired on
+   EVERY free build that produced nothing, without asking why — so this user was told "your app needs
+   our strongest engine, add credits" when our provider was simply slow. It is now gated on
+   `providerFailuresLookDegraded`, which reads the failure buckets the build **already recorded since
+   2026-09-01**; nothing had ever asked them this question. A suppressed upsell is recorded as
+   `UPSELL_SUPPRESSED` so the admin can see the check firing.
+4. **A workaround is no longer counted as a self-heal.** That report's `counts.autoResolved: 4` was
+   four PROVIDER_FALLBACK warnings, none of which resolved anything. Rule 5 already calls a
+   workaround "a deferred root cause — never a win"; `counts.workarounds` makes that true of the
+   number the admin reads. Counted by CODE, so a new fallback cannot forget to declare itself.
+
+### 🔴 OPEN ROOT CAUSE — deadline propagation (rule 6)
+
+**The plan cap is 90 s while the provider call's own timeout is 120 s: the parent deadline is shorter
+than the child's.** `SimpleBuilder` says so in its own comment — *"withTimeout only races, so the
+underlying call keeps running in the background, but the lane stops waiting on it"* — which is why
+that build logged provider events **148 s after it had ended**, on a sandbox already billed.
+
+The real fix is to pass the lane's remaining budget down into the provider call so a child can never
+outlive the parent that asked for it. That means threading a per-call deadline through
+`makeFastTextRunner` into the provider chain — a change that touches every build, so it does **not**
+belong in the same PR as four safe ones. The four fixes above make the consequence harmless
+(the wasted second lane is gone, the dishonest message is gone); the waste itself is still real.
+
+**Next session: this is the one to take.** The 88 s the first lane threw away is still thrown away.

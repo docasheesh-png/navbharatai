@@ -50706,3 +50706,147 @@ words a user types — `key edit`, `key badlo`, `rotate key`, `lock nahi khul ra
 
 **Gate on the final state:** typecheck 0, noUnusedImports clean, typecheck:server 0, build ok,
 test:bundle ok, boot:check PASS, vitest 1585 files / 21,974 passed / 1 skipped / 0 failed.
+
+---
+
+## 2026-09-13 — THE SECRET VAULT'S DOOR IS NOW A 4-DIGIT PIN, AND EVERYTHING ELSE IS GONE
+
+**Admin, verbatim:** *"ek kaam karo! isko aur simple bana do! bas — PIN banao, mobile number/email otp se
+PIN banao, PIN (4 digit pin se hi open ho). pin bhul jaye to, forget pin — otp — pin reset! waaki sab hata
+do … aur secret and api key ke andar cloud run ke jaise ui dikhe! mean 2-2 colom dikhen • 1. secret and api
+key, • 2. value (click karne se edit kiya ja sake) aur sath me ek 🗑️ (delete) button jisse dono colom delete
+karne ke liye. sabse last me ek button ho, "+ add new credentials" aur sabse last me — "save and sync"
+button. … sabse upar kis app ke credentials hai, woh select karne ka option bhi ho! … note: phone unlock
+etc sab hata do, simple rahne do"*
+
+### WHY THIS WAS THE RIGHT CALL, AND WHY THE PREVIOUS DOOR WAS DELETED RATHER THAN REPAIRED
+
+The entry immediately above this one records the honest open item it left behind: the phone lock could not
+be offered *inside the app at all*, because WebAuthn binds a credential to an ORIGIN and the Capacitor
+shell's origin is a custom scheme. Its fallback — confirming the account — had just been fixed to stop
+throwing `auth/argument-error` in the WebView. So the state of the feature was: **the stronger proof was
+unreachable on the platform most users hold, and the weaker one had needed an emergency repair to work at
+all.** The admin, holding the phone, asked for the simple thing instead.
+
+That is not a downgrade dressed up as simplification, and the reasoning is worth recording because a later
+session will be tempted to "restore" the device lock. A server-verified PIN with a real lock-out works
+identically on the app, on the web and on a borrowed laptop. **A slightly weaker secret that actually
+exists beats a stronger one nobody can open** — and a lock nobody can open is not strictness, it is the
+"built but not really working" state the second absolute rule forbids.
+
+### 🔴 A 4-DIGIT PIN IS 10,000 GUESSES. THAT IS THE DESIGN PROBLEM, AND IT IS ANSWERED THE WAY A BANK CARD ANSWERS IT
+
+Four digits are not secret; a machine tries all of them in under a second. A bank card is four digits too,
+and it is genuinely safe for three reasons, none of which is the PIN's length. All three are implemented:
+
+1. **The bank checks the PIN, not the card.** `POST /api/secrets/:userId/pin/unlock` is the ONLY place a
+   PIN is ever compared. The browser sends it, learns right-or-wrong and nothing else, and never holds a
+   copy (`tests/secretVaultDoor.test.ts` asserts no `localStorage`/`sessionStorage`/cookie/IndexedDB use
+   in the client half, and that the gate contains no `pin === '…'` comparison).
+2. **The machine eats the card.** Five wrong PINs lock the vault for **15 min → 1 h → 6 h → 24 h**, and
+   the level is forgiven only by a CORRECT PIN, never by waiting. 10,000 guesses at five per fifteen
+   minutes is years. `vaultPin.test.ts` pins the escalation explicitly, with a comment saying why a flat
+   `[15m, 15m, 15m…]` would be a speed bump rather than a lock.
+3. **Nobody can read the PIN off the card.** Only `scrypt(N=16384)` over a per-user random salt is stored.
+   The salt is what stops one precomputed table opening every account that chose the same PIN, and scrypt's
+   slowness is what makes even 10,000 candidates against one stolen hash cost real time and memory.
+
+Plus the thing a card does not have: the PIN buys a **short-lived TICKET**, and the routes that can decrypt
+or delete still refuse to act without one. Deleting the entire unlock UI would make the keys *unreadable*,
+not public.
+
+### 🔴 THE ONE TEST THAT MATTERS MOST, AND WHY IT IS A ROUTE TEST RATHER THAN A UNIT TEST
+
+This lock has exactly one way to rot into theatre: a route that reads the record, compares the PIN, and
+then **forgets to write the failed attempt back**. The lock-out would disappear with nothing failing — no
+error, no red test, a green screen. So `tests/vaultPinRoutes.test.ts` asserts against what reaches the
+STORE, not what reaches the response: each of the five wrong attempts must be persisted, and the fifth must
+leave `locked_until_ms` in the document. For the same reason `savePinRecord` deliberately does NOT swallow a
+write failure the way the audit log does — a counter that can be dropped is not a counter, so a failed write
+refuses the request.
+
+### THE OTP, AND THE ONE ACCOUNT THAT CANNOT BE EMAILED
+
+Creating or resetting a PIN needs a 6-digit code delivered to the contact the ACCOUNT owns — otherwise the
+PIN would be a door an attacker at an unlocked laptop could fit their own lock to. Delivery rides the
+mailer that has been configured since 2026-09-10 (`ALERT_EMAIL_*`), with the recipient overridden to the
+owner's own address: the mailer's DEFAULT recipient is the admin list, and sending a user's vault code there
+would be a disclosure to us and useless to them. A test asserts `to === ['owner@example.com']`.
+
+Three details that are security, not polish:
+- **The code is stored as a hash BEFORE the send.** The reverse order produces codes that are genuinely
+  delivered and genuinely unusable.
+- **The subject carries no code.** `sendAlertEmail` derives its subject from the MESSAGE, so without an
+  override the code would have been printed in the one line that shows on a lock screen and in every mail
+  preview. `SendDeps.subject` was added for exactly this, and a test asserts the subject has no digit.
+- **A used code is burnt**, a malformed guess still counts as an attempt (otherwise five letters buys
+  unlimited tries), and the send is capped at **60 s apart / 10 per UTC day** on the SERVER clock.
+
+🔒 **AN ACCOUNT WITH NO EMAIL IS NOT STRANDED, and this is the one place a second path survives.** NavBharatAI
+has no SMS provider of its own (the MSG91/Twilio code in this repo is a *generator* for user apps), so a
+phone-only account has nowhere to receive a code. Leaving it there would lock a real user out of their own
+API keys for ever — far worse than a second path. So for those accounts the proof is a genuinely fresh
+sign-in, and **the sign-in they perform is itself a mobile OTP**: Firebase texts the code and `auth_time`
+inside the SIGNED token is what the server reads. The screen says so in words and offers the button. An
+account with neither contact is told honestly that there is no way to send it a code.
+
+### THE CLOUD RUN LAYOUT, AND WHAT "SAVE AND SYNC" REALLY DOES
+
+Two columns (name | value), a 🗑️ per row, `+ Add new credentials`, then `Save and sync` — in that order, with
+the app picker moved to the TOP where the admin asked for it, above the rows it filters. The boxes are real
+`<input>`s for the reason the admin gave in the first iteration: *"copy/edit user khud apne phone/desktop se
+kar lega"* — a real input is where long-press-to-copy and ⌘C already work, so the screen supplies what the
+platform's own gesture needs instead of re-implementing copy badly.
+
+**`Save and sync` is not decoration.** It writes every edited row and every new row through the same
+authenticated `/api/secrets` save (an existing name REPLACES in place — that is what rotating a key is),
+then **RE-READS the vault and redraws from what the server really holds**, so "synced" is confirmed rather
+than assumed. It reports the count it saved, NAMES anything it skipped and why, and a failed save leaves
+every typed character on screen. An edit carries the key's own `workspace_id`; without that the new value
+would land in the SHARED scope while the app-scoped row kept the old one, and the build would read the stale
+key while the screen showed the new one.
+
+The per-row "Save new value" buttons from this morning are gone — one Save button at the bottom is what was
+asked for, and two ways to save the same edit is two behaviours to keep in step. The bin on a SAVED row
+still asks twice (real delete, no undo); on an unsaved new row it acts at once, because there is nothing in
+the vault to destroy.
+
+### WHAT WAS DELETED (a real deletion, not a feature flag)
+
+- `src/server/lib/deviceUnlock.ts` → **renamed** to `src/server/lib/vaultTicket.ts` and stripped to the
+  ticket alone. The WebAuthn verification (clientData, authenticatorData parsing, rpId hashing, assertion
+  signatures, sign counters, COSE algorithms) is gone, with `tests/deviceUnlock.test.ts` and
+  `tests/vaultUnlockEndToEnd.test.ts`. The file was named after devices and no longer had one in it —
+  exactly the doc-vs-code drift CLAUDE.md records elsewhere.
+- `src/lib/vaultReauth.ts` + its test — built this morning to fix the popup bug, deleted this afternoon
+  because the door it served no longer exists. Recorded plainly rather than quietly.
+- `verifyFreshAuth` in `authMiddleware.ts` was removed, then **restored** when the phone-only case proved
+  it was still needed, now documented as having exactly one caller and one reason. `resolveAccountContact`
+  was added beside it, so firebase-admin is still initialised in the one place that file insists on owning.
+- The `reauthenticateWithPopup` / `reauthenticateWithCredential` ambient declarations in
+  `declarations.d.ts`, which existed only for that module.
+- `user_device_credentials` is now read by nothing. The rows hold PUBLIC keys, never secret material, so
+  leaving them costs nothing and no purge job was invented for them. A user who had a device lock simply
+  creates a PIN on next open — nobody is locked out.
+
+### ALSO WORTH KNOWING FOR THE NEXT SESSION
+
+- **Two tests had to be re-anchored, and neither invariant was weakened.** `secretScope.test.ts` asserted
+  the old add-form line; it now asserts the same rule (`saveScopeId={effectiveScope}`, and that raw `scope`
+  never reaches a save) against the new shape, with a comment saying the anchor moved and the invariant did
+  not. `vaultLockWiring.test.ts` had a test asserting the add form was OUTSIDE the gate; that has been
+  **reversed deliberately** — there is no separate form left to leave outside.
+- **My own comment defeated an absence assertion for the third time in two days.** The gate's doc block
+  names WebAuthn in order to explain why the device lock is gone, which made "WebAuthn must not appear"
+  fail on the explanation. Fixed properly this time: `secretVaultDoor.test.ts` strips comments before
+  asserting absence (`codeOnly`), so prose stays free to explain while code stays pinned.
+- `maskEmail` pads nothing: the dot count is the EXACT number of hidden characters, so a two-letter local
+  part shows as `ab@x.io` rather than describing an address the user does not have.
+- `AppKnowledgeBase` rewritten for this screen in the same change (the sync rule): the PIN flow, the
+  lock-out, the reset, the mobile-number case, the two columns, both bottom buttons, and the vocabulary a
+  user actually types — `pin bhul gaya`, `forgot pin`, `otp nahi aaya`, `save and sync`, `pin lock ho gaya`.
+  The old `face lock` / `fingerprint` keywords were KEPT on purpose: somebody asking for Face ID must land
+  here and be told what the door actually is.
+
+**Gate on the final state:** typecheck 0, noUnusedImports clean, typecheck:server 0, build ok,
+test:bundle ok, boot:check PASS, full vitest suite re-run after the last edit.

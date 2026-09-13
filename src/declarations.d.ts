@@ -537,12 +537,7 @@ declare module 'firebase/auth' {
   export function updateProfile(user: any, profile: any): Promise<void>;
   export const GoogleAuthProvider: any;
   export const GithubAuthProvider: any;
-  // Re-authentication, for the secret vault's device lock (2026-09-12). These exist in firebase v12 at
-  // runtime; this shim is hand-written, so a member has to be declared before it can be used. The vault
-  // needs them because `auth_time` in the ID token only moves on a genuine re-auth — see deviceUnlock.ts.
   export const EmailAuthProvider: any;
-  export function reauthenticateWithCredential(user: any, credential: any): Promise<any>;
-  export function reauthenticateWithPopup(user: any, provider: any): Promise<any>;
   export function signInWithPopup(auth: any, provider: any): Promise<any>;
   export function signInWithRedirect(auth: any, provider: any): Promise<any>;
   export function signInWithCredential(auth: any, credential: any): Promise<any>;

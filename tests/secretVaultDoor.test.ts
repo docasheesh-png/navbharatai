@@ -3,39 +3,52 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 /**
- * THE SECRETS SCREEN AFTER THE 2026-09-13 REPORT.
+ * THE SECRETS SCREEN AFTER THE 2026-09-13 REDESIGN.
  *
- * The admin sent a screenshot of Settings → Secrets & API Keys on the app and said plainly: *"yeh to
- * kaam hi nahi kar raha hai"*. Three separate things were wrong, and only one of them was the error
- * message on screen:
+ * The admin asked for three things in one message, and all three are ARRANGEMENTS of the screen — the
+ * kind a later edit can quietly undo while the component still compiles and still renders, which is
+ * exactly the regression that reaches a user instead of CI:
  *
- *   1. the unlock itself threw `auth/argument-error` (covered by src/lib/vaultReauth.test.ts),
- *   2. the lock sat HALFWAY DOWN the panel — the add-key form was open above it — when the admin had
- *      asked for the lock to be the door: *"jab bhi 'secret and api key' par click kiye jaye, phone
- *      lock … se hi open hona chahiye! aur … ke andar koi lock nahi ho"*,
- *   3. a saved key could be copied and deleted but NOT edited: *"old ko edit/copy and delete kar sake"*.
+ *   1. *"bas PIN banao, mobile number/email otp se PIN banao, PIN (4 digit pin se hi open ho) … waaki
+ *      sab hata do … phone unlock etc sab hata do"* — one door, a PIN, and nothing else.
+ *   2. *"cloud run ke jaise ui … 2-2 colom … sath me ek 🗑️ … sabse last me ek button ho, "+ add new
+ *      credentials" aur sabse last me — "save and sync" button."* — including the ORDER of those two.
+ *   3. *"sabse upar kis app ke credentials hai, woh select karne ka option bhi ho!"* — the app picker at
+ *      the TOP, above the rows it filters.
  *
- * This file pins 2 and 3 structurally, because both are arrangements of the screen that a later edit
- * could quietly undo without any test noticing — the component still compiles and still renders either
- * way, which is exactly the kind of regression that reaches a user instead of CI.
+ * The lock's own rules are proven in `vaultPin.test.ts` and `vaultPinRoutes.test.ts`. This file pins the
+ * screen.
  */
 const read = (rel: string) => readFileSync(join(__dirname, '..', rel), 'utf8');
+
+/**
+ * Strip comments before asserting that something is ABSENT.
+ *
+ * 🔴 Learned the hard way, twice in this repo: a "this must no longer appear" assertion is defeated by
+ * the very comment that explains WHY it was removed. The gate's own doc block names WebAuthn in order to
+ * record why the device lock is gone, and an assertion over the raw file then fails on the explanation
+ * rather than on a regression. So absence is checked against CODE, and prose is left free to explain.
+ */
+const codeOnly = (src: string) => src
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .split('\n')
+  .map((line) => line.replace(/(^|\s)\/\/.*$/, ''))
+  .join('\n');
+
 const panel = read('src/components/SecretManager.tsx');
+const gate = read('src/components/VaultLockGate.tsx');
+const gateCode = codeOnly(gate);
+const panelCode = codeOnly(panel);
 
 describe('the lock is the DOOR, not a card inside the room', () => {
-  it('the add-key form renders INSIDE the gate, not above it', () => {
+  it('every control renders INSIDE the gate, not above it', () => {
     const gateAt = panel.indexOf('<VaultLockGate');
     expect(gateAt, 'the gate is gone entirely').toBeGreaterThan(-1);
-
-    // "Save Secret" is the add form's button. Before this change it appeared BEFORE the gate; the whole
-    // point of the fix is that it now appears after it, i.e. inside the render prop.
-    const addFormAt = panel.indexOf('Save Secret');
-    expect(addFormAt, 'the add form is gone').toBeGreaterThan(-1);
-    expect(addFormAt, 'the add form is outside the lock again').toBeGreaterThan(gateAt);
-  });
-
-  it('the saved-key rows are still inside the gate too', () => {
-    expect(panel.indexOf('<SavedKeyRows')).toBeGreaterThan(panel.indexOf('<VaultLockGate'));
+    // The two bottom buttons and the credential table are the whole of the room. If any of them appears
+    // before the gate, the screen is half-locked again — which is what the admin photographed.
+    for (const inside of ['<CredentialTable', 'Add new credentials', 'Save and sync']) {
+      expect(panel.indexOf(inside), `${inside} is outside the lock`).toBeGreaterThan(gateAt);
+    }
   });
 
   it('there is exactly ONE gate on this screen — two would mean two prompts', () => {
@@ -43,51 +56,142 @@ describe('the lock is the DOOR, not a card inside the room', () => {
   });
 });
 
-describe('a saved key can be edited, copied and deleted', () => {
+describe('the Cloud Run layout: two columns, a bin, then the two buttons', () => {
+  it('column one is the name and column two is the value, both as real inputs', () => {
+    // Real inputs rather than styled text, because that is where long-press-to-copy and ⌘C already work.
+    expect(panel).toContain('aria-label={`Name of ${row.secret_name}`}');
+    expect(panel).toContain('aria-label={`Value of ${row.secret_name}`}');
+    expect(panel).toContain('Secret / API key');
+  });
+
   it('the value box is NOT readOnly, so a rotated key can be typed straight in', () => {
     const at = panel.indexOf('aria-label={`Value of ${row.secret_name}`}');
-    expect(at, 'the value input is gone').toBeGreaterThan(-1);
-    // Look only at the input this label belongs to, not the whole file.
     const inputStart = panel.lastIndexOf('<input', at);
     expect(panel.slice(inputStart, at)).not.toContain('readOnly');
   });
 
-  it('the NAME box stays readOnly — renaming is a different key, not an edit', () => {
+  it('the NAME box of a SAVED row stays readOnly — renaming is a different key, not an edit', () => {
     const at = panel.indexOf('aria-label={`Name of ${row.secret_name}`}');
-    expect(at).toBeGreaterThan(-1);
     expect(panel.slice(panel.lastIndexOf('<input', at), at)).toContain('readOnly');
   });
 
-  it('saving an edit carries the key\'s workspace scope', () => {
-    // Without this the new value lands in the SHARED scope while the app-scoped row keeps the old one —
-    // the build would read the stale key while this screen showed the new one.
-    expect(panel).toContain('await saveSecret(userId, secretName, next, meta?.workspace_id ?? null)');
+  it('a NEW row can be named, because that is the one moment naming a key is meaningful', () => {
+    const at = panel.indexOf('aria-label="New credential name"');
+    expect(at).toBeGreaterThan(-1);
+    expect(panel.slice(panel.lastIndexOf('<input', at), at)).not.toContain('readOnly');
   });
 
-  it('an empty value is refused rather than silently blanking a live key', () => {
-    expect(panel).toMatch(/if \(!next\) \{ setError\(/);
-  });
-
-  it('the delete still asks twice', () => {
-    expect(panel).toContain("setConfirming(row.id)");
+  it('the bin removes the WHOLE row, and a saved one asks twice', () => {
+    expect(panel).toContain('aria-label={`Delete ${row.secret_name}`}');
+    expect(panel).toContain('setConfirming(row.id)');
     expect(panel).toContain('Keep');
+    // An unsaved row has nothing in the vault to destroy, so its bin acts at once.
+    expect(panel).toContain('aria-label="Remove this new row"');
+  });
+
+  it('🔝 the app picker is ABOVE the credential rows', () => {
+    const pickerAt = panel.indexOf("id=\"secret-scope\"");
+    const tableAt = panel.indexOf('<CredentialTable');
+    expect(pickerAt, 'the app picker is gone').toBeGreaterThan(-1);
+    expect(pickerAt, 'the picker dropped below the rows it filters').toBeLessThan(tableAt);
+  });
+
+  it('"+ Add new credentials" comes LAST but one, and "Save and sync" comes LAST', () => {
+    // Anchored on each button's own handler rather than on its label: the label text also appears in a
+    // row's "press Save and sync" hint higher up the file, which would make a correct order read as wrong.
+    const addAt = panelCode.indexOf('setNewRows((list) => [...list,');
+    const saveAt = panelCode.indexOf('void saveAndSync()');
+    expect(addAt, 'the add button is gone').toBeGreaterThan(-1);
+    expect(saveAt, 'the save button is gone').toBeGreaterThan(-1);
+    expect(saveAt, 'Save and sync is no longer the last button').toBeGreaterThan(addAt);
+    expect(panel).toContain('Add new credentials');
+    expect(panel).toContain('Save and sync');
   });
 });
 
-describe('the gate no longer carries its own copy of the re-auth', () => {
-  const gate = read('src/components/VaultLockGate.tsx');
-
-  it('calls the ONE shared implementation instead of a web-only popup', () => {
-    expect(gate).toContain("from '../lib/vaultReauth'");
-    // The duplicated popup call — once to unlock, once to enrol a device — is what made the fix
-    // land in one place and not the other.
-    expect(gate).not.toContain('reauthenticateWithPopup');
+describe('"Save and sync" does something real', () => {
+  it('writes through the authenticated vault save, scope and all', () => {
+    // 🔒 An edit must carry the key's own workspace scope. Without it the new value lands in the SHARED
+    // scope while the app-scoped row keeps the old one — the build reads the stale key while this screen
+    // shows the new one.
+    expect(panel).toContain('await saveSecret(userId, row.secret_name, next, meta?.workspace_id ?? null)');
+    // A NEW key uses the scope the parent derived from the picker.
+    expect(panel).toContain('await saveSecret(userId, name, value, saveScopeId)');
   });
 
-  it('does not tell the user their phone has no lock', () => {
-    // It does have one; the app's browser layer cannot reach it. Blaming the phone sends people into
-    // their own settings looking for something already switched on.
-    expect(gate).not.toMatch(/\{'?This device has no face/);
-    expect(gate).toContain('browser layer cannot ask for it');
+  it('RE-READS the vault afterwards, so "synced" is confirmed rather than assumed', () => {
+    const saveFn = panel.slice(panel.indexOf('const saveAndSync'), panel.indexOf('const remove ='));
+    expect(saveFn).toContain('await load(true)');
+  });
+
+  it('never writes an empty value, and says so instead of silently blanking a live key', () => {
+    expect(panel).toContain('empty value — use the bin to remove it');
+  });
+
+  it('reports what it saved and what it skipped — a button that claims more than it did is the bug', () => {
+    expect(panel).toContain('Saved and synced ');
+    expect(panel).toContain('Not saved: ');
+    expect(panel).toContain('Nothing to save');
+  });
+});
+
+describe('🔴 the door is a PIN, and NOTHING else survives in it', () => {
+  it('collects a 4-digit PIN and sends it to the server to be checked', () => {
+    expect(gate).toContain("from '../lib/vaultLock'");
+    expect(gate).toContain('unlockWithPin(userId, pin)');
+    expect(gate).toContain('maxLength={4}');
+  });
+
+  it('never compares the PIN itself — the only client-side check is the shape of the field', () => {
+    // A browser that knows whether a digit was right has already given an attacker the whole PIN.
+    expect(gateCode).not.toMatch(/pin\s*===\s*['"]/);
+    expect(gateCode).not.toContain('storedPin');
+    expect(gate).toContain('looksLikePin');
+  });
+
+  it('the phone lock, the device lock and the account-password door are all GONE', () => {
+    for (const removed of [
+      'WebAuthn', 'navigator.credentials', 'deviceLockAvailable', 'registerDeviceLock', 'unlockWithDevice',
+      'reauthenticateWithPopup', 'reauthenticateNow', 'vaultReauth', 'Fingerprint', 'Face ID',
+      'account password', 'device-lock',
+    ]) {
+      expect(gateCode, `${removed} is still in the gate`).not.toContain(removed);
+    }
+  });
+
+  it('offers "Forgot PIN" and resets it through an emailed code', () => {
+    expect(gate).toContain('Forgot PIN?');
+    expect(gate).toContain("sendPinCode(userId, status?.hasPin ? 'reset' : 'create')");
+    expect(gate).toContain('setPin(userId, newPin, code.trim())');
+  });
+
+  it('asks for the new PIN twice, because a typo here locks the owner out of their own keys', () => {
+    expect(gate).toContain('Confirm your PIN');
+    expect(gate).toContain('newPin !== confirmPin');
+  });
+
+  it('states the lock-out plainly and still offers the way out', () => {
+    expect(gate).toContain('Too many wrong PINs');
+    expect(gate).toContain('Reset my PIN');
+  });
+
+  it('an account with no email is told the door that works for it, not left at a dead end', () => {
+    expect(gate).toContain("status?.channel === 'fresh-sign-in'");
+    expect(gate).toMatch(/Sign in again/);
+  });
+});
+
+describe('the client half leaks nothing and decides nothing', () => {
+  const client = read('src/lib/vaultLock.ts');
+
+  it('the PIN only ever travels in a request body — it is never stored in the browser', () => {
+    for (const stored of ['localStorage', 'sessionStorage', 'document.cookie', 'indexedDB']) {
+      expect(client, stored).not.toContain(stored);
+    }
+  });
+
+  it('every privileged call carries the ticket header', () => {
+    expect(client).toContain('[UNLOCK_TICKET_HEADER]: ticket');
+    expect(client.match(/UNLOCK_TICKET_HEADER\]: ticket/g)?.length).toBe(2); // reveal + delete
   });
 });

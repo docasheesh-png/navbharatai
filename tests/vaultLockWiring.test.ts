@@ -1,9 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import {
-  unlockIsLive, secondsRemaining, deviceLabel, toBase64url, fromBase64url, UNLOCK_TICKET_HEADER,
-} from '../src/lib/vaultLock';
+import { unlockIsLive, secondsRemaining, looksLikePin, lockoutMinutes, UNLOCK_TICKET_HEADER } from '../src/lib/vaultLock';
 import { UNLOCK_TICKET_HEADER as SERVER_HEADER } from '../src/server/routes/secrets';
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), 'utf8');
@@ -11,10 +9,10 @@ const read = (p: string) => readFileSync(join(process.cwd(), p), 'utf8');
 /**
  * The wiring, not the crypto.
  *
- * The lock's rules are proven in `deviceUnlock.test.ts` and `vaultUnlockEndToEnd.test.ts`. What those
- * cannot see is whether the SCREEN is actually plumbed into them — and this feature has a specific way
- * of rotting silently: someone removes the gate, or reintroduces an unticketed delete, and every
- * security test still passes because the server is untouched while the UI simply stops asking.
+ * The lock's rules are proven in `vaultPin.test.ts`, `vaultTicket.test.ts` and `vaultPinRoutes.test.ts`.
+ * What those cannot see is whether the SCREEN is actually plumbed into them — and this feature has a
+ * specific way of rotting silently: someone removes the gate, or reintroduces an unticketed delete, and
+ * every security test still passes because the server is untouched while the UI simply stops asking.
  */
 describe('the client and the server agree on the ticket header', () => {
   it('one header name, defined on both sides and identical', () => {
@@ -47,14 +45,18 @@ describe('the Secrets screen is behind the gate', () => {
     expect(src).not.toMatch(/\bdeleteSecret\b(?!Locked)/);
   });
 
-  it('the ADD form is deliberately NOT gated — pasting a key you hold reveals nothing', () => {
-    // Stated as a test because it is a decision someone could "tidy up" by moving the whole screen
-    // behind the lock, adding friction with no security behind it.
+  it('🔒 EVERYTHING is now inside the gate, including adding a key', () => {
+    // This used to assert the OPPOSITE, and the reversal is deliberate rather than a loosened test.
+    // Pasting a key you already hold reveals nothing, so leaving the add form outside the lock was
+    // defensible — and it produced the screen the admin photographed: a form, then a lock card halfway
+    // down, which reads as a half-locked room. Since the rows themselves are now editable in place there
+    // is no separate form left to leave outside, and the panel has one door.
     const gateAt = src.indexOf('<VaultLockGate');
-    const addAt = src.indexOf('const addSecret');
-    expect(addAt).toBeGreaterThan(-1);
     expect(gateAt).toBeGreaterThan(-1);
-    expect(src.slice(gateAt)).not.toContain('const addSecret');
+    expect(src.indexOf('<CredentialTable')).toBeGreaterThan(gateAt);
+    // The old top-of-screen form is gone entirely, not merely moved.
+    expect(src).not.toContain('const addSecret');
+    expect(src).not.toContain('Save Secret');
   });
 });
 
@@ -102,89 +104,72 @@ describe('the client helpers a screen depends on', () => {
 
   it('unlockIsLive is false for null, an empty ticket and an expired one', () => {
     expect(unlockIsLive(null, now)).toBe(false);
-    expect(unlockIsLive({ ticket: '', method: 'device-lock', expiresAt: now + 1000 }, now)).toBe(false);
-    expect(unlockIsLive({ ticket: 't', method: 'device-lock', expiresAt: now - 1 }, now)).toBe(false);
-    expect(unlockIsLive({ ticket: 't', method: 'device-lock', expiresAt: now + 1 }, now)).toBe(true);
+    expect(unlockIsLive({ ticket: '', method: 'pin', expiresAt: now + 1000 }, now)).toBe(false);
+    expect(unlockIsLive({ ticket: 't', method: 'pin', expiresAt: now - 1 }, now)).toBe(false);
+    expect(unlockIsLive({ ticket: 't', method: 'pin', expiresAt: now + 1 }, now)).toBe(true);
   });
 
   it('secondsRemaining floors at zero rather than counting down past it', () => {
-    expect(secondsRemaining({ ticket: 't', method: 'device-lock', expiresAt: now + 90_000 }, now)).toBe(90);
-    expect(secondsRemaining({ ticket: 't', method: 'device-lock', expiresAt: now - 90_000 }, now)).toBe(0);
+    expect(secondsRemaining({ ticket: 't', method: 'pin', expiresAt: now + 90_000 }, now)).toBe(90);
+    expect(secondsRemaining({ ticket: 't', method: 'pin', expiresAt: now - 90_000 }, now)).toBe(0);
     expect(secondsRemaining(null, now)).toBe(0);
   });
 
-  it('base64url round-trips in the browser direction too', () => {
-    const bytes = new Uint8Array([0, 1, 250, 255, 128, 64]);
-    expect(Array.from(fromBase64url(toBase64url(bytes)))).toEqual(Array.from(bytes));
-    expect(toBase64url(bytes)).not.toMatch(/[+/=]/);
+  it('looksLikePin only enables the button — it is a field check, never the security', () => {
+    expect(looksLikePin('8274')).toBe(true);
+    for (const bad of ['', '1', '123', '12345', '82a4', ' 827']) expect(looksLikePin(bad), bad).toBe(false);
+    // Note what it deliberately does NOT do: it accepts 1234. The WEAK-PIN rule lives on the server
+    // (`pinRejectReason`), so a client that skipped this check cannot set a guessable PIN anyway.
+    expect(looksLikePin('1234')).toBe(true);
   });
 
-  it('names the device without identifying it', () => {
-    expect(deviceLabel('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0)')).toBe('iPhone');
-    expect(deviceLabel('Mozilla/5.0 (Linux; Android 14; Pixel 8)')).toBe('Android phone');
-    expect(deviceLabel('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)')).toBe('Mac');
-    expect(deviceLabel('Mozilla/5.0 (Windows NT 10.0)')).toBe('Windows PC');
-    expect(deviceLabel('something unrecognised')).toBe('This device');
+  it('lockoutMinutes never says "0 minutes" — a lock-out that reads as over is worse than none', () => {
+    expect(lockoutMinutes(15 * 60_000)).toBe(15);
+    expect(lockoutMinutes(61_000)).toBe(2);
+    expect(lockoutMinutes(1)).toBe(1);
+    expect(lockoutMinutes(0)).toBe(1);
   });
 });
 
 /**
- * WHICH DOOR THE SCREEN PUTS FIRST.
+ * THE SHAPE OF THE DOOR, now that there is only one.
  *
- * Not decoration. The admin opened this screen on an iPhone that CAN do Face ID and still asked whether
- * a simple phone lock was possible at all — because the phone-lock button was the small outline one at
- * the bottom while the password path wore the primary colour. Every security test passed throughout:
- * the lock was real, the screen just pointed at the wrong door. Nothing except an assertion on the
- * SCREEN can catch that, which is why these live here rather than in the crypto tests.
+ * Not decoration. The previous version of this block asserted which of TWO doors wore the primary colour,
+ * because the admin had opened the screen on an iPhone that can do Face ID and still asked whether a
+ * phone lock was possible at all — the button existed, it just looked like an afterthought. Every
+ * security test passed throughout; only an assertion on the SCREEN could catch it. With one door that
+ * particular trap is gone, and what remains worth pinning is that the door can always be OPENED: a
+ * locked-out user, a user with no PIN and a user with no email must each be offered a real next step
+ * rather than a dead end, because a vault nobody can open loses somebody their keys for good.
  */
-describe('the phone lock is the door this screen offers first', () => {
+describe('every state of the door offers a real way forward', () => {
   const src = read('src/components/VaultLockGate.tsx');
-  const setUpAt = src.indexOf('Set up ${deviceLabel()');
-  const accountAt = src.indexOf('{accountLabel}');
 
-  it('the set-up button wears the primary style, not a quiet outline', () => {
-    expect(setUpAt).toBeGreaterThan(0);
-    const button = src.slice(src.lastIndexOf('<button', setUpAt), setUpAt);
-    expect(button).toContain('primaryButton');
-    // The uppercase micro-type is what made it read as an afterthought.
-    expect(button).not.toContain('uppercase');
+  it('a fresh account is taken straight to setup, not asked for a PIN that does not exist', () => {
+    expect(src).toContain("setMode(s.hasPin ? 'unlock' : 'setup')");
   });
 
-  it('the account door steps down to secondary exactly when the device can do it', () => {
-    expect(src).toContain('const deviceIsPrimary = hasDeviceLock === true || offerSetUp;');
-    expect(src).toContain('deviceIsPrimary ? secondaryButton : primaryButton');
+  it('a locked-out user is offered a reset, which is the only thing that actually helps them', () => {
+    const lockedBranch = src.slice(src.indexOf('lockedForMs > 0 ? ('), src.indexOf("mode === 'unlock' ? ("));
+    expect(lockedBranch).toContain('Reset my PIN');
   });
 
-  it('the device path is rendered above the account path, not below it', () => {
-    expect(setUpAt).toBeGreaterThan(0);
-    expect(accountAt).toBeGreaterThan(0);
-    expect(setUpAt).toBeLessThan(accountAt);
+  it('the PIN field cannot waste a try on a stray letter', () => {
+    // Five attempts is the whole defence; one spent on a keyboard slip is a real cost to the owner.
+    expect(src).toContain("setPinValue(e.target.value.replace(/\\D/g, '').slice(0, 4))");
   });
 
-  it('🔒 the account door is still offered unconditionally — a device lock must never strand somebody outside their own keys', () => {
-    const buttonAt = src.lastIndexOf('<button', accountAt);
-    // A `{something && (` immediately before the tag would be a guard hiding the fallback door.
-    expect(src.slice(buttonAt - 160, buttonAt)).not.toMatch(/&&\s*\(\s*$/);
+  it('🔒 the unlock is never gated behind the setup form or vice versa — both are always reachable', () => {
+    expect(src).toContain("setMode('setup')");
+    expect(src).toContain("setMode('unlock')");
   });
 
-  it('nobody is sent to a device prompt that cannot appear', () => {
-    expect(src).toContain('const offerSetUp = canUseDevice === true && hasDeviceLock !== true;');
+  it('the server is the authority on lock-outs: a refusal re-reads the status instead of guessing', () => {
+    expect(src).toContain("if (typeof e?.lockedForMs === 'number' || e?.needsSetup) void refreshStatus();");
   });
 
-  it('a SOCIAL account confirms in one tap, and the button names its own provider', () => {
-    // It used to take two: the first tap only revealed a password field that a Google user never gets.
-    //
-    // WIDENED 2026-09-13: this was written as `isGoogleAccount`, which treated an Apple or GitHub
-    // account as a password account and showed it a field it can never fill. The check now reads the
-    // account's real provider (`reauthMethodFor`), so the same one-tap path covers all three and the
-    // button is labelled from the provider instead of being hardcoded to Google.
-    expect(src).toContain('askPassword || isSocialAccount ? void unlockViaAccount() : setAskPassword(true)');
-    expect(src).toMatch(/isSocialAccount[\s\S]{0,80}reauthMethodLabel\(accountMethod\)/);
-    expect(src).toContain("const showPasswordField = askPassword && accountMethod === 'password';");
-    expect(src).toContain("const accountMethod = auth.currentUser ? reauthMethodFor(auth.currentUser) : null;");
-  });
-
-  it('setting up on a password account reveals the field instead of raising an error that says the same thing', () => {
-    expect(src).toContain("if (!isSocialAccount && !password) { setAskPassword(true); return; }");
+  it('the vault re-locks itself on a timer, and "Lock now" is one tap', () => {
+    expect(src).toContain('if (!live) relock();');
+    expect(src).toContain('Lock now');
   });
 });

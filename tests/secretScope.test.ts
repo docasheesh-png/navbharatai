@@ -142,8 +142,14 @@ describe('🔒 the wiring — both doors, one decision', () => {
   const panel = readFileSync(join(__dirname, '..', 'src', 'components', 'agentv3', 'AgentV3Panel.tsx'), 'utf8');
 
   it('the save uses the DERIVED scope, never the raw picker state', () => {
-    expect(src).toContain('await saveSecret(userId, savedName, value.trim(), effectiveScope);');
+    // The ANCHOR moved on 2026-09-13 (the top-of-screen add form became an "+ Add new credentials" row
+    // inside the credential table), the INVARIANT did not: a save must use `effectiveScope`, which in
+    // fixed mode cannot name another app, and never the raw `scope` dropdown state.
+    expect(src).toContain('saveScopeId={effectiveScope}');
+    expect(src).toContain('await saveSecret(userId, name, value, saveScopeId);');
     expect(src).not.toMatch(/saveSecret\([^)]*scope \|\| null\)/);
+    // And `scope` itself must reach the save through NOTHING but that derivation.
+    expect(src).not.toMatch(/saveSecret\([^)]*,\s*scope\s*\)/);
   });
 
   it('🔒 the app dropdown is rendered ONLY in picker mode', () => {

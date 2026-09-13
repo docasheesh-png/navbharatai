@@ -11,7 +11,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
-import { mintUnlockTicket, unlockSecret } from '../src/server/lib/deviceUnlock';
+import { mintUnlockTicket, unlockSecret } from '../src/server/lib/vaultTicket';
 
 process.env.VITEST = 'true';
 
@@ -49,7 +49,7 @@ async function getDeleteHandler() {
 
 /** A genuine ticket for this user, minted the same way the unlock route does. */
 function ticketHeaders(uid: string) {
-  return { 'x-vault-unlock': mintUnlockTicket(uid, Date.now(), unlockSecret(), 'device-lock') };
+  return { 'x-vault-unlock': mintUnlockTicket(uid, Date.now(), unlockSecret(), 'pin') };
 }
 
 describe('DELETE /api/secrets/:userId/:secretId — cross-user IDOR guard', () => {
@@ -114,7 +114,7 @@ describe('DELETE — the vault lock (2026-09-12)', () => {
     const res = mockRes();
     await handler(mockReq({
       params: { userId: 'owner_uid', secretId: 'my_secret' },
-      headers: { 'x-vault-unlock': `device-lock.${Date.now() + 60_000}.deadbeef` },
+      headers: { 'x-vault-unlock': `pin.${Date.now() + 60_000}.deadbeef` },
     }), res);
     expect(res.statusCode).toBe(401);
     expect(DELETES).toHaveLength(0);
@@ -151,7 +151,7 @@ describe('DELETE — the vault lock (2026-09-12)', () => {
     const res = mockRes();
     await handler(mockReq({
       params: { userId: 'owner_uid', secretId: 'my_secret' },
-      body: { ticket: mintUnlockTicket('owner_uid', Date.now(), unlockSecret(), 'account-reauth') },
+      body: { ticket: mintUnlockTicket('owner_uid', Date.now(), unlockSecret(), 'pin') },
     }), res);
     expect(res.statusCode).toBe(200);
     expect(DELETES).toEqual(['my_secret']);

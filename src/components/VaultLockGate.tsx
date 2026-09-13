@@ -1,28 +1,34 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Lock, ShieldCheck, Fingerprint, KeyRound, AlertTriangle } from 'lucide-react';
-import { reauthenticateNow, reauthMethodFor, reauthMethodLabel, deviceLockUnavailableReason } from '../lib/vaultReauth';
+import { Lock, ShieldCheck, KeyRound, AlertTriangle, Mail, Loader2 } from 'lucide-react';
+import { signOut } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import {
-  deviceLockAvailable, lockStatus, registerDeviceLock, unlockWithDevice, unlockWithAccount,
-  unlockIsLive, secondsRemaining, deviceLabel, type UnlockState,
+  pinStatus, sendPinCode, setPin, unlockWithPin, unlockIsLive, secondsRemaining,
+  looksLikePin, lockoutMinutes, type PinStatus, type UnlockState, type VaultError,
 } from '../lib/vaultLock';
 
 /**
- * THE DOOR ON THE SECRET VAULT (admin 2026-09-12: "user jab secret and api keys par click kare to
- * phone lock / face lock / pin dalna pade, tab open ho!").
+ * THE DOOR ON THE SECRET VAULT — a 4-digit PIN (admin 2026-09-13, verbatim: *"ek kaam karo! isko aur
+ * simple bana do! bas — PIN banao, mobile number/email otp se PIN banao, PIN (4 digit pin se hi open
+ * ho). pin bhul jaye to, forget pin — otp — pin reset! waaki sab hata do … phone unlock etc sab hata
+ * do, simple rahne do"*).
  *
- * 🔴 WHAT THIS COMPONENT IS HONEST ABOUT. Hiding a list behind a React flag protects nothing — the
- * values would still be one ordinary request away. So this screen does not "guard" the vault; it
- * COLLECTS a proof and holds the resulting ticket, and the server refuses to decrypt anything without
- * it (`server/lib/deviceUnlock.ts`). If somebody deleted this component entirely, the keys would become
- * unreadable rather than public — which is the test of whether a lock is real.
+ * 🔴 WHY THE PREVIOUS DOOR WAS REPLACED RATHER THAN REPAIRED, recorded so nobody rebuilds it.
  *
- * TWO DOORS, BOTH REAL, AND WHY THERE MUST BE TWO. The device lock (face / fingerprint / PIN) is the one
- * the admin asked for and the one this screen offers first. But a user whose device has no platform
- * authenticator — an older Android WebView, a desktop with no Hello, a borrowed machine — would
- * otherwise be locked out of their own API keys permanently, which breaks the app far worse than a
- * weaker prompt does. So confirming the account password is the second door, and the server checks that
- * the sign-in really happened moments ago rather than trusting the screen.
+ * This screen used to offer the phone's own face / fingerprint / PIN through WebAuthn, with a fresh
+ * account sign-in behind it. Both were real proofs and BOTH were unreachable on the app the admin
+ * actually holds: WebAuthn binds a credential to an ORIGIN and the Capacitor shell's origin is a custom
+ * scheme, while the account fallback used the web popup flow a WebView blocks — which is how the admin
+ * came to photograph `auth/argument-error` on the only button on this screen. A lock nobody can open is
+ * not a strict lock; it is a broken feature, and the honest fix was to stop insisting on the stronger
+ * proof and ship the one that works everywhere.
+ *
+ * 🔒 AND IT IS A REAL LOCK, not a screen. Nothing here compares the PIN. The four digits go to the
+ * server, which answers right-or-wrong and nothing else, counts the wrong ones, locks the vault for an
+ * escalating window after five, and stores only a salted scrypt hash. Success returns a short-lived
+ * TICKET, and the routes that can decrypt or delete a key refuse to act without it — so deleting this
+ * component would make the keys unreadable rather than public, which is the test of whether a lock is
+ * real. The rules are in `server/lib/vaultPin.ts`; the ticket is in `server/lib/vaultTicket.ts`.
  */
 export const VaultLockGate: React.FC<{
   userId: string;
@@ -34,16 +40,21 @@ export const VaultLockGate: React.FC<{
    * preference.
    */
   render: (unlock: UnlockState, relock: () => void) => React.ReactNode;
-  /** Tighter chrome for the v5 sheet, same as SecretManager's own `embedded`. */
+  /** Tighter chrome for the Pro sheet, same as SecretManager's own `embedded`. */
   embedded?: boolean;
 }> = ({ userId, render, embedded }) => {
   const [unlock, setUnlock] = useState<UnlockState | null>(null);
-  const [canUseDevice, setCanUseDevice] = useState<boolean | null>(null);
-  const [hasDeviceLock, setHasDeviceLock] = useState<boolean | null>(null);
-  const [busy, setBusy] = useState<'' | 'device' | 'register' | 'account'>('');
+  const [status, setStatus] = useState<PinStatus | null>(null);
+  /** `unlock` = type the PIN; `setup` = the code-and-new-PIN form (first time OR after "Forgot PIN"). */
+  const [mode, setMode] = useState<'unlock' | 'setup'>('unlock');
+  const [pin, setPinValue] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [code, setCode] = useState('');
+  const [codeSentTo, setCodeSentTo] = useState('');
+  const [busy, setBusy] = useState<'' | 'unlock' | 'code' | 'save'>('');
   const [error, setError] = useState('');
-  const [password, setPassword] = useState('');
-  const [askPassword, setAskPassword] = useState(false);
+  const [notice, setNotice] = useState('');
   const [secondsLeft, setSecondsLeft] = useState(0);
   /** Held in a ref so the expiry timer never closes over a stale ticket. */
   const unlockRef = useRef<UnlockState | null>(null);
@@ -53,28 +64,30 @@ export const VaultLockGate: React.FC<{
     // Dropping the ticket is the whole of locking: without it every read and delete is refused at the
     // server, so there is no "locked in the UI but still readable" state to get wrong.
     setUnlock(null);
+    setPinValue('');
+    setNewPin('');
+    setConfirmPin('');
+    setCode('');
     setError('');
-    setPassword('');
-    setAskPassword(false);
+    setNotice('');
   }, []);
 
-  useEffect(() => {
-    let alive = true;
-    void (async () => {
-      const available = await deviceLockAvailable();
-      if (!alive) return;
-      setCanUseDevice(available);
-      try {
-        const status = await lockStatus(userId);
-        if (alive) setHasDeviceLock(status.hasDeviceLock);
-      } catch {
-        // A status we could not read must not claim "no lock set up" — that would push the user into
-        // registering a second credential over a working one. Unknown stays unknown.
-        if (alive) setHasDeviceLock(null);
-      }
-    })();
-    return () => { alive = false; };
+  const refreshStatus = useCallback(async () => {
+    try {
+      const s = await pinStatus(userId);
+      setStatus(s);
+      // A brand-new account goes straight to the setup form — asking for a PIN that does not exist yet
+      // is the kind of dead end that makes people think the feature is broken.
+      setMode(s.hasPin ? 'unlock' : 'setup');
+      if (s.codePending) setCodeSentTo(s.destination);
+      return s;
+    } catch (err) {
+      setError((err as Error)?.message || 'Could not reach your vault. Please try again.');
+      return null;
+    }
   }, [userId]);
+
+  useEffect(() => { void refreshStatus(); }, [refreshStatus]);
 
   /** The vault re-locks ITSELF. A screen left open on a shared desk must not stay open indefinitely. */
   useEffect(() => {
@@ -89,57 +102,80 @@ export const VaultLockGate: React.FC<{
     return () => clearInterval(timer);
   }, [unlock, relock]);
 
-  const run = async (kind: 'device' | 'register' | 'account', fn: () => Promise<UnlockState>) => {
-    setBusy(kind);
+  /** Turn any thrown vault error into the right screen state, in one place. */
+  const handleError = (err: unknown) => {
+    const e = err as VaultError;
+    setError(e?.message || 'Something went wrong. Please try again.');
+    // The server is the authority on lock-outs and on whether a PIN exists, so a refusal refreshes the
+    // status rather than this screen guessing what changed.
+    if (typeof e?.lockedForMs === 'number' || e?.needsSetup) void refreshStatus();
+  };
+
+  const doUnlock = async () => {
+    if (!looksLikePin(pin)) { setError('Enter your 4-digit PIN.'); return; }
+    setBusy('unlock');
     setError('');
     try {
-      setUnlock(await fn());
-    } catch (err: unknown) {
-      const e = err as { message?: string; name?: string };
-      // A cancelled prompt is not a failure worth shouting about — the user changed their mind.
-      const cancelled = e?.name === 'NotAllowedError' || e?.name === 'AbortError';
-      setError(cancelled ? '' : (e?.message || 'Could not confirm it is you. Please try again.'));
+      setUnlock(await unlockWithPin(userId, pin));
+      setPinValue('');
+    } catch (err) {
+      setPinValue('');
+      handleError(err);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const requestCode = async () => {
+    setBusy('code');
+    setError('');
+    setNotice('');
+    try {
+      const out = await sendPinCode(userId, status?.hasPin ? 'reset' : 'create');
+      setCodeSentTo(out.destination);
+      setNotice(`Code sent to ${out.destination}. It expires in 10 minutes.`);
+      void refreshStatus();
+    } catch (err) {
+      handleError(err);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const savePin = async () => {
+    if (!looksLikePin(newPin)) { setError('Your PIN must be exactly 4 digits.'); return; }
+    if (newPin !== confirmPin) {
+      // Checked before the request, because a mistyped PIN the server happily accepts locks the user out
+      // of their own keys until they reset it — the one mistake this form must not let through.
+      setError('The two PINs do not match.');
+      return;
+    }
+    setBusy('save');
+    setError('');
+    try {
+      setUnlock(await setPin(userId, newPin, code.trim()));
+      setNewPin('');
+      setConfirmPin('');
+      setCode('');
+    } catch (err) {
+      handleError(err);
     } finally {
       setBusy('');
     }
   };
 
   /**
-   * Re-authenticate with Firebase FIRST, then ask the server to check it.
-   *
-   * The order is the security: Firebase refreshes `auth_time` inside the ID token, and the server reads
-   * that from the signed token — so this screen cannot turn an old sign-in into a new one by saying so.
-   * Google accounts re-authenticate through the provider popup; password accounts through the field.
+   * An account with NO email address signs in by mobile number, so there is nowhere to send a code. It
+   * proves itself with a fresh sign-in instead — and the sign-in it does is itself a mobile OTP, checked
+   * on the server from `auth_time` inside the signed token. Signing out is the whole action; the user
+   * returns through the normal login they already know.
    */
-  const unlockViaAccount = async () => {
-    const user = auth.currentUser;
-    if (!user) { setError('Please sign in again.'); return; }
-    await run('account', async () => {
-      // ONE shared re-authentication (`lib/vaultReauth.ts`). It was a web-only popup call here and in
-      // setUpDeviceLock below, which is why the app showed `auth/argument-error` and no door opened at
-      // all: the native shell has no popup, and the sign-in it contradicted uses the native plugin.
-      await reauthenticateNow(user, password);
-      // The fresh token has to be in hand before the server reads auth_time off it.
-      await user.getIdToken(true);
-      setPassword('');
-      return unlockWithAccount(userId);
-    });
-  };
-
-  const setUpDeviceLock = async () => {
-    const user = auth.currentUser;
-    if (!user) { setError('Please sign in again.'); return; }
-    await run('register', async () => {
-      // 🔒 Registering a device is gated by a fresh sign-in on the SERVER too. Without that, a stolen
-      // session could enrol the thief's own face and hold the vault open forever — the lock would be
-      // handing out keys instead of withholding them.
-      await reauthenticateNow(user, password);
-      await user.getIdToken(true);
-      setPassword('');
-      const state = await registerDeviceLock(userId, user.email || user.displayName || 'NavBharatAI account');
-      setHasDeviceLock(true);
-      return state;
-    });
+  const signInAgain = async () => {
+    try {
+      await signOut(auth);
+    } catch {
+      setError('Could not sign you out. Please sign out from Settings and sign in again.');
+    }
   };
 
   if (unlock && unlockIsLive(unlock)) {
@@ -151,9 +187,7 @@ export const VaultLockGate: React.FC<{
           <span className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-emerald-300">
             <ShieldCheck size={14} />
             Unlocked
-            <span className="font-sans font-normal normal-case tracking-normal text-emerald-200/70">
-              {unlock.method === 'device-lock' ? 'with your device lock' : 'with your account password'}
-            </span>
+            <span className="font-sans font-normal normal-case tracking-normal text-emerald-200/70">with your PIN</span>
           </span>
           <span className="flex items-center gap-3">
             {/* The countdown is shown because a vault that closes without warning looks broken. */}
@@ -171,46 +205,11 @@ export const VaultLockGate: React.FC<{
     );
   }
 
-  // Which door this ACCOUNT actually has — read from its real providers rather than testing for Google
-  // alone. An Apple or GitHub account was previously treated as a password account, so it was shown a
-  // password field it can never fill; now each one is offered its own provider.
-  const accountMethod = auth.currentUser ? reauthMethodFor(auth.currentUser) : null;
-  const isSocialAccount = accountMethod === 'google' || accountMethod === 'apple' || accountMethod === 'github';
-
-  // A social account has no password to type, so the field would be an empty box that explains nothing.
-  const showPasswordField = askPassword && accountMethod === 'password';
-
-  /**
-   * 🔴 WHICH DOOR LOOKS LIKE THE MAIN ONE (admin 2026-09-12, from a real screenshot of this screen).
-   *
-   * The admin asked for the phone lock — "jaise UPI se payment kare to lock ko unlock karna hota hai" —
-   * opened this screen on an iPhone that CAN do Face ID, and still asked whether a simple phone lock was
-   * possible at all. It was: the button was there. It was just the small outline one at the bottom while
-   * the password path wore the primary colour, so the screen answered a different question than the one
-   * the user was asking.
-   *
-   * So the rule is now explicit rather than incidental: whenever the device can do face / fingerprint /
-   * PIN, THAT is the primary button — whether it is already set up (unlock) or not yet (set up). The
-   * account door keeps its full strength and never disappears (a device with no lock must never strand
-   * somebody outside their own API keys), it simply stops being the loudest thing on the screen.
-   */
-  const offerSetUp = canUseDevice === true && hasDeviceLock !== true;
-  const deviceIsPrimary = hasDeviceLock === true || offerSetUp;
-
+  const lockedForMs = status?.locked ? status.lockedForMs : 0;
+  const noEmail = status?.channel === 'fresh-sign-in';
+  const noContact = status?.channel === 'none';
+  const pinBox = 'w-full rounded-xl border border-white/10 bg-black/30 px-3 py-3 text-center text-lg font-bold tracking-[0.5em] text-white placeholder-gray-600 outline-none focus:border-indigo-500/50';
   const primaryButton = 'bg-indigo-600 text-white hover:bg-indigo-500';
-  const secondaryButton = 'border border-white/10 text-gray-200 hover:bg-white/5';
-
-  /**
-   * The label names what will actually happen. "Use my account password" in front of a Google user is
-   * a promise of a field they will never see — the popup is the confirmation, so the button says so.
-   */
-  const accountLabel = busy === 'account'
-    ? 'Checking…'
-    : isSocialAccount
-      ? reauthMethodLabel(accountMethod)
-      : askPassword
-        ? 'Confirm and unlock'
-        : 'Use my account password';
 
   return (
     <div className={embedded ? 'py-6' : 'py-10'}>
@@ -218,10 +217,13 @@ export const VaultLockGate: React.FC<{
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-500/10">
           <Lock className="h-6 w-6 text-indigo-300" />
         </div>
-        <h3 className="text-base font-bold text-white">Your keys are locked</h3>
+        <h3 className="text-base font-bold text-white">
+          {status === null ? 'Checking your vault…' : mode === 'setup' ? (status.hasPin ? 'Reset your PIN' : 'Create your PIN') : 'Enter your PIN'}
+        </h3>
         <p className="mt-2 text-xs leading-relaxed text-gray-400">
-          Confirm it is you before your API keys are shown. They stay encrypted on our server until you do —
-          this is not just a screen being hidden.
+          {mode === 'setup'
+            ? 'Your saved API keys open with a 4-digit PIN. We will email a code to the address on your account first, so only you can set it.'
+            : 'Your API keys stay encrypted on our server until you enter your PIN — this is not just a screen being hidden.'}
         </p>
 
         {error && (
@@ -229,82 +231,164 @@ export const VaultLockGate: React.FC<{
             <AlertTriangle size={14} className="mt-px shrink-0" /> {error}
           </p>
         )}
+        {notice && !error && (
+          <p className="mt-4 flex items-start gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2.5 text-left text-[11px] leading-snug text-emerald-300">
+            <Mail size={14} className="mt-px shrink-0" /> {notice}
+          </p>
+        )}
 
-        <div className="mt-5 space-y-2.5">
-          {/* The device lock first when this account already has one — one tap, no typing. */}
-          {hasDeviceLock === true && canUseDevice !== false && (
+        {status === null ? (
+          <p className="mt-5 flex items-center justify-center gap-2 text-xs text-gray-500">
+            <Loader2 size={14} className="animate-spin" /> One moment…
+          </p>
+        ) : lockedForMs > 0 ? (
+          /* 🔒 THE LOCK-OUT IS WHAT MAKES FOUR DIGITS SAFE, so the screen states it plainly rather than
+             hiding it behind a generic error — and it still offers the way out, which is a new code. */
+          <div className="mt-5 space-y-3">
+            <p className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-xs leading-relaxed text-amber-200">
+              Too many wrong PINs. Your vault is locked for about {lockoutMinutes(lockedForMs)} minute
+              {lockoutMinutes(lockedForMs) === 1 ? '' : 's'}. You can set a new PIN with an emailed code instead.
+            </p>
             <button
-              onClick={() => void run('device', () => unlockWithDevice(userId))}
-              disabled={!!busy}
-              className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold disabled:opacity-50 ${primaryButton}`}
+              onClick={() => { setMode('setup'); setError(''); }}
+              className={`w-full rounded-xl px-4 py-3 text-sm font-bold ${primaryButton}`}
             >
-              <Fingerprint size={16} />
-              {busy === 'device' ? 'Waiting for your device…' : 'Unlock with device lock'}
+              Reset my PIN
             </button>
-          )}
-
-          {/* Offered only when the device can actually do it, so nobody is sent to a prompt that cannot
-              appear. A device with no screen lock is told what to turn on, by the server, by name. */}
-          {offerSetUp && (
-            <>
-              <button
-                onClick={() => {
-                  // A password account has to type it first. Firing the registration now would only
-                  // raise an error saying what the field itself is about to ask for — an error as a
-                  // form of instruction, which is how a one-tap feature comes to feel broken.
-                  if (!isSocialAccount && !password) { setAskPassword(true); return; }
-                  void setUpDeviceLock();
-                }}
-                disabled={!!busy}
-                className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold disabled:opacity-50 ${primaryButton}`}
-              >
-                <Fingerprint size={16} />
-                {busy === 'register' ? 'Setting up…' : `Set up ${deviceLabel().toLowerCase()} lock`}
-              </button>
-              <p className="text-[10px] leading-snug text-gray-500">
-                Uses this device's own face, fingerprint or PIN. Confirm your account once to set it up —
-                after that it is one tap, every time.
-              </p>
-            </>
-          )}
-
-          {showPasswordField && (
+          </div>
+        ) : mode === 'unlock' ? (
+          <div className="mt-5 space-y-2.5">
             <input
               type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') void unlockViaAccount(); }}
-              placeholder="Your account password"
-              autoComplete="current-password"
-              className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white placeholder-gray-500 outline-none focus:border-indigo-500/50"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={4}
+              value={pin}
+              // Digits only, so a stray letter never reaches the server as a failed attempt that would
+              // burn one of the five tries.
+              onChange={(e) => setPinValue(e.target.value.replace(/\D/g, '').slice(0, 4))}
+              onKeyDown={(e) => { if (e.key === 'Enter') void doUnlock(); }}
+              placeholder="••••"
+              aria-label="Your 4-digit PIN"
+              className={pinBox}
             />
-          )}
-
-          <button
-            onClick={() => (askPassword || isSocialAccount ? void unlockViaAccount() : setAskPassword(true))}
-            disabled={!!busy}
-            className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold disabled:opacity-50 ${
-              deviceIsPrimary ? secondaryButton : primaryButton
-            }`}
-          >
-            <KeyRound size={16} />
-            {accountLabel}
-          </button>
-
-          {/* 🔴 HONEST ABOUT WHOSE LIMITATION IT IS (admin 2026-09-13, from a screenshot on the app).
-              This used to claim the device had no face, fingerprint or PIN lock available — which is
-              simply false on a modern phone and sends the user into their own settings looking for
-              something already switched on. Inside the app the phone's lock is unreachable because
-              WebAuthn binds to an ORIGIN and the shell's origin is a custom scheme, not because the
-              phone lacks a lock. Say that, and say what to do instead. */}
-          {canUseDevice === false && (
-            <p className="text-[10px] leading-snug text-gray-500">
-              {deviceLockUnavailableReason() === 'native-shell'
-                ? 'Face ID, fingerprint and PIN are not reachable from inside the app yet — your phone\'s lock is fine, the app\'s browser layer cannot ask for it. Confirming your account does the same job and is checked on our server, not here. On navbharatai.com in your phone\'s browser, the phone lock works.'
-                : 'This browser cannot offer face, fingerprint or PIN, so confirming your account is used instead. It is checked on our server, not here.'}
+            <button
+              onClick={() => void doUnlock()}
+              disabled={!!busy || !looksLikePin(pin)}
+              className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold disabled:opacity-50 ${primaryButton}`}
+            >
+              <KeyRound size={16} />
+              {busy === 'unlock' ? 'Checking…' : 'Unlock'}
+            </button>
+            {typeof status.attemptsLeft === 'number' && status.attemptsLeft < status.maxAttempts && (
+              <p className="text-[10px] text-amber-300/80">
+                {status.attemptsLeft} {status.attemptsLeft === 1 ? 'try' : 'tries'} left before your vault locks for a while.
+              </p>
+            )}
+            <button
+              onClick={() => { setMode('setup'); setError(''); setNotice(''); }}
+              className="w-full rounded-xl border border-white/10 px-4 py-2.5 text-xs font-bold text-gray-300 hover:bg-white/5"
+            >
+              Forgot PIN?
+            </button>
+          </div>
+        ) : noEmail || noContact ? (
+          /* HONEST ABOUT THE ONE ACCOUNT WE CANNOT EMAIL, and it names the door that does work. */
+          <div className="mt-5 space-y-3 text-left">
+            <p className="rounded-xl border border-white/10 bg-black/20 p-3 text-[11px] leading-relaxed text-gray-300">
+              {noEmail
+                ? `Your account signs in with your mobile number${status.destination ? ` (${status.destination})` : ''} and has no email address, so we cannot email you a code. Sign in again with your mobile OTP — that is your verification — and you will be able to set your PIN straight after.`
+                : 'Your account has no email address or mobile number on it, so there is no way to send you a verification code. Add one in Settings, then come back to set your PIN.'}
             </p>
-          )}
-        </div>
+            {noEmail && (
+              <button onClick={() => void signInAgain()} className={`w-full rounded-xl px-4 py-3 text-sm font-bold ${primaryButton}`}>
+                Sign in again
+              </button>
+            )}
+            {status.hasPin && (
+              <button
+                onClick={() => { setMode('unlock'); setError(''); }}
+                className="w-full rounded-xl border border-white/10 px-4 py-2.5 text-xs font-bold text-gray-300 hover:bg-white/5"
+              >
+                Back to PIN
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="mt-5 space-y-2.5">
+            <button
+              onClick={() => void requestCode()}
+              disabled={!!busy || status.resendInMs > 0}
+              className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold disabled:opacity-50 ${
+                codeSentTo ? 'border border-white/10 text-gray-200 hover:bg-white/5' : primaryButton
+              }`}
+            >
+              <Mail size={16} />
+              {busy === 'code'
+                ? 'Sending…'
+                : status.resendInMs > 0
+                  ? `Wait ${Math.ceil(status.resendInMs / 1000)}s to send again`
+                  : codeSentTo ? 'Send another code' : `Email me a code${status.destination ? ` (${status.destination})` : ''}`}
+            </button>
+
+            {/* The code and PIN fields are shown from the start, not gated behind the send, so a user who
+                already has the email open can type straight in — and a pending code survives a reopened
+                screen (`codePending`), which the previous flow would have thrown away. */}
+            <input
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              placeholder="6-digit code from your email"
+              aria-label="Verification code"
+              className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-center text-sm font-mono tracking-[0.3em] text-white placeholder-gray-600 outline-none focus:border-indigo-500/50"
+            />
+            <input
+              type="password"
+              inputMode="numeric"
+              autoComplete="new-password"
+              maxLength={4}
+              value={newPin}
+              onChange={(e) => setNewPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+              placeholder="New 4-digit PIN"
+              aria-label="New 4-digit PIN"
+              className={pinBox}
+            />
+            <input
+              type="password"
+              inputMode="numeric"
+              autoComplete="new-password"
+              maxLength={4}
+              value={confirmPin}
+              onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+              onKeyDown={(e) => { if (e.key === 'Enter') void savePin(); }}
+              placeholder="Confirm your PIN"
+              aria-label="Confirm your new PIN"
+              className={pinBox}
+            />
+            <button
+              onClick={() => void savePin()}
+              disabled={!!busy || !looksLikePin(newPin) || !confirmPin || code.length !== 6}
+              className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold disabled:opacity-50 ${primaryButton}`}
+            >
+              <ShieldCheck size={16} />
+              {busy === 'save' ? 'Saving…' : status.hasPin ? 'Reset PIN and open' : 'Create PIN and open'}
+            </button>
+            <p className="text-[10px] leading-snug text-gray-500">
+              Avoid 0000 or 1234. Five wrong PINs locks the vault for a while — you can always reset it with
+              a new emailed code.
+            </p>
+            {status.hasPin && (
+              <button
+                onClick={() => { setMode('unlock'); setError(''); setNotice(''); }}
+                className="w-full rounded-xl border border-white/10 px-4 py-2.5 text-xs font-bold text-gray-300 hover:bg-white/5"
+              >
+                Back to PIN
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

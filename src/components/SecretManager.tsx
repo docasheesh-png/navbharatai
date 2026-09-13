@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Lock, Eye, EyeOff, Save, Trash2, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { Lock, Eye, EyeOff, Trash2, ShieldCheck, AlertTriangle, Plus, RefreshCw, Loader2 } from 'lucide-react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase'; // shared handle → navbharat-prod (NOT the (default) DB)
 // Authenticated vault client — always attaches the signed-in user's Firebase token. Raw axios calls
@@ -9,7 +9,7 @@ import { findRecipeSource } from '../lib/credentialRecipes';
 import { listApps, type AppChoice } from '../lib/appList';
 import { scopeControl, saveScope, scopeSentence, secretOwnerLabel, shortAppName } from '../lib/secretScope';
 import { VaultLockGate } from './VaultLockGate';
-import { revealSecrets, deleteSecretLocked, type RevealedSecret, type UnlockState } from '../lib/vaultLock';
+import { revealSecrets, deleteSecretLocked, type RevealedSecret, type UnlockState, type VaultError } from '../lib/vaultLock';
 
 interface Secret {
   id: string;
@@ -24,13 +24,13 @@ interface Secret {
  * ONE VAULT, MORE THAN ONE DOOR (admin 2026-08-17: "ek room ke kayi gate").
  *
  * This component is the vault's UI, and it is deliberately the ONLY one. It is rendered from Settings →
- * App Settings → Secrets & API Keys and, since 2026-08-17, from Pro v5's own More menu — the same
- * component, reading and writing the same per-user `user_secrets` collection through the same
+ * App Settings → Secrets & API Keys and, since 2026-08-17, from NavBharatAI Pro's own More menu — the
+ * same component, reading and writing the same per-user `user_secrets` collection through the same
  * authenticated `/api/secrets` client. There is no second store to keep in step, because there is no
  * second implementation: a key saved at either door is the same key the build injects into the app's
  * `.env`, and `tests/secretsOneVault.test.ts` fails CI if a future change forks that.
  *
- * `embedded` only changes the CHROME. The Settings page owns a full screen; the v5 sheet is a panel
+ * `embedded` only changes the CHROME. The Settings page owns a full screen; the Pro sheet is a panel
  * inside a build the user must not lose their place in, so it drops the full-height frame and the
  * heading the sheet already provides. Nothing about the data path changes with it.
  */
@@ -40,7 +40,7 @@ export const SecretManager: React.FC<{
   /**
    * The app this screen opens on, and the default scope for a key saved here.
    *
-   * v5 passes the build the user is actually looking at, because a key typed while building THAT app
+   * Pro passes the build the user is actually looking at, because a key typed while building THAT app
    * almost always belongs to it — and that default is the whole point of scoping: it keeps the key out
    * of every other app's `.env`. Settings passes nothing and opens on "All apps".
    */
@@ -55,11 +55,6 @@ export const SecretManager: React.FC<{
   defaultAppName?: string | null;
 }> = ({ userId, embedded, defaultAppId, defaultAppName }) => {
   const [secrets, setSecrets] = useState<Secret[]>([]);
-  const [name, setName] = useState('');
-  const [value, setValue] = useState('');
-  const [showValue, setShowValue] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [addError, setAddError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [verdicts, setVerdicts] = useState<SecretVerdict[]>([]);
   const [checkedAt, setCheckedAt] = useState('');
@@ -105,9 +100,6 @@ export const SecretManager: React.FC<{
   const visibleSecrets = viewingAppId
     ? secrets.filter((s) => !s.workspace_id || s.workspace_id === viewingAppId)
     : secrets;
-  // Derived, not stored: a pure catalogue lookup on every keystroke is cheaper than keeping a second
-  // copy of it in state that could fall out of step with the field.
-  const recipe = findRecipeSource(name.trim());
 
   useEffect(() => {
     const q = query(
@@ -139,65 +131,30 @@ export const SecretManager: React.FC<{
   }, [defaultAppId]);
 
   // The app list is best-effort decoration on a picker: it never blocks saving a key, and an account
-  // without v5 access (or a failed request) simply gets no picker.
+  // without Pro access (or a failed request) simply gets no picker.
   useEffect(() => {
     let alive = true;
     void listApps().then((rows) => { if (alive) setApps(rows); });
     return () => { alive = false; };
   }, []);
 
-  const addSecret = async () => {
-    if (!name || !value) return;
-    const savedName = name.trim();
-    setIsLoading(true);
-    setAddError('');
-    setVerdicts([]);
-    try {
-      // The DERIVED scope, never the raw picker state — in fixed mode it cannot name another app.
-      await saveSecret(userId, savedName, value.trim(), effectiveScope);
-      setName('');
-      setValue('');
-      // SAY WHETHER IT ACTUALLY WORKS, not just that it stored (2026-08-17). "Saved" is a statement about
-      // this database and says nothing about the credential; a mistyped key used to be as successful as a
-      // working one, and the user found out from a payment button failing for a real customer.
-      //
-      // This runs AFTER the save and never blocks it: the key is stored either way (the user chose it),
-      // and a check we could not run is reported as unknown rather than as a bad key. It is deliberately
-      // not awaited into the save's own error path — a failed check must never make a successful save
-      // look like a failure.
-      setIsVerifying(true);
-      try {
-        const all = await verifySecrets(userId);
-        // Only the credential they just saved — a whole-vault report on every add would be noise.
-        setVerdicts(all.filter((v) => v.names.includes(savedName)));
-      } finally {
-        setIsVerifying(false);
-      }
-    } catch (err: any) {
-      // Honest, visible failure — a silent console.error left the user thinking the key saved when it didn't.
-      console.error('Failed to add secret:', err);
-      setAddError(err?.message || 'Could not save the key. Please check your connection and try again.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   /**
-   * Ask the providers about EVERY saved key, not just the one last typed.
+   * Ask the providers about saved keys.
    *
    * The plaintext never leaves the browser here — the server reads the values back out of the user's own
    * encrypted vault. A check that fails returns [] rather than throwing, because a verification we could
    * not run is not a verdict on anybody's keys and must not turn this screen into an error state.
    */
-  const checkAllKeys = async () => {
+  const checkAllKeys = useCallback(async (onlyNames?: string[]) => {
     setIsVerifying(true);
     try {
-      setVerdicts(await verifySecrets(userId));
-      setCheckedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      const all = await verifySecrets(userId);
+      setVerdicts(onlyNames?.length ? all.filter((v) => v.names.some((n) => onlyNames.includes(n))) : all);
+      if (!onlyNames?.length) setCheckedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
     } finally {
       setIsVerifying(false);
     }
-  };
+  }, [userId]);
 
   return (
     <div
@@ -215,207 +172,126 @@ export const SecretManager: React.FC<{
       {/* ── THE DOOR IS THE WHOLE SCREEN ──────────────────────────────────────────────────────────
           Admin 2026-09-13, verbatim: *"jab bhi 'secret and api key' par click kiye jaye, phone lock …
           se hi open hona chahiye! aur 'secret and api key' ke andar koi lock nahi ho, andar user ki old
-          credentials dikhe"*.
+          credentials dikhe"* — and, the same day, the simpler door that actually works on a phone:
+          *"bas PIN banao … PIN (4 digit pin se hi open ho)"*.
 
-          BEFORE, the lock wrapped only the saved-key LIST, and the add-key form sat above it in the
-          open. The reasoning was defensible on its own terms and is kept here rather than deleted:
-          writing a secret you already hold in your hand reveals nothing, so typing one needed no proof.
-          But it produced the screen in the admin's screenshot — a form, then a lock card halfway down —
-          which reads as a half-locked room, and it is not what "open it with the phone lock" means.
-
-          The lock is now the DOOR: nothing of this panel renders until the vault is genuinely open, and
-          once it is, everything inside is ordinary — add, reveal, copy, delete, with no second prompt.
+          The lock is the DOOR: nothing of this panel renders until the vault is genuinely open, and once
+          it is, everything inside is ordinary — add, reveal, copy, edit, delete, with no second prompt.
           Security is unchanged either way, because the lock was never the React flag: the server refuses
-          to decrypt without the ticket this gate collects. What changed is that the screen now tells the
-          truth about itself. */}
+          to decrypt without the ticket this gate collects. */}
       <VaultLockGate
         userId={userId}
         embedded={embedded}
         render={(unlock, relock) => (
           <div className="space-y-4">
-        {/* One vault for every key an app needs — the Cashfree-specific panel was removed (admin 2026-07-18):
-            a Cashfree key is just a name/value secret (CASHFREE_WEBHOOK_SECRET, CASHFREE_CLIENT_ID, …), so it
-            is added here like any other. Saved keys are injected into the app you build at build time. */}
-        <p className="text-xs text-gray-400 leading-relaxed bg-indigo-500/5 p-3 rounded-lg border border-indigo-500/10">
-          Store any API key or secret your built app needs (e.g. <span className="font-mono text-indigo-300">OPENAI_API_KEY</span>,
-          <span className="font-mono text-indigo-300"> DATABASE_URL</span>, a payment or provider key). Keys are encrypted, scoped to your
-          account, and <strong className="text-indigo-200">injected into your app automatically at build time</strong> — never shown to the AI,
-          never pasted in chat, never committed to git. Use the exact variable name your app reads.
-        </p>
-
-        {/* WHICH APP ARE THESE KEYS FOR?
-            Originally (admin 2026-08-17) one dropdown listing every app, rendered identically at both
-            doors onto the vault. Corrected 2026-09-08 after the admin sent a v5 screenshot: inside a
-            build that control asks a question the user already answered by opening it, and its list of
-            OTHER apps is a one-tap way to save a key into the wrong app's `.env` with nothing to say so.
-            The full reasoning — including why the control is narrowed rather than deleted — is in
-            lib/secretScope.ts. */}
-        {control === 'fixed' && (
-          <div className="space-y-2">
-            <div className="space-y-1">
-              <span className="block text-[11px] uppercase tracking-widest text-gray-500 font-bold">Keys for</span>
-              {/* A statement, not a choice. `title` carries the full name for an app whose derived name is
-                  its entire opening prompt — the clamp is what stopped it running off the edge. */}
-              <p className="text-sm font-semibold text-gray-100 truncate" title={currentAppName || undefined}>
-                {shortAppName(currentAppName) || 'This app'}
-              </p>
-            </div>
-            {/* The one choice worth keeping. There is no UI anywhere to re-scope a saved key, so without
-                this a v5 user who wanted a shared key would have to delete it and re-add it in Settings. */}
-            <label className="flex items-start gap-2 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={shareWithAll}
-                onChange={(e) => setShareWithAll(e.target.checked)}
-                className="mt-0.5 accent-indigo-500"
-              />
-              <span className="text-xs text-gray-300 leading-snug">
-                Also use this key in my other apps
-                <span className="block text-[11px] text-gray-500">For a key you reuse everywhere, like an AI or payment key.</span>
-              </span>
-            </label>
-          </div>
-        )}
-
-        {control === 'picker' && (
-          <div className="space-y-1">
-            <label htmlFor="secret-scope" className="block text-[11px] uppercase tracking-widest text-gray-500 font-bold">
-              Keys for
-            </label>
-            <select
-              id="secret-scope"
-              value={scope}
-              onChange={(e) => setScope(e.target.value)}
-              className="w-full bg-gray-900 border border-gray-700 p-3 rounded text-sm"
-            >
-              <option value="">All apps (shared)</option>
-              {apps.map((a) => (
-                <option key={a.id} value={a.id}>{shortAppName(a.title)}</option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        {/* SAY WHERE THE KEY IS ABOUT TO GO — always, in every mode, and never only when a control
-            happens to be on screen. The answer matters most exactly when there is no control to imply it. */}
-        <p className="text-[11px] text-gray-500 leading-snug">
-          {scopeSentence({
-            control,
-            appName: currentAppName,
-            shareWithAll,
-            pickerTitle: appTitle(scope),
-            hasApps: apps.length > 0,
-          })}
-        </p>
-
-        <div className="bg-gray-800 p-4 rounded-lg space-y-4">
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Secret Name (e.g. OPENAI_API_KEY)"
-            className="w-full bg-gray-900 border border-gray-700 p-3 rounded text-sm font-mono placeholder:text-gray-500"
-          />
-          {/* WHERE THE VALUE COMES FROM, the moment we recognise the name. Somebody typing
-              RAZORPAY_KEY_SECRET here is on this screen precisely because they are trying to find that
-              value, and until now the screen offered them nothing but an empty box. Appears only for a
-              name in the curated catalogue — never a guessed link. */}
-          {recipe && (
-            <div className="text-[11px] text-gray-400 leading-relaxed bg-gray-900/60 border border-gray-700 rounded p-3 space-y-1">
-              <p>
-                <span className="text-gray-500">Get it from </span>
-                <a
-                  href={recipe.option.link}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-indigo-300 underline underline-offset-2"
-                >
-                  {recipe.option.linkLabel}
-                </a>
-                <span className="text-gray-500"> → {recipe.option.path}</span>
-              </p>
-              <p className="text-gray-500">{recipe.variable.where}</p>
-              <p className="text-gray-500">{recipe.option.cost}</p>
-              {recipe.variable.serverOnly && (
-                // Said BEFORE they paste, because after the fact the only honest advice is "rotate it".
-                <p className="text-amber-300/90">
-                  Server-side only — do not add a VITE_ or NEXT_PUBLIC_ prefix to this one, or its value is
-                  published inside your app for every visitor to read.
-                </p>
-              )}
-              {recipe.recipe.keyless && <p className="text-emerald-400/90">💡 {recipe.recipe.keyless}</p>}
-            </div>
-          )}
-          <div className="relative">
-            <input
-              type={showValue ? 'text' : 'password'}
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              placeholder="Secret Value"
-              className="w-full bg-gray-900 border border-gray-700 p-3 rounded text-sm font-mono placeholder:text-gray-500 pr-10"
-            />
-            <button onClick={() => setShowValue(!showValue)} className="absolute right-3 top-3 text-gray-500 hover:text-white">
-              {showValue ? <EyeOff size={18} /> : <Eye size={18} />}
-            </button>
-          </div>
-          <button
-            onClick={addSecret}
-            disabled={isLoading}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 p-3 rounded font-bold uppercase tracking-widest text-xs flex items-center justify-center gap-2"
-          >
-            {isLoading ? 'Saving...' : <><Save size={16} /> Save Secret</>}
-          </button>
-          {addError && (
-            <p className="text-[11px] text-red-400 font-semibold text-center">{addError}</p>
-          )}
-          {/* WHAT THE PROVIDER ITSELF SAID. Shown only after a successful save, and only for a key we could
-              actually check — silence means "we have no free, read-only way to test this one", which is an
-              honest absence rather than an implied pass. A rejected key is still saved: the user chose it,
-              and quietly discarding it would be a second, quieter version of the bug this fixes. */}
-          {isVerifying && (
-            <p className="text-[11px] text-gray-400 font-semibold text-center">Checking the key with the provider…</p>
-          )}
-          {!isVerifying && verdicts.map((v) => (
-            <p
-              key={v.names.join('+')}
-              className={`text-[11px] font-semibold text-center leading-relaxed ${
-                v.status === 'working' ? 'text-emerald-400'
-                  : v.status === 'rejected' ? 'text-red-400'
-                    : 'text-gray-400'
-              }`}
-            >
-              {v.message}
+            {/* One vault for every key an app needs — a Cashfree key is just a name/value secret, so it
+                is added here like any other. Saved keys are injected into the app you build at build time. */}
+            <p className="text-xs text-gray-400 leading-relaxed bg-indigo-500/5 p-3 rounded-lg border border-indigo-500/10">
+              Store any API key or secret your built app needs (e.g. <span className="font-mono text-indigo-300">OPENAI_API_KEY</span>,
+              <span className="font-mono text-indigo-300"> DATABASE_URL</span>, a payment or provider key). Keys are encrypted, scoped to your
+              account, and <strong className="text-indigo-200">injected into your app automatically at build time</strong> — never shown to the AI,
+              never pasted in chat, never committed to git. Use the exact variable name your app reads.
             </p>
-          ))}
-        </div>
 
-        {/* THE CHECKLIST. A saved key told the user nothing about whether it still works, so a revoked,
-            rotated or expired credential looked exactly like a healthy one until a build failed on it.
-            One tap asks the providers themselves and puts the answer next to each name.
-            This is deliberately NOT automatic on mount: it makes real outbound requests, and doing that
-            every time somebody opens Settings would be work nobody asked for. */}
-        {visibleSecrets.length > 0 && (
-          <div className="flex items-center justify-between gap-2">
-            <button
-              onClick={checkAllKeys}
-              disabled={isVerifying}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-gray-700 text-[11px] font-bold uppercase tracking-widest text-gray-300 hover:text-white hover:border-gray-500 disabled:opacity-50"
-            >
-              <ShieldCheck size={14} /> {isVerifying ? 'Checking…' : 'Check my keys'}
-            </button>
-            {checkedAt && !isVerifying && (
-              <span className="text-[10px] text-gray-500">Checked {checkedAt}</span>
+            {/* 🔝 WHICH APP'S CREDENTIALS AM I LOOKING AT? (admin 2026-09-13: *"sabse upar kis app ke
+                credentials hai, woh select karne ka option bhi ho!"*) — so this sits at the TOP of the
+                panel, above the rows it filters, rather than beside the form it used to belong to.
+
+                Originally (admin 2026-08-17) one dropdown listing every app, rendered identically at both
+                doors onto the vault. Corrected 2026-09-08 after the admin sent a Pro screenshot: inside a
+                build that control asks a question the user already answered by opening it, and its list of
+                OTHER apps is a one-tap way to save a key into the wrong app's `.env` with nothing to say
+                so. The full reasoning — including why the control is narrowed rather than deleted — is in
+                lib/secretScope.ts. */}
+            {control === 'fixed' && (
+              <div className="space-y-2 rounded-xl border border-white/5 bg-black/20 p-3">
+                <div className="space-y-1">
+                  <span className="block text-[11px] uppercase tracking-widest text-gray-500 font-bold">Credentials for</span>
+                  {/* A statement, not a choice. `title` carries the full name for an app whose derived name is
+                      its entire opening prompt — the clamp is what stopped it running off the edge. */}
+                  <p className="text-sm font-semibold text-gray-100 truncate" title={currentAppName || undefined}>
+                    {shortAppName(currentAppName) || 'This app'}
+                  </p>
+                </div>
+                {/* The one choice worth keeping. There is no UI anywhere to re-scope a saved key, so without
+                    this a Pro user who wanted a shared key would have to delete it and re-add it in Settings. */}
+                <label className="flex items-start gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={shareWithAll}
+                    onChange={(e) => setShareWithAll(e.target.checked)}
+                    className="mt-0.5 accent-indigo-500"
+                  />
+                  <span className="text-xs text-gray-300 leading-snug">
+                    Also use new keys in my other apps
+                    <span className="block text-[11px] text-gray-500">For a key you reuse everywhere, like an AI or payment key.</span>
+                  </span>
+                </label>
+              </div>
             )}
-          </div>
-        )}
-          <SavedKeyRows
-            userId={userId}
-            unlock={unlock}
-            relock={relock}
-            metas={visibleSecrets}
-            verdicts={verdicts}
-            showOwner={apps.length > 0 || !!defaultAppId}
-            ownerLabel={(s) => secretOwnerLabel({ workspaceId: s.workspace_id, currentAppId: defaultAppId, titleOf: appTitle })}
-          />
+
+            {control === 'picker' && (
+              <div className="space-y-1 rounded-xl border border-white/5 bg-black/20 p-3">
+                <label htmlFor="secret-scope" className="block text-[11px] uppercase tracking-widest text-gray-500 font-bold">
+                  Credentials for
+                </label>
+                <select
+                  id="secret-scope"
+                  value={scope}
+                  onChange={(e) => setScope(e.target.value)}
+                  className="w-full bg-gray-900 border border-gray-700 p-3 rounded text-sm"
+                >
+                  <option value="">All apps (shared)</option>
+                  {apps.map((a) => (
+                    <option key={a.id} value={a.id}>{shortAppName(a.title)}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* SAY WHERE A NEW KEY IS ABOUT TO GO — always, in every mode, and never only when a control
+                happens to be on screen. The answer matters most exactly when there is no control to imply it. */}
+            <p className="text-[11px] text-gray-500 leading-snug">
+              {scopeSentence({
+                control,
+                appName: currentAppName,
+                shareWithAll,
+                pickerTitle: appTitle(scope),
+                hasApps: apps.length > 0,
+              })}
+            </p>
+
+            <CredentialTable
+              userId={userId}
+              unlock={unlock}
+              relock={relock}
+              metas={visibleSecrets}
+              verdicts={verdicts}
+              saveScopeId={effectiveScope}
+              showOwner={apps.length > 0 || !!defaultAppId}
+              ownerLabel={(s) => secretOwnerLabel({ workspaceId: s.workspace_id, currentAppId: defaultAppId, titleOf: appTitle })}
+              onSaved={(names) => void checkAllKeys(names)}
+            />
+
+            {/* THE CHECKLIST. A saved key told the user nothing about whether it still works, so a revoked,
+                rotated or expired credential looked exactly like a healthy one until a build failed on it.
+                One tap asks the providers themselves and puts the answer next to each name.
+                This is deliberately NOT automatic on mount: it makes real outbound requests, and doing that
+                every time somebody opens Settings would be work nobody asked for. */}
+            {visibleSecrets.length > 0 && (
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  onClick={() => void checkAllKeys()}
+                  disabled={isVerifying}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-gray-700 text-[11px] font-bold uppercase tracking-widest text-gray-300 hover:text-white hover:border-gray-500 disabled:opacity-50"
+                >
+                  <ShieldCheck size={14} /> {isVerifying ? 'Checking…' : 'Check my keys'}
+                </button>
+                {checkedAt && !isVerifying && (
+                  <span className="text-[10px] text-gray-500">Checked {checkedAt}</span>
+                )}
+              </div>
+            )}
           </div>
         )}
       />
@@ -423,45 +299,70 @@ export const SecretManager: React.FC<{
   );
 };
 
+/** One unsaved row the user is still typing. `key` is local only — it never reaches the server. */
+interface NewRow {
+  key: string;
+  name: string;
+  value: string;
+}
+
 /**
- * THE CLOUD RUN LAYOUT (admin 2026-09-12: "input box jaisa dikhna chahiye, jaisa cloud run me dikhta
- * hai!").
+ * THE CLOUD RUN LAYOUT (admin 2026-09-13: *"secret and api key ke andar cloud run ke jaise ui dikhe!
+ * mean 2-2 colom dikhen • 1. secret and api key, • 2. value (click karne se edit kiya ja sake) aur sath
+ * me ek 🗑️ (delete) button jisse dono colom delete karne ke liye. sabse last me ek button ho, "+ add new
+ * credentials" aur sabse last me — "save and sync" button."*)
  *
- * One row per key: the NAME in a box, the VALUE in a box, and a 🗑️ that removes the whole row. The boxes
- * are real inputs rather than styled text for a reason the admin gave himself — "copy/edit user khud
- * apne phone/desktop se kar lega". A real input is where long-press-to-copy, ⌘C and select-all already
- * work, on every device, with no button of ours to get wrong. So the screen provides the thing the
- * platform's own copy gesture needs, instead of re-implementing copy badly.
+ * Two columns, a bin per row, then the two buttons at the bottom — that is the whole screen, and it is
+ * the shape anybody who has edited environment variables in a cloud console already knows.
+ *
+ * WHY THE BOXES ARE REAL INPUTS rather than styled text, in the admin's own words from the first
+ * iteration — *"copy/edit user khud apne phone/desktop se kar lega"*. A real input is where
+ * long-press-to-copy, ⌘C and select-all already work, on every device, with no button of ours to get
+ * wrong. So the screen provides the thing the platform's own copy gesture needs instead of
+ * re-implementing copy badly.
+ *
+ * 🔒 WHAT "SAVE AND SYNC" ACTUALLY DOES, because a button that only looks like it works is the exact
+ * thing the second absolute rule forbids. It writes every changed and every newly-added row to the vault
+ * through the same authenticated `/api/secrets` save the screen has always used, then RE-READS the vault
+ * and redraws from what the server really holds — so "synced" means the boxes on screen and the keys a
+ * build will inject are the same thing, confirmed, not assumed. It reports the count it saved, names
+ * anything it skipped and why, and leaves a failed row on screen with its text intact.
  *
  * The value starts MASKED even though the vault is unlocked. Unlocking proves who you are; it is not a
  * reason to put four payment secrets in plain text on a screen somebody might be standing behind. One
  * tap per row reveals, and a row whose stored value could not be decrypted says so instead of showing
  * an empty box that would invite overwriting a key that is actually fine.
  */
-const SavedKeyRows: React.FC<{
+const CredentialTable: React.FC<{
   userId: string;
   unlock: UnlockState;
   relock: () => void;
   metas: Secret[];
   verdicts: SecretVerdict[];
+  /** The scope a NEW credential is saved against — derived by the parent, never by this table. */
+  saveScopeId: string;
   showOwner: boolean;
   ownerLabel: (s: Secret) => string;
-}> = ({ userId, unlock, relock, metas, verdicts, showOwner, ownerLabel }) => {
+  /** The names just written, so the parent can ask the providers whether they actually work. */
+  onSaved: (names: string[]) => void;
+}> = ({ userId, unlock, relock, metas, verdicts, saveScopeId, showOwner, ownerLabel, onSaved }) => {
   const [rows, setRows] = useState<RevealedSecret[] | null>(null);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [shown, setShown] = useState<Record<string, boolean>>({});
   const [confirming, setConfirming] = useState('');
   const [deleting, setDeleting] = useState('');
   /** Per-row edits in flight. Absent = untouched, so a row the user has not typed in shows the stored value. */
   const [draft, setDraft] = useState<Record<string, string>>({});
-  const [saving, setSaving] = useState('');
+  const [newRows, setNewRows] = useState<NewRow[]>([]);
+  const [saving, setSaving] = useState(false);
 
-  const load = useCallback(async () => {
-    setError('');
+  const load = useCallback(async (quiet = false) => {
+    if (!quiet) setError('');
     try {
       setRows(await revealSecrets(userId, unlock.ticket));
     } catch (err: unknown) {
-      const e = err as { message?: string; needsUnlock?: boolean };
+      const e = err as VaultError;
       // An expired ticket is not an error to display — it is the vault having re-locked, so say that by
       // actually re-locking rather than leaving a dead screen with a stale message on it.
       if (e?.needsUnlock) { relock(); return; }
@@ -471,38 +372,80 @@ const SavedKeyRows: React.FC<{
 
   useEffect(() => { void load(); }, [load]);
 
+  /** The stored value a row started from — the baseline every "has this changed?" question asks about. */
+  const storedValue = (row: RevealedSecret) => (row.readable ? row.secret_value : '');
+  const isDirty = (row: RevealedSecret) => draft[row.id] !== undefined && draft[row.id] !== storedValue(row);
+  const pendingCount = (rows ?? []).filter(isDirty).length + newRows.filter((r) => r.name.trim() && r.value.trim()).length;
+
   /**
-   * EDIT A SAVED KEY (admin 2026-09-13: *"old ko edit/copy and delete kar sake"*).
+   * SAVE EVERY PENDING CHANGE, THEN CONFIRM IT FROM THE SERVER.
    *
-   * There is no new endpoint behind this and no new concept: saving a name that already exists REPLACES
-   * it server-side (`routes/secrets.ts` — "SAVING AN EXISTING NAME REPLACES IT"), which is exactly what
-   * rotating a key is. The UI simply never offered it, so a user with a rotated credential had to delete
-   * the row and retype the name — and a typo there quietly creates a SECOND key that no build reads.
+   * There is no new endpoint behind an edit and no new concept: saving a name that already exists
+   * REPLACES it server-side (`routes/secrets.ts` — "SAVING AN EXISTING NAME REPLACES IT"), which is
+   * exactly what rotating a key is.
    *
-   * 🔒 THE SCOPE MUST RIDE ALONG. A key belonging to one app carries its `workspace_id`; saving without
-   * it would land the new value in the SHARED scope and leave the app-scoped row behind, so the build
-   * would keep using the old value while this screen showed the new one. The row's own meta is passed
-   * for exactly that reason.
+   * 🔒 THE SCOPE MUST RIDE ALONG on an edit. A key belonging to one app carries its `workspace_id`;
+   * saving without it would land the new value in the SHARED scope and leave the app-scoped row behind,
+   * so the build would keep using the old value while this screen showed the new one. A NEW row uses the
+   * scope the parent derived from the picker instead.
    *
-   * An EMPTY value is refused rather than saved: blanking a key a live app depends on is indistinguishable
-   * from deleting it, and delete is the control that asks twice before doing that.
+   * An EMPTY value is never saved: blanking a key a live app depends on is indistinguishable from
+   * deleting it, and the bin is the control that asks twice before doing that.
    */
-  const saveEdit = async (id: string, secretName: string) => {
-    const next = (draft[id] ?? '').trim();
-    if (!next) { setError('Enter a value, or use the bin to remove this key.'); return; }
-    setSaving(id);
+  const saveAndSync = async () => {
+    setSaving(true);
     setError('');
+    setNotice('');
+    const savedNames: string[] = [];
+    const skipped: string[] = [];
     try {
-      const meta = metas.find((m) => m.id === id);
-      await saveSecret(userId, secretName, next, meta?.workspace_id ?? null);
-      setRows((list) => (list ?? []).map((r) => (r.id === id ? { ...r, secret_value: next, readable: true } : r)));
-      setDraft((d) => { const { [id]: _drop, ...rest } = d; return rest; });
+      for (const row of (rows ?? [])) {
+        if (!isDirty(row)) continue;
+        const next = (draft[row.id] ?? '').trim();
+        if (!next) { skipped.push(`${row.secret_name} (empty value — use the bin to remove it)`); continue; }
+        const meta = metas.find((m) => m.id === row.id);
+        await saveSecret(userId, row.secret_name, next, meta?.workspace_id ?? null);
+        savedNames.push(row.secret_name);
+      }
+      for (const fresh of newRows) {
+        const name = fresh.name.trim();
+        const value = fresh.value.trim();
+        if (!name && !value) continue; // an untouched blank row is not an error, it is just empty
+        if (!name || !value) { skipped.push(`${name || 'a new row'} (needs both a name and a value)`); continue; }
+        await saveSecret(userId, name, value, saveScopeId);
+        savedNames.push(name);
+      }
+
+      // Re-read before claiming anything: "synced" has to mean the boxes and the vault agree, confirmed
+      // from the server, rather than this screen believing its own optimistic edits.
+      setDraft({});
+      // Keep exactly the rows that were NOT saved and still hold typed text — a half-filled row stays on
+      // screen with its text so the user can finish it, a saved row disappears into the list above, and a
+      // row that was left entirely blank is simply dropped.
+      setNewRows((list) => list.filter((r) => {
+        const name = r.name.trim();
+        const value = r.value.trim();
+        const wasSaved = !!name && !!value;
+        return !wasSaved && (!!name || !!value);
+      }));
+      await load(true);
+
+      if (savedNames.length === 0 && skipped.length === 0) {
+        setNotice('Nothing to save — no changes yet.');
+      } else {
+        const parts: string[] = [];
+        if (savedNames.length) parts.push(`Saved and synced ${savedNames.length} credential${savedNames.length === 1 ? '' : 's'}.`);
+        if (skipped.length) parts.push(`Not saved: ${skipped.join('; ')}.`);
+        setNotice(parts.join(' '));
+      }
+      if (savedNames.length) onSaved(savedNames);
     } catch (err: unknown) {
-      const e = err as { message?: string; needsUnlock?: boolean };
+      const e = err as VaultError;
       if (e?.needsUnlock) { relock(); return; }
-      setError(e?.message || 'Could not save the new value.');
+      // The rows keep their typed text, so nothing the user wrote is lost by a failed save.
+      setError(e?.message || 'Could not save your credentials. Your text is still here — please try again.');
     } finally {
-      setSaving('');
+      setSaving(false);
     }
   };
 
@@ -514,9 +457,10 @@ const SavedKeyRows: React.FC<{
       // Drop it locally too. The Firestore listener in the parent will agree a moment later; waiting for
       // it would leave the deleted row on screen long enough to look like the delete failed.
       setRows((list) => (list ?? []).filter((r) => r.id !== id));
+      setDraft((d) => { const { [id]: _drop, ...rest } = d; return rest; });
       setConfirming('');
     } catch (err: unknown) {
-      const e = err as { message?: string; needsUnlock?: boolean };
+      const e = err as VaultError;
       if (e?.needsUnlock) { relock(); return; }
       setError(e?.message || 'Could not delete the key.');
     } finally {
@@ -527,6 +471,8 @@ const SavedKeyRows: React.FC<{
   /** Only the keys this screen's app filter is showing — the scope rules stay exactly as they were. */
   const visibleIds = new Set(metas.map((m) => m.id));
   const visible = (rows ?? []).filter((r) => visibleIds.has(r.id));
+
+  const boxClass = 'w-full rounded-lg border border-white/10 bg-black/40 px-2.5 py-2 font-mono text-xs outline-none focus:border-indigo-500/40';
 
   if (rows === null) {
     return <p className="py-6 text-center text-xs text-gray-500">Opening your keys…</p>;
@@ -539,75 +485,70 @@ const SavedKeyRows: React.FC<{
           <AlertTriangle size={14} className="mt-px shrink-0" /> {error}
         </p>
       )}
+      {notice && !error && (
+        <p className="flex items-start gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2.5 text-[11px] leading-snug text-emerald-300">
+          <ShieldCheck size={14} className="mt-px shrink-0" /> {notice}
+        </p>
+      )}
 
-      {visible.length === 0 && (
-        <p className="py-6 text-center text-xs text-gray-500">No keys saved yet. Add one above.</p>
+      {/* The column headings, so the two boxes are labelled once instead of guessed at per row. Hidden on
+          the narrowest screens, where the rows stack and a two-column header would lie about the layout. */}
+      {(visible.length > 0 || newRows.length > 0) && (
+        <div className="hidden sm:flex items-center gap-2 px-0.5 pt-1">
+          <span className="flex-1 text-[10px] font-bold uppercase tracking-widest text-gray-500">Secret / API key</span>
+          <span className="flex-1 text-[10px] font-bold uppercase tracking-widest text-gray-500">Value</span>
+          <span className="w-9 shrink-0" />
+        </div>
+      )}
+
+      {visible.length === 0 && newRows.length === 0 && (
+        <p className="py-6 text-center text-xs text-gray-500">No credentials saved yet. Add your first one below.</p>
       )}
 
       {visible.map((row) => {
         const verdict = verdicts.find((v) => v.names.includes(row.secret_name));
         const isShown = !!shown[row.id];
         const meta = metas.find((m) => m.id === row.id);
+        const dirty = isDirty(row);
         return (
           <div key={row.id} className="rounded-xl border border-white/5 bg-[#0d1117] p-2.5">
-            <div className="flex items-start gap-2">
-              <div className="min-w-0 flex-1 space-y-1.5">
-                {/* NAME — readOnly, not disabled: a disabled input cannot be selected, which would break
-                    the very copy gesture these boxes exist for. Renaming a key is not an edit, it is a
-                    different key, so the name is not editable here. */}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+              {/* COLUMN 1 — the name. readOnly, not disabled: a disabled input cannot be selected, which
+                  would break the very copy gesture these boxes exist for. Renaming a key is not an edit,
+                  it is a different key, so the name is not editable on a saved row. */}
+              <input
+                readOnly
+                value={row.secret_name}
+                aria-label={`Name of ${row.secret_name}`}
+                className={`${boxClass} flex-1 text-indigo-200`}
+              />
+              {/* COLUMN 2 — the value, editable in place: click it and type. It was readOnly until
+                  2026-09-13, so rotating a key meant deleting the row and retyping its name, and a typo
+                  there silently creates a second key no build reads. */}
+              <div className="flex flex-1 items-center gap-1.5">
                 <input
-                  readOnly
-                  value={row.secret_name}
-                  aria-label={`Name of ${row.secret_name}`}
-                  className="w-full rounded-lg border border-white/10 bg-black/40 px-2.5 py-2 font-mono text-xs text-indigo-200 outline-none focus:border-indigo-500/40"
+                  type={isShown ? 'text' : 'password'}
+                  value={draft[row.id] ?? storedValue(row)}
+                  onChange={(e) => setDraft((d) => ({ ...d, [row.id]: e.target.value }))}
+                  placeholder={row.readable ? '' : 'Saved, but this value cannot be read back — type a new one to replace it'}
+                  aria-label={`Value of ${row.secret_name}`}
+                  className={`${boxClass} text-gray-200 placeholder-amber-400/60 ${dirty ? 'border-amber-400/50' : ''}`}
                 />
-                {/* VALUE — now EDITABLE (admin 2026-09-13). It was readOnly, so rotating a key meant
-                    deleting the row and retyping its name, and a typo there silently creates a second
-                    key no build reads. The Save control appears only once the text actually differs, so
-                    the row still reads as a value to copy until the user decides to change it. */}
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type={isShown ? 'text' : 'password'}
-                    value={draft[row.id] ?? (row.readable ? row.secret_value : '')}
-                    onChange={(e) => setDraft((d) => ({ ...d, [row.id]: e.target.value }))}
-                    placeholder={row.readable ? '' : 'Saved, but this value cannot be read back — type a new one to replace it'}
-                    aria-label={`Value of ${row.secret_name}`}
-                    className="w-full rounded-lg border border-white/10 bg-black/40 px-2.5 py-2 font-mono text-xs text-gray-200 outline-none focus:border-indigo-500/40 placeholder-amber-400/60"
-                  />
-                  <button
-                    onClick={() => setShown((m) => ({ ...m, [row.id]: !m[row.id] }))}
-                    aria-label={isShown ? `Hide ${row.secret_name}` : `Show ${row.secret_name}`}
-                    className="shrink-0 rounded-lg border border-white/10 p-2 text-gray-400 hover:text-white"
-                  >
-                    {isShown ? <EyeOff size={14} /> : <Eye size={14} />}
-                  </button>
-                </div>
-                {draft[row.id] !== undefined && draft[row.id] !== (row.readable ? row.secret_value : '') && (
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => void saveEdit(row.id, row.secret_name)}
-                      disabled={saving === row.id}
-                      className="rounded-lg bg-indigo-600 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-white hover:bg-indigo-500 disabled:opacity-50"
-                    >
-                      <Save size={12} className="-mt-px mr-1 inline" />
-                      {saving === row.id ? 'Saving…' : 'Save new value'}
-                    </button>
-                    <button
-                      onClick={() => setDraft((d) => { const { [row.id]: _drop, ...rest } = d; return rest; })}
-                      className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400 hover:text-white"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                )}
+                <button
+                  onClick={() => setShown((m) => ({ ...m, [row.id]: !m[row.id] }))}
+                  aria-label={isShown ? `Hide ${row.secret_name}` : `Show ${row.secret_name}`}
+                  className="shrink-0 rounded-lg border border-white/10 p-2 text-gray-400 hover:text-white"
+                >
+                  {isShown ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
               </div>
 
               {/* 🗑️ DELETES THE WHOLE ROW — name and value together, for good. Two taps, because one
                   stray tap on a phone must not destroy a key a live app depends on, and there is no
                   undo to fall back on now that the delete is real. */}
-              <div className="shrink-0">
+              <div className="shrink-0 self-end sm:self-start">
                 {confirming === row.id ? (
-                  <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-1 sm:flex-col">
                     <button
                       onClick={() => void remove(row.id)}
                       disabled={deleting === row.id}
@@ -635,9 +576,9 @@ const SavedKeyRows: React.FC<{
             </div>
 
             <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 px-0.5">
-              {showOwner && meta ? (
-                <span className="text-[10px] text-gray-500">{ownerLabel(meta)}</span>
-              ) : <span />}
+              <span className="text-[10px] text-gray-500">
+                {dirty ? <span className="text-amber-300">Changed — press “Save and sync”.</span> : (showOwner && meta ? ownerLabel(meta) : '')}
+              </span>
               {/* A key with no verdict shows NOTHING — absence of a badge means "not checked", which is
                   the truth. A grey "unknown" pill on every unverifiable key would be noise that teaches
                   people to stop reading the badges that matter. */}
@@ -656,6 +597,88 @@ const SavedKeyRows: React.FC<{
           </div>
         );
       })}
+
+      {/* NEW ROWS — the same two columns, with the NAME editable because that is the one moment naming a
+          key is meaningful. They are not saved until "Save and sync", so a half-typed row cannot reach
+          the vault. */}
+      {newRows.map((fresh) => {
+        // Where the value comes from, the moment we recognise the name. Somebody typing
+        // RAZORPAY_KEY_SECRET is on this screen precisely because they are trying to find that value,
+        // and an empty box offers them nothing. Only for a name in the curated catalogue — never a guess.
+        const recipe = findRecipeSource(fresh.name.trim());
+        return (
+          <div key={fresh.key} className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-2.5">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+              <input
+                value={fresh.name}
+                onChange={(e) => setNewRows((list) => list.map((r) => (r.key === fresh.key ? { ...r, name: e.target.value } : r)))}
+                placeholder="OPENAI_API_KEY"
+                aria-label="New credential name"
+                className={`${boxClass} flex-1 text-indigo-200 placeholder-gray-600`}
+              />
+              <input
+                value={fresh.value}
+                onChange={(e) => setNewRows((list) => list.map((r) => (r.key === fresh.key ? { ...r, value: e.target.value } : r)))}
+                placeholder="Paste the value"
+                aria-label="New credential value"
+                className={`${boxClass} flex-1 text-gray-200 placeholder-gray-600`}
+              />
+              <div className="shrink-0 self-end sm:self-start">
+                {/* An unsaved row has nothing in the vault to destroy, so its bin removes it at once —
+                    a confirmation step here would be a question about nothing. */}
+                <button
+                  onClick={() => setNewRows((list) => list.filter((r) => r.key !== fresh.key))}
+                  aria-label="Remove this new row"
+                  className="rounded-lg border border-white/10 p-2 text-red-400 hover:border-red-500/40 hover:text-red-300"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            </div>
+            {recipe && (
+              <div className="mt-2 space-y-1 rounded-lg border border-white/10 bg-black/30 p-2.5 text-[11px] leading-relaxed text-gray-400">
+                <p>
+                  <span className="text-gray-500">Get it from </span>
+                  <a href={recipe.option.link} target="_blank" rel="noopener noreferrer" className="text-indigo-300 underline underline-offset-2">
+                    {recipe.option.linkLabel}
+                  </a>
+                  <span className="text-gray-500"> → {recipe.option.path}</span>
+                </p>
+                <p className="text-gray-500">{recipe.variable.where}</p>
+                <p className="text-gray-500">{recipe.option.cost}</p>
+                {recipe.variable.serverOnly && (
+                  // Said BEFORE they paste, because after the fact the only honest advice is "rotate it".
+                  <p className="text-amber-300/90">
+                    Server-side only — do not add a VITE_ or NEXT_PUBLIC_ prefix to this one, or its value is
+                    published inside your app for every visitor to read.
+                  </p>
+                )}
+                {recipe.recipe.keyless && <p className="text-emerald-400/90">💡 {recipe.recipe.keyless}</p>}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* ── THE TWO BUTTONS AT THE BOTTOM, in the order the admin asked for them ───────────────────── */}
+      <button
+        onClick={() => setNewRows((list) => [...list, { key: `new-${Date.now()}-${list.length}`, name: '', value: '' }])}
+        className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-white/20 px-4 py-3 text-xs font-bold uppercase tracking-widest text-gray-300 hover:border-indigo-500/40 hover:text-white"
+      >
+        <Plus size={16} /> Add new credentials
+      </button>
+
+      <button
+        onClick={() => void saveAndSync()}
+        disabled={saving}
+        className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-xs font-bold uppercase tracking-widest text-white hover:bg-indigo-500 disabled:opacity-50"
+      >
+        {saving ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+        {saving ? 'Saving and syncing…' : pendingCount > 0 ? `Save and sync (${pendingCount})` : 'Save and sync'}
+      </button>
+      <p className="text-center text-[10px] leading-snug text-gray-500">
+        Saves every change above, then re-reads your vault so what you see is exactly what your builds will use.
+      </p>
     </div>
   );
 };

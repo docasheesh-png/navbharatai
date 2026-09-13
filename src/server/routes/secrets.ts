@@ -3,12 +3,18 @@ import type { Express, Request, Response } from 'express';
 import { doc, getDoc, updateDoc, deleteDoc, setDoc, collection, addDoc, getDocs, query, where, getServerDb as getDb } from '../lib/serverDb';
 import { encrypt, decrypt, loadUserVaultSecrets, secretCreatedAtMs } from '../lib/secrets';
 import { planSecretWrite } from '../lib/secretScope';
-import { requireUserMatch, trackDevice, verifyFreshAuth } from '../lib/authMiddleware';
+import { requireUserMatch, trackDevice, verifyFreshAuth, resolveAccountContact } from '../lib/authMiddleware';
 import {
-  unlockSecret, mintChallenge, mintUnlockTicket, verifyUnlockTicket, verifyClientData,
-  parseAuthenticatorData, rpIdMatches, verifyAssertionSignature, signCounterOk, isAcceptedAlg,
-  isFreshReauth, base64urlToBuffer, UNLOCK_REFUSED_MESSAGE, TICKET_TTL_MS, type UnlockMethod,
-} from '../lib/deviceUnlock';
+  unlockSecret, mintUnlockTicket, verifyUnlockTicket, UNLOCK_REFUSED_MESSAGE, TICKET_TTL_MS,
+  type UnlockMethod,
+} from '../lib/vaultTicket';
+import {
+  readPinRecord, writePinRecord, emptyPinRecord, hasPin, pinGate, afterWrongPin, afterCorrectPin,
+  pinRejectReason, newSalt, hashPin, matchesPin, newOtpCode, otpSendGate, afterOtpSent, otpCheck,
+  otpDelivery, otpEmailMessage, otpEmailSubject, isFreshSignIn, OTP_RESEND_COOLDOWN_MS,
+  MAX_PIN_ATTEMPTS, type OtpPurpose, type VaultPinRecord,
+} from '../lib/vaultPin';
+import { resolveEmailConfig, sendAlertEmail } from '../lib/alertEmail';
 import { allowAfterCooldown } from '../lib/callCooldown';
 import { probeCredentials, realProbeFetch } from '../AgentV3/credentialProbe';
 
@@ -41,15 +47,24 @@ export function allowVerify(state: Map<string, number>, userId: string, now: num
  */
 
 /**
- * THE VAULT'S OWN DOOR (admin 2026-09-12: "phone lock / face lock / pin dalna pade, tab open ho!").
+ * THE VAULT'S OWN DOOR — a 4-digit PIN (admin 2026-09-13: *"bas PIN banao, mobile number/email otp se
+ * PIN banao, PIN (4 digit pin se hi open ho) … pin bhul jaye to, forget pin — otp — pin reset! waaki
+ * sab hata do"*).
  *
  * Everything below this line exists so that the routes which can hand back a DECRYPTED key refuse to do
- * so unless the person proved, seconds ago, that they are the account owner. The verification rules live
- * in `deviceUnlock.ts` as pure functions (49 tests, real key pairs); these routes are the plumbing.
+ * so unless the person proved, moments ago, that they are the account owner. The rules live in
+ * `vaultPin.ts` (the PIN, the lock-out and the OTP) and `vaultTicket.ts` (the ticket) as pure functions;
+ * these routes are the plumbing and the only part that touches Firestore.
+ *
+ * 🔴 WHY THE PIN IS VERIFIED HERE AND NOT IN THE BROWSER. Four digits are 10,000 guesses; a client-side
+ * check would be tried exhaustively in under a second, and a client that is TOLD whether a digit was
+ * right has already given the attacker everything. So the browser sends the PIN, learns only
+ * right-or-wrong, and earns a short-lived ticket on success. Five wrong attempts and the vault locks
+ * itself for an escalating window — that lock-out, not the PIN's length, is what makes four digits safe.
  */
 
-/** Where a user's registered device credentials live. Public keys only — no secret material. */
-const DEVICE_CREDENTIALS = 'user_device_credentials';
+/** Where each user's PIN hash, lock-out state and pending OTP live. One document per user. */
+const VAULT_PIN = 'user_vault_pin';
 /** Where reveals and deletions are recorded. A vault without a log cannot answer "who read this key?". */
 const VAULT_AUDIT = 'secret_vault_audit';
 
@@ -245,208 +260,235 @@ export function registerSecretsRoutes(app: Express): void {
   });
 
   // ════════════════════════════════════════════════════════════════════════════════════════════════
-  // THE LOCK. Four endpoints, and the order matters: challenge → (register once) → unlock → reveal.
+  // THE PIN. Four endpoints: status → send a code → set the PIN → unlock with it.
   // ════════════════════════════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Step 1 — ask the server for something to sign, and find out whether this account already has a
-   * device registered.
-   *
-   * The challenge is signed rather than stored (see `mintChallenge`), because this server runs as many
-   * instances and the one that issues a challenge is usually not the one that verifies it.
-   */
-  app.post('/api/secrets/:userId/lock/challenge', requireUserMatch('userId'), async (req: Request, res: Response) => {
+  /** Load one user's PIN record, or a safe empty one. Throws only when the database itself is missing. */
+  async function loadPinRecord(userId: string): Promise<VaultPinRecord> {
     const db = getDb() as any;
+    if (!db) return emptyPinRecord();
+    const snap = await getDoc(doc(db, VAULT_PIN, userId));
+    return snap.exists() ? readPinRecord(snap.data()) : emptyPinRecord();
+  }
+
+  /**
+   * Persist a PIN record.
+   *
+   * 🔒 A FAILED WRITE MUST FAIL THE REQUEST, which is the opposite of how the audit log above behaves,
+   * and the difference is deliberate: this record holds the lock-out counter. If a wrong-PIN attempt
+   * could be swallowed, an attacker whose writes always failed would get unlimited guesses — the
+   * lock-out would silently stop existing. So every caller awaits this and answers an error if it throws.
+   */
+  async function savePinRecord(userId: string, record: VaultPinRecord): Promise<void> {
+    const db = getDb() as any;
+    if (!db) throw new Error('vault store unavailable');
+    await setDoc(doc(db, VAULT_PIN, userId), { user_id: userId, ...writePinRecord(record), updated_at: new Date() }, { merge: true });
+  }
+
+  /** What the screen needs to decide which of the three states to render. Never reveals the PIN or code. */
+  app.get('/api/secrets/:userId/pin', requireUserMatch('userId'), async (req: Request, res: Response) => {
     try {
       const { userId } = req.params;
-      let credentialIds: string[] = [];
-      try {
-        const snap = await getDocs(query(collection(db, DEVICE_CREDENTIALS), where('user_id', '==', userId)));
-        credentialIds = snap.docs
-          .map((d: any) => String(d.data()?.credential_id ?? ''))
-          .filter((id: string) => !!id);
-      } catch (err) {
-        // A credential list we cannot read must NOT read as "no device registered" — that would quietly
-        // push the user into re-registering and leave the old credential orphaned. Honest: no list.
-        console.error('[vault-lock] could not list device credentials', err instanceof Error ? err.message : err);
-        res.status(503).json({ error: 'Could not reach your vault just now. Try again in a moment.' });
-        return;
-      }
+      const now = Date.now();
+      const record = await loadPinRecord(userId);
+      const gate = pinGate(record, now);
+      const contact = await resolveAccountContact(userId);
+      const delivery = otpDelivery(contact);
+      res.set('Cache-Control', 'no-store, max-age=0');
       res.json({
-        challenge: mintChallenge(userId, Date.now(), unlockSecret()),
-        credentialIds,
-        hasDeviceLock: credentialIds.length > 0,
+        hasPin: hasPin(record),
+        locked: gate.locked,
+        lockedForMs: gate.lockedForMs,
+        attemptsLeft: gate.attemptsLeft,
+        maxAttempts: MAX_PIN_ATTEMPTS,
+        channel: delivery.channel,
+        destination: delivery.destination,
+        resendInMs: Math.max(0, record.otpSentAtMs + OTP_RESEND_COOLDOWN_MS - now),
+        /** True when a code has been sent and is still usable, so a reopened screen resumes mid-flow. */
+        codePending: !!record.otpHash && record.otpExpiresAtMs > now,
       });
-    } catch {
-      res.status(500).json({ error: 'Could not start the unlock.' });
-    }
-  });
-
-  /**
-   * Step 2 (once per device) — register this device's lock.
-   *
-   * 🔒 REGISTRATION IS ITSELF GATED BY A FRESH SIGN-IN. Otherwise a stolen session could enrol the
-   * THIEF'S face and then legitimately unlock the vault forever — the lock would hand an attacker a key
-   * instead of taking one away. So enrolling a new device requires the account proof, always.
-   *
-   * The public key arrives as SPKI from the browser's own `getPublicKey()`, which is why nothing here
-   * decodes CBOR: the attestation object would have to be parsed by hand to dig out the same key, and a
-   * parser is exactly where a security bug hides. We do not verify attestation — we are binding a
-   * credential to an account, not auditing which manufacturer made the phone.
-   */
-  app.post('/api/secrets/:userId/lock/register', requireUserMatch('userId'), async (req: Request, res: Response) => {
-    const db = getDb() as any;
-    try {
-      const { userId } = req.params;
-      const now = Date.now();
-
-      const fresh = process.env.VITEST ? { uid: userId, authTimeSec: Math.floor(now / 1000) } : await verifyFreshAuth(req);
-      if (!fresh || !isFreshReauth(fresh.authTimeSec, now)) {
-        res.status(401).json({ error: 'Sign in again to register this device.', needsReauth: true });
-        return;
-      }
-
-      const { credentialId, publicKeySpki, alg, clientDataJSON, authenticatorData, label } = req.body ?? {};
-      if (!isAcceptedAlg(typeof alg === 'number' ? alg : Number(alg))) {
-        res.status(400).json({ error: 'This device uses a signature type the vault does not accept.' });
-        return;
-      }
-      const clientData = base64urlToBuffer(String(clientDataJSON ?? ''));
-      const authData = base64urlToBuffer(String(authenticatorData ?? ''));
-      const spki = base64urlToBuffer(String(publicKeySpki ?? ''));
-      const credId = String(credentialId ?? '').trim();
-      if (!clientData.length || !authData.length || !spki.length || !credId) {
-        res.status(400).json({ error: UNLOCK_REFUSED_MESSAGE });
-        return;
-      }
-
-      const cd = verifyClientData(clientData.toString('utf8'), {
-        expectedType: 'webauthn.create', uid: userId, nowMs: now, secret: unlockSecret(),
-      });
-      if (!cd.ok) {
-        console.warn('[vault-lock] registration refused:', cd.reason);
-        res.status(400).json({ error: UNLOCK_REFUSED_MESSAGE });
-        return;
-      }
-      const parsed = parseAuthenticatorData(authData);
-      if (!parsed || !rpIdMatches(parsed.rpIdHash)) {
-        res.status(400).json({ error: UNLOCK_REFUSED_MESSAGE });
-        return;
-      }
-      // 🔒 The flag that makes this a LOCK. Without userVerified the device merely noticed a touch; the
-      // point of the feature is that the face, fingerprint or PIN was actually accepted.
-      if (!parsed.flags.userVerified) {
-        res.status(400).json({ error: 'Your device did not ask for your face, fingerprint or PIN. Turn on a screen lock, then try again.' });
-        return;
-      }
-
-      // One document per credential id, so re-registering the SAME device replaces its row instead of
-      // piling up duplicates — the same bug the secret save path had to fix in #2842.
-      await setDoc(doc(db, DEVICE_CREDENTIALS, `${userId}__${credId}`.slice(0, 400)), {
-        user_id: userId,
-        credential_id: credId,
-        public_key_spki: String(publicKeySpki),
-        alg: Number(alg),
-        sign_counter: parsed.signCounter,
-        label: typeof label === 'string' && label.trim() ? label.trim().slice(0, 60) : 'This device',
-        created_at: new Date(),
-      });
-      auditVault(userId, 'device-registered', { credential_id: credId });
-      res.json({ success: true, ticket: mintUnlockTicket(userId, now, unlockSecret(), 'device-lock'), expiresInMs: TICKET_TTL_MS });
     } catch (err) {
-      console.error('[vault-lock] registration failed', err instanceof Error ? err.message : err);
-      res.status(500).json({ error: 'Could not register this device.' });
+      console.error('[vault-pin] status failed', err instanceof Error ? err.message : err);
+      res.status(500).json({ error: 'Could not check your vault just now. Please try again.' });
     }
   });
 
   /**
-   * Step 3 — open the vault, by EITHER real proof.
+   * Send the verification code that authorises creating or resetting the PIN.
    *
-   * `mode: 'device'` verifies a WebAuthn assertion; `mode: 'account'` accepts a genuinely fresh
-   * re-authentication. Both mint the same ticket, so every route downstream has one thing to check and
-   * cannot be reasoned about incorrectly ("did this path check the device or the password?" is not a
-   * question any later reader has to answer).
+   * 🔒 THE CODE IS NEVER RETURNED TO THE CLIENT, and the response does not say whether the account has
+   * an address — it says where the code WENT, masked, which the owner recognises and nobody else learns
+   * anything from.
    */
-  app.post('/api/secrets/:userId/unlock', requireUserMatch('userId'), async (req: Request, res: Response) => {
-    const db = getDb() as any;
+  app.post('/api/secrets/:userId/pin/otp', requireUserMatch('userId'), async (req: Request, res: Response) => {
     try {
       const { userId } = req.params;
       const now = Date.now();
-      const mode = String(req.body?.mode ?? 'device');
+      const purpose: OtpPurpose = String(req.body?.purpose ?? '') === 'reset' ? 'reset' : 'create';
 
-      if (mode === 'account') {
+      const contact = await resolveAccountContact(userId);
+      const delivery = otpDelivery(contact);
+      if (delivery.channel !== 'email') {
+        // Honest, and it names the door that DOES work for this account rather than just refusing.
+        res.status(400).json({
+          error: delivery.channel === 'fresh-sign-in'
+            ? 'Your account has no email address, so we cannot send a code to it. Sign in again with your mobile number — that OTP is your verification — then create your PIN.'
+            : 'Your account has no email address or mobile number on it, so we cannot send a verification code. Add one to your profile, then come back.',
+          channel: delivery.channel,
+        });
+        return;
+      }
+
+      const record = await loadPinRecord(userId);
+      const gate = otpSendGate(record, now);
+      if (!gate.allowed) {
+        res.status(429).json({ error: gate.reason, waitMs: gate.waitMs });
+        return;
+      }
+
+      const cfg = resolveEmailConfig();
+      if (!cfg.configured) {
+        // NOT a silent failure and NOT a pretend send: the admin-facing reason is logged and the user is
+        // told plainly that the code could not be sent, so nobody sits waiting for an email that is
+        // never coming.
+        console.error('[vault-pin] cannot send code — email is not configured:', cfg.reason);
+        res.status(503).json({ error: 'We could not send your code just now. Please try again in a few minutes.' });
+        return;
+      }
+
+      const code = newOtpCode();
+      // The record is stored BEFORE the send, so a code that does reach the inbox always has a hash to
+      // check it against. The reverse order would produce codes that are genuinely delivered and
+      // genuinely unusable, which is the worst of both.
+      await savePinRecord(userId, afterOtpSent(record, code, purpose, now));
+
+      const sent = await sendAlertEmail({ ...cfg, to: [String(contact.email)] }, otpEmailMessage(code, purpose), {
+        subject: otpEmailSubject(),
+        footer: '— NavBharatAI\nYou are receiving this because someone asked to set the PIN on your saved keys.',
+      });
+      if (!sent.sent) {
+        console.error('[vault-pin] code email not sent:', sent.error);
+        res.status(502).json({ error: 'We could not send your code just now. Please try again in a moment.' });
+        return;
+      }
+
+      auditVault(userId, 'pin-code-sent', { purpose });
+      res.json({ sent: true, channel: 'email', destination: delivery.destination, resendInMs: OTP_RESEND_COOLDOWN_MS });
+    } catch (err) {
+      console.error('[vault-pin] send code failed', err instanceof Error ? err.message : err);
+      res.status(500).json({ error: 'Could not send your code just now. Please try again.' });
+    }
+  });
+
+  /**
+   * Create or reset the PIN.
+   *
+   * Creating and resetting are ONE endpoint on purpose: both need exactly the same proof, and a separate
+   * "reset" path would be a second place for that requirement to weaken. The ticket is returned with it
+   * so the user lands inside their keys instead of being asked for the PIN they just chose.
+   */
+  app.post('/api/secrets/:userId/pin', requireUserMatch('userId'), async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.params;
+      const now = Date.now();
+      const pin = String(req.body?.pin ?? '').trim();
+      const reject = pinRejectReason(pin);
+      if (reject) {
+        res.status(400).json({ error: reject });
+        return;
+      }
+
+      const contact = await resolveAccountContact(userId);
+      const delivery = otpDelivery(contact);
+      let record = await loadPinRecord(userId);
+
+      if (delivery.channel === 'fresh-sign-in') {
+        // An account with no email proves itself by the mobile OTP it signs in with; `auth_time` in the
+        // SIGNED token is what we read, so this is not a claim the client can make on its own.
         const fresh = process.env.VITEST ? { uid: userId, authTimeSec: Math.floor(now / 1000) } : await verifyFreshAuth(req);
-        if (!fresh || !isFreshReauth(fresh.authTimeSec, now)) {
-          res.status(401).json({ error: 'Confirm your account password, then try again.', needsReauth: true });
+        if (!fresh || !isFreshSignIn(fresh.authTimeSec, now)) {
+          res.status(401).json({
+            error: 'Sign in again with your mobile number, then set your PIN.',
+            needsFreshSignIn: true,
+          });
           return;
         }
-        auditVault(userId, 'unlock', { unlock_method: 'account-reauth' });
-        res.json({ ticket: mintUnlockTicket(userId, now, unlockSecret(), 'account-reauth'), method: 'account-reauth', expiresInMs: TICKET_TTL_MS });
-        return;
+      } else {
+        const check = otpCheck(record, String(req.body?.otp ?? ''), now);
+        // The attempt is recorded either way — a wrong code that cost nothing to try is unlimited tries.
+        await savePinRecord(userId, check.next);
+        record = check.next;
+        if (!check.ok) {
+          res.status(400).json({ error: check.reason });
+          return;
+        }
       }
 
-      const { credentialId, clientDataJSON, authenticatorData, signature } = req.body ?? {};
-      const credId = String(credentialId ?? '').trim();
-      const clientData = base64urlToBuffer(String(clientDataJSON ?? ''));
-      const authData = base64urlToBuffer(String(authenticatorData ?? ''));
-      const sig = base64urlToBuffer(String(signature ?? ''));
-      if (!credId || !clientData.length || !authData.length || !sig.length) {
-        res.status(400).json({ error: UNLOCK_REFUSED_MESSAGE });
-        return;
-      }
-
-      const ref = doc(db, DEVICE_CREDENTIALS, `${userId}__${credId}`.slice(0, 400));
-      const snap = await getDoc(ref);
-      const stored = snap.exists() ? (snap.data() as { user_id?: string; public_key_spki?: string; sign_counter?: number }) : null;
-      // The document id already contains the uid, but the ownership check is repeated rather than
-      // inferred — the same IDOR discipline the delete route above documents.
-      if (!stored || stored.user_id !== userId || !stored.public_key_spki) {
-        res.status(401).json({ error: UNLOCK_REFUSED_MESSAGE });
-        return;
-      }
-
-      const cd = verifyClientData(clientData.toString('utf8'), {
-        expectedType: 'webauthn.get', uid: userId, nowMs: now, secret: unlockSecret(),
-      });
-      const parsed = parseAuthenticatorData(authData);
-      const okSignature = cd.ok
-        && !!parsed
-        && rpIdMatches(parsed.rpIdHash)
-        && parsed.flags.userVerified
-        && signCounterOk(Number(stored.sign_counter ?? 0), parsed.signCounter)
-        && verifyAssertionSignature({
-          spkiDer: base64urlToBuffer(stored.public_key_spki),
-          authenticatorData: authData,
-          clientDataJSON: clientData,
-          signature: sig,
-        });
-
-      if (!okSignature) {
-        // The real reason goes to the log, never to the screen: "challenge expired" and "signature did
-        // not verify" are equally useful to someone probing this endpoint.
-        console.warn('[vault-lock] unlock refused:', cd.ok ? 'assertion checks failed' : cd.reason);
-        auditVault(userId, 'unlock-refused', { credential_id: credId });
-        res.status(401).json({ error: UNLOCK_REFUSED_MESSAGE });
-        return;
-      }
-
-      // Move the counter forward so a cloned authenticator replaying an old assertion is caught next
-      // time. Best-effort: a failed write must not refuse an unlock the signature already proved.
-      try {
-        await updateDoc(ref, { sign_counter: parsed!.signCounter, last_used_at: new Date() });
-      } catch (err) {
-        console.error('[vault-lock] counter not advanced', err instanceof Error ? err.message : err);
-      }
-      auditVault(userId, 'unlock', { unlock_method: 'device-lock', credential_id: credId });
-      res.json({ ticket: mintUnlockTicket(userId, now, unlockSecret(), 'device-lock'), method: 'device-lock', expiresInMs: TICKET_TTL_MS });
+      const salt = newSalt();
+      // A new PIN clears the lock-out too: the owner has just proved themselves through the account's own
+      // contact, which is strictly stronger proof than the PIN the counter was protecting.
+      const next = afterCorrectPin({ ...record, pinHash: hashPin(pin, salt), pinSalt: salt });
+      await savePinRecord(userId, next);
+      auditVault(userId, hasPin(record) ? 'pin-reset' : 'pin-created', {});
+      res.json({ success: true, ticket: mintUnlockTicket(userId, now, unlockSecret()), method: 'pin', expiresInMs: TICKET_TTL_MS });
     } catch (err) {
-      console.error('[vault-lock] unlock failed', err instanceof Error ? err.message : err);
-      res.status(500).json({ error: 'Could not open the vault just now.' });
+      console.error('[vault-pin] set failed', err instanceof Error ? err.message : err);
+      res.status(500).json({ error: 'Could not save your PIN just now. Please try again.' });
+    }
+  });
+
+  /** Open the vault with the PIN. The only place a PIN is ever compared, and it is compared here. */
+  app.post('/api/secrets/:userId/pin/unlock', requireUserMatch('userId'), async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.params;
+      const now = Date.now();
+      const record = await loadPinRecord(userId);
+      if (!hasPin(record)) {
+        res.status(409).json({ error: 'Set up your PIN first.', needsSetup: true });
+        return;
+      }
+
+      const gate = pinGate(record, now);
+      if (gate.locked) {
+        const mins = Math.ceil(gate.lockedForMs / 60_000);
+        res.status(429).json({
+          error: `Too many wrong PINs. Try again in ${mins} minute${mins === 1 ? '' : 's'}, or use "Forgot PIN".`,
+          lockedForMs: gate.lockedForMs,
+        });
+        return;
+      }
+
+      const pin = String(req.body?.pin ?? '').trim();
+      if (!matchesPin(pin, record.pinSalt, record.pinHash)) {
+        const next = afterWrongPin(record, now);
+        // Awaited, and a write failure refuses the request: a lock-out counter that can be dropped is
+        // not a lock-out. See `savePinRecord`.
+        await savePinRecord(userId, next);
+        const after = pinGate(next, now);
+        auditVault(userId, 'pin-refused', { attempts_left: after.attemptsLeft });
+        if (after.locked) {
+          const mins = Math.ceil(after.lockedForMs / 60_000);
+          res.status(429).json({ error: `Too many wrong PINs. Your vault is locked for ${mins} minute${mins === 1 ? '' : 's'}.`, lockedForMs: after.lockedForMs });
+          return;
+        }
+        res.status(401).json({
+          error: `That PIN is not right. ${after.attemptsLeft} ${after.attemptsLeft === 1 ? 'try' : 'tries'} left before your vault locks.`,
+          attemptsLeft: after.attemptsLeft,
+        });
+        return;
+      }
+
+      await savePinRecord(userId, afterCorrectPin(record));
+      auditVault(userId, 'unlock', { unlock_method: 'pin' });
+      res.json({ ticket: mintUnlockTicket(userId, now, unlockSecret()), method: 'pin', expiresInMs: TICKET_TTL_MS });
+    } catch (err) {
+      console.error('[vault-pin] unlock failed', err instanceof Error ? err.message : err);
+      res.status(500).json({ error: UNLOCK_REFUSED_MESSAGE });
     }
   });
 
   /**
-   * Step 4 — the values, and the ONLY route in the app that returns them.
+   * The values — and the ONLY route in the app that returns them.
    *
    * 🔴 THIS IS A DELIBERATE CHANGE OF POSTURE, recorded rather than slipped in. The list route above
    * says, in a comment that has been true since the vault was built, that "the ciphertext has no reason

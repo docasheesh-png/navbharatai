@@ -129,6 +129,15 @@ export interface SendDeps {
   timeoutMs?: number;
   /** The sign-off under the message. Defaults to the Monitor's; a user-facing alert passes its own. */
   footer?: string;
+  /**
+   * Override the derived subject.
+   *
+   * 🔒 REQUIRED for any mail that is not a Monitor alert, and the vault's PIN code is why it exists.
+   * `alertSubject` builds a subject out of the MESSAGE, so a verification code would have been printed
+   * in the subject line — the one part of an email that shows in a notification, a lock screen and
+   * every mail-list preview. A one-time code belongs in the body only.
+   */
+  subject?: string;
 }
 
 /**
@@ -156,7 +165,7 @@ export async function sendAlertEmail(
       body: JSON.stringify({
         from: cfg.from,
         to: cfg.to,
-        subject: alertSubject(message),
+        subject: deps.subject?.trim() || alertSubject(message),
         text: `${message}\n\n${deps.footer ?? '— NavBharatAI Monitor\nOpen Admin → Monitor for the live charts.'}`,
       }),
       signal: controller.signal,

@@ -29,7 +29,8 @@
 
 import { doc, getDoc, runTransaction, getServerDb } from './serverDb';
 import { computeDebitedWallet } from './walletDebit';
-import { inrToDebitTokens, inrToWalletTokens } from './payments';
+import { checkPlanPayable, giftRemaining, paidSpendableTokens } from './giftSpend';
+import { inrToDebitTokens, inrToWalletTokens, TOKENS_PER_RUPEE } from './payments';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletResolve';
 import { envFlag } from './envFlag';
 import {
@@ -183,7 +184,14 @@ export function unusedPlanValueInr(plan: HostingPlanRecord | undefined | null, n
 
 export type PlanPurchaseOutcome =
   | { ok: true; wallet: Record<string, any>; plan: HostingPlanRecord; charged: boolean; creditedInr: number; bundledCreditInr: number }
-  | { ok: false; reason: 'insufficient' | 'disabled' | 'unknown_tier' | 'agreement_required'; shortfallTokens?: number };
+  | {
+      ok: false;
+      reason: 'insufficient' | 'disabled' | 'unknown_tier' | 'agreement_required' | 'gift_only';
+      shortfallTokens?: number;
+      /** Set on `gift_only`: how much of the balance is our gift, and how much the user paid for. */
+      giftTokens?: number;
+      paidTokens?: number;
+    };
 
 /**
  * PURE purchase / extension / upgrade.
@@ -257,6 +265,24 @@ export function computePlanPurchase(
     return { ok: false, reason: 'insufficient', shortfallTokens: Math.ceil(needed - balance) };
   }
 
+  // THE WELCOME GIFT DOES NOT BUY A PLAN (admin 2026-09-13). The balance is big enough; the question
+  // this answers is whose money it is. `giftSpend.ts` holds the rule and the reasoning — including
+  // why a user who has paid us before is trusted and one who never has is not.
+  //
+  // ⚠️ ORDER MATTERS: this sits AFTER the plain affordability check on purpose. A user with too
+  // little of anything should be told they need more money, which is the simpler and more useful
+  // sentence; only a user who genuinely HAS the balance needs to hear that it is gift money.
+  const giftBlock = checkPlanPayable(startWallet, needed);
+  if (giftBlock) {
+    return {
+      ok: false,
+      reason: 'gift_only',
+      shortfallTokens: giftBlock.shortfallTokens,
+      giftTokens: giftBlock.giftTokens,
+      paidTokens: giftBlock.paidTokens,
+    };
+  }
+
   // An upgrade restarts the clock from today (the old period was paid back); a same-tier purchase
   // extends from the live expiry so early payment never costs days.
   const priorExp = priorActive && !isUpgrade ? Date.parse(prior!.expiresAt) : NaN;
@@ -268,6 +294,9 @@ export function computePlanPurchase(
     billedInr: tier.priceInr,
     buildRef,
     description: `Hosting plan — ${tier.name} (${tier.days} days)`,
+    // Paid money only — the gate above proved there is enough of it, and the gift must survive the
+    // purchase so it can still do what it is for: build apps.
+    spends: 'paid-only',
   }, nowIso);
 
   // The bundled credit is granted only when the charge really applied — a replayed purchase must not
@@ -374,10 +403,17 @@ export function computeLazyRenewal(current: Record<string, any>, nowIso: string)
   if (balance < needed) return { wallet: w, renewed: false, applied: false };
 
   const renewRef = `hostingplan_renew_${p.expiresAt}`;
+  // A RENEWAL IS A PURCHASE, so the same rule binds it — otherwise the gift would be barred at the
+  // front door and let in a month later, which is not a rule, it is a delay. A plan that can only be
+  // renewed from gift money simply lapses, exactly as it does when the balance is short.
+  if (checkPlanPayable(w, inrToDebitTokens(price))) {
+    return { wallet: w, renewed: false, applied: false };
+  }
   const debited = computeDebitedWallet(w, {
     billedInr: price,
     buildRef: renewRef,
     description: `Hosting plan — ${label} (auto-renewal, ${days} days)`,
+    spends: 'paid-only',
   }, nowIso);
   if (!debited.applied) return { wallet: w, renewed: false, applied: false }; // this lapse already renewed
 
@@ -600,7 +636,14 @@ export async function readHostingPlanStatus(db: any, userId: string, nowIso?: st
 
 export type PlanPurchaseResult =
   | { ok: true; plan: HostingPlanRecord; tokenBalance: number; charged: boolean; creditedInr: number; bundledCreditInr: number }
-  | { ok: false; error: string; reason: 'insufficient' | 'disabled' | 'unavailable' | 'unknown_tier' | 'agreement_required'; shortfallTokens?: number };
+  | {
+      ok: false;
+      error: string;
+      reason: 'insufficient' | 'disabled' | 'unavailable' | 'unknown_tier' | 'agreement_required' | 'gift_only';
+      shortfallTokens?: number;
+      giftInr?: number;
+      paidInr?: number;
+    };
 
 /**
  * Atomic purchase: debit + grant in one transaction on the wallet doc. Never throws.
@@ -643,6 +686,26 @@ export async function purchaseHostingPlan(
         return {
           ok: false, reason: 'insufficient', shortfallTokens: outcome.shortfallTokens,
           error: 'Your wallet balance is not enough for this plan — please recharge first.',
+        };
+      }
+      if (outcome.reason === 'gift_only') {
+        // THE ONE MESSAGE THIS WHOLE RULE IS FOR, and it has to be kind or the rule reads as a trick.
+        // It says what the gift IS for rather than only what it is not, names the real numbers, and
+        // never implies the user did something wrong — they did not; nobody told them until now.
+        const giftInr = Math.round(((outcome.giftTokens ?? 0) / TOKENS_PER_RUPEE) * 100) / 100;
+        const paidInr = Math.round(((outcome.paidTokens ?? 0) / TOKENS_PER_RUPEE) * 100) / 100;
+        const shortInr = Math.round(((outcome.shortfallTokens ?? 0) / TOKENS_PER_RUPEE) * 100) / 100;
+        return {
+          ok: false,
+          reason: 'gift_only',
+          shortfallTokens: outcome.shortfallTokens,
+          giftInr,
+          paidInr,
+          error:
+            `Your welcome gift is for building apps, not for buying a plan. ` +
+            `₹${giftInr.toFixed(2)} of your balance is the gift from us` +
+            (paidInr > 0 ? `, and ₹${paidInr.toFixed(2)} is yours` : '') +
+            `. Add ₹${shortInr.toFixed(2)} to start this plan — your gift stays exactly where it is.`,
         };
       }
       if (outcome.reason === 'agreement_required') {

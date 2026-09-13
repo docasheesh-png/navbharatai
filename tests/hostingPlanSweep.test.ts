@@ -27,9 +27,25 @@ const plan = (expiresInDays: number, extra: Record<string, unknown> = {}) => ({
   id: HOSTING_PLAN_ID, purchasedAt: NOW, autoRenew: true,
   expiresAt: new Date(NOW_MS + expiresInDays * DAY).toISOString(), ...extra,
 });
-const wallet = (tokens: number, hostingPlan: Record<string, unknown> | undefined) => ({
+/**
+ * CHANGED 2026-09-13: the fixture states that this balance was PAID FOR.
+ *
+ * A renewal is a purchase, so the welcome gift cannot fund one either (`giftSpend.ts`) — otherwise
+ * the gift would be barred at the front door and let in a month later. A wallet that says nothing
+ * about where its money came from, from a user who has never paid us, is read as gift. Every holder
+ * of a live plan in these tests bought it with real money by definition, so saying so is restoring
+ * what the fixture always meant, not relaxing the rule. `giftOnly` gives the opposite case.
+ */
+const wallet = (
+  tokens: number,
+  hostingPlan: Record<string, unknown> | undefined,
+  opts: { giftOnly?: boolean } = {},
+) => ({
   userId: 'u1', tokenBalance: tokens, totalTokensUsed: 0, remaining_balance: tokens / TOKENS_PER_RUPEE,
-  walletLedger: [], ...(hostingPlan ? { hostingPlan } : {}),
+  walletLedger: [],
+  giftTokensRemaining: opts.giftOnly ? tokens : 0,
+  ...(opts.giftOnly ? {} : { total_money_spent: tokens / TOKENS_PER_RUPEE }),
+  ...(hostingPlan ? { hostingPlan } : {}),
 });
 
 /**
@@ -436,5 +452,24 @@ describe('lifecycle wiring', () => {
     expect(msg).toContain('stays live on its free NavBharatAI link');
     // Short balance names the exact figure — "recharge" is not actionable without an amount.
     expect(graceMessage(1, 75, 'starter')).toContain('₹75');
+  });
+});
+
+// THE LOOPHOLE THIS CLOSES. If only the first purchase checked whose money it was, a user could be
+// refused the plan today and have it renewed from gift money a month later — which is not a rule,
+// it is a delay. A plan that can only be renewed from gift money lapses, exactly as it does when the
+// balance is simply too small.
+describe('a renewal cannot be paid for with the welcome gift either', () => {
+  it('an expired auto-renew plan whose balance is all gift does NOT renew', () => {
+    const w = wallet(500 * TOKENS_PER_RUPEE, plan(-1), { giftOnly: true });
+    const r = decidePlanSweepStep(w, NOW);
+    expect(r.action).not.toEqual({ kind: 'renewed' });
+    // And the gift is still there afterwards — nothing was quietly taken on the way past.
+    expect(r.wallet.giftTokensRemaining).toBe(500 * TOKENS_PER_RUPEE);
+  });
+
+  it('the same wallet renews once that balance is the user’s own money', () => {
+    const w = wallet(500 * TOKENS_PER_RUPEE, plan(-1));
+    expect(decidePlanSweepStep(w, NOW).action).toEqual({ kind: 'renewed' });
   });
 });

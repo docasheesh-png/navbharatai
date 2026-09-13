@@ -29,8 +29,27 @@ const PRICE_TOKENS = STARTER.priceInr * TOKENS_PER_RUPEE;
  */
 const AGREED = { agreedToTerms: true };
 
+/**
+ * CHANGED 2026-09-13: the fixture now says the balance was PAID FOR (`giftTokensRemaining: 0`).
+ *
+ * The welcome gift may no longer buy a plan (`giftSpend.ts`), and a wallet that says nothing about
+ * where its money came from is read as gift when the user has never paid us — so without this every
+ * purchase test below would exercise the refusal instead of the purchase. It is not a weakening: the
+ * tests always MEANT a customer with money, and now they say so. `wallet(n, { gifted: true })` gives
+ * the opposite case, and the rule itself is tested on its own.
+ */
 function wallet(tokens: number, extra: Record<string, any> = {}): Record<string, any> {
-  return { userId: 'u1', tokenBalance: tokens, totalTokensUsed: 0, remaining_balance: tokens / TOKENS_PER_RUPEE, walletLedger: [], ...extra };
+  const { gifted, ...rest } = extra as Record<string, any> & { gifted?: boolean };
+  return {
+    userId: 'u1',
+    tokenBalance: tokens,
+    totalTokensUsed: 0,
+    remaining_balance: tokens / TOKENS_PER_RUPEE,
+    walletLedger: [],
+    giftTokensRemaining: gifted ? tokens : 0,
+    ...(gifted ? {} : { total_money_spent: tokens / TOKENS_PER_RUPEE }),
+    ...rest,
+  };
 }
 
 afterEach(() => {

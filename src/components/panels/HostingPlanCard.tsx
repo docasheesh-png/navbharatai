@@ -23,7 +23,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Globe, Database, Cpu, BadgeCheck, RefreshCw, Check } from 'lucide-react';
 import { authHeaders } from '../../lib/authedFetch';
-import { HOSTING_TIERS, hostingAgreementTerms, type HostingTier } from '../../lib/hostingTiers';
+import { HOSTING_TIERS, hostingAgreementTerms, type HostingTier, HOSTING_OVERAGE_INR_PER_GB } from '../../lib/hostingTiers';
 
 interface PlanStatus {
   enabled: boolean;
@@ -189,6 +189,12 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
                   <p className="text-[12px] font-black text-indigo-300 font-mono">₹{tier.priceInr}<span className="text-[9px] text-[#8b949e] font-bold">/{tier.days}d</span></p>
                 </div>
                 <p className="text-[10px] text-[#8b949e] font-semibold">{tier.tagline}</p>
+                {/* THE HEADING IS THE FIX (admin 2026-09-13). The list was identical before and still
+                    read as a price list; naming it as INCLUDED is what answers "₹149 bhi dega aur
+                    wallet se bhi?" before the question is asked. */}
+                <p className="text-[9px] font-black uppercase tracking-wider text-emerald-400">
+                  Included — no extra charge
+                </p>
                 <ul className="space-y-1">
                   {tier.includes.map((line) => (
                     <li key={line} className="text-[10px] text-[#c9d1d9] flex items-start gap-1.5">
@@ -197,6 +203,13 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
                     </li>
                   ))}
                 </ul>
+                {/* The one thing that can cost more, kept small and last — where an exception belongs.
+                    Removing it would be dishonest; leading with it is what made the plan read as a
+                    double charge. */}
+                <p className="text-[9.5px] text-[#8b949e] leading-relaxed border-t border-white/5 pt-2">
+                  Past {tier.includedTransferGb} GB, extra traffic is ₹{HOSTING_OVERAGE_INR_PER_GB}/GB. You
+                  see your usage before anything extra is charged.
+                </p>
 
                 {held ? (
                   <p className="text-[10px] font-black uppercase tracking-wider text-emerald-400">Your current plan</p>

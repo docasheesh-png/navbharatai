@@ -506,7 +506,7 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       const newBalance = await runTransaction(db, async (tx: any) => {
         const fresh = await tx.get(walletRef);
         const w = fresh.exists() ? fresh.data() : null;
-        const patch = mirroredCreditPatch(w, rupeesToTokens(value));
+        const patch = mirroredCreditPatch(w, rupeesToTokens(value), 'gift');
         if (w) {
           tx.update(walletRef, { ...patch, updatedAt: new Date().toISOString() });
         } else {

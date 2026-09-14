@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon } from 'lucide-react';
+import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon, Smartphone, ExternalLink } from 'lucide-react';
 import { TirangaLoader } from './ui/TirangaLoader';
 import { usePagedList } from '../hooks/usePagedList';
 import { LoadMore } from './common/LoadMore';
@@ -27,7 +27,7 @@ interface AdminDashboardProps {
   onLogout: () => void;
 }
 
-type TabId = 'monitor' | 'users' | 'engines' | 'revenue' | 'reports' | 'userreports' | 'security' | 'settings';
+type TabId = 'monitor' | 'users' | 'engines' | 'revenue' | 'reports' | 'userreports' | 'apkreports' | 'security' | 'settings';
 
 const TABS: { id: TabId; label: string; icon: React.ComponentType<any> }[] = [
   // HOME = the live Monitor (2026-08-23). The old Overview content was not removed — it is rendered
@@ -42,6 +42,13 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<any> }[] = [
   // engine telling us about a build; this is a person telling us about the product or about another
   // person. Mixing them would bury the complaints that need a human.
   { id: 'userreports', label: 'User Reports', icon: Flag },
+  // APK REPORTS — a THIRD, separate page (admin 2026-09-14). "Build Reports" above is the in-house
+  // AgentV3 engine's own report, sent only when a user presses "Report"; this one is the Android/iOS
+  // store-build pipeline (a user's app compiled on their OWN GitHub via GitHub Actions), and it is
+  // written AUTOMATICALLY the moment such a build fails — no button, no user action. Different
+  // pipeline, different failure shape (Gradle/Xcode/npm, not an AI build turn), so it gets its own page
+  // rather than being squeezed into either existing inbox's fields.
+  { id: 'apkreports', label: 'APK Reports', icon: Smartphone },
   { id: 'security',  label: 'Security',     icon: Shield },
   { id: 'settings',  label: 'Settings',     icon: Settings },
 ];
@@ -120,6 +127,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [reportsLoading, setReportsLoading] = useState(false);
   const [openReport, setOpenReport] = useState<any>(null);
   const [reportFilter, setReportFilter] = useState<'open' | 'all'>('open');
+  // ── APK build-failure reports (admin 2026-09-14) — a separate inbox, see AdminApkReportStore.ts ──
+  const [apkReports, setApkReports] = useState<any[]>([]);
+  const [apkReportsLoading, setApkReportsLoading] = useState(false);
+  const [openApkReport, setOpenApkReport] = useState<any>(null);
   /** The account sheet: opened FROM a report (or from the Users tab), so a decision is made with the
    *  whole picture in front of the admin rather than from a complaint alone. */
   const [account, setAccount] = useState<any>(null);
@@ -536,6 +547,59 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     } catch { /* the row stays as it was; the admin can retry */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken, fetchUserReports]);
+
+  // ── APK build-failure reports — automatic inbox, see AdminApkReportStore.ts ──────────────────────
+  const fetchApkReports = useCallback(async () => {
+    setApkReportsLoading(true);
+    try {
+      const r = await fetch('/api/admin/apk-reports', { headers });
+      const d = await r.json();
+      setApkReports(Array.isArray(d?.reports) ? d.reports : []);
+    } catch (e) { console.error(e); setApkReports([]); }
+    finally { setApkReportsLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+
+  const openApkReportById = useCallback(async (id: string) => {
+    setOpenApkReport({ loading: true });
+    try {
+      const r = await fetch(`/api/admin/apk-reports/${encodeURIComponent(id)}`, { headers });
+      const d = await r.json();
+      setOpenApkReport(r.ok ? d : { error: d?.error || 'Could not open that report.' });
+    } catch { setOpenApkReport({ error: 'Could not open that report.' }); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+
+  const markApkReport = useCallback(async (id: string, fixed: boolean) => {
+    try {
+      await fetch(`/api/admin/apk-reports/${encodeURIComponent(id)}/mark`, {
+        method: 'POST', headers, body: JSON.stringify({ fixed }),
+      });
+      setOpenApkReport(null);
+      void fetchApkReports();
+    } catch { /* the row stays as it was; the admin can retry */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken, fetchApkReports]);
+
+  const deleteApkReportRow = useCallback(async (id: string) => {
+    if (!window.confirm('Delete this APK build report permanently?')) return;
+    try {
+      await fetch(`/api/admin/apk-reports/${encodeURIComponent(id)}`, { method: 'DELETE', headers });
+      setOpenApkReport(null);
+      setApkReports((rows) => rows.filter((row) => row.id !== id));
+    } catch { toast('Could not delete that report.'); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+
+  const clearApkReports = useCallback(async () => {
+    if (apkReports.length === 0) { toast('The inbox is already empty.'); return; }
+    if (!window.confirm(`Delete ALL ${apkReports.length} APK build reports permanently? This cannot be undone.`)) return;
+    try {
+      await fetch('/api/admin/apk-reports/clear', { method: 'POST', headers, body: JSON.stringify({ confirm: true }) });
+      setApkReports([]);
+    } catch { toast('Could not clear the APK reports.'); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken, apkReports.length]);
 
   /** One person's whole account. Every section says whether it was READ — see the route. */
   const openAccount = useCallback(async (uid: string) => {
@@ -1049,6 +1113,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     void fetchAllBuildsRef.current();
   }, [activeTab, allBuildsStatus, allBuildsDate, allBuildsUid]);
   useEffect(() => { if (activeTab === 'userreports') fetchUserReports(); }, [activeTab, fetchUserReports]);
+  useEffect(() => { if (activeTab === 'apkreports') fetchApkReports(); }, [activeTab, fetchApkReports]);
   const fetchLatencyAnomaly = useCallback(async () => {
     setAnomalyLoading(true);
     try {
@@ -2655,6 +2720,160 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                               className="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-xs font-bold text-white"
                             ><Shield size={13} /> Suspend this account</button>
                           )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'apkreports' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <h3 className="flex items-center gap-2 text-lg font-black text-white tracking-tight">
+                  <Smartphone size={18} className="text-indigo-400" /> APK Reports
+                  {apkReports.length > 0 && (
+                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-rose-500/40 text-rose-300">
+                      {apkReports.filter((r: any) => !r.fixed).length} open
+                    </span>
+                  )}
+                </h3>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => void fetchApkReports()} className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/60" aria-label="Refresh">
+                    <RefreshCw size={14} className={apkReportsLoading ? 'animate-spin' : ''} />
+                  </button>
+                  <button
+                    onClick={() => void clearApkReports()}
+                    disabled={apkReports.length === 0}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-white/5 hover:bg-white/10 text-white/60 disabled:opacity-40 disabled:cursor-not-allowed"
+                  ><Trash2 size={12} /> Clear all</button>
+                </div>
+              </div>
+              <p className="text-[11px] text-white/40 -mt-2">
+                Sent automatically the moment a user's own Android/iOS store build fails on their GitHub —
+                no button, no user action. Every row carries the classified cause, the log excerpt and a
+                link to the full run on GitHub, so a fix never needs the user asked for more detail.
+              </p>
+
+              {apkReportsLoading && apkReports.length === 0 ? (
+                <p className="text-xs text-white/40">Loading reports…</p>
+              ) : apkReports.length === 0 ? (
+                <p className="text-xs text-white/40">No failed store builds reported yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {apkReports.map((r: any) => (
+                    <button
+                      key={r.id}
+                      onClick={() => void openApkReportById(r.id)}
+                      className="w-full text-left rounded-xl border border-white/10 bg-white/[0.02] hover:bg-white/[0.05] p-3 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-white/15 text-white/60">
+                          {r.building || r.workflow}
+                        </span>
+                        {r.fixed ? (
+                          <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-emerald-500/30 text-emerald-300">Fixed</span>
+                        ) : (
+                          <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-rose-500/40 text-rose-300">Open</span>
+                        )}
+                        <span className="text-[10px] text-white/35 ml-auto">{new Date(r.reportedAt).toLocaleString()}</span>
+                      </div>
+                      <p className="text-sm text-white mt-1.5 line-clamp-2">{r.failure?.why || 'Build failed — no cause could be read.'}</p>
+                      <p className="text-[11px] text-white/40 mt-1">
+                        {r.owner}/{r.repo} · {r.email || r.userId}
+                        {r.failure?.stage && <> · stage: {r.failure.stage}</>}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {openApkReport && (
+                <div className="nb-sheet-overlay fixed inset-0 z-50 bg-black/70 flex items-center justify-center" onClick={() => setOpenApkReport(null)}>
+                  <div className="nb-sheet w-full max-w-2xl max-h-[85vh] supports-[height:100dvh]:max-h-[85dvh] overflow-y-auto bg-[#161b22] border border-white/10 rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
+                    {openApkReport.loading ? (
+                      <p className="text-sm text-white/60">Opening…</p>
+                    ) : openApkReport.error ? (
+                      <p className="text-sm text-amber-300">{openApkReport.error}</p>
+                    ) : (
+                      <>
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <h4 className="text-base font-bold text-white">{openApkReport.owner}/{openApkReport.repo}</h4>
+                            <p className="text-[11px] text-white/40">{openApkReport.building || openApkReport.workflow} · reported {new Date(openApkReport.reportedAt).toLocaleString()}</p>
+                          </div>
+                          <button onClick={() => setOpenApkReport(null)} className="text-white/40 hover:text-white p-1" aria-label="Close">✕</button>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 mt-4 text-[11px]">
+                          <div className="rounded-xl border border-white/10 p-3">
+                            <p className="text-white/40 uppercase tracking-widest text-[9px] font-black mb-1">Built by</p>
+                            <p className="text-white break-all">{openApkReport.email || openApkReport.userId}</p>
+                          </div>
+                          <div className="rounded-xl border border-white/10 p-3">
+                            <p className="text-white/40 uppercase tracking-widest text-[9px] font-black mb-1">Duration</p>
+                            <p className="text-white">{openApkReport.durationSeconds != null ? `${openApkReport.durationSeconds}s` : '—'}</p>
+                          </div>
+                        </div>
+
+                        {openApkReport.runUrl && (
+                          <a
+                            href={openApkReport.runUrl} target="_blank" rel="noopener noreferrer"
+                            className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-bold text-indigo-300 hover:text-indigo-200 underline decoration-indigo-300/30"
+                          ><ExternalLink size={12} /> Open the full run on GitHub</a>
+                        )}
+
+                        {openApkReport.steps?.length > 0 && (
+                          <div className="mt-4">
+                            <p className="text-white/40 uppercase tracking-widest text-[9px] font-black mb-2">Steps</p>
+                            <div className="space-y-1">
+                              {openApkReport.steps.map((s: any, idx: number) => (
+                                <div key={idx} className="flex items-center gap-2 text-[11px]">
+                                  <span className={`w-1.5 h-1.5 rounded-full ${s.state === 'failed' ? 'bg-rose-400' : s.state === 'done' ? 'bg-emerald-400' : 'bg-white/20'}`} />
+                                  <span className={s.state === 'failed' ? 'text-rose-300 font-semibold' : 'text-white/60'}>{s.label}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {openApkReport.failure && (
+                          <div className="mt-4">
+                            <p className="text-white/40 uppercase tracking-widest text-[9px] font-black mb-1">Why it failed</p>
+                            <p className="text-sm text-white bg-black/30 rounded-xl p-3 whitespace-pre-wrap">{openApkReport.failure.why}</p>
+                            {openApkReport.failure.detail && Object.keys(openApkReport.failure.detail).length > 0 && (
+                              <div className="mt-2 text-[11px] text-white/50 space-y-0.5">
+                                {Object.entries(openApkReport.failure.detail).map(([k, v]: [string, any]) => (
+                                  <p key={k}><span className="text-white/30">{k}:</span> {String(v)}</p>
+                                ))}
+                              </div>
+                            )}
+                            <p className="text-[10px] text-white/35 mt-2">
+                              {openApkReport.failure.navbharatCanFixItself
+                                ? "NavBharatAI's self-heal can attempt to fix this class automatically."
+                                : 'Outside the self-heal — needs a manual fix in the app or its build files.'}
+                            </p>
+                          </div>
+                        )}
+
+                        {openApkReport.failure?.logExcerpt?.length > 0 && (
+                          <div className="mt-4">
+                            <p className="text-white/40 uppercase tracking-widest text-[9px] font-black mb-1">Log excerpt (failed step)</p>
+                            <pre className="text-[10px] text-white/70 bg-black/50 rounded-xl p-3 overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap break-all">
+{openApkReport.failure.logExcerpt.join('\n')}
+                            </pre>
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-2 mt-5">
+                          {openApkReport.fixed ? (
+                            <button onClick={() => void markApkReport(openApkReport.id, false)} className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-bold text-white">Reopen</button>
+                          ) : (
+                            <button onClick={() => void markApkReport(openApkReport.id, true)} className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white">Mark fixed</button>
+                          )}
+                          <button onClick={() => void deleteApkReportRow(openApkReport.id)} className="ml-auto px-3 py-2 rounded-lg bg-rose-600/80 hover:bg-rose-500 text-xs font-bold text-white inline-flex items-center gap-1.5"><Trash2 size={12} /> Delete</button>
                         </div>
                       </>
                     )}

@@ -122,9 +122,13 @@ describe('⚠️ WHERE IT MUST NOT GO — a picker is not a list you read', () =
     // Paging a native <select> makes the filter WORSE than the problem: a user outside the first
     // twelve becomes unreachable, so the control silently stops doing its job. It also cannot be
     // valid HTML — a <div> is not allowed inside <select>.
-    expect(admin).toContain('{allBuildsUsers.map((u) => (');
+    // The picker moved into the shared ReportFilterBar (admin 2026-09-14) — both lists render it —
+    // so this rule is asserted where it now lives. It applies to BOTH lists by construction now.
+    const bar = readFileSync(join(process.cwd(), 'src/components/admin/ReportFilterBar.tsx'), 'utf8');
+    expect(bar).toContain('{users.map((u) => <option');
+    expect(bar).not.toContain('pagedUsers');
+    expect(bar).toContain('DELIBERATELY NOT PAGED');
     expect(admin).not.toContain('pagedAllBuildsUsers');
-    expect(admin).toContain('DELIBERATELY NOT PAGED');
   });
 });
 

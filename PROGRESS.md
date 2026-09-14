@@ -54760,3 +54760,93 @@ test:bundle` within budget (had to add the `supports-[height:100dvh]` companion 
 `npm run boot:check` PASS. Checked open PRs first (#2927, #2926, #2900) — #2926/#2927 also touch
 `admin.ts`/`AdminDashboard.tsx` but neither mentions APK/mobileShip/AdminApkReportStore, so no duplicate
 work; a mechanical merge conflict on those two shared files is possible and expected, not a redundancy.
+
+## 2026-09-14 — one report, two agents: the All-builds list now says when a row is taken; both lists made one
+
+**The admin, verbatim:** *"abhi ek hi report 2 agent ko send kar di! dono ne fix ki, aur dono ki PR
+apas me 2 hr tak conflict kari rahi!!"*
+
+That is build `1ef27cd7`, which reached two sessions and produced PRs **#2929** and **#2931** — two
+autopsies of one report, conflicting for two hours until one was cut down to a fragment. **Neither
+session could have known.** The user-submitted inbox has carried a `📤 Downloaded` badge since
+2026-08-12; the **All-builds** list — which is where the admin actually picks reports from, because it
+needs nobody to press Report — never got one.
+
+### 1 · The taken-mark, on the list that lacked it
+
+`AdminBuildTriageStore.ts` — durable marks for All-builds rows, **reusing `reportTriage.ts`** rather
+than inventing a second vocabulary: one meaning of "sent", one of "fixed", both already test-locked.
+
+- **Keyed by `workspaceId`, which is the row the admin looks at** — not by buildId. Both of the row's
+  buttons hand over the whole session, and a per-build key would leave the row itself unmarked, which
+  is the only place the duplicate could have been noticed.
+- ⚠️ **Copy marks it too, not only Download.** The admin said "download"; the row's other button copies
+  the identical JSON, and on a phone that is the commoner path. A mark the everyday action bypasses is
+  a mark that does not work.
+- **The badge is drawn from the SERVER's merged answer**, never an optimistic local guess — a badge
+  from a write that silently failed would send the next session to the same report, i.e. the exact bug.
+  A failed write says so and leaves the row unmarked.
+- **Pressing the badge un-marks it.** A mis-tap that could not be undone would HIDE a report that still
+  needs work — the failure this prevents, inverted.
+
+🔴 **THE TRAP IN MAKING IT REVERSIBLE, found before it shipped.** `applyReportMark` read `downloaded`
+as `body.downloaded === true`, which turns an **absent** field into `false`. The moment `false` began
+clearing the mark, every *"Mark fixed"* call would also have **erased the download it implies** —
+silently, on the existing user-report inbox. `downloaded` is now tri-state exactly like `fixed`, both
+routes pass `undefined` for absent, and a regression test asserts that marking fixed leaves the
+download standing.
+
+### 2 · Two lists made one (admin: *"dono build report ko ek jaisa bana do"*)
+
+**The measurable half came from the admin's own page capture:** on their 393 px phone the inbox's
+nine-column table (`SN · Application · Sender · Email · Time · User · Charged · Status`) ran
+**513 px past the right edge**. Time, User, Charged and Status were unreachable behind a horizontal
+scroll nobody discovers — `overflow-x-auto` did not fix that, it *caused* it. Meanwhile the All-builds
+list showed a clean row and **none of those facts at all**. One was unreadable; the other was poorer.
+
+- **`reportRowFacts.ts`** — ONE pure function per row type produces the SAME labels in the same order,
+  so a field added later appears in both lists by construction. The drift is what produced a
+  nine-column table on one screen and nothing on the other.
+- **`ReportInfoButton.tsx`** — the ⓘ the admin asked for. Collapsed by default; width-capped to
+  `min(18rem, 100vw − 2rem)` so the popover cannot itself push the page sideways.
+- The table is **gone**; the inbox now renders the same card rows as All-builds.
+- 🔒 **"Not recorded" is never a "₹0".** A build that failed before settling has no charge; a legacy
+  report has none either. Printing ₹0 would say we charged nothing when the truth is we do not know.
+  A genuine ₹0 carries `zeroBillReason` — *"working app or free"* — so the number is a statement.
+- The money facts ride the list query **that already read the whole report**, so parity costs **zero**
+  extra Firestore reads; opening each report from the panel would have been one round trip per row.
+
+### 3 · One filter bar (admin: *"filter bhi all build report wala chahiye dono me!!"*)
+
+`ReportFilterBar.tsx` + `reportListFilter.ts`. The component keeps the two bars **looking** the same;
+the pure module keeps them **agreeing** — and only the second can be tested.
+
+The inbox gains the two it never had: a **date range** (so *"is this still happening?"* is finally
+askable of the list where users actually complain) and a **per-user picker**. Its tier select and sort
+toggle survive alongside — extra, not duplicates; removing them for the sake of parity would have made
+the screen poorer.
+
+⚠️ **All-builds filters on the SERVER, the inbox in the browser, and that is not an inconsistency to
+"fix".** A date bound applied in the browser would make *"last 30 days"* secretly mean *"the newest 500
+rows, some of which are recent"*. The inbox already holds every row. Same meanings, applied where each
+list can afford them — which is exactly why the meanings are shared and the plumbing is not.
+
+### Three existing guards were re-pointed, not weakened
+
+`adminBuildFilters`, `pagedLists` and `reportUserNote` each pinned a literal from the JSX this change
+replaced. Every decision they guard **survives** — Clear fetching with explicit overrides, a chip that
+appears only when something is behind it, a `<select>` that is deliberately never paged, the user's own
+words staying searchable. Each now asserts that rule at its new address, and the `<select>` rule is
+stronger than before: it now covers **both** lists by construction.
+
+### Verification
+
+`tests/reportRowParity.test.ts` (20) + `src/components/admin/ReportParity.render.test.tsx` (18).
+**Proven by reversion:** dropping the mark from the Copy button fails a test.
+Full gate on the final state: `typecheck` · `noUnusedImports` · `typecheck:server` · `build` ·
+`test:bundle` · `boot:check` · `vitest` **1655 files · 23,165 passed · 1 skipped · `grep -c FAIL` = 0**.
+
+🔴 **Still open, and it is the deeper half of the admin's complaint:** the mark records that a report
+was taken; nothing records **who** took it or links it to the PR that came out. Two sessions started
+inside the same minute would still both see an unmarked row. A claim carrying an owner and a timestamp
+window is the real fix, and it is not built.

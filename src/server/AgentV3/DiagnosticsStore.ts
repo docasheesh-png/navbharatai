@@ -596,6 +596,23 @@ export interface AllDiagnosticsEntry extends DiagnosticsHistoryEntry {
   workspaceId: string;
   savedAt: number;
   ownerUid: string | null;
+  /**
+   * The money and tier facts, lifted out of the report the query ALREADY read (admin 2026-09-14:
+   * the All-builds list must carry the same information the user-submitted inbox does — sender,
+   * email, time, user type, charge, status — so one is not poorer than the other).
+   *
+   * 🔑 These cost NOTHING. `listAllDiagnostics` reads the whole document to project `ok`/`summary`
+   * anyway, so the billing block is already in memory; the alternative — opening each full report
+   * from the panel — would be one round trip per row on a list of up to 500.
+   *
+   * All optional: a legacy row, an unsettled build, or a report written before billing was recorded
+   * carries none of them, and the panel must show "not recorded" rather than a zero. A ₹0 charge and
+   * an unknown charge are different facts, and `zeroBillReason` is what distinguishes them.
+   */
+  userTier?: string | null;
+  billedInr?: number | null;
+  billedUsd?: number | null;
+  zeroBillReason?: string | null;
 }
 
 /**
@@ -633,6 +650,20 @@ export async function listAllDiagnostics(limit = 100, sinceMs?: number | null): 
         rootCause: r.rootCause,
         counts: r.counts,
         prompt: typeof r.prompt === 'string' ? r.prompt.slice(0, HISTORY_PROMPT_MAX) : undefined,
+        // Read defensively: `billing` is absent on a legacy or unsettled report, and a number that is
+        // not a number must stay NULL rather than become 0 — "we did not record a charge" and "we
+        // charged nothing" are different things to tell an admin looking at a failed build.
+        ...(() => {
+          const bill = (r as { billing?: Record<string, unknown> }).billing;
+          const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+          const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+          return {
+            userTier: str(bill?.userTier),
+            billedInr: num(bill?.billedInr),
+            billedUsd: num(bill?.billedUsd),
+            zeroBillReason: str(bill?.zeroBillReason),
+          };
+        })(),
       };
     });
   } catch {

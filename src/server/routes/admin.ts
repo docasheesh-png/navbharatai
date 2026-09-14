@@ -36,6 +36,7 @@ import { assistantSpendStore } from '../lib/AssistantSpendStore';
 import { summarizeBuildFailures } from '../AgentV3/buildFailureAnalytics';
 import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
 import { listAdminBuildReports, getAdminBuildReport, markAdminBuildReport, deleteAdminBuildReport, deleteAllAdminBuildReports } from '../AgentV3/AdminBuildReportStore';
+import { getBuildTriage, markBuildTriage } from '../AgentV3/AdminBuildTriageStore';
 import { listApkReports, getApkReport, markApkReportFixed, deleteApkReport, deleteAllApkReports } from '../lib/AdminApkReportStore';
 import { listAllDiagnostics, listBuildFacts, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { resolveUserIdentities, identityFrom, identityLabel } from '../lib/adminUserLookup';
@@ -1012,16 +1013,22 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       // refreshes constantly; a failure here degrades to ids rather than emptying the list.
       const identities = await resolveUserIdentities(all.map((b) => b.ownerUid), getDb() as never);
 
-      const builds = all
-        .filter((b) => buildMatchesFilters(b, {
-          status, uid, query: q,
-          identity: b.ownerUid ? identities.get(String(b.ownerUid).trim()) ?? null : null,
-        }))
-        .map((b) => {
-          const identity = b.ownerUid ? identities.get(String(b.ownerUid).trim()) ?? null : null;
-          const resolved = identity ?? identityFrom(b.ownerUid, null);
-          return { ...b, owner: { ...resolved, label: identityLabel(resolved) } };
-        });
+      const matched = all.filter((b) => buildMatchesFilters(b, {
+        status, uid, query: q,
+        identity: b.ownerUid ? identities.get(String(b.ownerUid).trim()) ?? null : null,
+      }));
+
+      // TRIAGE IN ONE BATCHED READ (admin 2026-09-14). Without this the list cannot show that a row
+      // has already been handed to someone — which is how one report reached two sessions and their
+      // PRs conflicted for two hours. Fetched only for the rows actually being returned, and a store
+      // failure yields an empty map, so the list degrades to no badges rather than to no list.
+      const triage = await getBuildTriage(matched.map((b) => b.workspaceId));
+
+      const builds = matched.map((b) => {
+        const identity = b.ownerUid ? identities.get(String(b.ownerUid).trim()) ?? null : null;
+        const resolved = identity ?? identityFrom(b.ownerUid, null);
+        return { ...b, owner: { ...resolved, label: identityLabel(resolved) }, triage: triage.get(b.workspaceId) ?? null };
+      });
 
       // The counts describe the FETCHED set (before status/user narrowing), so the chips can show how
       // much each choice would hide -- and `total` is stated separately so the panel never implies it
@@ -1086,6 +1093,35 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     }
   });
 
+  // MARK A ROW OF THE ALL-BUILDS LIST AS TAKEN (admin 2026-09-14: "jo build report admin download kar
+  // le, uske aage koi nisan bana do, jisse build report ki autopsy 2 bar na ho").
+  //
+  // The panel calls this AFTER a successful Copy or Download, rather than the download route marking
+  // itself: that route is a GET, and a GET that writes would also fire on a link preview, a retry or a
+  // browser prefetch. The mark must mean "the admin took this", so the admin's client is what says so.
+  //
+  // Same tri-state contract as the user-report inbox: absent leaves a mark alone, true sets it, false
+  // clears it. Clearing matters here — a mis-tap that could not be undone would HIDE a report that
+  // still needs work, which is the failure this feature exists to prevent.
+  app.post('/api/admin/all-builds/:workspaceId/mark', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const workspaceId = String(req.params.workspaceId || '').trim();
+      if (!workspaceId) { res.status(400).json({ error: 'A workspace id is required.' }); return; }
+      const body = (req.body ?? {}) as { downloaded?: unknown; fixed?: unknown; note?: unknown };
+      const triage = await markBuildTriage(workspaceId, {
+        downloaded: typeof body.downloaded === 'boolean' ? body.downloaded : undefined,
+        fixed: typeof body.fixed === 'boolean' ? body.fixed : undefined,
+        note: typeof body.note === 'string' ? body.note : null,
+      });
+      // NEVER 200 on a write that did not happen. The panel draws its badge from this answer, and a
+      // badge invented from an optimistic guess would send the next session to the same report.
+      if (!triage) { res.status(503).json({ error: 'The mark could not be saved — try again.' }); return; }
+      res.json({ ok: true, triage });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to mark the build.' });
+    }
+  });
+
   app.get('/api/admin/build-reports/:id', verifyAdminToken, async (req: Request, res: Response) => {
     try {
       const record = await getAdminBuildReport(String(req.params.id));
@@ -1109,7 +1145,10 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     try {
       const body = (req.body ?? {}) as { downloaded?: unknown; fixed?: unknown; note?: unknown };
       const triage = await markAdminBuildReport(String(req.params.id), {
-        downloaded: body.downloaded === true,
+        // TRI-STATE, like `fixed` below. `body.downloaded === true` would turn an ABSENT field into
+        // `false` — and since `false` now CLEARS the mark, that would erase the download every time
+        // the admin ticked "Mark fixed".
+        downloaded: typeof body.downloaded === 'boolean' ? body.downloaded : undefined,
         // Tri-state on purpose: absent leaves the mark alone, true sets it, false CLEARS it. The admin
         // will tick one by mistake, and a mark that cannot be undone silently buries a real bug.
         fixed: typeof body.fixed === 'boolean' ? body.fixed : undefined,

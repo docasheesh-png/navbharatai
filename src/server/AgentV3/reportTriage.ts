@@ -73,8 +73,17 @@ export function reportStatusHint(t: ReportTriage | null | undefined, fmt: (ms: n
  * Merge an incoming mark onto a report's existing triage. PURE, and deliberately narrow.
  *
  * Rules, each of which exists to stop the marks from lying:
- *  - DOWNLOAD IS STICKY. The first download is the one that matters ("when did this leave my inbox");
- *    re-downloading a report later must not rewrite that history.
+ *  - DOWNLOAD IS STICKY, BUT NOT IRREVERSIBLE. The FIRST download is the one that matters ("when did
+ *    this leave my inbox"), so re-downloading never rewrites that history — but an explicit
+ *    `downloaded: false` CLEARS it, for the same reason `fixed: false` does. A mark set by a mis-tap
+ *    that cannot be undone would HIDE a report that still needs work, which is the exact failure this
+ *    whole feature exists to prevent (admin 2026-09-14: one report was sent to two agents; the cure
+ *    must not become a way to lose one).
+ *
+ *    ⚠️ `downloaded` is TRI-STATE, exactly like `fixed`, and that is load-bearing. It used to be read
+ *    as `body.downloaded === true`, which turns an ABSENT field into `false` — so the moment `false`
+ *    started clearing the mark, every "mark fixed" call would also have erased the download it implies.
+ *    Absent must mean "leave it alone", never "clear it".
  *  - FIXED IS EXPLICIT AND REVERSIBLE. Only `fixed: true` sets it, and `fixed: false` clears it —
  *    because the admin WILL tick one by mistake, and a mark that cannot be undone is a mark that
  *    silently hides a real bug forever.
@@ -85,7 +94,7 @@ export function reportStatusHint(t: ReportTriage | null | undefined, fmt: (ms: n
  */
 export function applyReportMark(
   current: ReportTriage | null | undefined,
-  mark: { downloaded?: boolean; fixed?: boolean; note?: string | null },
+  mark: { downloaded?: boolean | undefined; fixed?: boolean | undefined; note?: string | null },
   now: number,
 ): ReportTriage {
   const at = ts(now) ?? Date.now();
@@ -94,7 +103,11 @@ export function applyReportMark(
     fixedAt: ts(current?.fixedAt),
     fixedNote: (current?.fixedNote ?? null) || null,
   };
-  if (mark?.downloaded && !next.downloadedAt) next.downloadedAt = at;
+  if (mark?.downloaded === true && !next.downloadedAt) next.downloadedAt = at;
+  // Clearing the download clears the FIXED mark with it: "fixed" claims work was done on a report
+  // this list no longer says anyone took, and a badge that outlives its own premise is how a shipped
+  // bug ends up wearing a green tick. Same reasoning as a note never surviving its mark, below.
+  else if (mark?.downloaded === false) { next.downloadedAt = null; next.fixedAt = null; next.fixedNote = null; }
   if (mark?.fixed === true) {
     if (!next.fixedAt) next.fixedAt = at;
     if (!next.downloadedAt) next.downloadedAt = at;

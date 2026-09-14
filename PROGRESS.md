@@ -55515,3 +55515,41 @@ first (#2935, #2934, #2933, #2932, #2900) — none touch this area. Branched fre
 this session's other open PR (#2933, an unrelated AgentV3 fix) to keep the two changes independently
 reviewable. PR #2937 opened; per the standing merge-hold rule, driven to green CI but not merged
 without the admin's explicit go-ahead.
+
+### 2026-09-14 — the preview address bar said "srcdoc"
+
+**Admin screenshot + question:** *"preview me yeh 'srcdoc' jis type box me likha hai — is srcdoc box ka
+kya kaam hai? isko delete kar dene se navbharatai par kya fark padega?"*
+
+**What the box is:** a real address bar for pages *inside the user's app* (`PreviewSurface.tsx`,
+`routeBar`) — ‹ › step the app's **own** history, and typing `/dashboard` + Enter performs a real
+navigation. Its docblock is explicit that it renders only once the app reports its location, *"so a
+preview that cannot drive itself never shows a dead control"*.
+
+🔴 **So it was not dead — it was mislabelled, and the guard could not tell.** The in-browser preview is
+an `about:srcdoc` iframe, and `location.pathname` of that URL is the literal string **`"srcdoc"`**. The
+app therefore *did* report — it reported garbage — so the `routePath ?` guard passed and the bar
+advertised an address that was never real.
+
+**The navigation half was already correct**, which is what makes deletion the wrong answer: the
+handler routes this mode by **hash** precisely because *"a srcdoc document cannot be navigated at
+all"*. Back, forward and Enter genuinely work. Only the display was wrong.
+
+`currentPath()` now reports the hash route in that mode (`#/dashboard` → `/dashboard`, no hash → `/`),
+keyed on `SOURCE === 'in-browser'` **or** `location.protocol === 'about:'` — the mode alone is
+sufficient (the in-browser preview rewrites BrowserRouter to HashRouter), and the protocol check is
+the belt for any future opaque document. **The live-server preview is byte-identical** — there
+`pathname` is the real path.
+
+**Answer to "delete kar dein?": no.** On the live preview this is a genuinely working feature that VS
+Code and Cursor both have and NavBharatAI lacked until 2026-09-10. Deleting the bar to remove one
+wrong word would have cost the feature on the mode where it is real.
+
+`tests/previewAddressBarSrcdoc.test.ts` — 9 tests, run against the **emitted bridge source** rather
+than a description of it. **Proven by reversion: 4 fail** when the mode guard is removed. Full gate
+green on the final state: **1665 files · 23,293 passed · 0 FAIL**.
+
+⚠️ **Noticed in the same screenshot, NOT fixed, recorded so it is not lost:** the preview header read
+**`4456m 8s`** — 74 hours — beside a build stamped `b:09-14 11:33`. That elapsed figure is almost
+certainly measuring from the wrong origin (a workspace's first build rather than this turn's start).
+Not investigated; raised as an open item.

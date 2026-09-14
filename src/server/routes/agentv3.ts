@@ -18732,13 +18732,33 @@ async function noteBuildOutcome(
         result = { ...result, summary: `${result.summary}\n\n${livePreviewLine}` };
       }
       // WEAK-TIER FAILURE GUIDANCE (admin spec 2026-08-02): when a real build attempt FAILS on the weak
-      // tier (the free engine, or a paid user who picked Weak), tell the user — in their OWN language —
-      // the honest, actionable reason: a complex app needs a stronger tier, switchable via the ⚙️ options
-      // button. Gated to `!result.ok && noClaudeBuild && expectsArtifacts` so it only fires on a genuine
-      // failed build on the weak tier — infra/sandbox failures short-circuit earlier and never reach here,
-      // so the tier is never blamed for a platform outage. White-label safe (names tiers, never a model).
-      // Kill switch AGENTV3_WEAK_FAIL_NOTICE=off. Appended to the failure summary so it rides the same bubble.
-      if (!result.ok && noClaudeBuild && expectsArtifacts && (process.env.AGENTV3_WEAK_FAIL_NOTICE ?? '').trim().toLowerCase() !== 'off') {
+      // tier (the free engine, or a paid user who picked Weak) for a reason that is genuinely about the
+      // WEAK TIER'S OWN CAPABILITY, tell the user — in their OWN language — the honest, actionable
+      // reason: a complex app needs a stronger tier, switchable via the ⚙️ options button.
+      //
+      // 🔴 CORRECTED 2026-09-14 (admin: "app fail ho jaye kisi bhi reason se, to user ko batao ki free
+      // plan me complex app nahi ban sakti"). The comment here used to claim "infra/sandbox failures
+      // short-circuit earlier and never reach here" — that was never actually enforced. THREE non-capability
+      // causes reach this exact line with `result.ok === false`: a cost-ceiling stop (`costCeilingFired`,
+      // the build hit its own spend limit — not a capability gap), a sandbox/E2B outage that killed the
+      // build AFTER some files were already written (the empty-build guard's own `sandboxUnavailable`
+      // check above only applies when ZERO files were produced, so a mid-build infra death slips past
+      // it), and a genuinely degraded provider (`providerFailuresLookDegraded` — the SAME check the
+      // empty-build branch above already uses to avoid blaming the tier for our own outage). All three
+      // are now excluded here too, so "this app is complex, upgrade" is said only when the evidence
+      // actually points at the tier's capability — never at our spend limit, our infra, or our outage.
+      //
+      // White-label safe (names tiers, never a model). Kill switch AGENTV3_WEAK_FAIL_NOTICE=off.
+      // Appended to the failure summary so it rides the same bubble.
+      if (
+        !result.ok &&
+        noClaudeBuild &&
+        expectsArtifacts &&
+        !sandboxUnavailable &&
+        !costCeilingFired &&
+        !providerFailuresLookDegraded(buildDiag.providerFailureBreakdown()) &&
+        (process.env.AGENTV3_WEAK_FAIL_NOTICE ?? '').trim().toLowerCase() !== 'off'
+      ) {
         const failLang = detectLanguageHint(prompt)?.code ?? null;
         result = { ...result, summary: `${result.summary ? `${result.summary}\n\n` : ''}${weakTierBuildFailedNotice(failLang)}` };
       }

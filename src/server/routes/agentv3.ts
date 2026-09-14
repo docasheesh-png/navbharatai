@@ -1619,6 +1619,16 @@ export function decideBuildBilledUsd(
   reconciledProviderUsage: Record<string, { inputTokens: number; outputTokens: number }>;
   realCostRemainder: { inputTokens: number; outputTokens: number };
   isOpusTier: boolean;
+  /**
+   * What the PROVIDERS really cost us for this build (USD, tokens only — the per-model rate card over
+   * the ledger, aux remainder at the Sonnet bound), and the VM beside it. Returned on EVERY path,
+   * including the Opus tier and the legacy per-tier path, because it is the platform's own cost and
+   * is true whatever formula the bill used. Persisted on the report's billing record (admin
+   * 2026-09-14: "asli kharcha vs bill") so the admin cost card reads a figure the SAME code priced,
+   * instead of re-deriving it later from a call log that storage caps at its last 40 entries.
+   */
+  realCostUsd: number;
+  sandboxUsd: number;
 } {
   const reconciledProviderUsage = reconcileWithSink(providerLedger.byProvider(), sinkTotal);
   const flatBilledUsd = billedAmountUsd(sinkTotal, powerLevel);
@@ -1628,18 +1638,19 @@ export function decideBuildBilledUsd(
     outputTokens: Math.max(0, (sinkTotal.outputTokens || 0) - (ledgerAttributed.outputTokens || 0)),
   };
   const isOpusTier = powerToTier(powerLevel) === 'opus';
+  const tokenCost = realProviderCostUsd(providerLedger.entries(), realCostRemainder);
+  const vmCost = Math.max(0, sandboxUsd || 0);
   let effectiveBilledUsd: number;
   if (isOpusTier) {
     effectiveBilledUsd = flatBilledUsd; // real Opus × 2 — unchanged
   } else if (realCostBillingEnabled()) {
-    const tokenCost = realProviderCostUsd(providerLedger.entries(), realCostRemainder);
-    effectiveBilledUsd = tieredMarkupUsd(tokenCost + Math.max(0, sandboxUsd || 0));
+    effectiveBilledUsd = tieredMarkupUsd(tokenCost + vmCost);
   } else {
     effectiveBilledUsd = (perTierBillingEnabled() || costRoutingActiveFor(userId, email))
       ? perTierBilledUsd(reconciledProviderUsage, powerLevel)
       : flatBilledUsd;
   }
-  return { effectiveBilledUsd, reconciledProviderUsage, realCostRemainder, isOpusTier };
+  return { effectiveBilledUsd, reconciledProviderUsage, realCostRemainder, isOpusTier, realCostUsd: tokenCost, sandboxUsd: vmCost };
 }
 
 /**
@@ -11156,6 +11167,8 @@ async function noteBuildOutcome(
                   : 'billing-off (no charge)',
             billedUsd: Math.round(watchdogBilledUsd * 1_000_000) / 1_000_000,
             billedInr: Math.round(watchdogBilledUsd * usdInrRate() * 100) / 100,
+            realCostUsd: Math.round(decided.realCostUsd * 1_000_000) / 1_000_000,
+            sandboxCostUsd: Math.round(decided.sandboxUsd * 1_000_000) / 1_000_000,
             powerMode: onlyOpus,
             powerLevel: powerLevelReqEffective,
             noClaude: noClaudeBuild,
@@ -18515,6 +18528,9 @@ async function noteBuildOutcome(
         // Needed by the failure ledger below: the tokens the per-provider ledger could not attribute.
         // Taken from the SAME call that decides the bill, so the two can never price a build differently.
         realCostRemainder: realCostRemainderForFailure,
+        // The platform's OWN cost, recorded beside the bill on every settle (success or failure) —
+        // the admin cost card's source of truth. Priced by the same call that priced the bill.
+        realCostUsd: decidedRealCostUsd, sandboxUsd: decidedSandboxUsd,
       } = decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, livePreviewCharge.usd);
       // PLATFORM TELEMETRY — feed the admin Monitor / Health Score / FinOps the REAL engine's numbers.
       // Until this line, those panels saw only the legacy Engineer-AI builder and were blind to every
@@ -18865,6 +18881,8 @@ async function noteBuildOutcome(
                   : 'billing-off (no charge)',
             billedUsd: Math.round(effectiveBilledUsd * 1_000_000) / 1_000_000,
             billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100,
+            realCostUsd: Math.round(decidedRealCostUsd * 1_000_000) / 1_000_000,
+            sandboxCostUsd: Math.round(decidedSandboxUsd * 1_000_000) / 1_000_000,
             ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited } : {}),
             ...(zeroBillReason ? { zeroBillReason } : {}),
             powerMode: onlyOpus,

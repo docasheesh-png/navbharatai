@@ -38,7 +38,8 @@ import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
 import { listAdminBuildReports, getAdminBuildReport, markAdminBuildReport, deleteAdminBuildReport, deleteAllAdminBuildReports } from '../AgentV3/AdminBuildReportStore';
 import { getBuildTriage, markBuildTriage } from '../AgentV3/AdminBuildTriageStore';
 import { listApkReports, getApkReport, markApkReportFixed, deleteApkReport, deleteAllApkReports } from '../lib/AdminApkReportStore';
-import { listAllDiagnostics, listBuildFacts, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
+import { listAllDiagnostics, listBuildFacts, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics, listRecentFullReports } from '../AgentV3/DiagnosticsStore';
+import { buildCostRow, summarizeCosts, SIMPLE_MAX_FILES, MID_MAX_FILES } from '../lib/buildCostLedger';
 import { resolveUserIdentities, identityFrom, identityLabel } from '../lib/adminUserLookup';
 import { fetchAuthMetadata, firebaseAuthBatch, resolveJoinedAt, resolveLastActiveAt } from '../lib/adminUserActivity';
 import { parseStatusFilter, parseDateFilter, sinceMsFor, buildMatchesFilters, statusCounts, usersInBuilds } from '../lib/buildListFilter';
@@ -1005,6 +1006,40 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // forbids gaming a benchmark (§53), and a curated "500-edit test" is exactly the thing that gets
   // nursed; grouping real workspaces answers the same question about projects users actually keep.
   // Admin-only: internal engine quality, never a user-facing surface.
+  /**
+   * ADMIN 2026-09-14 — "pichhle 30 build: size ke hisaab se asli kharcha vs bill". What each recent
+   * build REALLY cost the platform against what the user was billed, grouped by tier × app size.
+   * MEASURED from persisted reports (see buildCostLedger.ts) — no estimate anywhere in the response.
+   * A build whose real cost could not be established says so in its `source`/`measured` fields and is
+   * left out of the averages rather than counted as ₹0.
+   *
+   * 🔒 ADMIN-ONLY BY CONSTRUCTION: real cost and margin are exactly what the White-Label Law keeps
+   * off every user-facing surface. This route sits behind verifyAdminToken and nothing user-facing
+   * reads it.
+   */
+  app.get('/api/admin/build-costs', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '30'), 10) || 30, 1), 60);
+      const usdInr = usdInrRate();
+      const stored = await listRecentFullReports(limit);
+      const rows = stored
+        .map((entry) => buildCostRow(entry, usdInr))
+        .filter((row): row is NonNullable<typeof row> => row !== null);
+      const summary = summarizeCosts(rows);
+      res.json({
+        rows,
+        summary,
+        usdInr,
+        window: limit,
+        reportsRead: stored.length,
+        sizeRule: `Frontend-only apps: ≤ ${SIMPLE_MAX_FILES} files = simple, ≤ ${MID_MAX_FILES} = mid, more = full-stack; any server/API/database file = full-stack.`,
+        note: 'Real cost = provider tokens at the real rate card, as priced at settle. Sandbox VM cost is shown separately. Reports older than 2026-09-14 are re-priced from their stored call log; a log at the storage cap is a lower bound and is excluded from averages.',
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to read build costs.' });
+    }
+  });
+
   app.get('/api/admin/builder-scorecard', verifyAdminToken, async (req: Request, res: Response) => {
     try {
       const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '200'), 10) || 200, 1), 500);

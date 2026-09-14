@@ -5,6 +5,7 @@ import { doc, getDoc, setDoc, getServerDb } from '../lib/serverDb';
 import { buildRateLimiter, verifyFirebaseToken, enforceNotBanned } from '../lib/authMiddleware';
 import { injectBadge } from '../lib/madeWithBadge';
 import { probeHostingPlan } from '../lib/hostingPlan';
+import { routeParam, routeParams } from '../lib/expressCompat';
 
 // In-memory PWA cache entry (the durable copy lives in Firestore — see below).
 export interface PwaEntry {
@@ -114,9 +115,9 @@ export function registerPwaRoutes(app: Express, pwaStore: PwaStore): void {
   });
 
   app.get('/pwa/:id/manifest.json', async (req: Request, res: Response) => {
-    const entry = await loadEntry(pwaStore, req.params.id);
+    const entry = await loadEntry(pwaStore, routeParam(req.params.id));
     if (!entry) return res.status(404).json({ error: 'App not found or expired' });
-    const id = req.params.id;
+    const id = routeParam(req.params.id);
     const iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="100" fill="#6366f1"/><text y="370" x="256" font-size="320" text-anchor="middle" fill="white">&#128187;</text></svg>`;
     const icon = `data:image/svg+xml;base64,${Buffer.from(iconSvg).toString('base64')}`;
     res.json({
@@ -138,9 +139,9 @@ export function registerPwaRoutes(app: Express, pwaStore: PwaStore): void {
 
   app.get('/pwa/:id/sw.js', (req: Request, res: Response) => {
     res.setHeader('Content-Type', 'application/javascript');
-    res.setHeader('Service-Worker-Allowed', `/pwa/${req.params.id}`);
+    res.setHeader('Service-Worker-Allowed', `/pwa/${routeParam(req.params.id)}`);
     res.send(`
-const CACHE='nb-pwa-${req.params.id}';
+const CACHE='nb-pwa-${routeParam(req.params.id)}';
 self.addEventListener('install',()=>self.skipWaiting());
 self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));
 self.addEventListener('fetch',e=>e.respondWith(
@@ -149,11 +150,11 @@ self.addEventListener('fetch',e=>e.respondWith(
   });
 
   app.get('/pwa/:id', async (req: Request, res: Response) => {
-    const entry = await loadEntry(pwaStore, req.params.id);
+    const entry = await loadEntry(pwaStore, routeParam(req.params.id));
     if (!entry) {
       return res.status(404).send(EXPIRED_PAGE);
     }
-    const id = req.params.id;
+    const id = routeParam(req.params.id);
     const pwaHead = `<link rel="manifest" href="/pwa/${id}/manifest.json">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">

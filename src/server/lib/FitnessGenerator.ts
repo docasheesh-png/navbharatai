@@ -139,6 +139,7 @@ export const fitness = new FitnessService();
 
 export const FITNESS_ROUTES_SOURCE = `import { Router } from 'express';
 import { fitness, MembershipInactiveError } from './fitnessService';
+import { routeParam, routeParams } from './expressCompat';
 
 export const fitnessRouter = Router();
 
@@ -155,13 +156,13 @@ function handle(res: import('express').Response, fn: () => unknown): void {
 
 fitnessRouter.post('/plans', (req, res) => handle(res, () => fitness.addPlan(req.body)));
 fitnessRouter.post('/members', (req, res) => handle(res, () => fitness.join(req.body)));
-fitnessRouter.get('/members/:id', (req, res) => handle(res, () => fitness.get(req.params.id)));
+fitnessRouter.get('/members/:id', (req, res) => handle(res, () => fitness.get(routeParam(req.params.id))));
 fitnessRouter.get('/members', (req, res) => handle(res, () => fitness.listMembers({ status: req.query.status as never })));
-fitnessRouter.post('/members/:id/renew', (req, res) => handle(res, () => fitness.renew(req.params.id)));
-fitnessRouter.post('/members/:id/freeze', (req, res) => handle(res, () => fitness.freeze(req.params.id)));
-fitnessRouter.post('/members/:id/unfreeze', (req, res) => handle(res, () => fitness.unfreeze(req.params.id)));
-fitnessRouter.post('/members/:id/checkin', (req, res) => handle(res, () => fitness.checkIn(req.params.id))); // 409 if not active
-fitnessRouter.get('/members/:id/checkins', (req, res) => handle(res, () => fitness.checkInsFor(req.params.id)));
+fitnessRouter.post('/members/:id/renew', (req, res) => handle(res, () => fitness.renew(routeParam(req.params.id))));
+fitnessRouter.post('/members/:id/freeze', (req, res) => handle(res, () => fitness.freeze(routeParam(req.params.id))));
+fitnessRouter.post('/members/:id/unfreeze', (req, res) => handle(res, () => fitness.unfreeze(routeParam(req.params.id))));
+fitnessRouter.post('/members/:id/checkin', (req, res) => handle(res, () => fitness.checkIn(routeParam(req.params.id)))); // 409 if not active
+fitnessRouter.get('/members/:id/checkins', (req, res) => handle(res, () => fitness.checkInsFor(routeParam(req.params.id))));
 `;
 
 export const FITNESS_README = `# Fitness / gym starter

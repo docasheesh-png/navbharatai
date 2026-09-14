@@ -157,7 +157,7 @@ messagingRouter.post('/messages', (req: Request, res: Response) => {
 // Conversation history between the caller and another user.
 messagingRouter.get('/conversations/:me/:other/messages', (req: Request, res: Response) => {
   try {
-    return res.status(200).json(messaging.history(req.params.me, req.params.other));
+    return res.status(200).json(messaging.history(routeParam(req.params.me), routeParam(req.params.other)));
   } catch (err) {
     return res.status(400).json({ error: err instanceof Error ? err.message : 'bad request' });
   }
@@ -166,7 +166,7 @@ messagingRouter.get('/conversations/:me/:other/messages', (req: Request, res: Re
 // Mark a conversation read for the caller (up to the latest message). Returns the count just cleared.
 messagingRouter.post('/conversations/:me/:other/read', (req: Request, res: Response) => {
   try {
-    return res.status(200).json({ cleared: messaging.markRead(req.params.me, req.params.other) });
+    return res.status(200).json({ cleared: messaging.markRead(routeParam(req.params.me), routeParam(req.params.other)) });
   } catch (err) {
     return res.status(400).json({ error: err instanceof Error ? err.message : 'bad request' });
   }
@@ -174,7 +174,7 @@ messagingRouter.post('/conversations/:me/:other/read', (req: Request, res: Respo
 
 // The caller's inbox — every conversation with its unread count, most-recent first.
 messagingRouter.get('/inbox/:me', (req: Request, res: Response) => {
-  return res.status(200).json(messaging.inbox(req.params.me));
+  return res.status(200).json(messaging.inbox(routeParam(req.params.me)));
 });
 `;
 
@@ -191,6 +191,7 @@ so already-read messages never resurface). Files:
 
 \`\`\`ts
 import { messagingRouter } from './server/messaging/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', messagingRouter);
 \`\`\`
 

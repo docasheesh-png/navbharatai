@@ -143,7 +143,7 @@ timesheetRouter.post('/time/clock-out', (req: Request, res: Response) => {
 
 // The user's currently-running entry (or null).
 timesheetRouter.get('/time/:user/open', (req: Request, res: Response) => {
-  return res.status(200).json(timesheet.openEntry(req.params.user) ?? null);
+  return res.status(200).json(timesheet.openEntry(routeParam(req.params.user)) ?? null);
 });
 
 // Add a completed entry manually. { user, project?, note?, startedAt, endedAt }.
@@ -163,14 +163,14 @@ timesheetRouter.post('/time/manual', (req: Request, res: Response) => {
 timesheetRouter.get('/time/:user', (req: Request, res: Response) => {
   const q = req.query as { project?: string };
   return res.status(200).json({
-    entries: timesheet.list(req.params.user, { project: q.project }),
-    totalMs: timesheet.totalMs(req.params.user, { project: q.project }),
+    entries: timesheet.list(routeParam(req.params.user), { project: q.project }),
+    totalMs: timesheet.totalMs(routeParam(req.params.user), { project: q.project }),
   });
 });
 
 // Delete an entry.
 timesheetRouter.delete('/time/:id', (req: Request, res: Response) => {
-  if (!timesheet.remove(req.params.id)) return res.status(404).json({ error: 'entry not found' });
+  if (!timesheet.remove(routeParam(req.params.id))) return res.status(404).json({ error: 'entry not found' });
   return res.status(204).send();
 });
 `;
@@ -187,6 +187,7 @@ computes an **exact duration** (\`endedAt − startedAt\`, never negative). Tota
 
 \`\`\`ts
 import { timesheetRouter } from './server/timesheet/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', timesheetRouter);
 \`\`\`
 

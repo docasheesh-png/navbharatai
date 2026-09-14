@@ -146,6 +146,7 @@ export const invoicing = new InvoicingService();
 
 export const INVOICING_ROUTES_SOURCE = `import { Router } from 'express';
 import { invoicing, InvalidTransitionError, OverpaymentError } from './invoicingService';
+import { routeParam, routeParams } from './expressCompat';
 
 export const invoicingRouter = Router();
 
@@ -169,9 +170,9 @@ function view(id: string) {
 
 invoicingRouter.get('/invoices', (req, res) => handle(res, () => invoicing.list({ status: req.query.status as never })));
 invoicingRouter.post('/invoices', (req, res) => handle(res, () => invoicing.createInvoice(req.body)));
-invoicingRouter.get('/invoices/:id', (req, res) => handle(res, () => view(req.params.id)));
-invoicingRouter.patch('/invoices/:id/status', (req, res) => handle(res, () => invoicing.setStatus(req.params.id, req.body?.status))); // 409 invalid
-invoicingRouter.post('/invoices/:id/payments', (req, res) => handle(res, () => invoicing.recordPayment(req.params.id, Number(req.body?.amount), req.body?.method))); // 409 overpay
+invoicingRouter.get('/invoices/:id', (req, res) => handle(res, () => view(routeParam(req.params.id))));
+invoicingRouter.patch('/invoices/:id/status', (req, res) => handle(res, () => invoicing.setStatus(routeParam(req.params.id), req.body?.status))); // 409 invalid
+invoicingRouter.post('/invoices/:id/payments', (req, res) => handle(res, () => invoicing.recordPayment(routeParam(req.params.id), Number(req.body?.amount), req.body?.method))); // 409 overpay
 invoicingRouter.get('/invoices/outstanding/total', (_req, res) => handle(res, () => ({ outstanding: invoicing.outstandingTotal() })));
 `;
 

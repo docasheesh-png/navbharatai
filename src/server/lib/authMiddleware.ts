@@ -21,6 +21,7 @@ import { loadFirebaseAdmin } from './firebaseAdminModule';
 import { getServerDb, doc, getDoc } from './serverDb';
 import { readBanStatus, suspendedMessage } from './banGate';
 import { audit } from './audit';
+import { routeParam } from './expressCompat';
 
 /**
  * firebase-admin init options. Passes an EXPLICIT projectId when the environment provides one, so the
@@ -728,11 +729,11 @@ export function trackDevice(paramName = 'userId') {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     if (process.env.VITEST) { next(); return; }
     try {
-      const uid = req.params[paramName] || (await verifyFirebaseToken(req));
+      const uid = routeParam(req.params[paramName]) || (await verifyFirebaseToken(req));
       if (uid) {
         const { recordAndEvaluateDevice } = await import('./sessionTracker');
         const evaluation = await recordAndEvaluateDevice(
-          uid, req.headers['user-agent'] as string | undefined, req.ip, new Date().toISOString(),
+          uid, routeParam(req.headers['user-agent']) || undefined, req.ip, new Date().toISOString(),
         );
         if (evaluation.risk === 'high') {
           res.setHeader('X-Device-New', 'true');

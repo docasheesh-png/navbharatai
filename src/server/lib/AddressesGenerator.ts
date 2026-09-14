@@ -191,12 +191,12 @@ addressRouter.post('/addresses', (req: Request, res: Response) => {
 
 // A user's addresses (default first).
 addressRouter.get('/addresses/:user', (req: Request, res: Response) => {
-  return res.status(200).json(addressBook.list(req.params.user));
+  return res.status(200).json(addressBook.list(routeParam(req.params.user)));
 });
 
 // A user's current default address.
 addressRouter.get('/addresses/:user/default', (req: Request, res: Response) => {
-  const a = addressBook.getDefault(req.params.user);
+  const a = addressBook.getDefault(routeParam(req.params.user));
   if (!a) return res.status(404).json({ error: 'no default address' });
   return res.status(200).json(a);
 });
@@ -204,7 +204,7 @@ addressRouter.get('/addresses/:user/default', (req: Request, res: Response) => {
 // Make an address the default (unsets the previous default).
 addressRouter.post('/addresses/:id/default', (req: Request, res: Response) => {
   try {
-    return res.status(200).json(addressBook.setDefault(req.params.id));
+    return res.status(200).json(addressBook.setDefault(routeParam(req.params.id)));
   } catch (err) {
     return res.status(404).json({ error: err instanceof Error ? err.message : 'address not found' });
   }
@@ -218,7 +218,7 @@ addressRouter.patch('/addresses/:id', (req: Request, res: Response) => {
     if (body[k] !== undefined) patch[k] = String(body[k]);
   }
   try {
-    return res.status(200).json(addressBook.update(req.params.id, patch));
+    return res.status(200).json(addressBook.update(routeParam(req.params.id), patch));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'could not update';
     return res.status(message === 'address not found' ? 404 : 400).json({ error: message });
@@ -227,7 +227,7 @@ addressRouter.patch('/addresses/:id', (req: Request, res: Response) => {
 
 // Delete an address (promotes a new default if the deleted one was the default).
 addressRouter.delete('/addresses/:id', (req: Request, res: Response) => {
-  const result = addressBook.remove(req.params.id);
+  const result = addressBook.remove(routeParam(req.params.id));
   if (!result.removed) return res.status(404).json({ error: 'address not found' });
   return res.status(200).json(result);
 });
@@ -246,6 +246,7 @@ default). Files:
 
 \`\`\`ts
 import { addressRouter } from './server/addresses/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', addressRouter);
 \`\`\`
 

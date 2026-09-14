@@ -176,7 +176,7 @@ surveyRouter.post('/', (req: Request, res: Response) => {
 
 // Public survey (to render the form).
 surveyRouter.get('/:id', (req: Request, res: Response) => {
-  const survey = surveys.get(req.params.id);
+  const survey = surveys.get(routeParam(req.params.id));
   if (!survey) return res.status(404).json({ error: 'survey not found' });
   return res.status(200).json(survey);
 });
@@ -186,7 +186,7 @@ surveyRouter.post('/:id/responses', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { answers?: unknown };
   try {
     const answers = body.answers && typeof body.answers === 'object' ? (body.answers as Record<string, AnswerValue>) : {};
-    return res.status(201).json(surveys.submit(req.params.id, answers));
+    return res.status(201).json(surveys.submit(routeParam(req.params.id), answers));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'bad request';
     return res.status(message === 'survey not found' ? 404 : 400).json({ error: message });
@@ -196,7 +196,7 @@ surveyRouter.post('/:id/responses', (req: Request, res: Response) => {
 // Aggregated results. Admin.
 surveyRouter.get('/:id/results', (req: Request, res: Response) => {
   try {
-    return res.status(200).json({ responseCount: surveys.responseCount(req.params.id), aggregate: surveys.aggregate(req.params.id) });
+    return res.status(200).json({ responseCount: surveys.responseCount(routeParam(req.params.id)), aggregate: surveys.aggregate(routeParam(req.params.id)) });
   } catch (err) {
     return res.status(404).json({ error: err instanceof Error ? err.message : 'survey not found' });
   }
@@ -217,6 +217,7 @@ question **exactly**. Files:
 
 \`\`\`ts
 import { surveyRouter } from './server/surveys/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api/surveys', surveyRouter);
 \`\`\`
 

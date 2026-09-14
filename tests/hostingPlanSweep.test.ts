@@ -433,7 +433,9 @@ describe('lifecycle wiring', () => {
   it('the sweep is registered at boot and the purchase route re-attaches suspended domains', () => {
     const src = readFileSync(join(__dirname, '..', 'src/server/routes/wallet.ts'), 'utf8');
     expect(src).toContain('registerHostingPlanSweep()');
-    expect(src).toContain('reattachSuspendedDomains(req.params.userId)');
+    // Spelling-proof: the Express 5 migration wraps route params in routeParam(); the guarantee
+    // being pinned is that the purchase route re-attaches THIS user's suspended domains.
+    expect(src).toMatch(/reattachSuspendedDomains\([^)]*req\.params\.userId[^)]*\)/);
   });
 
   it('the sweep query uses ONE single-field inequality (no composite index to silently fail on)', () => {

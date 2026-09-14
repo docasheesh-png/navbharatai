@@ -5,6 +5,7 @@ import { encodeWorkspace, decodeWorkspace } from '../project/WorkspaceStore';
 import { mergeWorkspaceState, type WorkspacePayload } from '../project/SyncMerge';
 import { requireUserMatch } from '../lib/authMiddleware';
 import { sendSafeError } from '../lib/httpError';
+import { routeParam, routeParams } from '../lib/expressCompat';
 
 /**
  * Cross-device cloud sync routes (chat sessions + last generated app), stored in
@@ -29,7 +30,7 @@ export function registerSyncRoutes(app: Express): void {
   // sends the Bearer token via authedHeaders(); VITEST skips the check (see requireUserMatch).
   app.get('/api/sync/:userId', requireUserMatch('userId'), async (req: Request, res: Response) => {
     const db = getDb() as any;
-    const { userId } = req.params;
+    const { userId } = routeParams(req.params);
     if (!db) return res.json({ sessions: [], lastApp: '', updatedAt: null });
     try {
       const snap = await getDoc(doc(db, 'user_workspaces', userId));
@@ -65,7 +66,7 @@ export function registerSyncRoutes(app: Express): void {
 
   app.post('/api/sync/:userId', requireUserMatch('userId'), async (req: Request, res: Response) => {
     const db = getDb() as any;
-    const { userId } = req.params;
+    const { userId } = routeParams(req.params);
     if (!userId) return res.status(400).json({ error: 'User is not authenticated' });
     if (!db) return res.json({ ok: false, reason: 'db_unavailable' });
     try {

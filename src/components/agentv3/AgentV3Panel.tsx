@@ -1,4 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { usePagedList } from '../../hooks/usePagedList';
+import { LoadMore } from '../../components/common/LoadMore';
 import { FilesPanel, type FilesPanelProps } from '../panels/FilesPanel';
 import { AttachMenu } from '../AttachMenu';
 import { SecretRequestCard } from './SecretRequestCard';
@@ -158,6 +160,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   useEffect(() => { if (state.pendingClarify) setClarifyDismissed(false); }, [state.pendingClarify]);
   // Save-as-template: the user's own reusable starters (on-device), shown beside the built-in ones.
   const [savedTpls, setSavedTpls] = useState<SavedTemplate[]>(() => loadSavedTemplates());
+  const pagedSavedTpls = usePagedList(savedTpls);
   const handleSaveTemplate = (text: string) => setSavedTpls(saveTemplate('', text));
   const handleRemoveTemplate = (id: string) => setSavedTpls(removeSavedTemplate(id));
   // Paid-public (billing PR 5): whether THIS user is on paid billing (server-reported: paid-public flag
@@ -515,6 +518,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Files the user attached for the next message (images, PDFs, Word/Excel/PPT,
   // ZIP, text/code). Read and analyzed by v5.0 — converted to base64 on send.
   const [files, setFiles] = useState<File[]>([]);
+  const pagedFiles = usePagedList(files);
   // Composer: auto-growing textarea + expand/minimize + device-aware Enter behaviour.
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [composerExpanded, setComposerExpanded] = useState(false);
@@ -4097,7 +4101,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   <div className="mt-5">
                     <div className="text-[11px] uppercase tracking-wide text-zinc-600 mb-2">Your templates</div>
                     <div className="flex flex-wrap justify-center gap-1.5 max-w-md mx-auto">
-                      {savedTpls.map((t) => (
+                      {pagedSavedTpls.visible.map((t) => (
                         <span key={t.id} className="group/tpl inline-flex items-center rounded-full border border-amber-600/40 bg-amber-500/10 text-xs text-amber-200 overflow-hidden">
                           <button
                             type="button"
@@ -4118,6 +4122,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                           </button>
                         </span>
                       ))}
+                      <LoadMore list={pagedSavedTpls} label="templates" />
                     </div>
                   </div>
                 )}
@@ -4873,7 +4878,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             )}
             {files.length > 0 && (
               <div className="px-3 pt-2 flex flex-wrap gap-1.5">
-                {files.map((f, i) => (
+                {pagedFiles.visible.map((f, i) => (
                   <span key={i} className="flex items-center gap-1 max-w-[200px] text-[11px] bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-zinc-300">
                     <FileText className="w-3 h-3 shrink-0 text-indigo-400" />
                     <span className="truncate">{f.name}</span>
@@ -4882,6 +4887,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     </button>
                   </span>
                 ))}
+                <LoadMore list={pagedFiles} label="files" />
               </div>
             )}
             {/* File inputs now live inside <AttachMenu/> (photo / gallery / file) below. */}

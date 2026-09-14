@@ -1,4 +1,6 @@
 import React, { useState, useCallback } from 'react';
+import { usePagedList } from '../../hooks/usePagedList';
+import { LoadMore } from '../../components/common/LoadMore';
 import { Bug, Wand2, Copy, Check, ChevronDown, ChevronRight, Clock, X, History, Shield, Lightbulb, Search, Code2, CheckCircle2, FileSearch } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { AppScanPanel } from './AppScanPanel';
@@ -87,6 +89,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
   const [copiedFix, setCopiedFix] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>(loadHistory);
+  const pagedHistory = usePagedList(history);
   // Two modes: paste a single error, or scan a whole app (a Pro v5 app / GitHub repo / open project).
   const [mode, setMode] = useState<'single' | 'app'>('single');
   const detectedType = errorText.trim() ? detectErrorType(errorText) : null;
@@ -610,7 +613,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
                 No history yet
               </p>
             )}
-            {history.map((entry) => (
+            {pagedHistory.visible.map((entry) => (
               <button
                 key={entry.id}
                 onClick={() => handleHistoryRestore(entry)}
@@ -647,6 +650,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
                 </div>
               </button>
             ))}
+            <LoadMore list={pagedHistory} label="runs" />
           </div>
         )}
       </div>

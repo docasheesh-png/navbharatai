@@ -52978,6 +52978,8 @@ laptop and replayed on a phone, and a rotation — plus the narrow-screen case w
 cross and the **left** edge must win, because that is the one edge a finger cannot drag it back from.
 Bite-checked by removing the secret's opt-out: the wiring test fails. `AppKnowledgeBase.ts` gained an
 `admin-page-copy` entry.
+---
+
 ## 2026-09-14 — AUTOPSY 697b38ee: a working app was reported as a failed build (three root causes, one open)
 
 **Report.** Prompt: *"Continue from where you left off and finish/fix the build so the app works
@@ -53078,6 +53080,94 @@ per-gate.
   a wrong estimate with a differently-wrong one is not an improvement.
 - **The sandbox at 96% idle, started by `files`** is a cost item for the `sandbox_starts` instrument that
   PR D added, not a build defect. It wants a few days of that data read before anything is changed.
+
+---
+
+## 2026-09-14 — "Farzi object": the bike was a capsule on two cylinders, and the realism system was innocent
+
+**Report.** Admin screenshot of a bike racing game built by Pro v3.0. The bike was a red capsule lying
+across two grey cylinders. *"jab user koi game banwata hai, to object ek dam nakli se bante hai, farzi
+object lagte hai… jab user bole real/realistic/asli (word match nahi karne hai, user intension dekhni
+hai) to ek real 3d object banna chahiye."*
+
+### The interesting part: every piece they asked for already existed
+
+- `realismIntent.ts` — the admin's OWN 2026-08-27 instruction, already reading real/asli/realistic from
+  INTENTION rather than wording, with "real-time"/"real money" excluded by construction.
+- `objects.ts` (`Game3DGenerator`) — already builds genuinely good things at the real tier. `createCar`
+  has a raked windscreen, wheel arches, separate tyre and rim, emissive lights, a grille and mirrors.
+- `routes/agentv3.ts` — already prepends, in capitals, *"build every object with objects.ts … rather
+  than hand-modelling shapes"*, with the tier decided deterministically.
+
+🔴 **AND NONE OF IT COULD HELP, BECAUSE THE LIBRARY HAD NO BIKE.** Eight builders existed — car, tree,
+mountain, river, desert, road, animal, humanoid — so for a bike racing game the standing order "use the
+library, never hand-model" was **an order the model could not obey**. It hand-modelled with no spec, and
+three primitives is what free-form hand-modelling produces. `setDetailLevel` could not rescue it either:
+the tier only ever reaches objects.ts builders, so a hand-modelled object is `lite` whatever the user
+typed. **The realism switch worked; the library was too small, and nothing in the system said so.**
+
+### The fix, in the two halves the 50/50 law requires
+
+**Half 1 — the instance.** `createMotorcycle` and `createBicycle` in the object library, at the craft
+level `createCar` set. Real proportions (2.05 m long, **1.35 m wheelbase**, 0.30 m wheel radius, 0.80 m
+seat, 0.72 m bars), `sport`/`commuter`/`cruiser` variants, a `seat` anchor a `createHumanoid` drops
+straight into, and `lean()` / `steer()` / `roll()` — a bike that corners flat reads as a prop on rails.
+At the real tier: spoked rims, front disc and caliper, swingarm and chain, cooling fins, an exhaust
+header into a can, mudguards, mirrors, footpegs, emissive lights. The bicycle is built as a bicycle —
+open diamond frame, big thin spoked wheels, cranks and pedals — not as a shrunken motorbike.
+
+**Half 2 — the condition.** `heroObjectSpec.ts`: an N-builder library meets its N+1th request every day
+(an auto-rickshaw, a tractor, a fishing boat, a cricket bat), and at that moment the engine is back to
+improvising. So the builder now receives, for whatever the game is about, the object's **real-world
+dimensions**, the **parts it cannot read as itself without**, and **the one proportion that carries the
+silhouette** — whether or not a builder exists. ~25 objects, matched in English, Hinglish and
+Devanagari. This generalises what `createCar` already encoded in prose (*"those five numbers are most of
+why it reads as a car"*) to the objects nobody has written a builder for. It rides the SAME 3D/game gate
+as the realism block, so a billing app that mentions a "cab" gets nothing. Report code: `HERO_OBJECTS`.
+
+### A real bug the tests caught, and the reason the tests are shaped the way they are
+
+The first draft's wheelbase was **1.62 m, not 1.35** — a raked fork carries its wheel ~0.32 m forward of
+the steering head, and the head was not set back to pay for it. A stretched chopper, with nothing in the
+render to say so. **A string-matching test could never have seen this**, and string matching is all the
+generator tests could do, because `three` is not a dependency of this repo.
+
+So `tests/helpers/threeStub.ts` was added: the GENERATED `objects.ts` is transpiled and **executed**
+against a minimal three.js stand-in, and the assertions are about real numbers in the resulting scene
+graph — where the wheels are, whether they touch the ground, how far the parts spread along the bike
+(the "mostly air" test, which is the screenshot's failure stated as a measurement), and that steering
+moves the front wheel and only the front wheel.
+
+**Tests:** `tests/game3dObjects.test.ts` (10, runs the generated builder), `tests/heroObjectSpec.test.ts`
+(34). `AppKnowledgeBase.ts` updated in the same commit, per the standing rule.
+
+### 🔎 SIBLING BUG FOUND, DELIBERATELY NOT FIXED HERE (rule 3 + the concurrency rule)
+
+Writing the Devanagari matchers surfaced a bug class in this repo: **`\b` is defined on ASCII word
+characters, so it can never sit beside a Devanagari letter — the boundary logic inverts and the
+alternative silently never matches.** Two live files have it, verified by running their own regexes:
+
+| File | Pattern | Consequence |
+|---|---|---|
+| `AgentV3/claimAudit.ts` (≈97, 99, 144, 146, 157, 181) | `/\b(?:console\|कंसोल)\b…/` | every Hindi/Devanagari alternative in the false-claim detector is **dead** — a summary that overclaims in Hindi is never caught |
+| `lib/liveSearchContext.ts` (≈95) | `/\b(?:train\|rail\|…\|ट्रेन\|रेल)\b/i` | a live-train question asked in Devanagari never reaches the train lookup |
+
+**Not fixed in this change, and the reason is not caution about the fix — it is two lines.**
+`claimAudit.ts` is being edited right now by PR #2914, and `liveSearchContext.ts` is a Brave-path file
+the admin has told sessions to leave alone. Racing either would produce a conflict whoever is right.
+**Recorded here as an open sibling so the next session that legitimately owns those files fixes it**;
+`realismIntent.ts` already gets this right (its Devanagari group carries no `\b`) and is the pattern to
+copy.
+
+### 🔴 STILL OPEN — the honest ceiling, stated rather than sold
+
+This makes hand-modelled objects look **deliberate and real-LOOKING**. It is **not photorealism**, and
+no prompt can make it so. Photoreal needs real scanned assets (`.glb`), which is a hosting + licensing +
+attribution project (CC0 libraries such as Kenney/Quaternius/Poly Pizza, served from our own bucket with
+generated attribution), or paid AI 3D generation (~30–120 s and real money per model, which would break
+the "minutes, effortless" bar). **That is a product decision with a bill attached, so it is the admin's
+to make, not a session's.** Every user-facing word about this feature says "real-looking" and never
+"photorealistic", for exactly that reason.
 ## 2026-09-14 — The weak-tier "this app is complex, upgrade" notice was firing on our own failures too
 
 The admin asked, plainly: whenever a user's build fails, for ANY reason, tell them the free (Weak)
@@ -53902,6 +53992,226 @@ With the table gone, the `billingLogs` prop and its `/logs` fetch have **no cons
 nobody reads. Removing that chain touches three more files for no user-visible benefit, so it is not in
 this change; the leak it carried is closed at the route either way. Worth doing as its own tidy-up.
 
+---
+
+## 2026-09-14 (3) — Long lists: 12 rows and a "Load more", and the half a button cannot fix
+
+Admin asked for two things: **(1)** scan NavBharatAI and the admin panel for every place a whole list
+loads at once, and make the list; **(2)** fix it professionally — 10-12 rows first, then "Load more".
+
+### 1 · The scan
+
+**72 rendered lists with no paging at all, across 36 files.** Every one builds a DOM row for every
+record it holds. Separately, **22 of 22 `getDocs` calls on the server carry no `limit()`** — several
+read whole collections (`user_token_wallets`, `user_profiles`, `promo_codes`, the analytics triple).
+
+Worst offenders by how fast they grow: the admin user table and report list, the whole of the App
+Store (7 lists in one file), the public gallery, every tool's run history, the deploy/commit history,
+the workspace log viewer, the project file tree.
+
+### 2 · The fix — one hook, not seventy-two slices
+
+`src/hooks/usePagedList.ts` + `src/components/common/LoadMore.tsx`. **25 lists** now show 12 rows and
+a button. Doing it by hand 72 times would have been 72 chances to get the same two details wrong — the
+duplication this repo has already paid for twice (`safeRelPath` ×4; a model id in five files):
+
+- **THE RESET.** A filtered or re-sorted list starts at page one. Miss it and an admin who pressed
+  "Load more" five times then searched gets 72 rows of the new result.
+- **THE SHRINK.** When the list gets shorter than what is shown, the count clamps — otherwise 5,000
+  filtered to 3 leaves a button that was never pressed and now cannot be.
+
+The arithmetic is extracted as `pageWindow()` (pure) because both bugs live in it and this repo has no
+`@testing-library`, so a hook-only design would have been untestable.
+
+The button **always says how many are left** — "Load 12 more · Showing 12 of 4,331 users" (Indian digit
+grouping). "Load more" alone is a mystery button: the reader cannot tell if one row follows or four
+thousand. It renders **nothing** when the list is complete.
+
+### 3 · 🔴 The half a button CANNOT fix — `/api/admin/users`
+
+The admin's own example, and the one place client paging would have been a lie. The slowness is in the
+REQUEST: the route looks up Firebase Auth metadata for every user, batched at Firebase's
+100-identifier limit, so **5,000 users is fifty sequential Auth round-trips before the first row can be
+drawn**. Hiding rows afterwards changes nothing anyone can feel.
+
+So the Auth lookup and the payload are now limited to the page being sent, and "Load more" asks the
+SERVER for the next 25.
+
+⚠️ **The Firestore SCAN deliberately stays.** Sort and search run over the whole set in memory because
+Firestore cannot do substring search — limiting the READ would silently reduce "search all users" to
+"search the first page", which is the fix trading one problem for a worse one.
+
+🔒 **OPT-IN, so an old client cannot break.** The Android app is BUNDLED, so a phone can run last
+month's panel against today's server, and that panel does `users.map(...)` on the response. Without
+`?paged=1` the response is the same ARRAY it has always been; the panel reads both shapes.
+
+### ⚠️ Three places deliberately left alone — and this is the useful half
+
+- **A `<select>` picker** (the all-builds user filter). Paging it makes the control WORSE than the
+  problem: a user outside the first twelve becomes unreachable. It is also invalid HTML.
+- **Chat and message threads** (`LiveCollaboration`, `SonicChat`, `BotBuildHelp`). These need "load
+  older" at the TOP, not "load more" at the bottom — a different control, not yet built.
+- **Genuinely bounded lists** — pipeline `steps`, scan `stages`, `availableScopes`, the bot-builder's
+  own nodes. Paging a fixed list of six adds a control and fixes nothing.
+
+### 🐛 Three real bugs my own automation introduced, caught by the gate before they shipped
+
+Recorded because "I applied it mechanically to 26 sites" is exactly where this goes wrong:
+
+1. **A `<div>` inside `<tbody>`** on the promo-codes table — the browser hoists it out and React logs
+   `validateDOMNesting`. Fixed properly: `LoadMore` takes a `colSpan` and renders a real
+   `<tr><td colSpan>` inside a table.
+2. **A declaration inserted INSIDE a multi-line `useState(() => {…})`** in `GitPanel`, splitting the
+   statement.
+3. **A hook declared in the parent for a `.map` that belonged to a CHILD taking the array as a prop**
+   (`PerformanceAnalyzer`) — reverted whole; a small SVG chart is not a list anyone scrolls.
+
+**Tests:** `tests/pagedLists.test.ts` (24 — the arithmetic, the wiring, the server half, and the
+`<select>` that must stay whole) and `src/components/common/LoadMore.render.test.tsx` (7 — real
+markup). `AppKnowledgeBase.ts` updated in the same commit.
+
+### Still open, named rather than left silent
+
+**47 lists remain unpaged.** Most are genuinely bounded (see above), but these grow and are worth a
+later pass: `NotificationBell.items`, `AgentV3Panel.queueItems` / `reportPickerItems`,
+`AppScanPanel.repos` / `proApps` / `notes`, `AICodeReview.issues` / `repos`, `CodeVersioning.points`,
+`SecurityScan.history`, `StoreBuildPanel.artifacts`, `TeamCollaboration.pendingInvites`,
+`CodeMinifier.fileList`, `NavAppStore.detailShots`, `AdminDashboard.expandedHistory`. Each was skipped
+by the applier for a real structural reason (the `.map` is built in a helper, or sits in a `<select>`,
+or the array is a prop) — none is a one-line change, and none is guesswork away from being correct.
+
+**And the server's other 21 unbounded reads are untouched**, on purpose: each one needs its own
+sort/search analysis, exactly like `/api/admin/users` did, and doing them in bulk is how "search all"
+quietly becomes "search page one".
+## 2026-09-14 (2) — 100 objects, how to place each kind, and an answer for the 101st
+
+Follow-up to the "farzi object" autopsy above. Admin asked for three things, verbatim:
+
+1. *"Generally kisi app me kya kya object chahiye hote hai — uski ek detailed list banao… list jitni
+   badi hogi NavBharatAI ko utni hi asani hogi."*
+2. *"Sabhi object ko real dab realistic game me kaise add karna hai, NavBharatAI ko sikhao."*
+3. *"Koi aisa object jo apni list me hai hi nahi, to provider se banwao — ek dam realistic aur game
+   fit hona chahiye."*
+
+### 1 · The list — 100 objects, 19 categories
+
+`objectCatalog.ts`. Vehicles (14 land, 5 air, 3 water), people (4), animals (13), terrain (7), water
+(4), vegetation (6), rock (2), sky (3), buildings (8), street props (6), interior (7), sport (4),
+weapons (4), collectibles (4), containers (2), food (2), effects (2). Every entry carries the **real
+size in metres**, the **parts it cannot read as itself without**, and the **tell** — the one
+proportion that carries the silhouette and what it looks like when that is wrong. Matched in English,
+Hinglish and Devanagari.
+
+🔒 **Matching is DATA, not a hand-written RegExp per entry.** `compileMatch` assembles the pattern
+from `words` + `hi`. A hundred hand-written regexes is a hundred chances to repeat the `\b`-beside-
+Devanagari bug recorded in the entry above — building them centrally makes it *impossible*, not
+merely *fixed*.
+
+### 2 · How to place it — taught per CATEGORY, not per object
+
+`PLACEMENT` in `objectCatalogTypes.ts`, 19 rules sets. **A perfectly modelled car floating 20 cm above
+the road with no contact shadow looks FAKER than a crude car that is planted, shadowed and rolling** —
+placement is most of what the eye reads as real, and it is the part an improvising builder skips first
+because nothing errors when it is missing.
+
+Vehicles: raycast the ground so the tyres touch, cast AND receive shadows, roll the wheels from real
+speed, steer the front wheels only, follow the road tangent. Vegetation: instance it, randomise
+rotation and scale, sink the base in, sway, cluster. Water: it must MOVE and reflect, with a wet band
+at the bank. Sky: never cast shadows, never collide, drift slowly. Buildings: the 2.1 m door proves
+the scale, the roof overhangs, the base steps down a slope. Street props: wires SAG, signals show one
+lamp, streetlight arms reach over the road. And so on for the other twelve.
+
+⚠️ Written once per KIND on purpose. Per-object copies of one paragraph is exactly the duplication
+this repo has already paid for twice (`safeRelPath`, stale model ids).
+
+### 3 · The 101st object — the engine writes the spec, and it is checked
+
+`objectSpecProvider.ts` + the new **`object_spec` tool**. Ladder, cheapest first:
+
+| | |
+|---|---|
+| 1 | the 100-object catalogue — instant, free, human-checked |
+| 2 | the process cache — generated once, reused for every later build |
+| 3 | one small engine call on the FREE namespace (never reaches Claude; GLM-flash leads at ₹0), **strictly validated** |
+| 4 | the spec-first PROTOCOL — costs nothing, cannot fail |
+
+🔴 **Deliberately NOT AI mesh generation** (Meshy/Tripo), and the reason is written in the file: that
+costs real money per object, takes 30–120 s, and returns a mesh we would have to host, licence and
+attribute — breaking the admin's own *"chutkiyon ka kaam"* bar. **The model was never bad at BUILDING
+geometry** — `createCar` proves it builds beautifully when it knows what it is building. It was bad at
+DECIDING what a bike is, because nothing told it. The spec is the missing input, not the skill.
+
+🔒 **Validation is strict on purpose**: a spec reaches the builder as FACT, so a confident wrong
+dimension is worse than none — the model would build to it and the result would look deliberate and be
+wrong. `"about the size of a car"`, three parts, a four-word tell — all rejected. Rung 4 is always
+available, so rejecting is cheap and accepting rubbish is not. **It can never fail a build**, proved
+by test for a throwing provider, a null provider, a nonsense provider and no provider at all.
+
+An engine-generated spec emits `[OBJECT_SPEC_LEARNED]` in the tool result, so an object that keeps
+being asked for gets promoted into the permanent catalogue by hand, where someone checks its numbers.
+
+**Tests:** `tests/objectCatalog.test.ts` (22) — the admin's own named objects, every entry validated,
+Devanagari matching, placement per kind, the strict parser, and the four ways the provider can fail.
+`AppKnowledgeBase.ts` updated in the same commit.
+
+### ⚠️ Open, honestly
+
+- **The cache is PER-INSTANCE.** Cloud Run runs several, so the same unknown object may be generated
+  once per instance — a few paise, not a problem. `SpecDeps` takes the cache as an injection precisely
+  so a durable one is a one-line change when it is worth doing.
+- **The ceiling has not moved:** this makes objects look deliberate and real-LOOKING. Photoreal still
+  needs scanned `.glb` assets — a hosting, licensing and attribution project with a bill attached, and
+  therefore the admin's decision, not a session's.
+
+---
+
+## 2026-09-14 — 🔴 CORRECTION: the 3D-object work was never "dropped by a squash". It was written onto a branch whose PR had already been merged and closed.
+
+**I told the admin, in writing, that "PR #2917's squash merge left the bike/catalogue work behind."
+That is FALSE, and the way it is false matters more than the fact that it is.** The recovery was
+right and nothing was lost — but a wrong root cause recorded as a finding is a trap for whoever
+reads it next, because it points the blame at a mechanism (squash merges dropping commits) that
+did not misbehave and cannot be fixed.
+
+**The real timeline, read out of git rather than reasoned about:**
+
+| UTC | What happened |
+|---|---|
+| 04:44:05 | `29c6c50` — the last commit actually pushed to PR #2917's head. Autopsy only. |
+| 04:50:24 | The admin merged #2917. The squash (`af268bc`) carried **exactly** those 9 files / 528 additions. |
+| 06:52:04 | `93eda8d` — `createMotorcycle`, `createBicycle`, `heroObjectSpec.ts`. Written **two hours AFTER the PR was merged and closed.** |
+| 06:57:59 | I edited the **closed** PR #2917's description to describe that new work. |
+| 07:25:25 | `867bf4d` — the 100-object catalogue, placement rules, `object_spec`. Also after the merge. |
+
+Verified: `git merge-base --is-ancestor 93eda8d 29c6c50` → **NO**. The bike work was never in the
+PR head, so there was nothing for the squash to drop. `git show 29c6c50:src/server/lib/Game3DGenerator.ts
+| grep -c createMotorcycle` → **0**.
+
+🔴 **THE ACTUAL ROOT CAUSE, and this repo's own rules already name it:** *"A merged pull request is
+finished — it cannot track new work and must not be reused."* I kept committing to the designated
+branch after its PR had merged, and then edited that closed PR's body as if a description could
+carry code. A PR body is not a delivery mechanism. **Work reaches `main` only through an OPEN PR.**
+
+⚠️ **WHY IT LOOKED LIKE A SQUASH BUG, so the same misreading is recognised next time.** The evidence
+I actually had was real and correctly gathered — the files were genuinely absent from `main`, and
+the PR whose body described them was genuinely merged. Every observation was true. The error was
+in the step between them: I inferred the CAUSE from two facts that were consistent with it, without
+checking the one thing that could have falsified it — **whether those commits had ever been in the
+merged head at all.** That is one `git merge-base --is-ancestor` away, and it takes seconds.
+
+This is the same failure shape this file already records twice: the E2B rate derivation that
+"could not fail", and the truncated grep that concluded a privacy policy did not exist. **A
+conclusion drawn from evidence that is merely CONSISTENT with it is not verified.** Ask what
+would have to be true if the theory were wrong, then go and look at that.
+
+🔒 **THE RULE THIS ADDS, in one line: after a PR merges, the next commit needs a NEW PR — and a
+change is not shipped until `git cat-file -e origin/main:<file>` says so.** Not the PR being
+green, not the PR being merged, not the PR's description saying it was included. The tree.
+
+**Recovery (no work lost):** `867bf4d` was merged into the branch and now ships in **#2927**,
+alongside the list-pagination work. One conflict in `routes/agentv3.ts`, where `main` carries a
+strictly newer 4-argument `emptyBuildFailureSummary(..., buildObs.previewRendered)` from #2919 —
+HEAD's version kept, my older 3-argument call discarded.
 ## 2026-09-14 — the admin Monitor page contradicted itself in five places; nine items root-caused, one PR
 
 The admin sent a text capture of the Monitor page and asked what was wrong with it. Nine items were

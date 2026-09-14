@@ -139,7 +139,12 @@ describe('the reply reaches the person — and we say so honestly when it does n
   });
 
   it('the admin list flags it, and that badge outranks the status badge', () => {
-    const row = admin.slice(admin.indexOf('userReports.map'), admin.indexOf('userReports.map') + 2500);
+    // Anchored on the map call by REGEX, not on one spelling of the list variable: the rows are now
+    // rendered from a paged view (`pagedUserReports.visible.map`, 2026-09-14) and a literal anchor
+    // silently matched NOTHING, which slices from the end of the file and fails on the wrong thing.
+    const at = admin.search(/\b(?:paged)?UserReports[\w.]*\.map\(/i);
+    expect(at).toBeGreaterThan(-1);
+    const row = admin.slice(at, at + 2500);
     expect(row).toContain('Replied — needs you');
     expect(row.indexOf('r.awaitingReply')).toBeLessThan(row.indexOf("r.status !== 'open'"));
   });

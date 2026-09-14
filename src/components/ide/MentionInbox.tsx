@@ -4,6 +4,8 @@
 // an empty inbox, never throws.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { usePagedList } from '../../hooks/usePagedList';
+import { LoadMore } from '../../components/common/LoadMore';
 import { Bell, Check, AtSign } from 'lucide-react';
 import { teamAuthHeader } from './teamAuth';
 
@@ -28,6 +30,7 @@ function timeAgo(ts: number): string {
 
 export const MentionInbox: React.FC = () => {
   const [items, setItems] = useState<MentionNotif[]>([]);
+  const pagedItems = usePagedList(items);
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -107,7 +110,7 @@ export const MentionInbox: React.FC = () => {
             <div className="px-3 py-6 text-center text-[11px] text-zinc-500">No mentions yet.</div>
           ) : (
             <ul className="divide-y divide-white/5">
-              {items.map((n) => (
+              {pagedItems.visible.map((n) => (
                 <li key={n.id} className={`px-3 py-2 ${n.read ? 'opacity-60' : 'bg-white/[0.03]'}`}>
                   <div className="flex items-center gap-1 text-[11px] text-zinc-400">
                     <AtSign className="w-3 h-3 text-blue-400" />
@@ -118,6 +121,7 @@ export const MentionInbox: React.FC = () => {
                   <p className="mt-0.5 text-xs text-zinc-400 line-clamp-2">{n.text}</p>
                 </li>
               ))}
+              <LoadMore list={pagedItems} label="mentions" />
             </ul>
           )}
         </div>

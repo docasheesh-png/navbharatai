@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   TIER_LADDERS, tierLadder, parseLadderOverride, healLadder, ladderFrom, escalationProvider,
-  availableRungs, tierEngineAvailable, describeLadder, ladderEnvName, keyEnvFor, escalationPathForTier,
+  availableRungs, tierEngineAvailable, describeLadder, ladderEnvName, keyEnvFor, escalationPathForTier, PLAN_RUNG, planLadder,
 } from '../src/server/AgentV3/tierLadder';
 import { POWER_LEVELS_ORDERED } from '../src/server/AgentV3/powerGating';
 
@@ -118,5 +118,23 @@ describe('escalation stays inside the tier', () => {
   it('no analyser path → no escalation', () => {
     expect(escalationPathForTier('mini', undefined)).toEqual([]);
     expect(escalationPathForTier('off', [])).toEqual([]);
+  });
+});
+
+describe('the plan phase runs on the tier\'s best cheap reasoner, then its own ladder', () => {
+  it('plan rungs per tier — never Opus, never Grok', () => {
+    expect(PLAN_RUNG.weak).toEqual({ provider: 'GLM', model: 'glm-5.3-flash' });
+    expect(PLAN_RUNG.off).toEqual({ provider: 'KIMI', model: 'kimi-k2.7-code' });
+    expect(PLAN_RUNG.mini).toEqual({ provider: 'CLAUDE', model: 'sonnet' });
+    for (const r of Object.values(PLAN_RUNG)) expect(r.provider).not.toBe('CLAUDE_OPUS');
+  });
+  it('the plan chain is the plan rung followed by the tier ladder minus that rung — no other tier\'s model', () => {
+    expect(seq(planLadder('weak'))).toEqual(['GLM:glm-5.3-flash', 'GLM:glm-4.7-flash', 'KIMI:kimi-k2.6', 'CLAUDE_HAIKU:haiku', 'OPENAI:gpt-5.4']);
+    expect(seq(planLadder('off'))).toEqual(['KIMI:kimi-k2.7-code', 'GLM:glm-5.3-flash', 'CLAUDE:sonnet']);
+    expect(seq(planLadder('mini'))).toEqual(['CLAUDE:sonnet', 'KIMI:kimi-k3', 'CLAUDE_OPUS:opus']);
+    expect(seq(planLadder('max'))).toEqual(seq(planLadder('mini')));
+  });
+  it('🔒 a weak plan never reaches Sonnet/Opus', () => {
+    for (const r of planLadder('weak')) expect(['CLAUDE', 'CLAUDE_OPUS']).not.toContain(r.provider);
   });
 });

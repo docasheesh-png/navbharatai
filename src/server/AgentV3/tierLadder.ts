@@ -188,6 +188,29 @@ export function escalationPathForTier<T extends string>(level: PowerLevel | stri
   return [...withSonnet, 'opus' as T];
 }
 
+/**
+ * THE PLAN PHASE'S FIRST RUNG, PER TIER (admin-approved table, 2026-09-14). A plan is one short,
+ * input-heavy call whose quality decides whether the build is right in ONE try — so it runs on the
+ * tier's best cheap reasoner, not on its cheapest rung, and never on Opus ("Opus sirf zarurat par").
+ * Grok no longer plans: it is the JUDGE on every tier, which needs a model OUTSIDE the build ladders.
+ *   weak → glm-5.3-flash · normal → kimi-k2.7-code · strong → Sonnet
+ * The rest of the plan chain is the tier's own ladder (minus the plan rung), so a plan can never fall
+ * back to another tier's model either.
+ */
+export const PLAN_RUNG: Readonly<Record<PowerLevel, LadderRung>> = {
+  weak: { provider: 'GLM', model: 'glm-5.3-flash' },
+  off: { provider: 'KIMI', model: 'kimi-k2.7-code' },
+  mini: { provider: 'CLAUDE', model: 'sonnet' },
+};
+
+/** The plan chain: the tier's plan rung first, then its ladder as the fallback — nothing else. */
+export function planLadder(level: PowerLevel | string | boolean | null | undefined, env: NodeJS.ProcessEnv = process.env): LadderRung[] {
+  const lvl = toPowerLevel(level as PowerLevel | boolean | string | undefined | null);
+  const first = PLAN_RUNG[lvl];
+  const rest = tierLadder(lvl, env).rungs.filter((r) => !(r.provider === first.provider && r.model === first.model));
+  return [first, ...rest];
+}
+
 /** The env key whose presence lets a rung run. A keyless rung is skipped, never substituted. */
 export function keyEnvFor(provider: LadderProvider): string {
   switch (provider) {

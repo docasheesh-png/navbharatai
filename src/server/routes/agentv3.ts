@@ -30,7 +30,7 @@ import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary }
 import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
 import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote } from '../AgentV3/etaEvidence';
-import { tierLadder, healLadder, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
+import { tierLadder, healLadder, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
 import { describeRunnerChain, chainProviders, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction } from '../AgentV3/AuthenticityAnalysis';
@@ -2583,8 +2583,14 @@ export function floorLeadReason(): string {
  * the judge rather than spend Claude. Exported for tests.
  */
 export function resolveJudgeKind(mode: 'free' | 'paid' | 'power', grokKey: string | undefined, reviewerEnv: string | undefined): 'grok' | 'sonnet' | 'opus' {
-  if (mode === 'power') return 'opus';
-  if (mode === 'free') return grokKey ? 'grok' : 'sonnet';
+  // GROK JUDGES EVERY TIER (admin-approved table, 2026-09-14). Two reasons, both about the judge
+  // being worth paying for: (1) a judge must be a model OUTSIDE the build ladders — the model that
+  // wrote the app is the worst at finding its own mistakes, and Grok is on no tier's ladder; (2) the
+  // Opus judge was the single most expensive call a Strong build made (it reads the whole app, input-
+  // heavy, at $15/MTok), for a verdict Grok gives at Sonnet-class price. `mode` is kept for the call
+  // sites; it no longer changes the answer. `AGENTV3_REVIEWER=sonnet` still forces Sonnet everywhere,
+  // and no key ⇒ Sonnet. Opus is never the judge.
+  void mode;
   return selectReviewer({ reviewer: reviewerEnv, grokKey });
 }
 
@@ -3010,6 +3016,8 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
  */
 /** Whether the PLAN phase should run on Grok: a Grok/xAI key is set and not disabled.
  *  Pure + exported for unit testing. */
+// ⚠️ Not consulted by the plan phase since 2026-09-14 (plan runs on the tier's plan ladder; Grok judges).
+// Kept because tests pin it; retire with the banner list above healRunnerRoutingOpts.
 export function planGrokEnabled(apiKey: string | undefined, disableFlag: string | undefined): boolean {
   return !!apiKey && disableFlag !== '0' && disableFlag !== 'off';
 }
@@ -3021,8 +3029,10 @@ export function planGrokEnabled(apiKey: string | undefined, disableFlag: string 
  * the leak this kills: this chain is assembled OUTSIDE buildTurnRunner, so enforceNoClaude never
  * saw it, and one Grok timeout ran a weak (free) build's plan turn on a real Claude call.
  */
-export function planRunnerChainNames(noClaude: boolean): string[] {
-  return noClaude ? ['GROK'] : ['GROK', 'CLAUDE'];
+export function planRunnerChainNames(noClaude: boolean, level: PowerLevel | string | boolean | null | undefined = 'off'): string[] {
+  // The plan chain is the tier's plan rung followed by the tier's own ladder (tierLadder.ts), then the
+  // same weak-module guard the build chain gets. Grok no longer plans — it judges (see resolveJudgeKind).
+  return enforceNoClaude(planLadder(level).map((r) => ({ name: r.provider })), noClaude).map((r) => r.name);
 }
 
 /**
@@ -3106,26 +3116,16 @@ export function sanitizeSteerMessage(raw: unknown): string | null {
   return t.length > 2000 ? t.slice(0, 2000) : t;
 }
 
-function grokPlanRunner(opts?: { noClaude?: boolean }): TurnRunner | null {
-  const apiKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY;
-  if (!planGrokEnabled(apiKey, process.env.AGENTV3_PLAN_GROK)) return null;
+/**
+ * The PLAN runner for a tier: its plan rung first (glm-5.3-flash / kimi-k2.7-code / Sonnet), then the
+ * tier's own ladder — mapped by the same ladderRunners the build uses, guarded by the same
+ * enforceNoClaude. Null when nothing in it has a key; the caller then plans on the build client, which
+ * is the same tier's ladder anyway. Replaces grokPlanRunner (2026-09-14): Grok is the judge now.
+ */
+function tierPlanRunner(level: PowerLevel | string | boolean | null | undefined, noClaude: boolean): TurnRunner | null {
   try {
-    // 25s timeout matches the cheap-floor decision: a stalled plan call should fail FAST to the Claude
-    // fallback, not burn a flat 60s in front of the user-visible approval gate. Overridable via env.
-    const timeoutMs = Number(process.env.AGENTV3_GROK_PLAN_TIMEOUT_MS) || 25_000;
-    const client = new OpenAI({ apiKey, baseURL: 'https://api.x.ai/v1', timeout: timeoutMs, maxRetries: 0 });
-    // Default to a current FAST xAI tier ('grok-4-fast-non-reasoning') instead of the older/slower
-    // grok-3 — the plan is a single update_todo tool call, so a fast non-reasoning model is ideal.
-    // Overridable via AGENTV3_GROK_PLAN_MODEL; the Claude-Haiku fallback guards any model regression.
-    const model = process.env.AGENTV3_GROK_PLAN_MODEL || 'grok-4-fast-non-reasoning';
-    const grok: NamedRunner = { name: 'GROK', runner: new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model }) };
-    // Chain membership comes from planRunnerChainNames (the pure, tested invariant): on a noClaude
-    // build the chain is Grok ALONE — a Grok failure surfaces as a plan error handled best-effort by
-    // the caller, never a Claude call.
-    const chain: NamedRunner[] = [grok];
-    if (planRunnerChainNames(opts?.noClaude === true).includes('CLAUDE')) {
-      chain.push({ name: 'CLAUDE', runner: new ClaudeClient(undefined, { maxRetries: 2 }) });
-    }
+    const chain = enforceNoClaude(ladderRunners(planLadder(level)), noClaude);
+    if (chain.length === 0) return null;
     return makeMultiProviderTurnRunner(chain, {
       onProviderError: (name, err) => console.log(`[AGENTV3] plan ${name} failed: ${err instanceof Error ? err.message : String(err)}`),
     });
@@ -9625,7 +9625,7 @@ async function noteBuildOutcome(
         const docs = await buildDocumentContext(docAttachments);
         // Bounded (8s) — a stalled vision provider must not hang the request before the deadline
         // timer is armed; on timeout we proceed without the image description.
-        const vis = await raceTimeout(describeVisionAttachments(docAttachments, { useClaude: pinnedOpus, noClaude: noClaudeBuild, designContract: true }), 8_000, 'describeVisionAttachments')
+        const vis = await raceTimeout(describeVisionAttachments(docAttachments, { useClaude: powerSpecResolved.powerMode /* Strong: Claude-first (Haiku describe tier); Weak/Normal: Gemini → Grok */, noClaude: noClaudeBuild, designContract: true }), 8_000, 'describeVisionAttachments')
           .catch(() => '');
         // AP-8: pull the contract OUT of the description and strip its JSON from the prose, so the
         // build prompt carries the requirements once as instructions rather than twice — once as
@@ -13971,7 +13971,9 @@ async function noteBuildOutcome(
         // falls the plan runner to the normal build `client` + `model`, which there is Opus.
         // Strong ('mini' → Sonnet 100%, admin 2026-07-13) plans on Grok like Normal — planning on
         // Opus for a Sonnet-pinned tier would be exactly the cross-tier call the admin forbade.
-        const planGrok = pinnedOpus ? null : grokPlanRunner({ noClaude: noClaudeBuild });
+        // Plan on the tier's plan ladder (admin-approved table 2026-09-14). `planGrok` keeps its name
+        // for the lines below; it is no longer Grok — Grok judges.
+        const planGrok = tierPlanRunner(powerLevelReqEffective, noClaudeBuild);
         const planRunner = new AgentRunner({
           client: planGrok ?? client,
           // C2 — the plan runner has tool access too, so it gets the same guard. A planner that
@@ -13980,7 +13982,7 @@ async function noteBuildOutcome(
           state,
           events,
           usageSink: buildUsage, // billing accounting fix — the plan step's tokens are billed too
-          model: planGrok ? haikuModel() : model,
+          model: planGrok ? sonnetModel() : model, // every rung pins its own model; this is the Claude default only
           system: planSystemPrompt(),
           tools: catalogForTools(['update_todo']),
           onlyOpus,

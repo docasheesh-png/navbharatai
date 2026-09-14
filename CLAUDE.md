@@ -2527,6 +2527,28 @@ is now **`src/server/AgentV3/tierLadder.ts`**, and the build chain is built from
 - ⚠️ **Not yet done, said plainly:** the OpenAI rung is untested against a real response (no key); the
   chat router (`AIRouterManager`) has no OpenAI provider — that is slice 3, only if GPT should serve chat.
 
+**THE AGENT × TIER TABLE (admin-approved 2026-09-14, aims verbatim: "user ki app best of best bane — 1 try
+me" · "mera kharcha kam se kam ho").** Test-locked in `tests/agentRolesPerTier.test.ts`.
+
+| Role | Weak | Normal | Strong | Note |
+|---|---|---|---|---|
+| Credits / abuse / free-clamp | code | code | code | ₹0 — never a model |
+| Safety triage | code | code | code | `triagePrompt` is deterministic, precision-first |
+| Intent doubt-reader | free chat router | free chat router | free chat router | glm-4.7-flash led, $0; one-word answer |
+| **Plan** | glm-5.3-flash → own ladder | kimi-k2.7-code → own ladder | Sonnet → own ladder | `PLAN_RUNG` / `planLadder`; **Grok no longer plans** |
+| Builder + sub-agents + fast lane | tier ladder | tier ladder | tier ladder | above |
+| Heals | ladder minus leading flash | same | same | `healLadder` |
+| Lint / typecheck / build / preview / journey / fuzz / CVE | code | code | code | ₹0 |
+| **Judge / Reviewer** | **Grok** | **Grok** | **Grok** | outside every ladder; `AGENTV3_REVIEWER=sonnet` forces Sonnet; **Opus is never the judge** |
+| Vision (describe) | Gemini → Grok | Gemini → Grok | Claude(Haiku describe tier) → Gemini → Grok | `useClaude` follows `powerMode` |
+| Escalation | never | own ladder from Sonnet | own ladder from Opus | `escalationPathForTier` |
+
+Deliberate deviations from the admin's draft, each for the two aims: no model on guard/router/lint (code
+already does it, ₹0); no Opus on plan or judge (input-heavy calls, and "Opus sirf zarurat par"); no
+"context summarizer" (none exists — context is deterministic); "fallback builder" is the ladder's next
+rung, not an agent; the explainer lives in chat, not the build. Two names in the draft are unverified
+here — a non-flash **GLM-5.3** and **GPT-5 Nano** — and were not wired.
+
 ### Billing model — REAL-COST + tiered markup for every non-Opus tier (admin-CONFIRMED 2026-07-14, Fix 65) — ⚠️ CONFIRM WITH ADMIN BEFORE CHANGING
 
 The admin verified the LIVE provider deductions on the GLM (Z.ai) + Kimi (Moonshot) dashboards and

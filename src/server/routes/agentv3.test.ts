@@ -362,8 +362,15 @@ describe('planGrokEnabled — planning runs on Grok when a key is set', () => {
 // Model Routing Policy (admin 2026-07-12): judge is mode-aware — Free=Grok, Paid=Grok/Sonnet, Power=Opus.
 describe('resolveJudgeKind — mode-aware judge selection', () => {
   it('POWER → always Opus (judge runs on Opus like everything in power mode)', () => {
-    expect(resolveJudgeKind('power', undefined, undefined)).toBe('opus');
-    expect(resolveJudgeKind('power', 'grok-key', 'sonnet')).toBe('opus'); // power ignores grok/env
+    // GROK JUDGES EVERY TIER (admin-approved table 2026-09-14): Opus is never the judge — it was the
+    // single most expensive call a Strong build made, for a verdict Grok gives at Sonnet-class price,
+    // and a judge must sit OUTSIDE the build ladders (Grok is on none of them).
+    expect(resolveJudgeKind('power', 'grok-key', undefined)).toBe('grok');
+    expect(resolveJudgeKind('power', undefined, undefined)).toBe('sonnet');
+    expect(resolveJudgeKind('power', 'grok-key', 'sonnet')).toBe('sonnet'); // AGENTV3_REVIEWER=sonnet still forces Sonnet
+    for (const mode of ['free', 'paid', 'power'] as const) {
+      for (const key of ['grok-key', undefined]) expect(resolveJudgeKind(mode, key, undefined)).not.toBe('opus');
+    }
   });
   it('FREE → Grok when a Grok key exists; never a Claude judge', () => {
     expect(resolveJudgeKind('free', 'grok-key', undefined)).toBe('grok');
@@ -1952,13 +1959,23 @@ describe('planRunnerChainNames — the plan phase respects WEAK ⇒ NO CLAUDE (a
   // THE exact confirmed leak: grokPlanRunner hardwired [GROK → CLAUDE] OUTSIDE buildTurnRunner, so
   // enforceNoClaude never saw it — one Grok timeout ran a weak (free) build's plan turn on a real
   // Claude call. The chain membership is now this pure function, so the invariant is locked here.
-  it('a noClaude (weak) build plans on Grok ALONE — no Claude fallback rung exists', () => {
-    expect(planRunnerChainNames(true)).toEqual(['GROK']);
-    expect(planRunnerChainNames(true)).not.toContain('CLAUDE');
+  // PLAN RUNS ON THE TIER'S PLAN LADDER (admin-approved table 2026-09-14): its plan rung first, then
+  // its own ladder — Grok no longer plans (it judges), and no tier plans on another tier's model.
+  it('a weak build plans on glm-5.3-flash, then its own ladder — never Sonnet/Opus', () => {
+    const names = planRunnerChainNames(true, 'weak');
+    expect(names[0]).toBe('GLM');
+    expect(names).not.toContain('CLAUDE');
+    expect(names).not.toContain('CLAUDE_OPUS');
+    expect(names).not.toContain('GROK');
   });
 
-  it('a normal/paid build keeps the Grok → Claude fallback (resilience unchanged)', () => {
-    expect(planRunnerChainNames(false)).toEqual(['GROK', 'CLAUDE']);
+  it('normal plans on kimi-k2.7-code first; strong on Sonnet first with Opus last', () => {
+    expect(planRunnerChainNames(false, 'off')).toEqual(['KIMI', 'GLM', 'CLAUDE']);
+    expect(planRunnerChainNames(false, 'mini')).toEqual(['CLAUDE', 'KIMI', 'CLAUDE_OPUS']);
+  });
+
+  it('the guard still strips every Claude rung from a weak plan whatever the ladder said', () => {
+    expect(planRunnerChainNames(true, 'mini')).toEqual(['KIMI']);
   });
 });
 

@@ -55645,3 +55645,22 @@ dated entry; AppKnowledgeBase tells every AI the picked tier is the engine that 
 Gate on the final state (merged with `main` 1d8786d9): typecheck · noUnusedImports · typecheck:server ·
 build · test:bundle · boot:check all green; `vitest` **23,337 passed / 1 skipped**; the only 3 failures are
 `tests/esmMirror.test.ts`, verified earlier today to fail identically on a clean `main` in this sandbox.
+
+### Addendum, same day — the agent × tier table wired into #2939 (admin: "theek hai, ab yahi banao")
+
+Three roles moved, two deliberately stayed, all test-locked in `tests/agentRolesPerTier.test.ts`:
+- **Judge = Grok on every tier** (`resolveJudgeKind` ignores the mode; `AGENTV3_REVIEWER=sonnet` still
+  forces Sonnet; no key ⇒ Sonnet). **Opus is never the judge** — it was the single most expensive call a
+  Strong build made (reads the whole app, $15/MTok in) for a verdict Grok gives at Sonnet-class price, and
+  a judge must sit outside the build ladders, which Grok does.
+- **Plan = the tier's plan rung, then its own ladder** (`PLAN_RUNG`: glm-5.3-flash / kimi-k2.7-code /
+  Sonnet; `planLadder`; `tierPlanRunner` replaces `grokPlanRunner`, built by the same `ladderRunners` +
+  `enforceNoClaude` as the build chain). Grok no longer plans.
+- **Vision: Strong is Claude-first** (`useClaude: powerSpecResolved.powerMode` — the retired `pinnedOpus`
+  flag was always false now, so Strong had silently lost Claude vision). The describe model stays Haiku
+  (`claudeVisionModel`), a deliberate deviation from the draft's "Sonnet": describe-tier work, cheaper.
+- **Stayed, with the reason recorded:** safety triage is deterministic (`triagePrompt` is synchronous —
+  my own earlier table wrongly gave it a model); the intent doubt-reader already runs on the FREE chat
+  router ($0, glm-4.7-flash led) for every tier — the draft's Haiku-on-Strong would cost more for a
+  one-word answer.
+`planGrokEnabled` joins the "not consulted" list. The full table is in CLAUDE.md's 2026-09-14 section.

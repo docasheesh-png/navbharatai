@@ -83,7 +83,8 @@ export function hasFrontendBuilder(packageJsonFiles: string[]): boolean {
 /**
  * Is this project's user interface stranded?
  *
- * Requires ALL THREE, so it cannot fire on an ordinary project:
+ * Requires a COMPLETE VIEW plus all three, so it cannot fire on an ordinary project:
+ *   0. at least one package.json is visible          (its absence means we are seeing a fragment)
  *   1. UI component files exist                    (an API-only project has none)
  *   2. no package.json declares a frontend builder (a Vite/Next/monorepo project does)
  *   3. no index.html anywhere                      (a plain HTML site has one)
@@ -97,6 +98,28 @@ export function uiWithoutBuildVerdict(input: UiWithoutBuildInput): UiWithoutBuil
 
   const ui = paths.filter((p) => UI_SOURCE.test(p));
   if (ui.length === 0) return none;                                   // 1
+
+  /**
+   * 0. 🔴 CAN WE EVEN SEE THE WHOLE PROJECT? Added after build 70115adf (2026-09-13), where this
+   *    module told a user their app had "no index.html and no frontend build tool" — while the SAME
+   *    report's own `ls -la` listed `index.html`, `vite.config.ts` and `package.json`, and the
+   *    production build had succeeded.
+   *
+   *    Nothing was wrong with the three rules below. The caller hands us the DURABLE store, which
+   *    holds only the files the AI wrote — the scaffold lives in the sandbox and is never persisted.
+   *    So the view was one file long, and rules 2 and 3 both "passed" by looking at nothing.
+   *
+   *    🔒 THE GUARD IS EXACT, NOT A TRADE-OFF, which is why it belongs here rather than in the caller.
+   *    UI source cannot exist in a runnable project without a package.json — every scaffold in this
+   *    repo ships one. So its TOTAL ABSENCE is proof that we are looking at a fragment, never proof
+   *    that the project lacks a builder. Concluding from it is the "a conclusion drawn from a capped
+   *    result set is not a verified fact" mistake CLAUDE.md already records twice.
+   *
+   *    Silent rather than loud, matching this function's own stance below: a project we cannot judge
+   *    is "fine, or at least not diagnosable as this". An advisory that announced "I could not tell"
+   *    on every ordinary build would be noise, and noise is how a real finding gets ignored.
+   */
+  if ((input?.packageJsonFiles ?? []).length === 0) return none;      // 0
   if (hasFrontendBuilder(input?.packageJsonFiles ?? [])) return none; // 2
   if (paths.some((p) => /(^|\/)index\.html$/i.test(p))) return none;  // 3
 

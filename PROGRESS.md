@@ -52739,6 +52739,226 @@ pinned a literal where it meant a rule**; the others were the hosting catalogue'
 knowledge base's. 8 new tests.
 ---
 
+## 2026-09-14 — Autopsy of build 7bc15e40: "Run it" was answered with "your build produced nothing, add credits"
+
+A REAL user (not the admin). The whole prompt was **"Run it"**, on a project that already had 33 files.
+
+### The five-bucket ledger
+
+| | Count | What |
+|---|---|---|
+| ✅ Self-healed | 0 | nothing was healed; nothing needed to be |
+| 🔀 Worked around | 0 | — |
+| ⏭️ Skipped | 3 | the page-render check, the user journey, and the typecheck all skipped — and the summary claimed two of them passed |
+| ❌ Still broken | 3 | a working build reported as FAILED · an upsell after a turn that succeeded · two unsupported claims the auditor could not see |
+| 🥵 Struggle | 1 | 98 s, of which 7 s was setup before the first model call — but the user's real cost was being told their working app had produced nothing |
+
+**What the engine actually did, and it was right:** read `package.json`, read `vite.config.ts`, ran
+`npm run dev` (server up on 5173), called `update_preview` (`PREVIEW_PUBLISHED`, a live URL), took a
+screenshot, and reported the app running. It wrote no files, **because running an app does not write
+one.**
+
+**What the platform then told that user:**
+> "The build produced no files. Please try again — you have not been charged."
+> "✨ Your app needs our strongest engine to finish cleanly. Add credits…"
+
+Their app was up on the preview at that moment. We reported a success as a failure and asked for money
+to fix it.
+
+### The missing subsystem (step 2)
+
+**The platform has one question — "did this turn write files?" — and uses it to answer a different one:
+"did this turn do what the user asked?"** For a request whose correct completion involves no write
+("run it", "start the server", "is it working?", "show me the preview") those two questions have
+**opposite** answers. There was no concept of a turn whose success is an ACTION rather than an artifact.
+
+### 🔴 The contradiction was already in the code, and one half of it already knew
+
+- `shouldRetryEmptyBuild` declined to retry, in its own words: *"An edit on a project that already
+  exists may legitimately change nothing."*
+- `emptyBuildFailureSummary` was never told. Its entire input was
+  `(expectsArtifacts, fileCount, sandboxUnavailable)` — so "zero files ⇒ failure" is the only answer it
+  was capable of giving.
+
+Same build, same facts, opposite verdicts. The verdict is now computed **once** and reused by the
+failure message and the upsell, so they cannot disagree again.
+
+🔒 **The excuse needs TWO pieces of POSITIVE evidence, never the absence of something** — because the
+dangerous direction is the other one. (1) the user's own words ask to RUN or LOOK, with no change
+requested, and (2) the app really came up on this turn (`previewVerifiedRendered || lastPreviewUrl`).
+Fail either and today's behaviour is byte-identical. "Build me an app" that wrote nothing still fails
+(the 5b4f9b63 protection is untouched), an ordinary edit that wrote nothing still fails, and a dead
+sandbox still fails whatever was asked — that guard is tested *before* the new one.
+
+### The upsell: a FOURTH reason not to ask for money, in the same guard
+
+Three sessions had each found one reason and patched it — a refusal (03997004), our own provider
+outage, and a prompt with nothing to build from (#2887). None covered **a turn that did exactly what
+was asked**. Same mistake, fourth face: "zero files" read as a verdict on the ENGINE when it was a fact
+about the REQUEST.
+
+### 🔴 And the summary made two claims the report itself contradicts
+
+The engine wrote *"✅ No runtime errors in the browser console"* while the same report recorded
+`RUNTIME_UNCHECKED` — the console was never captured. And *"✅ TypeScript type-check passes cleanly"*
+while the release gate recorded *"the typecheck did not run"*. `CLAIM_UNSUPPORTED` exists for exactly
+this and **did not fire**:
+
+- **One adjective defeated the console check.** Every pattern spelled out an exact word sequence:
+  `no errors in the console` matched, `no RUNTIME errors in the console` did not. Verified empirically
+  before the fix, not read off the regex. Fixed as a CLASS — the negation and the noun may now be
+  separated by a short bounded run of words, in both orders — so "zero JavaScript errors in the
+  console" is caught too, rather than adding one more literal spelling per phrasing.
+- **There was no typecheck claim check at all.** Added, reading `gateEvidence.typecheck`, which starts
+  at `'not-run'` and is only ever moved by a check that actually ran — so it cannot claim a typecheck
+  happened when it did not. An UNKNOWN status never accuses.
+
+Six negative cases were tested explicitly ("there were 3 errors, which I fixed", "the typecheck is
+still failing", "run a typecheck before publishing"): none is flagged, and a fully-measured honest
+summary is accused of nothing.
+
+### A bug in my own first draft, recorded rather than quietly fixed
+
+The change-verb veto listed `karo` / `kardo`. Those mean **"do"**, not "change" — so *"app chalu karo"*
+("start the app") was being vetoed as an edit request. The specific verbs still catch what matters:
+*"chalao aur ek button add karo"* is vetoed by `add`. Caught by the Hinglish test, which is why it was
+written.
+
+### Verification
+
+32 tests across three files. Four reverts tried, four failures: the verdict not reaching the failure
+summary, the evidence half dropped, the console pattern narrowed back, and the typecheck fact unwired.
+
+### Still open (rule 6)
+
+- **The 7 s before the first model call** is recorded (`TIME_TO_FIRST_CALL`) and unaddressed here.
+- **`assessBuildInput('Run it').buildable` returns TRUE**, which is why the 'engine' upsell fired
+  rather than the gentler 'no-instruction' one. Left alone deliberately: the run-action verdict now
+  suppresses the message entirely, so changing `buildable` would be a second answer to a question that
+  is already settled — and it is consulted elsewhere.
+
+---
+
+## 2026-09-14 — The home-screen testing notice
+
+Admin: *"home page par hi jab bhi user app open kare, 3 seconds ke liye ek popup aa jaye"* — telling
+people the app is in active testing and asking them to report failures — *"isko aur acche se
+professionally likho. english me"*.
+
+**The copy:**
+> **NavBharatAI is in active testing**
+> If something doesn't work, please report it — that's how we make it stronger. Thank you.
+> `[ Report a problem ]`
+
+**🔒 It asks for something, so it hands over the means.** A notice saying "please report failures"
+that leaves the person to find out how is the half-built state the second absolute rule forbids —
+real instruction, missing means. NavBharatAI already has a genuine app-wide reporting sheet
+(`ReportSheet`, from the sidebar's "Report a problem" and by shaking the phone, attaching the screen,
+device, build and recorded errors by itself), so the notice carries a **button that opens that exact
+sheet**. Its label is asserted against the sidebar's own source, so the notice can never name a menu
+entry the app does not carry.
+
+**"Once per app open" is a storage decision, and it is the whole feature.** `sessionStorage`: a cold
+launch, a new tab or a reload each start a new session and show it again — which is what "whenever
+the user opens the app" means — while tapping Home a second time does not. `localStorage` would have
+meant once per device ever; an in-memory flag would have nagged on every Home tap.
+
+**⚠️ Three seconds is short for a message that asks the reader to act, and that is said plainly
+rather than quietly overridden.** The admin asked for three, so three it is — but the countdown
+**pauses on hover, focus and touch**, so nobody reading it is cut off mid-sentence and no button
+disappears from under a finger. The instruction is kept; its one sharp edge is removed.
+
+**Reduced motion needed no code.** `index.css` already clamps every animation under
+`.nb-reduce-motion` (Settings → General → Reduce Animations), so using a CSS animation rather than a
+JS one honours the setting **by construction** instead of through a prop somebody must remember to
+pass. Pinned by a test that reads both files.
+
+### 🔴 A test that passed while the feature was broken
+
+The first bite-check swapped `sessionStorage` for `localStorage` — turning "every app open" into
+"once per device, ever" — and **all 23 tests still passed.** They inject a fake store, so they prove
+the logic and cannot see which store the code actually reaches for. The most important behavioural
+decision in the feature was untested against the real code.
+
+Fixed by asserting the real default in the source. **The lesson is not "add a test" — it is that a
+unit test with an injected dependency proves the logic and says nothing about the wiring**, and the
+wiring is where this class of feature actually fails.
+
+### Verification
+
+24 tests across two files. Four reverts tried, four failures: the storage swap (after the gap above
+was closed), the label drifting from the sidebar, the touch-pause handlers dropped, and the button
+wired to nothing. `AppKnowledgeBase.ts` updated in the same change — the notice is a third way into
+the reporting sheet, recorded on that feature's existing entry rather than as a new one, because a
+transient notice is not a navigable feature of its own.
+
+---
+
+## 2026-09-14 — The floating "copy this page" button on every admin page
+
+**Admin, verbatim:** *"admin panel me ek floating 'copy' button bana — x(close) button ke sath. jab
+chahe admin kisi bhi page par ho. waha ek floting 'copy' button dikhe. (moving — finger se kahi bhi
+draw/khiska sake, aur x(close) kar sake) is copy button ka kaam : pure page ka screenshot le kar
+keyboard pe copy kar lena! pure 100% pages ko. woh page mai apko bhejunga, aur aap waha jo bhi
+problem ho, woh solve karoge!"*
+
+The button is exactly as asked: it floats over **every** admin tab, drags anywhere with a finger or
+a mouse, remembers where it was left, and closes with an ×. One press puts the whole page on the
+clipboard.
+
+### 🔴 What it copies is TEXT, not an image — and that was a judgement call, so it is recorded here
+
+A browser **cannot photograph its own window.** The two things people reach for instead both fail the
+"100% of pages" half of the instruction:
+
+- **A DOM-painting library** (`html2canvas` and friends) does not capture the screen — it **re-draws
+  the page** from the DOM, and gets it wrong often enough to mislead whoever reads the result. This
+  repo had already refused it once for exactly this reason: `ReportSheet.tsx` records *"a DOM-painting
+  library that renders the page WRONG often enough to mislead the person reading the report."* A
+  wrong picture sent to a debugger is worse than no picture — it sends the fix to the wrong place.
+- **`getDisplayMedia`** prompts the user to pick a window on every single call, is desktop-only, and
+  does not exist in the Android WebView the admin actually uses.
+
+So the copy is a **structured text snapshot**: page name, time, which frontend and app build is
+running, screen size and density, device/browser/language/online state, anything reaching past the
+edge of the screen, the last errors the browser recorded, then an indented outline of everything
+visible — headings, values, buttons, form fields, and **one line per table row** (an admin table is
+the most common thing on these pages; one line per *cell* would turn fifty rows into six hundred
+lines of confetti). It works on 100% of pages, on every device, with no prompt and no new dependency
+— and it carries strictly more of what a fix needs than an image does. The phone's own screenshot
+button remains the right tool for a purely visual complaint, and that is said plainly rather than
+papered over.
+
+### 🔴 The bug the tests caught, which would have leaked a live credential
+
+The opt-out attribute is written `data-nb-no-copy=""` — the form React emits for a valueless
+attribute. `getAttribute` returns an **empty string** for it, and my first implementation tested that
+value for **truthiness**, so the opt-out silently opted every marked element straight back **in**.
+
+The first thing marked with it is the admin's **live TOTP secret and its `otpauth://` URI**, rendered
+on the Security tab. Pressing Copy there would have put a working second factor on the clipboard and
+then into a chat. Fixed with an explicit presence check (`hasAttr`), which is now the only reader of
+that attribute, with a comment saying why truthiness is wrong. `otpauth://` URIs are additionally
+redacted **by pattern** wherever they appear, so the protection does not rest on one attribute alone;
+password fields and anything named like a token/key/secret/PIN copy as `[hidden]`.
+
+### Honesty
+
+`copyTextToClipboard` **returns false** rather than throwing when the browser refuses — so an
+unconditional "Copied!" is the exact fake success this repo forbids, and the admin would paste their
+previous clipboard with no way to know why the page did not match. The button branches on the real
+result and says which happened. A page too long for one copy says the copy is **only the top of the
+page**; a page that could not be read says so instead of showing an empty body; and "read as empty"
+and "could not be read" are deliberately different sentences.
+
+### Verification
+
+79 tests across three files (`pageSnapshot`, `floatingButtonPosition`, `adminCopyButtonWiring`). The
+clamp is tested against the two cases that actually strand a floating button — a position saved on a
+laptop and replayed on a phone, and a rotation — plus the narrow-screen case where the two bounds
+cross and the **left** edge must win, because that is the one edge a finger cannot drag it back from.
+Bite-checked by removing the secret's opt-out: the wiring test fails. `AppKnowledgeBase.ts` gained an
+`admin-page-copy` entry.
 ## 2026-09-14 — AUTOPSY 697b38ee: a working app was reported as a failed build (three root causes, one open)
 
 **Report.** Prompt: *"Continue from where you left off and finish/fix the build so the app works
@@ -53050,3 +53270,54 @@ question instead of a roadmap one.
 internal-track boundary, distinguishes it from the Cloud Run `GOOGLE_PLAY_SA_JSON` (different place,
 different purpose, possibly the same JSON), and keeps the correction visible rather than quietly
 rewriting the old claim.
+
+---
+
+## 2026-09-14 — Two sessions fixed the same bug. Mine was dropped, and that is the right outcome
+
+While PR #2914 sat open, **#2917 landed `verifiedNoChangeSummary` on `main`** — a fix for the exact
+defect my first commit (`12f21eed`) addressed: a turn that wrote no files, on a working app, reported
+as a failed empty build and followed by an invitation to pay. Same class, same two files
+(`routes/agentv3.ts`, `tests/pornographyBan.test.ts`), different report (`697b38ee` against my
+`7bc15e40`).
+
+**The conflict is also why the PR had no CI for forty minutes, and my first explanation was wrong.**
+I said it looked like a GitHub incident, citing the workflow's own recorded precedent. It was not —
+other branches were getting runs the whole time. A `pull_request` run is built on the merge ref
+GitHub computes, and a **conflicted PR has no merge ref, so no run is created and nothing anywhere
+says so.** The green/red signal and the conflict signal are the same signal, and I read the silence
+as the wrong one.
+
+### Which fix is better, decided from the code rather than from ownership
+
+| | Mine (`emptyTurnWasLegitimate`) | Theirs (`verifiedNoChangeSummary`, on `main`) |
+|---|---|---|
+| Evidence the app came up | `previewVerifiedRendered` **OR a stored `lastPreviewUrl`** | `previewVerifiedRendered` only |
+| Reads the user's words | yes — a change verb anywhere vetoes it | no |
+| Suppresses the upsell | a fourth named clause in the guard | `!result.ok` — the turn simply succeeded |
+
+**Theirs is stricter where it counts and mine is weaker there.** A stored `lastPreviewUrl` can be
+left over from an earlier turn, so it is not evidence that *this* turn brought the app up — and their
+comment says so in as many words: *"only on real browser evidence — a turn that wrote nothing and
+proved nothing still falls through to the honest failure below."* My PR claimed "the app really came
+up on this turn"; with that `||` the claim was not guaranteed. Their upsell guard is also more
+general than my extra clause: any successful turn is silent, not merely a run-action one.
+
+So `runActionTurn.ts` and its three test files are **deleted**, `emptyBuildFailureSummary` is back to
+its three-argument form, and `routes/agentv3.ts` now differs from `main` by exactly one hunk. Keeping
+both would have left two answers to one question — the drift this repo has paid for repeatedly.
+
+**What survives, because it was genuinely separate:** the claim auditor's two blind spots from the
+same report — `CONSOLE_CLEAN` widened from one phrase to a class (one adjective, "no **runtime**
+errors in the console", defeated it) and a `TYPECHECK_CLEAN` check that did not exist at all, reading
+`gateEvidence.typecheck`, which starts at `'not-run'`. Now in `tests/summaryClaimAudit.test.ts`, with
+the file saying plainly what was dropped from around it and why.
+
+### 🔴 One thing NOT closed, recorded rather than papered over (rule 6)
+
+Their guard requires `previewVerifiedRendered`. I cannot verify from here whether that flag was true
+in build `7bc15e40` — the report showed `PREVIEW_PUBLISHED` and a screenshot, which is why my version
+also accepted `lastPreviewUrl`. **If it was false, that specific build is still reported as a
+failure.** The fix for that is to make the preview verification actually run and record, not to
+accept weaker proof — loosening the evidence rule would re-introduce exactly what their comment
+warns against. Left open here rather than guessed at.

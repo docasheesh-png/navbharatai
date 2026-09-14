@@ -184,7 +184,7 @@ describe('the wiring — both surfaces, and no upsell after a refusal', () => {
     const block = route.slice(start, end);
     expect(block).toContain('const refused = looksLikeRefusal(result.summary);');
     // The narration — the upsell OR the degraded notice — is reachable only when there was no refusal.
-    expect(block).toMatch(/if \(!refused\) \{[\s\S]*freeTierUpsellMessage\(/);
+    expect(block).toMatch(/if \(!refused(?:\s*&&[^)]*)?\) \{[\s\S]*freeTierUpsellMessage\(/);
     // …and a suppressed upsell is recorded, so the admin sees the check fire rather than inferring it.
     expect(block).toContain('UPSELL_SUPPRESSED');
   });

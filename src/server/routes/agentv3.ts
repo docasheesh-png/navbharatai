@@ -17313,6 +17313,11 @@ async function noteBuildOutcome(
           // the builds where every runtime check skipped.
           filesWritten: writtenFiles.size,
           buildWasRequested: userAskedToBuildAnApp,
+          // "TypeScript type-check passes cleanly" beside a release gate recording "the typecheck did
+          // not run" — both in build 7bc15e40's own report. Read from the gate's own evidence, which
+          // starts at 'not-run' and is only ever moved by a check that actually ran, so this cannot
+          // claim a typecheck happened when it did not.
+          typecheckRan: gateEvidence.typecheck !== 'not-run',
         });
         if (contradictions.length > 0) {
           result = { ...result, summary: `${result.summary}${claimCorrection(contradictions)}` };

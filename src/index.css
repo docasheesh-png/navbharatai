@@ -534,3 +534,18 @@ button, [role='button'], nav, header, footer {
   box-shadow: 0 0 4px rgba(229, 20, 0, 0.7);
   cursor: pointer;
 }
+
+/* The home-screen testing notice (lib/testingNotice.ts). A CSS animation on purpose: the
+   `.nb-reduce-motion` rule above already disables every animation and transition, so the
+   accessibility setting is honoured here by construction rather than by a prop somebody has to
+   remember to pass. */
+@keyframes nb-testing-notice-in {
+  from { opacity: 0; transform: translate(-50%, -0.75rem); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+@keyframes nb-testing-notice-out {
+  from { opacity: 1; transform: translate(-50%, 0); }
+  to   { opacity: 0; transform: translate(-50%, -0.5rem); }
+}
+.nb-testing-notice-in  { animation: nb-testing-notice-in 220ms ease-out both; }
+.nb-testing-notice-out { animation: nb-testing-notice-out 200ms ease-in both; }

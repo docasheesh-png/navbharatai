@@ -13,6 +13,7 @@ import { copyTextToClipboard } from '../lib/copyText';
 import { reportParts, partJson, partsSummary, ordinal } from './adminReportParts';
 import { MonitorPanels } from './admin/MonitorPanels';
 import { LoadBoard } from './admin/LoadBoard';
+import { AdminCopyButton } from './admin/AdminCopyButton';
 import { reportStatus, reportStatusLabel, reportStatusHint, openReportCount, type ReportTriage } from '../server/AgentV3/reportTriage';
 import { problemKindLabel } from '../lib/userReport';
 import { describeOverflow } from '../lib/reportDiagnostics';
@@ -1131,6 +1132,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
   return (
     <div className="w-full max-w-7xl mx-auto space-y-6 py-4 text-left">
+      {/* The floating page-copy button — every admin tab, draggable, closable (admin 2026-09-14). */}
+      <AdminCopyButton pageLabel={TABS.find((t) => t.id === activeTab)?.label || 'Admin'} />
+
       {/* Toast */}
       {toastMsg && (
         <div className="fixed top-6 right-6 z-50 bg-indigo-600 text-white px-5 py-3 rounded-2xl font-bold text-sm shadow-2xl animate-in slide-in-from-top-2">
@@ -3697,8 +3701,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   <div className="space-y-3">
                     <div className="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-2">
                       <p className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest">1. Add this key to your authenticator app</p>
-                      <code className="block text-emerald-400 font-mono text-sm break-all select-all">{mfaEnroll.secret}</code>
-                      <p className="text-[9px] text-[#8b949e] break-all">Or paste this URI: <span className="font-mono">{mfaEnroll.otpauthUri}</span></p>
+                      {/* data-nb-no-copy: this is a live TOTP secret. The floating page-copy button
+                          puts the page's text on the clipboard and the admin pastes it into a chat —
+                          so this block must be unreadable to it. See pageSnapshot.ts. */}
+                      <code data-nb-no-copy="" className="block text-emerald-400 font-mono text-sm break-all select-all">{mfaEnroll.secret}</code>
+                      <p data-nb-no-copy="" className="text-[9px] text-[#8b949e] break-all">Or paste this URI: <span className="font-mono">{mfaEnroll.otpauthUri}</span></p>
                     </div>
                     <p className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest">2. Enter the 6-digit code to confirm</p>
                     <div className="flex gap-2">

@@ -233,6 +233,39 @@ describe('ToolDispatcher', () => {
     expect(res.content).toContain('src/Existing.tsx');
   });
 
+  // EduTube autopsy 2026-09-14: a real `npm install react-router-dom lucide-react` succeeded, and 13
+  // minutes later a full-file-dump rescue call (the fast lane's own "continue, you were cut off" retry,
+  // whose truncated prompt never saw the install) rewrote package.json WITHOUT them — every subsequent
+  // typecheck then failed with "Cannot find module" for packages that genuinely were installed, and the
+  // build never converged before its wall-clock cap. write_file must restore an already-installed dep a
+  // wholesale rewrite drops, exactly like it already does for the framework's own core deps.
+  it('write_file restores an already-installed dependency a wholesale package.json rewrite dropped', async () => {
+    act.files.set('package.json', JSON.stringify({
+      name: 'app', dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1', 'react-router-dom': '^6.26.0', 'lucide-react': '^0.400.0' },
+    }, null, 2));
+    const res = await d.dispatch(call('write_file', {
+      path: 'package.json',
+      content: JSON.stringify({ name: 'app', dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1' } }, null, 2),
+    }), 'architect');
+    expect(res.is_error).toBe(false);
+    const written = JSON.parse(act.files.get('package.json') ?? '{}');
+    expect(written.dependencies['react-router-dom']).toBe('^6.26.0');
+    expect(written.dependencies['lucide-react']).toBe('^0.400.0');
+  });
+
+  it('write_files_batch restores an already-installed dependency the SAME way as write_file (parity)', async () => {
+    act.files.set('package.json', JSON.stringify({ name: 'app', dependencies: { axios: '^1.6.0' } }, null, 2));
+    const res = await d.dispatch(
+      call('write_files_batch', { files: [
+        { path: 'package.json', content: JSON.stringify({ name: 'app', dependencies: {} }, null, 2) },
+      ] }),
+      'frontend',
+    );
+    expect(res.is_error).toBe(false);
+    const written = JSON.parse(act.files.get('package.json') ?? '{}');
+    expect(written.dependencies.axios).toBe('^1.6.0');
+  });
+
   it('write_files_batch on all-new files gives NO overwrite warning', async () => {
     const res = await d.dispatch(
       call('write_files_batch', { files: [{ path: 'a.ts', content: '1' }, { path: 'b.ts', content: '2' }] }),

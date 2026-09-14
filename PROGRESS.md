@@ -54761,6 +54761,129 @@ test:bundle` within budget (had to add the `supports-[height:100dvh]` companion 
 `admin.ts`/`AdminDashboard.tsx` but neither mentions APK/mobileShip/AdminApkReportStore, so no duplicate
 work; a mechanical merge conflict on those two shared files is possible and expected, not a redundancy.
 
+## 2026-09-14 — Forensic autopsy: the "EduTube" build (fifth absolute rule) — a stale "app is live" claim outlived a 29-minute timeout, and a rescue write silently un-installed two real dependencies
+
+Admin shared a real AgentV3 build-diagnostics report (workspaceId
+`agentv3-aotnZOjBkPXKLocjGNje2IUQKim2-06987f1c-070a-4be0-b6e1-b16f04986845`, prompt *"Build an app of a
+E (only educational video version of youtube)"*, free/weak tier, `kimi-k2.6` builder). `ok: false`,
+`rootCause`: *"Build outcome: STOPPED — the wall-clock cap (29 min) was reached before the build
+converged."* Read end to end (4110 lines) per the fifth absolute rule — not skimmed.
+
+### Step 1 — the five-bucket ledger, honest tally
+
+- ✅ **Self-healed — 1.** Two `LLM_TRUNCATED` events (a Vertex/Gemini call hit the output-token ceiling
+  twice) were auto-continued (`FASTLANE_CONTINUED`) so no file was left half-written — this worked
+  exactly as designed.
+- 🔀 **Worked around — 27.** 26 provider fallbacks (KIMI: 6 timeouts; GLM: 18 rate-limit + 2 timeout) —
+  the GLM 429-storm this file already documents mitigations for (pacer, circuit breaker, key pool) —
+  and `npm audit fix` ran automatically (`AGENTV3_AUDIT_FIX=on`) but exited 1: the 4 vulnerabilities
+  (1 high, 3 moderate — esbuild/vite, react-router) need a major-version bump it correctly declined to
+  force.
+- ⏭️ **Skipped — 2.** A `postmessage-wildcard-origin` medium-severity finding (`index.html:9`) was
+  recorded and never actioned. "No tests at all" — expected for a free-tier fast build, recorded
+  honestly rather than silently.
+- ❌ **Still broken / shipped imperfect — 7, one of them the whole build.** The `Cannot find module
+  'react-router-dom'`/`'lucide-react'` errors (see root cause 2 below) that never let the build
+  converge; a `SideBar.tsx`/`Sidebar.tsx` casing collision (TS1261); a `Video` type mismatch across 4
+  files (`thumbnailUrl`/`videoUrl`/`channelName`/`uploadDate` missing); a missing `./data` module; a
+  named/default `VideoCard` export mismatch; Design Consistency 60/100 (C — 22 colours, 14 off-4px-grid
+  spacing values) and Home.tsx `NO_HEADING`; and — found by re-checking the preview 3.5 hours later —
+  the app crashing at runtime with `Cannot read properties of null (reading 'useState')`, evidence the
+  half-fixed state never got a real second look after the timeout.
+- 🥵 **Struggle points — 4.** Two sequential fast-lane attempts (`SIMPLE_BUILD_FALLBACK` at ~52s,
+  `ONESHOT_FALLBACK` at ~4.2min) both timed out before the FULL builder even started — ~4.8 minutes of
+  wall clock with nothing to show for it. A `TOOL_ERROR` on `edit_file` (stale `old_string` for
+  `src/index.css`) burned a step. The model declared full, celebratory victory ("Your EduTube app is
+  live and ready ... zero TypeScript errors") at minute 17 while the build was, in fact, about to spend
+  12 more minutes failing typechecks and never converge. And the ETA (`~3 min, confidence 0.4`) was
+  wrong by roughly 10× — the same "ETA is a guess with a number on it" open item PRs #2929/#2931 name
+  from a different build the same day; not re-fixed here, corroborating evidence for that open item.
+
+### Step 2 — the missing subsystem
+
+Two concurrent sessions (PRs #2929, #2931) autopsied a *different* build the same day and converged on
+the same diagnosis this one point at too: **there is no shared evidence ledger** — the platform's own
+proven facts (a clean `tsc` run, a successful `npm install`, a re-judged-ready gate) live in scattered,
+private notions that different code paths don't consult before writing a verdict. This build adds a
+THIRD, distinct instance of the same missing-subsystem shape: `BuildDiagnostics.summary` is written by
+whichever `done` event happens to fire last, with no notion of "is this the FINAL word" — so a
+finalizer that doesn't explicitly override it inherits whatever the model said last, true or not. Until
+one ledger exists that every code path reads the CURRENT PROVEN STATE from before writing a verdict or
+a summary, this class keeps returning in new shapes. Recorded as still open (first named in the
+`697b38ee` autopsy) — not re-solved here, which would have meant redoing the two concurrent sessions'
+work.
+
+### Step 3 — root-cause fixes, DNA level (PR #2933)
+
+1. **The stale-success-narration class, both call sites.** `BuildDiagnostics.finish(ok, summary)` only
+   overwrites `this.summary` when a summary is actually passed — and `ingestEvent`'s `case 'done'` sets
+   `this.summary` unconditionally on EVERY `done` event `AgentRunner` emits, not only the terminal one.
+   The watchdog finalizer (`agentv3.ts`, `finalizeOnDeadline`) called `finish(ok, ok ?
+   buildResultRef?.summary : undefined)` — `undefined` left the stale text standing on the not-ok
+   branch. A second, independent call site (rule 3 — hunt the siblings) had the identical shape: the
+   top-level build `catch (err)` crash handler called `finish(false)` with no summary at all. Both now
+   pass an honest override: the watchdog path reuses `deadlinePauseMessage()` (computed ONCE, shared
+   with the chat bubble, so the two can never disagree — the very failure mode this bug was), the crash
+   path gets `` `Build stopped — an unexpected error occurred: ${errMsg}` ``. Locked in
+   `tests/buildOutcomeWiring.test.ts` (source-wiring guard, same convention as that file's existing
+   `OUTCOME_BUILD_TIMEOUT` tests).
+2. **A full-file-dump rescue call can silently un-install a real dependency.** When a normal agentic
+   turn gets cut by the output-token ceiling, a "continue — you were cut off" rescue call
+   (`OneShotBuilder.ts`/`FastLaneContinuation.ts`) re-emits every file from a ~2.5KB prompt with no
+   current package.json state. In THIS build, `npm install react-router-dom lucide-react` succeeded at
+   minute 5.7; the 320-second rescue call at minute ~18.9 re-dumped `package.json` without them, and
+   every subsequent typecheck failed with "Cannot find module" for packages genuinely installed 13
+   minutes earlier — this is the direct reason the build never converged.
+   `ensureFrameworkCoreDeps` already guards exactly this failure shape for a framework's OWN runtime
+   deps (`next`/`react`/`vite` — add-only, never downgrades, from the CargoPilot autopsy). The new
+   `restoreDroppedDependencies` (`DependencyAutoFix.ts`) generalizes the SAME policy to every dependency
+   the workspace already had: a key present on disk but absent from a rewrite is restored with its
+   existing version; a key the new content still declares (even at a bumped version) is left alone,
+   because a real `npm install`/`uninstall` is a shell command that never routes through this write
+   path — anything missing here was dropped by an LLM-authored full-file WRITE, never a considered
+   removal. Wired into BOTH places package.json is actually written: the single-file `write_file` case
+   and `write_files_batch` (the sibling a rescue dump actually writes through — hunted, not assumed).
+   Locked in `DependencyAutoFix.test.ts` (pure logic) and `ToolDispatcher.test.ts` (both write paths,
+   integration-level, proving parity).
+3. **The 50/50 law, applied.** The reactive half (above) stops THIS report's exact failure from lying
+   about itself again. The upstream half: `finish()` is now the single choke point through which every
+   known call site passes a defined, honest summary on the not-ok branch — a THIRD future call site that
+   forgets to compute one still can't reproduce today's specific bug (both existing sites are fixed), but
+   the class ("a mid-build `done` event's text outliving the build it described") is only closed at the
+   two known origins, not architecturally impossible yet; recorded here rather than claimed solved, per
+   rule 6 of the fifth absolute rule.
+4. **Not re-fixed here (another session's claim, per "Working alongside other live sessions"):** the
+   readiness-recovery / release-gate bug and the ETA-lying open item are PRs #2929/#2931's, not
+   duplicated in this change.
+
+### Step 6 — proactive layer (world-best, forward-looking)
+
+- **Prevent, don't heal, applies to the fast-lane double-timeout too.** `analyzeAppScope` correctly
+  tagged this prompt `LARGE — clone of YouTube` at t=0, before EITHER fast lane was tried — and both ran
+  anyway, burning ~4.8 minutes on shortcuts built for small apps. The scope classifier is deliberately
+  RECORD-ONLY for now (its own comment: "only a strong mega-signal reads as analyze... this changes
+  NOTHING about the build yet... so the classification can be reviewed against real prompts before it
+  steers anything") — this build is exactly that evidence. Recommendation, not a change made here:
+  once a few more real reports confirm the classifier's precision, gate the fast lanes on it (`decision
+  === 'analyze'` skips straight to the full builder) — a LARGE-scoped prompt has never once, across the
+  reports read this month, been served correctly by a one-shot lane.
+- **The single highest-value lever from this report: kill the CONDITION, not just this instance.** A
+  full-file-dump rescue re-emitting package.json from a truncated context is itself a symptom of the
+  fast lane's own retry design assuming "the model remembers everything" past a token-limit cut. The
+  fix shipped here (restore what's missing) is the safety net; the deeper fix — giving the continuation
+  prompt the CURRENT package.json content rather than relying on the model's truncated memory of it — is
+  a real lever for a future session: it would make this class of drop impossible rather than merely
+  self-healing, and is worth scoping once the current fix has run on a few more real builds.
+- **The evidence-ledger gap (open since `697b38ee`) just got a third, independent witness in one day.**
+  Three sessions, three different builds, the same underlying shape. This is no longer a hypothesis —
+  it is the single biggest lever left un-pulled in this file's build-honesty work, and probably the next
+  one worth a dedicated design pass rather than another point fix.
+
+Verification gate on the final rebased state: typecheck, noUnusedImports, typecheck:server, build,
+test:bundle, boot:check, and the full `npx vitest run` — **1649 files / 23004 tests passed / 1 skipped /
+0 FAIL**. Checked open PRs first (#2929, #2931, #2928, #2900) — #2929/#2931 autopsy a different build
+with no overlapping code paths; no duplicate work. PR #2933 opened; per the standing merge-hold rule,
+driven to green CI but not merged without the admin's explicit go-ahead.
 ---
 
 ## 2026-09-14 — "imaandar phase dikhao ya real number?" — the answer was never a choice between them

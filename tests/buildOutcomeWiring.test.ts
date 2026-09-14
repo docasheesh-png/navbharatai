@@ -155,3 +155,46 @@ describe('🔒 the wall-clock cap gets its own honest outcome code (admin diagno
     expect(body).toMatch(/try\s*\{[\s\S]*buildDiag\.record[\s\S]*\}\s*catch/);
   });
 });
+
+describe('🔒 a PERSISTED diagnostics report can never carry a stale success narration on a build that did not succeed (EduTube autopsy, 2026-09-14)', () => {
+  /**
+   * Real report: a mid-build `done` event ("Your EduTube app is live and ready … zero TypeScript
+   * errors") set `BuildDiagnostics.summary` at minute 17; the build kept hitting real compile errors
+   * for 12 more minutes and was then STOPPED by the wall-clock watchdog — but `finish(false, undefined)`
+   * left that celebratory text as the report's PERSISTED `summary`, because `finish()` only overwrites
+   * `this.summary` when a summary is actually passed. Anyone reading the report (admin dashboard, the
+   * user's own download, the APK/build-report inboxes) saw success on a build that timed out.
+   * `ingestEvent`'s `case 'done'` sets `this.summary` unconditionally on EVERY `done` event AgentRunner
+   * emits, not only the terminal one, so `finish()` is the one place that can put an honest string back.
+   */
+  it('the watchdog finalizer computes an honest pause message BEFORE finishing the report, and passes it on the not-ok branch', () => {
+    const i = route.indexOf('const finalizeOnDeadline = async () => {');
+    expect(i).toBeGreaterThan(-1);
+    const body = route.slice(i, i + 9000);
+    const pauseComputed = body.indexOf('const pauseMsgForReport = deadlinePauseMessage(writtenFiles.size);');
+    const finishCall = body.indexOf('buildDiagRef?.finish(ok, ok ? buildResultRef?.summary : pauseMsgForReport.summary);');
+    expect(pauseComputed).toBeGreaterThan(-1);
+    expect(finishCall).toBeGreaterThan(-1);
+    // Computed BEFORE finish() is called, and never `undefined` on the branch that means "did not succeed".
+    expect(pauseComputed).toBeLessThan(finishCall);
+    expect(body).not.toContain('buildDiagRef?.finish(ok, ok ? buildResultRef?.summary : undefined)');
+  });
+
+  it('the resumable-pause chat bubble and the persisted report summary are the SAME honest text — one computation, not two', () => {
+    const i = route.indexOf('const finalizeOnDeadline = async () => {');
+    const body = route.slice(i, i + 14000);
+    // The `else` branch (not-ok, resumable) must reuse the same value rather than recomputing it —
+    // two independent calls to deadlinePauseMessage() could disagree if writtenFiles.size changed
+    // between them, silently reopening this exact class of contradiction.
+    expect(body).toContain('const pauseMsg = pauseMsgForReport;');
+    expect(body).not.toContain('const pauseMsg = deadlinePauseMessage(writtenFiles.size);');
+  });
+
+  it('the crash-path finalizer also passes an honest summary — the sibling call site (rule 3: hunt the siblings)', () => {
+    const i = route.indexOf("buildDiagRef?.record({ phase: 'build', severity: 'error', code: 'BUILD_EXCEPTION'");
+    expect(i).toBeGreaterThan(-1);
+    const body = route.slice(i, i + 900);
+    expect(body).not.toContain('buildDiagRef?.finish(false);');
+    expect(body).toMatch(/buildDiagRef\?\.finish\(false, `Build stopped[\s\S]*errMsg[\s\S]*\)/);
+  });
+});

@@ -61,8 +61,37 @@ export function withSandboxBrowsers(command: string, framework: TestFramework): 
     || framework === 'npm-script';
   if (!needsBrowser) return command;
   if (command.includes('PLAYWRIGHT_BROWSERS_PATH')) return command;   // already carries it — never double it
-  return `PLAYWRIGHT_BROWSERS_PATH=${SANDBOX_BROWSERS_PATH} ${command}`;
+  return `PLAYWRIGHT_BROWSERS_PATH=${PREFER_PROJECT_BROWSER} ${command}`;
 }
+
+/**
+ * 🔴 THE HAND-OFF BECAME AN OVERRIDE, AND IT TURNED A PASSING SUITE INTO AN UNVERIFIED ONE
+ * (report 697b38ee, 2026-09-14). The sequence, from that build's own transcript:
+ *
+ *     +591.7s  `npx playwright test`            → exit 1, "browsers are not installed"
+ *     +615.0s  `npx playwright install chromium`→ exit 0   (into Playwright's DEFAULT cache)
+ *     +636.9s  `npx playwright test`            → exit 0   ✅ THE SUITE PASSED
+ *     +782.5s  the vaccine ran the SAME suite with PLAYWRIGHT_BROWSERS_PATH pinned to the pre-baked
+ *              path → "COULD NOT RUN — the Playwright browser binaries are not installed"
+ *
+ * and the release gate, reading that, told the user *"the app has no test suite that could be run
+ * here"* — 145 seconds after watching it pass. The variable did exactly what it was written to do and
+ * pointed Playwright AWAY from a browser that was genuinely present.
+ *
+ * 🔒 SO THE PATH IS NOW A FALLBACK, NOT A DECREE. If the project's own cache holds a chromium, that is
+ * the one used — it is the build Playwright was installed with, and Playwright matches browser builds
+ * exactly, so a fresh `playwright install` after a version bump (this build's `@playwright/test` was
+ * added by the dependency auto-fix at +2.1s) can leave the pre-baked copy the WRONG one as well as the
+ * unused one. Only when the default cache has nothing do we hand over the sandbox's copy — which is
+ * the Shiv Medical Store case this helper was written for, unchanged.
+ *
+ * Resolved IN THE SHELL rather than by probing first: one command, no extra sandbox round-trip, and no
+ * window in which the answer can go stale between the probe and the run. `$HOME` is expanded by the
+ * shell, so it is right for whatever user the sandbox runs as.
+ */
+const PREFER_PROJECT_BROWSER =
+  `$(ls -d "$HOME/.cache/ms-playwright"/chromium-* >/dev/null 2>&1 `
+  + `&& echo "$HOME/.cache/ms-playwright" || echo ${SANDBOX_BROWSERS_PATH})`;
 
 /** What `withTestFilter` did, so the caller can tell the truth about it. */
 export interface FilteredTestPlan {

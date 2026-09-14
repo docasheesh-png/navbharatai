@@ -2309,6 +2309,37 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'object_spec',
+      description:
+        'BEFORE hand-modelling ANY 3D object, call this with its name. Returns the object\u2019s REAL '
+        + 'dimensions in metres, the parts it cannot read as itself without, the ONE proportion that '
+        + 'carries its silhouette, and HOW that kind of thing is placed in a scene (grounded, '
+        + 'instanced, animated, shadowed). It answers for 100 built-in objects instantly and free '
+        + '(vehicles, people, animals, terrain, water, plants, sky, buildings, street props, '
+        + 'furniture, sport, weapons, pickups, containers, food, effects) and asks the engine for '
+        + 'anything else. '
+        + '\u{1F534} WHY IT EXISTS: a bike racing game once shipped a bike that was a capsule lying on '
+        + 'two cylinders \u2014 not because the model builds badly, but because nothing had decided '
+        + 'what a bike IS, so it went straight to primitives. Given "2.05 m long, 1.35 m wheelbase, '
+        + '0.30 m wheel radius, raked forks, a tank, a seat that falls to a kicked-up tail" it builds '
+        + 'a motorcycle. The spec is the missing input, not the skill. '
+        + 'If a library builder exists (createMotorcycle, createCar, createTree\u2026) the answer says '
+        + 'so \u2014 use it and do NOT hand-model. Costs nothing for a known object, and it can never '
+        + 'fail a build: with the engine unavailable it returns the spec-first protocol instead.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          object: {
+            type: 'string',
+            description:
+              'What to look up, in plain words \u2014 "motorcycle", "auto rickshaw", "bullock cart", '
+              + '"cricket bat", "hand pump". English or Hinglish; one object per call.',
+          },
+        },
+        required: ['object'],
+      },
+    },
+    {
       name: 'generate_game_3d',
       description:
         'Add the 3D layer for a game (three.js). Call generate_game_runtime FIRST — this builds on its '
@@ -3447,6 +3478,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_game_vfx',
   'generate_game_controller',
   'generate_game_3d',
+  'object_spec',
   'generate_game_runtime',
   'generate_animation',
   'generate_ui_states',

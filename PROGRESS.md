@@ -53083,3 +53083,85 @@ question instead of a roadmap one.
 internal-track boundary, distinguishes it from the Cloud Run `GOOGLE_PLAY_SA_JSON` (different place,
 different purpose, possibly the same JSON), and keeps the correction visible rather than quietly
 rewriting the old claim.
+
+---
+
+## 2026-09-14 (2) — 100 objects, how to place each kind, and an answer for the 101st
+
+Follow-up to the "farzi object" autopsy above. Admin asked for three things, verbatim:
+
+1. *"Generally kisi app me kya kya object chahiye hote hai — uski ek detailed list banao… list jitni
+   badi hogi NavBharatAI ko utni hi asani hogi."*
+2. *"Sabhi object ko real dab realistic game me kaise add karna hai, NavBharatAI ko sikhao."*
+3. *"Koi aisa object jo apni list me hai hi nahi, to provider se banwao — ek dam realistic aur game
+   fit hona chahiye."*
+
+### 1 · The list — 100 objects, 19 categories
+
+`objectCatalog.ts`. Vehicles (14 land, 5 air, 3 water), people (4), animals (13), terrain (7), water
+(4), vegetation (6), rock (2), sky (3), buildings (8), street props (6), interior (7), sport (4),
+weapons (4), collectibles (4), containers (2), food (2), effects (2). Every entry carries the **real
+size in metres**, the **parts it cannot read as itself without**, and the **tell** — the one
+proportion that carries the silhouette and what it looks like when that is wrong. Matched in English,
+Hinglish and Devanagari.
+
+🔒 **Matching is DATA, not a hand-written RegExp per entry.** `compileMatch` assembles the pattern
+from `words` + `hi`. A hundred hand-written regexes is a hundred chances to repeat the `\b`-beside-
+Devanagari bug recorded in the entry above — building them centrally makes it *impossible*, not
+merely *fixed*.
+
+### 2 · How to place it — taught per CATEGORY, not per object
+
+`PLACEMENT` in `objectCatalogTypes.ts`, 19 rules sets. **A perfectly modelled car floating 20 cm above
+the road with no contact shadow looks FAKER than a crude car that is planted, shadowed and rolling** —
+placement is most of what the eye reads as real, and it is the part an improvising builder skips first
+because nothing errors when it is missing.
+
+Vehicles: raycast the ground so the tyres touch, cast AND receive shadows, roll the wheels from real
+speed, steer the front wheels only, follow the road tangent. Vegetation: instance it, randomise
+rotation and scale, sink the base in, sway, cluster. Water: it must MOVE and reflect, with a wet band
+at the bank. Sky: never cast shadows, never collide, drift slowly. Buildings: the 2.1 m door proves
+the scale, the roof overhangs, the base steps down a slope. Street props: wires SAG, signals show one
+lamp, streetlight arms reach over the road. And so on for the other twelve.
+
+⚠️ Written once per KIND on purpose. Per-object copies of one paragraph is exactly the duplication
+this repo has already paid for twice (`safeRelPath`, stale model ids).
+
+### 3 · The 101st object — the engine writes the spec, and it is checked
+
+`objectSpecProvider.ts` + the new **`object_spec` tool**. Ladder, cheapest first:
+
+| | |
+|---|---|
+| 1 | the 100-object catalogue — instant, free, human-checked |
+| 2 | the process cache — generated once, reused for every later build |
+| 3 | one small engine call on the FREE namespace (never reaches Claude; GLM-flash leads at ₹0), **strictly validated** |
+| 4 | the spec-first PROTOCOL — costs nothing, cannot fail |
+
+🔴 **Deliberately NOT AI mesh generation** (Meshy/Tripo), and the reason is written in the file: that
+costs real money per object, takes 30–120 s, and returns a mesh we would have to host, licence and
+attribute — breaking the admin's own *"chutkiyon ka kaam"* bar. **The model was never bad at BUILDING
+geometry** — `createCar` proves it builds beautifully when it knows what it is building. It was bad at
+DECIDING what a bike is, because nothing told it. The spec is the missing input, not the skill.
+
+🔒 **Validation is strict on purpose**: a spec reaches the builder as FACT, so a confident wrong
+dimension is worse than none — the model would build to it and the result would look deliberate and be
+wrong. `"about the size of a car"`, three parts, a four-word tell — all rejected. Rung 4 is always
+available, so rejecting is cheap and accepting rubbish is not. **It can never fail a build**, proved
+by test for a throwing provider, a null provider, a nonsense provider and no provider at all.
+
+An engine-generated spec emits `[OBJECT_SPEC_LEARNED]` in the tool result, so an object that keeps
+being asked for gets promoted into the permanent catalogue by hand, where someone checks its numbers.
+
+**Tests:** `tests/objectCatalog.test.ts` (22) — the admin's own named objects, every entry validated,
+Devanagari matching, placement per kind, the strict parser, and the four ways the provider can fail.
+`AppKnowledgeBase.ts` updated in the same commit.
+
+### ⚠️ Open, honestly
+
+- **The cache is PER-INSTANCE.** Cloud Run runs several, so the same unknown object may be generated
+  once per instance — a few paise, not a problem. `SpecDeps` takes the cache as an injection precisely
+  so a durable one is a one-line change when it is worth doing.
+- **The ceiling has not moved:** this makes objects look deliberate and real-LOOKING. Photoreal still
+  needs scanned `.glb` assets — a hosting, licensing and attribution project with a bill attached, and
+  therefore the admin's decision, not a session's.

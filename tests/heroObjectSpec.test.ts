@@ -78,7 +78,7 @@ describe('🔒 THE CLASS FIX — an object with NO builder still gets a real spe
       expect(s.parts.length).toBeGreaterThanOrEqual(3);
       expect(s.tell.length).toBeGreaterThan(30);
     }
-    expect(HERO_OBJECTS.length).toBeGreaterThanOrEqual(20);
+    expect(HERO_OBJECTS.length).toBeGreaterThanOrEqual(100);   // the admin asked for a BIG list
   });
 });
 
@@ -95,8 +95,12 @@ describe('the REALISM tier still decides how much of the spec is built', () => {
     // broken at every detail level, and the silhouette costs no frames on a phone.
     const c = heroObjectContract('simple 3d bike game');
     expect(c.tier).toBe('lite');
-    expect(c.block).toContain('the SIZES and');
-    expect(c.block).toContain('costs no frames on a phone');
+    expect(c.block).toContain('the SIZES');
+    // The lite branch gained the placement half on 2026-09-14: a floating or unshadowed object looks
+    // broken at EVERY detail level, and fixing that costs no frames — so it is never a "real tier only"
+    // concern, which is exactly what this assertion pins.
+    expect(c.block).toContain('every placement rule still apply');
+    expect(c.block).toContain('costs no frames on a phone')
   });
 
   it('a stylised ask stays lite even with a realism word in it', () => {
@@ -112,8 +116,11 @@ describe('⚠️ it must stay quiet where it does not belong', () => {
   });
 
   it('never dumps more than a handful of specs into one prompt', () => {
+    // Raised 4 → 6 when the catalogue grew to 100 objects: "a 3d village with houses, trees, a river
+    // and cows" is four, so six covers what people really type. It is still a CAP, because a wall of
+    // text is ignored — a bigger catalogue makes recognition better, not the prompt longer.
     const everything = HERO_OBJECTS.map((s) => s.name).join(' ') + ' car bike bus truck plane boat tank';
-    expect(heroObjectContract(everything).specs.length).toBeLessThanOrEqual(4);
+    expect(heroObjectContract(everything).specs.length).toBeLessThanOrEqual(6);
   });
 });
 

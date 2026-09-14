@@ -55713,3 +55713,40 @@ first rung that succeeds.
 - **What this does NOT yet prove:** that 5.3-flash's first-try success rate is what the benchmarks
   suggest on THIS engine. The build report already records `deliveredVia` and heal counts; after 20–30
   real builds, compare heal rate per leading rung and move the leader if the data says so.
+
+### 2026-09-14 — Admin card: real cost vs bill, by tier × app size — MEASURED, not estimated (admin: "han banao")
+
+Asked what a simple / mid / full-stack app costs the USER versus the PLATFORM on each of the three
+tiers, the honest answer was an estimate from assumed token counts. The admin said build the
+measurement instead. Branch `claude/build-cost-card`.
+
+**What ships:**
+- **`GET /api/admin/build-costs?limit=30`** (`routes/admin.ts`, behind `verifyAdminToken`) → one row per
+  recent build (tier, app size, files, result, minutes, heals, real cost, sandbox cost, bill, margin) and
+  a tier × size summary where every average carries its own sample size. Rendered by
+  `src/components/admin/BuildCostCard.tsx` on the admin **Reports** tab, above the all-builds list.
+- 🔴 **THE ROOT CAUSE UNDER THE CARD, fixed rather than worked around: the settle never persisted the
+  real cost.** `decideBuildBilledUsd` priced the providers' real cost to compute the bill and then
+  threw the figure away; the report kept only the bill. Re-deriving it later from the stored call log
+  is not a measurement, because storage keeps only the newest **40** calls (`STORED_LLM_CALLS_MAX`,
+  now an exported constant instead of a literal) — a big build's re-priced cost would be a lower bound
+  presented as a fact. Now `decideBuildBilledUsd` returns `realCostUsd` + `sandboxUsd` on EVERY path
+  (Opus tier and legacy path included), and BOTH settle sites — the normal settle and the watchdog
+  finalizer (rule 3, the sibling that Fix 67 exists because of) — persist them on
+  `BuildBillingRecord.realCostUsd` / `.sandboxCostUsd`. Recorded on failure too: a failed build is
+  never charged, but it still cost us. Test-locked: both sites, and `userCostBreakdown` may never
+  carry either field (White-Label Law).
+- **Honesty rules in `src/server/lib/buildCostLedger.ts` (pure):** a settled figure wins; an older
+  report is re-priced from its call log through the SAME rate card (`realRateFor` + `usageCostUsd`);
+  a log AT the storage cap is `call-log-capped` — shown as "≥ ₹x", `measured: false`, **excluded from
+  every average and with no margin**, because a margin over a lower-bound cost overstates what we
+  made; a call with no token counts is counted as unpriced, never priced at zero; a rate that cannot
+  be read prices nothing. App size comes from the manifest's file list (complete), not
+  `generatedFiles` (capped at 20): any server/API/database path ⇒ full-stack, else ≤ 8 files simple,
+  ≤ 20 mid. The rule is printed on the card so the reader can disagree with it.
+- **Not an AppKnowledgeBase entry:** admin-only surface; nothing a user can reach.
+
+**What it does NOT do, said plainly:** builds settled before this merge carry no settled figure, so the
+first rows will mostly be re-priced from call logs, and the ones at the cap will read as lower bounds.
+The card gets exact from the first build after deploy. Sandbox cost is shown as its own column and is
+₹0 unless `AGENTV3_BILL_SANDBOX` + `E2B_USD_PER_HOUR` are set — it is not folded into the token cost.

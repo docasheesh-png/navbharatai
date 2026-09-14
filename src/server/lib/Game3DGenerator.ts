@@ -1774,6 +1774,373 @@ export function createAnimal(options: AnimalOptions = {}): Animal {
   update(0, 0);
   return { root, update };
 }
+
+// ── MOTORCYCLE ───────────────────────────────────────────────────────────────────────────────────
+export interface MotorcycleOptions extends BaseOpts { color?: number; length?: number; kind?: 'sport' | 'commuter' | 'cruiser' }
+export interface Motorcycle {
+  root: THREE.Group;
+  /** Attach a rider here — createHumanoid().root goes straight in, already seated and facing forward. */
+  seat: THREE.Object3D;
+  /** Lean into a corner (radians, + is right). A bike that corners flat reads as a prop on rails. */
+  lean: (radians: number) => void;
+  /** Turn the bars (radians). Moves the forks, wheel, mudguard and headlight together, as one assembly. */
+  steer: (radians: number) => void;
+  /** Spin the wheels from speed in m/s. Still wheels under a moving bike is the oldest tell there is. */
+  roll: (speed: number, dt: number) => void;
+}
+
+/**
+ * A motorcycle at real proportions: 2.05 m long, 1.35 m WHEELBASE, 0.30 m wheel radius, 0.80 m seat
+ * height, 0.72 m across the bars. Those five numbers are most of why it reads as a bike.
+ *
+ * 🔴 THE ONE THING THAT DECIDES IT, AND THE ONE EVERY IMPROVISED BIKE GETS WRONG: a motorcycle is
+ * mostly AIR. The wheels sit far apart with an open gap beneath the engine, the tank-to-tail line
+ * falls backwards, and the forks are RAKED — not vertical. A body blob bridging two cylinders has
+ * none of those, which is precisely why it reads as a toy however good the lighting is.
+ *
+ * \`real\` adds what you only notice up close and miss instantly when it is gone: a separate tyre and
+ * rim with spokes, a front disc and caliper, the swingarm and chain run, an exhaust that leaves the
+ * engine and ends in a can, mudguards over both wheels, mirrors, footpegs, and a headlight and tail
+ * light that actually EMIT.
+ */
+export function createMotorcycle(options: MotorcycleOptions = {}): Motorcycle {
+  const d = tier(options);
+  const L = options.length ?? 2.05;
+  const kind = options.kind ?? 'sport';
+  const paint = options.color ?? 0xc4231f;
+
+  const wheelR = L * 0.146;                                  // ~0.30 m — a 17" rim plus tyre
+  const base = L * (kind === 'cruiser' ? 0.7 : 0.659);       // wheelbase: a cruiser is longer
+  const seatY = L * (kind === 'cruiser' ? 0.34 : 0.39);      // ~0.80 m; cruisers sit lower
+  const barW = L * 0.35;                                     // ~0.72 m across the grips
+  const rake = kind === 'cruiser' ? 0.56 : kind === 'commuter' ? 0.44 : 0.46;  // fork angle, radians
+
+  const root = new THREE.Group();
+
+  const paintMat = d === 'real'
+    ? new THREE.MeshPhysicalMaterial({ color: paint, roughness: 0.24, metalness: 0.8, clearcoat: 1, clearcoatRoughness: 0.07 })
+    : new THREE.MeshStandardMaterial({ color: paint, roughness: 0.5, metalness: 0.3 });
+  const chrome = new THREE.MeshStandardMaterial({ color: 0xcfd6de, roughness: 0.18, metalness: 1 });
+  const engineMat = new THREE.MeshStandardMaterial({ color: 0x3b4046, roughness: 0.45, metalness: 0.9 });
+  const matte = new THREE.MeshStandardMaterial({ color: 0x1b1e22, roughness: 0.72, metalness: 0.25 });
+  const tyreMat = shared('fabric', d, 0x121418, 2);
+  const seatMat = shared('cloth', d, 0x15171a, 2);
+  const seg = d === 'real' ? 22 : 10;
+
+  /** One wheel, as a GROUP so it can be rolled and steered independently of the frame. */
+  const makeWheel = (radius: number, width: number): THREE.Group => {
+    const w = new THREE.Group();
+    const tyre = mesh(new THREE.TorusGeometry(radius * 0.86, radius * 0.15, d === 'real' ? 10 : 6, seg), tyreMat, d);
+    tyre.rotation.y = Math.PI / 2;
+    w.add(tyre);
+    if (d === 'real') {
+      const rim = mesh(new THREE.CylinderGeometry(radius * 0.72, radius * 0.72, width, seg), chrome, d);
+      rim.rotation.z = Math.PI / 2;
+      w.add(rim);
+      // Spokes: five, because the gaps are what stop a wheel reading as a solid disc.
+      for (let i = 0; i < 5; i++) {
+        const spoke = mesh(new THREE.BoxGeometry(width * 0.6, radius * 1.34, radius * 0.09), chrome, d);
+        spoke.rotation.x = (i * Math.PI) / 5;
+        w.add(spoke);
+      }
+      const hub = mesh(new THREE.CylinderGeometry(radius * 0.2, radius * 0.2, width * 1.25, 10), engineMat, d);
+      hub.rotation.z = Math.PI / 2;
+      w.add(hub);
+    } else {
+      const disc = mesh(new THREE.CylinderGeometry(radius * 0.7, radius * 0.7, width * 0.9, seg), matte, d);
+      disc.rotation.z = Math.PI / 2;
+      w.add(disc);
+    }
+    w.name = 'wheel';
+    return w;
+  };
+
+  // ── REAR: wheel, swingarm and the chain run ───────────────────────────────────────────────────
+  const rearWheel = makeWheel(wheelR, L * 0.075);
+  rearWheel.position.set(0, wheelR, -base / 2);
+  root.add(rearWheel);
+
+  if (d === 'real') {
+    for (const side of [-1, 1]) {
+      const arm = mesh(new THREE.BoxGeometry(L * 0.022, L * 0.038, base * 0.42), matte, d);
+      arm.position.set(side * L * 0.048, wheelR * 1.02, -base * 0.29);
+      arm.rotation.x = 0.06;
+      root.add(arm);
+    }
+    const sprocket = mesh(new THREE.CylinderGeometry(wheelR * 0.34, wheelR * 0.34, L * 0.012, 14), chrome, d);
+    sprocket.rotation.z = Math.PI / 2;
+    sprocket.position.set(L * 0.055, wheelR, -base / 2);
+    root.add(sprocket);
+    const chain = mesh(new THREE.BoxGeometry(L * 0.008, wheelR * 0.5, base * 0.34), matte, d);
+    chain.position.set(L * 0.055, wheelR * 1.05, -base * 0.33);
+    root.add(chain);
+    // Rear shock, visibly angled — a vertical strut looks like scaffolding.
+    const shock = mesh(new THREE.CylinderGeometry(L * 0.014, L * 0.014, L * 0.17, 8), chrome, d);
+    shock.position.set(0, wheelR * 1.75, -base * 0.2);
+    shock.rotation.x = -0.4;
+    root.add(shock);
+  }
+
+  // ── ENGINE: the mass low and CENTRAL, with daylight under it ───────────────────────────────────
+  const engine = mesh(new THREE.BoxGeometry(L * 0.17, L * 0.16, L * 0.2), engineMat, d);
+  engine.position.set(0, wheelR * 1.15, -L * 0.02);
+  root.add(engine);
+  if (d === 'real') {
+    // Cooling fins: three thin plates. Nothing says "engine" faster at this scale.
+    for (let i = 0; i < 3; i++) {
+      const fin = mesh(new THREE.BoxGeometry(L * 0.19, L * 0.012, L * 0.19), chrome, d);
+      fin.position.set(0, wheelR * 1.15 + (i - 1) * L * 0.042, -L * 0.02);
+      root.add(fin);
+    }
+    // Exhaust: header out of the engine, then a can along the right side, rising slightly.
+    const header = mesh(new THREE.CylinderGeometry(L * 0.017, L * 0.017, L * 0.3, 10), chrome, d);
+    header.position.set(L * 0.05, wheelR * 0.8, L * 0.05);
+    header.rotation.set(Math.PI / 2 - 0.25, 0, 0.18);
+    root.add(header);
+    const can = mesh(new THREE.CylinderGeometry(L * 0.033, L * 0.028, L * 0.36, 12), chrome, d);
+    can.position.set(L * 0.075, wheelR * 1.15, -L * 0.24);
+    can.rotation.set(Math.PI / 2 - 0.12, 0, 0.1);
+    root.add(can);
+    for (const side of [-1, 1]) {
+      const peg = mesh(new THREE.CylinderGeometry(L * 0.009, L * 0.009, L * 0.05, 6), chrome, d);
+      peg.position.set(side * L * 0.085, wheelR * 0.72, -L * 0.06);
+      peg.rotation.z = Math.PI / 2;
+      root.add(peg);
+    }
+  }
+
+  // ── FRAME: a spine from the steering head down to the swingarm pivot ───────────────────────────
+  const spine = mesh(new THREE.BoxGeometry(L * 0.05, L * 0.05, base * 0.5), matte, d);
+  spine.position.set(0, seatY * 0.92, L * 0.06);
+  spine.rotation.x = 0.2;
+  root.add(spine);
+
+  // ── TANK: the single most bike-defining shape. Widest at the knees, tapering to the seat ───────
+  const tank = mesh(new THREE.BoxGeometry(L * 0.19, L * 0.14, L * 0.3), paintMat, d);
+  tank.position.set(0, seatY * 1.02, L * 0.12);
+  tank.rotation.x = -0.07;
+  root.add(tank);
+  if (d === 'real') {
+    const tankNose = mesh(new THREE.BoxGeometry(L * 0.13, L * 0.1, L * 0.12), paintMat, d);
+    tankNose.position.set(0, seatY * 1.04, L * 0.28);
+    tankNose.rotation.x = -0.22;
+    root.add(tankNose);
+    const cap = mesh(new THREE.CylinderGeometry(L * 0.026, L * 0.026, L * 0.012, 12), chrome, d);
+    cap.position.set(0, seatY * 1.11, L * 0.14);
+    root.add(cap);
+  }
+
+  // ── SEAT + TAIL: the line that FALLS toward the back. Flat here and the bike reads as a bench ──
+  const seatMesh = mesh(new THREE.BoxGeometry(L * 0.13, L * 0.05, L * 0.3), seatMat, d);
+  seatMesh.position.set(0, seatY, -L * 0.11);
+  seatMesh.rotation.x = kind === 'cruiser' ? 0.02 : -0.06;
+  root.add(seatMesh);
+  const tail = mesh(new THREE.BoxGeometry(L * 0.1, L * 0.07, L * 0.18), paintMat, d);
+  tail.position.set(0, seatY * 1.06, -L * 0.29);
+  tail.rotation.x = kind === 'sport' ? -0.3 : -0.12;   // a sport tail kicks UP; that is its signature
+  root.add(tail);
+
+  // The rider's anchor: at the seat, facing -Z like the bike. Empty until a game puts someone on it.
+  const seatAnchor = new THREE.Object3D();
+  seatAnchor.position.set(0, seatY, -L * 0.08);
+  seatAnchor.name = 'seat';
+  root.add(seatAnchor);
+
+  // ── FRONT: ONE steering group, so bars, forks, wheel, mudguard and light turn TOGETHER ─────────
+  //
+  // 🔴 THE RAKE HAS TO BE PAID FOR, OR THE WHEELBASE IS NOT THE WHEELBASE. A raked fork carries its
+  // wheel FORWARD of the steering head by sin(rake) x forkLen — about 0.32 m on this bike. Hang the
+  // forks off a head placed at base/2 and the real wheelbase comes out ~1.62 m instead of 1.35: a
+  // stretched, chopper-ish machine that is not what anyone asked for, and nothing in the render says
+  // so. The head is therefore set BACK by exactly that offset, and the arithmetic below is what makes
+  // the five numbers in the doc comment true rather than aspirational.
+  const headY = seatY * 1.15;                              // steering-head height
+  const forkLen = (headY - wheelR) / Math.cos(rake);        // reach the ground AT the rake, not beside it
+  const frontZ = Math.sin(rake) * forkLen;                  // how far the rake throws the wheel forward
+  const steerGroup = new THREE.Group();
+  steerGroup.position.set(0, headY, base / 2 - frontZ);
+  steerGroup.name = 'steer';
+  root.add(steerGroup);
+
+  // Forks are RAKED. Vertical forks are the second-clearest sign of an improvised bike.
+  // NEGATIVE rotation.x, because a rotation about +X swings -Y toward -Z: the positive sign would
+  // rake the forks BACKWARDS, under the engine.
+  for (const side of [-1, 1]) {
+    const fork = mesh(new THREE.CylinderGeometry(L * 0.017, L * 0.019, forkLen, d === 'real' ? 10 : 6), chrome, d);
+    fork.position.set(side * L * 0.048, (-forkLen / 2) * Math.cos(rake), (forkLen / 2) * Math.sin(rake));
+    fork.rotation.x = -rake;
+    steerGroup.add(fork);
+  }
+  const frontWheel = makeWheel(wheelR * 0.98, L * 0.055);
+  frontWheel.position.set(0, -(headY - wheelR), frontZ);
+  steerGroup.add(frontWheel);
+
+  const bar = mesh(new THREE.CylinderGeometry(L * 0.012, L * 0.012, barW, 8), matte, d);
+  bar.rotation.z = Math.PI / 2;
+  bar.position.set(0, L * 0.03, 0);
+  steerGroup.add(bar);
+
+  if (d === 'real') {
+    const clamp = mesh(new THREE.BoxGeometry(L * 0.13, L * 0.025, L * 0.05), matte, d);
+    clamp.position.set(0, L * 0.01, L * 0.01);
+    steerGroup.add(clamp);
+    for (const side of [-1, 1]) {
+      const grip = mesh(new THREE.CylinderGeometry(L * 0.017, L * 0.017, L * 0.055, 8), matte, d);
+      grip.rotation.z = Math.PI / 2;
+      grip.position.set(side * (barW / 2 - L * 0.03), L * 0.03, 0);
+      steerGroup.add(grip);
+      const mirror = mesh(new THREE.BoxGeometry(L * 0.035, L * 0.022, L * 0.012), matte, d);
+      mirror.position.set(side * (barW / 2 - L * 0.02), L * 0.08, -L * 0.01);
+      steerGroup.add(mirror);
+    }
+    // Front disc + caliper. A brakeless front wheel is a detail people feel without naming.
+    const disc = mesh(new THREE.CylinderGeometry(wheelR * 0.55, wheelR * 0.55, L * 0.006, 18), chrome, d);
+    disc.rotation.z = Math.PI / 2;
+    disc.position.copy(frontWheel.position);
+    disc.position.x = L * 0.04;
+    steerGroup.add(disc);
+    const caliper = mesh(new THREE.BoxGeometry(L * 0.016, L * 0.05, L * 0.035), matte, d);
+    caliper.position.set(L * 0.04, frontWheel.position.y + wheelR * 0.55, frontWheel.position.z - L * 0.02);
+    steerGroup.add(caliper);
+    // Mudguard hugging the tyre — a wheel with clear sky above it looks unfinished.
+    const guard = mesh(new THREE.BoxGeometry(L * 0.075, L * 0.014, wheelR * 1.5), paintMat, d);
+    guard.position.set(0, frontWheel.position.y + wheelR * 0.95, frontWheel.position.z);
+    steerGroup.add(guard);
+  }
+
+  // Lights that EMIT. An unlit "light" is a coloured sticker, on a bike as much as on a car.
+  const head = new THREE.Mesh(
+    new THREE.SphereGeometry(L * 0.045, 12, 10),
+    new THREE.MeshBasicMaterial({ color: 0xfff4d2 }),
+  );
+  head.position.set(0, -L * 0.01, L * 0.06);
+  head.scale.set(1, 0.85, 0.55);
+  steerGroup.add(head);
+  const tailLight = new THREE.Mesh(
+    new THREE.BoxGeometry(L * 0.055, L * 0.022, L * 0.012),
+    new THREE.MeshBasicMaterial({ color: 0xe02a1c }),
+  );
+  tailLight.position.set(0, seatY * 1.08, -L * 0.375);
+  root.add(tailLight);
+
+  const wheels: THREE.Group[] = [rearWheel, frontWheel];
+  return {
+    root,
+    seat: seatAnchor,
+    lean: (radians: number) => { root.rotation.z = radians; },
+    steer: (radians: number) => { steerGroup.rotation.y = radians; },
+    roll: (speed: number, dt: number) => {
+      const spin = (speed * dt) / wheelR;
+      for (const w of wheels) w.rotation.x -= spin;
+    },
+  };
+}
+
+// ── BICYCLE ──────────────────────────────────────────────────────────────────────────────────────
+export interface BicycleOptions extends BaseOpts { color?: number; length?: number }
+
+/**
+ * A pedal cycle — 1.75 m long, 1.05 m wheelbase, 0.34 m wheel radius, and a DIAMOND frame.
+ *
+ * It is not a small motorcycle: the frame is open tubing you can see through, the wheels are larger
+ * and far thinner, and there is no engine mass in the middle. Building it as a shrunken motorbike is
+ * why most generated cycles look wrong.
+ */
+export function createBicycle(options: BicycleOptions = {}): Motorcycle {
+  const d = tier(options);
+  const L = options.length ?? 1.75;
+  const wheelR = L * 0.194;
+  const base = L * 0.6;
+  const seatY = L * 0.55;
+  const frameMat = new THREE.MeshStandardMaterial({ color: options.color ?? 0x1e88d6, roughness: 0.32, metalness: 0.7 });
+  const matte2 = new THREE.MeshStandardMaterial({ color: 0x1b1e22, roughness: 0.75, metalness: 0.2 });
+  const chrome2 = new THREE.MeshStandardMaterial({ color: 0xcfd6de, roughness: 0.2, metalness: 1 });
+  const tyre2 = shared('fabric', d, 0x14161a, 2);
+  const root = new THREE.Group();
+  const seg2 = d === 'real' ? 20 : 10;
+
+  const makeThinWheel = (): THREE.Group => {
+    const w = new THREE.Group();
+    const t = mesh(new THREE.TorusGeometry(wheelR * 0.9, wheelR * 0.07, 8, seg2), tyre2, d);
+    t.rotation.y = Math.PI / 2;
+    w.add(t);
+    if (d === 'real') {
+      for (let i = 0; i < 6; i++) {
+        const spoke = mesh(new THREE.BoxGeometry(L * 0.004, wheelR * 1.7, L * 0.004), chrome2, d);
+        spoke.rotation.x = (i * Math.PI) / 6;
+        w.add(spoke);
+      }
+    }
+    w.name = 'wheel';
+    return w;
+  };
+
+  const rear = makeThinWheel(); rear.position.set(0, wheelR, -base / 2); root.add(rear);
+
+  const tube = (len: number, x: number, y: number, z: number, rx: number): void => {
+    const t = mesh(new THREE.CylinderGeometry(L * 0.013, L * 0.013, len, 8), frameMat, d);
+    t.position.set(x, y, z); t.rotation.x = rx; root.add(t);
+  };
+  tube(base * 0.62, 0, seatY * 0.82, L * 0.02, Math.PI / 2 - 0.16);   // top tube
+  tube(base * 0.6, 0, seatY * 0.5, L * 0.02, Math.PI / 2 + 0.1);       // down tube
+  tube(seatY * 0.6, 0, seatY * 0.62, -L * 0.13, 0.25);                 // seat tube
+  tube(base * 0.42, 0, wheelR * 1.05, -L * 0.16, Math.PI / 2 - 0.06);  // chain stay
+
+  const saddle = mesh(new THREE.BoxGeometry(L * 0.055, L * 0.025, L * 0.13), matte2, d);
+  saddle.position.set(0, seatY, -L * 0.14);
+  root.add(saddle);
+  const seatAnchor = new THREE.Object3D();
+  seatAnchor.position.set(0, seatY, -L * 0.12);
+  seatAnchor.name = 'seat';
+  root.add(seatAnchor);
+
+  if (d === 'real') {
+    const crank = mesh(new THREE.CylinderGeometry(wheelR * 0.28, wheelR * 0.28, L * 0.01, 14), chrome2, d);
+    crank.rotation.z = Math.PI / 2;
+    crank.position.set(0, wheelR * 1.0, -L * 0.02);
+    root.add(crank);
+    for (const side of [-1, 1]) {
+      const pedal = mesh(new THREE.BoxGeometry(L * 0.03, L * 0.012, L * 0.06), matte2, d);
+      pedal.position.set(side * L * 0.055, wheelR * 0.78, -L * 0.02);
+      root.add(pedal);
+    }
+  }
+
+  // Same rake arithmetic as the motorcycle — a cycle's fork is raked too, and the wheelbase has to
+  // survive it. See the comment there for why the offset is subtracted rather than guessed.
+  const rake2 = 0.3;
+  const headY2 = seatY * 1.05;
+  const forkLen2 = (headY2 - wheelR) / Math.cos(rake2);
+  const frontZ2 = Math.sin(rake2) * forkLen2;
+  const steerGroup = new THREE.Group();
+  steerGroup.position.set(0, headY2, base / 2 - frontZ2);
+  steerGroup.name = 'steer';
+  root.add(steerGroup);
+  for (const side of [-1, 1]) {
+    const fork = mesh(new THREE.CylinderGeometry(L * 0.009, L * 0.009, forkLen2, 6), frameMat, d);
+    fork.position.set(side * L * 0.03, (-forkLen2 / 2) * Math.cos(rake2), (forkLen2 / 2) * Math.sin(rake2));
+    fork.rotation.x = -rake2;
+    steerGroup.add(fork);
+  }
+  const front = makeThinWheel();
+  front.position.set(0, -(headY2 - wheelR), frontZ2);
+  steerGroup.add(front);
+  const bars = mesh(new THREE.CylinderGeometry(L * 0.01, L * 0.01, L * 0.32, 8), matte2, d);
+  bars.rotation.z = Math.PI / 2;
+  steerGroup.add(bars);
+
+  const wheels2: THREE.Group[] = [rear, front];
+  return {
+    root,
+    seat: seatAnchor,
+    lean: (radians: number) => { root.rotation.z = radians; },
+    steer: (radians: number) => { steerGroup.rotation.y = radians; },
+    roll: (speed: number, dt: number) => {
+      const spin = (speed * dt) / wheelR;
+      for (const w of wheels2) w.rotation.x -= spin;
+    },
+  };
+}
 `;
 
 const FILES: Record<string, string> = {
@@ -1847,6 +2214,9 @@ export function generateGame3D(include?: string[]): Game3DResult {
       "scene.add(createMountain({ size: 140, height: 50 }));  scene.add(createRoad({ length: 400 }));\n" +
       "const river = createRiver(); scene.add(river.mesh);   // in the loop: river.update(elapsed)\n" +
       "const deer = createAnimal({ kind: 'deer' }); scene.add(deer.root); // deer.update(dt, speed)\n" +
+      "const bike = createMotorcycle({ kind: 'sport', color: 0xc4231f }); scene.add(bike.root);\n" +
+      "bike.seat.add(rider.root);            // a bike with no rider reads as a showroom prop\n" +
+      "// in the loop: bike.roll(speed, dt); bike.lean(-steerInput * 0.5); bike.steer(steerInput * 0.3);\n" +
       "// in the loop: hero.update(dt, speed, grounded)\n" +
       "const rig = new CameraRig({ kind: 'third-person', collidables: [terrain, buildings] });\n" +
       "scene.add(createTerrain({ palette: 'indianVillage' }));\n" +
@@ -1859,10 +2229,15 @@ export function generateGame3D(include?: string[]): Game3DResult {
       '- 🔴 For anything a player gets close to — walls, floors, roads, ground, crates, bark — use\n' +
       '  surfaceMaterial(kind) instead of a flat colour, and enableAO(geometry) on that mesh. A flat\n' +
       '  colour under perfect lighting is exactly what "not realistic" looks like.\n' +
-      '- 🔴 EVERY OBJECT COMES FROM objects.ts, never hand-modelled: createCar, createTree,\n' +
-      '  createMountain, createRiver, createDesert, createRoad, createAnimal. Call setDetailLevel()\n' +
+      '- 🔴 EVERY OBJECT COMES FROM objects.ts, never hand-modelled: createCar, createMotorcycle,\n' +
+      '  createBicycle, createTree, createMountain, createRiver, createDesert, createRoad,\n' +
+      '  createAnimal. Call setDetailLevel()\n' +
       "  ONCE at start-up — 'real' when the user asked for real/realistic/asli/100%, 'lite' when they\n" +
       '  only said 3D. A hand-written box car beside these reads as a bug, not a style.\n' +
+      '- 🔴 A BIKE IS createMotorcycle() / createBicycle(), never a capsule over two cylinders. A\n' +
+      '  motorcycle is mostly AIR: the wheels sit 1.35 m apart with daylight under the engine, the\n' +
+      '  forks are RAKED, and the tank-to-tail line falls backwards. Put a rider in bike.seat, and\n' +
+      '  call bike.lean() in corners — a bike that corners flat reads as a prop on rails.\n' +
       '- 🔴 A human character is createHumanoid(), never a capsule or a stack of spheres. Call\n' +
       '  hero.update(dt, speed, grounded) every frame — arms swing opposite the legs, knees only bend\n' +
       '  one way, and the body tucks in the air. A capsule with a hat is the single clearest sign of an\n' +

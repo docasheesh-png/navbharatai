@@ -2324,7 +2324,8 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'PBR metal has nothing to reflect and renders near-black), surfaces.ts (brick, wood, bark, '
         + 'stone, road, soil, grass, metal, cloth, tile, sand, each with generated bump/roughness/AO '
         + 'instead of one flat colour) and humanoid.ts + objects.ts — a properly proportioned figure, '
-        + 'and real cars, trees, mountains, rivers, deserts, roads and animals with setDetailLevel() '
+        + 'and real cars, MOTORCYCLES, bicycles, trees, mountains, rivers, deserts, roads and animals '
+        + 'with setDetailLevel() '
         + "choosing full detail or the lighter phone-friendly build from what the user MEANT. "
         + 'THE LOOK COMES FROM THESE SETTINGS, NOT FROM ASSET DETAIL: use ONE palette for the whole scene, '
         + 'share materials, scatter with instancing, and keep bloom subtle. Adds the `three` dependency.',
@@ -2339,7 +2340,8 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
               + 'humanoid, objects. Default = all; imports are pulled in automatically. '
               + 'environment = sky + image-based reflections; surfaces = brick/wood/bark/stone/road/soil/'
               + 'grass/metal/cloth/tile/sand with real bump + roughness; humanoid = a correctly '
-              + 'proportioned figure with joints; objects = createCar / createTree / createMountain / '
+              + 'proportioned figure with joints; objects = createCar / createMotorcycle / createBicycle '
+              + '/ createTree / createMountain / '
               + 'createRiver / createDesert / createRoad / createAnimal, with setDetailLevel() choosing '
               + 'full detail or the lighter phone-friendly build. '
               + '⚠️ NARROWING THIS IS HOW A 3D GAME ENDS UP LOOKING FLAT: without environment every '

@@ -52784,3 +52784,91 @@ per-gate.
   a wrong estimate with a differently-wrong one is not an improvement.
 - **The sandbox at 96% idle, started by `files`** is a cost item for the `sandbox_starts` instrument that
   PR D added, not a build defect. It wants a few days of that data read before anything is changed.
+
+---
+
+## 2026-09-14 — "Farzi object": the bike was a capsule on two cylinders, and the realism system was innocent
+
+**Report.** Admin screenshot of a bike racing game built by Pro v3.0. The bike was a red capsule lying
+across two grey cylinders. *"jab user koi game banwata hai, to object ek dam nakli se bante hai, farzi
+object lagte hai… jab user bole real/realistic/asli (word match nahi karne hai, user intension dekhni
+hai) to ek real 3d object banna chahiye."*
+
+### The interesting part: every piece they asked for already existed
+
+- `realismIntent.ts` — the admin's OWN 2026-08-27 instruction, already reading real/asli/realistic from
+  INTENTION rather than wording, with "real-time"/"real money" excluded by construction.
+- `objects.ts` (`Game3DGenerator`) — already builds genuinely good things at the real tier. `createCar`
+  has a raked windscreen, wheel arches, separate tyre and rim, emissive lights, a grille and mirrors.
+- `routes/agentv3.ts` — already prepends, in capitals, *"build every object with objects.ts … rather
+  than hand-modelling shapes"*, with the tier decided deterministically.
+
+🔴 **AND NONE OF IT COULD HELP, BECAUSE THE LIBRARY HAD NO BIKE.** Eight builders existed — car, tree,
+mountain, river, desert, road, animal, humanoid — so for a bike racing game the standing order "use the
+library, never hand-model" was **an order the model could not obey**. It hand-modelled with no spec, and
+three primitives is what free-form hand-modelling produces. `setDetailLevel` could not rescue it either:
+the tier only ever reaches objects.ts builders, so a hand-modelled object is `lite` whatever the user
+typed. **The realism switch worked; the library was too small, and nothing in the system said so.**
+
+### The fix, in the two halves the 50/50 law requires
+
+**Half 1 — the instance.** `createMotorcycle` and `createBicycle` in the object library, at the craft
+level `createCar` set. Real proportions (2.05 m long, **1.35 m wheelbase**, 0.30 m wheel radius, 0.80 m
+seat, 0.72 m bars), `sport`/`commuter`/`cruiser` variants, a `seat` anchor a `createHumanoid` drops
+straight into, and `lean()` / `steer()` / `roll()` — a bike that corners flat reads as a prop on rails.
+At the real tier: spoked rims, front disc and caliper, swingarm and chain, cooling fins, an exhaust
+header into a can, mudguards, mirrors, footpegs, emissive lights. The bicycle is built as a bicycle —
+open diamond frame, big thin spoked wheels, cranks and pedals — not as a shrunken motorbike.
+
+**Half 2 — the condition.** `heroObjectSpec.ts`: an N-builder library meets its N+1th request every day
+(an auto-rickshaw, a tractor, a fishing boat, a cricket bat), and at that moment the engine is back to
+improvising. So the builder now receives, for whatever the game is about, the object's **real-world
+dimensions**, the **parts it cannot read as itself without**, and **the one proportion that carries the
+silhouette** — whether or not a builder exists. ~25 objects, matched in English, Hinglish and
+Devanagari. This generalises what `createCar` already encoded in prose (*"those five numbers are most of
+why it reads as a car"*) to the objects nobody has written a builder for. It rides the SAME 3D/game gate
+as the realism block, so a billing app that mentions a "cab" gets nothing. Report code: `HERO_OBJECTS`.
+
+### A real bug the tests caught, and the reason the tests are shaped the way they are
+
+The first draft's wheelbase was **1.62 m, not 1.35** — a raked fork carries its wheel ~0.32 m forward of
+the steering head, and the head was not set back to pay for it. A stretched chopper, with nothing in the
+render to say so. **A string-matching test could never have seen this**, and string matching is all the
+generator tests could do, because `three` is not a dependency of this repo.
+
+So `tests/helpers/threeStub.ts` was added: the GENERATED `objects.ts` is transpiled and **executed**
+against a minimal three.js stand-in, and the assertions are about real numbers in the resulting scene
+graph — where the wheels are, whether they touch the ground, how far the parts spread along the bike
+(the "mostly air" test, which is the screenshot's failure stated as a measurement), and that steering
+moves the front wheel and only the front wheel.
+
+**Tests:** `tests/game3dObjects.test.ts` (10, runs the generated builder), `tests/heroObjectSpec.test.ts`
+(34). `AppKnowledgeBase.ts` updated in the same commit, per the standing rule.
+
+### 🔎 SIBLING BUG FOUND, DELIBERATELY NOT FIXED HERE (rule 3 + the concurrency rule)
+
+Writing the Devanagari matchers surfaced a bug class in this repo: **`\b` is defined on ASCII word
+characters, so it can never sit beside a Devanagari letter — the boundary logic inverts and the
+alternative silently never matches.** Two live files have it, verified by running their own regexes:
+
+| File | Pattern | Consequence |
+|---|---|---|
+| `AgentV3/claimAudit.ts` (≈97, 99, 144, 146, 157, 181) | `/\b(?:console\|कंसोल)\b…/` | every Hindi/Devanagari alternative in the false-claim detector is **dead** — a summary that overclaims in Hindi is never caught |
+| `lib/liveSearchContext.ts` (≈95) | `/\b(?:train\|rail\|…\|ट्रेन\|रेल)\b/i` | a live-train question asked in Devanagari never reaches the train lookup |
+
+**Not fixed in this change, and the reason is not caution about the fix — it is two lines.**
+`claimAudit.ts` is being edited right now by PR #2914, and `liveSearchContext.ts` is a Brave-path file
+the admin has told sessions to leave alone. Racing either would produce a conflict whoever is right.
+**Recorded here as an open sibling so the next session that legitimately owns those files fixes it**;
+`realismIntent.ts` already gets this right (its Devanagari group carries no `\b`) and is the pattern to
+copy.
+
+### 🔴 STILL OPEN — the honest ceiling, stated rather than sold
+
+This makes hand-modelled objects look **deliberate and real-LOOKING**. It is **not photorealism**, and
+no prompt can make it so. Photoreal needs real scanned assets (`.glb`), which is a hosting + licensing +
+attribution project (CC0 libraries such as Kenney/Quaternius/Poly Pizza, served from our own bucket with
+generated attribution), or paid AI 3D generation (~30–120 s and real money per model, which would break
+the "minutes, effortless" bar). **That is a product decision with a bill attached, so it is the admin's
+to make, not a session's.** Every user-facing word about this feature says "real-looking" and never
+"photorealistic", for exactly that reason.

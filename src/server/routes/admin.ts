@@ -34,6 +34,7 @@ import { assistantSpendStore } from '../lib/AssistantSpendStore';
 import { summarizeBuildFailures } from '../AgentV3/buildFailureAnalytics';
 import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
 import { listAdminBuildReports, getAdminBuildReport, markAdminBuildReport, deleteAdminBuildReport, deleteAllAdminBuildReports } from '../AgentV3/AdminBuildReportStore';
+import { listApkReports, getApkReport, markApkReportFixed, deleteApkReport, deleteAllApkReports } from '../lib/AdminApkReportStore';
 import { listAllDiagnostics, listBuildFacts, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { resolveUserIdentities, identityFrom, identityLabel } from '../lib/adminUserLookup';
 import { fetchAuthMetadata, firebaseAuthBatch, resolveJoinedAt, resolveLastActiveAt } from '../lib/adminUserActivity';
@@ -1078,6 +1079,68 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       res.json({ ok: true, deleted });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to clear the build reports.' });
+    }
+  });
+
+  // APK REPORTS — the automatic inbox for FAILED Android/iOS store builds (admin 2026-09-14). A separate
+  // inbox from Build Reports on purpose (see AdminApkReportStore.ts's header): that one is the in-house
+  // AgentV3 engine's own report, submitted only when a user presses "Report"; this one is written
+  // automatically by mobileShip.ts the moment a user's own GitHub Actions build fails — no user action.
+  app.get('/api/admin/apk-reports', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '200'), 10) || 200, 1), 500);
+      const reports = await listApkReports(limit);
+      res.json({ reports });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to load APK build reports.' });
+    }
+  });
+
+  app.get('/api/admin/apk-reports/:id', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const record = await getApkReport(String(req.params.id));
+      if (!record) { res.status(404).json({ error: 'APK build report not found.' }); return; }
+      res.json(record);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to load the APK build report.' });
+    }
+  });
+
+  app.post('/api/admin/apk-reports/:id/mark', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const body = (req.body ?? {}) as { fixed?: unknown; note?: unknown };
+      if (typeof body.fixed !== 'boolean') {
+        res.status(400).json({ error: 'Pass { fixed: true|false } to mark this report.' });
+        return;
+      }
+      const ok = await markApkReportFixed(String(req.params.id), body.fixed, typeof body.note === 'string' ? body.note : null);
+      if (!ok) { res.status(404).json({ error: 'APK build report not found (or the mark could not be saved).' }); return; }
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to mark the APK build report.' });
+    }
+  });
+
+  app.delete('/api/admin/apk-reports/:id', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const ok = await deleteApkReport(String(req.params.id));
+      if (!ok) { res.status(404).json({ error: 'APK build report not found (or it could not be deleted).' }); return; }
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to delete the APK build report.' });
+    }
+  });
+
+  app.post('/api/admin/apk-reports/clear', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      if ((req.body ?? {}).confirm !== true) {
+        res.status(400).json({ error: 'Pass { confirm: true } to clear all APK reports — this cannot be undone.' });
+        return;
+      }
+      const deleted = await deleteAllApkReports();
+      res.json({ ok: true, deleted });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to clear the APK build reports.' });
     }
   });
 

@@ -36,6 +36,7 @@ import { verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import { debitWalletForBuild } from '../lib/walletDebit';
 import { appBuildStore } from '../lib/AppBuildStore';
+import { saveApkFailureReport } from '../lib/AdminApkReportStore';
 import { getServerDb } from '../lib/serverDb';
 
 const githubToken = githubTokenFromRequest;
@@ -129,6 +130,19 @@ export function registerMobileShipRoutes(app: Express): void {
         if (concl === 'success' || concl === 'failure' || concl === 'cancelled') {
           const identity = await verifyFirebaseIdentity(req);
           if (identity?.uid) void appBuildStore.setOutcome(identity.uid, String(owner), String(repo), concl);
+          // AUTOMATIC ADMIN FAILURE REPORT (admin 2026-09-14: "apk bane nahi, fail ho jaye, to puri
+          // detailed build report admin panel me automatically send ho jaye"). No user action needed —
+          // this is the FIRST point the server itself learns a run failed. `saveApkFailureReport` is
+          // its own idempotency guard (doc id keyed to owner/repo/runId), so the repeat polls this same
+          // endpoint gets from a client that has not yet noticed the failure cost nothing beyond one
+          // Firestore write attempt that quietly no-ops.
+          if (concl === 'failure' && identity?.uid && done?.id != null) {
+            void recordApkFailureReport(req, {
+              uid: identity.uid, email: identity.email,
+              owner: String(owner), repo: String(repo), workflow: String(workflow),
+              runId: String(done.id), runUrl: typeof done.url === 'string' ? done.url : null,
+            });
+          }
         }
       } catch { /* the run list is the job; the record is a convenience */ }
       res.json({ runs });
@@ -713,6 +727,54 @@ export function registerMobileShipRoutes(app: Express): void {
       res.status(502).json({ error: 'Could not read the build log from GitHub.' });
     }
   });
+}
+
+/**
+ * Build the SAME complete report the user can download, and save it into the admin inbox — automatically,
+ * the moment `/runs` observes a run has failed. Best-effort throughout: every step is wrapped so a failure
+ * here (a transient GitHub 5xx, a rate limit) can never surface to the user whose build status this
+ * function rides alongside.
+ */
+async function recordApkFailureReport(
+  req: Request,
+  params: { uid: string; email: string | null; owner: string; repo: string; workflow: string; runId: string; runUrl: string | null },
+): Promise<void> {
+  const token = githubToken(req);
+  if (!token) return;
+  const { uid, email, owner, repo, workflow, runId, runUrl } = params;
+  try {
+    const headers = githubApiHeaders(token);
+    const [runRes, jobsRes, log] = await Promise.all([
+      axios.get(`https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}`, { headers }),
+      axios.get(`https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}/jobs`, { headers }),
+      failedJobLog(headers, owner, repo, runId).catch(() => ''),
+    ]);
+    const w = runRes.data as Record<string, unknown>;
+    const job = (jobsRes.data?.jobs || [])[0] as { steps?: Array<Record<string, unknown>> } | undefined;
+    const steps = mapRunSteps((job?.steps || []) as Array<{ name?: string; status?: string; conclusion?: string | null }>);
+    const full = buildMobileBuildReport({
+      owner, repo, workflow,
+      run: {
+        id: (w.id as number) ?? runId,
+        status: String(w.status || 'completed'),
+        conclusion: (w.conclusion as string | null) ?? 'failure',
+        startedAt: (w.run_started_at as string) || (w.created_at as string) || null,
+        completedAt: (w.updated_at as string) || null,
+        htmlUrl: (w.html_url as string) || runUrl,
+      },
+      steps,
+      log,
+    });
+    if (!full.failure) return; // GitHub disagreed with the earlier /runs read — nothing to report
+    void saveApkFailureReport({
+      userId: uid, email,
+      owner, repo, workflow, building: full.app.building,
+      runId: String(full.build.runId), runUrl: full.build.link,
+      startedAt: full.build.startedAt, completedAt: full.build.completedAt,
+      durationSeconds: full.build.durationSeconds,
+      steps: full.steps, failure: full.failure,
+    });
+  } catch { /* best-effort — the user's own build status must never wait on this */ }
 }
 
 /**

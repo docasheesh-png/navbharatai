@@ -54030,3 +54030,83 @@ both are 24-hour now.
 typecheck · noUnusedImports · typecheck:server · build · test:bundle · boot:check — all green on the
 final state; **1642 files / 22,879 tests passed / 1 skipped / 0 FAIL**. 121 tests touched or added
 across nine suites; the `live`-channel, audit-severity and window-snapshot rules are each locked.
+## 2026-09-14 — A failed store build now reports itself to the admin, automatically, on its own page
+
+Admin (verbatim): *"jab bhi koi user, navbharatai par 'APK' banwaye. aur apk bane nahi, fail ho jaye. to
+puri, failed apk ki detailed build report … admin panel me automatically send ho jaye"* + *"admin panel
+me 'apk report' ka alag page bana do, header me."*
+
+**Investigated first.** The Android/iOS "Ship to stores" pipeline (`src/server/routes/mobileShip.ts` +
+`StoreBuildPanel.tsx`) does NOT build on our own infrastructure — it packages a user's app, pushes it to
+**their own GitHub repo**, and dispatches a real GitHub Actions workflow there. A complete "why it
+failed" builder already existed (`buildMobileBuildReport()` in `mobileBuildReport.ts` — the SAME
+classifier the self-healing repair loop uses, so the report and the repair can never tell two different
+stories) but it only ran ON DEMAND, behind two USER-initiated routes (`GET /api/mobile-ship/report`, the
+downloadable JSON; `GET /api/mobile-ship/logs`, the admin-diagnostic view). Nothing wrote it anywhere
+automatically, and nothing reached the admin at all — the only durable trace of a failed build was a
+bare `outcome: 'failure'` + a short classifier code on `AppBuildStore`'s one-row-per-app pointer, with no
+log, no "why", no step name.
+
+**Root-caused as two separate gaps, both closed:**
+
+1. **No automatic capture.** `GET /api/mobile-ship/runs` is the ONE place the server first learns a run's
+   real conclusion (it's polled by the client while a build is in flight). It already wrote the outcome
+   to `AppBuildStore`; it now ALSO — only on `conclusion === 'failure'`, only once per run — fetches the
+   failed job's log and steps, builds the SAME report `buildMobileBuildReport()` produces for the user's
+   own download, and saves it via the new `saveApkFailureReport()` (`src/server/lib/AdminApkReportStore.ts`).
+   No user action, no button — the report exists before the user has even seen the failure themselves.
+   🔒 **Idempotency is structural, not a check-then-write race.** The doc id is deterministic on
+   `(owner, repo, runId)` and the save uses Firestore `.create()` (never `.set()`), so a client polling
+   the same failed run five times in a row before it stops writes the row exactly once — a duplicate
+   attempt throws ALREADY_EXISTS and is swallowed, the same idempotency shape `hosting_billing`'s daily
+   job already uses. A DIFFERENT run of the same repo (the user fixes something and rebuilds, and THAT
+   fails too) gets its OWN report — unlike `AppBuildStore`'s one-row-per-APP pointer, this inbox is
+   one-row-per-FAILED-ATTEMPT on purpose, because each one is a genuinely separate thing to fix.
+   Best-effort throughout, matching every store in this codebase that shares a request with a user who
+   is waiting: every step is wrapped so a GitHub 5xx or rate limit here can never delay or break the
+   build-status response the user's own poll is waiting on.
+
+2. **No admin surface.** A new, DELIBERATELY SEPARATE admin inbox and nav page — not folded into the
+   existing AgentV3 "Build Reports" tab, for the same reason "User Reports" got its own page on
+   2026-08-21 (see that entry): different pipeline, different failure shape (Gradle/Xcode/npm output,
+   not an AI build turn), different population (every store-build user, not only the ones who pressed a
+   Report button). `admin_apk_reports` collection; routes `GET/POST /api/admin/apk-reports[...]` (list,
+   detail, mark fixed/reopened, delete, clear-all — mirroring the existing inbox's own shape exactly,
+   all behind `verifyAdminToken`); a new **"APK Reports"** tab in the admin header nav
+   (`AdminDashboard.tsx`), between "User Reports" and "Security", showing each failure's repo, who built
+   it, when, the classified "why", the step list, the log excerpt, a direct link to the full run on
+   GitHub (the unbounded log already lives there for 90 days — duplicating it into Firestore would be
+   the fragile choice), and whether NavBharatAI's own self-heal could have fixed this class.
+
+**What "everything needed to fix it" means here, concretely:** the classified failure code + plain-words
+summary, which pipeline stage broke (install/webbuild/capacitor/android), the actual failed-step log
+(bounded to the last 120 lines / 400 chars per line — the same bound the user's own downloadable report
+uses), whether the class is one NavBharatAI's self-heal already knows how to repair, and a one-click link
+to the complete GitHub Actions run for anything the excerpt doesn't cover.
+
+**Regression-locked:** `src/server/lib/AdminApkReportStore.test.ts` (the id's determinism/uniqueness —
+same run reported twice collapses, a different run or repo does not — and every store method's
+VITEST-inert guards, mirroring `AppBuildStore.test.ts`'s own pattern) and
+`tests/apkFailureReportWiring.test.ts` (the `/runs` route fires the report only on `failure` + a
+verified identity; the reporter and the user-facing `/report` route both call the SAME
+`buildMobileBuildReport()`; all five new admin routes exist and are gated by `verifyAdminToken`; the new
+tab is genuinely wired — its own fetch, its own render block, its own nav entry, separate from "Build
+Reports").
+
+⚠️ **One thing kept deliberately narrow, stated rather than hidden.** The report fires from the SAME
+signed-in request whose GitHub token happens to be polling `/runs` at the moment a failure is first
+observed — if a user's browser is closed or stops polling before that happens (the client itself decides
+when to stop), no report is written for that run. This is the same trade the existing "recent runs" /
+"run steps" endpoints already make — the pipeline has no server-side webhook from the user's own GitHub
+repo, only what the open client asks for. Acceptable because `StoreBuildPanel.tsx`'s state machine polls
+through to a terminal state by design (`idle→…→built|failed`) before it ever lets the tab go idle, so the
+gap is a user closing the tab mid-poll, not the ordinary path.
+
+Verified against a freshly-rebased `origin/main` and the full CI-parity gate: `tsc --noEmit` (frontend)
+clean, `tsc -p tsconfig.server.json --noEmit` (server) clean, `node scripts/noUnusedImports.mjs` clean,
+full `npx vitest run` — 22848 passed, 1 skipped, 0 `FAIL` lines, `npm run build` clean, `npm run
+test:bundle` within budget (had to add the `supports-[height:100dvh]` companion to the new modal's
+`max-h-[85vh]` — `tests/mobileScrollGeometry.test.ts` already guards this repo-wide, and caught it),
+`npm run boot:check` PASS. Checked open PRs first (#2927, #2926, #2900) — #2926/#2927 also touch
+`admin.ts`/`AdminDashboard.tsx` but neither mentions APK/mobileShip/AdminApkReportStore, so no duplicate
+work; a mechanical merge conflict on those two shared files is possible and expected, not a redundancy.

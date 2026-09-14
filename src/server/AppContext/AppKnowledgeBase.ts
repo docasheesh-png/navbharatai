@@ -2850,6 +2850,21 @@ Backend: GET /api/admin/monitor (one composed call) over the 5-minute time-serie
     keywords: ['2fa', 'mfa', 'two-factor', 'totp', 'authenticator', 'google authenticator', 'authy', 'otp', 'admin security', 'second factor', 'do factor', 'suraksha', 'login security'],
   },
   {
+    id: 'admin-page-copy',
+    name: 'Floating "Copy this page" button (admin only)',
+    path: 'Admin Dashboard → any tab → the round copy button floating over the page (admin only)',
+    description: `A round copy button that floats above EVERY admin page (Monitor, Users, AI Engines, Revenue, Build Reports, User Reports, Security, Settings) so the whole page can be handed to someone who can fix it:
+• DRAG IT ANYWHERE with a finger or a mouse — it remembers where it was put, and it re-clamps itself onto the screen after a rotation or on a smaller device, so it can never end up stranded off the edge
+• PRESS IT to put the whole page on the clipboard; the × in its corner hides it until the admin panel is reloaded
+• WHAT IT COPIES IS TEXT, NOT A PICTURE — and that is deliberate: a browser cannot photograph its own window, the libraries that claim to do it re-draw the page and get it wrong, and screen capture prompts every time and does not exist in the Android app's WebView. A text copy works on 100% of pages, on every device, with no prompt
+• The copy carries the page name, the time, which frontend/app build is running, the screen size and pixel density, the device/browser/language/online state, anything reaching past the edge of the screen, the last errors the browser recorded, and then an indented outline of everything visible on the page — headings, values, buttons, form fields and one line per table row
+• It never copies itself, and it never copies the admin's own two-factor secret; password and credential fields are shown as [hidden]
+• It tells the truth: if the browser refuses the clipboard it says so instead of claiming "Copied", and if the page is too long to fit it says the copy is only the top of the page`,
+    howToUse: 'Admin login required. Open the Admin Dashboard, go to any tab, drag the floating copy button wherever it suits you, then press it once — the whole page is now on your clipboard and can be pasted into a chat or a message. Press the × to hide it; reload the admin panel to bring it back.',
+    relatedFeatures: ['admin-monitor', 'admin-metrics', 'report_problem'],
+    keywords: ['copy page', 'copy button', 'floating button', 'screenshot', 'page copy', 'share page', 'admin copy', 'copy karo', 'page bhejo', 'screenshot le', 'floting button', 'drag button'],
+  },
+  {
     id: 'admin-cost-ladder',
     name: 'Build Cost-Ladder Dashboard',
     path: 'Admin Dashboard → Revenue tab → "Build Cost-Ladder (last 30 days)" (admin only)',

@@ -52836,3 +52836,71 @@ was closed), the label drifting from the sidebar, the touch-pause handlers dropp
 wired to nothing. `AppKnowledgeBase.ts` updated in the same change — the notice is a third way into
 the reporting sheet, recorded on that feature's existing entry rather than as a new one, because a
 transient notice is not a navigable feature of its own.
+
+---
+
+## 2026-09-14 — The floating "copy this page" button on every admin page
+
+**Admin, verbatim:** *"admin panel me ek floating 'copy' button bana — x(close) button ke sath. jab
+chahe admin kisi bhi page par ho. waha ek floting 'copy' button dikhe. (moving — finger se kahi bhi
+draw/khiska sake, aur x(close) kar sake) is copy button ka kaam : pure page ka screenshot le kar
+keyboard pe copy kar lena! pure 100% pages ko. woh page mai apko bhejunga, aur aap waha jo bhi
+problem ho, woh solve karoge!"*
+
+The button is exactly as asked: it floats over **every** admin tab, drags anywhere with a finger or
+a mouse, remembers where it was left, and closes with an ×. One press puts the whole page on the
+clipboard.
+
+### 🔴 What it copies is TEXT, not an image — and that was a judgement call, so it is recorded here
+
+A browser **cannot photograph its own window.** The two things people reach for instead both fail the
+"100% of pages" half of the instruction:
+
+- **A DOM-painting library** (`html2canvas` and friends) does not capture the screen — it **re-draws
+  the page** from the DOM, and gets it wrong often enough to mislead whoever reads the result. This
+  repo had already refused it once for exactly this reason: `ReportSheet.tsx` records *"a DOM-painting
+  library that renders the page WRONG often enough to mislead the person reading the report."* A
+  wrong picture sent to a debugger is worse than no picture — it sends the fix to the wrong place.
+- **`getDisplayMedia`** prompts the user to pick a window on every single call, is desktop-only, and
+  does not exist in the Android WebView the admin actually uses.
+
+So the copy is a **structured text snapshot**: page name, time, which frontend and app build is
+running, screen size and density, device/browser/language/online state, anything reaching past the
+edge of the screen, the last errors the browser recorded, then an indented outline of everything
+visible — headings, values, buttons, form fields, and **one line per table row** (an admin table is
+the most common thing on these pages; one line per *cell* would turn fifty rows into six hundred
+lines of confetti). It works on 100% of pages, on every device, with no prompt and no new dependency
+— and it carries strictly more of what a fix needs than an image does. The phone's own screenshot
+button remains the right tool for a purely visual complaint, and that is said plainly rather than
+papered over.
+
+### 🔴 The bug the tests caught, which would have leaked a live credential
+
+The opt-out attribute is written `data-nb-no-copy=""` — the form React emits for a valueless
+attribute. `getAttribute` returns an **empty string** for it, and my first implementation tested that
+value for **truthiness**, so the opt-out silently opted every marked element straight back **in**.
+
+The first thing marked with it is the admin's **live TOTP secret and its `otpauth://` URI**, rendered
+on the Security tab. Pressing Copy there would have put a working second factor on the clipboard and
+then into a chat. Fixed with an explicit presence check (`hasAttr`), which is now the only reader of
+that attribute, with a comment saying why truthiness is wrong. `otpauth://` URIs are additionally
+redacted **by pattern** wherever they appear, so the protection does not rest on one attribute alone;
+password fields and anything named like a token/key/secret/PIN copy as `[hidden]`.
+
+### Honesty
+
+`copyTextToClipboard` **returns false** rather than throwing when the browser refuses — so an
+unconditional "Copied!" is the exact fake success this repo forbids, and the admin would paste their
+previous clipboard with no way to know why the page did not match. The button branches on the real
+result and says which happened. A page too long for one copy says the copy is **only the top of the
+page**; a page that could not be read says so instead of showing an empty body; and "read as empty"
+and "could not be read" are deliberately different sentences.
+
+### Verification
+
+79 tests across three files (`pageSnapshot`, `floatingButtonPosition`, `adminCopyButtonWiring`). The
+clamp is tested against the two cases that actually strand a floating button — a position saved on a
+laptop and replayed on a phone, and a rotation — plus the narrow-screen case where the two bounds
+cross and the **left** edge must win, because that is the one edge a finger cannot drag it back from.
+Bite-checked by removing the secret's opt-out: the wiring test fails. `AppKnowledgeBase.ts` gained an
+`admin-page-copy` entry.

@@ -53419,6 +53419,69 @@ warns against. Left open here rather than guessed at.
 
 ---
 
+## 2026-09-14 — Eleven saved credentials shown as "No credentials saved yet"
+
+**Admin, with a screenshot:** *"maine abhi 11 credentials save kiye. par yaha aa raha hai save nahi hai."*
+
+**The keys were saved. Every one of them.** The save path was never the problem — it goes through
+`POST /api/secrets`, which uses the ADMIN SDK. What failed was the screen's ability to *see* them.
+
+### The root cause: the browser was reading a collection only the server owns
+
+`SecretManager.tsx` rendered the table as `rows ∩ metas`:
+
+- **`rows`** — the real keys, from `POST /api/secrets/:userId/reveal`. Server-side, ticketed, correct.
+  All eleven were in here.
+- **`metas`** — an `onSnapshot` **straight onto the `user_secrets` collection from the browser**.
+
+A browser read is subject to Firestore security rules; the Admin SDK is not. And the rule guarding it
+was wrong in a way that reads as protection:
+
+```
+match /user_secrets/{userId}/{document=**} { allow read, write: if isOwner(userId); }
+```
+
+That guards a **per-user subtree which has never existed.** The server writes **flat documents with
+auto-ids** and a `user_id` **field** (`addDoc(collection(db, 'user_secrets'), …)`), so under
+`rules_version = '2'` the `{userId}` wildcard bound to a **random document id** and `isOwner(<auto-id>)`
+could never be true. The query was refused.
+
+**And the refusal arrived nowhere.** `onSnapshot(q, cb)` was registered with **no error callback**, so
+the denial was swallowed, `secrets` stayed `[]`, the allow-list was empty — and every real key was
+filtered out of a list that then announced *"No credentials saved yet."*
+
+### Why this is one bug and not two
+
+The class is **a client reading a server-owned, Admin-SDK-written collection directly** — which cannot
+work, and whose failure mode is silence. So the fix is not a better rule: it is to stop doing that.
+`listSecrets()` already existed in `src/lib/secretsApi.ts` for exactly this (names + scope, never a
+value), carries the user's token, is bounded by a timeout, and throws. The list now uses it, reloads
+after a save, and `firestore.rules` states the truth — `user_secrets` is **server-only**, denied
+outright, a rule that cannot be mistaken for a permission that works.
+
+⚠️ **The trade, stated rather than discovered later:** a one-shot read has no live updates. It reloads
+on mount and after a save — the same moments the old snapshot would have fired — and it now reads from
+the same source the build engine does.
+
+### The honesty half, which matters more than the read
+
+A failed read still empties `rows ∩ metas`, so it would have printed the same sentence. Those two
+states now differ: an unreadable list says **why**, and says the keys are safe. And the catch block
+deliberately **does not blank the list it already had** — turning a transient network failure into "you
+have nothing saved" is the same lie arriving by a slower route. Test-locked, including that one.
+
+### 🔴 Not verified from here, and not claimed
+
+I cannot read the **deployed** Firestore rules — `firestore.rules` in this repo is only live if someone
+ran a Firebase deploy. The diagnosis above is from the repo's rule and the code's real document shape.
+**It does not matter for the fix** (the client no longer reads that collection at all, so the deployed
+rule cannot affect this screen either way), but the specific claim "the deployed rule denied it" is an
+inference, not a measurement, and is written here as one.
+
+### Verification
+
+9 tests (`tests/secretListReadPath.test.ts`). Two reverts tried, two failures: removing the server read,
+and collapsing the honest empty-state back into one sentence.
 ## 2026-09-14 — MERGE RESOLUTION: #2919's render evidence into #2917's ok-gate (one mechanism, not two)
 
 **What #2919 fixes, and it is real.** Report fd021c64: a user typed *"Yess create karo"* into a
@@ -53474,6 +53537,69 @@ file has now been burned by three times.
 **Also on 2026-09-14:** #2914 merged (`ff9cd845`) after its own session resolved the #2917 overlap and
 CI went green on `802eaa7e`; the full gate was re-run locally on main+#2914 before the merge, per the
 concurrent-sessions rule that a gate run before a merge proves nothing.
+
+## 2026-09-14 — Settings → Live Metrics was never real: it rendered an auth failure as a dashboard of zeros
+
+Admin, with a screenshot: *"setting ke andar ka live matrix farzi hai, real data nahi show ho raha."*
+The screen showed **0 total builds · 0% success · 0% preview · 0s average · "No AI calls recorded
+yet" · $0.0000** — on an account that had built apps that same day.
+
+**They were right, and more precisely right than the word "farzi" suggests. Nothing was mocked — the
+screen had never been able to load anything, since the day it shipped.**
+
+### The chain, read from the code rather than guessed
+
+1. `/api/admin/metrics` authenticates on the **`x-admin-token`** header — `verifyAdminToken` reads
+   exactly `req.headers['x-admin-token']`.
+2. `SettingsPanel` sent **`Authorization: Bearer <token>`**, in **both** of its call sites.
+3. So the route answered **401 `{ error: 'Admin token required.' }`** — every time, for every admin,
+   from the first day.
+4. The client did `.then(r => r.json()).then(setAdminLiveMetrics)` with **no `r.ok` check**. That error
+   object is truthy, so the panel rendered — and every field fell through its `?? 0`:
+   `builds?.total ?? 0` → 0 · `successRate ?? 0` → 0% · `previewRate ?? 0` → 0% · `avgMs ?? 0` → 0s ·
+   `Object.entries(tokens || {}).length === 0` → "No AI calls recorded yet" · `totalCostUsd ?? 0` →
+   $0.0000.
+
+**That is the screenshot, field for field.** A confident dashboard assembled entirely out of fallbacks
+over an auth failure — the second absolute rule's *"a status indicator MUST reflect real state — never
+hardcoded, never faked"*, and worse than a blank screen: a blank screen asks a question, this answered
+one, wrongly.
+
+### 🔒 The fix is a shared helper, not a one-character header fix
+
+`'x-admin-token'` was hand-written in **four** client files — `LoadBoard`, `MonitorPanels`,
+`AdminDashboard` and this panel. **Three had it right and one did not, and nothing could tell**,
+because there was no single answer to "how does an admin request authenticate?" for the wrong one to
+disagree with. Correcting only the typo leaves the next caller equally free to invent a fifth spelling.
+
+`src/lib/adminFetch.ts` is now that answer: `ADMIN_TOKEN_HEADER`, `adminHeaders`, and an `adminGet`
+whose result type **has no `data` on the failure branch** — so "an error became the dashboard" is not a
+mistake a caller can make any more. A 401 is named as a sign-in problem (the one thing the admin can
+act on); a network throw is `status: 0`, because *"we could not ask"* and *"the server said no"* are
+different facts; and a 200 that will not parse is not data either.
+
+⚠️ `adminFailed()` is an explicit **type predicate** rather than a bare `if (r.ok)`: this project's
+frontend tsconfig did not narrow the union reliably at the call sites, and a caller that cannot reach
+`message` is a caller who will reach for `data` instead — which is the original bug wearing a different
+hat.
+
+### The screen now tells the truth in three states
+
+- **loaded** — real numbers
+- **failed** — the actual reason, with a *Try again* button. The old card said *"Admin login required"*
+  for every outcome, which was by accident the one true thing it could have said.
+- ⚠️ **labelled** — *"Counted since this server last started — not lifetime totals."* These come from a
+  process-wide registry (`server/lib/metrics.ts`), and this service scales to zero and redeploys on
+  every merge. **Without that line a genuinely small number reads exactly like the broken screen this
+  replaces** — which is how the real bug stayed hidden for so long.
+
+### The class guard
+
+A test sweeps every client file and fails if an `Authorization` header appears near an `/api/admin/`
+URL. ⚠️ **Per CALL, not per file** — the first version flagged `App.tsx`, whose `Authorization: Bearer`
+headers are GitHub API calls with nothing to do with this, and this module's own comment describing the
+bug. A guard that cries wolf gets deleted. A second test asserts the sweep actually sees admin call
+sites, because a scan that finds nothing passes while proving nothing. 12 tests.
 
 ---
 

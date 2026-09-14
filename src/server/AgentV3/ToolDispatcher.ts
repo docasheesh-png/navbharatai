@@ -360,7 +360,7 @@ import { formatUiFindings, type ScannedElement } from './UiElementFinder';
 import { envKillSwitch } from '../lib/envFlag';
 import { webFetchUrl, formatWebFetchResult } from './webFetch';
 import { matchingIgnoreRule, protectedWriteMessage, type IgnoreRule } from './ignoreRules';
-import { stripPreviewBridge, isHtmlDocumentPath } from './previewBridge';
+import { withoutPreviewBridge } from './previewBridge';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -482,7 +482,7 @@ export class ToolDispatcher {
      * sometimes-empty, sandbox listFiles). This is what makes a build's files survive a sandbox
      * loss / the next message getting a fresh sandbox.
      */
-    private readonly onFileWrite?: (path: string, content: string) => void,
+    private readonly onFileWriteRaw?: (path: string, content: string) => void,
     /** Framework id from FrameworkRegistry (e.g. 'nextjs', 'vue'). Defaults to 'vite-react'. */
     private readonly framework?: string,
     /**
@@ -493,6 +493,31 @@ export class ToolDispatcher {
      */
     private readonly onCommand?: (result: { command: string; exitCode: number | null; stdout: string; stderr: string; durationMs: number }) => void,
   ) {}
+
+  /**
+   * THE DURABLE STORE IS WHAT A PUBLISH SERVES, SO NOTHING OF OURS MAY REACH IT (autopsy fd021c64).
+   *
+   * `stripPreviewBridge`'s own doc claims the bridge is "closed at both ends" — the file the model
+   * READS never contains it, and a `write_file` that carries the marker has it stripped. Both are
+   * true, and both are about the `write_file` TOOL. **There is a third door.** Roughly twenty places
+   * in this class persist a file by calling the durable callback DIRECTLY, and the sharpest of them
+   * is `injectAppSignatureIntoIndexHtml`: it fires the moment the preview port is verified UP —
+   * which is precisely when the dev-server launch has just injected the bridge into the sandbox's
+   * `index.html` — reads that document, adds the badge, and persists the result. The bridge rode
+   * along into the durable store, and the durable store is exactly what a later deploy serves.
+   *
+   * So the guard lives on the callback itself rather than at the call sites. The constructor's
+   * parameter is `onFileWriteRaw` and this wrapper is what the class calls, which means a write
+   * that reaches durable storage with the bridge in it is not merely unlikely — it has nowhere to
+   * come from, including from code nobody has written yet.
+   *
+   * ⚠️ It deliberately guards ONLY the durable copy. The SANDBOX file keeps its bridge, because the
+   * running Vite server serves that document and the Live preview's console mirror is the whole
+   * reason it is there — stripping it from disk would fix a publishing bug by breaking a feature.
+   */
+  private readonly onFileWrite = (path: string, content: string): void => {
+    this.onFileWriteRaw?.(path, withoutPreviewBridge(path, content));
+  };
 
   // Preview loop-breaker state (build-diagnostics root cause: with no cross-call memory the model
   // re-ran update_preview + npm run dev in a loop until the step cap — ~10 min burned on an
@@ -1548,7 +1573,12 @@ export class ToolDispatcher {
       const reads = await mapWithConcurrency(candidates, 12, async (p) => {
         try {
           const content = await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'readFile');
-          return content.length > 200_000 ? null : { path: p, content };
+          // THE THIRD CONSUMER OF THESE FILES, AND THE ONE NOBODY GUARDED (autopsy fd021c64).
+          // This reads the SANDBOX directly — it is not the `read_file` tool, so nothing had
+          // stripped our injected preview bridge before ~30 analysers judged it as the user's own
+          // code. One real build was headlined `postmessage-wildcard-origin @ index.html:9`, which
+          // is the mirror's own `postMessage(msg, '*')`. Strip at the funnel, not per analyser.
+          return content.length > 200_000 ? null : { path: p, content: withoutPreviewBridge(p, content) };
         } catch {
           return null;
         }
@@ -2220,7 +2250,7 @@ export class ToolDispatcher {
           // preserve the script tags they find when they rewrite an HTML file, which is precisely how
           // a development-only bridge ends up published inside somebody's finished app. It is removed
           // here so the model only ever sees the file it actually authored.
-          if (isHtmlDocumentPath(reqPath)) full = stripPreviewBridge(full);
+          full = withoutPreviewBridge(reqPath, full);
         } catch (err) {
           // PATH-MISS RECOVERY (build-report autopsy 2026-08-01): a bare "does not exist" made the builder
           // loop 12 times guessing the same wrong root (created src/components/ui/X.tsx, read
@@ -2296,7 +2326,7 @@ export class ToolDispatcher {
         // (a model reproducing an older document from memory, a paste, a future read path that
         // forgets to strip) has it removed before it reaches durable storage, so the bridge can never
         // be published inside a user's app. Both ends, deliberately: unlikely is not impossible.
-        if (isHtmlDocumentPath(path)) content = stripPreviewBridge(content);
+        content = withoutPreviewBridge(path, content);
         // PACKAGE.JSON DEP PIN (LearnLoop autopsy 2026-07-18): force known-breaking deps (Prisma → ^6)
         // to their known-good major IN the written package.json, so a later plain `npm install` (which
         // carries no package tokens, so pinKnownDepsInInstallCommand can't fire) never pulls a breaking

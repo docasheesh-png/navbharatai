@@ -53537,4 +53537,66 @@ also carries an animation class, and `translate(-50%` appeared in no other keyfr
 `transform: translateY(6px)` but is never combined with a translate utility. So this was the only live
 instance — and the new sweep assertion is what keeps it the last one.
 
+## 2026-09-14 — Supabase one-tap connect stranded the native (Capacitor) app on "Please sign in first."
+
+Admin report, screenshotted from the iOS app: tapping "Connect Supabase" in Settings → Database ends on
+an in-browser "Please sign in first." with no way back into the app.
+
+**ROOT CAUSE.** The one-tap Supabase connect flow (`SupabaseConnectCard.tsx` + `supabaseIntegration.ts`,
+shipped 2026-08-04, fixed for the web on 2026-08-20) was built and fixed for the WEB app only: `connect()`
+does a full-page `window.location.assign()` to Supabase, and the server callback redirects same-tab,
+same-origin back to `https://navbharatai.com/?sbconnect=<nonce>` — which works because a web browser tab
+never changes origin across that whole round trip.
+
+The native app's own WebView origin is `https://localhost` (Android) / `capacitor://localhost` (iOS) —
+**not** `navbharatai.com` (see `capacitor.config.ts` and the secret-vault device-lock entry above). So on
+native: the external navigation to Supabase gets routed into the OS's own system browser (the Safari
+chrome visible in the report screenshot), Supabase's redirect lands that browser on
+`https://navbharatai.com/...` — a real public origin with its OWN, completely separate, unauthenticated
+browser storage — and the completion call has no Firebase ID token to attach, so the server correctly
+(and unhelpfully) answers 401 "Please sign in first.", verbatim what was reported.
+
+**THIS IS THE SAME CLASS OF BUG already root-caused and fixed for GitHub connect** (`useGitHubConnect.ts`
+/ `githubOauthReturn.ts`, admin report 2026-08-17: "github login ho jata hai theek se par, yaha aa kar
+atak jata hai") — it was simply never ported to Supabase. Applied the identical fix:
+
+- **Client**: on native, open the consent URL in an **in-app browser** (`@capacitor/browser`'s
+  `Browser.open()`) instead of navigating the app's own WebView away.
+- **Server**: the callback returns through the app's own `com.navbharat.ai://supabase-callback` deep
+  link instead of the web redirect. **No new native-side registration needed** — the Android manifest's
+  intent-filter and the iOS build's `CFBundleURLSchemes` entry are scheme-only (`com.navbharat.ai`), not
+  path-restricted, so the scheme GitHub already registered covers this path too.
+- **ONE function, `supabaseReturnUrl()`, decides both the web and native redirect** — so the two paths
+  cannot silently drift apart the way the original web-only flow drifted from what native needed in the
+  first place. The native flag travels from `/start` (the client states its own platform, since the
+  callback is a browser navigation that can carry no headers of its own) alongside the PKCE verifier, so
+  the callback knows which return to send for both the success AND failure paths.
+- **No ticket/encryption needed**, unlike GitHub's raw-token handoff: the nonce this deep link carries is
+  not a secret, only a claim key — `claimPendingConnection` already independently verifies the redeeming
+  request comes from the SAME Firebase uid that started the flow, so an app that merely intercepted the
+  scheme could read the nonce but never redeem it as anyone else's account.
+- **New pure module `src/lib/supabaseOauthReturn.ts`** parses the deep link (mirrors
+  `githubOauthReturn.ts`), and the native return re-fires the card's existing completion check via a new
+  custom event (`SUPABASE_NATIVE_RETURN_EVENT`) rather than relying on a mount effect — on native the
+  in-app browser closes with **no page navigation**, so the card component never remounts the way a web
+  page reload does.
+
+**Regression-locked** in `src/lib/supabaseOauthReturn.test.ts` (pure parsing), `supabaseOAuth.test.ts`
+(the web/native redirect split), and `tests/supabaseNativeReturnWiring.test.ts` (end-to-end wiring: the
+deep-link listener checks Supabase before falling into the GitHub branch, the card opens the in-app
+browser and tells the server `native: true`, the server threads the flag through both redirect paths).
+
+⚠️ **One thing kept deliberately narrow.** The native flag is resolved from the verifier store, which is
+only populated once `takeVerifier` succeeds — a callback whose STATE itself is forged/expired/malformed
+falls back to the web-style redirect (an honest "please retry from the app" page) rather than a
+native-aware one, since nothing at that point can yet be trusted to say what platform started the flow.
+This is an already-rare, independently-retryable edge case (the user just taps Connect again), not a gap
+in the fix for the actual reported bug.
+
+Verified against a freshly-rebased `origin/main` and the full CI-parity gate: `tsc --noEmit` (frontend)
+clean, `tsc -p tsconfig.server.json --noEmit` (server) clean, `node scripts/noUnusedImports.mjs` clean,
+full `npx vitest run` — 22770 passed, 1 skipped, 0 `FAIL` lines, `npm run build` clean, `npm run
+test:bundle` within budget, `npm run boot:check` PASS. Checked open PRs first (#2922, #2921, #2900) —
+none touch Supabase, OAuth, or the native `appUrlOpen` listener.
+
 **Gate:** typecheck · noUnusedImports · typecheck:server · vitest · build · test:bundle · boot:check.

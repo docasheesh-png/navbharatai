@@ -2143,6 +2143,38 @@ changes: CI still must be green before a merge ever happens, and a red or pendin
 worked to green in the background exactly as before — only the final "merge it" decision moved
 from Claude to the admin.
 
+🔴 **AND THE MERGE IS ONE SESSION'S JOB, NOT EVERY SESSION'S (admin-mandated 2026-09-13, verbatim:
+"ab se PR merge sirf aap karoge! mai bolunga apko tab. woh session bas bana bana kar CI check laga
+denge").** This is the second half of the correction above, and without it that one is unenforceable:
+a rule that says "wait for the admin" still lets five sessions each decide, independently, that their
+own PR is the one that may go.
+
+**So there are now exactly two roles, and every session is in one of them.**
+
+| | What it does | Where it STOPS |
+|---|---|---|
+| **The merging session** — the ONE the admin is talking to | merges, and only when the admin names the PR | — |
+| **Every other session** | branch → commit → push → open the PR → drive CI to GREEN → say so | **at green. It does not merge, ever.** |
+
+⚠️ **"I am the session the admin is talking to" is not something to assume — it is something the
+admin SAYS.** If you have not been told in your own conversation that merging is yours, you are in
+the second row, whatever your PR's state. A session that reasons "the admin clearly wants this
+merged" has just made itself the merger, which is the exact thing this rule removes.
+
+🔴 **WHY, AND IT IS NOT HOUSEKEEPING.** On the day this was written, **eight PRs merged into `main`
+inside two hours from four different sessions**, and two of them (#2892, #2896) were merged by a
+session that did not open them, while the session that did was still working on the branch. Nothing
+broke — by luck and a green CI, not by design. With concurrent sessions the merge is the ONE step
+where an independent decision compounds: a conflict-resolution another session has not seen, a
+half-landed pair, a `main` that moves under three branches at once. One merger makes the order
+deliberate instead of incidental.
+
+⚠️ **NOTHING ELSE CHANGES, and a session in the second row must not go quiet.** CI must still be
+green before any merge, a red or conflicted PR is still driven to green in the background, and a
+merge conflict is still merged in and re-gated by whoever owns the branch. **Reaching green is the
+deliverable — report it plainly** ("#NNNN is open and green") so the admin knows there is something
+to name. Going idle on a green PR is not obedience to this rule; it is half the job.
+
 ### The 60-second auto-answer rule (admin-mandated, 2026-07-06 — keeps the cycle from stalling)
 
 The cycle must NOT freeze waiting on the admin. So:

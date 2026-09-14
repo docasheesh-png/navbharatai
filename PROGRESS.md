@@ -53758,3 +53758,79 @@ boot:check · **1633 files / 22,777 passed / 1 skipped / 0 FAIL**.
 - `AGENT_NOTE` / `PREVIEW_SNAPSHOT_STALE` / the incremental line contradicting each other.
 - `@playwright/test` added to a project whose sandbox has no browsers installed.
 - The ETA lying, and 90–95% sandbox idle.
+
+---
+
+## 2026-09-14 — "Kon aya v/s kitne aye": counting NavBharatAI's own audience
+
+**Admin:** *"hamara app kitne mobiles me install hai, kya ham pata kar sakte hai? … kitne user hamari
+website 'navbharatai.com' par aye? … kon aya/download kiya v/s kitne aye/download huye (all time and
+today)."*
+
+Four questions. **Three have honest answers and one does not**, and the value of this change is that
+the difference is visible on the screen rather than smoothed over.
+
+### The finding: we built this for our users and never pointed it at ourselves
+
+NavBharatAI already owned a complete, tested, privacy-safe visitor counter — `siteAnalytics.ts` /
+`siteAnalyticsStore.ts`: per-day views and unique visitors, a visitor code that **rotates daily** so it
+cannot be reversed or joined across days, no cookie, nothing stored on the device, Do-Not-Track
+honoured, sharded documents for scale. We give it to **users**, for the apps they publish. Our own
+site was never counted at all: the analytics pipeline records only product events (signup / build /
+deploy / pay), gated on consent, and **no page-view event exists anywhere in the codebase.**
+
+So `ownAudience.ts` counts nothing itself. It decides **what is worth counting** and hands it to that
+store under two reserved ids — one implementation, not a second one.
+
+### Where the counting happens, and why there
+
+- **Website** — in the SPA catch-all in `server.ts`, the one line every real page view passes through.
+  Server-side on purpose: the request already carries the IP and user-agent to us, so counting it
+  collects nothing new, adds no request to the visitor's page, and **cannot be blocked by an
+  ad-blocker** — which would quietly under-report and make the number a lie.
+- **App** — on `/api/app-version`. `UpdateBanner` is mounted at the app's root and returns early on
+  web, so that route is hit exactly once per **native launch** and nowhere else.
+  ⚠️ Two things this needed: the client now **declares** its platform (`X-NBAI-Platform`), because
+  anyone can curl that route and counting every caller would count scripts as phones; and a counted
+  response is `no-store`, because the old five-minute cache meant a second launch inside five minutes
+  was never counted.
+
+### 🔴 What it deliberately cannot say — stated in the payload, not just on the screen
+
+- **Play Store installs.** Google Play holds that number and nothing here can reach it. What is
+  reported is an **open** — a device that launched the app and reached our server. An install we
+  cannot see is not one we may claim.
+- **An all-time count of PEOPLE.** The visitor code rotates every day precisely so the same person is
+  not recognisable tomorrow. All-time **visits** is a real running total; all-time people would need a
+  permanent per-person identifier, which is exactly what the rotation refuses to keep. `allTime` has
+  **no people field at all** — a nullable one would invite somebody to fill it with the sum of daily
+  counts, which is visits.
+- **Who an anonymous visitor was.** Only people who signed in can be named, and they are listed from
+  their own accounts in the Users tab — never from a counter that cannot identify anybody.
+
+### The honesty rule this feature is built on
+
+**A counter that could not be read is `null` and says so — never 0.** That is the same class as the
+secrets bug fixed hours earlier, where a silent read failure printed "No credentials saved yet" over
+eleven real keys. On a dashboard, "nobody came" and "we could not look" are the same picture unless
+the code refuses to let them be. Test-locked, including the case that a genuinely quiet day still
+shows a real zero.
+
+### The policy, in the same change
+
+Counting our own visitors is new collection about a new group of people, so `privacyPolicy.ts` gains
+**§11.1** — no cookie, no script, nothing stored on the device, daily rotation, DNT honoured, and the
+plain statement that we can say how many came today and **can never produce an all-time list of
+people**.
+
+### Verification
+
+40 tests across two files. The wiring file exists because every call added here fails **nothing** if
+dropped — the server would just stop counting and the panel would show a confident, permanent zero.
+
+⚠️ **Two self-inflicted bugs worth recording, both the same character sequence.** The wiring test's
+comment-stripper ate half of `server.ts`, because that file contains an Express content-type wildcard
+whose slash-star opened a block comment the regex closed at the next star-slash — deleting real code
+and failing an assertion about a call that was present all along. Then the comment written to explain
+that quoted the wildcard literally and **closed itself early**, breaking the file. Line comments only,
+and the note now describes the sequence instead of printing it.

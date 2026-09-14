@@ -62,7 +62,12 @@ export function UpdateBanner({ apiBase = '' }: { apiBase?: string }) {
       if (cancelled) return;
       let store = null;
       try {
-        const res = await fetch(`${apiBase}/api/app-version`, { headers: { accept: 'application/json' } });
+        // The platform header is what lets the server count this launch as an APP OPEN. It is only
+        // ever sent from the native shell (this whole branch returns early on web), so a browser is
+        // never counted as a phone — and anyone curling the route declares nothing and is not counted.
+        const res = await fetch(`${apiBase}/api/app-version`, {
+          headers: { accept: 'application/json', 'X-NBAI-Platform': me.platform || 'android' },
+        });
         store = res.ok ? parseStoreVersion(await res.json()) : null;
       } catch {
         store = null; // unreachable ⇒ no claim

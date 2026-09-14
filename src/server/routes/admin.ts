@@ -5,6 +5,8 @@ import {
   appleDomainAssociation, appleDomainAssociationSource, APPLE_DOMAIN_ASSOCIATION_PATH,
 } from '../lib/appleDomainAssociation';
 import { diagnoseAppleSignIn, type AppleSelfFetch } from '../lib/appleSignInDiagnosis';
+import { siteAnalyticsStore } from '../lib/siteAnalyticsStore';
+import { OWN_WEBSITE_ID, OWN_APP_ID, lifetimeViews, audienceView } from '../lib/ownAudience';
 import { APPLE_SERVICE_ID, APPLE_WEB_RETURN_URL } from '../../components/socialSignInPolicy';
 import { needsRealServer, builtAServer, tallyServerNecessity, necessityHeadline } from '../AgentV3/serverNecessity';
 import type { Express, Request, Response, NextFunction } from 'express';
@@ -347,6 +349,45 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // Observability: live token-usage/cost + build-success metrics (Phase 5, item 28).
   // Phase 4.3 — include triggered alerts (error rate / preview rate / latency) so
   // the admin panel surfaces health issues, not just raw numbers.
+  /**
+   * WHO CAME, AND HOW MANY — NavBharatAI's own website and its own app.
+   *
+   * Every number here is measured by us. Where a number cannot honestly be produced, this route says
+   * so IN THE PAYLOAD rather than sending a zero, because a zero and "we cannot see this" look
+   * identical on a dashboard and only one of them means nobody came.
+   *
+   * 🔴 THREE THINGS IT DELIBERATELY DOES NOT ANSWER:
+   *   • PLAY STORE INSTALLS. Google Play holds that number; nothing here can reach it. What is
+   *     reported is an app OPEN — a device that launched the app and reached our server.
+   *   • ALL-TIME UNIQUE PEOPLE. The visitor code rotates daily by design, so the same person cannot be
+   *     recognised tomorrow. All-time VIEWS is a real running total; all-time "people" would need a
+   *     permanent per-person identifier, which is exactly what the rotation refuses to keep.
+   *   • WHO an anonymous visitor was. Only people who SIGNED IN can be named, and they are listed from
+   *     their own accounts — never from the visit counter, which cannot identify anybody.
+   */
+  app.get('/api/admin/audience', verifyAdminToken, async (_req: Request, res: Response) => {
+    const days = 30;
+    const [webDays, appDays, webLife, appLife] = await Promise.all([
+      siteAnalyticsStore.summary(OWN_WEBSITE_ID, days).catch(() => null),
+      siteAnalyticsStore.summary(OWN_APP_ID, days).catch(() => null),
+      lifetimeViews(OWN_WEBSITE_ID).catch(() => null),
+      lifetimeViews(OWN_APP_ID).catch(() => null),
+    ]);
+    res.json({
+      website: audienceView(webDays, webLife),
+      app: audienceView(appDays, appLife),
+      // Stated in the payload so the screen cannot drift from the truth by being edited on its own.
+      notes: {
+        appOpensAreNotInstalls:
+          'This counts devices that OPENED the app and reached our server. Google Play holds the install count; someone who installs and never opens is not here.',
+        allTimePeopleUnavailable:
+          'All-time visits are a running total. All-time PEOPLE cannot be counted: the visitor code rotates every day so the same person is not recognisable tomorrow — that is deliberate, not a gap.',
+        crawlersExcluded:
+          'Requests that declare themselves as bots are not counted. A crawler that pretends to be a browser is counted, so treat these as close, not exact.',
+      },
+    });
+  });
+
   app.get('/api/admin/metrics', verifyAdminToken, (_req: Request, res: Response) => {
     const snapshot = getMetrics().snapshot();
     res.json({ ...snapshot, alerts: evaluateAlerts(snapshot) });

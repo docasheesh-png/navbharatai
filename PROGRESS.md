@@ -52682,6 +52682,51 @@ under a branch you are still improving. **Check whether your PR is still OPEN be
 correction to it** — a push that succeeds to a merged branch is silent and reaches nobody.
 7 new tests. Fixed on the P5 branch (#2905) and merged up the stack to #2908 and #2909.
 
+## 2026-09-14 — The weak-tier "this app is complex, upgrade" notice was firing on our own failures too
+
+The admin asked, plainly: whenever a user's build fails, for ANY reason, tell them the free (Weak)
+tier can't build a complex app and to switch to Normal/Strong. Taken literally, that would have been
+a NEW dishonesty — most build failures are not about the tier's capability at all (a provider outage,
+our own mid-build cost-ceiling stop, a sandbox/E2B death). Blaming "your app is too complex" for those
+would contradict the White-Label/honesty rules this file already enforces elsewhere.
+
+**Investigated first, per the fourth absolute rule, and found the message already exists.**
+`weakTierBuildFailedNotice()` (`src/server/AgentV3/weakTierNotice.ts`) is near-word-for-word the exact
+notice the admin described — it was built 2026-08-02. Its own header comment claimed it fires "ONLY
+when a real build attempt failed on the weak tier (never on an infra/sandbox failure, which
+short-circuits earlier)" — but the actual call site in `routes/agentv3.ts` never enforced that: the
+gate was just `!result.ok && noClaudeBuild && expectsArtifacts`. Three non-capability causes could
+reach it: a cost-ceiling stop (`costCeilingFired` — the build hit ITS OWN spend limit, not a
+capability gap), a mid-build sandbox/E2B outage (the empty-build guard's `sandboxUnavailable` check
+only covers the case where ZERO files were produced, so a build that dies after writing some files
+slips past it), and a genuinely degraded provider (`providerFailuresLookDegraded` — the same signal
+the empty-build branch already uses to avoid blaming the tier for our own outage, but not reused here).
+
+**Root-caused rather than literally implementing blanket messaging.** Added `!sandboxUnavailable`,
+`!costCeilingFired`, and `!providerFailuresLookDegraded(buildDiag.providerFailureBreakdown())` to the
+existing gate — reusing state and a function that were already in scope and already exist for exactly
+this purpose elsewhere in the same file. No new imports, no new state, the message text itself
+unchanged, the kill switch (`AGENTV3_WEAK_FAIL_NOTICE=off`) untouched. This makes the notice do what
+its own comment always claimed: fire reliably, and ONLY when the evidence actually points at the
+tier's own capability — never at our spend limit, our infra, or our outage.
+
+Locked with a new regression test, `tests/weakTierFailNotice.test.ts`: asserts the gate's exclusions
+are present and the original capability conditions are untouched (an ADDITION, not a replacement),
+the kill switch line is untouched, and the message text stays White-Label-compliant (no
+provider/model name) and non-empty for every language it claims to support.
+
+Verified against a freshly-rebased `origin/main` (`6c53f4e`) and the full CI-parity gate before
+pushing: `tsc --noEmit` (frontend) clean, `tsc -p tsconfig.server.json --noEmit` (server) clean,
+`node scripts/noUnusedImports.mjs` clean, full `npx vitest run` — 22566 passed, 1 skipped, 0 FAIL
+lines, `npm run build` clean, `npm run test:bundle` within budget, `npm run boot:check` PASS. Checked
+open PRs first (#2915, #2914, #2913, #2912, #2900) — none touch `weakTierBuildFailedNotice`, the
+`costCeilingFired`/`sandboxUnavailable` flags, or this call site; #2914 is nearby (the empty-build
+upsell guard) but edits a different function region with no textual overlap.
+
+Reported to the admin: the literal ask already existed in the code but was unconditional and
+therefore dishonest in three specific cases; fixed the gate instead of adding a second, competing
+mechanism. Per the 2026-09-13 merge-hold rule, the PR is opened and driven to green CI but NOT
+merged without the admin's explicit go-ahead.
 ## 2026-09-14 — `70115adf` follow-up: a verdict from a partial view, and the typed "stop" nobody hears
 
 Two of the three items left open by the `70115adf` autopsy. The third is deliberately NOT built — see

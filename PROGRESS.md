@@ -52682,6 +52682,82 @@ under a branch you are still improving. **Check whether your PR is still OPEN be
 correction to it** — a push that succeeds to a merged branch is silent and reaches nobody.
 7 new tests. Fixed on the P5 branch (#2905) and merged up the stack to #2908 and #2909.
 
+## 2026-09-14 — AUTOPSY of build `70115adf`: a working app was declared RED, and 153 innocent providers were blamed
+
+Report: free tier, weak power level, KIMI delivered, 4m22s, `ok: false`. The user's app **built** —
+`PROD_BUILD_OK` ("the production build succeeded"), a preview snapshot was saved and confirmed current
+— and the summary told them *"1 thing is still broken, so it is NOT ready to use yet"*.
+
+### The five buckets
+
+| | Count | What |
+|---|---|---|
+| ✅ self-healed | **0** | the report's own tally, and it is honest |
+| 🔀 worked around | **7** | fast lane → full builder handoff, and the provider chain walking to a backstop |
+| ⏭️ skipped | **4** | route smoke check, page-render check, e2e scaffold, user journey — all need a live preview that never came up |
+| ❌ still broken | **8 unresolved** | of which the gate counted **1** as a blocker |
+| 🥵 struggled | **3 places** | 93s on an abandoned lane · 153-rung provider cascade · a 108s plan call that returned nothing |
+
+### The single root cause behind the two worst items
+
+Both come from one unrecognised string. The fast lane timed out at 90s and handed off; the full
+builder then finished the app. But the abandoned lane's plan call **outlived its lane by 18 seconds**
+and threw `build budget exhausted before this call could start`.
+
+PR #2894 worded those messages so `isTimeoutProviderError` would not match them — correct, and not
+sufficient, because **nothing else recognised them either**:
+
+1. **153 rungs walked for nothing.** The refusal is thrown at the TOP of each runner, before any
+   network call, so the chain sprinted through the whole GLM key-pool ladder in milliseconds and
+   recorded `Provider GLM failed` **153 times**. GLM never failed — we never called it. The final
+   error string names 54 providers. That is a false statement about a third party in our own
+   diagnostics, which the fifth rule's step 5 forbids directly.
+2. **The build was declared RED.** The resulting `LLM_CALL_FAILED` is an unresolved ERROR;
+   `shippingIssueCount('error')` counts exactly those; the release gate reported "1 build-breaking
+   blocker"; `OUTCOME_RELEASE_GATE_RED` flipped the verdict to NOT ok. **This is the `a38c6fef` shape
+   again** — an app that had already built, reported to its owner as not ready.
+
+⚠️ **AND LOWERING THE SEVERITY WOULD NOT HAVE WORKED.** `resolveRecoveredOnSuccess` forgives
+transients when a build succeeds — and success is precisely what this issue prevented. The error made
+the gate RED, the RED gate made `ok` false, and `ok` false meant the error was never forgiven. A
+closed circle, breakable only where the fact is actually known: at the moment of recording.
+
+**Fixed at the root, one concept in three places:** `isBudgetEndedError` in `turnDeadline.ts`;
+`MultiProviderTurnRunner` now **aborts the chain** on it (beside `isHopelesslyOversizedError`, because
+it is the same kind of fact — a condition no later rung can change) with a message that names OUR
+budget and says *"No provider failed"*; and `recordLlmCall` records it as `LLM_CALL_BUDGET_ENDED`,
+info + resolved, so it stays on the timeline but is never a blocker. 11 tests, including one that
+builds a 154-rung chain and asserts exactly ONE provider is asked.
+
+### 🧬 The missing SUBSYSTEM (step 2), named honestly
+
+**There is no concept of "this lane is closed" that reaches the things the lane started.** Every lane
+artefact is carefully marked resolved at handoff — `SIMPLE_BUILD_FALLBACK`, `SIMPLE_BUILD_OUTCOME`,
+`SIMPLE_BUILD_SALVAGE`, all `autoResolved: true`, with comments recording the three earlier autopsies
+that hardened them. The orphan call bypassed all of it because it reported through a *different* path,
+*after* the handoff. #2894 gave the lane a deadline; what is still missing is a lane IDENTITY on the
+work it spawned, so a late arrival can be attributed to a lane that no longer exists. Recorded as an
+**open root cause** — today's fix classifies by the error string, which is correct and narrower than
+the general answer.
+
+### Still open (deliberately not guessed)
+
+- 🔴 **`UI_WITHOUT_BUILD` is a FALSE POSITIVE here** and it was not the blocker — it is a warning, so
+  it did not turn the gate RED, but it is wrong and it would frighten a user. It reports "there is no
+  index.html and no frontend build tool", while `commands[0]`'s own `ls -la` in the same report lists
+  `index.html`, `vite.config.ts` and `package.json`, and the production build succeeded. Cause: the
+  check reads the DURABLE store, which held **1 file** (`src/App.tsx`) — the scaffold lives in the
+  sandbox and is never persisted. So **any build where the AI edits only `src/App.tsx` gets this
+  warning.** Not fixed here because the fix is a choice between persisting the scaffold and teaching
+  the check to read the sandbox, and that decision affects the publish path too.
+- 🔴 **"Stop" did not stop.** The user wrote *"मेरा आदेश है कि अभी छोड़ दो"*, the agent answered
+  *"ठीक है, मैं इस काम को अभी यहीं रोक देता हूँ"* — and then **30 more seconds** of post-build gates
+  ran and produced the RED verdict. A user who asked to stop was handed a failure report.
+- **The ETA lied twice.** "~2–4 min" at the start; at minute 2, "~53s to go"; at minute 4, "this app
+  is bigger than expected — about 3 min more to go" — and it finished 22 seconds later.
+- **95% sandbox idle** — 7.9 min up, 0.4 min doing our work. Billed.
+- Design consistency C (70/100), accessibility A (92/100) — neither healed; this workspace was not in
+  the `AGENTV3_FEATURE_HEAL_PCT=20` cohort.
 ## 2026-09-14 — CLAUDE.md said the Play auto-upload did not exist. It has existed all along.
 
 The admin asked what it would take to get `upload: true` for the Android `.aab`, the way iOS ships

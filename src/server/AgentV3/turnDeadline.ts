@@ -55,6 +55,39 @@ export const BUDGET_EXHAUSTED_MESSAGE = 'build budget exhausted before this call
  *  our budget ending, not the provider being slow, so it must not read as a provider timeout. */
 export const BUDGET_REACHED_MESSAGE = 'build budget reached while this call was still running';
 
+/**
+ * Did this call end because OUR budget ran out, rather than because the provider did anything wrong?
+ *
+ * 🔴 THE HALF THIS MODULE WAS MISSING, and a real build paid for it (report 70115adf, 2026-09-13).
+ * The two messages above were worded so `isTimeoutProviderError` would not match them — so a provider
+ * is never benched for our clock. That was necessary and not sufficient: nothing else in the stack
+ * recognised them either, so a budget refusal fell through every class in the fallback chain and was
+ * treated as an ordinary provider failure. Two consequences, both visible in that report:
+ *
+ *   1. **153 rungs walked for nothing.** The refusal is thrown at the top of each runner, before any
+ *      network call, so the chain advanced through the entire GLM key-pool ladder in milliseconds and
+ *      recorded `Provider GLM failed` 153 times. GLM never failed — we never called it. The report's
+ *      own error string listed 54 providers, which is unreadable and, worse, untrue about a third
+ *      party in our own diagnostics.
+ *   2. **The build was declared RED.** The resulting `LLM_CALL_FAILED` is an unresolved ERROR, and
+ *      `shippingIssueCount('error')` counts exactly those — so the release gate reported
+ *      "1 build-breaking blocker", the verdict was flipped to NOT ok, and a user whose app had
+ *      actually built (`PROD_BUILD_OK`, snapshot saved) was told it was not ready to use.
+ *
+ * The call that triggered it had already been ABANDONED: its fast lane handed off at 90s and every
+ * artefact the lane recorded is marked resolved — but the orphaned provider call outlived the lane by
+ * 18 seconds and recorded its failure afterwards, where nothing connected it back. PR #2894 stopped
+ * such a call from SPENDING past its lane; this is the other half — it must not INDICT anyone either.
+ *
+ * PURE, and matched on the exported constants rather than on prose, so re-wording a message cannot
+ * silently un-classify it.
+ */
+export function isBudgetEndedError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  if (!msg) return false;
+  return msg.includes(BUDGET_EXHAUSTED_MESSAGE) || msg.includes(BUDGET_REACHED_MESSAGE);
+}
+
 function finitePositive(n: unknown): number | null {
   return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : null;
 }

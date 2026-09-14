@@ -49,6 +49,8 @@ We may remove content, suspend builds, or close accounts that break these rules 
 
 If you believe something on NavBharatAI breaks these rules, or that we have wrongly acted against you, our [Grievance Redressal](/grievance) page names the officer who handles complaints and the timelines we must answer within.
 
+If you are using NavBharatAI as a business and need the processor terms, they are in our [Data Processing Agreement](/dpa); our security practices are at [Security at NavBharatAI](/security).
+
 ## 4. Tokens, wallet and billing
 
 - **Tokens are prepaid usage credit.** They are consumed by builds and AI actions according to the tier you choose. They are **not** legal tender, earn no interest, and cannot be transferred between accounts.

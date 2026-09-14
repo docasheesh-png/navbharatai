@@ -1148,7 +1148,11 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // still needs work, which is the failure this feature exists to prevent.
   app.post('/api/admin/all-builds/:workspaceId/mark', verifyAdminToken, async (req: Request, res: Response) => {
     try {
-      const workspaceId = String(req.params.workspaceId || '').trim();
+      // Through `routeParam` like every other route since the Express 5 migration (#2936) — not
+      // because this one can receive an array (it is not a wildcard), but because leaving one route
+      // reading `req.params` raw is how the next migration finds a straggler it has no reason to look
+      // for. The reasoning lives in expressCompat.ts, in one place, with its evidence.
+      const workspaceId = routeParam(req.params.workspaceId).trim();
       if (!workspaceId) { res.status(400).json({ error: 'A workspace id is required.' }); return; }
       const body = (req.body ?? {}) as { downloaded?: unknown; fixed?: unknown; note?: unknown };
       const triage = await markBuildTriage(workspaceId, {

@@ -52,15 +52,42 @@ describe('the Live preview gets a console — the gap this closes', () => {
 });
 
 describe('the bridge can never reach a user’s shipped app', () => {
+  /**
+   * ⚠️ THESE ASSERT THE GUARD, NOT A HELPER'S NAME (updated 2026-09-14, autopsy fd021c64).
+   *
+   * They used to require the literal `stripPreviewBridge` + `isHtmlDocumentPath` at each site, which
+   * was the guard written out by hand — and hand-written guards are exactly what the autopsy found a
+   * THIRD path quietly missing. The expression now lives once in `withoutPreviewBridge`, so the rule
+   * is "the read/write path applies the bridge guard", stated in a way a later refactor cannot fail
+   * for the wrong reason.
+   */
+  const guarded = (code: string): boolean => /withoutPreviewBridge\s*\(/.test(code)
+    || (/stripPreviewBridge\s*\(/.test(code) && /isHtmlDocumentPath\s*\(/.test(code));
+
   it('is stripped from what the model READS', () => {
     const readCase = dispatcher.slice(dispatcher.indexOf("case 'read_file'"), dispatcher.indexOf("case 'write_file'"));
-    expect(readCase).toContain('stripPreviewBridge');
-    expect(readCase).toContain('isHtmlDocumentPath');
+    expect(guarded(readCase)).toBe(true);
   });
 
   it('is stripped from what the model WRITES — the guarantee, not just the likelihood', () => {
     const writeCase = dispatcher.slice(dispatcher.indexOf("case 'write_file'"));
-    expect(writeCase.slice(0, 4000)).toContain('stripPreviewBridge');
+    expect(guarded(writeCase.slice(0, 4000))).toBe(true);
+  });
+
+  it('is stripped from what our own ANALYSERS read — the third path, which nobody guarded', () => {
+    // `readEvalSnapshot` reads the sandbox with the raw actuator and feeds ~30 static checks. Our
+    // injected console mirror was being judged as the user's code, and one real build was headlined
+    // with a security finding that belonged to us.
+    const snap = dispatcher.slice(dispatcher.indexOf('private async readEvalSnapshot('));
+    expect(guarded(snap.slice(0, 2500))).toBe(true);
+  });
+
+  it('is stripped from what reaches DURABLE storage, which is what a publish serves', () => {
+    // Not a call site: the durable callback itself. ~24 places persist a file directly, and the
+    // signature injector — which runs the instant the preview port verifies UP, i.e. once the bridge
+    // is in the sandbox's index.html — read that document and persisted it.
+    expect(dispatcher).toMatch(/private readonly onFileWrite = \([\s\S]{0,200}withoutPreviewBridge\(path, content\)/);
+    expect(dispatcher).not.toMatch(/private readonly onFileWrite\?:\s*\(/);
   });
 });
 

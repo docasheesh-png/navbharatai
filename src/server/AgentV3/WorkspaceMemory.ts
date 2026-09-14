@@ -18,6 +18,7 @@
 // the v5.0 engine. A durable backend can swap the Map without changing callers.
 
 import { scanSecurity, type SecurityFinding } from './SecurityAnalysis';
+import { withoutPreviewBridge } from './previewBridge';
 import { bm25, type Bm25Doc } from './Bm25';
 
 // Words too generic to carry recall signal — dropped from the query token set so a
@@ -206,7 +207,13 @@ export class WorkspaceMemory {
 
   /** Index (or re-index) a file's content into the project graph. */
   indexFile(file: string, content: string): void {
-    this.fileFacts.set(file, extractFacts(file, content));
+    // OUR PREVIEW BRIDGE IS NOT THE APP'S CODE, AND THIS IS WHERE THE ANALYSIS CORPUS BEGINS
+    // (autopsy fd021c64). `extractFacts` runs `scanSecurity` over whatever it is handed, and the
+    // pre-seed indexer reads the sandbox with the raw actuator — not the `read_file` tool, so not
+    // stripped. The result was `postmessage-wildcard-origin @ index.html:9` reported to a user as
+    // their app's security defect; the line belongs to `previewBridgeSource`, which we inject.
+    // Stripping HERE rather than at the ten call sites makes it true for the eleventh as well.
+    this.fileFacts.set(file, extractFacts(file, withoutPreviewBridge(file, content)));
     // Verification ledger: any (re)write invalidates "tsc clean"; touching package.json
     // invalidates "deps installed". Conservative-by-design — a stale claim would make the
     // team SKIP a needed check, which is worse than one redundant run.

@@ -53663,3 +53663,98 @@ test:bundle` within budget, `npm run boot:check` PASS. Checked open PRs first (#
 none touch Supabase, OAuth, or the native `appUrlOpen` listener.
 
 **Gate:** typecheck · noUnusedImports · typecheck:server · vitest · build · test:bundle · boot:check.
+### Not changed, and stated rather than assumed
+
+The underlying numbers come from a **per-instance, since-boot** registry — that is real data, but it is
+not lifetime data. A Firestore-backed history already exists at `/api/admin/metrics/history`. Pointing
+this screen at it would give lifetime totals and is probably the right end state, but it is a different
+change with its own shape and cost, and the admin's complaint was that the screen shows nothing real.
+It now shows something real and says exactly what window it covers. Recorded here as the obvious next
+step rather than folded in silently.
+
+## 2026-09-14 — the security finding in a user's build report was OUR OWN code
+
+Follow-up on the `fd021c64` autopsy, which recorded two items as "found, not fixed — each needs its own
+look". Both are now fixed at the root, and the investigation found a third that is worse than either.
+
+### What the report said, and why it was wrong twice over
+
+> `rootCause: "postmessage-wildcard-origin @ index.html:9"`
+
+**That finding is not the user's code. It is ours.** `SecurityAnalysis`'s `postmessage-wildcard-origin`
+rule matches `.postMessage(data, '*')`, and that is the exact line `previewBridgeSource` emits so the
+Live preview's console mirror can reach its parent frame. The dev-server launch injects the bridge into
+the sandbox's `index.html`; line 9 is where it lands. The app's owner was handed a security defect in
+their app that was a script we put there.
+
+It was wrong a second time as a *root cause*: `READINESS_WARNING` is recorded `autoResolved: true`
+because it is the NON-blocking half of the readiness split. If a warning could be why a build failed,
+the gate would have raised it as a `READINESS_BLOCKER`.
+
+### Root cause — the guard existed, and had a third door
+
+`stripPreviewBridge`'s own doc comment claims the bridge is *"closed at both ends"*: the file the model
+READS never contains it, and a `write_file` carrying the marker has it stripped. Both statements are
+true, and both are about the `write_file` **tool**. The analysers are not the tool.
+
+`readEvalSnapshot` reads the sandbox with the **raw actuator** and feeds ~30 static checks — security,
+accessibility, CSP, SRI, design, hygiene. The WorkspaceMemory pre-seed does the same and runs
+`scanSecurity` over the result. Neither had ever been stripped, so every one of those checks has been
+judging our injected mirror as the user's code.
+
+### 🔴 The third door, found while hunting siblings — and it reaches a PUBLISH
+
+`injectAppSignatureIntoIndexHtml` fires the moment the preview port is verified UP — which is precisely
+when the dev server has just injected the bridge. It reads that `index.html`, adds the badge, writes it
+back, and calls the durable-store callback **directly**, bypassing the `write_file` case that does the
+stripping. The bridge rode into durable storage, and durable storage is what a later deploy serves. The
+code comment immediately above it even says *"any later deploy of these same files"*.
+
+So the outcome the two existing guards were written to prevent — a development-only script phoning a
+parent frame that does not exist, published inside somebody's finished app — had an open path the whole
+time. No report has shown it reaching a user; it is fixed as a live hole, not as a post-mortem.
+
+### The fixes (rule 4 step 2 — fix the class, at the funnel)
+
+| | Where | Why there |
+|---|---|---|
+| `withoutPreviewBridge(path, content)` | `previewBridge.ts` | one helper owns the expression; this repo has paid for hand-copied rules four times |
+| strip inside `WorkspaceMemory.indexFile` | the memory index | covers all **10** of its call sites, and the 11th |
+| strip inside `readEvalSnapshot` | the evaluate funnel | covers ~30 analysers with one line |
+| `onFileWrite` is now a **wrapper** over the constructor's `onFileWriteRaw` | `ToolDispatcher` | covers all **24** durable-persist sites by construction, including code nobody has written yet |
+
+⚠️ **The sandbox file deliberately keeps its bridge.** The running Vite server serves that document and
+the Live console mirror is the entire reason it is there — stripping it from disk would have fixed a
+publishing bug by breaking a feature. Only the DURABLE copy and the ANALYSIS corpus are guarded.
+
+### The diagnostics half — and the 50/50 law
+
+1. **The instance:** `READINESS_WARNING` added to `NEVER_ROOT_CAUSE`, beside `DESIGN_PAGE_INCONSISTENT`
+   and the rest. Its blocking sibling `READINESS_BLOCKER` stays eligible — a real failure must keep its
+   explanation.
+2. **The class:** the auto-resolved-inclusive fallback in `deriveRootCause` no longer presents its pick
+   as the cause. Reaching for an `autoResolved: true` item so a failed build says *something* is right;
+   calling it the CAUSE contradicts our own record in the same report. The item is still named, with the
+   causal claim withdrawn — exactly what the `endedWithoutOutcome` and `stillRunning` branches beside it
+   already do. Every auto-resolved code that exists today, and every one added later, loses this door.
+
+### Tests
+
+`tests/previewBridgeNotTheApp.test.ts` — 19 tests. It opens by proving the bridge genuinely trips the
+rule that headlined the report, so nothing below can pass for the wrong reason, and it asserts that an
+app's OWN wildcard `postMessage` is still flagged — we hide our line, not theirs.
+
+Two existing tests in `tests/previewLiveConsole.test.ts` pinned the helper's NAME at each call site.
+They now assert the **guard**, name-agnostically, and two new cases cover the analyser funnel and the
+durable callback. `BuildDiagnostics.test.ts`'s fallback-ordering test likewise now asserts the ordering
+rule rather than the sentence around it — the rule it was always about.
+
+Gate on the final state: typecheck · noUnusedImports · typecheck:server · build · test:bundle ·
+boot:check · **1633 files / 22,777 passed / 1 skipped / 0 FAIL**.
+
+### Still open from that autopsy (unchanged, not silently closed)
+
+- The retry decided before the evidence exists (an ordering change in the post-loop sequence).
+- `AGENT_NOTE` / `PREVIEW_SNAPSHOT_STALE` / the incremental line contradicting each other.
+- `@playwright/test` added to a project whose sandbox has no browsers installed.
+- The ETA lying, and 90–95% sandbox idle.

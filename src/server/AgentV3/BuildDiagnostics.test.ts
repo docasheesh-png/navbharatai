@@ -513,7 +513,15 @@ describe('deriveRootCause (P-REPORT.3 — the root cause, not buried in 180 mixe
       { ts: 1, phase: 'provider' as const, severity: 'warning' as const, code: 'PROVIDER_FALLBACK', message: 'fell back to Haiku', autoResolved: true },
       { ts: 2, phase: 'build' as const, severity: 'error' as const, code: 'BUILD_ERROR', message: 'transient error, later recovered', autoResolved: true },
     ];
-    expect(deriveRootCause({ issues })).toBe('transient error, later recovered');
+    // THE RULE IS THE ORDERING, and it is unchanged: the error is what gets named, not the warning.
+    // What changed on 2026-09-14 (autopsy fd021c64) is the SENTENCE around it — an item this engine
+    // itself stamped `autoResolved: true` is no longer asserted to be the CAUSE of the build, because
+    // that contradicts our own record in the same report. It is still named, which is what this test
+    // has always been about; only the causal claim is withdrawn. Asserting the rule rather than the
+    // exact string is also why this test no longer breaks when that wording is improved again.
+    const out = deriveRootCause({ issues }) ?? '';
+    expect(out).toContain('transient error, later recovered');
+    expect(out).not.toContain('fell back to Haiku');
   });
 
   // PaisaTrack "fix all error" autopsy 2026-07-21: the build SUCCEEDED (app live, ok:true) yet the report

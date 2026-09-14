@@ -539,13 +539,31 @@ button, [role='button'], nav, header, footer {
    `.nb-reduce-motion` rule above already disables every animation and transition, so the
    accessibility setting is honoured here by construction rather than by a prop somebody has to
    remember to pass. */
+/* 🔴 THESE KEYFRAMES MOVE ON Y ONLY, AND MUST NEVER CENTRE ON X AGAIN (fixed 2026-09-14, from an
+   admin screenshot of the notice half off the left edge of a real phone).
+
+   They used to read `transform: translate(-50%, …)`, matching the element's own
+   `-translate-x-1/2`. That looks redundant and is in fact ADDITIVE. Tailwind v4 compiles
+   `-translate-x-1/2` to the STANDALONE `translate` property:
+
+       .-translate-x-1\/2 { --tw-translate-x: -50%; translate: var(--tw-translate-x) var(--tw-translate-y) }
+
+   and CSS applies `translate` FIRST and `transform` AFTER, so the two composed to -100% of the
+   card's own width — putting its RIGHT edge on the screen's centre line and the rest off-screen.
+   Under Tailwind v3 the same utility compiled into `transform`, where the animation simply replaced
+   it and the pair looked correct; the upgrade changed that silently, with nothing failing.
+
+   The element now centres with left/right insets plus `mx-auto` — no transform at all — so these
+   keyframes own `transform` alone. ⚠️ Reduced motion is why this was only half visible in testing:
+   `.nb-reduce-motion` disables the animation, so those users saw it correctly centred the whole
+   time, and only everyone else saw it cropped. */
 @keyframes nb-testing-notice-in {
-  from { opacity: 0; transform: translate(-50%, -0.75rem); }
-  to   { opacity: 1; transform: translate(-50%, 0); }
+  from { opacity: 0; transform: translateY(-0.75rem); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 @keyframes nb-testing-notice-out {
-  from { opacity: 1; transform: translate(-50%, 0); }
-  to   { opacity: 0; transform: translate(-50%, -0.5rem); }
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(-0.5rem); }
 }
 .nb-testing-notice-in  { animation: nb-testing-notice-in 220ms ease-out both; }
 .nb-testing-notice-out { animation: nb-testing-notice-out 200ms ease-in both; }

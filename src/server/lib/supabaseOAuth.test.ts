@@ -3,8 +3,8 @@ import crypto from 'crypto';
 import {
   createPkcePair, signOAuthState, verifyOAuthState, buildSupabaseAuthorizeUrl,
   tokenExchangeBody, refreshTokenBody, basicAuthHeader, parseCallbackParams,
-  supabaseOAuthConfigured, connectFailureMessage,
-  SUPABASE_SCOPES, SUPABASE_AUTHORIZE_URL, OAUTH_STATE_TTL_MS,
+  supabaseOAuthConfigured, connectFailureMessage, supabaseReturnUrl,
+  SUPABASE_SCOPES, SUPABASE_AUTHORIZE_URL, OAUTH_STATE_TTL_MS, SUPABASE_NATIVE_REDIRECT,
 } from './supabaseOAuth';
 
 const SECRET = 'test-signing-secret';
@@ -166,5 +166,36 @@ describe('configuration + user-facing messages (honest states, rule 2)', () => {
 
   it('passes a provider description through rather than replacing it with a vague line', () => {
     expect(connectFailureMessage('The user declined access.')).toBe('The user declined access.');
+  });
+});
+
+// Regression lock for the 2026-09-14 fix: the native (Capacitor) app's WebView origin is
+// https://localhost / capacitor://localhost, not https://navbharatai.com — a WEB-style redirect to the
+// app's own origin strands a native user on a completely different, unauthenticated browser session
+// ("Please sign in first." — the reported bug). The callback must send a native flow back through a
+// deep link instead, and the two paths must never drift apart.
+describe('supabaseReturnUrl — one function decides both the web and native return, so they cannot drift', () => {
+  it('web: keeps the existing sbconnect/sberror query shape on the app origin', () => {
+    expect(supabaseReturnUrl(false, 'https://navbharatai.com', { nonce: 'n1' }))
+      .toBe('https://navbharatai.com/?sbconnect=n1');
+    expect(supabaseReturnUrl(false, 'https://navbharatai.com/', { error: 'oops' }))
+      .toBe('https://navbharatai.com/?sberror=oops');
+  });
+
+  it('native: returns our own deep link, never the app origin', () => {
+    const url = supabaseReturnUrl(true, 'https://navbharatai.com', { nonce: 'n1' });
+    expect(url).toBe(`${SUPABASE_NATIVE_REDIRECT}?nonce=n1`);
+    expect(url).not.toContain('navbharatai.com');
+  });
+
+  it('native error path uses the same deep link, with error instead of nonce', () => {
+    const url = supabaseReturnUrl(true, 'https://navbharatai.com', { error: 'That link expired.' });
+    expect(url.startsWith(`${SUPABASE_NATIVE_REDIRECT}?error=`)).toBe(true);
+    expect(new URL(url.replace('com.navbharat.ai://', 'https://')).searchParams.get('error'))
+      .toBe('That link expired.');
+  });
+
+  it('the native deep link uses the SAME scheme GitHub connect already registered', () => {
+    expect(SUPABASE_NATIVE_REDIRECT.startsWith('com.navbharat.ai://')).toBe(true);
   });
 });

@@ -1,10 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Lock, Eye, EyeOff, Trash2, ShieldCheck, AlertTriangle, Plus, RefreshCw, Loader2, Info } from 'lucide-react';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { db } from '../lib/firebase'; // shared handle → navbharat-prod (NOT the (default) DB)
 // Authenticated vault client — always attaches the signed-in user's Firebase token. Raw axios calls
 // here used to omit it, so requireUserMatch rejected every save (401) → keys never saved (admin fix).
-import { saveSecret, verifySecrets, type SecretVerdict } from '../lib/secretsApi';
+import { listSecrets, saveSecret, verifySecrets, type SecretVerdict } from '../lib/secretsApi';
 import { findRecipeSource } from '../lib/credentialRecipes';
 import { listApps, type AppChoice } from '../lib/appList';
 import { scopeControl, saveScope, scopeSentence, secretOwnerLabel, shortAppName } from '../lib/secretScope';
@@ -56,6 +54,8 @@ export const SecretManager: React.FC<{
   defaultAppName?: string | null;
 }> = ({ userId, embedded, defaultAppId, defaultAppName }) => {
   const [secrets, setSecrets] = useState<Secret[]>([]);
+  /** Empty string = the list loaded. Anything else is why it did not, shown instead of "none saved". */
+  const [listError, setListError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [verdicts, setVerdicts] = useState<SecretVerdict[]>([]);
   const [checkedAt, setCheckedAt] = useState('');
@@ -102,21 +102,40 @@ export const SecretManager: React.FC<{
     ? secrets.filter((s) => !s.workspace_id || s.workspace_id === viewingAppId)
     : secrets;
 
-  useEffect(() => {
-    const q = query(
-      collection(db, 'user_secrets'),
-      where('user_id', '==', userId)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const secretsData = snapshot.docs
-        .map((doc) => ({ id: doc.id, ...doc.data() } as Secret))
-        .filter((s) => !s.deleted);
-      setSecrets(secretsData);
-    });
-
-    return () => unsubscribe();
+  /**
+   * THE VAULT IS READ THROUGH THE SERVER, AND THAT IS THE FIX FOR A REAL, SILENT FAILURE.
+   *
+   * 🔴 WHAT THIS REPLACED, and why it showed "No credentials saved yet" over a vault holding eleven
+   * keys (admin, 2026-09-14). This list used to be an `onSnapshot` straight onto the `user_secrets`
+   * collection from the browser. Every WRITE already went through `/api/secrets`, which uses the
+   * ADMIN SDK and so bypasses security rules — but a browser read does not. `firestore.rules` matched
+   * `/user_secrets/{userId}/{document=**}`, a per-user SUBTREE that has never existed: the server
+   * writes FLAT documents with auto-ids and a `user_id` FIELD, so `isOwner(<auto-id>)` could never be
+   * true and the query was refused. The snapshot was registered with no error callback, so the refusal
+   * arrived nowhere, `secrets` stayed `[]` — and because the table renders `rows ∩ metas`, every one of
+   * the user's real, decryptable keys was filtered out by an empty allow-list.
+   *
+   * So the bug was not one wrong line: it was the CLIENT reading a collection only the server owns.
+   * `listSecrets` is the route that already existed for exactly this (names + scope, never a value),
+   * it carries the user's token, it is bounded by a timeout, and it FAILS LOUDLY.
+   *
+   * ⚠️ The trade, stated rather than discovered later: a one-shot read has no live updates, so this
+   * reloads on mount and after a save instead of following the collection. That is the same moment the
+   * old snapshot would have fired, and it is now the same source the build engine reads from.
+   */
+  const loadSecrets = useCallback(async () => {
+    try {
+      const rows = await listSecrets(userId);
+      setSecrets(rows as Secret[]);
+      setListError('');
+    } catch (err) {
+      // 🔒 The list is NOT emptied on failure. Blanking it would turn "we could not read your vault"
+      // into "you have nothing saved" — the exact lie this whole change exists to remove.
+      setListError((err as { message?: string })?.message || 'Could not read your saved keys. Please try again.');
+    }
   }, [userId]);
+
+  useEffect(() => { void loadSecrets(); }, [loadSecrets]);
 
   /**
    * 🔒 IF THE APP ON SCREEN CHANGES, THE SCOPE FOLLOWS IT.
@@ -265,7 +284,8 @@ export const SecretManager: React.FC<{
               viewingAppId={viewingAppId}
               viewingAppName={control === 'fixed' ? currentAppName : (appTitle(scope) || '')}
               ownerLabel={(s) => secretOwnerLabel({ workspaceId: s.workspace_id, currentAppId: defaultAppId, titleOf: appTitle })}
-              onSaved={(names) => void checkAllKeys(names)}
+              onSaved={(names) => { void loadSecrets(); void checkAllKeys(names); }}
+              metasError={listError}
             />
 
             {/* THE CHECKLIST. A saved key told the user nothing about whether it still works, so a revoked,
@@ -389,7 +409,15 @@ const CredentialTable: React.FC<{
   ownerLabel: (s: Secret) => string;
   /** The names just written, so the parent can ask the providers whether they actually work. */
   onSaved: (names: string[]) => void;
-}> = ({ userId, unlock, relock, metas, verdicts, saveScopeId, viewingAppId, viewingAppName, ownerLabel, onSaved }) => {
+  /**
+   * Why the key LIST could not be read, or '' when it was.
+   *
+   * 🔒 The table renders `rows ∩ metas`, so an unreadable `metas` empties the screen just as
+   * convincingly as an empty vault does. The two must never print the same sentence — that identity is
+   * precisely what hid eleven saved credentials behind "No credentials saved yet".
+   */
+  metasError: string;
+}> = ({ userId, unlock, relock, metas, verdicts, saveScopeId, viewingAppId, viewingAppName, ownerLabel, onSaved, metasError }) => {
   const [rows, setRows] = useState<RevealedSecret[] | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -585,7 +613,17 @@ const CredentialTable: React.FC<{
       )}
 
       {visible.length === 0 && newRows.length === 0 && (
-        <p className="py-6 text-center text-xs text-gray-500">No credentials saved yet. Add your first one below.</p>
+        metasError ? (
+          <p className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/5 p-2.5 text-[11px] leading-snug text-red-300">
+            <AlertTriangle size={14} className="mt-px shrink-0" />
+            <span>
+              {metasError}{' '}
+              Your saved keys are safe — this screen could not read the list, so nothing is shown. Please try again.
+            </span>
+          </p>
+        ) : (
+          <p className="py-6 text-center text-xs text-gray-500">No credentials saved yet. Add your first one below.</p>
+        )
       )}
 
       {visible.map((row) => {

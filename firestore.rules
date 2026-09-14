@@ -130,8 +130,20 @@ service cloud.firestore {
     }
 
     // User secrets — owner only, strict
-    match /user_secrets/{userId}/{document=**} {
-      allow read, write: if isOwner(userId);
+    // 🔴 SECRET VAULT — SERVER ONLY. This rule used to read
+    //   match /user_secrets/{userId}/{document=**} { allow read, write: if isOwner(userId); }
+    // which looks like owner-only protection and is not: it matches a per-user SUBTREE that has never
+    // existed. The server writes FLAT documents with AUTO-IDs and a `user_id` FIELD, so `{userId}` bound
+    // to a random document id and `isOwner` could never be true. The effect was a silent denial — and on
+    // 2026-09-14 that hid eleven genuinely-saved credentials behind "No credentials saved yet", because
+    // the Settings screen was reading this collection from the browser with no error handler.
+    //
+    // Nothing in the app reads or writes this collection from a client any more: every path goes through
+    // `/api/secrets`, which uses the ADMIN SDK (so it is unaffected by this rule) and checks the caller's
+    // own token. Denying outright is therefore both correct and the strictest option — and, unlike the
+    // rule it replaces, it cannot be mistaken for a permission that works.
+    match /user_secrets/{document=**} {
+      allow read, write: if false;
     }
 
     // Chat sessions — owner only

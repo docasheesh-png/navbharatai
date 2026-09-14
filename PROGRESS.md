@@ -53419,6 +53419,69 @@ warns against. Left open here rather than guessed at.
 
 ---
 
+## 2026-09-14 — Eleven saved credentials shown as "No credentials saved yet"
+
+**Admin, with a screenshot:** *"maine abhi 11 credentials save kiye. par yaha aa raha hai save nahi hai."*
+
+**The keys were saved. Every one of them.** The save path was never the problem — it goes through
+`POST /api/secrets`, which uses the ADMIN SDK. What failed was the screen's ability to *see* them.
+
+### The root cause: the browser was reading a collection only the server owns
+
+`SecretManager.tsx` rendered the table as `rows ∩ metas`:
+
+- **`rows`** — the real keys, from `POST /api/secrets/:userId/reveal`. Server-side, ticketed, correct.
+  All eleven were in here.
+- **`metas`** — an `onSnapshot` **straight onto the `user_secrets` collection from the browser**.
+
+A browser read is subject to Firestore security rules; the Admin SDK is not. And the rule guarding it
+was wrong in a way that reads as protection:
+
+```
+match /user_secrets/{userId}/{document=**} { allow read, write: if isOwner(userId); }
+```
+
+That guards a **per-user subtree which has never existed.** The server writes **flat documents with
+auto-ids** and a `user_id` **field** (`addDoc(collection(db, 'user_secrets'), …)`), so under
+`rules_version = '2'` the `{userId}` wildcard bound to a **random document id** and `isOwner(<auto-id>)`
+could never be true. The query was refused.
+
+**And the refusal arrived nowhere.** `onSnapshot(q, cb)` was registered with **no error callback**, so
+the denial was swallowed, `secrets` stayed `[]`, the allow-list was empty — and every real key was
+filtered out of a list that then announced *"No credentials saved yet."*
+
+### Why this is one bug and not two
+
+The class is **a client reading a server-owned, Admin-SDK-written collection directly** — which cannot
+work, and whose failure mode is silence. So the fix is not a better rule: it is to stop doing that.
+`listSecrets()` already existed in `src/lib/secretsApi.ts` for exactly this (names + scope, never a
+value), carries the user's token, is bounded by a timeout, and throws. The list now uses it, reloads
+after a save, and `firestore.rules` states the truth — `user_secrets` is **server-only**, denied
+outright, a rule that cannot be mistaken for a permission that works.
+
+⚠️ **The trade, stated rather than discovered later:** a one-shot read has no live updates. It reloads
+on mount and after a save — the same moments the old snapshot would have fired — and it now reads from
+the same source the build engine does.
+
+### The honesty half, which matters more than the read
+
+A failed read still empties `rows ∩ metas`, so it would have printed the same sentence. Those two
+states now differ: an unreadable list says **why**, and says the keys are safe. And the catch block
+deliberately **does not blank the list it already had** — turning a transient network failure into "you
+have nothing saved" is the same lie arriving by a slower route. Test-locked, including that one.
+
+### 🔴 Not verified from here, and not claimed
+
+I cannot read the **deployed** Firestore rules — `firestore.rules` in this repo is only live if someone
+ran a Firebase deploy. The diagnosis above is from the repo's rule and the code's real document shape.
+**It does not matter for the fix** (the client no longer reads that collection at all, so the deployed
+rule cannot affect this screen either way), but the specific claim "the deployed rule denied it" is an
+inference, not a measurement, and is written here as one.
+
+### Verification
+
+9 tests (`tests/secretListReadPath.test.ts`). Two reverts tried, two failures: removing the server read,
+and collapsing the honest empty-state back into one sentence.
 ## 2026-09-14 — MERGE RESOLUTION: #2919's render evidence into #2917's ok-gate (one mechanism, not two)
 
 **What #2919 fixes, and it is real.** Report fd021c64: a user typed *"Yess create karo"* into a
@@ -53538,6 +53601,131 @@ headers are GitHub API calls with nothing to do with this, and this module's own
 bug. A guard that cries wolf gets deleted. A second test asserts the sweep actually sees admin call
 sites, because a scan that finds nothing passes while proving nothing. 12 tests.
 
+---
+
+## 2026-09-14 — THE TESTING NOTICE SAT HALF OFF THE LEFT EDGE OF A REAL PHONE (admin screenshot)
+
+**The report.** The 3-second home-screen testing notice (#2914) appeared cropped: only its right-hand
+portion was on screen — *"active testing"*, *"work, please report it —"*, *"…BLEM"*. Admin: *"yeh popup
+mobile ke mid me ana chahiye, dekho side me aa raha hai, crop ho raha hai."*
+
+**ROOT CAUSE — the card centred itself TWICE, and the two ADD.** The element carried
+`left-1/2 -translate-x-1/2`, and the entry/exit keyframes carried `transform: translate(-50%, …)`. That
+reads as harmless duplication. It is not. **Tailwind v4 compiles `-translate-x-1/2` to the STANDALONE
+`translate` property**, confirmed by reading the built stylesheet rather than the docs:
+
+```css
+.-translate-x-1\/2 { --tw-translate-x:-50%; translate: var(--tw-translate-x) var(--tw-translate-y) }
+@keyframes nb-testing-notice-in { ... to { transform: translate(-50%) } }
+```
+
+CSS applies `translate` **first** and `transform` **after**, so they compose to **−100% of the card's own
+width**: its RIGHT edge lands on the screen's centre line and everything left of that is off-screen.
+
+**MEASURED, NOT ARGUED — both directions, in real Chromium at a 390px viewport:**
+
+| | left | right | on screen? |
+|---|---|---|---|
+| old (shipped) | **−163.0** | **195.0** ( = 390/2, the centre line) | **no** |
+| fixed | 16.0 | 374.0 | yes, gaps 16/16 |
+
+The fixed layout was measured at 320 / 360 / 390 / 768 px: centred at every width, never cropped, width
+capped at `max-w-md` on the tablet width.
+
+**🔴 WHY NOBODY CAUGHT IT, AND WHY THAT MATTERS MORE THAN THE BUG.** Under **Tailwind v3 the same
+utility compiled INTO `transform`**, where the animation simply REPLACED it — the pair was genuinely
+correct when it was written. The v4 upgrade changed the compilation target and broke it **with nothing
+failing anywhere**: no type error, no test, no CI signal, no console warning. This is the doc-vs-code
+drift class this repo already records twice (the idle-minutes default, the E2B rate), arriving through a
+*dependency upgrade* instead of a doc.
+
+**⚠️ AND IT WAS INVISIBLE TO EXACTLY THE PEOPLE MOST LIKELY TO CHECK.** `.nb-reduce-motion` disables the
+animation, so anyone testing with Reduce Animations on saw only the Tailwind `translate` — i.e. a
+correctly centred card. The bug was visible only to users who had motion ON.
+
+**THE FIX — remove the collision, not the symptom.** The card now centres with **left/right insets plus
+`mx-auto`** (`left-[calc(env(safe-area-inset-left,0px)+1rem)]`, same on the right), which needs **no
+transform at all**, so the keyframes own `transform` alone and the two can never fight again. The
+keyframes move on **Y only**. Safe-area insets on both sides are a small bonus over the old
+`w-[calc(100%-2rem)]`: `position: fixed` resolves against the viewport, not the safe-area-padded root, so
+the old version sat under the rounded corner in landscape.
+
+**REGRESSION LOCK — `tests/testingNoticeCentering.test.ts`**, and it states the RULE rather than this one
+bug: *an element whose position is animated by one of our keyframes must not ALSO be positioned by a
+Tailwind translate utility — one owner for the offset.* Four assertions, each proven by reversion
+(re-adding `-translate-x-1/2` fails it; restoring `translate(-50%)` in the keyframes fails it). The last
+one sweeps **every** `@keyframes nb-*` in `index.css` for X-axis movement, so the next toast or sheet
+someone animates is covered without anyone remembering this incident. jsdom does not compose transforms,
+so no render test could ever have caught this — a source rule is the only thing that can.
+
+**SIBLINGS HUNTED (rule 3).** 37 elements use `translate-x-1/2` / `translate-y-1/2`; **none** of them
+also carries an animation class, and `translate(-50%` appeared in no other keyframe. `nb-fadein` animates
+`transform: translateY(6px)` but is never combined with a translate utility. So this was the only live
+instance — and the new sweep assertion is what keeps it the last one.
+
+## 2026-09-14 — Supabase one-tap connect stranded the native (Capacitor) app on "Please sign in first."
+
+Admin report, screenshotted from the iOS app: tapping "Connect Supabase" in Settings → Database ends on
+an in-browser "Please sign in first." with no way back into the app.
+
+**ROOT CAUSE.** The one-tap Supabase connect flow (`SupabaseConnectCard.tsx` + `supabaseIntegration.ts`,
+shipped 2026-08-04, fixed for the web on 2026-08-20) was built and fixed for the WEB app only: `connect()`
+does a full-page `window.location.assign()` to Supabase, and the server callback redirects same-tab,
+same-origin back to `https://navbharatai.com/?sbconnect=<nonce>` — which works because a web browser tab
+never changes origin across that whole round trip.
+
+The native app's own WebView origin is `https://localhost` (Android) / `capacitor://localhost` (iOS) —
+**not** `navbharatai.com` (see `capacitor.config.ts` and the secret-vault device-lock entry above). So on
+native: the external navigation to Supabase gets routed into the OS's own system browser (the Safari
+chrome visible in the report screenshot), Supabase's redirect lands that browser on
+`https://navbharatai.com/...` — a real public origin with its OWN, completely separate, unauthenticated
+browser storage — and the completion call has no Firebase ID token to attach, so the server correctly
+(and unhelpfully) answers 401 "Please sign in first.", verbatim what was reported.
+
+**THIS IS THE SAME CLASS OF BUG already root-caused and fixed for GitHub connect** (`useGitHubConnect.ts`
+/ `githubOauthReturn.ts`, admin report 2026-08-17: "github login ho jata hai theek se par, yaha aa kar
+atak jata hai") — it was simply never ported to Supabase. Applied the identical fix:
+
+- **Client**: on native, open the consent URL in an **in-app browser** (`@capacitor/browser`'s
+  `Browser.open()`) instead of navigating the app's own WebView away.
+- **Server**: the callback returns through the app's own `com.navbharat.ai://supabase-callback` deep
+  link instead of the web redirect. **No new native-side registration needed** — the Android manifest's
+  intent-filter and the iOS build's `CFBundleURLSchemes` entry are scheme-only (`com.navbharat.ai`), not
+  path-restricted, so the scheme GitHub already registered covers this path too.
+- **ONE function, `supabaseReturnUrl()`, decides both the web and native redirect** — so the two paths
+  cannot silently drift apart the way the original web-only flow drifted from what native needed in the
+  first place. The native flag travels from `/start` (the client states its own platform, since the
+  callback is a browser navigation that can carry no headers of its own) alongside the PKCE verifier, so
+  the callback knows which return to send for both the success AND failure paths.
+- **No ticket/encryption needed**, unlike GitHub's raw-token handoff: the nonce this deep link carries is
+  not a secret, only a claim key — `claimPendingConnection` already independently verifies the redeeming
+  request comes from the SAME Firebase uid that started the flow, so an app that merely intercepted the
+  scheme could read the nonce but never redeem it as anyone else's account.
+- **New pure module `src/lib/supabaseOauthReturn.ts`** parses the deep link (mirrors
+  `githubOauthReturn.ts`), and the native return re-fires the card's existing completion check via a new
+  custom event (`SUPABASE_NATIVE_RETURN_EVENT`) rather than relying on a mount effect — on native the
+  in-app browser closes with **no page navigation**, so the card component never remounts the way a web
+  page reload does.
+
+**Regression-locked** in `src/lib/supabaseOauthReturn.test.ts` (pure parsing), `supabaseOAuth.test.ts`
+(the web/native redirect split), and `tests/supabaseNativeReturnWiring.test.ts` (end-to-end wiring: the
+deep-link listener checks Supabase before falling into the GitHub branch, the card opens the in-app
+browser and tells the server `native: true`, the server threads the flag through both redirect paths).
+
+⚠️ **One thing kept deliberately narrow.** The native flag is resolved from the verifier store, which is
+only populated once `takeVerifier` succeeds — a callback whose STATE itself is forged/expired/malformed
+falls back to the web-style redirect (an honest "please retry from the app" page) rather than a
+native-aware one, since nothing at that point can yet be trusted to say what platform started the flow.
+This is an already-rare, independently-retryable edge case (the user just taps Connect again), not a gap
+in the fix for the actual reported bug.
+
+Verified against a freshly-rebased `origin/main` and the full CI-parity gate: `tsc --noEmit` (frontend)
+clean, `tsc -p tsconfig.server.json --noEmit` (server) clean, `node scripts/noUnusedImports.mjs` clean,
+full `npx vitest run` — 22770 passed, 1 skipped, 0 `FAIL` lines, `npm run build` clean, `npm run
+test:bundle` within budget, `npm run boot:check` PASS. Checked open PRs first (#2922, #2921, #2900) —
+none touch Supabase, OAuth, or the native `appUrlOpen` listener.
+
+**Gate:** typecheck · noUnusedImports · typecheck:server · vitest · build · test:bundle · boot:check.
 ### Not changed, and stated rather than assumed
 
 The underlying numbers come from a **per-instance, since-boot** registry — that is real data, but it is
@@ -53546,3 +53734,90 @@ this screen at it would give lifetime totals and is probably the right end state
 change with its own shape and cost, and the admin's complaint was that the screen shows nothing real.
 It now shows something real and says exactly what window it covers. Recorded here as the obvious next
 step rather than folded in silently.
+
+## 2026-09-14 — the security finding in a user's build report was OUR OWN code
+
+Follow-up on the `fd021c64` autopsy, which recorded two items as "found, not fixed — each needs its own
+look". Both are now fixed at the root, and the investigation found a third that is worse than either.
+
+### What the report said, and why it was wrong twice over
+
+> `rootCause: "postmessage-wildcard-origin @ index.html:9"`
+
+**That finding is not the user's code. It is ours.** `SecurityAnalysis`'s `postmessage-wildcard-origin`
+rule matches `.postMessage(data, '*')`, and that is the exact line `previewBridgeSource` emits so the
+Live preview's console mirror can reach its parent frame. The dev-server launch injects the bridge into
+the sandbox's `index.html`; line 9 is where it lands. The app's owner was handed a security defect in
+their app that was a script we put there.
+
+It was wrong a second time as a *root cause*: `READINESS_WARNING` is recorded `autoResolved: true`
+because it is the NON-blocking half of the readiness split. If a warning could be why a build failed,
+the gate would have raised it as a `READINESS_BLOCKER`.
+
+### Root cause — the guard existed, and had a third door
+
+`stripPreviewBridge`'s own doc comment claims the bridge is *"closed at both ends"*: the file the model
+READS never contains it, and a `write_file` carrying the marker has it stripped. Both statements are
+true, and both are about the `write_file` **tool**. The analysers are not the tool.
+
+`readEvalSnapshot` reads the sandbox with the **raw actuator** and feeds ~30 static checks — security,
+accessibility, CSP, SRI, design, hygiene. The WorkspaceMemory pre-seed does the same and runs
+`scanSecurity` over the result. Neither had ever been stripped, so every one of those checks has been
+judging our injected mirror as the user's code.
+
+### 🔴 The third door, found while hunting siblings — and it reaches a PUBLISH
+
+`injectAppSignatureIntoIndexHtml` fires the moment the preview port is verified UP — which is precisely
+when the dev server has just injected the bridge. It reads that `index.html`, adds the badge, writes it
+back, and calls the durable-store callback **directly**, bypassing the `write_file` case that does the
+stripping. The bridge rode into durable storage, and durable storage is what a later deploy serves. The
+code comment immediately above it even says *"any later deploy of these same files"*.
+
+So the outcome the two existing guards were written to prevent — a development-only script phoning a
+parent frame that does not exist, published inside somebody's finished app — had an open path the whole
+time. No report has shown it reaching a user; it is fixed as a live hole, not as a post-mortem.
+
+### The fixes (rule 4 step 2 — fix the class, at the funnel)
+
+| | Where | Why there |
+|---|---|---|
+| `withoutPreviewBridge(path, content)` | `previewBridge.ts` | one helper owns the expression; this repo has paid for hand-copied rules four times |
+| strip inside `WorkspaceMemory.indexFile` | the memory index | covers all **10** of its call sites, and the 11th |
+| strip inside `readEvalSnapshot` | the evaluate funnel | covers ~30 analysers with one line |
+| `onFileWrite` is now a **wrapper** over the constructor's `onFileWriteRaw` | `ToolDispatcher` | covers all **24** durable-persist sites by construction, including code nobody has written yet |
+
+⚠️ **The sandbox file deliberately keeps its bridge.** The running Vite server serves that document and
+the Live console mirror is the entire reason it is there — stripping it from disk would have fixed a
+publishing bug by breaking a feature. Only the DURABLE copy and the ANALYSIS corpus are guarded.
+
+### The diagnostics half — and the 50/50 law
+
+1. **The instance:** `READINESS_WARNING` added to `NEVER_ROOT_CAUSE`, beside `DESIGN_PAGE_INCONSISTENT`
+   and the rest. Its blocking sibling `READINESS_BLOCKER` stays eligible — a real failure must keep its
+   explanation.
+2. **The class:** the auto-resolved-inclusive fallback in `deriveRootCause` no longer presents its pick
+   as the cause. Reaching for an `autoResolved: true` item so a failed build says *something* is right;
+   calling it the CAUSE contradicts our own record in the same report. The item is still named, with the
+   causal claim withdrawn — exactly what the `endedWithoutOutcome` and `stillRunning` branches beside it
+   already do. Every auto-resolved code that exists today, and every one added later, loses this door.
+
+### Tests
+
+`tests/previewBridgeNotTheApp.test.ts` — 19 tests. It opens by proving the bridge genuinely trips the
+rule that headlined the report, so nothing below can pass for the wrong reason, and it asserts that an
+app's OWN wildcard `postMessage` is still flagged — we hide our line, not theirs.
+
+Two existing tests in `tests/previewLiveConsole.test.ts` pinned the helper's NAME at each call site.
+They now assert the **guard**, name-agnostically, and two new cases cover the analyser funnel and the
+durable callback. `BuildDiagnostics.test.ts`'s fallback-ordering test likewise now asserts the ordering
+rule rather than the sentence around it — the rule it was always about.
+
+Gate on the final state: typecheck · noUnusedImports · typecheck:server · build · test:bundle ·
+boot:check · **1633 files / 22,777 passed / 1 skipped / 0 FAIL**.
+
+### Still open from that autopsy (unchanged, not silently closed)
+
+- The retry decided before the evidence exists (an ordering change in the post-loop sequence).
+- `AGENT_NOTE` / `PREVIEW_SNAPSHOT_STALE` / the incremental line contradicting each other.
+- `@playwright/test` added to a project whose sandbox has no browsers installed.
+- The ETA lying, and 90–95% sandbox idle.

@@ -1817,6 +1817,16 @@ const NEVER_ROOT_CAUSE: ReadonlySet<string> = new Set([
   // Same class, same report: an accessibility grade is a quality note about the app, never the reason
   // a build did or did not work.
   'ACCESSIBILITY',
+  // A READINESS *WARNING* IS THE NON-BLOCKING SIBLING OF A BLOCKER, BY CONSTRUCTION (autopsy
+  // fd021c64, 2026-09-14). The readiness gate splits its findings in two and this class records the
+  // split faithfully: `READINESS_BLOCKER` is severity ERROR and `autoResolved: false` — those
+  // genuinely explain a failure and stay eligible. `READINESS_WARNING` is the other half, recorded
+  // `autoResolved: true` precisely because it does NOT block. If a warning could be why a build
+  // failed, the gate would have raised it as a blocker; that it did not IS the evidence.
+  // The reported build was headlined `rootCause: "postmessage-wildcard-origin @ index.html:9"` —
+  // and that finding was not only advisory, it was OURS (see previewBridge.ts's withoutPreviewBridge,
+  // fixed in the same change): the app's owner was told their build's problem was a line we injected.
+  'READINESS_WARNING',
 ]);
 
 /**
@@ -2159,13 +2169,15 @@ export function deriveRootCause(input: {
   // continued fine — appeared before the real DB_UNREACHABLE ERROR that actually killed the build, and the
   // old first-match order blamed "useAuth.ts does not exist" instead of the database. Severity now leads
   // the pick so the report names the real killer.)
-  const problem =
+  const unresolved =
     issues.find((i) => i.severity === 'error' && !i.autoResolved && !excluded(i))
-    ?? issues.find((i) => i.severity !== 'info' && !i.autoResolved && !excluded(i))
-    // The autoResolved-INCLUSIVE fallbacks exist only to surface SOMETHING on a build that did NOT
-    // succeed; a successful build must never report a recovered/auto-resolved item as its root cause.
-    ?? (ok === true ? undefined : (issues.find((i) => i.severity === 'error' && !excluded(i))
+    ?? issues.find((i) => i.severity !== 'info' && !i.autoResolved && !excluded(i));
+  // The autoResolved-INCLUSIVE fallbacks exist only to surface SOMETHING on a build that did NOT
+  // succeed; a successful build must never report a recovered/auto-resolved item as its root cause.
+  const resolvedOnly = unresolved ? undefined
+    : (ok === true ? undefined : (issues.find((i) => i.severity === 'error' && !excluded(i))
       ?? issues.find((i) => i.severity !== 'info' && !excluded(i))));
+  const problem = unresolved ?? resolvedOnly;
   /**
    * 🔴 A BUILD THAT NEVER RECORDED AN ENDING MUST NOT HAVE ONE INVENTED FOR IT (admin report 2026-09-10).
    *
@@ -2216,6 +2228,24 @@ export function deriveRootCause(input: {
     return problem
       ? `This build ended without recording an outcome (cut off before it could report one) — so the reason it stopped is NOT known. The most severe issue recorded before it stopped, which may or may not be related: ${problem.message}`
       : 'This build ended without recording an outcome (cut off before it could report one) — the reason it stopped is not known, and no unresolved issue was recorded either.';
+  }
+  /**
+   * 🔴 AN ITEM WE OURSELVES MARKED RESOLVED MUST NOT BE PRESENTED AS THE CAUSE (autopsy fd021c64).
+   *
+   * `resolvedOnly` is reached only when the run recorded NOTHING unresolved, and the fallback then
+   * reaches back for an `autoResolved: true` item so a failed build says something rather than
+   * nothing. Naming it is right; naming it as the CAUSE is a claim that contradicts our own record —
+   * `autoResolved: true` is this engine stating, in the same report, that the item is not an
+   * outstanding defect.
+   *
+   * Adding `READINESS_WARNING` to NEVER_ROOT_CAUSE fixes the instance above. This fixes the CLASS:
+   * every code recorded auto-resolved today, and every one added tomorrow, stops being able to
+   * become a headline cause through this door. The item is still named — it is the most useful
+   * thing the run has — with the causal claim withdrawn, exactly as the `endedWithoutOutcome` and
+   * `stillRunning` branches above already do for the same reason.
+   */
+  if (problem && problem === resolvedOnly) {
+    return `This build did not succeed, but NO unresolved problem was recorded — so why it failed is not known from this report. The most severe thing seen, which the engine had already resolved and which may be unrelated: ${problem.message}`;
   }
   if (problem) return problem.message;
   if (ok === true) return 'Build completed successfully with no problems recorded.';

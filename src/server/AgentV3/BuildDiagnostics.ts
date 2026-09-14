@@ -586,6 +586,12 @@ export class BuildDiagnostics {
    */
   /** The last audit note recorded, so a re-install replaces its predecessor instead of stacking. */
   private lastAuditNote: string | null = null;
+  /**
+   * Did THIS build already run the compatible `npm audit fix`? Read from the command log rather than
+   * from the env flag, so the note describes what actually happened in this run — a build where the
+   * fix was skipped for time still gets the advice, and one where it ran does not.
+   */
+  private compatibleAuditFixRan = false;
 
   recordCommand(rec: { command: string; exitCode: number | null; stdout?: string; stderr?: string; durationMs?: number }): void {
     // NPM ALREADY TOLD US (dukaan report 2026-08-12). That build's install printed "8 vulnerabilities
@@ -595,9 +601,15 @@ export class BuildDiagnostics {
     // call and no extra command, and it covers every install path by construction.
     if (looksLikeDependencyInstall(rec.command)) {
       try {
+        // Set BEFORE the note is built, because the command that reveals this is usually the SAME one
+        // whose output we are parsing: `looksLikeDependencyInstall` matches `audit`, so `npm audit fix`
+        // both applies the compatible fixes and prints the tree they left behind.
+        if (/\bnpm\b[^\n]*\baudit\b[^\n]*\bfix\b/.test(rec.command) && !/--force/.test(rec.command)) {
+          this.compatibleAuditFixRan = true;
+        }
         const audit = parseNpmAuditSummary(`${rec.stdout ?? ''}\n${rec.stderr ?? ''}`);
         const severity = auditSeverity(audit);
-        const note = npmAuditNote(audit);
+        const note = npmAuditNote(audit, { compatibleFixAlreadyRun: this.compatibleAuditFixRan });
         // Only the LATEST install describes the tree the app ships with, so a later result replaces an
         // earlier one rather than stacking a second, contradictory line in the same report.
         if (severity && note && this.lastAuditNote !== note) {

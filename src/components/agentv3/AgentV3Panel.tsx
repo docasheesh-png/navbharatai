@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { appRanDespiteFailedVerdict, fixRemainingIssuePrompt, appRunningNoticeText } from './failedButRunning';
+import { publicTierLabel } from '../../lib/engineLabels';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
 import { FilesPanel, type FilesPanelProps } from '../panels/FilesPanel';
@@ -5058,16 +5059,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                             );
                           })}
                         </div>
+                        {/* 🔴 WHITE-LABEL LAW (admin 2026-09-14). This line printed the vendor's own
+                            tier words — "balanced (Sonnet)", "Sonnet · 100%", "Opus · medium effort"
+                            — to EVERY user, on a control gated by nothing. Note the shape of the bug:
+                            the FIRST branch was already correct and the other four were not, which is
+                            exactly what one ternary per developer produces and what a choke point
+                            prevents. `publicTierLabel` keeps every fact a user needs (relative
+                            strength, pinned or adaptive, how much effort) and names no vendor. */}
                         <div className="text-[11px] text-zinc-500 mt-1">
-                          {powerLevel === 'weak'
-                            ? 'Free engine — fast & lightweight'
-                            : powerLevel === 'off'
-                            ? 'Normal — balanced (Sonnet)'
-                            : powerLevel === 'mini'
-                            ? 'Sonnet · 100%'
-                            : powerLevel === 'medium'
-                            ? 'Opus · medium effort'
-                            : 'Opus · ultracode (max effort)'}
+                          {publicTierLabel(powerLevel)}
                           {!powerUnlocked && ' · 🔒 recharge (any amount) to unlock all tiers'}
                         </div>
                       </div>

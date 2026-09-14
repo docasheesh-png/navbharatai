@@ -55600,3 +55600,70 @@ first (#2935, #2934, #2933, #2932, #2900) — none touch this area. Branched fre
 this session's other open PR (#2933, an unrelated AgentV3 fix) to keep the two changes independently
 reviewable. PR #2937 opened; per the standing merge-hold rule, driven to green CI but not merged
 without the admin's explicit go-ahead.
+
+---
+
+## 2026-09-14 — 🔴 WHITE-LABEL BREACH: the provider's name was on a user screen. The one the admin found was not the worst one.
+
+Admin, from his own phone: *"navbharatai -> settings -> live metrics. **live metric me provider ka naam
+show ho raha hai!** maine kaha tha — kahi bhi kisi bhi prkar se real background provider ai ka naam
+show nahi hona chahiye (white labeling karni hai)."* The card read **`KIMI · 3 reqs · 23,73,820
+tokens · $1.4916`**.
+
+### What the sweep found — the leak he saw was the SMALLER of two
+
+| | surface | gate | severity |
+|---|---|---|---|
+| 1 | **Settings → Live Metrics** printed the raw provider key as a row heading | `isAdmin` **and** an admin token on `/api/admin/metrics` | no ordinary user ever saw it |
+| 2 | 🔴 **The POWER SELECTOR's description line** | **none** | **every user, on the main build screen** |
+
+Item 2 printed the vendor's own tier words straight to the user:
+`'Normal — balanced (Sonnet)'` · `'Sonnet · 100%'` · `'Opus · medium effort'` ·
+`'Opus · ultracode (max effort)'`.
+
+🔴 **And the shape of that bug is the finding.** The FIRST branch of the same five-branch ternary was
+already white-labelled correctly — `'Free engine — fast & lightweight'` — and the other four were not.
+Someone applied the law to one branch and moved on. **That is exactly what a per-call-site habit
+produces and exactly what CLAUDE.md's own §4 prescribed the cure for**: *"route every user-facing
+provider reference through ONE anonymizer … so a NavBharatAI label is applied by construction — never
+sprinkled ad-hoc per call site."* The server half of that (`providerRedaction.ts`) has existed since
+Fix 62/68. **The client half never got built** — so the client had no choke point, and the leak grew
+there.
+
+⚠️ The UI was also contradicting **our own documentation**: `AppKnowledgeBase.ts` has described these
+tiers as *"NavBharatAI's fast economy engine"*, *"the standard engine, adaptive"*, *"a stronger engine,
+pinned for the whole build"*, *"most capable engine at higher reasoning effort"* since it was written.
+The fix is simply to make the screen say what the docs already promised.
+
+### The fix
+
+- **`src/lib/engineLabels.ts`** — the missing client choke point. `publicTierLabel()` returns the
+  white-labelled description for every tier, and an **unknown tier falls back to the brand, never to a
+  vendor string**. Pure, so every rule is testable.
+- Both surfaces now render through it. The metrics card aggregates to **one `NavBharatAI engine` row**
+  and points at the Admin Panel → *Provider Token Burn* for the genuine per-engine breakdown — an
+  admin-only surface by construction, which is the one place §3 actually permits vendor identity.
+  **Nothing the admin needs is lost; it just stops living inside a user-facing file.**
+- 🔒 **`tests/whiteLabelClientSurfaces.test.ts`** walks **every** `.ts`/`.tsx` under `src/components`,
+  `src/lib` and `src/hooks`, strips comments and imports, and fails on any **string literal** that
+  names a vendor, model family or Claude tier word. **Proven by injection**: adding
+  `const leak = "Powered by Claude Sonnet"` to `GalleryPanel.tsx` fails the suite by name.
+- A test also asserts the five tier labels stay **distinct and rankable** — five identical safe strings
+  would be white-label theatre, not a fix.
+
+### ⚠️ The allowlist, and why it is not a hole
+
+The law covers **which engine NavBharatAI ran**. It does **not** cover a third-party AI the **user** is
+adding to **their own app** — the API marketplace, the BYO-key recipes, the IDE's provider picker.
+Those are the user's integrations, chosen and paid for by them, and scrubbing them would break the
+feature. Each allowlisted file carries its reason in the test, alongside the two genuinely admin-only
+surfaces (`AdminDashboard.tsx`, `agentV3CostSummary.ts`). **A new file is guilty until listed**, so the
+default is safe.
+
+### Still open
+
+- The sweep covers **string literals in client source**. A provider name arriving from the SERVER at
+  runtime and rendered raw would pass it — which is precisely how the metrics card leaked
+  (`{provider}` was an interpolation, not a literal). That one is fixed at its source, but the general
+  case needs the server to redact before it serializes, not the client to notice. `providerRedaction.ts`
+  is the right home; wiring every admin/metrics payload through it is not done.

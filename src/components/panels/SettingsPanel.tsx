@@ -1,4 +1,5 @@
 import React, { lazy, Suspense, useState } from 'react';
+import { PUBLIC_ENGINE_NAME } from '../../lib/engineLabels';
 import { motion, AnimatePresence } from 'motion/react';
 import { Settings, X, ChevronRight, ChevronLeft, Monitor, LayoutDashboard, Lock, Database, GitFork, Activity, GitBranch, Bot, Globe, Smartphone, BarChart2, Cpu, List, LogOut, GitBranch as GitBranchIcon, Folder, Check, Search, RefreshCw, Box, Zap, Heart, HardDrive, ShieldCheck, Languages, Plus, ExternalLink, Copy, User, Mail, Scale, FileText } from 'lucide-react';
 import { Github } from '../ui/BrandIcons';
@@ -1506,24 +1507,37 @@ export function SettingsPanel({
                         ))}
                       </div>
                     </div>
-                    {/* AI Cost by Provider */}
+                    {/* 🔴 AI COST — AGGREGATED, NEVER PER VENDOR (admin 2026-09-14, from his own phone:
+                        "live metric me provider ka naam show ho raha hai!"). This block used to render
+                        the raw provider key as a row heading, so the card read "KIMI · $1.4916".
+                        It is admin-gated twice over — the tab needs `isAdmin` and `/api/admin/metrics`
+                        needs an admin token — so no ordinary user ever saw it. It was still wrong to
+                        live HERE: every other line of this file is a user-facing settings screen, and a
+                        vendor name sitting inside it is one wrong boolean from being a real breach.
+                        Nothing is lost: the genuine per-engine breakdown belongs on the Admin Panel
+                        (Provider Token Burn), which is an admin-only surface by construction — the one
+                        place the White-Label Law actually permits vendor identity. */}
                     <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 space-y-4">
                       <div className="flex items-center justify-between">
-                        <h4 className="text-[11px] font-black text-white uppercase tracking-widest">AI Cost by Provider</h4>
+                        <h4 className="text-[11px] font-black text-white uppercase tracking-widest">AI Engine Cost</h4>
                         <span className="text-[11px] font-black text-amber-400">${(adminLiveMetrics.totalCostUsd ?? 0).toFixed(4)} total</span>
                       </div>
-                      {Object.entries(adminLiveMetrics.tokens || {}).length === 0 && (
+                      {Object.entries(adminLiveMetrics.tokens || {}).length === 0 ? (
                         <p className="text-[10px] text-[#484f58]">No AI calls recorded yet.</p>
-                      )}
-                      {Object.entries(adminLiveMetrics.tokens || {}).map(([provider, usage]: [string, any]) => (
-                        <div key={provider} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
+                      ) : (
+                        <div className="flex items-center justify-between py-2">
                           <div>
-                            <div className="text-xs font-bold text-white capitalize">{provider}</div>
-                            <div className="text-[9px] text-[#484f58]">{usage.requests} reqs · {(usage.inputTokens + usage.outputTokens).toLocaleString()} tokens</div>
+                            <div className="text-xs font-bold text-white">{PUBLIC_ENGINE_NAME} engine</div>
+                            <div className="text-[9px] text-[#484f58]">
+                              {Object.values(adminLiveMetrics.tokens as Record<string, any>).reduce((n, u: any) => n + (u?.requests ?? 0), 0)} reqs
+                              {' · '}
+                              {Object.values(adminLiveMetrics.tokens as Record<string, any>).reduce((n, u: any) => n + (u?.inputTokens ?? 0) + (u?.outputTokens ?? 0), 0).toLocaleString()} tokens
+                            </div>
                           </div>
-                          <span className="text-[11px] font-black text-amber-400">${(usage.costUsd ?? 0).toFixed(4)}</span>
+                          <span className="text-[11px] font-black text-amber-400">${(adminLiveMetrics.totalCostUsd ?? 0).toFixed(4)}</span>
                         </div>
-                      ))}
+                      )}
+                      <p className="text-[9px] text-[#484f58]">Per-engine breakdown is on the Admin Panel → Provider Token Burn.</p>
                     </div>
                     {/* Refresh */}
                     <button

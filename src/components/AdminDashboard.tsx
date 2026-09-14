@@ -563,7 +563,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
    */
   const [channels, setChannels] = useState<{
     verdict: { used: number; cap: number; remaining: number; reclaimable: number; level: 'ok' | 'warn' | 'critical'; message: string };
-    channels: Array<{ channelId: string; url: string; updateTime: string | null; state: 'live' | 'stale' | 'unknown'; workspaceId: string | null; reclaimable: boolean }>;
+    channels: Array<{ channelId: string; url: string; updateTime: string | null; state: 'live' | 'stale' | 'unknown' | 'indeterminate' | 'default'; workspaceId: string | null; reclaimable: boolean }>;
   } | null>(null);
   const [channelsError, setChannelsError] = useState('');
   const [reclaiming, setReclaiming] = useState('');
@@ -1213,13 +1213,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {statCard('Total Revenue', `₹${(analytics?.totalRevenue || 0).toLocaleString('en-IN')}`, 'Verified payments', 'bg-emerald-500', IndianRupee)}
                 {statCard('Registered Users', analytics?.totalUsers || 0, `+${analytics?.newUsersToday || 0} today`, 'bg-indigo-500', Users)}
-                {statCard('Website Hits Today', (analytics?.websiteHitsToday || 0).toLocaleString(), `${(analytics?.websiteHitsTotal || 0).toLocaleString()} total`, 'bg-sky-500', Globe)}
+                {statCard('Website Hits Today', (analytics?.websiteHitsToday || 0).toLocaleString(), analytics?.hitsSinceBoot ? `${(analytics?.websiteHitsTotal || 0).toLocaleString()} since this server started` : `${(analytics?.websiteHitsTotal || 0).toLocaleString()} total`, 'bg-sky-500', Globe)}
                 {statCard('Active (24h)', analytics?.activeUsers24h || 0, 'Unique users with AI requests', 'bg-violet-500', Activity)}
               </div>
 
               {/* Row 2: 4 more metrics */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {statCard('Output Tokens', (analytics?.totalTokensUsed || 0).toLocaleString(), 'All providers combined', 'bg-amber-500', Zap)}
+                {statCard('Output Tokens', (analytics?.totalTokensUsed || 0).toLocaleString(), analytics?.scope === 'chat' ? 'Chat assistants only — builds are on the Monitor' : 'All providers combined', 'bg-amber-500', Zap)}
                 {/* 🔒 "AT MOST" WHEN THE COST IS A FLOOR. Some calls cannot be priced (a provider that
                     reported no tokens, or a row written before usage was recorded), so the real cost is
                     at least what we summed and the margin is at most what we show. This card used to
@@ -1227,14 +1227,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     ₹1,223 of spend — because cost was structurally zero and margin was revenue with a
                     different label. Never again by accident: the word changes with the certainty. */}
                 {statCard(
-                  analytics?.providerCostComplete === false ? 'Platform Margin (at most)' : 'Platform Margin',
+                  analytics?.providerCostComplete === false ? `${analytics?.scope === 'chat' ? 'Chat margin' : 'Platform Margin'} (at most)` : (analytics?.scope === 'chat' ? 'Chat margin' : 'Platform Margin'),
                   `₹${(analytics?.estimatedProfit || 0).toFixed(2)}`,
-                  analytics?.providerCostComplete === false
-                    ? `Revenue minus AI cost · ${analytics?.unpricedCalls || 0} call(s) could not be priced`
-                    : 'Revenue minus AI cost',
+                  /* CHAT cost only — build cost is on the Monitor's own tiles (scope from the server) */
+                  `Revenue minus ${analytics?.scope === 'chat' ? 'CHAT AI' : 'AI'} cost${analytics?.scope === 'chat' ? ' · build cost is on the Monitor' : ''}${analytics?.providerCostComplete === false ? ` · ${analytics?.unpricedCalls || 0} call(s) could not be priced` : ''}`,
                   (analytics?.estimatedProfit || 0) >= 0 ? 'bg-emerald-500' : 'bg-red-500', TrendingUp)}
                 {statCard('Token Purchases', analytics?.tokenPurchaseCount || 0, 'Paid transactions', 'bg-pink-500', Tag)}
-                {statCard('Cost / Request', `₹${(analytics?.burnRate || 0).toFixed(5)}`, 'Direct provider cost', 'bg-orange-500', Cpu)}
+                {statCard('Cost / Request', `₹${(analytics?.burnRate || 0).toFixed(5)}`, analytics?.scope === 'chat' ? 'Direct provider cost · chat only' : 'Direct provider cost', 'bg-orange-500', Cpu)}
               </div>
 
               {/* PUBLISHED APPS, as a NUMBER among the numbers.
@@ -1421,7 +1420,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
                   <div>
                     <h3 className="text-sm font-black text-white uppercase tracking-tight">API Usage Ranking</h3>
-                    <p className="text-[10px] text-[#8b949e] font-bold uppercase tracking-widest mt-1">Most to least used providers</p>
+                    <p className="text-[10px] text-[#8b949e] font-bold uppercase tracking-widest mt-1">{analytics?.scope === 'chat' ? 'Most to least used chat providers' : 'Most to least used providers'}</p>
                   </div>
                   <div className="space-y-3">
                     {(analytics?.providerRanking || []).length === 0 && (
@@ -1435,12 +1434,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         <div key={p.name}>
                           <div className="flex justify-between text-xs font-bold text-white mb-1">
                             <span className="uppercase font-mono">#{i + 1} {p.name}</span>
-                            <span className="text-[#8b949e]">{p.requests} req · {p.avgLatencyMs}ms avg</span>
+                            <span className="text-[#8b949e]">{p.requests} req · {p.avgLatencyMs == null ? 'latency not recorded' : `${p.avgLatencyMs}ms avg`}</span>
                           </div>
                           <div className="w-full bg-black/40 h-2 rounded-full overflow-hidden">
                             <div className={`${col} h-full transition-all duration-700`} style={{ width: `${pct}%` }} />
                           </div>
-                          <div className="text-[9px] text-[#8b949e] mt-0.5">{pct}% of requests · {(p.tokensUsed || 0).toLocaleString()} tokens</div>
+                          <div className="text-[9px] text-[#8b949e] mt-0.5">{pct}% of requests · {typeof p.measuredCalls === 'number' && p.measuredCalls === 0 ? 'tokens not measured' : `${(p.tokensUsed || 0).toLocaleString()} tokens`}</div>
                         </div>
                       );
                     })}
@@ -1451,7 +1450,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
                   <div>
                     <h3 className="text-sm font-black text-white uppercase tracking-tight">Provider Token Burn</h3>
-                    <p className="text-[10px] text-[#8b949e] font-bold uppercase tracking-widest mt-1">Token consumption by provider</p>
+                    <p className="text-[10px] text-[#8b949e] font-bold uppercase tracking-widest mt-1">{analytics?.scope === 'chat' ? 'Chat token consumption by provider' : 'Token consumption by provider'}</p>
                   </div>
                   <div className="space-y-3">
                     {Object.entries(analytics?.providerWise || {}).map(([name, tokens]: any) => {
@@ -3738,7 +3737,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 {statCard('Failed Logins', analytics?.failedRequests || 0, 'Admin login failures', 'bg-red-500', Shield)}
-                {statCard('Website Hits', (analytics?.websiteHitsTotal || 0).toLocaleString(), 'All time requests', 'bg-sky-500', Globe)}
+                {statCard('Website Hits', (analytics?.websiteHitsTotal || 0).toLocaleString(), analytics?.hitsSinceBoot ? 'Since this server started — resets on deploy' : 'All time requests', 'bg-sky-500', Globe)}
                 {statCard('Today Hits', (analytics?.websiteHitsToday || 0).toLocaleString(), `vs ${analytics?.websiteHitsYesterday || 0} yesterday`, 'bg-indigo-500', Eye)}
               </div>
 

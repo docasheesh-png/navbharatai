@@ -68,6 +68,7 @@ import { realRateFor, usageCostUsd } from '../AgentV3/providerRates';
 import { usdToInr } from '../lib/UsdInrRate';
 import { analyzeFinOps } from '../lib/FinOpsAdvisor';
 import { generateInsights, generateOpsReport, answerMetricQuery } from '../lib/AiInsights';
+import { windowSnapshot, sinceBootScope } from '../lib/windowSnapshot';
 import { assessDeployRisk, analyzeIncident } from '../AppMakerLab/deployment/DeployRiskAdvisor';
 import { releaseGateStore } from '../lib/ReleaseGateStore';
 import { normalizeGateConfig } from '../lib/ReleaseGate';
@@ -518,6 +519,16 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
 
     const timeline = await metricsTimeline.series(hours).catch(() => null);
 
+    // ANALYSE THE SAME DATA THE CHARTS DRAW (admin Monitor capture, 2026-09-14). `snapshot` above is
+    // the since-boot registry — a deploy resets it, and this page was captured 49 s after one: the
+    // charts (timeline) showed 3 builds and ₹231, while Insights ("no builds recorded in this window")
+    // and Health ("no data for success" → Reliability 100) were fed the empty registry. When the
+    // timeline has data for the window, the analysers get the window; otherwise they get the
+    // registry AND the response says so, so the client can label the panels either way.
+    const scoped = timeline && timeline.hasData
+      ? windowSnapshot(timeline, hours)
+      : { snapshot, scope: sinceBootScope(snapshot, process.uptime()) };
+
     // LIVE SANDBOXES — the number that answers "what is running right now", and the one that is
     // actually costing money this second (a running E2B VM bills by wall-clock; a paused one does not).
     //
@@ -560,7 +571,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         latencyWeighted += (st.avgLatencyMs || 0) * (st.requestCount || 0);
       }
       const inputs = {
-        successRatePct: snapshot.builds.total > 0 ? snapshot.builds.successRate * 100 : null,
+        successRatePct: scoped.snapshot.builds.total > 0 ? scoped.snapshot.builds.successRate * 100 : null,
         errorRatePct: totalReq > 0 ? (totalErr / totalReq) * 100 : null,
         avgLatencyMs: totalReq > 0 ? latencyWeighted / totalReq : null,
         // Same reason as the live endpoint above: process age is deploy recency, and scoring it made a
@@ -602,11 +613,16 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         grievanceOfficerNamed: officerIsNamed(grievanceOfficer()),
         grievanceWarning: officerIsNamed(grievanceOfficer()) ? '' : OFFICER_MISSING_WARNING,
       },
-      alerts: guard(() => evaluateAlerts(snapshot)).value ?? [],
+      // What the four analysers below were fed — so the client can print it beside them.
+      metricsScope: scoped.scope,
+      alerts: guard(() => evaluateAlerts(scoped.snapshot)).value ?? [],
       health: health.value,
       healthError: health.error,
-      finops: guard(() => analyzeFinOps(snapshot)).value,
-      insights: guard(() => generateInsights(snapshot)).value ?? [],
+      finops: guard(() => analyzeFinOps(scoped.snapshot)).value,
+      insights: guard(() => generateInsights(scoped.snapshot, undefined, {
+        repairsTracked: scoped.scope.repairsTracked,
+        label: scoped.scope.label,
+      })).value ?? [],
       providers: providerStats.value ?? {},
       providersError: providerStats.error,
       timeline: timeline ?? {
@@ -1228,7 +1244,6 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const totalTokensUsed = usage.outputTokens;
       const totalProviderCost = usdToInr(usage.costUsd);
       const modelWise: any = {};
-      const providerWise: any = {};
 
       logs.forEach((log: any) => {
         const out = Number(log.outputTokens);
@@ -1237,9 +1252,22 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         if (!(log.usageMeasured === true) || !Number.isFinite(out) || out < 0) return;
         const model = log.modelName || 'unknown-model';
         modelWise[model] = (modelWise[model] || 0) + out;
-        const provider = log.providerName || 'unknown-provider';
-        providerWise[provider] = (providerWise[provider] || 0) + out;
       });
+
+      // ONE PROVIDER ACCOUNTING, NOT TWO (admin Monitor capture, 2026-09-14).
+      //
+      // "API Usage Ranking" said VERTEX had 0 tokens while "Provider Token Burn" said 1,40,925, on the
+      // same page. The burn map was keyed by `providerName` AS WRITTEN (`VERTEX`); the ranking was a
+      // second, hand-rolled tally that looked those tokens up by `name.toLowerCase()` — and found
+      // nothing. The ranking also counted every legacy `auto` row as a provider called "auto", holding
+      // 58% of traffic at 0 ms and 0 tokens, three months after the writer that invented it was fixed.
+      // `summariseUsage` already does the one honest rollup — requests, measured tokens, cost, latency,
+      // `auto` folded into `unknown` — so both panels now read the SAME `byProvider`, and cannot
+      // disagree with each other by construction.
+      const providerWise: Record<string, number> = {};
+      for (const [name, r] of Object.entries(usage.byProvider)) {
+        if (r.measured > 0) providerWise[name] = r.outputTokens;
+      }
 
       const clientIdSample = (process.env.CASHFREE_CLIENT_ID || process.env.CASHFREE_APP_ID)?.trim();
       const clientSecretSample = (process.env.CASHFREE_CLIENT_SECRET || process.env.CASHFREE_SECRET_KEY)?.trim();
@@ -1284,26 +1312,20 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const activeUserIds = new Set(logs.filter((l: any) => (l.createdAt || '') > cutoff24h).map((l: any) => l.userId));
       const activeUsers24h = activeUserIds.size;
 
-      // Provider ranking by request count
-      const providerRequestCount: any = {};
-      const providerLatencySum: any = {};
-      const providerLatencyCount: any = {};
-      logs.forEach((log: any) => {
-        const p = log.providerName || 'unknown';
-        providerRequestCount[p] = (providerRequestCount[p] || 0) + 1;
-        if (log.latencyMs) {
-          providerLatencySum[p] = (providerLatencySum[p] || 0) + log.latencyMs;
-          providerLatencyCount[p] = (providerLatencyCount[p] || 0) + 1;
-        }
-      });
-      const providerRanking = Object.entries(providerRequestCount)
-        .map(([name, count]: any) => ({
+      // Provider ranking by request count — from the SAME rollup as the burn map (see above).
+      // `avgLatencyMs` is null when no latency was recorded, never 0: "unmeasured" and "instant" are
+      // different facts, and the old tally printed the legacy rows as "0 ms avg".
+      const providerRanking = Object.entries(usage.byProvider)
+        .map(([name, r]) => ({
           name,
-          requests: count,
-          avgLatencyMs: providerLatencyCount[name] ? Math.round(providerLatencySum[name] / providerLatencyCount[name]) : 0,
-          tokensUsed: providerWise[name.toLowerCase()] || 0,
+          requests: r.requests,
+          avgLatencyMs: r.avgLatencyMs == null ? null : Math.round(r.avgLatencyMs),
+          tokensUsed: r.outputTokens,
+          // How many of these calls carried real token counts — so a bar of 888 requests with 0 tokens
+          // reads as "unmeasured", which is what it is, rather than as a free provider.
+          measuredCalls: r.measured,
         }))
-        .sort((a: any, b: any) => b.requests - a.requests);
+        .sort((a, b) => b.requests - a.requests);
 
       // Token purchases
       const successfulPurchases = transactions.filter((tx: any) => tx.paymentStatus === 'SUCCESS' && tx.paymentProvider !== 'WELCOME_BONUS');
@@ -1330,6 +1352,17 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const liveProviderStats = getProviderStats();
 
       return res.json({
+        // WHAT THIS ROUTE MEASURES, stated so the screen can say it (admin Monitor capture, 2026-09-14).
+        //
+        // Every AI number below comes from `ai_usage_logs`, which is written by the CHAT route only.
+        // AgentV3 BUILDS record through the metrics sink into the Firestore timeline instead, and never
+        // touch this collection. So "Platform Margin: revenue minus AI cost" was revenue minus CHAT
+        // cost — it read ₹-1.92 lifetime on a day the Monitor showed ₹231 of BUILD cost in six hours —
+        // and "Output Tokens · All providers combined" omitted the provider (kimi) that had done 94% of
+        // the work. The numbers were right for what they measured; the labels claimed more. Unifying
+        // the two accountings is a separate change; until then this field is what keeps the labels
+        // honest, and the client reads it rather than hardcoding "all providers".
+        scope: 'chat' as const,
         totalUsers, totalRevenue, totalTokensUsed, totalProviderCost,
         // HOW SURE ARE WE? `providerCostComplete` false ⇒ the cost above is a FLOOR (some calls could
         // not be priced), so the profit below is an UPPER BOUND and the screen must say "at most".
@@ -1342,6 +1375,11 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         // New fields
         websiteHitsToday: todayHits, websiteHitsYesterday: yesterdayHits,
         websiteHitsTotal: serverStats.totalHits,
+        // `serverStats` lives in THIS instance's memory. "86 today · 86 total" after a deploy is not a
+        // coincidence and not a lifetime figure — it is how many requests this process has seen since
+        // it started, which a fresh instance restarts at zero. Named so the tile can say so.
+        hitsSinceBoot: true,
+        hitsSinceBootSeconds: Math.round(process.uptime()),
         newUsersToday, activeUsers24h,
         providerRanking, tokenPurchaseCount, recentPurchases,
         liveProviderStats,
@@ -2021,6 +2059,15 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         return res.status(409).json({
           error: 'The deployment registry could not be read in full, so it is impossible to tell whether '
             + 'this channel is waste or a live app whose record we simply did not see. Nothing was deleted.',
+          state: target.state,
+        });
+      }
+      // DEFENCE IN DEPTH for the site's own default channel (2026-09-14). The Reclaim button no longer
+      // exists for it because `classifyChannels` marks it `default`/not reclaimable — but a delete
+      // endpoint must refuse on its own, not trust that the only caller is the screen we drew.
+      if (target.state === 'default') {
+        return res.status(409).json({
+          error: "That is the hosting site's own default channel, not a preview channel. It is never waste and is never deleted from here.",
           state: target.state,
         });
       }

@@ -116,6 +116,15 @@ export interface MonitorTotals {
   buildsFailed: number;
   successRate: number | null;
   previewRate: number | null;
+  /** Builds the platform SAW RENDER — the previewRate numerator, kept so the gap below is computable. */
+  previewOk: number;
+  /**
+   * Builds that rendered an app and STILL did not pass — a gate (release, cost cap, user stop) ended
+   * them after the preview existed. Admin Monitor capture 2026-09-14: "Success rate 0%" beside
+   * "Preview rendered 67%" read as a contradiction because this number had no name. 0 when the
+   * rendered count does not exceed the passed count; never negative.
+   */
+  renderedNotOk: number;
   avgBuildMs: number | null;
   tokens: number;
   costUsd: number;
@@ -148,6 +157,8 @@ export function totalsFor(points: MonitorPoint[]): MonitorTotals {
     buildsFailed,
     successRate: builds > 0 ? buildsOk / builds : null,
     previewRate: builds > 0 ? previewOk / builds : null,
+    previewOk,
+    renderedNotOk: Math.max(0, previewOk - buildsOk),
     avgBuildMs: builds > 0 ? buildMs / builds : null,
     tokens,
     costUsd: costMicroUsd / 1_000_000,

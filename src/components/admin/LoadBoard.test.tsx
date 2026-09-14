@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { loadHeadline } from './LoadBoard';
+import { loadHeadline, chipWord } from './LoadBoard';
 
 /**
  * THE LOAD BOARD (ROADMAP §12) — the screen for `/api/admin/load`.
@@ -86,5 +86,22 @@ describe('🔒 the wiring — an API with no screen is not a feature', () => {
     expect(mountEffects.length).toBe(1);
     expect(mountEffects[0]).toContain('fetchLoad');
     expect(mountEffects[0]).not.toContain('fetchHosting');
+  });
+});
+
+describe('chipWord — the chip says HOW MANY were unread, not "nothing was measured" (admin capture 2026-09-14)', () => {
+  it('a mostly-measured board with a few unread ceilings names the count', () => {
+    expect(chipWord('unknown', 2, 12)).toBe('2 not measured');
+  });
+
+  it('a board where NOTHING could be read still says Not measured — that is the honest summary', () => {
+    expect(chipWord('unknown', 12, 12)).toBe('Not measured');
+    expect(chipWord('unknown', 0, 0)).toBe('Not measured');
+  });
+
+  it('any measured level keeps its own word — the count applies only to the unknown case', () => {
+    expect(chipWord('ok', 0, 12)).toBe('Room to spare');
+    expect(chipWord('warn', 1, 12)).toBe('Getting full');
+    expect(chipWord('full', 0, 12)).toBe('At the ceiling');
   });
 });

@@ -19,6 +19,10 @@ import { AudienceCard } from './admin/AudienceCard';
 import { AdminCopyButton } from './admin/AdminCopyButton';
 import { reportStatus, reportStatusLabel, reportStatusHint, openReportCount, type ReportTriage } from '../server/AgentV3/reportTriage';
 import { problemKindLabel } from '../lib/userReport';
+import { ReportInfoButton } from './admin/ReportInfoButton';
+import { ReportFilterBar } from './admin/ReportFilterBar';
+import { submittedRowFacts, allBuildRowFacts, personLabel } from '../lib/reportRowFacts';
+import { rowMatches, statusCountsFor, EMPTY_FILTERS, type ListFilterState } from '../lib/reportListFilter';
 import { describeOverflow } from '../lib/reportDiagnostics';
 import { ReportShot } from './ReportShot';
 import { compressForReport } from '../lib/reportImage';
@@ -91,11 +95,23 @@ interface AdminBuildReportRow extends ReportTriage {
    * an error, and neither should read as one.
    */
   userNote?: string | null;
+  /**
+   * THE ACCOUNT'S tier — "has this person ever bought tokens with real ₹?" (admin 2026-09-14).
+   * Resolved server-side by lib/accountTier.ts.
+   *
+   * ⚠️ NOT the same field as `tier` above, and that is the point. `tier` is
+   * `classifyReportTier(billing.userTier)` — how THAT BUILD was routed, which a user turns to "free"
+   * simply by choosing the Weak engine. A customer who had paid ₹500 and picked Weak was listed as
+   * Free, so "show me my paying users" hid a real customer. Both are kept: one is the build, one is
+   * the person, and only the second answers the admin's question.
+   */
+  accountTier?: ListFilterState['tier'] | null;
 }
 
 type ReportSortKey = 'time' | 'name' | 'app' | 'tier' | 'charged';
-type ReportTierFilter = 'all' | 'paid' | 'free' | 'admin';
-type ReportStatusFilter = 'all' | 'ok' | 'failed';
+// `ReportTierFilter` lived here for this inbox's own paid/free select. That control moved into the
+// shared ReportFilterBar and its vocabulary into ListTierFilter (reportListFilter.ts), which BOTH
+// lists now use — and which carries 'unknown', a bucket this one silently folded into nothing.
 
 const statCard = (label: string, value: string | number, sub: string, color: string, Icon: React.ComponentType<any>) => (
   <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-5 relative overflow-hidden">
@@ -260,6 +276,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     summary?: string; rootCause?: string; prompt?: string;
     /** Resolved server-side from the SAME wallet records the Users tab reads (adminUserLookup.ts). */
     owner?: { label: string; email: string; name: string; shortUid: string; anonymous: boolean };
+    /** Lifted out of the report the list query already read — see AllDiagnosticsEntry. Every one is
+     *  optional: a legacy or unsettled build records none, and the ⓘ panel says "not recorded"
+     *  rather than printing a ₹0 nobody was charged. */
+    userTier?: string | null; billedInr?: number | null; billedUsd?: number | null; zeroBillReason?: string | null;
+    /** Has this row already been handed to someone? (admin 2026-09-14 — one report, two sessions.) */
+    triage?: ReportTriage | null;
+    /** The ACCOUNT's tier — paid means this person has bought tokens with real ₹. */
+    tier?: ListFilterState['tier'] | null;
   }
   const [allBuilds, setAllBuilds] = useState<AllBuildRow[]>([]);
   const [allBuildsLoading, setAllBuildsLoading] = useState(false);
@@ -268,6 +292,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [allBuildsStatus, setAllBuildsStatus] = useState<'all' | 'failed' | 'succeeded' | 'unknown'>('all');
   const [allBuildsDate, setAllBuildsDate] = useState<'all' | 'today' | '7d' | '30d'>('all');
   const [allBuildsUid, setAllBuildsUid] = useState('');
+  /** Paid / free / admin / unknown — decided on the ACCOUNT, server-side (see lib/accountTier.ts). */
+  const [allBuildsTier, setAllBuildsTier] = useState<ListFilterState['tier']>('all');
   const [allBuildsCounts, setAllBuildsCounts] = useState<{ all: number; failed: number; succeeded: number; unknown: number } | null>(null);
   const [allBuildsUsers, setAllBuildsUsers] = useState<Array<{ uid: string; count: number; label: string }>>([]);
   const [allBuildsFetched, setAllBuildsFetched] = useState<{ fetched: number; limit: number } | null>(null);
@@ -275,28 +301,47 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [expandedHistory, setExpandedHistory] = useState<Array<{ id: string; startedAt: number; endedAt?: number; ok?: boolean; summary?: string; prompt?: string }>>([]);
   const [expandedLoading, setExpandedLoading] = useState(false);
   // Build Reports — filters & sorting (admin 2026-08-01): who sent which report, when, free/paid.
-  const [reportSearch, setReportSearch] = useState('');
-  const [reportTierFilter, setReportTierFilter] = useState<ReportTierFilter>('all');
-  const [reportStatusFilter, setReportStatusFilter] = useState<ReportStatusFilter>('all');
+  // THE SAME FILTER OBJECT THE ALL-BUILDS LIST USES (admin 2026-09-14: "filter bhi all build report
+  // wala chahiye dono me!!"). It replaces this inbox's own search + status selects, and ADDS the two
+  // it never had: a date range (so "is this still happening?" is askable of the list where users
+  // actually complain) and a per-user picker. The tier select and the sort toggle survive alongside
+  // it — they are extra, not duplicates, and dropping them would be a regression dressed as parity.
+  const [reportFilters, setReportFilters] = useState<ListFilterState>(EMPTY_FILTERS);
   const [reportSortKey, setReportSortKey] = useState<ReportSortKey>('time');
   const [reportSortAsc, setReportSortAsc] = useState(false); // default: newest first
 
   // Apply the search + tier + status filters, then sort. Pure derivation of the fetched rows.
+  /**
+   * One row of this inbox, mapped onto the shape the SHARED filter understands. The searchable text
+   * still includes the user's own complaint (admin 2026-08-28) — "show me every report that mentions
+   * the Save button" is the question this inbox exists to answer, and only their words can answer it.
+   */
+  const reportFilterRow = useCallback((r: AdminBuildReportRow) => ({
+    ok: r.ok, at: r.reportedAt, uid: r.userId,
+    // The ACCOUNT's tier, not the build's — see `accountTier` on the row type.
+    tier: r.accountTier ?? 'unknown',
+    search: [r.name, r.email, r.appLabel, r.userId, r.userNote, r.rootCause],
+  }), []);
+
+  /** The chip counts and the user picker, computed from the rows this inbox already holds. */
+  const reportCounts = useMemo(
+    () => statusCountsFor(buildReports.map(reportFilterRow), reportFilters),
+    [buildReports, reportFilters, reportFilterRow],
+  );
+  const reportUsers = useMemo(() => {
+    const by = new Map<string, { uid: string; count: number; label: string }>();
+    for (const r of buildReports) {
+      const uid = String(r.userId ?? '').trim();
+      if (!uid) continue;
+      const row = by.get(uid) ?? { uid, count: 0, label: personLabel(r.name, r.email, uid) };
+      row.count += 1;
+      by.set(uid, row);
+    }
+    return [...by.values()].sort((a, b) => b.count - a.count);
+  }, [buildReports]);
+
   const visibleBuildReports = useMemo(() => {
-    const q = reportSearch.trim().toLowerCase();
-    const filtered = buildReports.filter((r) => {
-      if (reportTierFilter !== 'all' && r.tier !== reportTierFilter) return false;
-      if (reportStatusFilter === 'ok' && r.ok !== true) return false;
-      if (reportStatusFilter === 'failed' && r.ok !== false) return false;
-      if (q) {
-        // The user's own complaint is searchable too (admin 2026-08-28) — "show me every report that
-        // mentions the Save button" is the question this inbox exists to answer, and it is answerable
-        // only over the words the user wrote. Costs nothing: userNote is already in the listed meta.
-        const hay = `${r.name ?? ''} ${r.email ?? ''} ${r.appLabel ?? ''} ${r.userId ?? ''} ${r.userNote ?? ''}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
-    });
+    const filtered = buildReports.filter((r) => rowMatches(reportFilterRow(r), reportFilters));
     const dir = reportSortAsc ? 1 : -1;
     const sorted = [...filtered].sort((a, b) => {
       switch (reportSortKey) {
@@ -309,13 +354,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       }
     });
     return sorted;
-  }, [buildReports, reportSearch, reportTierFilter, reportStatusFilter, reportSortKey, reportSortAsc]);
+  }, [buildReports, reportFilters, reportSortKey, reportSortAsc, reportFilterRow]);
 
-  const fmtCharge = (inr: number | null): { text: string; cls: string } => {
-    if (inr == null) return { text: '—', cls: 'text-zinc-500' };
-    if (inr <= 0) return { text: '₹0', cls: 'text-[#8b949e]' };
-    return { text: `₹${inr.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, cls: 'text-emerald-300 font-bold' };
-  };
+  // `fmtCharge` and `tierBadge` lived here to fill two columns of the nine-column table that this
+  // change removed. Their replacements are `formatCharge` and the "User type" fact in
+  // reportRowFacts.ts, which BOTH lists now read — and which, unlike these, distinguish "we charged
+  // nothing" from "no charge was recorded". Deleted rather than left behind: a dead helper is the
+  // thing a later edit resurrects by accident, reintroducing the ₹0-for-unknown it used to print.
 
   // M8-S8.1 — data-driven failure signal: which failure class recurs most across all reports.
   const failureSummary = useMemo(() => summarizeFailurePatterns(buildReports), [buildReports]);
@@ -420,15 +465,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   // M6-S6.1 — the speed signal: average / median / slowest build time across all reports.
   const buildTimeSummary = useMemo(() => summarizeBuildTimes(buildReports), [buildReports]);
   const fmtDuration = (ms: number): string => (ms >= 60_000 ? `${(ms / 60_000).toFixed(1)}m` : `${Math.round(ms / 1000)}s`);
-
-  const tierBadge = (tier: ReportTier): { label: string; cls: string } => {
-    switch (tier) {
-      case 'paid': return { label: 'Paid', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' };
-      case 'free': return { label: 'Free', cls: 'bg-sky-500/15 text-sky-300 border-sky-500/30' };
-      case 'admin': return { label: 'Admin/Tester', cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30' };
-      default: return { label: 'Unknown', cls: 'bg-zinc-600/20 text-zinc-400 border-zinc-600/30' };
-    }
-  };
 
   const headers = { 'x-admin-token': adminToken, 'Content-Type': 'application/json' };
 
@@ -799,11 +835,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   // live state.
   const fetchAllBuilds = useCallback(async (override?: {
     q?: string; status?: typeof allBuildsStatus; date?: typeof allBuildsDate; uid?: string;
+    tier?: ListFilterState['tier'];
   }) => {
     const q = override?.q ?? allBuildsSearch;
     const status = override?.status ?? allBuildsStatus;
     const date = override?.date ?? allBuildsDate;
     const uid = override?.uid ?? allBuildsUid;
+    // Server-side, like every other filter on this list: the tier lives on the ACCOUNT, and narrowing
+    // in the browser would only narrow the 500 rows already fetched — "my paying users" would quietly
+    // mean "my paying users among the newest 500 builds".
+    const tier = override?.tier ?? allBuildsTier;
     setAllBuildsLoading(true);
     try {
       const params = new URLSearchParams();
@@ -811,6 +852,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       if (status !== 'all') params.set('status', status);
       if (date !== 'all') params.set('date', date);
       if (uid) params.set('uid', uid);
+      if (tier && tier !== 'all') params.set('tier', tier);
       const qs = params.toString() ? `?${params}` : '';
       const r = await fetch(`/api/admin/all-builds${qs}`, { headers });
       const d = await r.json();
@@ -821,7 +863,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     } catch (e) { console.error(e); setAllBuilds([]); setAllBuildsCounts(null); setAllBuildsUsers([]); }
     finally { setAllBuildsLoading(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminToken, allBuildsSearch, allBuildsStatus, allBuildsDate, allBuildsUid]);
+  }, [adminToken, allBuildsSearch, allBuildsStatus, allBuildsDate, allBuildsUid, allBuildsTier]);
 
   // Always the LATEST closure, so the effect above can leave `fetchAllBuilds` out of its deps (which
   // would re-run it on every keystroke) without ever calling a stale one that forgets the search box.
@@ -874,16 +916,47 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     } catch (e) { console.error(e); toast('Could not load that report.'); return ''; }
   };
 
+  /**
+   * MARK AN ALL-BUILDS ROW AS TAKEN (admin 2026-09-14: "jo build report admin download kar le, uske
+   * aage koi nisan bana do, jisse build report ki autopsy 2 bar na ho").
+   *
+   * Folds the SERVER's merged answer back into the list, never an optimistic local guess — a badge
+   * drawn from a write that silently failed would send the next session to the same report, which is
+   * the exact bug this exists to prevent (one report reached two sessions; their PRs conflicted for
+   * two hours). A failed write says so out loud instead of drawing the badge.
+   */
+  const markBuildTaken = async (workspaceId: string, mark: { downloaded?: boolean; fixed?: boolean }) => {
+    try {
+      const r = await fetch(`/api/admin/all-builds/${encodeURIComponent(workspaceId)}/mark`, {
+        method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(mark),
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok || !d?.triage) { toast(d?.error || 'The mark could not be saved — the list still shows this as untaken.'); return; }
+      setAllBuilds((rows) => rows.map((b) => (b.workspaceId === workspaceId ? { ...b, triage: d.triage } : b)));
+    } catch { toast('The mark could not be saved — the list still shows this as untaken.'); }
+  };
+
+  /**
+   * ⚠️ COPY MARKS IT TOO, not only Download. The admin's words said "download", but the row's other
+   * button copies the identical JSON, and a report pasted into a chat has left their hands exactly as
+   * much as one saved to disk — on a phone it is the commoner path. A mark that the everyday action
+   * bypasses is a mark that does not work.
+   *
+   * Marked only AFTER the report was really fetched: marking a row whose download 404'd would hide a
+   * report nobody has actually got.
+   */
   const downloadWorkspaceReport = async (workspaceId: string, buildId?: string) => {
     const json = await fetchWorkspaceReportJson(workspaceId, buildId);
     if (!json) return;
     saveJsonFile(json, buildId ? `build-${workspaceId}-${buildId}.json` : `build-session-${workspaceId}.json`);
+    void markBuildTaken(workspaceId, { downloaded: true });
   };
 
   const copyWorkspaceReport = async (workspaceId: string, buildId?: string) => {
     const json = await fetchWorkspaceReportJson(workspaceId, buildId);
     if (!json) return;
     await copyJson(json, buildId ? 'Build' : 'Full session');
+    void markBuildTaken(workspaceId, { downloaded: true });
   };
 
   // PARTS (admin 2026-08-09): a submitted report now carries the WHOLE session, so Download/Copy act
@@ -1135,7 +1208,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   useEffect(() => {
     if (activeTab !== 'reports') return;
     void fetchAllBuildsRef.current();
-  }, [activeTab, allBuildsStatus, allBuildsDate, allBuildsUid]);
+  }, [activeTab, allBuildsStatus, allBuildsDate, allBuildsUid, allBuildsTier]);
   useEffect(() => { if (activeTab === 'userreports') fetchUserReports(); }, [activeTab, fetchUserReports]);
   useEffect(() => { if (activeTab === 'apkreports') fetchApkReports(); }, [activeTab, fetchApkReports]);
   const fetchLatencyAnomaly = useCallback(async () => {
@@ -3227,107 +3300,53 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   <h4 className="text-sm font-black text-white tracking-tight">All builds — every user, no submit needed</h4>
                   <span className="text-[10px] text-[#8b949e] font-bold">full 0→100% report per build, straight from the engine's own record</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    value={allBuildsSearch}
-                    onChange={(e) => setAllBuildsSearch(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') void fetchAllBuilds(); }}
-                    placeholder="Search: name, email, workspace, prompt words…"
-                    className="flex-1 bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2 text-[12px] text-white focus:outline-none focus:border-indigo-500"
-                  />
-                  <button
-                    onClick={() => void fetchAllBuilds()}
-                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${allBuildsLoading ? 'animate-spin' : ''}`} /> Load
-                  </button>
-                </div>
-                {/* FOUR filters, and no more. Status answers "what needs work", date answers "is it
-                    still happening", user answers "is it one account", and search covers the rest.
-                    Tier/model/duration filters were considered and left out: an admin who needs those
-                    is already opening the full report, and a ten-control bar costs more attention than
-                    it saves on a screen opened to move fast. */}
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {([
-                    ['all', 'All', allBuildsCounts?.all],
-                    ['failed', 'Failed', allBuildsCounts?.failed],
-                    ['succeeded', 'Worked', allBuildsCounts?.succeeded],
-                    // Shown only when there ARE any: the chips used to read "All 100 · Failed 25 ·
-                    // Worked 70" and those five builds could be reached by no filter at all.
-                    ...(allBuildsCounts?.unknown ? [['unknown', 'No outcome', allBuildsCounts.unknown] as const] : []),
-                  ] as const).map(([value, label, count]) => (
+                {/* THE SAME COMPONENT THE USER-SUBMITTED INBOX RENDERS (admin 2026-09-14). It used
+                    to be ~100 lines of bespoke JSX here and a different bar over there; now one
+                    component draws both and one pure module (reportListFilter.ts) decides what each
+                    control MEANS. That split is the point: a shared component keeps them LOOKING the
+                    same, a shared module keeps them AGREEING — and only the second can be tested.
+
+                    ⚠️ This list's filters go to the SERVER (see fetchAllBuilds): a date bound applied
+                    in the browser would make "last 30 days" secretly mean "the newest 500 rows, some
+                    of which are recent". The inbox filters in the browser because it already holds
+                    every row. Same meanings, applied where each list can afford them. */}
+                <ReportFilterBar
+                  value={{ query: allBuildsSearch, status: allBuildsStatus, date: allBuildsDate, uid: allBuildsUid, tier: allBuildsTier }}
+                  onChange={(next) => {
+                    setAllBuildsSearch(next.query);
+                    setAllBuildsStatus(next.status);
+                    setAllBuildsDate(next.date);
+                    setAllBuildsUid(next.uid);
+                    setAllBuildsTier(next.tier);
+                    // ⚠️ EXPLICIT OVERRIDES, and that is not a convenience. React state is set
+                    // asynchronously, so fetching straight after the setters above would send the
+                    // PREVIOUS values — the list would lag one click behind every control.
+                    // Typing is deliberately NOT auto-fetched: that would be one request per
+                    // keystroke. Enter (onSubmitSearch) and Load are what submit the search box.
+                    if (next.query === allBuildsSearch) {
+                      void fetchAllBuilds({ q: next.query, status: next.status, date: next.date, uid: next.uid, tier: next.tier });
+                    }
+                  }}
+                  onSubmitSearch={() => void fetchAllBuilds()}
+                  counts={allBuildsCounts}
+                  users={allBuildsUsers}
+                  trailing={(
                     <button
-                      key={value}
-                      onClick={() => { setAllBuildsStatus(value); }}
-                      className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg border ${
-                        allBuildsStatus === value
-                          ? value === 'failed' ? 'border-rose-500/60 bg-rose-500/15 text-rose-200'
-                            : value === 'succeeded' ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-200'
-                            // Amber, not indigo — indigo is "All", and two chips that look identical
-                            // when selected is how an admin loses track of what they are looking at.
-                            : value === 'unknown' ? 'border-amber-500/60 bg-amber-500/15 text-amber-200'
-                            : 'border-indigo-500/60 bg-indigo-500/15 text-indigo-200'
-                          : 'border-white/10 text-[#8b949e] hover:text-white hover:border-white/20'
-                      }`}
+                      onClick={() => void fetchAllBuilds()}
+                      className="shrink-0 flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white"
                     >
-                      {label}{typeof count === 'number' ? ` ${count}` : ''}
-                    </button>
-                  ))}
-
-                  <span className="w-px h-5 bg-white/10 mx-1" aria-hidden="true" />
-
-                  <select
-                    value={allBuildsDate}
-                    onChange={(e) => setAllBuildsDate(e.target.value as typeof allBuildsDate)}
-                    className="bg-[#0d1117] border border-white/10 rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-indigo-500"
-                    aria-label="Filter by date"
-                  >
-                    <option value="all">Any time</option>
-                    <option value="today">Last 24 hours</option>
-                    <option value="7d">Last 7 days</option>
-                    <option value="30d">Last 30 days</option>
-                  </select>
-
-                  <select
-                    value={allBuildsUid}
-                    onChange={(e) => setAllBuildsUid(e.target.value)}
-                    className="bg-[#0d1117] border border-white/10 rounded-lg px-2 py-1.5 text-[11px] text-white max-w-[16rem] focus:outline-none focus:border-indigo-500"
-                    aria-label="Filter by user"
-                  >
-                    <option value="">Every user</option>
-                    {/* ⚠️ DELIBERATELY NOT PAGED, and this is the useful half of the rule. A native
-                        <select> already renders its options lazily and scrolls them itself, and paging
-                        it would make the filter WORSE than the problem: a user outside the first twelve
-                        would become unreachable, so the control would silently stop doing its job.
-                        "Show 12 then a button" is for lists people READ, never for a picker. */}
-                    {allBuildsUsers.map((u) => (
-                      <option key={u.uid} value={u.uid}>{u.label} ({u.count})</option>
-                    ))}
-                  </select>
-
-                  {(allBuildsStatus !== 'all' || allBuildsDate !== 'all' || allBuildsUid || allBuildsSearch) && (
-                    <button
-                      onClick={() => {
-                        setAllBuildsStatus('all'); setAllBuildsDate('all'); setAllBuildsUid(''); setAllBuildsSearch('');
-                        // Explicit, because Clear can change ONLY the search box — which the effect
-                        // ignores by design — and because the overrides beat React's async state.
-                        void fetchAllBuilds({ q: '', status: 'all', date: 'all', uid: '' });
-                      }}
-                      className="text-[10px] font-bold px-2 py-1.5 rounded-lg text-[#8b949e] hover:text-white underline"
-                    >
-                      Clear
+                      <RefreshCw className={`w-3.5 h-3.5 ${allBuildsLoading ? 'animate-spin' : ''}`} /> Load
                     </button>
                   )}
-
-                  <span className="text-[10px] text-[#8b949e] ml-auto">
-                    Showing {allBuilds.length}
-                    {allBuildsFetched && allBuildsFetched.fetched >= allBuildsFetched.limit
-                      /* Honest about the fetch ceiling: at the limit there may be OLDER builds this
-                         list has not looked at, so "0 failed" must not read as "none exist". */
-                      ? ` of the ${allBuildsFetched.fetched} most recent — narrow the date to see further back`
-                      : allBuildsFetched ? ` of ${allBuildsFetched.fetched} loaded` : ''}
-                  </span>
-                </div>
+                />
+                <p className="text-[10px] text-[#8b949e]">
+                  Showing {allBuilds.length}
+                  {allBuildsFetched && allBuildsFetched.fetched >= allBuildsFetched.limit
+                    /* Honest about the fetch ceiling: at the limit there may be OLDER builds this
+                       list has not looked at, so "0 failed" must not read as "none exist". */
+                    ? ` of the ${allBuildsFetched.fetched} most recent — narrow the date to see further back`
+                    : allBuildsFetched ? ` of ${allBuildsFetched.fetched} loaded` : ''}
+                </p>
 
                 {allBuilds.length === 0 && !allBuildsLoading && (
                   <p className="text-[11px] text-[#8b949e]">Press Load to list the most recently active builds across all users.</p>
@@ -3359,6 +3378,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                           </span>
                           <span className="block text-[9px] text-[#6e7681] font-mono truncate">{b.workspaceId}</span>
                         </span>
+                        {/* ALREADY TAKEN? (admin 2026-09-14). The badge says only what we KNOW — that
+                            the report left the admin's hands — never "someone is fixing it", which we
+                            cannot know. Clicking it un-marks: a mis-tap that could not be undone would
+                            HIDE a report that still needs work, the very failure this prevents. */}
+                        {(() => {
+                          const st = reportStatus(b.triage);
+                          if (st === 'new') return null; // an untouched row needs no badge — the list is already dense
+                          return (
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              title={`${reportStatusHint(b.triage, (ms) => new Date(ms).toLocaleString())} — press to un-mark`}
+                              onClick={(e) => { e.stopPropagation(); void markBuildTaken(b.workspaceId, { downloaded: false }); }}
+                              onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); void markBuildTaken(b.workspaceId, { downloaded: false }); } }}
+                              className={`shrink-0 text-[9px] font-black uppercase tracking-wider px-1.5 py-1 rounded-full border ${st === 'fixed' ? 'border-emerald-500/40 text-emerald-300' : 'border-sky-500/40 text-sky-300'}`}
+                            >{st === 'fixed' ? reportStatusLabel(st) : '📤 Taken'}</span>
+                          );
+                        })()}
+                        {/* Sender · email · time · user type · charge · status — off the row, behind
+                            one button, from the SAME pure function the other list uses. */}
+                        <ReportInfoButton facts={allBuildRowFacts(b, Date.now())} />
                         <span
                           role="button"
                           tabIndex={0}
@@ -3543,59 +3583,47 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 </div>
               )}
 
-              {/* Filters + sorting (admin 2026-08-01): who sent which report, when, free/paid */}
+              {/* THE SHARED FILTER BAR (admin 2026-09-14: "filter bhi all build report wala chahiye
+                  dono me!!"). Identical to the one on All-builds — status chips with live counts, a
+                  date range, a per-user picker, a search box and Clear — because both bars now render
+                  from ONE component and agree through ONE pure module (reportListFilter.ts).
+
+                  This inbox previously had no date range at all, so the list where users actually
+                  complain could not be asked "is this still happening?". The tier select and the sort
+                  toggle ride along as `trailing`: they are EXTRA here, not duplicates, and removing
+                  them in the name of parity would have made this screen poorer. */}
               {!buildReportsLoading && buildReports.length > 0 && (
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="relative flex-1 min-w-[200px]">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#8b949e]" />
-                    <input
-                      value={reportSearch}
-                      onChange={(e) => setReportSearch(e.target.value)}
-                      placeholder="Search name, email, or app…"
-                      className="w-full bg-[#161b22] border border-white/10 rounded-xl pl-9 pr-3 py-2 text-[12px] text-white placeholder:text-[#8b949e] focus:border-indigo-500/50 outline-none"
-                    />
-                  </div>
-                  <select
-                    value={reportTierFilter}
-                    onChange={(e) => setReportTierFilter(e.target.value as ReportTierFilter)}
-                    className="bg-[#161b22] border border-white/10 rounded-xl px-3 py-2 text-[12px] text-white outline-none focus:border-indigo-500/50"
-                    title="Filter by user type"
-                  >
-                    <option value="all">All users</option>
-                    <option value="paid">Paid</option>
-                    <option value="free">Free</option>
-                    <option value="admin">Admin/Tester</option>
-                  </select>
-                  <select
-                    value={reportStatusFilter}
-                    onChange={(e) => setReportStatusFilter(e.target.value as ReportStatusFilter)}
-                    className="bg-[#161b22] border border-white/10 rounded-xl px-3 py-2 text-[12px] text-white outline-none focus:border-indigo-500/50"
-                    title="Filter by build outcome"
-                  >
-                    <option value="all">All status</option>
-                    <option value="ok">Success</option>
-                    <option value="failed">Failed</option>
-                  </select>
-                  <select
-                    value={reportSortKey}
-                    onChange={(e) => setReportSortKey(e.target.value as ReportSortKey)}
-                    className="bg-[#161b22] border border-white/10 rounded-xl px-3 py-2 text-[12px] text-white outline-none focus:border-indigo-500/50"
-                    title="Sort by"
-                  >
-                    <option value="time">Sort: Time</option>
-                    <option value="name">Sort: Name</option>
-                    <option value="app">Sort: App</option>
-                    <option value="tier">Sort: User type</option>
-                    <option value="charged">Sort: ₹ Charged</option>
-                  </select>
-                  <button
-                    onClick={() => setReportSortAsc((v) => !v)}
-                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-white/10 text-[#8b949e] hover:text-white hover:bg-white/5"
-                    title={reportSortAsc ? 'Ascending' : 'Descending'}
-                  >
-                    <ArrowUpDown className="w-3.5 h-3.5" /> {reportSortAsc ? 'Asc' : 'Desc'}
-                  </button>
-                </div>
+                <ReportFilterBar
+                  value={reportFilters}
+                  onChange={setReportFilters}
+                  counts={reportCounts}
+                  users={reportUsers}
+                  searchPlaceholder="Search: app, sender, email, or the user's own words…"
+                  trailing={(
+                    <>
+                      <select
+                        value={reportSortKey}
+                        onChange={(e) => setReportSortKey(e.target.value as ReportSortKey)}
+                        className="shrink-0 bg-[#0d1117] border border-white/10 rounded-xl px-2.5 py-2 text-[11px] text-white outline-none focus:border-indigo-500"
+                        title="Sort by"
+                        aria-label="Sort by"
+                      >
+                        <option value="time">Sort: Time</option>
+                        <option value="name">Sort: Name</option>
+                        <option value="app">Sort: App</option>
+                        <option value="tier">Sort: User type</option>
+                        <option value="charged">Sort: ₹ Charged</option>
+                      </select>
+                      <button
+                        onClick={() => setReportSortAsc((v) => !v)}
+                        className="shrink-0 flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-2.5 py-2 rounded-xl border border-white/10 text-[#8b949e] hover:text-white hover:bg-white/5"
+                        title={reportSortAsc ? 'Ascending' : 'Descending'}
+                      >
+                        <ArrowUpDown className="w-3.5 h-3.5" /> {reportSortAsc ? 'Asc' : 'Desc'}
+                      </button>
+                    </>
+                  )}
+                />
               )}
 
               {buildReportsLoading ? (
@@ -3610,103 +3638,67 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   {visibleBuildReports.length === 0 ? (
                     <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-8 text-center text-[#8b949e] text-sm">No reports match these filters.</div>
                   ) : (
-                    <div className="bg-[#161b22] border border-white/10 rounded-[1.25rem] overflow-hidden">
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse">
-                          <thead>
-                            <tr className="text-[10px] uppercase tracking-wider text-[#8b949e] border-b border-white/10">
-                              <th className="px-3 py-2.5 font-black w-10">SN</th>
-                              <th className="px-3 py-2.5 font-black">Application</th>
-                              <th className="px-3 py-2.5 font-black">Sender</th>
-                              <th className="px-3 py-2.5 font-black">Email</th>
-                              <th className="px-3 py-2.5 font-black whitespace-nowrap">Time</th>
-                              <th className="px-3 py-2.5 font-black">User</th>
-                              <th className="px-3 py-2.5 font-black whitespace-nowrap">Charged</th>
-                              <th className="px-3 py-2.5 font-black">Status</th>
-                              <th className="px-3 py-2.5 font-black w-8"></th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {visibleBuildReports.map((r, idx) => {
-                              const badge = tierBadge(r.tier);
-                              return (
-                                <tr
-                                  key={r.id}
-                                  onClick={() => openBuildReport(r.id)}
-                                  className="border-b border-white/[0.04] last:border-0 hover:bg-white/[0.03] cursor-pointer transition-colors"
-                                >
-                                  <td className="px-3 py-2.5 text-[12px] text-[#8b949e] tabular-nums">{idx + 1}</td>
-                                  <td className="px-3 py-2.5 max-w-[240px]">
-                                    <span className="flex items-center gap-2">
-                                      <span className={`w-2 h-2 rounded-full shrink-0 ${r.ok === true ? 'bg-emerald-500' : r.ok === false ? 'bg-red-500' : r.inFlight ? 'bg-amber-500' : 'bg-zinc-600'}`} />
-                                      <span className="block text-[12px] font-bold text-white truncate">{r.appLabel}</span>
-                                      {/* A report carrying the whole session says so in the list, so the
-                                          admin knows there are parts to choose from before opening it. */}
-                                      {(r.sessionParts ?? 1) > 1 && (
-                                        <span className="shrink-0 text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-indigo-500/40 text-indigo-300">{r.sessionParts} parts</span>
-                                      )}
-                                      {/* TRIAGE (admin 2026-08-12) — "is report ka kaam ho chuka hai?".
-                                          Downloaded and Fixed are DIFFERENT facts and are shown as such:
-                                          a report downloaded this morning may still be shipping its bugs
-                                          tonight. See reportTriage.ts. */}
-                                      {(() => {
-                                        const st = reportStatus(r);
-                                        if (st === 'new') return null; // an untouched report needs no badge — the list is already full
-                                        return (
-                                          <span
-                                            title={reportStatusHint(r, (ms) => new Date(ms).toLocaleString())}
-                                            className={`shrink-0 text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${st === 'fixed' ? 'border-emerald-500/40 text-emerald-300' : 'border-sky-500/40 text-sky-300'}`}
-                                          >{reportStatusLabel(st)}</span>
-                                        );
-                                      })()}
-                                    </span>
-                                    {/* THE USER'S OWN WORDS COME FIRST (admin 2026-08-28). `rootCause`
-                                        below is the ENGINE's verdict on itself; this is the only line
-                                        that can say the button does nothing or it built the wrong app.
-                                        When triaging fifty rows, that is the one worth reading first,
-                                        which is also why it lives in meta and needs no extra fetch. */}
-                                    {r.userNote && (
-                                      <span title={r.userNote} className="block text-[10px] text-sky-300/90 mt-0.5 truncate max-w-[240px]">“{r.userNote}”</span>
-                                    )}
-                                    {r.rootCause && <span className="block text-[10px] text-amber-400/80 mt-0.5 truncate max-w-[240px]">{r.rootCause}</span>}
-                                  </td>
-                                  <td className="px-3 py-2.5 text-[12px] text-white/90 truncate max-w-[140px]">{r.name || <span className="text-[#8b949e]">—</span>}</td>
-                                  <td className="px-3 py-2.5 text-[12px] text-[#8b949e] truncate max-w-[180px]">{r.email || r.userId || 'unknown'}</td>
-                                  <td className="px-3 py-2.5 text-[11px] text-[#8b949e] whitespace-nowrap">{new Date(r.reportedAt).toLocaleString()}</td>
-                                  <td className="px-3 py-2.5">
-                                    <span className={`inline-block text-[10px] font-black px-2 py-0.5 rounded-full border ${badge.cls}`} title={r.userTier || undefined}>{badge.label}</span>
-                                  </td>
-                                  <td className="px-3 py-2.5 whitespace-nowrap tabular-nums">
-                                    {(() => { const c = fmtCharge(r.billedInr); return <span className={`text-[12px] ${c.cls}`} title={r.billedUsd != null ? `$${r.billedUsd}` : undefined}>{c.text}</span>; })()}
-                                  </td>
-                                  <td className="px-3 py-2.5">
-                                    {/* "—" for an unfinished build read as "it produced nothing", which is the
-                                        alarming reading and the wrong one. A build still running when Report was
-                                        pressed says so. */}
-                                    <span className={`text-[11px] font-black ${r.ok === true ? 'text-emerald-400' : r.ok === false ? 'text-red-400' : r.inFlight ? 'text-amber-400' : 'text-zinc-500'}`}>
-                                      {r.ok === true ? 'Success' : r.ok === false ? 'Failed' : r.inFlight ? 'Still running' : '—'}
-                                    </span>
-                                  </td>
-                                  <td className="px-3 py-2.5">
-                                    <span className="flex items-center gap-2">
-                                      <Eye className="w-4 h-4 text-[#8b949e]" />
-                                      {/* Delete this report (admin 2026-08-16) — stopPropagation so it never
-                                          opens the report it is removing. Confirmed before it deletes. */}
-                                      <button
-                                        onClick={(e) => { e.stopPropagation(); void deleteReport(r.id); }}
-                                        title="Delete this report (frees its storage)"
-                                        className="text-[#8b949e] hover:text-red-400 transition-colors"
-                                      >
-                                        <Trash2 className="w-4 h-4" />
-                                      </button>
-                                    </span>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
+                    /* THE NINE-COLUMN TABLE IS GONE (admin 2026-09-14).
+                       The capture that prompted this recorded the measurable half: on the admin's own
+                       393 px phone its header cell reached **513 px past the right edge**, so Time,
+                       User, Charged and Status were unreachable without a horizontal scroll nobody
+                       discovers. `overflow-x-auto` did not fix that; it CAUSED it, by letting the row
+                       grow instead of fit.
+
+                       The rows now match All-builds exactly — a dot, the app, the person, the time,
+                       and the same ⓘ button holding sender · email · time · user type · charge ·
+                       status. "bahar ka UI ek dam clean aur clear ho." */
+                    <div className="space-y-1.5">
+                      {visibleBuildReports.map((r) => {
+                        const st = reportStatus(r);
+                        return (
+                          <div key={r.id} className="border border-white/5 rounded-xl overflow-hidden bg-[#161b22]">
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => openBuildReport(r.id)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') openBuildReport(r.id); }}
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-white/5 cursor-pointer"
+                            >
+                              <span className={`shrink-0 w-2 h-2 rounded-full ${r.ok === true ? 'bg-emerald-400' : r.ok === false ? 'bg-rose-400' : r.inFlight ? 'bg-amber-400' : 'bg-zinc-500'}`} />
+                              <span className="flex-1 min-w-0">
+                                <span className="block text-[12px] font-bold text-white truncate">{r.appLabel}</span>
+                                <span className="block text-[10px] truncate">
+                                  <span className="text-sky-300/90">{personLabel(r.name, r.email, r.userId)}</span>
+                                  <span className="text-[#8b949e]">{' · '}{new Date(r.reportedAt).toLocaleString()}</span>
+                                </span>
+                                {/* THE USER'S OWN WORDS COME FIRST (admin 2026-08-28). `rootCause`
+                                    below is the ENGINE's verdict on itself; this is the only line that
+                                    can say the button does nothing, or that it built the wrong app. */}
+                                {r.userNote && (
+                                  <span title={r.userNote} className="block text-[10px] text-sky-300/90 truncate">“{r.userNote}”</span>
+                                )}
+                                {r.rootCause && <span className="block text-[10px] text-amber-400/80 truncate">{r.rootCause}</span>}
+                              </span>
+                              {/* A report carrying the whole session says so, so the admin knows there
+                                  are parts to choose from before opening it. */}
+                              {(r.sessionParts ?? 1) > 1 && (
+                                <span className="shrink-0 text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-indigo-500/40 text-indigo-300">{r.sessionParts}p</span>
+                              )}
+                              {st !== 'new' && (
+                                <span
+                                  title={reportStatusHint(r, (ms) => new Date(ms).toLocaleString())}
+                                  className={`shrink-0 text-[9px] font-black uppercase tracking-wider px-1.5 py-1 rounded-full border ${st === 'fixed' ? 'border-emerald-500/40 text-emerald-300' : 'border-sky-500/40 text-sky-300'}`}
+                                >{st === 'fixed' ? '✅ Fixed' : '📤 Taken'}</span>
+                              )}
+                              <ReportInfoButton facts={submittedRowFacts(r, Date.now())} />
+                              {/* stopPropagation so Delete never opens the report it is removing. */}
+                              <button
+                                onClick={(e) => { e.stopPropagation(); void deleteReport(r.id); }}
+                                title="Delete this report (frees its storage)"
+                                className="shrink-0 p-1.5 rounded-lg border border-white/10 text-[#8b949e] hover:text-red-400 hover:border-red-400/30 transition-colors"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </>

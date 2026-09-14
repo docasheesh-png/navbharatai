@@ -2517,9 +2517,13 @@ is now **`src/server/AgentV3/tierLadder.ts`**, and the build chain is built from
   `PROVIDER:model,…`, applied whole or refused with the reason in the `TIER_LADDER` report line);
   `OPENAI_API_KEY` (⚠️ **NOT set** — the admin said they will buy it; until then the gpt-5.4 rung yields
   nothing and changes no build) and `OPENAI_BASE_URL`, `AGENTV3_OPENAI_TIMEOUT_MS`; `RATE_GLM53_FLASH_IN`
-  / `_OUT` / `_CACHE` and `RATE_GPT_IN` / `_OUT` / `_CACHE` — ⚠️ **both prices are UNKNOWN here and default
-  to the over-state-only bound** (glm-5 line; Sonnet line), which inflates a paid Normal build's bill on
-  5.3-flash in the bounded, margin-safe direction until the admin sets the real numbers. `AGENTV3_CHEAP_FLOOR=off`
+  / `_OUT` / `_CACHE` (**code default now the admin's real price, 2026-09-14: $0.15 / $0.50, cache
+  $0.0375** — an earlier placeholder priced it at the glm-5 line, ~10× too high, for a few hours, on
+  no user's bill); non-flash **GLM-5.3 is $1.40 / $4.40 = the existing glm-5 line**, no new row;
+  `RATE_GPT_NANO_IN` / `_OUT` (**$0.20 / $1.25**, GPT-5.4 Nano — priced so it can never be billed at the
+  full-GPT bound, but on NO ladder: the admin's own brief says Nano is for classification/extraction,
+  never an app-generation engine); `RATE_GPT_IN` / `_OUT` / `_CACHE` for the FULL gpt-5.4 — ⚠️ **still
+  unknown, still the Sonnet-line bound** until the admin has its price. `AGENTV3_CHEAP_FLOOR=off`
   is still the GLM/KIMI kill switch. **Now inert for the build chain:** `AGENTV3_BUILD_CLAUDE_FIRST`,
   `AGENTV3_BUILD_ALLOW_GEMINI`, `AGENTV3_VERTEX_PEER`, `AGENTV3_FLOOR_BALANCE`, `AGENTV3_FREE_KIMI_LEAD`,
   `AGENTV3_WEAK_FLAGSHIP_HEAL`, `GLM_MODEL` / `KIMI_MODEL` / `AGENTV3_FREE_*_MODEL` (the ladders name their

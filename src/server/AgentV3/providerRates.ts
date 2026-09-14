@@ -48,15 +48,13 @@ export function realRateCard(): Record<string, TokenRate> {
     // providers WITHOUT a cache line (Gemini/Grok/Claude rows below) omit it → full input rate
     // (no discount) by construction, so nothing can be under-billed.
     'glm-flash': { inputPerMTok: envRate('RATE_GLM_FLASH_IN', 0), outputPerMTok: envRate('RATE_GLM_FLASH_OUT', 0) },
-    // glm-5.3-flash (admin 2026-09-14: on the WEAK and NORMAL ladders). Its published price is NOT
-    // known here. ⚠️ It must NOT inherit the 'glm-flash' $0 line above — that line is the 4.7-flash
-    // price, and a "flash" in the NAME is not evidence of a $0 price: 5.3-flash benchmarks beside the
-    // flagship (Terminal Bench 84.3, DeepSWE 63.4 on z.ai's own page). Per this function's contract an
-    // unknown model may only OVER-state cost, so the default mirrors the glm-5 flagship line — the
-    // highest GLM rate we can verify. ⚠️ SET `RATE_GLM53_FLASH_IN`/`_OUT`/`_CACHE` to the real
-    // published rate: until then a paid Normal build on it is billed at the flagship rate (a user
-    // over-charge in the bounded, margin-safe direction, visible in the admin report as this rung).
-    'glm-5.3-flash': { inputPerMTok: envRate('RATE_GLM53_FLASH_IN', 1.4), outputPerMTok: envRate('RATE_GLM53_FLASH_OUT', 4.4), cacheReadPerMTok: envRate('RATE_GLM53_FLASH_CACHE', 0.35) },
+    // glm-5.3-flash (admin 2026-09-14: on the WEAK and NORMAL ladders). Price from the admin the same
+    // day: $0.15 in / $0.50 out per MTok; cache-hit at the Z.ai ≈25% convention (see the note above).
+    // ⚠️ It must NOT fall into the 'glm-flash' $0 line — a "flash" in the NAME is not a price, and this
+    // one benchmarks beside the flagship. Matched BEFORE the generic flash rule in realRateFor.
+    'glm-5.3-flash': { inputPerMTok: envRate('RATE_GLM53_FLASH_IN', 0.15), outputPerMTok: envRate('RATE_GLM53_FLASH_OUT', 0.5), cacheReadPerMTok: envRate('RATE_GLM53_FLASH_CACHE', 0.0375) },
+    // glm-5.3 (non-flash, Z.ai, admin 2026-09-14): $1.40 / $4.40 — identical to the glm-5 line below,
+    // which the /glm-?5/ family rule already returns for it. No separate line: one price, one row.
     'glm-5': { inputPerMTok: envRate('RATE_GLM5_IN', 1.4), outputPerMTok: envRate('RATE_GLM5_OUT', 4.4), cacheReadPerMTok: envRate('RATE_GLM5_CACHE', 0.35) },
     'glm': { inputPerMTok: envRate('RATE_GLM_IN', 0.6), outputPerMTok: envRate('RATE_GLM_OUT', 2.2), cacheReadPerMTok: envRate('RATE_GLM_CACHE', 0.15) }, // glm-4.x coder
     // ── Kimi (Moonshot) ─────────────────────────────────────────────────────────────────────────
@@ -83,6 +81,10 @@ export function realRateCard(): Record<string, TokenRate> {
     // Every WEAK build is paid by NavBharatAI, so an over-stated rate here inflates our own cost
     // report, never a user's bill — the safe direction, but a wrong number all the same.
     'gpt': { inputPerMTok: envRate('RATE_GPT_IN', sonnetRate().inputPerMTok), outputPerMTok: envRate('RATE_GPT_OUT', sonnetRate().outputPerMTok), cacheReadPerMTok: envRate('RATE_GPT_CACHE', sonnetRate().inputPerMTok) },
+    // gpt-*-nano (admin 2026-09-14): GPT-5.4 Nano $0.20 / $1.25 per MTok. NOT on any ladder today —
+    // the admin's own brief says Nano is for classification/extraction, never an app-generation
+    // engine — but if a helper role ever uses it, it must not be billed at the full-GPT bound above.
+    'gpt-nano': { inputPerMTok: envRate('RATE_GPT_NANO_IN', 0.2), outputPerMTok: envRate('RATE_GPT_NANO_OUT', 1.25) },
   };
 }
 
@@ -124,6 +126,7 @@ export function realRateFor(provider: string, model?: string): TokenRate {
     }
     if (m.includes('gemini')) return m.includes('pro') ? card['gemini-pro'] : card.gemini;
     if (m.includes('grok')) return card.grok;
+    if (m.startsWith('gpt') && m.includes('nano')) return card['gpt-nano'];
     if (m.startsWith('gpt') || /^o\d/.test(m)) return card.gpt; // gpt-5.4 and the o-series reasoning ids
   }
 

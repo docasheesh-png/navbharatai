@@ -55664,3 +55664,22 @@ Three roles moved, two deliberately stayed, all test-locked in `tests/agentRoles
   router ($0, glm-4.7-flash led) for every tier — the draft's Haiku-on-Strong would cost more for a
   one-word answer.
 `planGrokEnabled` joins the "not consulted" list. The full table is in CLAUDE.md's 2026-09-14 section.
+
+### Addendum — the real prices, from the admin (2026-09-14, same PR)
+
+- **glm-5.3-flash = $0.15 / $0.50** (cache at Z.ai's 25% convention, $0.0375). My placeholder had it at
+  the glm-5 line ($1.40 / $4.40) — the over-state-only bound the rate card's contract demands for an
+  unknown model, but ~10× the truth. It stood for a few hours in an unmerged branch; no bill was ever
+  computed from it. Test now pins the exact numbers.
+- **GLM-5.3 (non-flash) exists, $1.40 / $4.40** — exactly the glm-5 line the family rule already returns
+  for it. No new row. It is on no approved ladder; the honest question it raises is recorded below.
+- **GPT-5.4 Nano = $0.20 / $1.25** — a `gpt-nano` line so a Nano id can never be billed at the full-GPT
+  bound. **Not wired anywhere.** Every role a Nano could take here is either deterministic code (₹0) or
+  already on glm-4.7-flash ($0), so today it would add a vendor and a bill to a job that costs nothing.
+- **Full GPT-5.4: price still unknown** → still the Sonnet-line bound. It is the Weak ladder's last rung
+  by the admin's list, keyless today.
+
+**Open question for the admin, recorded rather than decided:** with GLM-5.3 at $1.40 / $4.40 and a
+95th-percentile coding score, it is a candidate for (a) Weak's LAST rung in place of gpt-5.4 — same vendor
+as rungs 1–2, no new key, no new bill surface — and (b) Normal's last rung in place of Sonnet ($3 / $15),
+which would cut Normal's worst-case cost ~3×. Both change an approved ladder, so neither was done.

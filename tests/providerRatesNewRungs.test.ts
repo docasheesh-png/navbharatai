@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { realRateFor, realRateCard } from '../src/server/AgentV3/providerRates';
 
-const KEYS = ['RATE_GLM53_FLASH_IN', 'RATE_GLM53_FLASH_OUT', 'RATE_GLM53_FLASH_CACHE', 'RATE_GPT_IN', 'RATE_GPT_OUT', 'RATE_GPT_CACHE'] as const;
+const KEYS = ['RATE_GLM53_FLASH_IN', 'RATE_GLM53_FLASH_OUT', 'RATE_GLM53_FLASH_CACHE', 'RATE_GPT_IN', 'RATE_GPT_OUT', 'RATE_GPT_CACHE', 'RATE_GPT_NANO_IN', 'RATE_GPT_NANO_OUT'] as const;
 const saved: Record<string, string | undefined> = {};
 beforeEach(() => { for (const k of KEYS) { saved[k] = process.env[k]; delete process.env[k]; } });
 afterEach(() => { for (const k of KEYS) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]!; } });
@@ -20,8 +20,13 @@ describe('glm-5.3-flash is priced as a 5.x model, not as the $0 4.7-flash', () =
     // …while the genuine 4.7-flash still prices at its own $0 line.
     expect(realRateFor('GLM', 'glm-4.7-flash')).toEqual(realRateCard()['glm-flash']);
   });
-  it('defaults to the glm-5 flagship line (the over-state-only direction) until the admin sets the real price', () => {
-    expect(realRateFor('GLM', 'glm-5.3-flash')).toEqual({ ...realRateCard()['glm-5'] });
+  it('defaults to the admin-supplied price: $0.15 in / $0.50 out, cache at the Z.ai 25% convention', () => {
+    expect(realRateFor('GLM', 'glm-5.3-flash')).toEqual({ inputPerMTok: 0.15, outputPerMTok: 0.5, cacheReadPerMTok: 0.0375 });
+  });
+  it('the non-flash glm-5.3 prices on the glm-5 line ($1.40 / $4.40) — the same number the admin gave', () => {
+    expect(realRateFor('GLM', 'glm-5.3')).toEqual(realRateCard()['glm-5']);
+    expect(realRateCard()['glm-5'].inputPerMTok).toBe(1.4);
+    expect(realRateCard()['glm-5'].outputPerMTok).toBe(4.4);
   });
   it('the env override is honoured', () => {
     process.env.RATE_GLM53_FLASH_IN = '0.2';
@@ -47,6 +52,11 @@ describe('gpt-5.4 / OPENAI is priced at the conservative upper bound until the k
     const r = realRateFor('OPENAI', 'gpt-5.4');
     expect(r.inputPerMTok).toBe(1.25);
     expect(r.outputPerMTok).toBe(10);
+  });
+  it('a Nano id prices on its own $0.20 / $1.25 line, never at the full-GPT bound', () => {
+    expect(realRateFor('OPENAI', 'gpt-5.4-nano')).toEqual({ inputPerMTok: 0.2, outputPerMTok: 1.25 });
+    expect(realRateFor('OPENAI', 'gpt-5-nano')).toEqual({ inputPerMTok: 0.2, outputPerMTok: 1.25 });
+    expect(realRateFor('OPENAI', 'gpt-5.4')).not.toEqual(realRateFor('OPENAI', 'gpt-5.4-nano'));
   });
   it('does not swallow unrelated ids: kimi/glm/gemini still price on their own lines', () => {
     expect(realRateFor('KIMI', 'kimi-k2.6')).toEqual(realRateCard().kimi);

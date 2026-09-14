@@ -95,6 +95,97 @@ export function measuredRemainingMs(p: FileProgress): number | null {
 }
 
 /**
+ * 🔴 THE MEASUREMENT ABOVE COULD NOT RUN ON THE PATH THAT NEEDED IT (autopsy d11ad529, 2026-09-14).
+ *
+ * `measuredRemainingMs` needs `plannedFiles`, and in the whole route that number had exactly TWO
+ * producers: the simple lane's `onPlanned`, and the blueprint step. Both are lanes, not the build —
+ * and neither runs on the ordinary path:
+ *
+ *   - **The simple lane only reports a plan when its plan call SUCCEEDS.** In the reported build that
+ *     call hit its 90 s cap and the lane handed off, so nothing was ever reported. Note the shape of
+ *     this: a lane that finishes quickly does not need a long-build ETA at all, so the measurement was
+ *     wired to the one case where it is least useful and absent from the case where the user is
+ *     actually sitting and watching.
+ *   - **The blueprint is gated** on `deep` depth, on NOT being simple-lane-eligible, and on
+ *     `AGENTV3_BLUEPRINT`. An ordinary one-shot app misses it by the first two conditions alone.
+ *
+ * So that build ran 12 minutes with `plannedFiles` stuck at 0, `measuredRemainingMs` returning null on
+ * every tick, and the user reading the prompt-word heuristic this module's own header calls "exactly
+ * backwards". The first line had promised them *"I'll replace it with a real figure as soon as I know
+ * how big it is"* — a promise that path could not keep, by construction. Three consecutive autopsies
+ * (#2929, #2931 and this one) recorded the ETA lying while the fix for it sat in this file, unreachable.
+ *
+ * THE SIGNAL THAT WAS ALREADY THERE. The full builder does not know a file count up front — asking it
+ * to guess one would be the very thing this module refuses. But it does keep the architect's OWN plan:
+ * the todo list, whose done-count `PlanProgress.computePlanProgress` already derives from REAL file
+ * writes, and already paints as ticks on the user's screen. So "5 of 8 steps done" is not a new claim
+ * invented for the ETA — it is the state the user can already see, given a clock.
+ *
+ * Same discipline as the file measurement, deliberately: null in every case where it would be
+ * guessing, and the caller keeps the honest fallback.
+ */
+
+/**
+ * How many plan steps must be finished before extrapolating. Three for the same reason as files: the
+ * first completion starts the clock and gives no interval, so three give two intervals to average.
+ */
+export const MIN_STEPS_FOR_MEASUREMENT = 3;
+
+export interface PlanStepProgress {
+  /** How many items the architect's own plan has. Fewer than 2 disables measurement. */
+  plannedSteps: number;
+  /** How many have been completed — the same counter that advances the ticks the user sees. */
+  stepsDone: number;
+  /** Epoch ms the FIRST step completed. */
+  firstStepAt: number;
+  /** Epoch ms now (passed in — this module never reads the clock). */
+  now: number;
+}
+
+/** Average wall time per completed plan step, or null without two intervals to average. */
+export function observedPerStepMs(p: PlanStepProgress): number | null {
+  const done = Math.floor(Number(p?.stepsDone));
+  const first = Number(p?.firstStepAt);
+  const now = Number(p?.now);
+  if (!Number.isFinite(done) || done < MIN_STEPS_FOR_MEASUREMENT) return null;
+  if (!Number.isFinite(first) || first <= 0) return null;
+  if (!Number.isFinite(now) || now <= first) return null;
+  // `done - 1` intervals since the first step landed — dividing by `done` would credit an interval
+  // that never happened and under-estimate what is left, the same optimistic direction as the bug.
+  return (now - first) / (done - 1);
+}
+
+/**
+ * Remaining build time extrapolated from the architect's own plan, or null when it would be a guess.
+ *
+ * ⚠️ `stepsDone` counts real completions and is NOT clamped to the plan's length by its producer, so
+ * it can run PAST `plannedSteps` when the plan under-counted the work. That is precisely the case
+ * where the plan has stopped describing the build, so it returns null rather than a negative or a
+ * zero — "the plan was too small" is not the same fact as "there is no time left".
+ */
+export function measuredRemainingFromSteps(p: PlanStepProgress): number | null {
+  const planned = Math.floor(Number(p?.plannedSteps));
+  const done = Math.floor(Number(p?.stepsDone));
+  // A one-item plan has nothing to extrapolate across: its only interval is the whole build.
+  if (!Number.isFinite(planned) || planned < 2) return null;
+  if (!Number.isFinite(done) || done >= planned) return null;
+  const perStep = observedPerStepMs(p);
+  if (perStep === null || !(perStep > 0)) return null;
+  return Math.round((planned - done) * perStep + FINISH_ALLOWANCE_MS);
+}
+
+/**
+ * The live line for a plan-measured estimate. Names what it counted, for the same reason the file
+ * line does — and the count matches the ticks already on the user's screen, so it is checkable rather
+ * than merely asserted.
+ */
+export function stepEtaText(elapsedMs: number, remainingMs: number, stepsDone: number, plannedSteps: number): string {
+  const inTxt = formatEta(Math.max(0, elapsedMs)).replace('~', '');
+  const leftTxt = formatEta(Math.max(0, remainingMs)).replace('~', '');
+  return `⏱️ Building… ${inTxt} in · ${stepsDone} of ${plannedSteps} steps done · ~${leftTxt} to go`;
+}
+
+/**
  * The live line for a MEASURED estimate. Says what it is counting so the number is checkable by the
  * person reading it — "12 of 19 files" is a claim the user can watch come true, where "~4 min to go"
  * on its own is only ever a promise.

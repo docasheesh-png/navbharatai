@@ -28,7 +28,7 @@ import { goldenScaffoldForPrompt, goldenScaffoldFiles } from '../AgentV3/goldenS
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
 import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
-import { measuredRemainingMs, measuredEtaText, firstEtaLine, formatEtaRange } from '../AgentV3/progressEta';
+import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange } from '../AgentV3/progressEta';
 import { describeRunnerChain, chainProviders, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction } from '../AgentV3/AuthenticityAnalysis';
@@ -11286,6 +11286,26 @@ async function noteBuildOutcome(
     let etaFirstFileAt = 0;
     /** Stamp the first file's arrival — the start of the only interval we can honestly measure. */
     const noteEtaFileWritten = (): void => { if (etaFirstFileAt === 0) etaFirstFileAt = Date.now(); };
+    // PLAN-STEP measurement (autopsy d11ad529, 2026-09-14) — the SAME measurement, over the signal the
+    // FULL BUILDER actually has. `etaPlannedFiles` above is reported by the simple lane and by the
+    // blueprint, and an ordinary build reaches neither: the lane only reports a plan when its plan call
+    // succeeds (and a lane that succeeds is a build too short to need an ETA), while the blueprint is
+    // gated on deep depth. So a 12-minute build ran its whole length with `plannedFiles` at 0 and the
+    // user read the prompt-word guess. These three fields carry the architect's OWN plan instead — its
+    // length, how many steps are done, and when the first one landed. See progressEta.ts.
+    let etaPlannedSteps = 0;
+    let etaStepsDone = 0;
+    let etaFirstStepAt = 0;
+    /**
+     * Record the architect's plan and its progress. Both counters only ever GROW, for the same reason
+     * `noteEtaPlannedFiles` does: a plan the model extends mid-build supersedes the shorter one, and a
+     * transient shorter snapshot must never walk the measurement backwards.
+     */
+    const noteEtaPlanStep = (planLength: number, stepsDone: number): void => {
+      if (Number.isFinite(planLength) && planLength > etaPlannedSteps) etaPlannedSteps = Math.floor(planLength);
+      if (Number.isFinite(stepsDone) && stepsDone > etaStepsDone) etaStepsDone = Math.floor(stepsDone);
+      if (etaFirstStepAt === 0) etaFirstStepAt = Date.now();
+    };
     /**
      * Tell the surfaces the app now EXISTS and is only being settled.
      *
@@ -11333,6 +11353,19 @@ async function noteBuildOutcome(
             // prompt guess it was still carrying.
             etaTotalMs = elapsedMs + measured;
             events.emit({ type: 'narration', agent: 'architect', text: measuredEtaText(elapsedMs, measured, writtenFiles.size, etaPlannedFiles), ts: now, id: 'eta-live' });
+            return;
+          }
+          // THEN THE PLAN, which is the full builder's only honest measurement (autopsy d11ad529).
+          // Second rather than first on purpose: a file manifest is an exact count of what will be
+          // written, while a plan step is a unit of the architect's own choosing — so where both
+          // exist the file count is the better evidence and keeps today's behaviour exactly.
+          const byStep = measuredRemainingFromSteps({ plannedSteps: etaPlannedSteps, stepsDone: etaStepsDone, firstStepAt: etaFirstStepAt, now });
+          if (byStep !== null) {
+            // Re-anchor the fallback's budget for the same reason the file branch does: if the plan
+            // later saturates, liveEtaTick continues from something measured rather than from the
+            // prompt guess it would otherwise still be carrying.
+            etaTotalMs = elapsedMs + byStep;
+            events.emit({ type: 'narration', agent: 'architect', text: stepEtaText(elapsedMs, byStep, etaStepsDone, etaPlannedSteps), ts: now, id: 'eta-live' });
             return;
           }
           // RE-BASELINING tick (autopsy 2026-08-02): liveEtaTick returns the line AND an extended budget
@@ -12812,6 +12845,10 @@ async function noteBuildOutcome(
           if (cur.length > 0) {
             planSteps += 1;
             state.setTodos(computePlanProgress(cur, planSteps, false));
+            // THE ETA'S ONLY REAL FACT ON THIS PATH. The line above already turns this same counter
+            // into the ticks the user watches; handing it to the ETA as well is what lets the
+            // heartbeat measure instead of guess on a build that never planned a file list.
+            noteEtaPlanStep(cur.length, planSteps);
           }
         } catch { /* plan progress is best-effort — never affects the build */ }
         const flushFilesDurably = () => {
@@ -19065,7 +19102,13 @@ async function noteBuildOutcome(
           // A notice is never worth failing a successful build over — stay silent and ship the app.
         }
       }
-      emit({ type: 'result', ...result, ...projectContinue, buildId, promptHash, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...(diagnostics ? { diagnostics } : {}), ...(costBreakdown ? { costBreakdown } : {}), readiness: buildHealth });
+      // THE ONE FACT THE CLIENT WAS MISSING (admin 2026-09-14). The platform knows whether it opened
+      // this app in a real browser and saw it render — it is the same observation `GREEN_GUARD_SAVE`
+      // and the preview telemetry already use. Without it in the payload, the chat's failure card had
+      // no way to tell a broken app from a working one carrying a wrong verdict, so it offered to
+      // "fix" both — and fixing a working app is how we broke it. See failedButRunning.ts.
+      // Additive and optional: an older BUNDLED Android client ignores the field entirely.
+      emit({ type: 'result', ...result, ...projectContinue, buildId, promptHash, appRendered: buildObs.previewRendered === true, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...(diagnostics ? { diagnostics } : {}), ...(costBreakdown ? { costBreakdown } : {}), readiness: buildHealth });
       // Native push notification (admin 2026-07-26): fire-and-forget — never delays or fails the
       // response the client already has. A resumable module turn is an intermediate step, not a
       // finished build, so it's excluded (the user is mid-flow inside the app already).

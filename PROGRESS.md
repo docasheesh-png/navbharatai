@@ -54418,6 +54418,123 @@ across nine suites; the `live`-channel, audit-severity and window-snapshot rules
 
 ---
 
+## 2026-09-14 — Autopsy `d11ad529`: *"Text to image generator app banao asli ."* — a working app, 12 minutes, and an ETA that could not measure
+
+Free/weak tier (`noClaude: true`, delivered by KIMI `kimi-k2.6`), **12m02s**, `ok: false`, `billedInr: 0`.
+The app itself was fine: `tsc --noEmit` exit 0, `npm run build` exit 0, dev server up, preview published,
+**opened in a real browser and seen rendering**, `PROD_BUILD_OK`, `GREEN_GUARD_SAVE`, accessibility
+100/100, architecture invariants held. The user was told *"1 thing is still broken, so it is NOT ready
+to use yet."*
+
+### The five-bucket ledger
+
+| | count | what |
+|---|---|---|
+| ✅ self-healed | **2** | the one-shot lane was skipped with a correct reason (the previous lane had just timed out on the same engine, so a bigger call to it was a worse bet, not an untried one) · the preview copy was saved, verified against the persisted files and confirmed current |
+| 🔀 worked around | **8** | every one a provider fallback — and **158 of the 159 chain rungs were never actually called** (see below) |
+| ⏭️ skipped | **4** | the page-render check (needs a live app) · the user journey (*"no page components were found"* — on an app whose entire purpose is a prompt box and a button) · the Playwright suite we had just written into the project (`@playwright/test` not installed) · peak memory (*"no cgroup accounting exposed"* — the instrument shipped on 2026-09-11 produced nothing on the real machine) |
+| ❌ still broken | **5 unresolved**, gate counted **1** | the blocker — **already fixed, see below**. Rest: design consistency 60/100 (grade C, 22 colours, 14 off-grid spacings) with no heal recorded although `AGENTV3_DESIGN_GATE` is on · 2 medium security findings · "no tests at all" |
+| 🥵 struggled | **4 places** | **95 s on a fast lane that produced nothing** · a plan call that outlived its lane by 18 s · **12 minutes against an ETA of "~2–4 min"** · sandbox **93% idle** (12.6 min up, 0.9 min of our operations) |
+
+### 🟢 Two of the three headline items were ALREADY fixed this morning — by other sessions, hours after this build ran
+
+Recorded first, and deliberately NOT re-fixed (safeguard #6). **This report predates both fixes.**
+
+| item | fixed by | merged | build ran |
+|---|---|---|---|
+| 153 `Provider GLM failed` rungs + the RED gate they caused | **#2913** `isBudgetEndedError` | 2026-09-14 **04:19 UTC** | 2026-09-13 **17:19 UTC** |
+| `postmessage-wildcard-origin @ index.html:9` — **our own injected preview bridge**, reported to the user as a defect in their app | **c3f7695** `withoutPreviewBridge` | 2026-09-14 **06:55 UTC** | same |
+| `Model call failed (claude-sonnet-4-6)` on a build where `enforceNoClaude` had stripped Claude — a stall pinned on a third party never contacted | **#2931** (open) `fastLaneCallIdentity` | — | same |
+
+`turnDeadline.ts`'s own doc comment describes this build's numbers exactly (153 rungs, "1 build-breaking
+blocker", 54 providers in one error string). **Reading the code before re-deriving the finding is what
+saved a third duplicate of it** — and there is already one duplicate in flight: **#2929 and #2931 are two
+sessions' independent fixes of the same `1ef27cd7` blocker**, `recoverAfterRejudge` and
+`recordReadinessRecovery`, same three call sites.
+
+### 🔴 THE ROOT CAUSE NOBODY HAD FOUND: the measured ETA cannot run on the path that needs it
+
+Three consecutive autopsies (#2929, #2931, this one) have recorded the ETA lying — *"~2–4 min"* against
+12, 26.6 and 26.6 real minutes. Both open PRs list it under *"still open"*; neither claims it. The reason
+it survived three reports is that **the fix for it already exists and is unreachable**.
+
+`progressEta.ts` (2026-08-23) replaced the prompt-word guess with a real measurement. It needs one input,
+`plannedFiles`, and in the entire route that number has exactly **two producers**:
+
+1. **The simple lane's `onPlanned`** — which fires only when that lane's plan call SUCCEEDS. In this build
+   it hit its 90 s cap and the lane handed off, so nothing was ever reported. ⚠️ **Note the shape: a lane
+   that finishes quickly produces a build too short to need an ETA at all.** The measurement was wired to
+   the case where it is least useful and absent from the case where the user sits and watches.
+2. **The blueprint step** — gated on `deep` depth AND not being simple-lane-eligible AND `AGENTV3_BLUEPRINT`.
+   An ordinary one-shot app misses it on the first two conditions alone.
+
+So the build ran twelve minutes with `plannedFiles` at **0**, `measuredRemainingMs` returning null on every
+tick, and the user reading the heuristic this module's own header calls *"exactly backwards"*. Every line
+they saw was the fallback:
+
+```
+0.1s   ~2–4 min — "I'll replace it with a real figure as soon as I know how big it is"
+2min   ~53s to go
+4min   bigger than expected — about 3 min more to go      (8 minutes actually remained)
+6/10/12min   bigger than estimated, still working
+```
+
+⚠️ **`liveEtaTick` is not the bug and must not be "fixed".** It behaved exactly as designed — two revised
+promises, then honest no-number lines. The defect is upstream of it: it should never have owned the line.
+
+🔴 **And the first line made a promise that path CANNOT keep, by construction.** *"I'll replace it with a
+real figure as soon as I know how big it is"* — on the full-builder path there is no code that could ever
+have made that true.
+
+**THE FIX — measure over the signal the full builder actually has.** It does not know a file count up
+front, and asking it to guess one is the very thing `progressEta.ts` refuses. But it keeps the architect's
+OWN plan: the todo list, whose done-count `PlanProgress.computePlanProgress` already derives from **real
+file writes** and already paints as ticks on the user's screen. `measuredRemainingFromSteps` extrapolates
+from that with the identical discipline — null in every case where it would be guessing. So *"5 of 8 steps
+done"* is not a new claim invented for the ETA; it is the state the user can already see, given a clock.
+
+🔒 **The file measurement stays FIRST.** A file manifest is an exact count of what will be written; a plan
+step is a unit of the architect's own choosing. Where both exist the file count is better evidence — which
+also makes this change a byte-for-byte no-op for the lane that already worked.
+
+⚠️ **`stepsDone` is not clamped to the plan** (it counts real completions and can run past a plan that
+under-counted the work). That case returns **null, never zero** — *"the plan was too small"* and *"there is
+no time left"* are different facts, and a zero would print *"~0s to go"* on a build with minutes left.
+
+**Test-locked** in `tests/etaMeasuresTheFullBuilder.test.ts` (13 tests), including the reported build's own
+shape. ⚠️ Every line of this wiring **fails nothing if dropped** — that is precisely how the 2026-08-23 fix
+sat unreachable for three weeks with no test anywhere going red — so the wiring itself is asserted, and the
+guard is **proven by reversion**: deleting the one producer call fails the suite.
+
+### 🔴 STILL OPEN — named, not implied fixed
+
+- **The fast lane cost 95 seconds and produced nothing, and that is where the whole cascade started.** Its
+  plan call exceeded the 90 s cap; the abandoned call then outlived the lane by 18 s and recorded the
+  failure that turned the gate RED. #2894 stopped such a call SPENDING past its lane and #2913 stopped it
+  INDICTING anyone — **neither stops the 90 seconds being spent.** The admin's own bar names *"time spent
+  on an abandoned lane"* as a ledger item in its own right. Genuinely provider-side: the honest fix needs a
+  stall signal (no tokens for N seconds), not a smaller constant, because lowering the cap kills a slow-but-
+  working plan. Both #2929 and #2931 reached the same conclusion independently.
+- **The tail is under-allowed.** `FINISH_ALLOWANCE_MS` is 60 s; this build spent **~3.5 minutes** after its
+  last file on typecheck, dev server, production build and the final summary. Every measured estimate is
+  therefore systematically short by about that much. Deliberately NOT retuned here — one report is not a
+  distribution, and replacing a wrong constant with a differently-wrong one is what `progressEta.ts`'s own
+  header warns against. It needs the real spread of post-file tails, which nobody has measured.
+- **The user journey found "no page components"** on an app that is a prompt box, a style picker and a
+  generate button — and the release gate then told the user *"this app has no data-entry flow"*, which is
+  false. Journey derivation appears to look for a `pages/` shape; this app keeps its UI in `components/`.
+- **Four statements about tests, mutually inconsistent, in one report**: readiness says *"No tests at all"*;
+  `E2E_SCAFFOLDED` says a Playwright suite was just written into the project; `TEST_SUITE_UNVERIFIED` says
+  it could not run because `@playwright/test` is not installed; the release gate says *"the app has no test
+  suite that could be run here"*. **We write a suite and never install the one dev dependency needed to run
+  it** — then hold its absence against the app. Another witness for the missing **evidence ledger** (open
+  since `697b38ee`).
+- **`SANDBOX_PEAK_MEMORY` produced nothing** — *"not available on this machine (no cgroup accounting
+  exposed)"*. The instrument shipped 2026-09-11 to gate the template-RAM decision does not work on the real
+  E2B machine, so that decision still has no measurement behind it.
+- **Design consistency 60/100 shipped unhealed** although `AGENTV3_DESIGN_GATE` is on in Cloud Run; no
+  `DESIGN_HEALED` or `DESIGN_PARTIALLY_HEALED` was recorded. Not investigated here.
+- **Sandbox 93% idle** — 12.6 minutes billed for 0.9 minutes of our operations.
 ## 2026-09-14 (cont.) — "Kon aya" completed, and the whole thing folded into one button
 
 **Admin:** *"jo bana sakte ho, woh bana do! aur aise bana ki sab kuch button ke andar ho, screen par
@@ -54886,6 +55003,55 @@ with no overlapping code paths; no duplicate work. PR #2933 opened; per the stan
 driven to green CI but not merged without the admin's explicit go-ahead.
 ---
 
+## 2026-09-14 — The admin's four Monitor alerts: two of them contradicted each other, and the louder one sent him to the wrong component
+
+Admin screenshot, 14/9/2026 2:22–2:45 PM. Four notifications, three of them from the same ten builds.
+
+**The contradiction, provable from the two numbers on his own screen:**
+
+```
+🔴 2:22:20  Build failure rate is 60.0% (over 10%). Investigate the engine/providers.
+🟡 2:22:21  Only 50.0% of builds reached a preview (target 80%). Many apps generated but not runnable.
+```
+
+Ten builds ⇒ 6 failed, 4 succeeded, and **5 reached a preview**. Both figures come from the same
+`MetricsSnapshot`, and `previewAllowed` is set from `buildObs.previewRendered` — the platform **watched
+that app render in a real browser**. So **at least one of the six "failures" was an app we had ourselves
+seen working**, and the red alert's advice pointed at the single component the evidence exonerates: the
+providers produced a running app.
+
+🔴 **This is the fifth sighting of one class** — `697b38ee`, `fd021c64`, `1ef27cd7`, `d11ad529`, and now
+the dashboard built on top of them: **a working app carrying a failing verdict.** The verdict fixes live
+in the build route (#2913 merged 04:19 UTC; #2929 / #2931 open, and those two are themselves duplicates
+of each other). This entry is the OTHER end of it — the number the admin reads, which had no idea the
+fact contradicting it was sitting in the same object.
+
+**Fixed:** `rendersCountedAsFailures()` in `metricsAlerts.ts`, and the failure-rate alert now chooses its
+advice from the evidence instead of asserting it in advance:
+
+> *"Build failure rate is 60.0% (over 10%). But at least 1 of those build(s) produced an app that opened
+> in a browser and RENDERED — so the engine is making working apps. Start at the release gate and the
+> build verdict, not provider latency."*
+
+⚠️ **Deliberately NOT called "false failures", and the severity is unchanged.** A build can render and
+still carry a genuine blocker, so this is not proof the verdict was wrong; what it proves is narrower and
+sufficient — those builds produced an app that runs, so provider latency is not where to start. And it
+stays CRITICAL, because telling a user their working app is broken is not the smaller problem.
+When nothing contradicts the failure count the old wording stands, untouched. Test-locked in
+`tests/alertNamesTheRightSuspect.test.ts` (9 tests) against the admin's exact numbers.
+
+### The other two alerts — what they are, and what is NOT being changed
+
+- 🟡 **"Builds averaging 11.0 min across 10 builds, over the 10-minute mark."** Real, and consistent with
+  autopsy `d11ad529` (12m02s for a text-to-image app). ⚠️ **The 10-minute threshold is still the open
+  question `metricsAlerts.ts` already names**: nobody has measured this engine's real build-duration
+  distribution, so whether 11 minutes is abnormal or ordinary is unknown. Guessing a new threshold would
+  replace a noisy alert with a quiet one that might be wrong. **Not touched.** The honest way to settle it
+  is the distribution, not an opinion.
+- 🟡 **"Hosting channels filling up: 35 of about 50 in use, 15 left. 29 can be reclaimed."** Real,
+  accurate and purely an admin action — Admin → Overview → Publish Capacity. No code change; the ceiling
+  itself already has its plan in ROADMAP §10.3 (serve published apps from the bucket), gated on the three
+  `PUBLISHED_APPS_*` keys in the order that entry records.
 ## 2026-09-14 — TWO SESSIONS AUTOPSIED BUILD `1ef27cd7`. The other one was better, so mine was cut down.
 
 Both #2929 (mine) and #2931 landed the same finding from the same report: the incomplete-code heal
@@ -54927,3 +55093,86 @@ the second session begins. Recorded as an observation, not a fix.
 the 6–9× wrong ETA, the 354-second silent model call, the missing evidence ledger, and the strong
 suspicion — unverified, because the generated sources are not in the report — that the delivered
 "video editor" cannot edit video.
+
+---
+
+## 2026-09-14 — 🔴 WE WERE BREAKING WORKING APPS OURSELVES. The admin named it; it is the worst bug in this week's ledger.
+
+The counting bug two entries up ("at least 1 build rendered and was counted as failed") looked like a
+dashboard problem. The admin read it and supplied the half no report could have shown — **what happens
+next, in production**, verbatim:
+
+> *"actually yah hota hai. kabhi kabhi app ban jata hai, par chatbox me ai bolta 'fix with ai' aur woh
+> build fail me count ho jata hai (10-12% time, not always). **aur ham aise builds ko fix with ai press
+> hote hi sach me tod dete hai.** yaha 3 nuksan hai: 1- jo galat failed count hua, uska charge = 0.
+> 2- wapas se wahi sahi app ko build karna padega. 3- user ka trust bhi gaya!!"*
+
+**So the wrong verdict was never the end of the damage — it was the trigger for it.** The full chain,
+every link verified in code:
+
+1. The build finishes. The platform opens the app in a real browser and **sees it render**
+   (`GREEN_GUARD_SAVE` — *"recorded as the last known good state"*).
+2. Something unrelated still sets `ok: false` — a budget-refused provider call counted as a blocker
+   (#2913), a healed blocker never cleared (#2929/#2931), a release gate summarising a finding that is
+   not about the app at all (`d11ad529`).
+3. `AgentV3Panel.tsx` renders the amber failure card, and its button sends:
+   **`"Continue from where you left off and finish/fix the build so the app works end-to-end."`**
+4. 🔴 **That sentence asserts, as fact, that the app does not work end-to-end.** On an app that does, it
+   is a false premise — and a model handed a false premise does not reply *"nothing is wrong"*. It goes
+   looking, finds nothing, and **changes working code until it has something to show for the turn.**
+
+⚠️ **The sentence in step 3 is the SAME ONE** `shouldRetryEmptyBuild`'s doc comment quotes verbatim as
+the Shiv Medical Store case (2026-08-10) and that autopsy `697b38ee` was written about. It has now cost
+three separate incidents. It was never examined as a *prompt* — only as an input to a retry decision.
+
+### The 50/50 split, and why this half is the one that lasts
+
+Killing each cause of a wrong verdict is the first half, and it is being done one cause at a time
+(#2913 merged, #2929 and #2931 merged). **The admin's own number is why that cannot be the whole
+answer: it happens 10–12% of the time and it will never be exactly zero.** So the durable half is this
+— *even when the verdict is wrong, the user must never be invited to "fix" an app the platform has just
+watched working.* The evidence and the invitation must come from the same place.
+
+### The fix
+
+- **The one fact the client never had.** The server knew `buildObs.previewRendered` — the same
+  observation `GREEN_GUARD_SAVE` and the preview telemetry already use — and never sent it. The
+  terminal result now carries `appRendered`. Additive and optional, because the Android shell is
+  BUNDLED: an older client ignores it and keeps today's behaviour exactly.
+- **`failedButRunning.ts`** — pure, so every rule is testable. `appRanDespiteFailedVerdict` requires
+  `appRendered === true` **identically**: a missing field, a null, or a truthy non-boolean can never
+  open this path. An unknown resolves to today's behaviour, never to *"the app is fine"*.
+- **The card leads with what is true and checkable:** *"Your app is built and running — I opened it in
+  a browser and it rendered. One check did not pass, so I have not marked this build complete (and you
+  have not been charged for it)."* The order is not decoration — putting the caveat first would keep
+  the impression this card exists to remove.
+- **The prompt does three things, each because its absence is what broke apps.** It STATES THE EVIDENCE
+  (so the model is not left inferring that everything is suspect); it FORBIDS THE REBUILD explicitly
+  (the failure mode is not a wrong edit, it is a large, confident, unnecessary one); and it gives an
+  explicit **licence to change nothing** — *"that is a complete and correct answer, and I would rather
+  have it than an edit"* — because a model with no way to report "there was nothing to fix" will invent
+  work.
+
+🔒 **NOTHING IS HIDDEN, and this must never be turned into something that hides.** The verdict is
+untouched, the build is still not billed, the summary is still shown in full, and the action is still
+offered. A genuinely broken app keeps the blunt card and the original prompt — test-locked, so this
+change can only ever narrow what the old card claims, never delete it.
+
+**Tests:** `tests/fixWithAiDoesNotBreakWorkingApps.test.ts` (18). Every line of the wiring **fails
+nothing if dropped**, so the wiring is asserted too, and the guard is **proven by reversion**: deleting
+the server's one field fails the suite.
+
+### 🔴 Still open — the three costs, honestly
+
+1. **The zero charge.** A build the platform watched render, marked failed, is not billed. Fixing that
+   means fixing the VERDICT, not the billing: under the "working app or free" law a build marked
+   not-ok must never be charged, and charging one would be the worse bug. **Nothing here changes
+   billing, deliberately.** The money comes back when the verdict is right.
+2. **Rebuilding a working app** — addressed: the user is no longer told to.
+3. **Trust** — addressed: the message now matches what the platform actually saw.
+
+⚠️ **AND THE UNDO HAS A HOLE WORTH NAMING.** `GreenGuard` Layer 2 restores the last known good set, but
+only on `provenBroken` — we opened the app and saw it broken. A repair turn that leaves the app
+**still rendering but functionally worse** (a button that stops working, a feature quietly dropped) is
+not caught by that test, and nothing else catches it either. Prevention above is what covers this case
+today; a real fix needs a behavioural check, not a render check. **Recorded as an open root cause.**

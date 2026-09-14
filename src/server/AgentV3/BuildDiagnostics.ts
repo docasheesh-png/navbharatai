@@ -20,6 +20,7 @@ import { redactProvidersText } from '../lib/providerRedaction';
 import { costAlertAdvisory, costAlertThresholdUsd } from './costAlert';
 import { isModelUnavailableError } from './providerErrorClass';
 import { unreachedProvidersNote } from './runnerChainSummary';
+import { isBudgetEndedError } from './turnDeadline';
 
 export type IssuePhase =
   | 'sandbox' | 'provider' | 'plan' | 'tool' | 'build' | 'readiness' | 'preview' | 'autofix' | 'deploy';
@@ -908,7 +909,36 @@ export class BuildDiagnostics {
     }
     // A truncated response (max_tokens) or a failed call is a real struggle → flag on the timeline.
     const truncated = rec.finishReason === 'max_tokens' || rec.finishReason === 'length';
-    if (!rec.ok || truncated) {
+    // 🔴 A CALL WE STOPPED IS NOT A CALL THAT FAILED — and reading it as one told a real user their
+    // working app was broken (report 70115adf, 2026-09-13).
+    //
+    // What happened: the fast lane handed off at 90s, the full builder finished the app, the
+    // production build succeeded and a preview snapshot was saved. But the abandoned lane's plan call
+    // outlived its lane by 18 seconds and then recorded an unresolved ERROR. `shippingIssueCount`
+    // counts exactly those, so the release gate reported "1 build-breaking blocker", the verdict was
+    // flipped to NOT ok, and the summary said the app "is NOT ready to use yet". Every artefact the
+    // lane recorded for ITSELF was already marked resolved — this one arrived from a different path,
+    // after the handoff, with nothing tying it back.
+    //
+    // ⚠️ IT IS NOT ENOUGH TO LOWER THE SEVERITY. `resolveRecoveredOnSuccess` forgives on success, and
+    // success is precisely what this issue prevented: the error made the gate RED, the RED gate made
+    // `ok` false, and `ok` false meant the error was never forgiven. A circle that can only be broken
+    // where the fact is known — here, at the moment of recording.
+    //
+    // Recorded as INFO and resolved, never dropped: the build genuinely ran out of time and the
+    // timeline must still show where. It simply stops being an accusation against a provider and a
+    // blocker against the app.
+    const budgetEnded = !rec.ok && isBudgetEndedError(rec.error);
+    if (budgetEnded) {
+      this.record({
+        phase: 'provider',
+        severity: 'info',
+        code: 'LLM_CALL_BUDGET_ENDED',
+        message: `A model call was stopped because this build's time budget ended, not because it failed (${rec.model ?? 'model'}).`,
+        autoResolved: true,
+        detail: rec.provider ? `provider=${rec.provider}` : undefined,
+      });
+    } else if (!rec.ok || truncated) {
       this.record({
         phase: 'provider',
         severity: rec.ok ? 'warning' : 'error',

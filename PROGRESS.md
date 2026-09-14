@@ -52781,3 +52781,58 @@ summary, the evidence half dropped, the console pattern narrowed back, and the t
   rather than the gentler 'no-instruction' one. Left alone deliberately: the run-action verdict now
   suppresses the message entirely, so changing `buildable` would be a second answer to a question that
   is already settled — and it is consulted elsewhere.
+
+---
+
+## 2026-09-14 — The home-screen testing notice
+
+Admin: *"home page par hi jab bhi user app open kare, 3 seconds ke liye ek popup aa jaye"* — telling
+people the app is in active testing and asking them to report failures — *"isko aur acche se
+professionally likho. english me"*.
+
+**The copy:**
+> **NavBharatAI is in active testing**
+> If something doesn't work, please report it — that's how we make it stronger. Thank you.
+> `[ Report a problem ]`
+
+**🔒 It asks for something, so it hands over the means.** A notice saying "please report failures"
+that leaves the person to find out how is the half-built state the second absolute rule forbids —
+real instruction, missing means. NavBharatAI already has a genuine app-wide reporting sheet
+(`ReportSheet`, from the sidebar's "Report a problem" and by shaking the phone, attaching the screen,
+device, build and recorded errors by itself), so the notice carries a **button that opens that exact
+sheet**. Its label is asserted against the sidebar's own source, so the notice can never name a menu
+entry the app does not carry.
+
+**"Once per app open" is a storage decision, and it is the whole feature.** `sessionStorage`: a cold
+launch, a new tab or a reload each start a new session and show it again — which is what "whenever
+the user opens the app" means — while tapping Home a second time does not. `localStorage` would have
+meant once per device ever; an in-memory flag would have nagged on every Home tap.
+
+**⚠️ Three seconds is short for a message that asks the reader to act, and that is said plainly
+rather than quietly overridden.** The admin asked for three, so three it is — but the countdown
+**pauses on hover, focus and touch**, so nobody reading it is cut off mid-sentence and no button
+disappears from under a finger. The instruction is kept; its one sharp edge is removed.
+
+**Reduced motion needed no code.** `index.css` already clamps every animation under
+`.nb-reduce-motion` (Settings → General → Reduce Animations), so using a CSS animation rather than a
+JS one honours the setting **by construction** instead of through a prop somebody must remember to
+pass. Pinned by a test that reads both files.
+
+### 🔴 A test that passed while the feature was broken
+
+The first bite-check swapped `sessionStorage` for `localStorage` — turning "every app open" into
+"once per device, ever" — and **all 23 tests still passed.** They inject a fake store, so they prove
+the logic and cannot see which store the code actually reaches for. The most important behavioural
+decision in the feature was untested against the real code.
+
+Fixed by asserting the real default in the source. **The lesson is not "add a test" — it is that a
+unit test with an injected dependency proves the logic and says nothing about the wiring**, and the
+wiring is where this class of feature actually fails.
+
+### Verification
+
+24 tests across two files. Four reverts tried, four failures: the storage swap (after the gap above
+was closed), the label drifting from the sidebar, the touch-pause handlers dropped, and the button
+wired to nothing. `AppKnowledgeBase.ts` updated in the same change — the notice is a third way into
+the reporting sheet, recorded on that feature's existing entry rather than as a new one, because a
+transient notice is not a navigable feature of its own.

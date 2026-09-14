@@ -404,3 +404,31 @@ export function stripPreviewBridge(html: string): string {
 export function isHtmlDocumentPath(path: string): boolean {
   return /\.html?$/i.test((path || '').trim());
 }
+
+/**
+ * THE BRIDGE IS OURS, SO IT MUST NEVER BE JUDGED AS THE APP'S CODE (autopsy fd021c64, 2026-09-14).
+ *
+ * `stripPreviewBridge` already guarded the two paths where the MODEL meets a document — `read_file`
+ * and `write_file` — so the bridge could never be copied into a user's published app. What neither
+ * guard covered is the third consumer of the same files: OUR OWN ANALYSERS.
+ *
+ * They read the sandbox directly (`actuator.readFile`), which is not the `read_file` tool and
+ * therefore not stripped. So every static check — security, accessibility, CSP, SRI, design,
+ * hygiene — has been reading our injected console mirror as if the user had written it.
+ *
+ * It was not theoretical. `SecurityAnalysis`'s `postmessage-wildcard-origin` rule matches
+ * `.postMessage(msg, '*')`, and that is EXACTLY the line `previewBridgeSource` emits so the mirror
+ * can reach its parent frame. A real build report was headlined
+ *     rootCause: "postmessage-wildcard-origin @ index.html:9"
+ * — our own development-only script, reported to its owner as a security defect in their app.
+ *
+ * One helper rather than a third hand-written `if`: this repo's own history (four drifted copies of
+ * `safeRelPath`, retired model ids in five files) says a rule copied to a third call site is a rule
+ * that will be missed at the fourth. Apply it wherever sandbox content enters the analysis corpus.
+ *
+ * A no-op for every non-HTML path and for any document that never carried the bridge. PURE.
+ */
+export function withoutPreviewBridge(path: string, content: string): string {
+  if (typeof content !== 'string' || !content) return content;
+  return isHtmlDocumentPath(path) ? stripPreviewBridge(content) : content;
+}

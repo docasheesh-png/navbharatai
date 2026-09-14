@@ -1,5 +1,11 @@
 // TWO-FINGER PINCH MUST NOT ZOOM THE APP (admin 2026-08-24: "do unglio se jaise webpage zoom karte
-// hai woh zoom app me nahi hona chahiye").
+// hai woh zoom app me nahi hona chahiye") — NATIVE SHELL ONLY. `installZoomLock` itself is gated in
+// main.tsx: called only when `isNativeShell(window)` is true.
+//
+// 🔴 CORRECTED 2026-09-14 — this used to be called unconditionally, and it reached the plain WEBSITE
+// too (admin: "mobile app me off karne ko kaha tha, apne website par bhi pinch zoom band kar di!").
+// The ask was about the installed app; a website visitor loses a real accessibility aid (WCAG 1.4.4)
+// by having pinch withheld with nothing to show for it. See the gating call site in main.tsx.
 //
 // Pinch-zooming the whole screen is the last big "this is a web page in a wrapper" tell left in the
 // shell, alongside the tap-highlight rectangle, pull-to-refresh and the rubber-band bounce that

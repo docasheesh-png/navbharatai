@@ -53474,3 +53474,75 @@ file has now been burned by three times.
 **Also on 2026-09-14:** #2914 merged (`ff9cd845`) after its own session resolved the #2917 overlap and
 CI went green on `802eaa7e`; the full gate was re-run locally on main+#2914 before the merge, per the
 concurrent-sessions rule that a gate run before a merge proves nothing.
+
+## 2026-09-14 — Settings → Live Metrics was never real: it rendered an auth failure as a dashboard of zeros
+
+Admin, with a screenshot: *"setting ke andar ka live matrix farzi hai, real data nahi show ho raha."*
+The screen showed **0 total builds · 0% success · 0% preview · 0s average · "No AI calls recorded
+yet" · $0.0000** — on an account that had built apps that same day.
+
+**They were right, and more precisely right than the word "farzi" suggests. Nothing was mocked — the
+screen had never been able to load anything, since the day it shipped.**
+
+### The chain, read from the code rather than guessed
+
+1. `/api/admin/metrics` authenticates on the **`x-admin-token`** header — `verifyAdminToken` reads
+   exactly `req.headers['x-admin-token']`.
+2. `SettingsPanel` sent **`Authorization: Bearer <token>`**, in **both** of its call sites.
+3. So the route answered **401 `{ error: 'Admin token required.' }`** — every time, for every admin,
+   from the first day.
+4. The client did `.then(r => r.json()).then(setAdminLiveMetrics)` with **no `r.ok` check**. That error
+   object is truthy, so the panel rendered — and every field fell through its `?? 0`:
+   `builds?.total ?? 0` → 0 · `successRate ?? 0` → 0% · `previewRate ?? 0` → 0% · `avgMs ?? 0` → 0s ·
+   `Object.entries(tokens || {}).length === 0` → "No AI calls recorded yet" · `totalCostUsd ?? 0` →
+   $0.0000.
+
+**That is the screenshot, field for field.** A confident dashboard assembled entirely out of fallbacks
+over an auth failure — the second absolute rule's *"a status indicator MUST reflect real state — never
+hardcoded, never faked"*, and worse than a blank screen: a blank screen asks a question, this answered
+one, wrongly.
+
+### 🔒 The fix is a shared helper, not a one-character header fix
+
+`'x-admin-token'` was hand-written in **four** client files — `LoadBoard`, `MonitorPanels`,
+`AdminDashboard` and this panel. **Three had it right and one did not, and nothing could tell**,
+because there was no single answer to "how does an admin request authenticate?" for the wrong one to
+disagree with. Correcting only the typo leaves the next caller equally free to invent a fifth spelling.
+
+`src/lib/adminFetch.ts` is now that answer: `ADMIN_TOKEN_HEADER`, `adminHeaders`, and an `adminGet`
+whose result type **has no `data` on the failure branch** — so "an error became the dashboard" is not a
+mistake a caller can make any more. A 401 is named as a sign-in problem (the one thing the admin can
+act on); a network throw is `status: 0`, because *"we could not ask"* and *"the server said no"* are
+different facts; and a 200 that will not parse is not data either.
+
+⚠️ `adminFailed()` is an explicit **type predicate** rather than a bare `if (r.ok)`: this project's
+frontend tsconfig did not narrow the union reliably at the call sites, and a caller that cannot reach
+`message` is a caller who will reach for `data` instead — which is the original bug wearing a different
+hat.
+
+### The screen now tells the truth in three states
+
+- **loaded** — real numbers
+- **failed** — the actual reason, with a *Try again* button. The old card said *"Admin login required"*
+  for every outcome, which was by accident the one true thing it could have said.
+- ⚠️ **labelled** — *"Counted since this server last started — not lifetime totals."* These come from a
+  process-wide registry (`server/lib/metrics.ts`), and this service scales to zero and redeploys on
+  every merge. **Without that line a genuinely small number reads exactly like the broken screen this
+  replaces** — which is how the real bug stayed hidden for so long.
+
+### The class guard
+
+A test sweeps every client file and fails if an `Authorization` header appears near an `/api/admin/`
+URL. ⚠️ **Per CALL, not per file** — the first version flagged `App.tsx`, whose `Authorization: Bearer`
+headers are GitHub API calls with nothing to do with this, and this module's own comment describing the
+bug. A guard that cries wolf gets deleted. A second test asserts the sweep actually sees admin call
+sites, because a scan that finds nothing passes while proving nothing. 12 tests.
+
+### Not changed, and stated rather than assumed
+
+The underlying numbers come from a **per-instance, since-boot** registry — that is real data, but it is
+not lifetime data. A Firestore-backed history already exists at `/api/admin/metrics/history`. Pointing
+this screen at it would give lifetime totals and is probably the right end state, but it is a different
+change with its own shape and cost, and the admin's complaint was that the screen shows nothing real.
+It now shows something real and says exactly what window it covers. Recorded here as the obvious next
+step rather than folded in silently.

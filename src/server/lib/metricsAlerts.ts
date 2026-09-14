@@ -86,6 +86,41 @@ export const VERY_SLOW_BUILD_MS = 20 * 60_000;
 export const SLOW_BUILD_MIN_SAMPLE = ALERT_MIN_SAMPLE;
 
 /**
+ * How many FAILED builds nevertheless produced an app that opened in a browser and rendered.
+ *
+ * 🔴 WHY THIS EXISTS (admin screenshot, 2026-09-14). Two alerts fired in the same minute, off the same
+ * ten builds, and they contradicted each other:
+ *
+ *     🔴 "Build failure rate is 60.0% (over 10%). Investigate the engine/providers."
+ *     🟡 "Only 50.0% of builds reached a preview (target 80%). Many apps generated but not runnable."
+ *
+ * Ten builds: six counted failed, four counted succeeded — and FIVE reached a preview. Both numbers
+ * come from the same snapshot, and `previewAllowed` is set from `buildObs.previewRendered`, which
+ * means the platform watched that app render in a real browser. So at least one of the six "failures"
+ * was an app the platform had itself seen working, and the alert's advice — go and look at the
+ * providers — points at the one component the evidence exonerates: the providers produced a running
+ * app.
+ *
+ * This is the same class this repo has now autopsied four times (`697b38ee`, `fd021c64`, `1ef27cd7`,
+ * `d11ad529`): a working app carrying a failing verdict. The fixes for the verdict live in the build
+ * route (#2913 merged; #2929 / #2931 open). THIS is the other end of it — the number the admin reads,
+ * which had no idea the fact contradicting it was sitting in the same object.
+ *
+ * ⚠️ DELIBERATELY NOT CALLED "false failures". A build can render AND still have a genuine blocker,
+ * so this is not proof the verdict was wrong. What it IS proof of is narrower and enough: those
+ * builds produced an app that runs, so provider latency is not where to start looking.
+ *
+ * PURE. Clamped at zero because the two counters are recorded on different code paths and a snapshot
+ * mid-flush can legitimately show preview ahead of success without anything being wrong.
+ */
+export function rendersCountedAsFailures(b: { succeeded: number; previewAllowed: number }): number {
+  const ok = Number(b?.succeeded);
+  const rendered = Number(b?.previewAllowed);
+  if (!Number.isFinite(ok) || !Number.isFinite(rendered)) return 0;
+  return Math.max(0, Math.floor(rendered) - Math.floor(ok));
+}
+
+/**
  * Evaluate alert conditions against a metrics snapshot.
  * Returns an empty array when everything is healthy.
  */
@@ -97,11 +132,18 @@ export function evaluateAlerts(snapshot: MetricsSnapshot): MetricAlert[] {
   // Rate-based alerts only once there is a meaningful sample.
   if (b.total >= ALERT_MIN_SAMPLE) {
     const errorRate = b.total ? b.failed / b.total : 0;
+    const rendersAsFailures = rendersCountedAsFailures(b);
     if (errorRate > ERROR_RATE_THRESHOLD) {
       alerts.push({
         id: 'high-error-rate',
         severity: 'critical',
-        message: `Build failure rate is ${(errorRate * 100).toFixed(1)}% (over ${ERROR_RATE_THRESHOLD * 100}%). Investigate the engine/providers.`,
+        // The advice is chosen from the evidence in this same snapshot rather than fixed in advance:
+        // when builds that RENDERED are sitting in the failed column, sending the admin to the
+        // providers costs them the one hour the alert bought. Severity stays critical either way —
+        // telling a user their working app is broken is not the smaller problem.
+        message: rendersAsFailures > 0
+          ? `Build failure rate is ${(errorRate * 100).toFixed(1)}% (over ${ERROR_RATE_THRESHOLD * 100}%). But at least ${rendersAsFailures} of those build(s) produced an app that opened in a browser and RENDERED — so the engine is making working apps. Start at the release gate and the build verdict, not provider latency.`
+          : `Build failure rate is ${(errorRate * 100).toFixed(1)}% (over ${ERROR_RATE_THRESHOLD * 100}%). Investigate the engine/providers.`,
         metric: 'builds.failureRate',
         value: Math.round(errorRate * 1000) / 1000,
         threshold: ERROR_RATE_THRESHOLD,

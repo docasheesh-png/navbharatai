@@ -93,12 +93,19 @@ describe('publishedAppList — the user\'s own live apps', () => {
    * number. If the two counted different things, a user could see "3 of 5" and still be refused —
    * a limit that lies about itself.
    */
-  it('its count matches EXACTLY what the five-app cap enforces', () => {
+  it('its count matches EXACTLY what the cap enforces', () => {
     const records = [
       rec(), rec({ workspaceId: 'ws-b' }), rec({ workspaceId: 'ws-c' }),
       rec({ workspaceId: 'ws-d', status: 'unpublished' }),   // freed — counted by neither
     ];
+    // THE INVARIANT: the list a user is SHOWN and the number the cap COUNTS are the same set. A
+    // screen that shows four apps while the gate counts three is how "you are at your limit" becomes
+    // an argument nobody can settle.
     expect(publishedAppList(records)).toHaveLength(liveAppCount(records as never));
-    expect(publishedAppList(records).length).toBeLessThan(publishedAppCap());
+    // ⚠️ This used to assert `< publishedAppCap()` with three live apps, which silently encoded "the
+    // free cap is more than 3" — true at 5, false the day it became 3, and nothing to do with what
+    // this test is for. The cap's own default is tested in hostingStorageCap.test.ts; here it is
+    // enough that the two counters agree, at whatever the cap happens to be.
+    expect(publishedAppCap()).toBeGreaterThan(0);
   });
 });

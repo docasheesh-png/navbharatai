@@ -35,7 +35,7 @@ import { doc, getDoc, getServerDb } from './serverDb';
  * has not yet been renewed simply reads as no plan here, which errs toward the free cap. The renewal
  * still happens on the plan screen and in the sweep, as it always did.
  */
-async function readHostingTierForQuota(userId: string | null | undefined): Promise<HostingTier | null> {
+export async function readHostingTierForQuota(userId: string | null | undefined): Promise<HostingTier | null> {
   if (!userId || !hostingPlansEnabled()) return null;
   try {
     const db = getServerDb() as any;

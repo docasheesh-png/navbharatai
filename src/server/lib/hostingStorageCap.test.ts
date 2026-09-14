@@ -3,6 +3,7 @@ import {
   hostingStorageCapMb, liveStorageMb, deployBytesMb, isFirstPartyProvider,
   publishedAppCap, liveAppCount,
 } from './HostingQuota';
+import { FREE_PUBLISHED_APPS } from '../../lib/hostingTiers';
 
 /**
  * THE HOLE THIS CLOSES (admin 2026-08-21: "sara 10gb ek hi user kha gaya to mera dhanda manda ho
@@ -85,30 +86,35 @@ describe('liveStorageMb — what the user actually holds', () => {
  * Firebase channel, and that pool is what the platform ceiling is made of (ROADMAP §10). Republishing
  * reuses the same channel and costs nothing new.
  */
-describe('publishedAppCap — five free apps, not five publishes', () => {
+describe('publishedAppCap — free apps, not free publishes', () => {
+  // ⚠️ ASKED BY CONSTANT, NOT BY LITERAL (2026-09-13). Every assertion below used to name `5`, so the
+  // free allowance moving to 3 failed four tests that were testing the RULE, not the number. The rule
+  // is "there is a default, it is env-tunable, a malformed value falls back to it rather than to
+  // disabled, and republishing never counts" — none of which is about any particular figure.
   afterEach(() => { delete process.env.AGENTV3_USER_PUBLISHED_APP_CAP; });
 
-  it('defaults to 5, is env-tunable, and an explicit 0 disables it', () => {
-    expect(publishedAppCap()).toBe(5);
+  it('defaults to the catalogue figure, is env-tunable, and an explicit 0 disables it', () => {
+    expect(publishedAppCap()).toBe(FREE_PUBLISHED_APPS);
     process.env.AGENTV3_USER_PUBLISHED_APP_CAP = '12';
     expect(publishedAppCap()).toBe(12);
     process.env.AGENTV3_USER_PUBLISHED_APP_CAP = '0';
     expect(publishedAppCap()).toBe(0);
   });
 
-  it('an empty or malformed value falls back to 5, never to "disabled"', () => {
+  it('an empty or malformed value falls back to the default, never to "disabled"', () => {
     process.env.AGENTV3_USER_PUBLISHED_APP_CAP = '';
-    expect(publishedAppCap()).toBe(5);
+    expect(publishedAppCap()).toBe(FREE_PUBLISHED_APPS);
     process.env.AGENTV3_USER_PUBLISHED_APP_CAP = 'five';
-    expect(publishedAppCap()).toBe(5);
+    expect(publishedAppCap()).toBe(FREE_PUBLISHED_APPS);
   });
 
   it('THE RULE: REPUBLISHING an existing app never counts — shipping a fix must stay free', () => {
-    const held = [rec({ workspaceId: 'a' }), rec({ workspaceId: 'b' }), rec({ workspaceId: 'c' }),
-                  rec({ workspaceId: 'd' }), rec({ workspaceId: 'e' })];
-    expect(liveAppCount(held, 'c')).toBe(4);            // updating 'c' → under the cap of 5
-    expect(liveAppCount(held, 'c') >= publishedAppCap()).toBe(false);
-    expect(liveAppCount(held, 'new-app')).toBe(5);      // a 6th NEW app → at the cap
+    // Exactly the cap's worth of live apps, whatever the cap is.
+    const held = Array.from({ length: publishedAppCap() }, (_, i) => rec({ workspaceId: `ws-${i}` }));
+    const mine = `ws-0`;
+    expect(liveAppCount(held, mine)).toBe(publishedAppCap() - 1);   // updating mine → under the cap
+    expect(liveAppCount(held, mine) >= publishedAppCap()).toBe(false);
+    expect(liveAppCount(held, 'new-app')).toBe(publishedAppCap()); // one more NEW app → at the cap
     expect(liveAppCount(held, 'new-app') >= publishedAppCap()).toBe(true);
   });
 

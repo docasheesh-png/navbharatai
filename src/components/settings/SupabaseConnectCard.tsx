@@ -18,6 +18,27 @@ import { useCallback, useEffect, useState } from 'react';
 import { Database, Check, Loader2, ExternalLink, AlertTriangle, ArrowLeft } from 'lucide-react';
 import { authedFetch } from '../../lib/authedFetch';
 import { V3_TAB_FLAG, V3_VIEW } from '../agentv3/v3TabPersistence';
+import { SUPABASE_NATIVE_RETURN_EVENT } from '../../lib/supabaseOauthReturn';
+
+/**
+ * True on the native (Capacitor) app. Checked at CALL TIME, not cached, because it decides how to open
+ * the OAuth URL and it must never be stale.
+ *
+ * WHY THIS MATTERS (2026-09-14 fix): a full-page `window.location.assign()` navigates the native app's
+ * OWN WebView (origin `https://localhost` / `capacitor://localhost`) away to Supabase, and the eventual
+ * redirect back lands on `https://navbharatai.com` — a completely different, unauthenticated browser
+ * session. The user was shown "Please sign in first." with no way back into the app. The native branch
+ * below opens an in-app browser instead and returns via the app's own deep link — the SAME fix already
+ * shipped for GitHub connect (see useGitHubConnect.ts).
+ */
+async function isNativePlatform(): Promise<boolean> {
+  try {
+    const { Capacitor } = await import('@capacitor/core');
+    return Capacitor.isNativePlatform?.() === true;
+  } catch {
+    return false;
+  }
+}
 
 interface Status {
   available: boolean;
@@ -60,12 +81,19 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  // Returning from the SAME-TAB consent redirect: App.tsx stashed the completion nonce (or the
-  // callback's honest error) and reopened this screen. THIS authenticated call is what actually
-  // attaches the consent to the signed-in account — the callback itself is a browser navigation and
-  // cannot carry our auth header (the bug that made connecting impossible), and the earlier popup +
-  // postMessage attempt died to popup blockers and to GitHub-login pages severing `window.opener`.
-  useEffect(() => {
+  // Returning from consent: App.tsx (web, on the SAME-TAB redirect) or the native appUrlOpen deep-link
+  // listener stashed the completion nonce (or the callback's honest error) into the same sessionStorage
+  // keys. THIS authenticated call is what actually attaches the consent to the signed-in account — the
+  // server callback itself is a browser navigation and cannot carry our auth header (the bug that made
+  // connecting impossible), and the earlier popup + postMessage attempt died to popup blockers and to
+  // GitHub-login pages severing `window.opener`.
+  //
+  // Extracted into its own function and ALSO wired to a custom window event (2026-09-14 fix): on the
+  // web the whole page reloads after the redirect, so running this once on mount was enough. On native
+  // the in-app browser closes without any navigation — this component stays mounted the whole time — so
+  // the deep-link listener in App.tsx dispatches SUPABASE_NATIVE_RETURN_EVENT after stashing the nonce,
+  // and this same logic runs again without needing a remount.
+  const attemptComplete = useCallback((): void => {
     let nonce = '';
     let storedError = '';
     try {
@@ -103,12 +131,39 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
     })();
   }, [refresh]);
 
+  useEffect(() => {
+    attemptComplete();
+    window.addEventListener(SUPABASE_NATIVE_RETURN_EVENT, attemptComplete);
+    return () => window.removeEventListener(SUPABASE_NATIVE_RETURN_EVENT, attemptComplete);
+  }, [attemptComplete]);
+
   const connect = async (): Promise<void> => {
     setBusy('connect'); setError(''); setDone('');
     try {
-      const res = await authedFetch('/api/integrations/supabase/start', { method: 'POST' });
+      const native = await isNativePlatform();
+      const res = await authedFetch('/api/integrations/supabase/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ native }),
+      });
       const data = await res.json();
       if (!res.ok || !data?.url) { setError(data?.error || 'Could not start the connection.'); setBusy(null); return; }
+
+      if (native) {
+        // In-app browser (Custom Tab / SFSafariViewController). The app stays underneath; on success or
+        // failure the callback deep-links back via com.navbharat.ai://supabase-callback, which App.tsx's
+        // appUrlOpen listener catches (it stashes the nonce/error and fires SUPABASE_NATIVE_RETURN_EVENT
+        // above). No page navigation, so the native app is never replaced by the website.
+        try {
+          const { Browser } = await import('@capacitor/browser');
+          await Browser.open({ url: data.url, presentationStyle: 'popover' });
+        } catch {
+          setError('Could not open the in-app browser. Please try again.');
+          setBusy(null);
+        }
+        return;
+      }
+
       // SAME-TAB on purpose: the consent chain often passes through a GitHub sign-in, and popups die
       // to blockers and opener-severing there. The callback redirects straight back to this screen.
       window.location.assign(data.url);

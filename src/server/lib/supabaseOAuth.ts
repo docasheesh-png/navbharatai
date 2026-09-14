@@ -203,6 +203,43 @@ export function supabaseOAuthConfigured(env: NodeJS.ProcessEnv = process.env): b
 }
 
 /**
+ * Where the NATIVE (Capacitor) app's Supabase-connect deep link lands.
+ *
+ * SAME scheme GitHub's OAuth return already uses (`com.navbharat.ai`) — the Android manifest's
+ * intent-filter and the iOS build's `CFBundleURLSchemes` entry are scheme-only, not path-restricted, so
+ * this new path needs no native-side registration. Mirrors `NATIVE_OAUTH_REDIRECT` in
+ * `githubNativeHandoff.ts`, kept as its own constant because the two features are independent and must
+ * never be made to share one.
+ */
+export const SUPABASE_NATIVE_REDIRECT = 'com.navbharat.ai://supabase-callback';
+
+/**
+ * Build the native deep link the callback sends the app, or the web redirect — ONE function so the two
+ * paths cannot drift apart the way the original web-only flow drifted from what native needed.
+ *
+ * Unlike GitHub's handoff, the nonce is not a secret: it only unlocks a claim `claimPendingConnection`
+ * independently re-checks against the Firebase uid making the request, so an app that merely intercepts
+ * this scheme can read the nonce but can never redeem it as anyone else's account. No ticket/encryption
+ * is needed here.
+ */
+export function supabaseReturnUrl(
+  isNative: boolean,
+  appOrigin: string,
+  params: { nonce?: string; error?: string },
+): string {
+  const q = new URLSearchParams();
+  if (params.nonce) q.set('nonce', params.nonce);
+  if (params.error) q.set('error', params.error);
+  if (isNative) return `${SUPABASE_NATIVE_REDIRECT}?${q.toString()}`;
+  // The web path keeps its existing param names (`sbconnect`/`sberror`) — unchanged so nothing about
+  // the working web flow moves.
+  const webQuery = new URLSearchParams();
+  if (params.nonce) webQuery.set('sbconnect', params.nonce);
+  if (params.error) webQuery.set('sberror', params.error);
+  return `${appOrigin.replace(/\/$/, '')}/?${webQuery.toString()}`;
+}
+
+/**
  * A user-facing message for a failed connect, in NavBharatAI's voice.
  *
  * WHITE-LABEL LAW: the user must never meet a raw provider error. But Supabase is the USER'S OWN

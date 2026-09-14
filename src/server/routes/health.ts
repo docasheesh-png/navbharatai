@@ -10,6 +10,7 @@
 
 import type { Express, Request, Response } from 'express';
 import { firestoreBackup } from '../lib/FirestoreBackup';
+import { noteAppOpen } from '../lib/ownAudience';
 import { doraMetrics } from '../lib/DoraMetrics';
 import { serverStats } from '../lib/serverStats';
 import { buildHealthReport, renderStatusPageHtml, type HealthCheck } from '../lib/HealthReport';
@@ -176,12 +177,34 @@ export function registerHealthRoutes(app: Express): void {
   //
   // UNSET ⇒ the route answers with a null versionCode, and the client's decideUpdate() treats an
   // unknown as "no update". A misconfiguration therefore shows NOTHING, never a false prompt.
-  app.get('/api/app-version', (_req: Request, res: Response) => {
+  //
+  // 🔢 IT IS ALSO WHERE AN APP OPEN IS COUNTED (admin 2026-09-14: *"hamara app kitne mobiles me install
+  // hai?"*). `UpdateBanner` is mounted at the app's root and returns early on web, so this route is hit
+  // exactly once per NATIVE launch and nowhere else — the cleanest per-open signal the server has.
+  //
+  // ⚠️ AN OPEN IS NOT AN INSTALL, and the admin panel says so. Play Console holds installs; a device
+  // that installs and never opens is invisible here, and an install we cannot see is not one we may
+  // claim. The caller must DECLARE its platform: anyone can curl this route, so counting every request
+  // would count scripts as phones.
+  app.get('/api/app-version', (req: Request, res: Response) => {
     const num = (v: string | undefined): number | null => {
       const n = Number.parseInt(String(v ?? '').trim(), 10);
       return Number.isFinite(n) && n > 0 ? n : null;
     };
-    res.set('Cache-Control', 'public, max-age=300'); // a version number does not need to be fresh to the second
+    const platform = req.headers['x-nbai-platform'];
+    const open = noteAppOpen({
+      platform,
+      path: '/api/app-version',
+      ip: req.ip || '',
+      userAgent: String(req.headers['user-agent'] ?? ''),
+      headers: req.headers as Record<string, unknown>,
+      nowMs: Date.now(),
+    });
+    // 🔴 A COUNTED OPEN MUST NOT BE CACHED, or the second launch inside five minutes is never counted
+    // and the number quietly under-reports. The native answer is four small fields, so one fresh
+    // request per launch costs nothing — and an update notice reaching the user sooner is the right
+    // trade anyway. The WEB response keeps the five-minute cache exactly as before.
+    res.set('Cache-Control', open.counted ? 'no-store' : 'public, max-age=300');
     res.json({
       androidVersionCode: num(process.env.ANDROID_LATEST_VERSION_CODE),
       androidVersionName: (process.env.ANDROID_LATEST_VERSION_NAME || '').trim() || null,

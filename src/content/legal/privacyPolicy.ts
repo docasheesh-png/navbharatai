@@ -223,6 +223,16 @@ We use a small set of cookies and local-storage keys that are **necessary** for 
 
 ---
 
+### 11.1 Counting visits to NavBharatAI itself — no cookie, no script, no profile
+
+So that we can tell whether anyone is actually using NavBharatAI, **our own server counts the pages it serves and the times the mobile app is opened.** This happens on our side, from the request your browser or the app already sends us. It sets **no cookie**, stores **nothing on your device**, downloads **no script**, and does not follow you anywhere.
+
+What one count records: the page path (never the query string), whether the request came from the website or from the mobile app, and a short code derived from your IP address and browser using a secret that **rotates every day** — so you are counted once a day, the code cannot be turned back into you, and today's code cannot be matched to yesterday's. That daily rotation is why we can tell you how many people visited **today** and can never produce an all-time list of people: the ability to recognise you tomorrow is deliberately not kept.
+
+Requests that identify themselves as bots are not counted, and browsers that send **Do Not Track** or Global Privacy Control are not counted at all. These counts are seen only by NavBharatAI's own administrators, never shared, and never joined to your account, your chats, your files or your apps. Counting how many people came is not the same as knowing who they were, and we do not do the second.
+
+---
+
 ## 12. Apps YOU build, and their users
 
 When you build an app with NavBharatAI and share or deploy it, **you** are responsible to the people who use it. Their data lives in the database and services **you** connect (your own Supabase/Firebase/other account — NavBharatAI deliberately provisions user apps on the builder's own accounts, not ours). If your app collects personal data, you need your own privacy policy for it — you can generate a starting draft with NavBharatAI, and the same review advice applies: have it checked before you rely on it.

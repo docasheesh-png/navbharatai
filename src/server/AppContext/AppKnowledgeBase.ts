@@ -2865,6 +2865,24 @@ Backend: GET /api/admin/monitor (one composed call) over the 5-minute time-serie
     keywords: ['2fa', 'mfa', 'two-factor', 'totp', 'authenticator', 'google authenticator', 'authy', 'otp', 'admin security', 'second factor', 'do factor', 'suraksha', 'login security'],
   },
   {
+    id: 'admin-audience',
+    name: 'Who came to NavBharatAI (website visits + app opens, admin only)',
+    path: 'Admin Dashboard → Monitor tab → "Who came to NavBharatAI" (admin only)',
+    description: `How many people are actually using NavBharatAI — measured by NavBharatAI's own server, not by anyone else's script:
+• WEBSITE (navbharatai.com): page views today, over the last 30 days, and since counting began, plus how many separate people visited each day
+• APP: how many times the mobile app was OPENED — today, over the last 30 days, and since counting began
+• It sets no cookie, downloads no tracking script, and stores nothing on the visitor's device; the visitor code is derived from IP + browser with a secret that rotates every day
+• Requests that identify themselves as bots are not counted, and browsers sending Do Not Track are not counted at all
+• A number that could not be read shows as "Not available", never as 0 — so "nobody came" and "we could not look" can never be confused
+WHAT IT DELIBERATELY CANNOT TELL YOU, and says so on the card:
+• Play Store INSTALLS — Google Play holds that number. This counts devices that opened the app and reached our server; someone who installs and never opens is not here
+• An ALL-TIME list of people — the visitor code rotates daily on purpose, so the same person is not recognisable tomorrow. All-time VISITS is a real running total; all-time PEOPLE cannot exist without keeping a permanent identifier, which is exactly what the rotation refuses
+• WHO an anonymous visitor was — only people who signed in can be named, and they are listed from their own accounts in the Users tab, never from this counter`,
+    howToUse: 'Admin login required. Open the Admin Dashboard → Monitor tab and scroll to "Who came to NavBharatAI". For named people who signed in, use the Users tab instead.',
+    relatedFeatures: ['admin-monitor', 'admin-metrics', 'admin-page-copy'],
+    keywords: ['visitors', 'traffic', 'how many users', 'website visits', 'app opens', 'installs', 'downloads', 'analytics', 'kitne user aaye', 'kitne log aaye', 'kaun aaya', 'website par kitne', 'app kitne mobile', 'install kitne', 'daily active', 'today visitors'],
+  },
+  {
     id: 'admin-page-copy',
     name: 'Floating "Copy this page" button (admin only)',
     path: 'Admin Dashboard → any tab → the round copy button floating over the page (admin only)',

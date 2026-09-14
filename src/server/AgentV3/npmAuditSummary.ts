@@ -104,12 +104,35 @@ export function looksLikeDependencyInstall(command: string | undefined | null): 
  * contract — it is the safe half of npm's advice, and the reason `--force` is deliberately not
  * suggested here is that it applies breaking major upgrades that can take a working app down.
  */
-export function npmAuditNote(s: NpmAuditSummary | null): string | null {
+export function npmAuditNote(
+  s: NpmAuditSummary | null,
+  opts?: {
+    /**
+     * Did THIS build already run the compatible fix? (`AGENTV3_AUDIT_FIX=on`, which is set in
+     * production.) When it did, the advice below would be telling the user to do the thing we just
+     * did — see the root cause in this function's own comment.
+     */
+    compatibleFixAlreadyRun?: boolean;
+  },
+): string | null {
   if (!s || s.total <= 0) return null;
   const parts = LEVELS.filter((l) => s[l] > 0).map((l) => `${s[l]} ${l}`);
   const serious = s.critical + s.high;
   const head = `${s.total} known ${s.total === 1 ? 'vulnerability' : 'vulnerabilities'} in this app's dependencies (${parts.join(', ')}).`;
-  const action = ' Running `npm audit fix` applies the compatible fixes; it does not upgrade across a major version, so it will not change how the app behaves.';
+  // 🔴 THE ADVICE USED TO BE UNCONDITIONAL, AND IN PRODUCTION IT WAS USUALLY WRONG (autopsy
+  // `1ef27cd7`, 2026-09-14). `AGENTV3_AUDIT_FIX=on` is set in Cloud Run, so a build RUNS
+  // `npm audit fix` itself. In that report it ran, exited 1, and npm's own output said the remaining
+  // four need `npm audit fix --force` — a breaking major upgrade. `looksLikeDependencyInstall`
+  // matches `audit`, so this very note was then RE-PARSED from that post-fix output and still told
+  // the user to run the command that had just been run to no effect.
+  //
+  // 🔒 `--force` IS STILL NOT SUGGESTED, and that is not timidity: it applies breaking major upgrades
+  // and is a way to take a working app down while claiming to secure it. What changes is that we stop
+  // pretending an option remains when the safe one is spent — the honest line names the real situation
+  // and leaves the judgement with the person who owns the app.
+  const action = opts?.compatibleFixAlreadyRun
+    ? ' The compatible fixes were already applied automatically during this build, so what remains needs a major-version upgrade — that can change how the app behaves, so it is left for you to decide.'
+    : ' Running `npm audit fix` applies the compatible fixes; it does not upgrade across a major version, so it will not change how the app behaves.';
   return serious > 0
     ? `${head} ${serious} of ${serious === 1 ? 'them is' : 'them are'} high or critical.${action}`
     : `${head}${action}`;

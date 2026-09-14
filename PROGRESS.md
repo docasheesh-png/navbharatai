@@ -54540,3 +54540,55 @@ test:bundle` within budget (had to add the `supports-[height:100dvh]` companion 
 `npm run boot:check` PASS. Checked open PRs first (#2927, #2926, #2900) — #2926/#2927 also touch
 `admin.ts`/`AdminDashboard.tsx` but neither mentions APK/mobileShip/AdminApkReportStore, so no duplicate
 work; a mechanical merge conflict on those two shared files is possible and expected, not a redundancy.
+
+---
+
+## 2026-09-14 — The admin's four Monitor alerts: two of them contradicted each other, and the louder one sent him to the wrong component
+
+Admin screenshot, 14/9/2026 2:22–2:45 PM. Four notifications, three of them from the same ten builds.
+
+**The contradiction, provable from the two numbers on his own screen:**
+
+```
+🔴 2:22:20  Build failure rate is 60.0% (over 10%). Investigate the engine/providers.
+🟡 2:22:21  Only 50.0% of builds reached a preview (target 80%). Many apps generated but not runnable.
+```
+
+Ten builds ⇒ 6 failed, 4 succeeded, and **5 reached a preview**. Both figures come from the same
+`MetricsSnapshot`, and `previewAllowed` is set from `buildObs.previewRendered` — the platform **watched
+that app render in a real browser**. So **at least one of the six "failures" was an app we had ourselves
+seen working**, and the red alert's advice pointed at the single component the evidence exonerates: the
+providers produced a running app.
+
+🔴 **This is the fifth sighting of one class** — `697b38ee`, `fd021c64`, `1ef27cd7`, `d11ad529`, and now
+the dashboard built on top of them: **a working app carrying a failing verdict.** The verdict fixes live
+in the build route (#2913 merged 04:19 UTC; #2929 / #2931 open, and those two are themselves duplicates
+of each other). This entry is the OTHER end of it — the number the admin reads, which had no idea the
+fact contradicting it was sitting in the same object.
+
+**Fixed:** `rendersCountedAsFailures()` in `metricsAlerts.ts`, and the failure-rate alert now chooses its
+advice from the evidence instead of asserting it in advance:
+
+> *"Build failure rate is 60.0% (over 10%). But at least 1 of those build(s) produced an app that opened
+> in a browser and RENDERED — so the engine is making working apps. Start at the release gate and the
+> build verdict, not provider latency."*
+
+⚠️ **Deliberately NOT called "false failures", and the severity is unchanged.** A build can render and
+still carry a genuine blocker, so this is not proof the verdict was wrong; what it proves is narrower and
+sufficient — those builds produced an app that runs, so provider latency is not where to start. And it
+stays CRITICAL, because telling a user their working app is broken is not the smaller problem.
+When nothing contradicts the failure count the old wording stands, untouched. Test-locked in
+`tests/alertNamesTheRightSuspect.test.ts` (9 tests) against the admin's exact numbers.
+
+### The other two alerts — what they are, and what is NOT being changed
+
+- 🟡 **"Builds averaging 11.0 min across 10 builds, over the 10-minute mark."** Real, and consistent with
+  autopsy `d11ad529` (12m02s for a text-to-image app). ⚠️ **The 10-minute threshold is still the open
+  question `metricsAlerts.ts` already names**: nobody has measured this engine's real build-duration
+  distribution, so whether 11 minutes is abnormal or ordinary is unknown. Guessing a new threshold would
+  replace a noisy alert with a quiet one that might be wrong. **Not touched.** The honest way to settle it
+  is the distribution, not an opinion.
+- 🟡 **"Hosting channels filling up: 35 of about 50 in use, 15 left. 29 can be reclaimed."** Real,
+  accurate and purely an admin action — Admin → Overview → Publish Capacity. No code change; the ceiling
+  itself already has its plan in ROADMAP §10.3 (serve published apps from the bucket), gated on the three
+  `PUBLISHED_APPS_*` keys in the order that entry records.

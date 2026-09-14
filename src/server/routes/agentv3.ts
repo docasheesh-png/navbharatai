@@ -2,7 +2,7 @@ import type { Express, Request, Response } from 'express';
 import { copyName, copyStatus } from '../AgentV3/duplicateApp';
 import { buildRateLimiter, rateLimiter, workspaceRateLimiter, workspacePollRateLimiter, deployOpsRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
 import express from 'express';
-import { HIT_PATH, parseHit, requestOptsOut, siteAnalyticsEnabled } from '../lib/siteAnalytics';
+import { HIT_PATH, parseHit, parseBytesReport, requestOptsOut, siteAnalyticsEnabled } from '../lib/siteAnalytics';
 import { siteAnalyticsStore } from '../lib/siteAnalyticsStore';
 import { siteIdForWorkspace } from '../lib/firebaseCustomDomain';
 import { validateSiteConfig, DEFAULT_SITE_CONFIG, MAX_REDIRECTS } from '../AgentV3/siteConfig';
@@ -7599,14 +7599,18 @@ async function noteBuildOutcome(
     hitCors(res);
     res.status(204).end();
     if (!siteAnalyticsEnabled() || requestOptsOut(req.headers as Record<string, unknown>)) return;
+    const ip = req.ip || '';
+    const userAgent = String(req.headers['user-agent'] || '');
     const hit = parseHit(req.body);
-    if (!hit) return;
-    siteAnalyticsStore.record({
-      ...hit,
-      ip: req.ip || '',
-      userAgent: String(req.headers['user-agent'] || ''),
-      nowMs: Date.now(),
-    });
+    if (hit) {
+      siteAnalyticsStore.record({ ...hit, ip, userAgent, nowMs: Date.now() });
+      return;
+    }
+    // The SECOND beacon: how many bytes this app actually served, as the delivering browser measured
+    // it. The two shapes are disjoint (`parseBytesReport` refuses anything carrying a path), so one
+    // report can never be counted as both a page view and an egress total.
+    const bytes = parseBytesReport(req.body);
+    if (bytes) siteAnalyticsStore.recordBytes({ ...bytes, ip, userAgent, nowMs: Date.now() });
   });
 
   /**

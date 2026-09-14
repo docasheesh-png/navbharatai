@@ -43,6 +43,20 @@ export const APP_ID_RE = /^nbai-[a-f0-9]{20}$/;
 export const MAX_PATH_CHARS = 120;
 /** Distinct paths / referrers tracked per shard document per day; the rest fold into `_other`. */
 export const MAX_KEYS_PER_SHARD = 200;
+
+/**
+ * THE CEILING ON ONE BYTES REPORT — and why an absurd one is DROPPED rather than clamped.
+ *
+ * The figure is reported by the visitor's browser, so a hostile caller can send any number they like.
+ * Clamping a nonsense value to the ceiling would keep a fabricated number and merely make it a
+ * smaller fabrication; dropping it keeps only what is plausible. Under-counting is the safe side and
+ * the side `hostingUsage.ts` already takes in writing: we under-measure rather than over-measure,
+ * because the billing law permits absorbing our own cost and never permits charging for something we
+ * did not observe.
+ *
+ * 256 MB is far above any real page load — the source of a whole hosted app is capped at 40 MB.
+ */
+export const MAX_BYTES_PER_REPORT = 256 * 1024 * 1024;
 /** How far back the summary looks. 30 days keeps a read at 30 × shards documents, which is bounded. */
 export const MAX_SUMMARY_DAYS = 30;
 
@@ -54,6 +68,7 @@ export const MAX_SUMMARY_DAYS = 30;
 export const POLICY_PHRASES = [
   'the page path',
   'the referring site',
+  'how many bytes',
   'rotates daily',
   'Do Not Track',
 ] as const;
@@ -87,9 +102,16 @@ export function beaconHtml(appId: string, origin: string): string {
   return `<script ${SITE_ANALYTICS_MARKER}="beacon">(function(){try{
 var n=navigator;if(n.doNotTrack=="1"||window.doNotTrack=="1"||n.globalPrivacyControl===true)return;
 var r="";try{if(document.referrer){var h=new URL(document.referrer).hostname;if(h&&h!==location.hostname)r=h;}}catch(e){}
-var b=JSON.stringify({a:${JSON.stringify(appId)},p:location.pathname,r:r});
-if(n.sendBeacon){n.sendBeacon(${JSON.stringify(url)},new Blob([b],{type:"text/plain"}));}
-else{fetch(${JSON.stringify(url)},{method:"POST",body:b,headers:{"Content-Type":"text/plain"},keepalive:true,mode:"no-cors"}).catch(function(){});}
+var U=${JSON.stringify(url)},A=${JSON.stringify(appId)};
+function S(b){if(n.sendBeacon){n.sendBeacon(U,new Blob([b],{type:"text/plain"}));}
+else{fetch(U,{method:"POST",body:b,headers:{"Content-Type":"text/plain"},keepalive:true,mode:"no-cors"}).catch(function(){});}}
+S(JSON.stringify({a:A,p:location.pathname,r:r}));
+var sent=0;function T(){if(sent)return;sent=1;var t=0;try{
+var e=performance.getEntriesByType("resource");for(var i=0;i<e.length;i++)t+=e[i].transferSize||0;
+var g=performance.getEntriesByType("navigation");if(g&&g[0])t+=g[0].transferSize||0;
+}catch(x){return}if(t>0)S(JSON.stringify({a:A,b:t}));}
+addEventListener("pagehide",T);
+document.addEventListener("visibilitychange",function(){if(document.visibilityState=="hidden")T();});
 }catch(e){}})();</script>`;
 }
 
@@ -156,6 +178,45 @@ export function parseHit(raw: unknown): ParsedHit | null {
   if (!path) return null;
   const ref = normalizeReferrerHost(r);
   return { appId: a, path, ref };
+}
+
+/**
+ * HOW MANY BYTES THIS APP ACTUALLY SERVED ONE VISITOR — a second, separate report from the beacon.
+ *
+ * 🔑 WHY THE BROWSER IS THE METER, AND WHY THAT IS A MEASUREMENT RATHER THAN A GUESS. There is no
+ * server-side figure to read: a published app is served by Firebase Hosting (or the bucket), and
+ * Google's Hosting meters are per SITE — every published app shares one site and differs only by
+ * channel, so nothing on our side can attribute a byte to an app. `PerformanceResourceTiming` can:
+ * it is the delivering browser's own count of what it actually transferred.
+ *
+ * Three properties of `transferSize` that look like bugs and are exactly right for OUR bill:
+ *   • a CACHE HIT reports ~0 — correct, we served no bytes;
+ *   • a CROSS-ORIGIN asset without `Timing-Allow-Origin` reports 0 — correct, somebody else's CDN
+ *     served it and it is not our egress;
+ *   • it counts the compressed bytes on the wire, not the decoded size — which is what we are billed for.
+ *
+ * 🔴 TWO GAPS THAT MAKE THIS A FLOOR, NOT A BILL, and they are the reason nothing charges for it yet:
+ *   1. A caller that runs no JavaScript — a bot, a scraper, `curl` — costs us real egress and is
+ *      invisible here. That is not a small gap for a public site.
+ *   2. An owner who strips the beacon from their own published HTML reports nothing at all.
+ * Both under-count, so neither can ever over-charge anyone. Closing them needs a meter in the serving
+ * path itself (the Cloudflare Worker, or a per-host log-based metric) — recorded as an open root
+ * cause rather than papered over with an estimate.
+ */
+export function parseBytesReport(raw: unknown): { appId: string; bytes: number } | null {
+  if (typeof raw !== 'string' || raw.length === 0 || raw.length > 2_000) return null;
+  let body: unknown;
+  try { body = JSON.parse(raw); } catch { return null; }
+  if (!body || typeof body !== 'object') return null;
+  const { a, b, p } = body as { a?: unknown; b?: unknown; p?: unknown };
+  // A payload carrying a path is a HIT, not a bytes report. Keeping the two shapes disjoint is what
+  // stops one beacon being counted as both a view and a byte total by a future edit.
+  if (p !== undefined) return null;
+  if (typeof a !== 'string' || !APP_ID_RE.test(a)) return null;
+  const bytes = typeof b === 'number' ? b : Number(b);
+  if (!Number.isFinite(bytes) || !Number.isInteger(bytes)) return null;
+  if (bytes <= 0 || bytes > MAX_BYTES_PER_REPORT) return null;
+  return { appId: a, bytes };
 }
 
 /** `/x?y#z` → `/x`; missing/odd → '' (the caller refuses). Always `/`-prefixed and bounded. */
@@ -250,6 +311,8 @@ export interface ShardDoc {
   appId: string;
   day: string;
   views: number;
+  /** Bytes this app served on this day, as the delivering browsers measured it. */
+  bytes?: number;
   /** encoded path → views */
   paths?: Record<string, number>;
   /** encoded referrer host → views ('' direct visits are not stored here) */
@@ -258,7 +321,7 @@ export interface ShardDoc {
   uniq?: Record<string, boolean>;
 }
 
-export interface DayPoint { day: string; views: number; uniques: number }
+export interface DayPoint { day: string; views: number; uniques: number; bytes: number }
 
 export type SiteAnalyticsSummary =
   | {
@@ -267,6 +330,8 @@ export type SiteAnalyticsSummary =
       days: DayPoint[];
       totalViews: number;
       totalUniques: number;
+      /** Bytes served across the window. See `parseBytesReport` — a floor, never an over-count. */
+      totalBytes: number;
       todayViews: number;
       topPaths: Array<{ path: string; views: number }>;
       topReferrers: Array<{ host: string; views: number }>;
@@ -295,7 +360,7 @@ export function summarize(
 ): Extract<SiteAnalyticsSummary, { available: true }> {
   const window = dayWindow(opts.todayMs, opts.days);
   const inWindow = new Set(window);
-  const byDay = new Map<string, DayPoint>(window.map((d) => [d, { day: d, views: 0, uniques: 0 }]));
+  const byDay = new Map<string, DayPoint>(window.map((d) => [d, { day: d, views: 0, uniques: 0, bytes: 0 }]));
   const paths = new Map<string, number>();
   const refs = new Map<string, number>();
 
@@ -304,6 +369,7 @@ export function summarize(
     const point = byDay.get(d.day)!;
     point.views += Math.max(0, Number(d.views) || 0);
     point.uniques += d.uniq ? Object.keys(d.uniq).length : 0;
+    point.bytes += Math.max(0, Number(d.bytes) || 0);
     for (const [k, v] of Object.entries(d.paths ?? {})) paths.set(k, (paths.get(k) ?? 0) + (Number(v) || 0));
     for (const [k, v] of Object.entries(d.refs ?? {})) refs.set(k, (refs.get(k) ?? 0) + (Number(v) || 0));
   }
@@ -319,6 +385,7 @@ export function summarize(
     days,
     totalViews: days.reduce((s, p) => s + p.views, 0),
     totalUniques: days.reduce((s, p) => s + p.uniques, 0),
+    totalBytes: days.reduce((s, p) => s + p.bytes, 0),
     todayViews: byDay.get(today)?.views ?? 0,
     topPaths: top(paths).map(([k, views]) => ({ path: k === OTHER_KEY ? OTHER_KEY : decodeFieldKey(k), views })),
     topReferrers: top(refs).map(([k, views]) => ({ host: k === OTHER_KEY ? OTHER_KEY : decodeFieldKey(k), views })),

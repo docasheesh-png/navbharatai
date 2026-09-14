@@ -1,9 +1,13 @@
 /**
  * Plans card in the wallet (admin 2026-08-06: "wallet me sara hisab hona chahiye — hosting plan,
  * db plan, coding pay and use"). ONE card, three honest lines:
- *   • Hosting — TWO tiers since 2026-09-10 ("do tier banao"): Starter ₹149 and Growth ₹499, each
- *     removing the "Made with NavBharatAI" badge and unlocking the user's own domain. Bought from
- *     the SAME wallet balance; renewal too.
+ *   • Hosting — TWO tiers since 2026-09-10 ("do tier banao"), RE-PRICED 2026-09-13 with the move to
+ *     Cloud Run: Starter ₹299 and Growth ₹599 (they were ₹149 / ₹499 for STATIC hosting; the price
+ *     now buys 10 and 30 apps that can run a REAL SERVER). Each removes the "Made with NavBharatAI"
+ *     badge and unlocks the user's own domain. Bought from the SAME wallet balance; renewal too.
+ *     ⚠️ NEITHER BUNDLES WALLET CREDIT any more (admin: "no free credit") — Growth's ₹150/month is
+ *     gone, and `bundledCreditInr` is 0 on both. Every figure this card RENDERS comes from
+ *     `HOSTING_TIERS`, so it followed the re-price on its own; only this comment had to be told.
  *   • Database — Free, always (runs on the user's own account — the standing rule).
  *   • Coding — pay-per-use from the wallet (already live; shown here so the full account story
  *     reads in one place).

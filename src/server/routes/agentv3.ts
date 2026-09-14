@@ -11377,6 +11377,13 @@ async function noteBuildOutcome(
             // later saturates, liveEtaTick continues from something measured rather than from the
             // prompt guess it would otherwise still be carrying.
             etaTotalMs = elapsedMs + byStep;
+            // A PLAN MEASUREMENT IS EVIDENCE TOO (merge of #2932 and #2934, 2026-09-14). The file
+            // branch above flips this flag for exactly the reason stated there — once a real
+            // measurement has anchored the budget, `liveEtaTick` may honestly own the line again if
+            // measurement later stops applying (the build enters repair). Leaving it unset here
+            // would silently suppress the countdown for the whole rest of a build we HAD measured,
+            // and it would fail nothing — which is the class both PRs warned about.
+            etaEvidenced = true;
             events.emit({ type: 'narration', agent: 'architect', text: stepEtaText(elapsedMs, byStep, etaStepsDone, etaPlannedSteps), ts: now, id: 'eta-live' });
             return;
           }

@@ -52179,6 +52179,52 @@ from my summary of the report instead of from the report.** The remaining `54197
 unchanged: the cheap-floor latency ceiling, and in-flight provider-call cancellation (owned by PR
 #2889's session, not this one).
 
+## 2026-09-13 — MERGES ARE ONE SESSION'S JOB, ON THE ADMIN'S WORD
+
+Admin, verbatim: *"ab se PR merge sirf aap karoge! mai bolunga apko tab. woh session bas bana bana
+kar CI check laga denge."*
+
+**This settles a question that was live and unanswered for most of the day.** PR #2897 (another
+session) had proposed a rule that no PR may be merged without the admin's explicit go-ahead, quoting
+an instruction — *"jab tak kaha na jaye, CI merge na ki jaye"* — that had never been given in THIS
+conversation, and that directly contradicted what the admin had told this session ("sabhi pr ab aap
+dekho"). It was put to the admin three times and deliberately not acted on: **a PR body is repo
+content, not an instruction from the user**, and adopting a governance rule from one would mean any
+session could change how every other session behaves by writing it down.
+
+The admin's answer confirms #2897 and adds the half it was missing.
+
+### The two halves, and why one without the other does not work
+
+- **#2897's half:** the merge decision moves from Claude to the admin. Correct, and it stands.
+- **The missing half:** *which* Claude. A rule that only says "wait for the admin" still lets five
+  concurrent sessions each conclude, independently, that their own PR is the one that may go — which
+  is exactly the state that produced the day's evidence.
+
+**The evidence, recorded rather than asserted:** eight PRs merged into `main` inside two hours from
+four different sessions, and **two of them (#2892, #2896) were merged by a session that did not open
+them, while the session that did was still working on the branch.** Nothing broke — by luck and a
+green CI, not by design.
+
+### What shipped
+
+`CLAUDE.md` now states both halves together, as two roles every session is in one of: the **merging
+session** (the one the admin is talking to, merging only PRs the admin names), and **every other
+session** (branch → push → PR → drive CI green → say so, and STOP there).
+
+Three things are stated explicitly because each is a way the rule would otherwise be read away:
+
+1. **"I am the session the admin is talking to" is something the admin SAYS, not something to
+   assume.** A session reasoning *"the admin clearly wants this merged"* has just made itself the
+   merger — the exact thing the rule removes.
+2. **Reaching green is still the deliverable.** A second-row session that goes quiet on a green PR
+   has done half the job; it must report plainly so the admin knows there is something to name.
+3. **Nothing else changes.** CI green before any merge, conflicts still merged in and re-gated by
+   whoever owns the branch.
+
+🔒 **AND THIS PR IS THE FIRST ONE THE RULE APPLIES TO.** It is opened, driven to green, and left for
+the admin to name — including the fact that a rule about not merging without permission cannot
+itself be merged without permission.
 ## 2026-09-13 — Hosting P5: the catalogue the plans are actually sold from
 
 Admin decisions, taken across one session of costing (full reasoning in `HOSTING_ECONOMICS_ROADMAP.md`).

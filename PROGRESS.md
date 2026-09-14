@@ -52904,6 +52904,151 @@ laptop and replayed on a phone, and a rotation — plus the narrow-screen case w
 cross and the **left** edge must win, because that is the one edge a finger cannot drag it back from.
 Bite-checked by removing the secret's opt-out: the wiring test fails. `AppKnowledgeBase.ts` gained an
 `admin-page-copy` entry.
+## 2026-09-14 — AUTOPSY 697b38ee: a working app was reported as a failed build (three root causes, one open)
+
+**Report.** Prompt: *"Continue from where you left off and finish/fix the build so the app works
+end-to-end."* Existing 21-file TradingView-style React+Vite app. 13.1 min · `ok:false` · 171 items
+(3 errors, 24 warnings, 7 auto-resolved, 14 workarounds, 6 unresolved) · 21 provider failures (KIMI 11
+rate-limit, GLM 9 rate-limit + 1 timeout) · free tier, weak, billed ₹0.
+
+**What the engine actually achieved, from its own transcript:** `tsc --noEmit` exit 0 (twice, +64.5s and
++520.7s) · `npm run build` exit 0 · dev server up · preview published · opened in a real browser and
+rendered · watchlist click updates the chart · the project's own Playwright suite installed and **passed**
+(exit 0, +636.9s) · `PROD_BUILD_OK` · `PREVIEW_SNAPSHOT_SAVED` · `GREEN_GUARD_SAVE` · release gate
+*"It runs and renders"*.
+
+**What the user was told:** *"The build produced no files. Please try again — you have not been charged."*
+and *"NavBharatAI's engine is running slowly right now and your build could not finish."*
+
+### Ledger
+
+- ✅ **Self-healed (7):** `@playwright/test` added to package.json automatically (+2.1s) · the agent
+  installed the missing chromium itself and re-ran the suite green · recovered from a `browser_action`
+  that landed on `about:blank` · the weak checkpoint nudged a stalled loop (+345.4s) · the fallback chain
+  absorbed all 21 provider failures · `UPSELL_SUPPRESSED` correctly withheld the credits pitch
+  (`laneFailure.ts`, another session's fix, working exactly as designed).
+- 🔀 **Workarounds (14):** every rate-limit fallback — the build was delivered by VERTEX (8) and GEMINI (1)
+  out of 32 deliveries, i.e. the free ladder's last rungs, because the cheap floor could not answer ·
+  `npm audit fix` exit 1, so 2 vulnerabilities (1 high) stayed · the second attempt re-did `npm install`,
+  `tsc`, dev server, preview and screenshot because nothing told it the first attempt had already succeeded.
+- ⏭️ **Skipped (4):** `DESIGN_CONSISTENCY 50/100 (D)` — the design gate is `on`, but its repair is gated on
+  `resultOk`, which the false failure had already set to false, so a D-grade app shipped with no repair and
+  no note saying why · `ACCESSIBILITY 84/100 (B)`, 2 unlabelled form fields · `DEPENDENCY_VULNERABILITIES`
+  (1 high) · `JOURNEY_NOT_DERIVED` says *"no form … nothing here takes user input"* while `ACCESSIBILITY`
+  found 2 form fields in the same 15 files, recorded 0.0s apart; nothing reconciled them.
+- ❌ **Still broken (5) — all honesty defects, all in the last 4 seconds of the run:** the false failure
+  verdict itself · `TEST_SUITE_UNVERIFIED` claiming the Playwright binaries are not installed, 167s after
+  the install and 145s after the suite passed · `RELEASE_GATE` saying *"the typecheck did not run"* (it ran
+  twice, clean) and *"the app has no test suite that could be run here"* · `RUNTIME_UNCHECKED` after three
+  successful `console_errors` reads · `CLAIM_UNSUPPORTED` (*"not one file was created or changed"*) 1.9s
+  before `Incremental: 2 changed, 2 new`.
+- 🥵 **Struggle (5):** `EMPTY_BUILD_RETRY` at +371.7s re-ran the entire build — **6.2 finished minutes
+  became 13.1** · 130 seconds of dead silence after *"rebuilding with a stronger model"* (+371.7s → +501.6s),
+  heartbeats only · two more silences of 53s and 68s during the rate-limit storm · ETA said ~3 min
+  (confidence 0.4) against 13.1 actual, and at +239.8s promised "about 3 min more" before nine more minutes ·
+  sandbox 45.7 min up, 2.0 min of our operations, **43.6 min idle (96%)**, started by `files` — roughly ₹11
+  of E2B time on a ₹0 build.
+
+### Root causes and fixes
+
+**RC-1 — the retry: a boolean derived from another subsystem's verdict.** `userAskedToBuildAnApp` was
+`intent === 'new_build'`, and the keyword ladder matched the **noun** "build" in *"fix the build"* at HIGH
+confidence in Step 1, long before Step 4.5 would have seen `continue`. That cancelled the 2026-08-10
+narrowing written for **this byte-identical sentence** — it is quoted verbatim in `shouldRetryEmptyBuild`'s
+own doc comment as the Shiv Medical Store case — six days after it shipped, via the 2026-08-16 widening for
+build 5b4f9b63. **Both test suites stayed green because each asserted the other's FLAG and neither the
+SENTENCE.** Fix: `userAskedForAnAppToBeBuilt(message)` in `IntentClassifier.ts` asks the question directly —
+a continuation or problem phrase is never a build request, and a creation verb after a determiner ("the
+build", "this design", "the install") is a noun, not an order. `classifyIntent` is deliberately untouched:
+routing was correct, and the blast radius stays on the one question. This also silences the report's
+`CLAIM_UNSUPPORTED`, which reads the same flag.
+
+**RC-2 — the verdict: delivery was measured in files written.** A turn whose correct output is a VERDICT
+rather than a diff could not succeed by construction. Fix: `verifiedNoChangeSummary()` in `routes/agentv3.ts`,
+checked *before* `emptyBuildFailureSummary` and only on real browser evidence (`previewVerifiedRendered`),
+returns an honest success — *"Nothing needed changing — I checked your app from end to end and it works."*
+A turn that wrote nothing and proved nothing still fails honestly. The turn stays **free** (changing that is
+a pricing decision, not a bug fix) and the ledger now says `verified-no-change turn … not charged` instead
+of `empty build`. The free-tier narration block is gated on `!result.ok` so a success can never carry a
+"could not finish" message underneath it.
+
+**RC-3 — a hand-off that became an override.** `withSandboxBrowsers` pinned `PLAYWRIGHT_BROWSERS_PATH` at
+the pre-baked `/home/user/.e-tools/.browsers`, pointing Playwright **away** from the chromium the agent had
+installed into the default cache 22 seconds earlier — turning a suite that passed into
+`TEST_SUITE_UNVERIFIED`, which then made the release gate deny the suite existed. Fix: the project's own
+cache wins when it holds a `chromium-*`; ours is the fallback, which is the Shiv Medical Store case the
+helper was written for, unchanged. Resolved in-shell (verified in both `sh` and `bash`), so there is no
+extra sandbox round-trip and no window for the answer to go stale. Sibling call site in `ToolDispatcher`
+gets the same fix from the same helper.
+
+**Tests:** `tests/verifiedNoChangeTurn.test.ts` (35) — including build 5b4f9b63 asserted unchanged, so this
+fix cannot regress the one it narrows. `src/server/AgentV3/sandboxBrowsersPath.test.ts` extended.
+
+### 🔴 OPEN ROOT CAUSE — there is no shared EVIDENCE LEDGER (rule 6)
+
+The three fixes above each stop one wrong sentence. **The condition that produced all of them is that the
+agent's shell commands and the platform's gates keep private notions of what has been proven, and the gates
+trust only their own.** Every fact needed to contradict `RELEASE_GATE`, `RUNTIME_UNCHECKED` and
+`TEST_SUITE_UNVERIFIED` was already in the same report as `SANDBOX_CMD` lines with exit codes. Until one
+ledger exists that any actor writes a proven fact into (`typecheck: passed, by agent bash, exit 0, +64.5s`)
+and every verdict reads from, this class returns in a new place. Recorded here as open rather than patched
+per-gate.
+
+### Other items not yet actioned (deliberately, with reasons)
+
+- **The 130-second silence after "rebuilding with a stronger model"** is a genuine UX hole, but the retry
+  it belongs to should now not fire on this prompt shape at all; measure again before building a fix for a
+  path that just got rarer.
+- **The ETA (~3 min vs 13.1)** needs the real distribution of build durations to correct — the same
+  measurement CLAUDE.md already records as missing for the 10-minute slow-build alert threshold. Replacing
+  a wrong estimate with a differently-wrong one is not an improvement.
+- **The sandbox at 96% idle, started by `files`** is a cost item for the `sandbox_starts` instrument that
+  PR D added, not a build defect. It wants a few days of that data read before anything is changed.
+## 2026-09-14 — The weak-tier "this app is complex, upgrade" notice was firing on our own failures too
+
+The admin asked, plainly: whenever a user's build fails, for ANY reason, tell them the free (Weak)
+tier can't build a complex app and to switch to Normal/Strong. Taken literally, that would have been
+a NEW dishonesty — most build failures are not about the tier's capability at all (a provider outage,
+our own mid-build cost-ceiling stop, a sandbox/E2B death). Blaming "your app is too complex" for those
+would contradict the White-Label/honesty rules this file already enforces elsewhere.
+
+**Investigated first, per the fourth absolute rule, and found the message already exists.**
+`weakTierBuildFailedNotice()` (`src/server/AgentV3/weakTierNotice.ts`) is near-word-for-word the exact
+notice the admin described — it was built 2026-08-02. Its own header comment claimed it fires "ONLY
+when a real build attempt failed on the weak tier (never on an infra/sandbox failure, which
+short-circuits earlier)" — but the actual call site in `routes/agentv3.ts` never enforced that: the
+gate was just `!result.ok && noClaudeBuild && expectsArtifacts`. Three non-capability causes could
+reach it: a cost-ceiling stop (`costCeilingFired` — the build hit ITS OWN spend limit, not a
+capability gap), a mid-build sandbox/E2B outage (the empty-build guard's `sandboxUnavailable` check
+only covers the case where ZERO files were produced, so a build that dies after writing some files
+slips past it), and a genuinely degraded provider (`providerFailuresLookDegraded` — the same signal
+the empty-build branch already uses to avoid blaming the tier for our own outage, but not reused here).
+
+**Root-caused rather than literally implementing blanket messaging.** Added `!sandboxUnavailable`,
+`!costCeilingFired`, and `!providerFailuresLookDegraded(buildDiag.providerFailureBreakdown())` to the
+existing gate — reusing state and a function that were already in scope and already exist for exactly
+this purpose elsewhere in the same file. No new imports, no new state, the message text itself
+unchanged, the kill switch (`AGENTV3_WEAK_FAIL_NOTICE=off`) untouched. This makes the notice do what
+its own comment always claimed: fire reliably, and ONLY when the evidence actually points at the
+tier's own capability — never at our spend limit, our infra, or our outage.
+
+Locked with a new regression test, `tests/weakTierFailNotice.test.ts`: asserts the gate's exclusions
+are present and the original capability conditions are untouched (an ADDITION, not a replacement),
+the kill switch line is untouched, and the message text stays White-Label-compliant (no
+provider/model name) and non-empty for every language it claims to support.
+
+Verified against a freshly-rebased `origin/main` (`6c53f4e`) and the full CI-parity gate before
+pushing: `tsc --noEmit` (frontend) clean, `tsc -p tsconfig.server.json --noEmit` (server) clean,
+`node scripts/noUnusedImports.mjs` clean, full `npx vitest run` — 22566 passed, 1 skipped, 0 FAIL
+lines, `npm run build` clean, `npm run test:bundle` within budget, `npm run boot:check` PASS. Checked
+open PRs first (#2915, #2914, #2913, #2912, #2900) — none touch `weakTierBuildFailedNotice`, the
+`costCeilingFired`/`sandboxUnavailable` flags, or this call site; #2914 is nearby (the empty-build
+upsell guard) but edits a different function region with no textual overlap.
+
+Reported to the admin: the literal ask already existed in the code but was unconditional and
+therefore dishonest in three specific cases; fixed the gate instead of adding a second, competing
+mechanism. Per the 2026-09-13 merge-hold rule, the PR is opened and driven to green CI but NOT
+merged without the admin's explicit go-ahead.
 ## 2026-09-14 — `70115adf` follow-up: a verdict from a partial view, and the typed "stop" nobody hears
 
 Two of the three items left open by the `70115adf` autopsy. The third is deliberately NOT built — see
@@ -53070,3 +53215,54 @@ question instead of a roadmap one.
 internal-track boundary, distinguishes it from the Cloud Run `GOOGLE_PLAY_SA_JSON` (different place,
 different purpose, possibly the same JSON), and keeps the correction visible rather than quietly
 rewriting the old claim.
+
+---
+
+## 2026-09-14 — Two sessions fixed the same bug. Mine was dropped, and that is the right outcome
+
+While PR #2914 sat open, **#2917 landed `verifiedNoChangeSummary` on `main`** — a fix for the exact
+defect my first commit (`12f21eed`) addressed: a turn that wrote no files, on a working app, reported
+as a failed empty build and followed by an invitation to pay. Same class, same two files
+(`routes/agentv3.ts`, `tests/pornographyBan.test.ts`), different report (`697b38ee` against my
+`7bc15e40`).
+
+**The conflict is also why the PR had no CI for forty minutes, and my first explanation was wrong.**
+I said it looked like a GitHub incident, citing the workflow's own recorded precedent. It was not —
+other branches were getting runs the whole time. A `pull_request` run is built on the merge ref
+GitHub computes, and a **conflicted PR has no merge ref, so no run is created and nothing anywhere
+says so.** The green/red signal and the conflict signal are the same signal, and I read the silence
+as the wrong one.
+
+### Which fix is better, decided from the code rather than from ownership
+
+| | Mine (`emptyTurnWasLegitimate`) | Theirs (`verifiedNoChangeSummary`, on `main`) |
+|---|---|---|
+| Evidence the app came up | `previewVerifiedRendered` **OR a stored `lastPreviewUrl`** | `previewVerifiedRendered` only |
+| Reads the user's words | yes — a change verb anywhere vetoes it | no |
+| Suppresses the upsell | a fourth named clause in the guard | `!result.ok` — the turn simply succeeded |
+
+**Theirs is stricter where it counts and mine is weaker there.** A stored `lastPreviewUrl` can be
+left over from an earlier turn, so it is not evidence that *this* turn brought the app up — and their
+comment says so in as many words: *"only on real browser evidence — a turn that wrote nothing and
+proved nothing still falls through to the honest failure below."* My PR claimed "the app really came
+up on this turn"; with that `||` the claim was not guaranteed. Their upsell guard is also more
+general than my extra clause: any successful turn is silent, not merely a run-action one.
+
+So `runActionTurn.ts` and its three test files are **deleted**, `emptyBuildFailureSummary` is back to
+its three-argument form, and `routes/agentv3.ts` now differs from `main` by exactly one hunk. Keeping
+both would have left two answers to one question — the drift this repo has paid for repeatedly.
+
+**What survives, because it was genuinely separate:** the claim auditor's two blind spots from the
+same report — `CONSOLE_CLEAN` widened from one phrase to a class (one adjective, "no **runtime**
+errors in the console", defeated it) and a `TYPECHECK_CLEAN` check that did not exist at all, reading
+`gateEvidence.typecheck`, which starts at `'not-run'`. Now in `tests/summaryClaimAudit.test.ts`, with
+the file saying plainly what was dropped from around it and why.
+
+### 🔴 One thing NOT closed, recorded rather than papered over (rule 6)
+
+Their guard requires `previewVerifiedRendered`. I cannot verify from here whether that flag was true
+in build `7bc15e40` — the report showed `PREVIEW_PUBLISHED` and a screenshot, which is why my version
+also accepted `lastPreviewUrl`. **If it was false, that specific build is still reported as a
+failure.** The fix for that is to make the preview verification actually run and record, not to
+accept weaker proof — loosening the evidence rule would re-introduce exactly what their comment
+warns against. Left open here rather than guessed at.

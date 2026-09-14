@@ -53901,3 +53901,95 @@ With the table gone, the `billingLogs` prop and its `/logs` fetch have **no cons
 `usePaymentEngine` still requests it on every wallet load and threads it through `App.tsx` into a prop
 nobody reads. Removing that chain touches three more files for no user-visible benefit, so it is not in
 this change; the leak it carried is closed at the route either way. Worth doing as its own tidy-up.
+
+---
+
+## 2026-09-14 (3) — Long lists: 12 rows and a "Load more", and the half a button cannot fix
+
+Admin asked for two things: **(1)** scan NavBharatAI and the admin panel for every place a whole list
+loads at once, and make the list; **(2)** fix it professionally — 10-12 rows first, then "Load more".
+
+### 1 · The scan
+
+**72 rendered lists with no paging at all, across 36 files.** Every one builds a DOM row for every
+record it holds. Separately, **22 of 22 `getDocs` calls on the server carry no `limit()`** — several
+read whole collections (`user_token_wallets`, `user_profiles`, `promo_codes`, the analytics triple).
+
+Worst offenders by how fast they grow: the admin user table and report list, the whole of the App
+Store (7 lists in one file), the public gallery, every tool's run history, the deploy/commit history,
+the workspace log viewer, the project file tree.
+
+### 2 · The fix — one hook, not seventy-two slices
+
+`src/hooks/usePagedList.ts` + `src/components/common/LoadMore.tsx`. **25 lists** now show 12 rows and
+a button. Doing it by hand 72 times would have been 72 chances to get the same two details wrong — the
+duplication this repo has already paid for twice (`safeRelPath` ×4; a model id in five files):
+
+- **THE RESET.** A filtered or re-sorted list starts at page one. Miss it and an admin who pressed
+  "Load more" five times then searched gets 72 rows of the new result.
+- **THE SHRINK.** When the list gets shorter than what is shown, the count clamps — otherwise 5,000
+  filtered to 3 leaves a button that was never pressed and now cannot be.
+
+The arithmetic is extracted as `pageWindow()` (pure) because both bugs live in it and this repo has no
+`@testing-library`, so a hook-only design would have been untestable.
+
+The button **always says how many are left** — "Load 12 more · Showing 12 of 4,331 users" (Indian digit
+grouping). "Load more" alone is a mystery button: the reader cannot tell if one row follows or four
+thousand. It renders **nothing** when the list is complete.
+
+### 3 · 🔴 The half a button CANNOT fix — `/api/admin/users`
+
+The admin's own example, and the one place client paging would have been a lie. The slowness is in the
+REQUEST: the route looks up Firebase Auth metadata for every user, batched at Firebase's
+100-identifier limit, so **5,000 users is fifty sequential Auth round-trips before the first row can be
+drawn**. Hiding rows afterwards changes nothing anyone can feel.
+
+So the Auth lookup and the payload are now limited to the page being sent, and "Load more" asks the
+SERVER for the next 25.
+
+⚠️ **The Firestore SCAN deliberately stays.** Sort and search run over the whole set in memory because
+Firestore cannot do substring search — limiting the READ would silently reduce "search all users" to
+"search the first page", which is the fix trading one problem for a worse one.
+
+🔒 **OPT-IN, so an old client cannot break.** The Android app is BUNDLED, so a phone can run last
+month's panel against today's server, and that panel does `users.map(...)` on the response. Without
+`?paged=1` the response is the same ARRAY it has always been; the panel reads both shapes.
+
+### ⚠️ Three places deliberately left alone — and this is the useful half
+
+- **A `<select>` picker** (the all-builds user filter). Paging it makes the control WORSE than the
+  problem: a user outside the first twelve becomes unreachable. It is also invalid HTML.
+- **Chat and message threads** (`LiveCollaboration`, `SonicChat`, `BotBuildHelp`). These need "load
+  older" at the TOP, not "load more" at the bottom — a different control, not yet built.
+- **Genuinely bounded lists** — pipeline `steps`, scan `stages`, `availableScopes`, the bot-builder's
+  own nodes. Paging a fixed list of six adds a control and fixes nothing.
+
+### 🐛 Three real bugs my own automation introduced, caught by the gate before they shipped
+
+Recorded because "I applied it mechanically to 26 sites" is exactly where this goes wrong:
+
+1. **A `<div>` inside `<tbody>`** on the promo-codes table — the browser hoists it out and React logs
+   `validateDOMNesting`. Fixed properly: `LoadMore` takes a `colSpan` and renders a real
+   `<tr><td colSpan>` inside a table.
+2. **A declaration inserted INSIDE a multi-line `useState(() => {…})`** in `GitPanel`, splitting the
+   statement.
+3. **A hook declared in the parent for a `.map` that belonged to a CHILD taking the array as a prop**
+   (`PerformanceAnalyzer`) — reverted whole; a small SVG chart is not a list anyone scrolls.
+
+**Tests:** `tests/pagedLists.test.ts` (24 — the arithmetic, the wiring, the server half, and the
+`<select>` that must stay whole) and `src/components/common/LoadMore.render.test.tsx` (7 — real
+markup). `AppKnowledgeBase.ts` updated in the same commit.
+
+### Still open, named rather than left silent
+
+**47 lists remain unpaged.** Most are genuinely bounded (see above), but these grow and are worth a
+later pass: `NotificationBell.items`, `AgentV3Panel.queueItems` / `reportPickerItems`,
+`AppScanPanel.repos` / `proApps` / `notes`, `AICodeReview.issues` / `repos`, `CodeVersioning.points`,
+`SecurityScan.history`, `StoreBuildPanel.artifacts`, `TeamCollaboration.pendingInvites`,
+`CodeMinifier.fileList`, `NavAppStore.detailShots`, `AdminDashboard.expandedHistory`. Each was skipped
+by the applier for a real structural reason (the `.map` is built in a helper, or sits in a `<select>`,
+or the array is a prop) — none is a one-line change, and none is guesswork away from being correct.
+
+**And the server's other 21 unbounded reads are untouched**, on purpose: each one needs its own
+sort/search analysis, exactly like `/api/admin/users` did, and doing them in bulk is how "search all"
+quietly becomes "search page one".

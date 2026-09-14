@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { usePagedList } from '../../hooks/usePagedList';
+import { LoadMore } from '../../components/common/LoadMore';
 import { Activity, RefreshCw, AlertTriangle } from 'lucide-react';
 import { authJsonHeaders as authHeaders } from '../../lib/authHeaders';
 
@@ -35,6 +37,7 @@ function fmtTime(ts: number): string {
 
 export const WorkspaceLogs: React.FC<WorkspaceLogsProps> = ({ workspaceId, userId, email }) => {
   const [lines, setLines] = useState<LogLine[]>([]);
+  const pagedLines = usePagedList(lines);
   const [running, setRunning] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [previewErrors, setPreviewErrors] = useState<Array<{ ts: number; source: string; message: string }>>([]);
@@ -150,12 +153,13 @@ export const WorkspaceLogs: React.FC<WorkspaceLogsProps> = ({ workspaceId, userI
             No build activity recorded yet for this workspace. Start a build in NavBharatAI Pro chat — its live progress will appear here.
           </div>
         )}
-        {lines.map((l, i) => (
+        {pagedLines.visible.map((l, i) => (
           <div key={i} className={`${colorFor(l.kind)} whitespace-pre-wrap break-words`}>
             <span className="text-[#484f58] select-none">{fmtTime(l.ts)} </span>
             {l.text}
           </div>
         ))}
+        <LoadMore list={pagedLines} label="lines" />
         <div ref={endRef} />
       </div>
 

@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { usePagedList } from '../../hooks/usePagedList';
+import { LoadMore } from '../../components/common/LoadMore';
 import { GitBranch, History, RefreshCcw, Search, Loader2, Rocket, Cloud, Terminal, CheckCircle2, AlertCircle, Settings, Key, Globe, Layout, Layers, Play, Server, Cpu, Download, Copy, AlertTriangle, ChevronDown, Sparkles, Clock, Lock } from 'lucide-react';
 import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
@@ -390,6 +392,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
 
   // Deployment Logs state
   const [deployLogs, setDeployLogs] = useState<string[]>([]);
+  const pagedDeployLogs = usePagedList(deployLogs);
   const [deployStatus, setDeployStatus] = useState<'idle' | 'validating' | 'building' | 'deployed' | 'error' | 'unavailable'>('idle');
   const [activeStep, setActiveStep] = useState<number>(0);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
@@ -404,6 +407,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
     } catch {}
     return [];
   });
+  const pagedGitHistory = usePagedList(gitHistory);
 
   interface ErrorDetails {
     provider: string;
@@ -1617,7 +1621,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
 
                 {/* Console Log Screen */}
                 <div className="flex-1 overflow-y-auto font-mono text-[9.5px] text-[#4af626] space-y-1 select-text scrollbar-thin scrollbar-thumb-white/5 pr-1">
-                  {deployLogs.map((log, index) => {
+                  {pagedDeployLogs.visible.map((log, index) => {
                     const isErr = log.includes('❌') || log.includes('FAILED') || log.includes('halted');
                     const isSuccess = log.includes('🎉') || log.includes('✅') || log.includes('SUCCESSFUL');
                     return (
@@ -1756,7 +1760,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                   DevOps Pipeline Deployment History
                 </h5>
                 <div className="space-y-1.5 max-h-[140px] overflow-y-auto no-scrollbar">
-                  {gitHistory.map((item) => {
+                  {pagedGitHistory.visible.map((item) => {
                     const PltIcon = DEPLOY_PLATFORMS.find(p => p.id === item.platform)?.icon || Clock;
                     return (
                       <div 
@@ -2010,6 +2014,8 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                       </span>
                     </button>
                   ))}
+                  <LoadMore list={pagedDeployLogs} label="lines" />
+                  <LoadMore list={pagedGitHistory} label="commits" />
 
                 {fetchedProjects.length === 0 && (
                   <div className="text-center py-6">

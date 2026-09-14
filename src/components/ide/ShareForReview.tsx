@@ -5,6 +5,8 @@
 // Self-contained (own styles + auth) so it needs only `generatedCode`.
 
 import React, { useState } from 'react';
+import { usePagedList } from '../../hooks/usePagedList';
+import { LoadMore } from '../../components/common/LoadMore';
 import { authHeader } from '../../lib/authHeaders';
 
 interface Feedback { rating: 'approve' | 'changes' | 'reject'; comment: string; name: string; timestamp: number }
@@ -29,6 +31,7 @@ export function ShareForReview({ generatedCode }: ShareForReviewProps) {
   const [token, setToken] = useState('');
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState<Feedback[]>([]);
+  const pagedFeedback = usePagedList(feedback);
   const [loadingFb, setLoadingFb] = useState(false);
   const [error, setError] = useState('');
 
@@ -108,7 +111,7 @@ export function ShareForReview({ generatedCode }: ShareForReviewProps) {
           </div>
           {feedback.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 180, overflow: 'auto' }}>
-              {feedback.map((f, i) => (
+              {pagedFeedback.visible.map((f, i) => (
                 <div key={i} style={{ ...card, padding: 8 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: 10, fontWeight: 800, color: RATING_META[f.rating].color }}>{RATING_META[f.rating].label}</span>
@@ -117,6 +120,7 @@ export function ShareForReview({ generatedCode }: ShareForReviewProps) {
                   {f.comment && <div style={{ fontSize: 11, color: 'var(--text-body)', marginTop: 3 }}>{f.comment}</div>}
                 </div>
               ))}
+              <LoadMore list={pagedFeedback} label="notes" />
             </div>
           )}
         </>

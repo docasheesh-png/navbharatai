@@ -9,6 +9,8 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePagedList } from '../../hooks/usePagedList';
+import { LoadMore } from '../../components/common/LoadMore';
 import { Activity, Brain, FileCode, Layers, Plus, RefreshCcw, Send, ShieldCheck, Trash2, TrendingUp, Webhook as WebhookIcon } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { auth } from '../../lib/firebase';
@@ -230,6 +232,7 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
 
   // ── Inline Code Review comments (P-DEV.11) ──
   const [comments, setComments] = useState<any[]>([]);
+  const pagedComments = usePagedList(comments);
   const [rvFile, setRvFile] = useState('');
   const [rvLine, setRvLine] = useState('');
   const [rvBody, setRvBody] = useState('');
@@ -548,7 +551,7 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
           <textarea value={rvBody} onChange={(e) => setRvBody(e.target.value)} placeholder="Comment…" className="w-full h-14 bg-black/40 border border-[#30363d] rounded px-2 py-1 text-[10px] text-[#c9d1d9] resize-y focus:outline-none focus:border-violet-500" />
           <Button size="sm" onClick={addComment} disabled={rvBusy || !rvFile.trim() || !rvBody.trim()} className="uppercase tracking-widest bg-violet-600 hover:bg-violet-700">{rvBusy ? 'Adding…' : 'Add comment'}</Button>
           {comments.length > 0 && (
-            <div className="space-y-1 max-h-52 overflow-auto">{comments.map((c) => (
+            <div className="space-y-1 max-h-52 overflow-auto">{pagedComments.visible.map((c) => (
               <div key={c.id} className={cn('bg-black/30 rounded px-3 py-2 text-[10px] space-y-1', c.resolved && 'opacity-50')}>
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-mono text-violet-300">{c.file}:{c.line}</span>
@@ -559,6 +562,7 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
               </div>
             ))}</div>
           )}
+          <LoadMore list={pagedComments} label="comments" />
         </Card>
       )}
 

@@ -3,6 +3,8 @@
 // Lets a signed-in user create, view (metadata only), and revoke their public API keys. The plaintext
 // key is shown exactly ONCE right after creation (the server never returns it again), with a copy button.
 import { useCallback, useEffect, useState } from 'react';
+import { usePagedList } from '../../hooks/usePagedList';
+import { LoadMore } from '../../components/common/LoadMore';
 import { Key, Trash2, Copy, Check, Plus, AlertTriangle } from 'lucide-react';
 
 interface ApiKeyMeta {
@@ -23,6 +25,7 @@ interface ApiKeysCardProps {
 
 export function ApiKeysCard({ getToken }: ApiKeysCardProps) {
   const [keys, setKeys] = useState<ApiKeyMeta[]>([]);
+  const pagedKeys = usePagedList(keys);
   const [availableScopes, setAvailableScopes] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -152,7 +155,7 @@ export function ApiKeysCard({ getToken }: ApiKeysCardProps) {
         <p className="text-[11px] text-[#484f58]">No API keys yet. Create one above to access the API programmatically.</p>
       ) : (
         <div className="space-y-2">
-          {keys.map(k => (
+          {pagedKeys.visible.map(k => (
             <div key={k.id} className={`flex items-center gap-3 bg-[#0d1117] rounded-xl p-3 border border-white/5 ${k.revoked ? 'opacity-50' : ''}`}>
               <div className="min-w-0">
                 <div className="text-xs font-bold text-white truncate">
@@ -167,6 +170,7 @@ export function ApiKeysCard({ getToken }: ApiKeysCardProps) {
               )}
             </div>
           ))}
+          <LoadMore list={pagedKeys} label="keys" />
         </div>
       )}
     </div>

@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { usePagedList } from '../../hooks/usePagedList';
+import { LoadMore } from '../../components/common/LoadMore';
 import { escapeHtml } from '../../lib/escapeHtml';
 import { UNTRUSTED_PREVIEW_SANDBOX } from '../../lib/previewSandbox';
 import {
@@ -244,6 +246,7 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated, o
   const [isRefining, setIsRefining] = useState(false);
 
   const [history, setHistory] = useState<string[]>([]);
+  const pagedHistory = usePagedList(history);
 
   useEffect(() => {
     setHistory(loadHistory());
@@ -564,7 +567,7 @@ ${generatedCode}
               <div className="flex items-center gap-1">
                 <Clock size={12} className="text-gray-500" />
                 <span className="text-xs text-gray-500">Recent:</span>
-                {history.map((key) => (
+                {pagedHistory.visible.map((key) => (
                   <button
                     key={key}
                     onClick={() => {
@@ -577,6 +580,7 @@ ${generatedCode}
                     {key.slice(0, 8)}…
                   </button>
                 ))}
+                <LoadMore list={pagedHistory} label="imports" />
               </div>
             )}
           </div>

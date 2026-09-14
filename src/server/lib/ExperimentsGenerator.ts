@@ -130,18 +130,18 @@ experimentRouter.post('/experiments', (req: Request, res: Response) => {
 
 // Assign a user (deterministic; does NOT log exposure). /experiments/:key/assign/:user
 experimentRouter.get('/experiments/:key/assign/:user', (req: Request, res: Response) => {
-  return res.status(200).json({ experiment: req.params.key, user: req.params.user, variant: experiments.assign(req.params.key, req.params.user) });
+  return res.status(200).json({ experiment: routeParam(req.params.key), user: routeParam(req.params.user), variant: experiments.assign(routeParam(req.params.key), routeParam(req.params.user)) });
 });
 
 // Assign AND log exposure (idempotent). { user }.
 experimentRouter.post('/experiments/:key/expose', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { user?: unknown };
-  return res.status(200).json({ experiment: req.params.key, variant: experiments.expose(req.params.key, String(body.user ?? '')) });
+  return res.status(200).json({ experiment: routeParam(req.params.key), variant: experiments.expose(routeParam(req.params.key), String(body.user ?? '')) });
 });
 
 // Per-variant exposure counts.
 experimentRouter.get('/experiments/:key/counts', (req: Request, res: Response) => {
-  return res.status(200).json({ experiment: req.params.key, counts: experiments.counts(req.params.key) });
+  return res.status(200).json({ experiment: routeParam(req.params.key), counts: experiments.counts(routeParam(req.params.key)) });
 });
 
 // List experiments.
@@ -162,6 +162,7 @@ hash of \`(salt, user)\`, so the **same user always gets the same variant** with
 
 \`\`\`ts
 import { experimentRouter } from './server/experiments/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', experimentRouter);
 \`\`\`
 

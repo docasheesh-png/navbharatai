@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import { normalizeMissingBody } from './src/server/lib/expressCompat';
 import helmet from 'helmet';
 import crypto from 'crypto';
 import net from 'net';
@@ -394,6 +395,12 @@ setInterval(() => {
       verify: (req: any, _res, buf) => { req.rawBody = buf; },
     }));
 
+    // EXPRESS 5 restores nothing that Express 4 gave for free: `req.body` is now left UNDEFINED when
+    // no parser matched, where it used to be `{}`. 419 places in this repo read it, all typed `any`,
+    // so a typecheck cannot see any of them. Fill the default in once, here, immediately after the
+    // parsers — see normalizeMissingBody.
+    app.use(normalizeMissingBody);
+
   // Hit counter middleware
   app.use((req: any, _res: any, next: any) => {
     serverStats.totalHits++;
@@ -510,7 +517,10 @@ setInterval(() => {
           }
         }
       }));
-      app.get('*', (req, res, next) => {
+      // EXPRESS 5: a bare '*' is no longer a valid path — path-to-regexp v8 THROWS at startup on it.
+      // '/*splat' is the Express 5 spelling of the same catch-all; the handler below never reads the
+      // captured value, it only decides whether to defer, so nothing else about this route changes.
+      app.get('/*splat', (req, res, next) => {
         // The SPA fallback is registered (inside initializeServer) BEFORE the API
         // and preview routes below. Because app.get('*') matches every GET, it
         // would otherwise swallow GET routes registered afterwards (live preview,

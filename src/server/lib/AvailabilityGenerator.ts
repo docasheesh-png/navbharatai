@@ -145,7 +145,7 @@ availabilityRouter.get('/', (_req: Request, res: Response) => {
 availabilityRouter.put('/weekly/:weekday', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { windows?: unknown };
   try {
-    const weekday = Number(req.params.weekday);
+    const weekday = Number(routeParam(req.params.weekday));
     const windows = Array.isArray(body.windows) ? (body.windows as Array<{ open: string; close: string }>) : [];
     availability.setWeekly(weekday as 0 | 1 | 2 | 3 | 4 | 5 | 6, windows);
     return res.status(200).json({ weekly: availability.weeklySchedule() });
@@ -189,6 +189,7 @@ date-specific **exceptions** that override the weekly schedule for one date (clo
 
 \`\`\`ts
 import { availabilityRouter } from './server/availability/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api/availability', availabilityRouter);
 \`\`\`
 

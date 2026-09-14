@@ -55174,6 +55174,78 @@ suspicion — unverified, because the generated sources are not in the report �
 
 ---
 
+## 2026-09-14 — EXPRESS 4 → 5, done as a migration rather than a version bump (#2900)
+
+Dependabot's #2900 changed two lines of `package.json` and nothing else. Its CI had been red for days
+with **80 type errors**, and the errors were the smallest of its three problems.
+
+### What actually breaks, measured rather than assumed
+
+| | Found | Caught by typecheck? |
+|---|---|---|
+| Bare `'*'` routes | **3** (`server.ts` SPA catch-all, the ESM mirror, the preview proxy) | ❌ — path-to-regexp v8 **throws at startup**, so the server does not run at all |
+| `req.params` widened to `string \| string[]` | **80 sites, 17 files** | ✅ |
+| `req.body` now `undefined` where it was `{}` | **419 reads** | ❌ — `req.body` is `any`, so every one type-checks clean and throws at runtime |
+| `req.query` assignment (a getter in v5) | **0** | — |
+| Optional `:param?` (removed in path-to-regexp v8) | **0** in real routes | — |
+
+🔴 **THE 419 `req.body` READS ARE THE REASON THIS COULD NOT BE A "GET CI GREEN" TASK.** A green
+typecheck proves nothing about them: a GET with no body, a POST whose client omitted the header, a
+webhook delivered as `text/plain` — each used to get `{}` and now gets `undefined`, on auth, wallet,
+secrets and webhook routes. Shipping a green CI over that would be precisely the false green the fifth
+rule forbids.
+
+**Fixed at the ONE point every request passes through**: `normalizeMissingBody`, registered
+immediately after the body parsers, restores the Express 4 default. All 419 sites behave exactly as
+before, and a test pins the ORDER — registered before the parsers it would overwrite real bodies.
+
+### The wildcard routes were the dangerous ones
+
+`'*'` is invalid in Express 5; `'/*splat'` is the replacement and hands the capture over as an
+**array**, where Express 4 gave a joined string in `req.params[0]`. Both of this repo's proxies (the
+ESM mirror and the live-preview forwarder) build an upstream URL out of that value — so getting it
+wrong does not throw, it quietly **fetches the wrong thing**. `splatPath` is the one place that
+conversion happens, and it accepts the array, a plain string and the legacy numbered key, so a route
+in either spelling is correct.
+
+### The 80 type errors are one class, fixed as one
+
+`ParamsDictionary` is now `{ [key: string]: string | string[] }` because a wildcard capture can be an
+array. This repo has exactly three wildcard routes and **all three read their capture through
+`splatPath`** — so for every other route a parameter is a plain string at runtime. `routeParam` /
+`routeParams` (in `lib/expressCompat.ts`) carry that reasoning with the evidence attached, instead of
+80 bare `as string` casts a later reader would have to justify one at a time.
+
+### Four safety tests failed, and they were right to
+
+`appLockEnforce` (×2), `duplicateAppWiring` and `hostingPlanSweep` pin the money and access guards by
+reading the source. Wrapping the id in `routeParam(...)` changed the spelling they matched.
+
+⚠️ **The guards were verified intact before any test was touched** — e.g.
+`appLockBlocks(req, routeParam(req.params.userId), 'hosting-plan-purchase')` is the same call, on the
+same user, still before `purchaseHostingPlan`. Changing a test to match broken behaviour is forbidden;
+these were not broken. The assertions now match the **rule** (this guard, this user, this purpose, in
+this order) rather than one spelling of an argument, so the next refactor cannot fail them for a change
+that alters nothing.
+
+### Verification
+
+Full CI gate on Express 5.2.1: `typecheck` · `noUnusedImports` · `typecheck:server` · `vitest`
+(**1655 files, 23145 passed, 0 FAIL**) · `build` · `test:bundle` · **`boot:check` — the server really
+starts**, which is the only thing that proves the rewritten routes register · `audit:gate` ·
+`license:gate`. 12 new tests; the two startup-breaking guards proven by reversion.
+
+⚠️ **AN EARLY GREEN IN THIS WORK WAS FALSE, and it is worth recording.** After editing `package.json`
+the server typecheck reported **0 errors** — because `node_modules` still held Express **4**. The 80
+errors only appeared after `npm ci` actually installed 5.2.1. A gate is only as true as the tree it ran
+against.
+
+### 🔴 WHAT THIS UPGRADE DOES NOT BUY, stated plainly
+
+**No security.** #2900's own body records that CVE-2024-51999 was **rejected**, and that 5.2.0's fix
+was **reverted in 5.2.1** — the version being installed. The case for merging is staying on a supported
+major, not a vulnerability being closed. That is a real reason; it is not the reason the PR's title
+implies, and the admin should have the honest version.
 ## 2026-09-14 — 🔴 WE WERE BREAKING WORKING APPS OURSELVES. The admin named it; it is the worst bug in this week's ledger.
 
 The counting bug two entries up ("at least 1 build rendered and was counted as failed") looked like a

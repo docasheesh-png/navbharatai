@@ -147,7 +147,7 @@ contactRouter.get('/', (req: Request, res: Response) => {
 });
 
 contactRouter.get('/:id', (req: Request, res: Response) => {
-  const m = contact.get(req.params.id);
+  const m = contact.get(routeParam(req.params.id));
   if (!m) return res.status(404).json({ error: 'message not found' });
   return res.status(200).json(m);
 });
@@ -156,7 +156,7 @@ contactRouter.get('/:id', (req: Request, res: Response) => {
 contactRouter.patch('/:id/status', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { status?: unknown };
   try {
-    return res.status(200).json(contact.setStatus(req.params.id, String(body.status ?? '') as 'new' | 'read' | 'archived' | 'spam'));
+    return res.status(200).json(contact.setStatus(routeParam(req.params.id), String(body.status ?? '') as 'new' | 'read' | 'archived' | 'spam'));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'bad request';
     if (message === 'message not found') return res.status(404).json({ error: message });
@@ -165,7 +165,7 @@ contactRouter.patch('/:id/status', (req: Request, res: Response) => {
 });
 
 contactRouter.delete('/:id', (req: Request, res: Response) => {
-  if (!contact.remove(req.params.id)) return res.status(404).json({ error: 'message not found' });
+  if (!contact.remove(routeParam(req.params.id))) return res.status(404).json({ error: 'message not found' });
   return res.status(204).send();
 });
 `;
@@ -183,6 +183,7 @@ message moves through a status lifecycle **new → read → archived** (or **spa
 
 \`\`\`ts
 import { contactRouter } from './server/contact/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api/contact', contactRouter);
 \`\`\`
 

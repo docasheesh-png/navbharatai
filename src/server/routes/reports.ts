@@ -37,6 +37,7 @@ import { adultPreferenceFrom } from '../../lib/adultContent';
 import { spendByFeature, featureLabel, isWalletFeature } from '../lib/walletFeature';
 import { featureSpendStore, spendDayKey } from '../lib/FeatureSpendStore';
 import { professionalPassStore } from '../professionals/ProfessionalPassStore';
+import { routeParam, routeParams } from '../lib/expressCompat';
 import {
   fetchAuthMetadata, firebaseAuthBatch, resolveJoinedAt, resolveLastActiveAt,
   summariseAiActivity, summariseDevices, profileView,
@@ -211,7 +212,7 @@ export function registerReportRoutes(app: Express): void {
       const parsed = validateReplyPayload(req.body?.text, req.body?.screenshot);
       if (parsed.ok !== true) return res.status(400).json({ error: parsed.error });
 
-      const reportId = String(req.params.id || '');
+      const reportId = String(routeParam(req.params.id) || '');
       // ⚠️ THE IMAGE IS STORED FIRST, AND THE ORDER IS THE POINT. If the message were appended first
       // and the image write then failed, the thread would carry a handle to a picture that does not
       // exist — a broken attachment on somebody's bug report, which is worse than no attachment. This
@@ -248,8 +249,8 @@ export function registerReportRoutes(app: Express): void {
   app.get('/api/report/:id/shot/:shotId', async (req: Request, res: Response) => {
     const me = await verifyFirebaseIdentity(req);
     if (!me?.uid) return res.status(401).json({ error: 'Sign in first.' });
-    const id = String(req.params.id || '');
-    const shotId = String(req.params.shotId || '');
+    const id = String(routeParam(req.params.id) || '');
+    const shotId = String(routeParam(req.params.shotId) || '');
     if (!isShotId(shotId)) return res.status(404).json({ error: 'Not found.' });
 
     const report = await getReport(id);
@@ -279,7 +280,7 @@ export function registerReportRoutes(app: Express): void {
   app.post('/api/admin/reports/:id/reply', requireAdmin, async (req: Request, res: Response) => {
     const parsed = validateReplyPayload(req.body?.text, req.body?.screenshot);
     if (parsed.ok !== true) return res.status(400).json({ error: parsed.error });
-    const id = String(req.params.id || '');
+    const id = String(routeParam(req.params.id) || '');
 
     const report = await getReport(id);
     if (!report) return res.status(404).json({ error: 'That report could not be found.' });
@@ -315,9 +316,9 @@ export function registerReportRoutes(app: Express): void {
 
   /** The same image, for the admin. Separate route, separate authorisation. */
   app.get('/api/admin/reports/:id/shot/:shotId', requireAdmin, async (req: Request, res: Response) => {
-    const shotId = String(req.params.shotId || '');
+    const shotId = String(routeParam(req.params.shotId) || '');
     if (!isShotId(shotId)) return res.status(404).json({ error: 'Not found.' });
-    const dataUrl = await getReportMessageShot(String(req.params.id || ''), shotId);
+    const dataUrl = await getReportMessageShot(String(routeParam(req.params.id) || ''), shotId);
     if (!dataUrl) return res.status(404).json({ error: 'Not found.' });
     res.set('Cache-Control', 'private, no-store');
     res.json({ dataUrl });
@@ -369,7 +370,7 @@ export function registerReportRoutes(app: Express): void {
 
   /** One report, with its screenshot and how many other reports name the same person. */
   app.get('/api/admin/reports/:id', requireAdmin, async (req: Request, res: Response) => {
-    const report = await getReport(String(req.params.id || ''));
+    const report = await getReport(String(routeParam(req.params.id) || ''));
     if (!report) return res.status(404).json({ error: 'No such report.' });
     const [screenshot, people, againstCount] = await Promise.all([
       report.hasScreenshot ? getReportScreenshot(report.id) : Promise.resolve(null),
@@ -399,7 +400,7 @@ export function registerReportRoutes(app: Express): void {
    * person who never paid us a rupee, and they would act on it.
    */
   app.get('/api/admin/users/:uid/account', requireAdmin, async (req: Request, res: Response) => {
-    const uid = String(req.params.uid || '').trim();
+    const uid = String(routeParam(req.params.uid) || '').trim();
     if (!uid) return res.status(400).json({ error: 'Which user?' });
 
     const db = identityDb() as { collection?: (n: string) => { where: (f: string, op: string, v: unknown) => { limit: (n: number) => { get: () => Promise<{ docs: Array<{ data: () => unknown }> }> } } } } | null;
@@ -567,7 +568,7 @@ export function registerReportRoutes(app: Express): void {
       return res.status(400).json({ error: 'Unknown status.' });
     }
     const ok = await setReportStatus(
-      String(req.params.id || ''),
+      String(routeParam(req.params.id) || ''),
       status as 'open' | 'reviewed' | 'actioned' | 'dismissed',
       typeof req.body?.note === 'string' ? req.body.note : undefined,
     );

@@ -184,6 +184,7 @@ export const restaurant = new RestaurantService();
 
 export const RESTAURANT_ROUTES_SOURCE = `import { Router } from 'express';
 import { restaurant, InvalidTransitionError, OrderClosedError } from './restaurantService';
+import { routeParam, routeParams } from './expressCompat';
 
 export const restaurantRouter = Router();
 
@@ -204,11 +205,11 @@ restaurantRouter.get('/tables', (_req, res) => handle(res, () => restaurant.list
 restaurantRouter.post('/tables', (req, res) => handle(res, () => restaurant.addTable(req.body)));
 
 restaurantRouter.post('/orders', (req, res) => handle(res, () => restaurant.openOrder(req.body?.tableId))); // 409 if table occupied
-restaurantRouter.get('/orders/:id', (req, res) => handle(res, () => restaurant.getOrder(req.params.id)));
-restaurantRouter.post('/orders/:id/lines', (req, res) => handle(res, () => restaurant.addLine(req.params.id, req.body?.menuItemId, Number(req.body?.qty)))); // 409 if order served/closed
-restaurantRouter.patch('/orders/:id/status', (req, res) => handle(res, () => restaurant.setOrderStatus(req.params.id, req.body?.status))); // 409 on invalid
-restaurantRouter.get('/orders/:id/bill', (req, res) => handle(res, () => restaurant.bill(req.params.id)));  // exact GST bill
-restaurantRouter.post('/orders/:id/close', (req, res) => handle(res, () => restaurant.closeOrder(req.params.id)));
+restaurantRouter.get('/orders/:id', (req, res) => handle(res, () => restaurant.getOrder(routeParam(req.params.id))));
+restaurantRouter.post('/orders/:id/lines', (req, res) => handle(res, () => restaurant.addLine(routeParam(req.params.id), req.body?.menuItemId, Number(req.body?.qty)))); // 409 if order served/closed
+restaurantRouter.patch('/orders/:id/status', (req, res) => handle(res, () => restaurant.setOrderStatus(routeParam(req.params.id), req.body?.status))); // 409 on invalid
+restaurantRouter.get('/orders/:id/bill', (req, res) => handle(res, () => restaurant.bill(routeParam(req.params.id))));  // exact GST bill
+restaurantRouter.post('/orders/:id/close', (req, res) => handle(res, () => restaurant.closeOrder(routeParam(req.params.id))));
 `;
 
 export const RESTAURANT_README = `# Restaurant / POS starter

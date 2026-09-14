@@ -171,7 +171,7 @@ quizRouter.post('/', (req: Request, res: Response) => {
 
 // Public taker view (NO answer key).
 quizRouter.get('/:id', (req: Request, res: Response) => {
-  const view = quizzes.publicView(req.params.id);
+  const view = quizzes.publicView(routeParam(req.params.id));
   if (!view) return res.status(404).json({ error: 'quiz not found' });
   return res.status(200).json(view);
 });
@@ -181,7 +181,7 @@ quizRouter.post('/:id/submit', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { answers?: unknown };
   try {
     const answers = body.answers && typeof body.answers === 'object' ? (body.answers as Record<string, string>) : {};
-    return res.status(200).json(quizzes.grade(req.params.id, answers));
+    return res.status(200).json(quizzes.grade(routeParam(req.params.id), answers));
   } catch (err) {
     return res.status(err instanceof Error && err.message === 'quiz not found' ? 404 : 400)
       .json({ error: err instanceof Error ? err.message : 'bad request' });
@@ -202,6 +202,7 @@ public view strips it and only server-side grading reads it. Files:
 
 \`\`\`ts
 import { quizRouter } from './server/quizzes/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api/quizzes', quizRouter);
 \`\`\`
 

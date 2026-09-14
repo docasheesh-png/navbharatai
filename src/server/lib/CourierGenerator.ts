@@ -153,6 +153,7 @@ export const courier = new CourierService();
 
 export const COURIER_ROUTES_SOURCE = `import { Router } from 'express';
 import { courier, InvalidTransitionError } from './courierService';
+import { routeParam, routeParams } from './expressCompat';
 
 export const courierRouter = Router();
 
@@ -172,14 +173,14 @@ courierRouter.get('/shipments', (req, res) => handle(res, () => courier.list({
   status: req.query.status as never,
   driverId: req.query.driverId as string | undefined,
 })));
-courierRouter.get('/shipments/:id', (req, res) => handle(res, () => courier.get(req.params.id)));
+courierRouter.get('/shipments/:id', (req, res) => handle(res, () => courier.get(routeParam(req.params.id))));
 courierRouter.patch('/shipments/:id/status', (req, res) => handle(res, () =>
-  courier.advanceStatus(req.params.id, req.body?.status, { location: req.body?.location, note: req.body?.note }))); // 409 on invalid transition
-courierRouter.patch('/shipments/:id/driver', (req, res) => handle(res, () => courier.assignDriver(req.params.id, req.body?.driverId)));
-courierRouter.get('/shipments/:id/history', (req, res) => handle(res, () => courier.history(req.params.id)));
+  courier.advanceStatus(routeParam(req.params.id), req.body?.status, { location: req.body?.location, note: req.body?.note }))); // 409 on invalid transition
+courierRouter.patch('/shipments/:id/driver', (req, res) => handle(res, () => courier.assignDriver(routeParam(req.params.id), req.body?.driverId)));
+courierRouter.get('/shipments/:id/history', (req, res) => handle(res, () => courier.history(routeParam(req.params.id))));
 
 // Public tracking lookup by tracking number.
-courierRouter.get('/track/:trackingNo', (req, res) => handle(res, () => courier.getByTracking(req.params.trackingNo)));
+courierRouter.get('/track/:trackingNo', (req, res) => handle(res, () => courier.getByTracking(routeParam(req.params.trackingNo))));
 `;
 
 export const COURIER_README = `# Courier / Logistics starter

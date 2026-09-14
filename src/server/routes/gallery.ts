@@ -5,6 +5,7 @@ import { isStoreAdmin } from './navStore';
 import { hostingPlansEnabled, hostingPlanPriceInr, probeHostingPlan } from '../lib/hostingPlan';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import { remixGate, remixRefusal } from '../lib/remixPlanGate';
+import { routeParam, routeParams } from '../lib/expressCompat';
 import {
   preparePublishBundle,
   exclusionSummary,
@@ -124,14 +125,14 @@ export function registerGalleryRoutes(app: Express): void {
 
   /** One approved app. */
   app.get('/api/gallery/:id', async (req: Request, res: Response) => {
-    const found = await getGalleryApp(String(req.params.id));
+    const found = await getGalleryApp(String(routeParam(req.params.id)));
     if (!found || found.status !== 'approved') return res.status(404).json({ error: 'That app is not available.' });
     res.json({ app: toPublic(found), excludedPaths: found.excludedPaths });
   });
 
   /** The source, for reading or remixing. Approved only — a pending app's code is not public. */
   app.get('/api/gallery/:id/source', async (req: Request, res: Response) => {
-    const found = await getGalleryApp(String(req.params.id));
+    const found = await getGalleryApp(String(routeParam(req.params.id)));
     if (!found || found.status !== 'approved') return res.status(404).json({ error: 'That app is not available.' });
     res.json({ id: found.id, title: found.title, files: found.files });
   });
@@ -144,7 +145,7 @@ export function registerGalleryRoutes(app: Express): void {
    */
   app.post('/api/gallery/:id/remix', async (req: Request, res: Response) => {
     const who = await verifyFirebaseIdentity(req);
-    const found = await getGalleryApp(String(req.params.id));
+    const found = await getGalleryApp(String(routeParam(req.params.id)));
     if (!found || found.status !== 'approved') return res.status(404).json({ error: 'That app is not available.' });
 
     /**
@@ -219,7 +220,7 @@ export function registerGalleryRoutes(app: Express): void {
   app.get('/api/gallery/admin/:id/source', async (req: Request, res: Response) => {
     const who = await verifyFirebaseIdentity(req);
     if (!isStoreAdmin(who?.email ?? null)) return res.status(403).json({ error: 'Not allowed.' });
-    const found = await getGalleryApp(String(req.params.id));
+    const found = await getGalleryApp(String(routeParam(req.params.id)));
     if (!found) return res.status(404).json({ error: 'Not found.' });
     res.json({ id: found.id, title: found.title, status: found.status, files: found.files });
   });
@@ -236,7 +237,7 @@ export function registerGalleryRoutes(app: Express): void {
     if (!['approved', 'rejected', 'removed'].includes(decision)) {
       return res.status(400).json({ error: 'decision must be "approved", "rejected" or "removed".' });
     }
-    const found = await getGalleryApp(String(req.params.id));
+    const found = await getGalleryApp(String(routeParam(req.params.id)));
     if (!found) return res.status(404).json({ error: 'Not found.' });
 
     const patch: Partial<GalleryApp> = {

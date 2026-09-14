@@ -138,7 +138,7 @@ giftCardRouter.post('/', (req: Request, res: Response) => {
 
 // Check balance (the code is the secret).
 giftCardRouter.get('/:code', (req: Request, res: Response) => {
-  const card = giftCards.get(req.params.code);
+  const card = giftCards.get(routeParam(req.params.code));
   if (!card) return res.status(404).json({ error: 'card not found' });
   return res.status(200).json({ code: card.code, balanceMinor: card.balanceMinor, currency: card.currency, active: card.active, expiresAt: card.expiresAt });
 });
@@ -147,7 +147,7 @@ giftCardRouter.get('/:code', (req: Request, res: Response) => {
 giftCardRouter.post('/:code/redeem', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { amountMinor?: unknown; note?: unknown };
   try {
-    const card = giftCards.redeem(req.params.code, Number(body.amountMinor), String(body.note ?? ''));
+    const card = giftCards.redeem(routeParam(req.params.code), Number(body.amountMinor), String(body.note ?? ''));
     return res.status(200).json({ code: card.code, balanceMinor: card.balanceMinor, currency: card.currency });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'bad request';
@@ -159,7 +159,7 @@ giftCardRouter.post('/:code/redeem', (req: Request, res: Response) => {
 giftCardRouter.patch('/:code', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { active?: unknown };
   try {
-    const card = giftCards.setActive(req.params.code, Boolean(body.active));
+    const card = giftCards.setActive(routeParam(req.params.code), Boolean(body.active));
     return res.status(200).json({ code: card.code, active: card.active });
   } catch (err) {
     return res.status(404).json({ error: err instanceof Error ? err.message : 'card not found' });
@@ -181,6 +181,7 @@ deactivated; an expired card can't be redeemed. Files:
 
 \`\`\`ts
 import { giftCardRouter } from './server/giftcards/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api/gift-cards', giftCardRouter);
 \`\`\`
 

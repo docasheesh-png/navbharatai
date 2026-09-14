@@ -124,7 +124,7 @@ export const cartRouter = Router();
 // The current cart with its exact total.
 cartRouter.get('/:userId', (req: Request, res: Response) => {
   try {
-    return res.status(200).json(carts.view(req.params.userId));
+    return res.status(200).json(carts.view(routeParam(req.params.userId)));
   } catch (err) {
     return res.status(400).json({ error: err instanceof Error ? err.message : 'bad request' });
   }
@@ -135,11 +135,11 @@ cartRouter.post('/:userId/items', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { productId?: unknown; name?: unknown; unitPriceMinor?: unknown; qty?: unknown };
   try {
     carts.add(
-      req.params.userId,
+      routeParam(req.params.userId),
       { productId: String(body.productId ?? ''), name: String(body.name ?? ''), unitPriceMinor: Number(body.unitPriceMinor) },
       body.qty === undefined ? 1 : Number(body.qty),
     );
-    return res.status(201).json(carts.view(req.params.userId));
+    return res.status(201).json(carts.view(routeParam(req.params.userId)));
   } catch (err) {
     return res.status(400).json({ error: err instanceof Error ? err.message : 'bad request' });
   }
@@ -149,8 +149,8 @@ cartRouter.post('/:userId/items', (req: Request, res: Response) => {
 cartRouter.patch('/:userId/items/:productId', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { qty?: unknown };
   try {
-    carts.setQty(req.params.userId, req.params.productId, Number(body.qty));
-    return res.status(200).json(carts.view(req.params.userId));
+    carts.setQty(routeParam(req.params.userId), routeParam(req.params.productId), Number(body.qty));
+    return res.status(200).json(carts.view(routeParam(req.params.userId)));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'bad request';
     return res.status(message === 'product not in cart' ? 404 : 400).json({ error: message });
@@ -159,14 +159,14 @@ cartRouter.patch('/:userId/items/:productId', (req: Request, res: Response) => {
 
 // Remove a line.
 cartRouter.delete('/:userId/items/:productId', (req: Request, res: Response) => {
-  if (!carts.remove(req.params.userId, req.params.productId)) return res.status(404).json({ error: 'product not in cart' });
-  return res.status(200).json(carts.view(req.params.userId));
+  if (!carts.remove(routeParam(req.params.userId), routeParam(req.params.productId))) return res.status(404).json({ error: 'product not in cart' });
+  return res.status(200).json(carts.view(routeParam(req.params.userId)));
 });
 
 // Empty the cart.
 cartRouter.delete('/:userId', (req: Request, res: Response) => {
-  carts.clear(req.params.userId);
-  return res.status(200).json(carts.view(req.params.userId));
+  carts.clear(routeParam(req.params.userId));
+  return res.status(200).json(carts.view(routeParam(req.params.userId)));
 });
 `;
 
@@ -184,6 +184,7 @@ floating point. Files:
 
 \`\`\`ts
 import { cartRouter } from './server/cart/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api/cart', cartRouter);
 \`\`\`
 

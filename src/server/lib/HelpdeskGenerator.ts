@@ -135,6 +135,7 @@ export const helpdesk = new HelpdeskService();
 
 export const HELPDESK_ROUTES_SOURCE = `import { Router } from 'express';
 import { helpdesk, InvalidTransitionError } from './helpdeskService';
+import { routeParam, routeParams } from './expressCompat';
 
 export const helpdeskRouter = Router();
 
@@ -163,11 +164,11 @@ helpdeskRouter.get('/tickets', (req, res) => handle(res, () => helpdesk.list({
   breached: req.query.breached === undefined ? undefined : req.query.breached === 'true',
 })));
 helpdeskRouter.post('/tickets', (req, res) => handle(res, () => helpdesk.createTicket(req.body)));
-helpdeskRouter.get('/tickets/:id', (req, res) => handle(res, () => view(req.params.id)));
-helpdeskRouter.patch('/tickets/:id/status', (req, res) => handle(res, () => helpdesk.setStatus(req.params.id, req.body?.status, req.body?.by))); // 409 invalid
-helpdeskRouter.patch('/tickets/:id/assign', (req, res) => handle(res, () => helpdesk.assign(req.params.id, req.body?.assigneeId)));
-helpdeskRouter.post('/tickets/:id/comments', (req, res) => handle(res, () => helpdesk.addComment(req.params.id, req.body?.by ?? 'agent', String(req.body?.text ?? ''))));
-helpdeskRouter.get('/tickets/:id/thread', (req, res) => handle(res, () => helpdesk.thread(req.params.id)));
+helpdeskRouter.get('/tickets/:id', (req, res) => handle(res, () => view(routeParam(req.params.id))));
+helpdeskRouter.patch('/tickets/:id/status', (req, res) => handle(res, () => helpdesk.setStatus(routeParam(req.params.id), req.body?.status, req.body?.by))); // 409 invalid
+helpdeskRouter.patch('/tickets/:id/assign', (req, res) => handle(res, () => helpdesk.assign(routeParam(req.params.id), req.body?.assigneeId)));
+helpdeskRouter.post('/tickets/:id/comments', (req, res) => handle(res, () => helpdesk.addComment(routeParam(req.params.id), req.body?.by ?? 'agent', String(req.body?.text ?? ''))));
+helpdeskRouter.get('/tickets/:id/thread', (req, res) => handle(res, () => helpdesk.thread(routeParam(req.params.id))));
 `;
 
 export const HELPDESK_README = `# Helpdesk / ticketing starter

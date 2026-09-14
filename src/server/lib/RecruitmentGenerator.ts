@@ -146,6 +146,7 @@ export const recruitment = new RecruitmentService();
 
 export const RECRUITMENT_ROUTES_SOURCE = `import { Router } from 'express';
 import { recruitment, InvalidStageError, DuplicateApplicationError, JobClosedError } from './recruitmentService';
+import { routeParam, routeParams } from './expressCompat';
 
 export const recruitmentRouter = Router();
 
@@ -164,13 +165,13 @@ function handle(res: import('express').Response, fn: () => unknown): void {
 
 recruitmentRouter.get('/jobs', (req, res) => handle(res, () => recruitment.listJobs({ status: req.query.status as never })));
 recruitmentRouter.post('/jobs', (req, res) => handle(res, () => recruitment.postJob(req.body)));
-recruitmentRouter.get('/jobs/:id', (req, res) => handle(res, () => recruitment.getJob(req.params.id)));
-recruitmentRouter.post('/jobs/:id/close', (req, res) => handle(res, () => recruitment.closeJob(req.params.id)));
-recruitmentRouter.post('/jobs/:id/reopen', (req, res) => handle(res, () => recruitment.reopenJob(req.params.id)));
+recruitmentRouter.get('/jobs/:id', (req, res) => handle(res, () => recruitment.getJob(routeParam(req.params.id))));
+recruitmentRouter.post('/jobs/:id/close', (req, res) => handle(res, () => recruitment.closeJob(routeParam(req.params.id))));
+recruitmentRouter.post('/jobs/:id/reopen', (req, res) => handle(res, () => recruitment.reopenJob(routeParam(req.params.id))));
 recruitmentRouter.post('/candidates', (req, res) => handle(res, () => recruitment.addCandidate(req.body)));
-recruitmentRouter.post('/jobs/:id/apply', (req, res) => handle(res, () => recruitment.apply(req.params.id, req.body?.candidateId))); // 409 dup / closed
-recruitmentRouter.get('/jobs/:id/applications', (req, res) => handle(res, () => recruitment.applicationsFor(req.params.id, req.query.stage as never)));
-recruitmentRouter.patch('/applications/:id/stage', (req, res) => handle(res, () => recruitment.advance(req.params.id, req.body?.stage))); // 409 invalid
+recruitmentRouter.post('/jobs/:id/apply', (req, res) => handle(res, () => recruitment.apply(routeParam(req.params.id), req.body?.candidateId))); // 409 dup / closed
+recruitmentRouter.get('/jobs/:id/applications', (req, res) => handle(res, () => recruitment.applicationsFor(routeParam(req.params.id), req.query.stage as never)));
+recruitmentRouter.patch('/applications/:id/stage', (req, res) => handle(res, () => recruitment.advance(routeParam(req.params.id), req.body?.stage))); // 409 invalid
 `;
 
 export const RECRUITMENT_README = `# Recruitment / job-board starter

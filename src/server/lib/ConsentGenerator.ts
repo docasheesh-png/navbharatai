@@ -123,18 +123,18 @@ consentRouter.post('/consent', (req: Request, res: Response) => {
 
 // A user's current consent state across purposes.
 consentRouter.get('/consent/:user', (req: Request, res: Response) => {
-  return res.status(200).json({ user: req.params.user, state: consent.stateOf(req.params.user) });
+  return res.status(200).json({ user: routeParam(req.params.user), state: consent.stateOf(routeParam(req.params.user)) });
 });
 
 // Whether a specific (user, purpose) currently has consent.
 consentRouter.get('/consent/:user/:purpose', (req: Request, res: Response) => {
-  return res.status(200).json({ user: req.params.user, purpose: req.params.purpose, granted: consent.hasConsent(req.params.user, req.params.purpose) });
+  return res.status(200).json({ user: routeParam(req.params.user), purpose: routeParam(req.params.purpose), granted: consent.hasConsent(routeParam(req.params.user), routeParam(req.params.purpose)) });
 });
 
 // The full audit history for a user (?purpose=).
 consentRouter.get('/consent/:user/history', (req: Request, res: Response) => {
   const q = req.query as { purpose?: string };
-  return res.status(200).json(consent.history(req.params.user, q.purpose));
+  return res.status(200).json(consent.history(routeParam(req.params.user), q.purpose));
 });
 `;
 
@@ -150,6 +150,7 @@ event (latest wins), and the full history is retained for **audit/proof**. Files
 
 \`\`\`ts
 import { consentRouter } from './server/consent/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', consentRouter);
 \`\`\`
 

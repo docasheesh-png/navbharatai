@@ -337,3 +337,80 @@ describe('fixWrongSourceImports — a named import pointing at the WRONG module 
     expect(Array.isArray(r.fixes)).toBe(true);
   });
 })
+
+/**
+ * AUTOPSY 424ecdab (2026-09-14) — the build ended RED on three names and no heal could touch them:
+ *   <IndianRupee>@src/pages/JobDetail.tsx:37, <Clock>@src/pages/JobDetail.tsx:38, <Link>@src/pages/Apply.tsx:36
+ * All three are PACKAGE exports (lucide-react, react-router-dom). The export index only ever held
+ * project modules, so the most common defect an LLM produces — a forgotten icon/component import —
+ * was structurally unfixable, however precisely it was detected.
+ */
+describe('addMissingProjectImports — package exports the project already uses', () => {
+  it('adds the missing import by COPYING one the project has already proven correct', async () => {
+    const files = {
+      // Layout.tsx imports Link from react-router-dom — that is the proof.
+      'src/components/Layout.tsx':
+        "import { Link } from 'react-router-dom';\nexport default function Layout() { return <Link to=\"/\">home</Link>; }\n",
+      // Apply.tsx uses it and forgot the import — the exact shape of the reported blocker.
+      'src/pages/Apply.tsx':
+        "export default function Apply() { return <Link to=\"/jobs\">back</Link>; }\n",
+    };
+    const res = await addMissingProjectImports(files);
+    const add = res.added.find((a) => a.file === 'src/pages/Apply.tsx' && a.name === 'Link');
+    expect(add).toBeTruthy();
+    expect(add!.from).toBe('react-router-dom');
+    expect(res.files['src/pages/Apply.tsx']).toContain("from \"react-router-dom\"");
+  });
+
+  it('never invents an import the project has not already made', async () => {
+    // `Clock` is used but imported NOWHERE — we do not know lucide-react exports it, so we do not guess.
+    // This is the honest half of the reported blocker and it stays honest.
+    const files = {
+      'src/components/Layout.tsx': "import { Briefcase } from 'lucide-react';\nexport const L = () => <Briefcase />;\n",
+      'src/pages/JobDetail.tsx': "export default function JobDetail() { return <Clock />; }\n",
+    };
+    const res = await addMissingProjectImports(files);
+    expect(res.added.find((a) => a.name === 'Clock')).toBeUndefined();
+  });
+
+  it('two packages claiming the same name is never guessed at', async () => {
+    const files = {
+      'src/a.tsx': "import { Button } from 'antd';\nexport const A = () => <Button />;\n",
+      'src/b.tsx': "import { Button } from '@mui/material';\nexport const B = () => <Button />;\n",
+      'src/c.tsx': "export const C = () => <Button />;\n",
+    };
+    const res = await addMissingProjectImports(files);
+    expect(res.added.find((a) => a.file === 'src/c.tsx')).toBeUndefined();
+  });
+
+  it('an ALIASED package import proves nothing and is not copied', async () => {
+    const files = {
+      'src/a.tsx': "import { Clock as Timer } from 'lucide-react';\nexport const A = () => <Timer />;\n",
+      'src/b.tsx': "export const B = () => <Clock />;\n",
+    };
+    const res = await addMissingProjectImports(files);
+    expect(res.added.find((a) => a.name === 'Clock')).toBeUndefined();
+  });
+
+  it('a PROJECT module still wins over a package of the same name (no existing outcome changes)', async () => {
+    const files = {
+      'src/ui/Button.tsx': "export function Button() { return null; }\n",
+      'src/a.tsx': "import { Button } from 'antd';\nexport const A = () => <Button />;\n",
+      'src/b.tsx': "export const B = () => <Button />;\n",
+    };
+    const res = await addMissingProjectImports(files);
+    const add = res.added.find((a) => a.file === 'src/b.tsx' && a.name === 'Button');
+    expect(add).toBeTruthy();
+    expect(add!.from).toMatch(/^\.\.?\//);  // the project module, not 'antd'
+  });
+
+  it('a file that already imports the name from that package is left alone', async () => {
+    const files = {
+      'src/a.tsx': "import { Link } from 'react-router-dom';\nexport const A = () => <Link />;\n",
+      'src/b.tsx': "import { Link } from 'react-router-dom';\nexport const B = () => <Link />;\n",
+    };
+    const res = await addMissingProjectImports(files);
+    expect(res.added.length).toBe(0);
+    expect(res.files).toBe(files);
+  });
+});

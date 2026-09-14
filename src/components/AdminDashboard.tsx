@@ -15,6 +15,7 @@ import { copyTextToClipboard } from '../lib/copyText';
 import { reportParts, partJson, partsSummary, ordinal } from './adminReportParts';
 import { MonitorPanels } from './admin/MonitorPanels';
 import { LoadBoard } from './admin/LoadBoard';
+import { AudienceCard } from './admin/AudienceCard';
 import { AdminCopyButton } from './admin/AdminCopyButton';
 import { reportStatus, reportStatusLabel, reportStatusHint, openReportCount, type ReportTriage } from '../server/AgentV3/reportTriage';
 import { problemKindLabel } from '../lib/userReport';
@@ -135,6 +136,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
    *  whole picture in front of the admin rather than from a complaint alone. */
   const [account, setAccount] = useState<any>(null);
   const [analytics, setAnalytics] = useState<any>(null);
+  /**
+   * Who came to NavBharatAI itself — website visits, app opens and the people who signed in.
+   *
+   * 🔒 LOADED ON DEMAND, never on a tab switch. The "who came" half scans the wallets and asks Firebase
+   * Auth about every account, which is real work nobody asked for when they merely opened Monitor. The
+   * admin's instruction ("sab kuch button ke andar ho") and the cost point the same way.
+   */
+  const [audience, setAudience] = useState<any>(null);
+  const [audienceLoading, setAudienceLoading] = useState(false);
   const [users, setUsers] = useState<any[]>([]);
   const [promos, setPromos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1038,6 +1048,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     }
   }, [adminToken]);
 
+  const fetchAudience = useCallback(async () => {
+    setAudienceLoading(true);
+    try {
+      const r = await fetch('/api/admin/audience', { headers });
+      const d = await r.json();
+      setAudience(d && typeof d === 'object' ? d : null);
+    } catch (e) {
+      console.error(e);
+      setAudience(null);
+    } finally {
+      setAudienceLoading(false);
+    }
+  }, [adminToken]);
+
   const fetchHealthScore = useCallback(async () => {
     try {
       const r = await fetch('/api/admin/health-score', { headers });
@@ -1307,6 +1331,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               {/* LIVE MONITOR — real time-series from the platform's own telemetry. Everything below it
                   is the business view the Overview tab used to hold, unchanged. */}
               <MonitorPanels adminToken={adminToken} />
+
+              {/* WHO CAME — NavBharatAI's own website and app (admin 2026-09-14). */}
+              <AudienceCard data={audience} onOpen={() => void fetchAudience()} loading={audienceLoading} />
 
               <div className="pt-1">
                 <h2 className="text-[11px] font-black text-white uppercase tracking-widest">Business</h2>

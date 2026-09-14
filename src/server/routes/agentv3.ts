@@ -13530,7 +13530,14 @@ async function noteBuildOutcome(
       // and with the flag off this whole block is inert, leaving buildPrompt byte-identical to today.
       if (requirementAwareBuildEnabled() && intent === 'new_build' && !isEditMode) {
         try {
-          const reqGuidance = buildRequirementGuidance(analyzeRequirementGaps(prompt));
+          // The second argument answers "did the user ask for an app to be PRODUCED?" — a DIFFERENT
+          // question from `intent` above, which only says which lane runs this turn. Autopsy 424ecdab
+          // (2026-09-14): a persona request ("your job is to tell me until it's bullet proof") routed
+          // to new_build and was handed a recruitment-ATS feature list to INCLUDE. The domain half is
+          // now withheld unless an app was genuinely asked for; the India half is unaffected.
+          const reqGuidance = buildRequirementGuidance(analyzeRequirementGaps(prompt), {
+            userAskedForAnApp: userAskedForAnAppToBeBuilt(prompt),
+          });
           if (reqGuidance) buildPrompt = `${reqGuidance}\n\n---\n\n${buildPrompt}`;
         } catch { /* requirement guidance is best-effort — never affect the build */ }
       }

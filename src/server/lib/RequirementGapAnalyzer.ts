@@ -265,6 +265,109 @@ const DOMAINS: DomainDef[] = [
   },
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// ORDINARY ENGLISH IS NOT A DOMAIN (autopsy of buildId 424ecdab, 2026-09-14).
+//
+// The user wrote: "You are my ruthless mentor. Dont sugar coat anything. if my idea is weak call it
+// trash and tell me why. your job is to tell me until it's a bullet proof." They wanted a persona.
+// `\bjob\b` matched "your **job** is to tell me", this analyzer returned `domain: 'jobs'`, and the
+// REQUIREMENT-AWARENESS guidance — which is phrased as an instruction ("INCLUDE them by default") —
+// was prepended to the build prompt. The model had already read the request correctly ("Got it. I'll
+// be your ruthless mentor"), then reversed itself thirty seconds later, in its own words: *"I'm
+// treating this as a jobs app (the requirement awareness flagged it)"*. It spent 15.2 minutes
+// building a recruitment ATS — login, employer and candidate dashboards, a hiring pipeline,
+// interview scheduling — and shipped RED. **Our own injection overrode a correct reading.**
+//
+// 🔴 WHY THE EXISTING TRIPWIRE COULD NOT CATCH IT, AND WHY THAT IS THE REAL LESSON. The corpus test
+// below already calls itself "the tripwire for the whole class", written after the 2026-08-02 autopsy
+// where "mobile-friendly" made a to-do list a social network. But every case in it is a SUBSTRING
+// failure — `cartoon`/`photoshop`/`friendly`/`portable` — and every fix was a `\b` anchor. `\bjob\b`
+// is ALREADY anchored and still wrong, because "job" here is a whole word used as ordinary English.
+// The class was never "a stem leaks inside a longer word"; it was "a keyword is also ordinary
+// English", of which substrings are one species. Six keywords had been narrowed one at a time
+// (`shop`, `store`, `cart`, `friend`, `book`, `table`, `tutor`, `like`, `game plan`) and the class was
+// declared closed each time.
+//
+// 🔬 MEASURED, NOT ASSUMED: swept against 26 innocent sentences a real user types, **22 selected a
+// domain** — "good job!" → jobs, "in order to make this faster" → ecommerce, "of course" → education,
+// "add a click event listener" → events, "set the CSS property" → real-estate, "add a hamburger menu"
+// → restaurant, "send a POST request" → social, "the database driver keeps timing out" → logistics,
+// "store the result" → ecommerce, "a team of three developers" → saas. Every one of those would have
+// been handed a domain's implicit-feature list to build.
+//
+// THE FIX, at the level of the class rather than the keyword: ONE shared list of the ways these words
+// are used when they do NOT mean the domain, stripped from the text ONCE before any domain is matched,
+// by ONE function that both entry points call. A new keyword that leaks adds a line HERE — it does not
+// get another negative lookahead buried inside a twelve-alternative headline regex, which is how the
+// previous six fixes left no mechanism behind for the seventh.
+//
+// ⚠️ PRECISION-FIRST, and the asymmetry is why. Missing an idiom costs what we have today. Stripping
+// a genuine signal would make a real recruitment app lose its domain — so every entry below matches a
+// SPECIFIC construction, never a bare word, and removal only ever DELETES evidence: it cannot invent a
+// domain that was not already matching. The genuine-classification corpus is asserted unchanged.
+const NON_DOMAIN_USES: RegExp[] = [
+  // jobs — a duty, praise, or a background task. None of them is employment.
+  /\b(?:your|my|our|his|her|their|its)\s+jobs?\b/gi,
+  /\b(?:good|great|nice|excellent|amazing|fine|bad|poor|terrible|lousy)\s+jobs?\b/gi,
+  /\bjobs?\s+(?:is|was|are|were)\s+to\b/gi,
+  /\b(?:cron|background|scheduled|batch|build|queue|worker|async|print)\s+jobs?\b/gi,
+  /\bjobs?\s+(?:queue|runner|scheduler|id)\b/gi,
+  // jobs — "resume the build", "resume from where you left off": continue, not a CV.
+  /\bresumes?\s+(?:the|this|that|my|our|it|from|where|building|work|again)\b/gi,
+  // ecommerce — purpose, arithmetic, sorting, and "store" as the verb.
+  /\bin\s+order\s+to\b/gi,
+  /\border(?:ed|s)?\s+(?:by|alphabetically|ascending|descending)\b/gi,
+  /\bthe\s+products?\s+of\b/gi,
+  /\b(?:store|stores|storing|stored)\s+(?:the|this|that|these|those|it|them|all|any|each|every|my|our|your|data|results?|values?|state|items?|files?|everything|locally|in)\b/gi,
+  /\b(?:local|session|browser|cloud|object|data|key.?value|file)\s+stores?\b/gi,
+  // education — "of course" is agreement, not a syllabus.
+  /\bof\s+course\b/gi,
+  // events — a DOM event is not a conference.
+  /\b(?:click|change|input|submit|key(?:board|down|up|press)?|mouse|touch|scroll|focus|blur|drag|drop|custom|dom|browser|window|resize|load)\s+events?\b/gi,
+  /\bevents?\s+(?:handler|listener|bubbling|loop|delegation|emitter|target|object)\b/gi,
+  /\b(?:add|remove)\s*event\s*listener\b/gi,
+  // real-estate — a CSS/JS property is not a house; "flat" is a layout, not an apartment;
+  // "listing" is a rendered list of anything.
+  /\b(?:css|style|styling|js|javascript|object|custom|computed)\s+propert(?:y|ies)\b/gi,
+  /\bpropert(?:y|ies)\s+(?:name|value|key|of|is|are|on)\b/gi,
+  /\bflat\s+(?:design|list|structure|file|rate|array|layout|colou?rs?|hierarchy|style|ui)\b/gi,
+  /\b(?:file|code|command|feature|price|product|task|item)\s+listings?\b/gi,
+  // social — following instructions, an HTTP POST, a user's own profile, and "message" as output.
+  /\bfollow(?:s|ing|ed)?\s+(?:the|these|this|those|my|our|your|a|an|it|them|up|along|instructions?|steps?|guidelines?|conventions?|patterns?|rules?)\b/gi,
+  /\b(?:http|api|rest|ajax|fetch|axios|curl|a|the)\s+post\s+(?:request|endpoint|route|method|call|body|handler|api)\b/gi,
+  /\bposts?\s+(?:request|endpoint|route|method|body|to\s+the\s+api)\b/gi,
+  /\b(?:error|success|warning|toast|log|status|commit|alert|confirmation|validation|welcome|greeting)\s+messages?\b/gi,
+  /\bmessages?\s+(?:saying|like|that\s+says)\b/gi,
+  /\b(?:code|inline|block|html|todo|doc|jsdoc)\s+comments?\b/gi,
+  /\b(?:my|your|our|their|his|her|the\s+user'?s?)\s+profile\b/gi,
+  // saas — "a team of", "billing" on its own is generic money language.
+  /\b(?:a|our|my|your|the|small|large|whole|entire|dev(?:eloper)?|engineering|design|support)\s+teams?\s+of\b/gi,
+  /\bteams?\s+(?:of|member)\b/gi,
+  // restaurant — a navigation menu is not a food menu; POS is also "position".
+  /\b(?:nav(?:igation)?|hamburger|burger|side|slide.?out|drop.?down|context|main|top|bottom|tab|kebab|user|profile|settings?|mobile|left|right)\s*-?\s*menus?\b/gi,
+  /\bmenus?\s+(?:bar|item|button|icon|toggle|opens?|closes?)\b/gi,
+  // logistics — a device driver is not a delivery rider.
+  /\b(?:device|database|db|odbc|jdbc|display|graphics|printer|audio|network|usb|chrome|web)\s+drivers?\b/gi,
+  // booking — a support ticket is not an event ticket; a book is a thing on a shelf.
+  /\b(?:support|help.?desk|bug|issue|jira|trouble|service)\s+tickets?\b/gi,
+  /\b(?:read|reading|reads|write|writing|wrote|buy|buying|sell|selling|borrow|lend|shelf|library|audio|e-?)\s+books?\b/gi,
+  /\bbooks?\s+(?:i'?ve|i\s+have|i\s+read|on\s+my\s+shelf)\b/gi,
+];
+
+/**
+ * The text with every ordinary-English use of a domain keyword removed, so no domain can be selected
+ * by an idiom, a technical compound, or a verb that happens to spell a noun we care about.
+ *
+ * 🔒 ONE function, called by BOTH entry points. `analyzeRequirementGaps` and `missingDomainFeatures`
+ * carried duplicate domain-selection code already; letting only one of them strip would reproduce this
+ * repo's most expensive shape — a fix applied to one of two lanes (see `a38c6fef`). Pure.
+ */
+export function stripNonDomainUses(text: string): string {
+  let out = String(text || '');
+  for (const re of NON_DOMAIN_USES) out = out.replace(re, ' ');
+  return out;
+}
+
 const GENERIC_FEATURES: Array<{ label: string; re: RegExp }> = [
   { label: 'user authentication', re: /auth|login|sign.?in|sign.?up|account|user/i },
   { label: 'admin panel', re: /admin|dashboard|manage|backend/i },
@@ -311,7 +414,11 @@ function domainFeatureScore(domain: DomainDef, text: string): number {
 
 /** Analyze a build prompt for its likely domain, missing features, NFRs and clarifying questions. Pure. */
 export function analyzeRequirementGaps(prompt: string): RequirementGaps {
-  const text = String(prompt || '');
+  const original = String(prompt || '');
+  // Domain matching and feature detection both read the text with ordinary-English uses of domain
+  // keywords removed (see NON_DOMAIN_USES). `india` deliberately reads the ORIGINAL: stripping an
+  // idiom must never be able to hide "in Hindi" / "₹" and turn an Indian build into a US-centric one.
+  const text = stripNonDomainUses(original);
   // Pick the BEST-matching domain among all whose headline regex fires, scored by how many of its feature
   // signals the prompt hits. Array order breaks ties (`>=` keeps the earlier one), so EVERY existing
   // classification stays byte-identical unless a LATER domain is STRICTLY more specific — the fix for the
@@ -352,7 +459,7 @@ export function analyzeRequirementGaps(prompt: string): RequirementGaps {
     mentioned,
     likelyMissing,
     nonFunctional,
-    india: detectIndiaContext(text),
+    india: detectIndiaContext(original),
     clarifyingQuestions: clarifyingQuestions.slice(0, 6),
   };
 }
@@ -373,7 +480,7 @@ export function shouldSurfaceRequirementGaps(g: RequirementGaps): boolean {
  * a later build turn is correctly treated as already-present and never re-suggested. Pure.
  */
 export function missingDomainFeatures(appText: string, source: string): { domain: string; labels: string[] } {
-  const text = String(appText || '');
+  const text = stripNonDomainUses(String(appText || ''));
   const src = String(source || '');
   const domain = DOMAINS
     .filter((d) => d.re.test(text))
@@ -390,10 +497,31 @@ export function missingDomainFeatures(appText: string, source: string): { domain
  *  domain almost always needs but the prompt left implicit — so a rich request never gets a shallow app,
  *  with NO clarifying round-trip (friction-free requirement awareness). Returns '' when there is nothing
  *  worth adding (no domain, or nothing missing), so a clear/generic prompt is left exactly as-is. Pure. */
-export function buildRequirementGuidance(g: RequirementGaps): string {
+export function buildRequirementGuidance(
+  g: RequirementGaps,
+  opts: { userAskedForAnApp?: boolean } = {},
+): string {
   const parts: string[] = [];
-  // Domain feature guidance (unchanged) — only when a real domain has genuinely-missing features.
-  if (shouldSurfaceRequirementGaps(g)) {
+  // 🔒 THE SECOND LAYER (autopsy 424ecdab, 2026-09-14). The keyword fix above stops an idiom SELECTING
+  // a domain; this stops a domain — however it was selected — being turned into an INSTRUCTION on a turn
+  // where the user never asked for an app at all.
+  //
+  // The two halves of this block are not equally dangerous and are no longer gated together:
+  //   • the DOMAIN half INVENTS an app ("a production jobs app almost always needs… INCLUDE them by
+  //     default"). On a persona or chat turn that is the sentence that built a recruitment ATS for
+  //     someone who asked for a mentor, and it outranked the model's own correct reading.
+  //   • the INDIA half invents nothing — it restates the market the user's own words already named
+  //     (₹ / GST / UPI / Hindi) and can only change FORMATTING. It stays ungated, so a request that
+  //     says "in ₹" keeps Indian rails whatever the lane decides.
+  //
+  // ⚠️ The caller passes the answer to "did the user ask for an app to be PRODUCED?" — deliberately a
+  // different question from `intent` ("which lane runs this turn?"). Reusing one verdict for two
+  // questions is the documented shape that let a later widening silently cancel an earlier narrowing
+  // (see `userAskedForAnAppToBeBuilt`). Defaults to TRUE so every existing caller — and
+  // `renderRequirementGaps`, which only describes — behaves byte-identically.
+  const askedForAnApp = opts.userAskedForAnApp !== false;
+  // Domain feature guidance — only when a real domain has genuinely-missing features AND an app was asked for.
+  if (askedForAnApp && shouldSurfaceRequirementGaps(g)) {
     const feats = g.likelyMissing.slice(0, 6);
     if (feats.length > 0) {
       parts.push([

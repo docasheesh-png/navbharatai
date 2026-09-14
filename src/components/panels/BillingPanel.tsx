@@ -19,6 +19,7 @@ import {
 
 import { packBreakdown, type PurchaseRail, type StoreConfig } from '../../lib/storePurchase';
 import { splitPaymentAtPct, DEFAULT_PLATFORM_FEE_PCT } from '../../lib/platformFee';
+import { aiSpendSummary, formatInr } from '../../lib/aiSpendSummary';
 
 type BillingDetailTab = 'purchase' | 'gift' | 'use' | 'remaining' | 'budget';
 type ToastType = 'success' | 'error' | 'info' | 'warning';
@@ -103,6 +104,13 @@ export function BillingPanel(props: BillingPanelProps) {
     onSetLimitError, onSetLimitSuccess, onToast,
   } = props;
   const { monthlyAiCost } = props;
+
+  // TOTAL AI SPEND — the real ₹ this wallet has been charged, derived from its own ledger by the same
+  // arithmetic the debit used (`tokens / TOKENS_PER_RUPEE`). Same principle as `rechargeSplit` below:
+  // the screen recomputes the server's own number rather than displaying a separately-recorded one
+  // that is free to drift from it. Cheap and synchronous — it reads a wallet already in memory, so it
+  // needs no fetch and nothing to keep in sync.
+  const aiSpend = aiSpendSummary(wallet);
 
   // The recharge split, computed by the SAME pure function the server settles with. One money rule,
   // one implementation — the user is never shown a number the server will later disagree with.
@@ -528,40 +536,73 @@ export function BillingPanel(props: BillingPanelProps) {
                       </div>
                     </div>
 
+                    {/* TOTAL AI SPEND — what NavBharatAI actually charged this wallet (admin 2026-09-14).
+                        Replaces a per-AI-call table read from `ai_usage_logs`, which answered the wrong
+                        question AND could only ever print -₹0.0000: it read `amount_deducted` /
+                        `output_tokens`, and neither is written any more (a streamed turn records no
+                        token counts, and `estimated_provider_cost` was deleted in the money audit as
+                        "a field whose only value was a lie"). Its header row also declared four columns
+                        over five body cells, so every value sat one column right of its own label.
+                        The real charge is the wallet ledger — see lib/aiSpendSummary.ts. */}
                     <div>
-                      <p className="text-[9px] text-orange-400 font-black uppercase tracking-wider font-mono mb-2">Prompt Dedution logs (Deducted per command output)</p>
-                      <div className="overflow-y-auto max-h-[180px] custom-scrollbar border border-white/5 rounded-2xl bg-black/10">
-                        <table className="w-full text-left text-[11px] font-mono">
-                          <thead>
-                            <tr className="border-b border-white/5 text-[#8b949e] font-black uppercase tracking-widest text-[9px] bg-black/40">
-                              <th className="py-2.5 px-4">Command / Agent Call</th>
-                              <th className="py-2.5 px-4">Output Tokens</th>
-                              <th className="py-2.5 px-4 text-red-400">Rupees Charged</th>
-                              <th className="py-2.5 px-4">Datetime</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-white/5 font-bold">
-                            {billingLogs.map((log: any, i: number) => (
-                              <tr key={i} className="hover:bg-white/5 transition-colors">
-                                <td className="py-2.5 px-4 text-white font-semibold uppercase">{log.agent || 'Chat Prompt'}</td>
-                                <td className="py-2.5 px-4 text-[#8b949e] truncate max-w-[150px]"></td>
-                                <td className="py-2.5 px-4 text-orange-400">{(log.output_tokens || log.outputTokens || 0).toLocaleString()}</td>
-                                <td className="py-2.5 px-4 text-red-405 font-black text-red-400">-₹{(log.amount_deducted || log.amountDeducted || 0).toFixed(4)}</td>
-                                <td className="py-2.5 px-4 text-[#8b949e] text-[10px]">
-                                  {log.timestamp ? (log.timestamp.seconds ? new Date(log.timestamp.seconds * 1000).toLocaleString() : new Date(log.timestamp).toLocaleString()) : 'Just now'}
-                                </td>
-                              </tr>
-                            ))}
-                            {billingLogs.length === 0 && (
-                              <tr>
-                                <td colSpan={4} className="py-6 text-center text-[#8b949e] font-black uppercase tracking-widest text-[9px]">
-                                  No AI task execution logs captured yet.
-                                </td>
-                              </tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
+                      <p className="text-[9px] text-orange-400 font-black uppercase tracking-wider font-mono mb-2">Total AI Spend (what NavBharatAI has charged you)</p>
+                      {!aiSpend.ledgerAvailable ? (
+                        /* HONEST FAILURE, NOT A ZERO. An unreadable wallet is a different fact from a
+                           wallet that has spent nothing, and printing ₹0.00 for the first is the exact
+                           defect that made the Live Metrics screen a dashboard of confident zeros. */
+                        <div className="border border-white/5 rounded-2xl bg-black/10 px-4 py-5 text-center space-y-2">
+                          <p className="text-[10px] text-amber-400 font-black uppercase tracking-widest">Spend not loaded</p>
+                          <p className="text-[10px] text-[#8b949e]">We could not read your charges just now — this is not ₹0. Tap Refresh to try again.</p>
+                        </div>
+                      ) : (
+                        <div className="border border-white/5 rounded-2xl bg-black/10 overflow-hidden">
+                          <div className="px-4 py-4 border-b border-white/5 bg-black/20">
+                            <div className="text-2xl font-black text-red-400">₹{formatInr(aiSpend.totalInr)}</div>
+                            <div className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest mt-1">
+                              Charged across {aiSpend.chargeCount.toLocaleString('en-IN')} {aiSpend.chargeCount === 1 ? 'charge' : 'charges'}
+                            </div>
+                            <div className="flex flex-wrap gap-x-5 gap-y-1 mt-3">
+                              <div>
+                                <span className="text-xs font-black text-white">₹{formatInr(aiSpend.buildInr)}</span>
+                                <span className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest ml-1.5">App building</span>
+                              </div>
+                              <div>
+                                <span className="text-xs font-black text-white">₹{formatInr(aiSpend.assistantInr)}</span>
+                                <span className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest ml-1.5">Assistants</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="overflow-y-auto max-h-[180px] custom-scrollbar">
+                            <table className="w-full text-left text-[11px] font-mono">
+                              <thead>
+                                <tr className="border-b border-white/5 text-[#8b949e] font-black uppercase tracking-widest text-[9px] bg-black/40">
+                                  <th className="py-2.5 px-4">What it was for</th>
+                                  <th className="py-2.5 px-4 text-right text-red-400">Charged</th>
+                                  <th className="py-2.5 px-4">When</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-white/5 font-bold">
+                                {aiSpend.rows.map((row, i) => (
+                                  <tr key={`${row.at}-${i}`} className="hover:bg-white/5 transition-colors">
+                                    <td className="py-2.5 px-4 text-white font-semibold">{row.label}</td>
+                                    <td className="py-2.5 px-4 text-right text-red-400 font-black whitespace-nowrap">-₹{formatInr(row.inr)}</td>
+                                    <td className="py-2.5 px-4 text-[#8b949e] text-[10px] whitespace-nowrap">
+                                      {row.at ? new Date(row.at).toLocaleString() : '—'}
+                                    </td>
+                                  </tr>
+                                ))}
+                                {aiSpend.rows.length === 0 && (
+                                  <tr>
+                                    <td colSpan={3} className="py-6 text-center text-[#8b949e] font-black uppercase tracking-widest text-[9px]">
+                                      Nothing charged yet — your builds so far have been free.
+                                    </td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

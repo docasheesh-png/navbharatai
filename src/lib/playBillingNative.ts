@@ -1,5 +1,6 @@
 // Google Play Billing — the NATIVE bridge. Pure decisions live in storePurchase.ts; this file is
-// only the wire to the Android plugin (PlayBillingPlugin.java), and it is a no-op everywhere else.
+// only the wire to the Android plugin (PlayBillingPlugin.java), and it is a no-op everywhere else —
+// including iOS, which is native but has no such plugin (see isPlayBillingPlatform).
 //
 // Mirrors metaNativeConsent.ts exactly: dynamic `@capacitor/core` import, a native-platform guard,
 // `registerPlugin<Interface>('PlayBilling')`, every call try/caught into a NAMED outcome rather than
@@ -30,12 +31,27 @@ interface PlayBillingPlugin {
 
 let cached: PlayBillingPlugin | null = null;
 
-/** The plugin handle, or null on web / an older shell that never registered it. Never throws. */
+/**
+ * The only platform this plugin exists on. Exported so the gate is testable without Capacitor.
+ *
+ * 🔴 IT USED TO ASK "IS THIS NATIVE?" — AND AN iPHONE IS NATIVE (admin Monitor capture, 2026-09-14:
+ * `"PlayBilling" plugin is not implemented on ios @ unhandled promise`). So every iOS launch registered
+ * the Android-only plugin, called `isAvailable()` on it, and Capacitor threw. Nothing was lost for the
+ * user — `purchaseRail` still resolved to the web gateway — but a guaranteed error on every iOS launch
+ * is exactly the kind of noise that hides a real one, and this file's own header said "a no-op
+ * everywhere else", which was false for the platform that carries half the installed base.
+ */
+export function isPlayBillingPlatform(platform: string | null | undefined): boolean {
+  return String(platform ?? '').trim().toLowerCase() === 'android';
+}
+
+/** The plugin handle, or null anywhere Play Billing does not exist (web, iOS, an older shell). Never throws. */
 async function plugin(): Promise<PlayBillingPlugin | null> {
   if (cached) return cached;
   try {
     const { Capacitor, registerPlugin } = await import('@capacitor/core');
-    if (Capacitor.isNativePlatform() !== true) return null;
+    // Android, not "native": Play Billing is a Google Play service, and iOS has no such plugin.
+    if (!isPlayBillingPlatform(Capacitor.getPlatform())) return null;
     cached = registerPlugin<PlayBillingPlugin>('PlayBilling');
     return cached;
   } catch {

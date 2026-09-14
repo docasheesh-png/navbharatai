@@ -53538,6 +53538,69 @@ file has now been burned by three times.
 CI went green on `802eaa7e`; the full gate was re-run locally on main+#2914 before the merge, per the
 concurrent-sessions rule that a gate run before a merge proves nothing.
 
+## 2026-09-14 — Settings → Live Metrics was never real: it rendered an auth failure as a dashboard of zeros
+
+Admin, with a screenshot: *"setting ke andar ka live matrix farzi hai, real data nahi show ho raha."*
+The screen showed **0 total builds · 0% success · 0% preview · 0s average · "No AI calls recorded
+yet" · $0.0000** — on an account that had built apps that same day.
+
+**They were right, and more precisely right than the word "farzi" suggests. Nothing was mocked — the
+screen had never been able to load anything, since the day it shipped.**
+
+### The chain, read from the code rather than guessed
+
+1. `/api/admin/metrics` authenticates on the **`x-admin-token`** header — `verifyAdminToken` reads
+   exactly `req.headers['x-admin-token']`.
+2. `SettingsPanel` sent **`Authorization: Bearer <token>`**, in **both** of its call sites.
+3. So the route answered **401 `{ error: 'Admin token required.' }`** — every time, for every admin,
+   from the first day.
+4. The client did `.then(r => r.json()).then(setAdminLiveMetrics)` with **no `r.ok` check**. That error
+   object is truthy, so the panel rendered — and every field fell through its `?? 0`:
+   `builds?.total ?? 0` → 0 · `successRate ?? 0` → 0% · `previewRate ?? 0` → 0% · `avgMs ?? 0` → 0s ·
+   `Object.entries(tokens || {}).length === 0` → "No AI calls recorded yet" · `totalCostUsd ?? 0` →
+   $0.0000.
+
+**That is the screenshot, field for field.** A confident dashboard assembled entirely out of fallbacks
+over an auth failure — the second absolute rule's *"a status indicator MUST reflect real state — never
+hardcoded, never faked"*, and worse than a blank screen: a blank screen asks a question, this answered
+one, wrongly.
+
+### 🔒 The fix is a shared helper, not a one-character header fix
+
+`'x-admin-token'` was hand-written in **four** client files — `LoadBoard`, `MonitorPanels`,
+`AdminDashboard` and this panel. **Three had it right and one did not, and nothing could tell**,
+because there was no single answer to "how does an admin request authenticate?" for the wrong one to
+disagree with. Correcting only the typo leaves the next caller equally free to invent a fifth spelling.
+
+`src/lib/adminFetch.ts` is now that answer: `ADMIN_TOKEN_HEADER`, `adminHeaders`, and an `adminGet`
+whose result type **has no `data` on the failure branch** — so "an error became the dashboard" is not a
+mistake a caller can make any more. A 401 is named as a sign-in problem (the one thing the admin can
+act on); a network throw is `status: 0`, because *"we could not ask"* and *"the server said no"* are
+different facts; and a 200 that will not parse is not data either.
+
+⚠️ `adminFailed()` is an explicit **type predicate** rather than a bare `if (r.ok)`: this project's
+frontend tsconfig did not narrow the union reliably at the call sites, and a caller that cannot reach
+`message` is a caller who will reach for `data` instead — which is the original bug wearing a different
+hat.
+
+### The screen now tells the truth in three states
+
+- **loaded** — real numbers
+- **failed** — the actual reason, with a *Try again* button. The old card said *"Admin login required"*
+  for every outcome, which was by accident the one true thing it could have said.
+- ⚠️ **labelled** — *"Counted since this server last started — not lifetime totals."* These come from a
+  process-wide registry (`server/lib/metrics.ts`), and this service scales to zero and redeploys on
+  every merge. **Without that line a genuinely small number reads exactly like the broken screen this
+  replaces** — which is how the real bug stayed hidden for so long.
+
+### The class guard
+
+A test sweeps every client file and fails if an `Authorization` header appears near an `/api/admin/`
+URL. ⚠️ **Per CALL, not per file** — the first version flagged `App.tsx`, whose `Authorization: Bearer`
+headers are GitHub API calls with nothing to do with this, and this module's own comment describing the
+bug. A guard that cries wolf gets deleted. A second test asserts the sweep actually sees admin call
+sites, because a scan that finds nothing passes while proving nothing. 12 tests.
+
 ---
 
 ## 2026-09-14 — THE TESTING NOTICE SAT HALF OFF THE LEFT EDGE OF A REAL PHONE (admin screenshot)
@@ -53834,3 +53897,211 @@ whose slash-star opened a block comment the regex closed at the next star-slash 
 and failing an assertion about a call that was present all along. Then the comment written to explain
 that quoted the wildcard literally and **closed itself early**, breaking the file. Line comments only,
 and the note now describes the sequence instead of printing it.
+## 2026-09-14 — the user's "Rupees Charged" column could only ever print ₹0.0000
+
+Admin: *"user ko ai call by provider ki jagah par total AI spend dikhna chahiye — jahan hamne (admin)
+user se app building me jo charge liya hai, wo show hona chahiye."*
+
+The billing screen's **"Prompt Dedution logs (Deducted per command output)"** table showed one row per AI
+call, read from `ai_usage_logs`. Investigating it found three faults, and only the first is the one that
+was asked about.
+
+### 1 · It asked the wrong question
+
+`ai_usage_logs` is a per-provider-call ENGINE log. A user does not buy calls, they buy builds. The
+number they care about — what left their wallet — was on no screen at all.
+
+### 2 · 🔴 Its money column was structurally incapable of being non-zero
+
+It read `log.amount_deducted || log.amountDeducted` and `log.output_tokens || log.outputTokens`.
+**Neither is written any more.** The streamed turn (which is the one that carries real chat traffic)
+records no token counts at all, and `estimated_provider_cost` was *deliberately deleted* in the
+2026-09-12 money audit — *"a field whose only value was a lie is not worth keeping"*.
+
+So every row rendered **`-₹0.0000`**, for every user, on every account, however much they had really
+been charged. The audit removed the lie from the collection and nobody checked who was still reading it.
+
+The same table also declared **four header columns over five body cells**, so every value sat one column
+to the right of its own label: "Output Tokens" headed an empty cell, "Rupees Charged" headed the token
+count, "Datetime" headed the rupees, and the date had no header at all. `colSpan={4}` on the empty state
+and a `text-red-405` class (no such Tailwind shade) are from the same edit.
+
+### 3 · 🔴 And those rows were leaking the provider to the user's browser
+
+`GET /api/wallet/:userId/logs` spread the **whole Firestore document** into its response —
+`{ id: d.id, ...d.data() }` — on its primary query *and* its index-missing fallback. Those documents
+carry `providerName` and `modelName` (`routes/chat.ts` writes both), so every signed-in user's client
+received the vendor and model id of every call made for them.
+
+The UI never painted those fields, **which is exactly why it went unnoticed: the leak was in the
+payload, not the pixels.** The White-Label Law is about what reaches the user, and a JSON body in their
+own devtools is as surfaced as a rendered table.
+
+### The fix
+
+**`src/lib/aiSpendSummary.ts`** (pure) — the real charge has always been in the **wallet ledger**.
+`computeDebitedWallet` writes one `type:'usage'` entry per charge with the exact tokens debited, the
+build it belongs to and our own description. That is the authoritative record: it *is* the balance
+movement, not telemetry sitting beside it.
+
+- 🔒 **₹ is DERIVED from tokens, never parsed out of the description.** The debit computes
+  `billedInr = tokens / TOKENS_PER_RUPEE`; recomputing from the same field through the same shared
+  constant reproduces the charge exactly and cannot drift when the wording changes.
+- 🔒 **`ledgerAvailable: false` is a distinct outcome from `totalInr === 0`.** An unreadable wallet
+  renders an honest "Spend not loaded — this is not ₹0", never a zero. This is the lesson of the Live
+  Metrics bug found four days earlier: a dashboard of confident zeros assembled out of `?? 0` fallbacks
+  is worse than no dashboard.
+- The card headlines the **total**, splits it into **App building** and **Assistants**, and lists the
+  charges underneath — `chargeCount` stays honest even though the rows are capped for rendering.
+
+**`src/server/lib/usageLogPublic.ts`** — the route now returns an **allow-list**, built field by field
+so the type system enforces it. Deleting `providerName`/`modelName` would have closed today's leak and
+nothing else; the next field written into that collection would ship to users by default with no test
+failing. `latencyMs` and `raced` are withheld too — neither names a vendor, but `raced` reveals that two
+models were asked and a latency distribution is how someone infers which engine served them.
+
+### Tests
+
+`tests/aiSpendSummary.test.ts` — 19 tests. **The allow-list guard was proven by reversion**: restoring
+the raw spread fails 4 of them. Also covered — a description whose ₹ contradicts its tokens must not
+move the total, a sub-token charge counts but adds no rupees, junk rows degrade rather than poison, and
+**both** query paths apply the redaction (a guard on one path leaks on exactly the day the other runs).
+
+Gate on the final state: typecheck · noUnusedImports · typecheck:server · build · test:bundle ·
+boot:check · **1634 files / 22,788 passed / 1 skipped / 0 FAIL**.
+
+### Follow-up, recorded rather than bundled (rule 6)
+
+With the table gone, the `billingLogs` prop and its `/logs` fetch have **no consumer left** —
+`usePaymentEngine` still requests it on every wallet load and threads it through `App.tsx` into a prop
+nobody reads. Removing that chain touches three more files for no user-visible benefit, so it is not in
+this change; the leak it carried is closed at the route either way. Worth doing as its own tidy-up.
+
+## 2026-09-14 — the admin Monitor page contradicted itself in five places; nine items root-caused, one PR
+
+The admin sent a text capture of the Monitor page and asked what was wrong with it. Nine items were
+worked; six turned out to be code defects, two were engine facts working as designed, and three of the
+"text defects" were artefacts of the capture tool. Everything below was verified from code before it
+was called a bug.
+
+### 🔴 M6-live — a Reclaim button on the site's own production channel (the one that mattered most)
+
+Firebase Hosting's `channels.list` returns the site's built-in **`live`** channel beside the preview
+channels, and nothing filtered it. It has no deployment record (it is not an app), so with a complete
+registry `classifyChannels` called it `unknown` — and `unknown` is reclaimable. The Publish Capacity
+card showed a card literally named "live" under *Wasted channels — no live app is using these*,
+counted it as one of "30 of about 50" preview channels, and offered a **Reclaim** button that would
+have issued a delete against the production channel. Whether Google's API would have refused is not a
+thing a platform may rely on.
+
+**Fix:** a new `default` state — never reclaimable, never counted against the preview-channel cap
+(the "N of about 50" figure was off by one on every site, always), sorted last; the reclaim endpoint
+refuses it by name as defence in depth. Test-locked (5 cases) including the case where a *workspace*
+named "live" hashes to a normal preview id.
+
+### 🔴 M1 + M2 — two provider accountings, and labels that claimed more than they measured
+
+- **"API Usage Ranking: VERTEX 0 tokens" beside "Provider Token Burn: VERTEX 1,40,925 tokens".** The
+  burn map was keyed by `providerName` as written (`VERTEX`); the ranking was a second, hand-rolled
+  tally that looked tokens up by `name.toLowerCase()` and found nothing. It also printed 888 legacy
+  `auto` rows as a provider called "auto" at "0 ms · 0 tokens" — three months after the writer that
+  invented them was fixed. **Both panels now read the one `summariseUsage().byProvider` rollup**
+  (`auto` folded into `unknown`, latency `null` when unrecorded, a `measuredCalls` count so 888
+  unmeasured calls read as unmeasured rather than free).
+- **"Platform Margin ₹-1.92 · Revenue minus AI cost" on a day the Monitor showed ₹231 of build cost in
+  six hours.** Every AI number on the Business panel comes from `ai_usage_logs`, which the CHAT route
+  alone writes; builds record into the Firestore timeline and never touch it. So the margin was
+  revenue minus *chat* cost, and "Output Tokens · All providers combined" omitted the provider (kimi)
+  that had done 94% of the work. The numbers were right for what they measured; the labels lied about
+  what that was. The route now declares `scope: 'chat'` and the tiles say *Chat margin*, *Chat
+  assistants only — builds are on the Monitor*, *Direct provider cost · chat only*.
+  🔴 **OPEN (rule 6):** the two accountings should become one. Writing builds into `ai_usage_logs`, or
+  reading both into one ledger, is a money-audit-sized change and is NOT in this PR — the honest label
+  is what ships today.
+- **"Website Hits Today 86 · 86 total"** — `serverStats.totalHits` is in-memory, per instance, since
+  boot; the process was 49 s old. Route now sends `hitsSinceBoot: true`; the tile says *since this
+  server started — resets on deploy* instead of *All time requests*.
+
+### 🔴 M3 — Insights and Health analysed a different dataset from the charts above them
+
+Captured 49 s after a deploy: the charts (Firestore timeline) showed 3 builds / ₹231.36 for the last
+6 hours; **Insights** said *"No builds or model calls have been recorded in this window"* and
+**Platform Health** said *"No data yet for: success"* — and scored **Reliability 100 beside three
+failed builds**. Both, plus Alerts and FinOps, were fed `getMetrics().snapshot()`, the since-boot
+registry. After every deploy the two halves of the page contradict each other until the registry
+refills, and the half that contradicts the evidence is the half that claims to analyse it.
+
+**Fix:** `windowSnapshot.ts` (pure) builds the analysers' snapshot from the timeline the charts draw;
+the monitor route feeds all four from it whenever the window has data, and returns `metricsScope` so
+each panel prints what it analysed (*for the last 6 hours* / *since this server started (49s ago)*).
+`generateInsights` takes a scope: the no-data sentence names it instead of a fixed "in this window",
+and the repair-burden insight is **skipped** when the source does not record repairs (the timeline
+does not) rather than reporting "0 attempts" from a field that was never measured.
+
+### 🔴 M5 — every server-log row was INFO with an empty message
+
+`audit()` computes the real severity for the Cloud Logging mirror (`DIAGNOSTICS_READ_FAILED` →
+WARNING) and then handed the durable store `level: 'info'`, **hardcoded**, one statement later. And
+`message: meta.message` was `undefined` for every caller in the codebase — they pass `error`, `path`,
+`kind`, `key` — so nine `DIAGNOSTICS_READ_FAILED` rows, each carrying the failure text in
+`meta.error`, rendered as `DIAGNOSTICS_READ_FAILED — ` at INFO. `BLOCKED_SCAN` lives in **`server.ts`
+at the repo root** (safeguard #6, again). **Fix:** pure `persistedAuditEntry()` — the durable level is
+the mirror's severity mapped down, the message is the first meta field that says what happened,
+capped at 300 chars. The panel also shows a date once the 40 rows cross midnight (they ran
+13:22 → 22:36 with no day anywhere).
+
+### M4 — the Play Billing plugin was called on iOS
+
+`playBillingNative.ts` gated on `Capacitor.isNativePlatform()`, which is true on iOS; the plugin is
+Android-only, so every iPhone launch threw *"PlayBilling" plugin is not implemented on ios*. The rail
+still resolved to the web gateway, so no user lost anything — but the file's own header said "a
+no-op everywhere else", which was false for half the installed base. Gate is now
+`getPlatform() === 'android'` via an exported, tested predicate.
+
+### M9 — "Success 0%" beside "Preview 67%" was TRUE, and now says so
+
+The timeline records `ok` (passed the gates) and `previewAllowed` (the platform saw it render)
+separately; a build can render and still be ended by a gate, a cost cap, or a user stop. Two of
+the three did exactly that. The Success tile now names the gap — *0 ok · 3 failed · 2 rendered but
+did not pass* — so it reads as a state rather than a contradiction. **Why** those three failed needs
+a build report; the Monitor cannot say.
+
+### M6 — chip and clock
+
+The Platform Load chip said *Not measured* while the sentence beneath it said *10 of 12 ceilings have
+room*: the level is honestly `unknown` (an unread ceiling is the worst thing on the board), but the
+chip now says **`2 not measured`**. The header used 12-hour time while the log rows used 24-hour;
+both are 24-hour now.
+
+### Not bugs — stated so nobody re-investigates them
+
+- **"20 more app s", "Unrecovered spend .", the grievance text ending "…reach in"** — capture-tool
+  artefacts. React renders `app{plural}` as adjacent text nodes which the tool joins with a space; the
+  grievance constant genuinely ends with `info@navbharatai.com` and the tool cut the line.
+- **M7 — "reaches 559px past the right edge (and 4 more)"** — the admin tab strip is a
+  `flex … overflow-x-auto` scroller with `whitespace-nowrap` buttons; five tabs sit past the edge
+  *inside the scroll container*. The page body does not scroll sideways. By design.
+- **M8a — 9 live sandboxes, 0 builds on this instance.** The count asks E2B for `state === 'running'`
+  (`liveSandboxCount.ts`); it is the authority, so nine really were billing. The tile already says
+  several servers run at once; the instruments to attribute them (*why machines started*, `pausedBy`)
+  exist on the Reports card. Not a Monitor defect.
+- **M8b — free build with kimi ₹221 and GLM ₹0.** By design: `AGENTV3_FREE_KIMI_LEAD` (admin
+  2026-08-02) and the 2026-09-12 health-aware lead put KIMI first on free builds with GLM as the
+  error-fallback; Vertex appearing means the ladder climbed exactly as the routing policy is written.
+  The ₹221 spent on three failed builds is a build-report question, not a routing one.
+
+### Still open, named
+
+- **Grievance Officer warning is still showing.** `CLAUDE.md` records the key as set on 2026-09-12 and
+  names the disappearance of this warning as the verification signal. It has not disappeared. Cloud
+  Run console only — a session cannot see it.
+- **24 of 30 preview channels are waste** (23, once `live` is excluded). The Reclaim buttons exist and
+  now cannot touch the wrong channel.
+- **The three failed builds (₹231.36 in six hours).** Needs a build report.
+- **Unifying the chat and build accountings** (M2, above).
+
+### Gate
+
+typecheck · noUnusedImports · typecheck:server · build · test:bundle · boot:check — all green on the
+final state; **1642 files / 22,879 tests passed / 1 skipped / 0 FAIL**. 121 tests touched or added
+across nine suites; the `live`-channel, audit-severity and window-snapshot rules are each locked.

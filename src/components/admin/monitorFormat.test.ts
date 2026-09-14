@@ -175,3 +175,30 @@ describe('totalsFor — VM seconds', () => {
     expect(t.sandboxSeconds).toBe(420);
   });
 });
+
+import { totalsFor as totalsForRule } from './monitorFormat';
+
+describe('monitorFormat — "rendered but did not pass" is a NAMED state (admin Monitor capture, 2026-09-14)', () => {
+  const pt = (o: Partial<Parameters<typeof totalsForRule>[0][number]>) => ({
+    t: 0, observed: true, builds: 0, buildsOk: 0, buildsFailed: 0, buildMs: 0, previewOk: 0,
+    aiRequests: 0, inputTokens: 0, outputTokens: 0, costMicroUsd: 0, sandboxSeconds: 0, ...o,
+  } as Parameters<typeof totalsForRule>[0][number]);
+
+  it('the exact capture: 3 builds, 0 ok, 2 rendered ⇒ 2 rendered-but-not-ok, and the rates still disagree honestly', () => {
+    const t = totalsForRule([pt({ builds: 3, buildsOk: 0, buildsFailed: 3, previewOk: 2 })]);
+    expect(t.successRate).toBe(0);
+    expect(t.previewRate).toBeCloseTo(2 / 3);
+    expect(t.previewOk).toBe(2);
+    expect(t.renderedNotOk).toBe(2);
+  });
+
+  it('is zero — never negative — when passed builds are at least the rendered ones', () => {
+    expect(totalsForRule([pt({ builds: 2, buildsOk: 2, previewOk: 2 })]).renderedNotOk).toBe(0);
+    expect(totalsForRule([pt({ builds: 2, buildsOk: 2, previewOk: 1 })]).renderedNotOk).toBe(0);
+  });
+
+  it('sums across buckets', () => {
+    const t = totalsForRule([pt({ builds: 1, previewOk: 1 }), pt({ builds: 1, buildsOk: 1, previewOk: 1 })]);
+    expect(t.renderedNotOk).toBe(1);
+  });
+});

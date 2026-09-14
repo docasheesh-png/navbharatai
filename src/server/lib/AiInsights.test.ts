@@ -138,3 +138,23 @@ describe('answerMetricQuery', () => {
     expect(a.answer.toLowerCase()).toContain('no telemetry');
   });
 });
+
+describe('generateInsights — scope (admin Monitor capture, 2026-09-14)', () => {
+  it('the no-data detail names the scope it was given', () => {
+    const [ins] = generateInsights(snap(), undefined, { label: 'the last 6 hours' });
+    expect(ins.detail).toContain('the last 6 hours');
+  });
+  it('keeps the old "in this window" wording when no scope label is supplied — nothing regresses', () => {
+    const [ins] = generateInsights(snap());
+    expect(ins.detail).toContain('in this window');
+  });
+  it('skips the repair-load insight when repairs were not tracked, instead of reporting 0 attempts', () => {
+    // 24 attempts over 12 builds = 2.0 per build, comfortably over the >= 1 threshold that emits it.
+    const s = snap({ builds: { ...snap().builds, total: 12, succeeded: 12, successRate: 1, totalRepairAttempts: 24 } });
+    const tracked = generateInsights(s, undefined, { repairsTracked: true });
+    const untracked = generateInsights(s, undefined, { repairsTracked: false });
+    const isRepair = (i: { id: string; headline: string }) => /repair/i.test(i.id) || /repair/i.test(i.headline);
+    expect(tracked.some(isRepair)).toBe(true);
+    expect(untracked.some(isRepair)).toBe(false);
+  });
+});

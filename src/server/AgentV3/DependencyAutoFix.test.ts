@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { planDependencyAutoFix, applyWellKnownMissingDeps, WELL_KNOWN_DEPS, WELL_KNOWN_DEV_DEPS, pinKnownDepsInPackageJson, pinKnownDepsInInstallCommand, ensureFrameworkCoreDeps, npmInstallMaskedFailure, knownDepVersion } from './DependencyAutoFix';
+import { planDependencyAutoFix, applyWellKnownMissingDeps, WELL_KNOWN_DEPS, WELL_KNOWN_DEV_DEPS, pinKnownDepsInPackageJson, pinKnownDepsInInstallCommand, ensureFrameworkCoreDeps, restoreDroppedDependencies, npmInstallMaskedFailure, knownDepVersion } from './DependencyAutoFix';
 import { detectMisplacedDevTools, isDevOnlyTool } from './DependencyAnalysis';
 
 const pkg = (deps: Record<string, string> = {}, extra: Record<string, unknown> = {}) =>
@@ -70,6 +70,63 @@ describe('ensureFrameworkCoreDeps — the framework binary can never vanish (Car
     expect(ensureFrameworkCoreDeps('{}', 'brand-new-framework').added).toEqual([]);
     expect(ensureFrameworkCoreDeps('not json', 'nextjs').added).toEqual([]);
     expect(ensureFrameworkCoreDeps('{}', undefined).added).toEqual([]);
+  });
+});
+
+describe('restoreDroppedDependencies — a rewrite can never silently revert an already-installed dep (EduTube autopsy 2026-09-14)', () => {
+  it('re-adds a dependency a rewrite dropped, exactly the EduTube failure (react-router-dom + lucide-react)', () => {
+    const existing = JSON.stringify({
+      name: 'app',
+      dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1', 'react-router-dom': '^6.26.0', 'lucide-react': '^0.400.0' },
+    }, null, 2);
+    // A stale full-file-dump rescue call re-emits package.json from a truncated context — it never
+    // knew about the two packages a real `npm install` had added minutes earlier.
+    const stale = JSON.stringify({ name: 'app', dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1' } }, null, 2);
+    const r = restoreDroppedDependencies(stale, existing);
+    expect(r.restored).toEqual(expect.arrayContaining(['react-router-dom@^6.26.0', 'lucide-react@^0.400.0']));
+    const out = JSON.parse(r.content);
+    expect(out.dependencies['react-router-dom']).toBe('^6.26.0');
+    expect(out.dependencies['lucide-react']).toBe('^0.400.0');
+    expect(out.dependencies.react).toBe('^18.3.1'); // untouched
+  });
+
+  it('is ADD-ONLY — a key the new content still declares (even at a different version) is left alone', () => {
+    const existing = JSON.stringify({ name: 'app', dependencies: { axios: '^1.6.0' } }, null, 2);
+    const bumped = JSON.stringify({ name: 'app', dependencies: { axios: '^1.7.0' } }, null, 2);
+    const r = restoreDroppedDependencies(bumped, existing);
+    expect(r.restored).toEqual([]);
+    expect(r.content).toBe(bumped); // byte-identical — a considered version bump is never overridden
+  });
+
+  it('restores a devDependency into devDependencies, not dependencies', () => {
+    const existing = JSON.stringify({ name: 'app', devDependencies: { vitest: '^2.0.0' } }, null, 2);
+    const stale = JSON.stringify({ name: 'app', devDependencies: {} }, null, 2);
+    const r = restoreDroppedDependencies(stale, existing);
+    expect(r.restored).toEqual(['vitest@^2.0.0']);
+    const out = JSON.parse(r.content);
+    expect(out.devDependencies.vitest).toBe('^2.0.0');
+    expect(out.dependencies).toBeUndefined();
+  });
+
+  it('a dep moved between dependencies and devDependencies in the new file is NOT re-added twice', () => {
+    const existing = JSON.stringify({ name: 'app', dependencies: { typescript: '^5.5.0' } }, null, 2);
+    const moved = JSON.stringify({ name: 'app', devDependencies: { typescript: '^5.5.0' } }, null, 2);
+    const r = restoreDroppedDependencies(moved, existing);
+    expect(r.restored).toEqual([]); // already declared somewhere in the new file — a considered edit
+  });
+
+  it('no-ops on a genuinely NEW file (nothing to preserve) and on non-JSON input', () => {
+    expect(restoreDroppedDependencies('{"name":"app"}', '').restored).toEqual([]);
+    expect(restoreDroppedDependencies('{"name":"app"}', '   ').restored).toEqual([]);
+    expect(restoreDroppedDependencies('not json', '{"dependencies":{"react":"^18"}}').restored).toEqual([]);
+    expect(restoreDroppedDependencies('{"name":"app"}', 'not json').restored).toEqual([]);
+  });
+
+  it('no-ops when nothing was dropped — byte-identical output', () => {
+    const same = JSON.stringify({ name: 'app', dependencies: { react: '^18' } }, null, 2);
+    const r = restoreDroppedDependencies(same, same);
+    expect(r.restored).toEqual([]);
+    expect(r.content).toBe(same);
   });
 });
 

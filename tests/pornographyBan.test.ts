@@ -170,10 +170,28 @@ describe('the wiring — both surfaces, and no upsell after a refusal', () => {
     // is read, and NOTHING is said to the user when that answer was no.
     const start = route.indexOf("zeroBillReason = 'empty build (0 files produced) — never charged'");
     expect(start).toBeGreaterThan(0);
-    const block = route.slice(start, start + 4500);
+    // ⚠️ THE WINDOW IS DERIVED FROM CONTENT, NOT A CHARACTER COUNT. It used to be `start + 4500`, and
+    // adding one comment to the guard pushed the code it checks outside the slice — a green-to-red
+    // that says nothing about the behaviour. `UPSELL_SUPPRESSED` is the block's own last statement, so
+    // the window now grows with the block instead of being a number somebody has to remember.
+    // The block ends with the UPSELL_SUPPRESSED record, so the window runs to the close of that call.
+    const suppressed = route.indexOf('UPSELL_SUPPRESSED', start);
+    expect(suppressed).toBeGreaterThan(start);
+    const end = route.indexOf('});', suppressed);
+    expect(end).toBeGreaterThan(suppressed);
+    const block = route.slice(start, end + 3);
     expect(block).toContain('const refused = looksLikeRefusal(result.summary);');
     // The narration — the upsell OR the degraded notice — is reachable only when there was no refusal.
-    expect(block).toMatch(/if \(!refused\) \{[\s\S]*freeTierUpsellMessage\(/);
+    //
+    // ⚠️ MATCHED AS "the guard STARTS with !refused", not as one exact expression. A FOURTH suppression
+    // reason landed on 2026-09-14 (the app already renders — report fd021c64), turning `if (!refused)`
+    // into `if (!refused && !appAlreadyRuns)`. That is the guard getting STRONGER, and the literal
+    // above would have failed on it — which is the same "pinned a sentence where it meant a rule"
+    // fragility this file's own comment warns about two lines up.
+    expect(block).toMatch(/if \(!refused(\s*&&[^)]*)?\)\s*\{[\s\S]*freeTierUpsellMessage\(/);
+    // …and the upsell is never reachable with `refused` alone being false — every added condition may
+    // only ever SUPPRESS further, never re-open the path a refusal closes.
+    expect(block).not.toMatch(/if \(!refused\s*\|\|/);
     // …and a suppressed upsell is recorded, so the admin sees the check fire rather than inferring it.
     expect(block).toContain('UPSELL_SUPPRESSED');
   });

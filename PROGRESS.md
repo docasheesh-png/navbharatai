@@ -52681,3 +52681,104 @@ of the fix. Re-fetching before a push catches a conflict; it does not catch a PR
 under a branch you are still improving. **Check whether your PR is still OPEN before pushing a
 correction to it** — a push that succeeds to a merged branch is silent and reaches nobody.
 7 new tests. Fixed on the P5 branch (#2905) and merged up the stack to #2908 and #2909.
+
+## 2026-09-14 — AUTOPSY of build `fd021c64`: a working app was told it did not exist, then asked for money
+
+Free tier, weak, KIMI, **5m03s**, `ok: false`. Prompt: **"Yess create karo"**.
+
+### What the report says about the app, in its own words
+
+> `PROD_BUILD_OK` — *"The production build succeeded"*
+> `GREEN_GUARD_SAVE` — *"The app was opened in a real browser and rendered — recorded as the last known good state"*
+> `RELEASE_GATE: YELLOW` — *"**It runs and renders.**"*
+> narration — *"✅ Preview verified — I opened the running app in a browser and it renders correctly"*
+
+### What the platform told the user
+
+> *"The build produced no files. Please try again"*
+> *"Your app needs our strongest engine to finish cleanly. **Add credits** and I will complete it on the best engine."*
+
+**Nothing was broken. Nothing needed writing.** The workspace already held the user's 25-file Fantasy
+Football app (`durable read 356ms (25 file(s))`, before any model call). The engine restored it, ran the
+dev server, opened it, verified the render, built it for production — and reported that it did not exist.
+
+### The five buckets
+
+| | Count | What |
+|---|---|---|
+| ✅ self-healed | **0** | one auto-add of a missing `@playwright/test` dependency — and see 🥵 below |
+| 🔀 worked around | **1** | the whole build re-run on a stronger model to reach the identical conclusion |
+| ⏭️ skipped | **3** | user journey (no form — correctly), e2e scaffold (already present), Playwright run (binaries absent) |
+| ❌ still broken | **2 unresolved** | the false verdict + upsell (fixed here); design consistency B (84/100), not healed |
+| 🥵 struggled | **1, and it is the whole second half of the run** | minutes 2–5 repeated minutes 0–2 exactly: 12 file reads, tsc, dev server, preview, screenshot, 3 browser actions, same summary |
+
+Cost of that repetition: **16 model calls, 441,699 input tokens**, five minutes of a user's time. ₹0 to
+them (free tier); ours to pay.
+
+### 🔴 THE ROOT CAUSE, and it is the FOURTH instance of one class
+
+`emptyBuildFailureSummary` and the free-tier upsell both asked *"how many files did the AI write?"*
+Three reasons that question gives the wrong answer were already found and fixed, each after a real
+report, each added as its own branch:
+
+1. **the model REFUSED** (report `03997004` — the pornography upsell)
+2. **our own PROVIDERS were degraded** (2026-09-13 — the user invited to pay for our slowness)
+3. **the PROMPT carried no instruction** (#2887 — a bare Drive link)
+
+This is the **fourth**, and it is the only one that is positive evidence about **the app** rather than
+about the model, the providers, or the prompt: **the app was opened in a browser and it rendered.**
+CLAUDE.md already states the general rule — *"Zero files is not always a capability failure"* — and it
+has now been re-derived one instance at a time, four times. That is rule 3 (hunt the siblings) failing
+on a class whose general form was already written down.
+
+**Fixed:** `emptyBuildFailureSummary` takes the render evidence and returns null when the app runs;
+the upsell gains `appAlreadyRuns`, tested **before** degraded and before (c) because it is the
+strongest of the four. `UPSELL_SUPPRESSED` records the reason. 6 tests.
+
+🔒 **WHY THE RENDER AND NOT THE RUNNER'S `ok`.** A runner's `ok: true` is a CLAIM, and build `5b4f9b63`
+is precisely that claim being false — *"your to-do app is complete and ready"* over an unrelated
+project, zero files. A verified render is a MEASUREMENT the platform took itself. **"Preview is EARNED"
+cuts both ways**: it refuses a green tick without proof, and it must equally refuse a FAILURE verdict
+against proof.
+⚠️ The dead-sandbox verdict still wins over a render, checked in that order — a sandbox that could not
+be created cannot have served a page, so if the two ever disagree, believe the one that says nothing
+could possibly have run.
+
+### 🔴 OPEN ROOT CAUSE — the retry was decided before the evidence existed
+
+The wasted second half is NOT fixed, and the reason is worth stating rather than patching around.
+
+`shouldRetryEmptyBuild` already exempts an edit on an existing project — *"an edit may legitimately
+change nothing"* — but that exemption is switched OFF by `userAskedToBuildAnApp`, which is
+`intent === 'new_build'`. **"Yess create karo"** is a bare confirmation carrying a build verb, so the
+classifier read it as a fresh build order and the exemption lifted. The narrowing itself is correct and
+was written for a real bug (`5b4f9b63`); it simply cannot tell "build me a to-do app" from "yes, do
+that".
+
+**The DNA-level problem is ORDERING, not classification.** The retry is decided at a point where the
+platform does not yet know whether the app works — `buildObs.previewRendered` is still false there, and
+only becomes true thousands of lines later. So the decision is made blind and the evidence that would
+settle it arrives afterwards. **The real fix is to probe first and decide second**; that is a
+reordering of the build's post-loop sequence, which is too large to do safely from a report alone and
+would risk trading one problem for another. Recorded here per rule 6 rather than guessed at.
+**The user-visible harm is gone either way** — with this change that build ends honest instead of
+telling someone their working app produced nothing.
+
+### Also found, not fixed (smaller, and each needs its own look)
+
+- **The `rootCause` is an autoResolved advisory.** The report blames *"postmessage-wildcard-origin @
+  index.html:9"* — a `READINESS_WARNING` marked `autoResolved: true`. CLAUDE.md already says advisory
+  findings must never be named as a build's root cause; `READINESS_WARNING` is evidently not on that
+  list. ⚠️ And `index.html:9` in a plain Vite scaffold is very likely **our own injected preview/beacon
+  script**, i.e. we may be reporting our own code to the user as their app's security issue — stated as
+  a suspicion because it was not verified against the injector.
+- **Two subsystems contradict each other in one report.** `AGENT_NOTE` says *"no files were changed"*;
+  `PREVIEW_SNAPSHOT_STALE` says *"a later pass changed a file after the copy was taken"*; the
+  incremental line says *"3 changed, 2 new"*. At least one of the three is wrong.
+- **We added a dependency we cannot run.** `@playwright/test` was auto-added to `package.json`, and
+  `TEST_SUITE_UNVERIFIED` then reports the Playwright browsers are not installed in the sandbox.
+- **90% sandbox idle** (6.3 min up, 0.6 min of our operations) and the **ETA lied again** — "~2–4 min",
+  then at minute 4 "about 3 min more to go", finished 1 minute later.
+- ⚠️ **The 153-rung provider cascade is NOT present in this report.** `providerChain` lists the
+  configured ladder, but there is no `providerFailures` key at all and `providerDelivery` is KIMI × 16.
+  Recorded explicitly because the previous report's cascade makes this easy to misread as a recurrence.

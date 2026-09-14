@@ -1086,6 +1086,26 @@ export function emptyBuildFailureSummary(
   expectsArtifacts: boolean,
   fileCount: number,
   sandboxUnavailable: boolean,
+  /**
+   * Did the server's OWN eyes see this app come up and render in a browser on this turn?
+   *
+   * 🔴 THE FOURTH REASON "ZERO FILES" IS NOT A FAILURE (report fd021c64, 2026-09-14). A user typed
+   * "Yess create karo" into a workspace already holding their 25-file Fantasy Football app. The
+   * engine restored it, started the dev server, opened it in a real browser, confirmed it rendered,
+   * ran the production build green, and saved it as the last known good state — then told the user
+   * **"The build produced no files. Please try again"** and asked them to **add credits**.
+   *
+   * Nothing was broken. Nothing NEEDED writing. The whole build then ran a SECOND time on a stronger
+   * model to reach the same conclusion — five minutes and sixteen model calls to tell somebody their
+   * working app does not exist.
+   *
+   * 🔒 WHY THE RENDER IS THE RIGHT EVIDENCE, and not the model's own word for it. `ok: true` from the
+   * runner is a CLAIM — build 5b4f9b63 is exactly that claim being false ("your to-do app is complete
+   * and ready" over an unrelated project, zero files). A verified render is a MEASUREMENT the platform
+   * took itself. "Preview is EARNED" cuts both ways: it refuses a green tick without proof, and it
+   * must equally refuse a failure verdict against proof.
+   */
+  appRenders = false,
 ): string | null {
   if (!expectsArtifacts) return null;
   // SANDBOX DOWN ⇒ FAILURE regardless of file count (deep-test App #11, 2026-07-14). When the sandbox
@@ -1099,6 +1119,9 @@ export function emptyBuildFailureSummary(
     return 'The build could not run — the sandbox was unavailable (no files could be created, installed, or verified). Please try again in a moment; you have not been charged.';
   }
   if (fileCount > 0) return null;
+  // A WORKING APP IS NOT AN EMPTY BUILD. Checked after `sandboxUnavailable` on purpose: a dead sandbox
+  // can never have rendered anything, so that verdict must still win if the two ever disagree.
+  if (appRenders) return null;
   return 'The build produced no files. Please try again — you have not been charged.';
 }
 
@@ -17717,7 +17740,7 @@ async function noteBuildOutcome(
       // (already ₹0 via zeroBillReason), and telemetry all agree the build did NOT succeed. This runs
       // BEFORE the SPM settle / billing / finish below so every downstream consumer sees the truth.
       if (result && result.ok) {
-        const emptyFail = emptyBuildFailureSummary(expectsArtifacts, writtenFiles.size, sandboxUnavailable);
+        const emptyFail = emptyBuildFailureSummary(expectsArtifacts, writtenFiles.size, sandboxUnavailable, buildObs.previewRendered);
         if (emptyFail) result = { ...result, ok: false, summary: emptyFail };
       }
 
@@ -18205,9 +18228,14 @@ async function noteBuildOutcome(
         // spend the very budget free-tier protects). Instead, honestly invite the user to add credits
         // and finish on the strongest engine — converting the user to paid without shipping a broken app.
         if (freeTierBuildActive) {
-          // 🔴 THREE INDEPENDENT REASONS NOT TO ASK FOR MONEY, AND THEY COMPOSE. Three sessions each
-          // found one of them on the same day, in this one guard; a merge that kept only one would
-          // silently restore the other two bugs, so the order below is the whole resolution.
+          // 🔴 FOUR INDEPENDENT REASONS NOT TO ASK FOR MONEY, AND THEY COMPOSE. Three sessions each
+          // found one of the first three on the same day, in this one guard; a merge that kept only
+          // one would silently restore the others, so the order below is the whole resolution. The
+          // fourth arrived on 2026-09-14 from report fd021c64.
+          //
+          // ⚠️ THE COUNT IN THIS SENTENCE IS PART OF THE GUARD. It said "three" for a day after the
+          // fourth landed — and a reader who trusts a stale count stops looking for the branch that
+          // is not in it. Whoever adds the fifth updates this line in the same edit.
           //
           // (a) THE MODELS REFUSED (report 03997004). The user asked for a pornography site; the
           // models refused eight times; this line then said *"Your app needs our strongest engine…
@@ -18236,9 +18264,17 @@ async function noteBuildOutcome(
           // Degraded is then tested before (c) for the reason its own author gives: when our
           // providers are down we do not know whether the prompt was buildable, and blaming the
           // user's wording for our outage is the same mistake in a politer sentence.
+          //
+          // (d) THE APP ALREADY WORKS (report fd021c64, 2026-09-14). "Yess create karo" into a
+          // workspace holding the user's own 25-file app: the engine restored it, opened it in a real
+          // browser, watched it render, built it for production — and then asked the user to add
+          // credits so a stronger engine could "finish" it. Tested BEFORE degraded and before (c)
+          // because it is the strongest evidence of the four: the other three reason about why we
+          // produced nothing, and this one observes that the app EXISTS AND RUNS. Nothing to sell.
           const refused = looksLikeRefusal(result.summary);
-          const degraded = !refused && providerFailuresLookDegraded(buildDiag.providerFailureBreakdown());
-          if (!refused) {
+          const appAlreadyRuns = !refused && buildObs.previewRendered;
+          const degraded = !refused && !appAlreadyRuns && providerFailuresLookDegraded(buildDiag.providerFailureBreakdown());
+          if (!refused && !appAlreadyRuns) {
             const emptyCause = assessBuildInput(prompt).buildable ? 'engine' : 'no-instruction';
             events.emit({
               type: 'narration',
@@ -18247,12 +18283,14 @@ async function noteBuildOutcome(
               ts: Date.now(),
             });
           }
-          if (refused || degraded) {
+          if (refused || degraded || appAlreadyRuns) {
             buildDiag.record({
               phase: 'build', severity: 'warning', code: 'UPSELL_SUPPRESSED', autoResolved: false,
               message: refused
                 ? 'Did not ask this user to add credits: the engine REFUSED this request on policy grounds. A refusal is an answer, not a capability limit — selling a stronger engine after one offers to do the very thing we just declined to do.'
-                : 'Did not ask this user to add credits: the build failed because the engine did not respond, not because the app needed a stronger one. Charging for our own slowness is what this check exists to prevent.',
+                : appAlreadyRuns
+                  ? 'Did not ask this user to add credits: their app was opened in a real browser and RENDERED on this turn. No files needed writing because nothing was broken — selling a stronger engine to finish an app that already works is the plainest false claim this guard can make.'
+                  : 'Did not ask this user to add credits: the build failed because the engine did not respond, not because the app needed a stronger one. Charging for our own slowness is what this check exists to prevent.',
             });
           }
         }

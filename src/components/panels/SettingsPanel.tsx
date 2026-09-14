@@ -1,4 +1,4 @@
-import React, { lazy, Suspense } from 'react';
+import React, { lazy, Suspense, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Settings, X, ChevronRight, ChevronLeft, Monitor, LayoutDashboard, Lock, Database, GitFork, Activity, GitBranch, Bot, Globe, Smartphone, BarChart2, Cpu, List, LogOut, GitBranch as GitBranchIcon, Folder, Check, Search, RefreshCw, Box, Zap, Heart, HardDrive, ShieldCheck, Languages, Plus, ExternalLink, Copy, User, Mail, Scale, FileText } from 'lucide-react';
 import { Github } from '../ui/BrandIcons';
@@ -23,6 +23,7 @@ import { THEME_MODES } from '../../lib/theme';
 import type { ThemeMode } from '../../lib/theme';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { panelWidth, panelColumns, READING_WIDTH, type DeviceMode } from '../../lib/panelWidth';
+import { adminGet, adminFailed } from '../../lib/adminFetch';
 
 // Lazy-loaded sub-components (same pattern as App.tsx)
 const _lz = <T extends object>(fn: () => Promise<T>, k: keyof T) =>
@@ -425,6 +426,12 @@ export function SettingsPanel({
   user,
   addLog,
 }: SettingsPanelProps) {
+  /**
+   * Why the metrics screen could not load, in words — local to this panel because nothing outside it
+   * needs the reason. `null` means "no failure", which is NOT the same as "no data": the panel
+   * distinguishes the two, and that distinction is the whole fix (see lib/adminFetch.ts).
+   */
+  const [metricsError, setMetricsError] = useState<string | null>(null);
   return (
     <div className={cn("flex-1 flex flex-col h-full overflow-y-auto custom-scrollbar modal-scroll-lock animate-in fade-in zoom-in duration-300", themeClasses.bg)}>
       {/* Settings Header */}
@@ -1436,17 +1443,29 @@ export function SettingsPanel({
                 exit={{ opacity: 0, x: -20 }}
                 className="space-y-6"
                 onViewportEnter={() => {
-                  if (!adminLiveMetrics && !loadingAdminMetrics) {
+                  if (!adminLiveMetrics && !loadingAdminMetrics && !metricsError) {
                     setLoadingAdminMetrics(true);
-                    const token = localStorage.getItem('admin_token') || '';
-                    fetch('/api/admin/metrics', { headers: { Authorization: `Bearer ${token}` } })
-                      .then(r => r.json()).then(setAdminLiveMetrics).catch(() => {}).finally(() => setLoadingAdminMetrics(false));
+                    void adminGet<any>('/api/admin/metrics')
+                      .then((r) => {
+                        // 🔴 AN ERROR IS NEVER DATA. This used to be `.then(r => r.json()).then(set…)`,
+                        // so a 401 body became the dashboard and every field fell through its `?? 0` —
+                        // a confident screen of zeros over an auth failure. See lib/adminFetch.ts.
+                        if (adminFailed(r)) { setAdminLiveMetrics(null); setMetricsError(r.message); return; }
+                        setAdminLiveMetrics(r.data);
+                        setMetricsError(null);
+                      })
+                      .finally(() => setLoadingAdminMetrics(false));
                   }
                 }}
               >
                 <div className="px-1 py-4">
                   <h2 className="text-2xl font-black text-white tracking-tight">Live Metrics</h2>
                   <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Build stats, AI cost & success rates</p>
+                  {/* ⚠️ NAME THE WINDOW. These come from a process-wide registry (server/lib/metrics.ts),
+                      so they count from the last server start — and this service scales to zero and
+                      redeploys on every merge. Without this line a genuinely small number reads exactly
+                      like the broken screen this replaced, which is how the real bug stayed hidden. */}
+                  <p className="text-[10px] text-[#484f58] mt-1">Counted since this server last started — not lifetime totals.</p>
                 </div>
                 {loadingAdminMetrics && (
                   <div className="flex items-center justify-center py-12 text-[#484f58] text-sm">Loading metrics…</div>
@@ -1510,9 +1529,13 @@ export function SettingsPanel({
                     <button
                       onClick={() => {
                         setLoadingAdminMetrics(true);
-                        const token = localStorage.getItem('admin_token') || '';
-                        fetch('/api/admin/metrics', { headers: { Authorization: `Bearer ${token}` } })
-                          .then(r => r.json()).then(setAdminLiveMetrics).catch(() => {}).finally(() => setLoadingAdminMetrics(false));
+                        void adminGet<any>('/api/admin/metrics')
+                          .then((r) => {
+                            if (adminFailed(r)) { setAdminLiveMetrics(null); setMetricsError(r.message); return; }
+                            setAdminLiveMetrics(r.data);
+                            setMetricsError(null);
+                          })
+                          .finally(() => setLoadingAdminMetrics(false));
                       }}
                       className="w-full py-4 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-[1.5rem] font-black uppercase tracking-widest text-xs transition-all flex items-center justify-center gap-2"
                     >
@@ -1524,7 +1547,26 @@ export function SettingsPanel({
                 {!adminLiveMetrics && !loadingAdminMetrics && (
                   <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 flex flex-col items-center text-center space-y-4">
                     <BarChart2 className="w-10 h-10 text-[#484f58]" />
-                    <p className="text-[10px] text-[#484f58]">Admin login required to view metrics.</p>
+                    {/* The REASON, not a guess at it. This card used to say "Admin login required" for
+                        every outcome — which was, by accident, the one true thing it could have said,
+                        because the request never carried a header the server reads. */}
+                    <p className="text-[11px] text-[#8b949e] font-semibold">{metricsError ?? 'No metrics loaded yet.'}</p>
+                    <button
+                      onClick={() => {
+                        setMetricsError(null);
+                        setLoadingAdminMetrics(true);
+                        void adminGet<any>('/api/admin/metrics')
+                          .then((r) => {
+                            if (adminFailed(r)) { setAdminLiveMetrics(null); setMetricsError(r.message); return; }
+                            setAdminLiveMetrics(r.data);
+                            setMetricsError(null);
+                          })
+                          .finally(() => setLoadingAdminMetrics(false));
+                      }}
+                      className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all"
+                    >
+                      Try again
+                    </button>
                   </div>
                 )}
               </motion.div>

@@ -586,6 +586,12 @@ export class BuildDiagnostics {
    */
   /** The last audit note recorded, so a re-install replaces its predecessor instead of stacking. */
   private lastAuditNote: string | null = null;
+  /**
+   * Did THIS build already run the compatible `npm audit fix`? Read from the command log rather than
+   * from the env flag, so the note describes what actually happened in this run — a build where the
+   * fix was skipped for time still gets the advice, and one where it ran does not.
+   */
+  private compatibleAuditFixRan = false;
 
   recordCommand(rec: { command: string; exitCode: number | null; stdout?: string; stderr?: string; durationMs?: number }): void {
     // NPM ALREADY TOLD US (dukaan report 2026-08-12). That build's install printed "8 vulnerabilities
@@ -595,9 +601,15 @@ export class BuildDiagnostics {
     // call and no extra command, and it covers every install path by construction.
     if (looksLikeDependencyInstall(rec.command)) {
       try {
+        // Set BEFORE the note is built, because the command that reveals this is usually the SAME one
+        // whose output we are parsing: `looksLikeDependencyInstall` matches `audit`, so `npm audit fix`
+        // both applies the compatible fixes and prints the tree they left behind.
+        if (/\bnpm\b[^\n]*\baudit\b[^\n]*\bfix\b/.test(rec.command) && !/--force/.test(rec.command)) {
+          this.compatibleAuditFixRan = true;
+        }
         const audit = parseNpmAuditSummary(`${rec.stdout ?? ''}\n${rec.stderr ?? ''}`);
         const severity = auditSeverity(audit);
-        const note = npmAuditNote(audit);
+        const note = npmAuditNote(audit, { compatibleFixAlreadyRun: this.compatibleAuditFixRan });
         // Only the LATEST install describes the tree the app ships with, so a later result replaces an
         // earlier one rather than stacking a second, contradictory line in the same report.
         if (severity && note && this.lastAuditNote !== note) {
@@ -1473,6 +1485,37 @@ export class BuildDiagnostics {
       cleared++;
     }
     if (cleared > 0) this.notify();
+    return cleared;
+  }
+
+  /**
+   * Record that a heal's re-judge PASSED — and clear the blockers that re-judge just superseded.
+   *
+   * 🔴 WHY THIS IS ONE METHOD AND NOT TWO CALLS (build 1ef27cd7, 2026-09-14). The fix above was written
+   * on 2026-08-27 for the dedupe heal and applied to that ONE call site. There are THREE heals that
+   * re-judge readiness and recover the build — dedupe, the Rules-of-Hooks heal, and the incomplete-code
+   * heal — and the other two never cleared the stale blocker. The dedupe site's own comment even says
+   * it re-judges *"exactly as the hooks heal and the incomplete-code heal below already do"*, which was
+   * true of the re-judging and false of the clearing.
+   *
+   * What that cost, in one real build: the engine detected a placeholder, completed it, re-judged the
+   * app READY **92/100**, and the production build succeeded — and then the release gate counted the
+   * superseded blocker from two minutes earlier, went RED, and the user was told
+   *     *"1 thing is still broken, so it is NOT ready to use yet"*
+   * about an app the platform had already re-judged as ready. The same class as the 2026-08-27 report
+   * this was first fixed for: a finding that describes code which no longer exists.
+   *
+   * So recording the recovery and clearing what it supersedes are now a SINGLE action. A fourth heal
+   * written later cannot record its recovery and forget the other half, because there is no longer a
+   * way to do one without the other.
+   *
+   * 🔒 THE CALLER'S OBLIGATION IS UNCHANGED, and it is what keeps this honest: reach here ONLY after
+   * re-running `assessBuildReadiness()` and only on `verdict.ready`. This clears blockers because the
+   * same gate that raised them has looked again and passed — never because a repair "probably worked".
+   */
+  recordReadinessRecovery(code: string, message: string): number {
+    const cleared = this.resolveReadinessBlockersOnRejudge();
+    this.record({ phase: 'build', severity: 'info', code, message, autoResolved: true });
     return cleared;
   }
 

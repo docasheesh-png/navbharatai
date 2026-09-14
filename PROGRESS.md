@@ -53912,6 +53912,81 @@ boot:check · **1633 files / 22,777 passed / 1 skipped / 0 FAIL**.
 - `@playwright/test` added to a project whose sandbox has no browsers installed.
 - The ETA lying, and 90–95% sandbox idle.
 
+---
+
+## 2026-09-14 — "Kon aya v/s kitne aye": counting NavBharatAI's own audience
+
+**Admin:** *"hamara app kitne mobiles me install hai, kya ham pata kar sakte hai? … kitne user hamari
+website 'navbharatai.com' par aye? … kon aya/download kiya v/s kitne aye/download huye (all time and
+today)."*
+
+Four questions. **Three have honest answers and one does not**, and the value of this change is that
+the difference is visible on the screen rather than smoothed over.
+
+### The finding: we built this for our users and never pointed it at ourselves
+
+NavBharatAI already owned a complete, tested, privacy-safe visitor counter — `siteAnalytics.ts` /
+`siteAnalyticsStore.ts`: per-day views and unique visitors, a visitor code that **rotates daily** so it
+cannot be reversed or joined across days, no cookie, nothing stored on the device, Do-Not-Track
+honoured, sharded documents for scale. We give it to **users**, for the apps they publish. Our own
+site was never counted at all: the analytics pipeline records only product events (signup / build /
+deploy / pay), gated on consent, and **no page-view event exists anywhere in the codebase.**
+
+So `ownAudience.ts` counts nothing itself. It decides **what is worth counting** and hands it to that
+store under two reserved ids — one implementation, not a second one.
+
+### Where the counting happens, and why there
+
+- **Website** — in the SPA catch-all in `server.ts`, the one line every real page view passes through.
+  Server-side on purpose: the request already carries the IP and user-agent to us, so counting it
+  collects nothing new, adds no request to the visitor's page, and **cannot be blocked by an
+  ad-blocker** — which would quietly under-report and make the number a lie.
+- **App** — on `/api/app-version`. `UpdateBanner` is mounted at the app's root and returns early on
+  web, so that route is hit exactly once per **native launch** and nowhere else.
+  ⚠️ Two things this needed: the client now **declares** its platform (`X-NBAI-Platform`), because
+  anyone can curl that route and counting every caller would count scripts as phones; and a counted
+  response is `no-store`, because the old five-minute cache meant a second launch inside five minutes
+  was never counted.
+
+### 🔴 What it deliberately cannot say — stated in the payload, not just on the screen
+
+- **Play Store installs.** Google Play holds that number and nothing here can reach it. What is
+  reported is an **open** — a device that launched the app and reached our server. An install we
+  cannot see is not one we may claim.
+- **An all-time count of PEOPLE.** The visitor code rotates every day precisely so the same person is
+  not recognisable tomorrow. All-time **visits** is a real running total; all-time people would need a
+  permanent per-person identifier, which is exactly what the rotation refuses to keep. `allTime` has
+  **no people field at all** — a nullable one would invite somebody to fill it with the sum of daily
+  counts, which is visits.
+- **Who an anonymous visitor was.** Only people who signed in can be named, and they are listed from
+  their own accounts in the Users tab — never from a counter that cannot identify anybody.
+
+### The honesty rule this feature is built on
+
+**A counter that could not be read is `null` and says so — never 0.** That is the same class as the
+secrets bug fixed hours earlier, where a silent read failure printed "No credentials saved yet" over
+eleven real keys. On a dashboard, "nobody came" and "we could not look" are the same picture unless
+the code refuses to let them be. Test-locked, including the case that a genuinely quiet day still
+shows a real zero.
+
+### The policy, in the same change
+
+Counting our own visitors is new collection about a new group of people, so `privacyPolicy.ts` gains
+**§11.1** — no cookie, no script, nothing stored on the device, daily rotation, DNT honoured, and the
+plain statement that we can say how many came today and **can never produce an all-time list of
+people**.
+
+### Verification
+
+40 tests across two files. The wiring file exists because every call added here fails **nothing** if
+dropped — the server would just stop counting and the panel would show a confident, permanent zero.
+
+⚠️ **Two self-inflicted bugs worth recording, both the same character sequence.** The wiring test's
+comment-stripper ate half of `server.ts`, because that file contains an Express content-type wildcard
+whose slash-star opened a block comment the regex closed at the next star-slash — deleting real code
+and failing an assertion about a call that was present all along. Then the comment written to explain
+that quoted the wildcard literally and **closed itself early**, breaking the file. Line comments only,
+and the note now describes the sequence instead of printing it.
 ## 2026-09-14 — the user's "Rupees Charged" column could only ever print ₹0.0000
 
 Admin: *"user ko ai call by provider ki jagah par total AI spend dikhna chahiye — jahan hamne (admin)
@@ -54340,6 +54415,271 @@ both are 24-hour now.
 typecheck · noUnusedImports · typecheck:server · build · test:bundle · boot:check — all green on the
 final state; **1642 files / 22,879 tests passed / 1 skipped / 0 FAIL**. 121 tests touched or added
 across nine suites; the `live`-channel, audit-severity and window-snapshot rules are each locked.
+
+---
+
+## 2026-09-14 (cont.) — "Kon aya" completed, and the whole thing folded into one button
+
+**Admin:** *"jo bana sakte ho, woh bana do! aur aise bana ki sab kuch button ke andar ho, screen par
+bheed na dikhe."*
+
+### The half that was still missing: WHO
+
+Counting how many came was the easy half. The admin also asked **who** — and that question has exactly
+one honest answer: **the people who signed in.** Firebase Auth already holds each account's
+`lastSignInTime` / `lastRefreshTime` and `creationTime`, and `adminUserActivity.ts` already reads them
+for the Users tab, so `peopleAudience()` folds those rows into: registered (all time), signed in today,
+new accounts today, and the names of today's arrivals, newest first.
+
+🔴 **The figure that keeps the other two honest: `lastActiveUnknown`.** "Last signed in" lives in
+Firebase Auth, which can be unreachable and is batched under a cap. Folding an unknown into "did not
+come today" would render an **outage as a quiet day** — the same lie as a zero standing in for an
+unread counter. So an account whose last-active could not be determined is counted separately, and the
+card says *"signed in today is at least N, not exactly."*
+
+The named list is capped at 25, and **the COUNT is never capped** — only the list is, with the screen
+saying so rather than implying that is everybody.
+
+### One button, and it is not only tidiness
+
+The card is **collapsed until pressed**, and the data is fetched **on open**. That matters beyond the
+admin's instruction: the "who came" half scans every wallet and asks Firebase Auth about every
+account. Loading that because somebody merely opened the Monitor tab is real work nobody asked for.
+The instruction and the cost pointed the same way, which is why this is a button and not a smaller
+font — pinned by a test that fails if the eager load returns.
+
+### The day boundary, decided rather than defaulted
+
+A day here is **midnight to midnight UTC**, and the card says so (5:30 AM IST). The visit counter's
+day-documents are keyed in UTC by a store shared with every user's published-app analytics, so
+inventing a second India-local day for the people half would make the two halves of one card disagree
+about what "today" means. Stating the boundary is honest; quietly picking a different one per section
+is not.
+
+### Verification
+
+56 tests across two files. Bite-checked by removing the on-open fetch — the wiring test fails.
+
+## 2026-09-14 — AUTOPSY `424ecdab`: "your job is to tell me" built a recruitment ATS
+
+**The prompt, verbatim:** *"You are my ruthless mentor.Dont sugar coat anything.if my idea is weak call
+it trash and tell me why .your job is to tell me until it's a bullet proof"*
+
+The user asked for a persona. `\bjob\b` in `RequirementGapAnalyzer` matched **"your *job* is to tell
+me"**, the analyzer returned `domain: 'jobs'`, and `buildRequirementGuidance` — which is phrased as an
+order (*"INCLUDE them by default (real, wired — never stubbed)"*) — was **prepended** to the build
+prompt. The report contains the exact moment it worked:
+
+| t | the model |
+|---|---|
+| ~2 min | *"Got it. I'll be your ruthless mentor — no fluff, no padding, no 'that's a great idea' when it's not."* |
+| ~2.5 min | *"I hear you — no more talk, let's build. **I'm treating this as a jobs app (the requirement awareness flagged it**, and you're demanding files)."* |
+
+**The model read the request correctly and our own injection turned it around.** 15.2 minutes, 19 files,
+a full job board (Login / Register / CandidateDashboard / EmployerDashboard / PostJob / Apply /
+ScheduleInterview / Pipeline), `ok: false`, `RELEASE_GATE: RED`. Billed ₹0 — NavBharatAI absorbed
+VERTEX 1,018,963 in / 10,829 out, KIMI 305,261 / 8,337, GLM 35,691 / 1,688.
+
+### The five-bucket ledger (270 entries)
+
+| | n | |
+|---|---|---|
+| ✅ self-healed | 3 | 24 import specifiers normalized · fast-lane failure handed to the full builder · `edit_file` miss recovered by re-reading |
+| 🔀 worked around | 6 | every one a `PROVIDER_FALLBACK` — KIMI 120 s timeouts ×3, GLM 429 ×4 |
+| ⏭️ skipped | 5 | one-shot lane · page-render check · user journey · typecheck · E2E scaffold (all "the build did not succeed") |
+| ❌ still broken | 9 unresolved | the 3 undefined JSX components · 4 dependency CVEs (1 high) · design 62/100 · a11y 70/100 · 2× `DESIGN_PAGE_INCONSISTENT` · no tests |
+| 🥵 struggled | 5 | 90 s first call killed by the budget · fast lane FAILED outright · ETA *"~2–4 min"* against 15.2 min · `react-datepicker` missing so the dev server would not start · **16.4 min sandbox, 1.5 min of our operations, 14.9 min idle (91%)** |
+
+### Root cause 1 — ordinary English selected a domain. FIXED.
+
+🔴 **The existing tripwire could not have caught this, and that is the lesson.** The corpus test in
+`RequirementGapAnalyzer.test.ts` calls itself *"the tripwire for the whole class"*, written after the
+2026-08-02 autopsy. Every case in it is a **substring** leak — `cartoon`, `photoshop`, `mobile-friendly`,
+`portable` — and every fix was a `\b` anchor. **`\bjob\b` is already anchored and still wrong**, because
+the word is whole and the *sense* is ordinary English. The class was never "a stem leaks inside a longer
+word"; it was "a keyword is also ordinary English", of which substrings are one species. Nine keywords
+had been narrowed one at a time (`shop`, `store`, `cart`, `friend`, `book`, `table`, `tutor`, `like`,
+`game plan`) and the class was declared closed each time.
+
+🔬 **Measured, not assumed: swept against 26 innocent sentences a real user types, 22 selected a domain.**
+`"good job!"` → jobs · `"in order to make this faster"` → ecommerce · `"of course"` → education ·
+`"add a click event listener"` → events · `"set the CSS property"` → real-estate · `"add a hamburger
+menu"` → restaurant · `"send a POST request"` → social · `"the database driver keeps timing out"` →
+logistics · `"a team of three developers"` → saas · `"store the result"` → ecommerce. Every one would
+have been handed that domain's implicit-feature list **to build**.
+
+**The fix is one mechanism, not a tenth narrowing:** `NON_DOMAIN_USES` — a single list of the
+constructions in which these words do NOT mean the domain — stripped once by `stripNonDomainUses()`,
+which **both** entry points call (`analyzeRequirementGaps` and `missingDomainFeatures` had duplicate
+selection code; letting one strip and not the other is the `a38c6fef` shape). A leaking keyword now adds
+a line there instead of another lookahead buried in a twelve-alternative regex. **24 of 26 now return
+`general`**; `india` deliberately still reads the ORIGINAL text so stripping can never hide "₹"/"Hindi".
+
+⚠️ **Two residuals, named rather than forced:** *"write a blog post about this"* and *"show a chat with
+the assistant"* still resolve to `social`. Both are genuine grey areas — a blog with posts and a chat
+really are social surfaces — and inventing a rule to kill them would risk a real social app's domain.
+
+### Root cause 2 (the other 50%) — a domain became an INSTRUCTION on a turn that asked for no app. FIXED.
+
+The only gate was `intent === 'new_build'`, which answers *"which lane runs this turn?"*. Whether an app
+was **asked for** is a different question, and this repo already records what reusing one verdict for two
+questions costs (`userAskedForAnAppToBeBuilt`'s own docstring). `buildRequirementGuidance` now takes that
+answer, and the two halves are gated **separately**: the DOMAIN half invents an app and is withheld; the
+INDIA half restates a market the user's own words named, invents nothing, and stays. Defaults to `true`,
+so every existing caller is byte-identical.
+
+⚠️ **Stated plainly: this layer would NOT have saved this build.** `userAskedForAnAppToBeBuilt` returns
+**true** for this prompt — signal `long-message`. A long message is read as a high-confidence
+`new_build` regardless of what it says. **OPEN ROOT CAUSE: the `long-message` signal treats length as
+build intent**, which is exactly the "READ THE MOOD FIRST" failure one layer up.
+
+### Root cause 3 — the RED blocker had no heal at all. PARTIALLY FIXED.
+
+`READINESS_BLOCKER: 3 undefined JSX component(s) … <IndianRupee>@JobDetail.tsx:37, <Clock>@JobDetail.tsx:38,
+<Link>@Apply.tsx:36`. Detected precisely, to the line — and **nothing tried to repair it**. Incomplete
+code has a heal, Rules-of-Hooks has a heal, duplicate imports have a heal; the single most common defect
+an LLM produces does not, because `addMissingProjectImports` indexed **project modules only** and all
+three names are **package** exports.
+
+**Fixed for the sub-class that can be PROVEN:** the index now also holds packages the project *already
+imports that exact name from*, so the heal **copies an import the project has already proven correct** —
+`Link` is imported from `react-router-dom` in `Layout.tsx`, so adding it to `Apply.tsx` cannot be wrong in
+a way the project was not already wrong. Aliased imports prove nothing and are skipped; two packages
+claiming one name is never guessed; a project module always wins, so no existing outcome changes.
+
+🔴 **STILL OPEN, and deliberately not guessed at: the two icons.** `Clock` and `IndianRupee` are imported
+**nowhere** in that project. Fixing them means asserting what `lucide-react` exports, and a wrong guess
+adds an import that will not resolve — turning a broken build into one that cannot parse, which is the
+precise bug this healer caused once before (Fight 3D, 2026-08-27). The honest blocker stands.
+**The real answer is to read the installed package's own type declarations**; that is the next thing to
+take on this root cause.
+
+### Other open root causes recorded from this report
+
+- 🔴 **91% of a 16.4-minute sandbox was idle** (1.5 min inside our operations). Third report in a row.
+- 🔴 **The ETA said "~2–4 min" for a 15.2-minute build** — `confidence 0.4`, printed as a number anyway.
+  Fourth autopsy to record it.
+- 🔴 **`RELEASE_GATE` said "the typecheck did not run"** — the **evidence-ledger** root cause from
+  `697b38ee`, still open, now with a third witness.
+- 🟡 `react-datepicker` was used but never installed, so the dev server would not start — the
+  dependency-sync gap.
+- 🟡 4 dependency vulnerabilities (1 high) with `AGENTV3_AUDIT_FIX=on`; npm could not fix them within a
+  major version.
+
+### Verification
+
+`tests/domainKeywordIdioms.test.ts` — 58 tests: the exact reported prompt, the 26-sentence innocent
+corpus as a LAW, 19 genuine prompts asserted **unchanged** (stripping can delete a real domain, which is
+the one way this fix could hurt a build), both entry points, and the guidance gate.
+**Proven by reversion: 25 fail** when `stripNonDomainUses` stops stripping; **1 fails** when the package
+index is removed.
+## 2026-09-14 — build 1ef27cd7: the heal worked, the verdict did not (CapCut/Alight Motion, 26.6 min)
+
+Prompt: *"Bro give me a app that has all the features of Capcut and alight motion and it should have
+video for learning each feature in it"*. Free/weak tier, `noClaude: true`, 26.6 minutes, `ok: false`,
+`billedInr: 0`. **Two root causes fixed, both found inside the report's own timeline.**
+
+### 🔴 ROOT CAUSE 1 — the app was re-judged READY 92/100, then failed on the blocker that re-judge had superseded
+
+The build's own timeline, twenty seconds apart:
+
+| time | |
+|---|---|
+| 08:04:40 | `READINESS_BLOCKER` (error, **unresolved**) — *1 fake/incomplete code issue* |
+| 08:06:29 | `INCOMPLETE_CODE_HEALED` — *Completed 1 unfinished/placeholder code section* |
+| 08:06:36 | `READINESS_RECOVERED_AFTER_COMPLETION` — ***now READY (score 92/100)*** |
+| 08:06:45 | `PROD_BUILD_OK` — *ready to publish and to package* |
+| 08:06:56 | `RELEASE_GATE: RED — 1 build-breaking blocker` ← the superseded one |
+| | → `OUTCOME_RELEASE_GATE_RED` → `ok: false` |
+
+The user was told *"1 thing is still broken, so it is NOT ready to use yet"* about an app the platform
+had itself re-judged as ready, whose production build had succeeded, and which `GREEN_GUARD_SAVE`
+recorded as having rendered in a real browser.
+
+**Why: the August fix was applied to ONE of three heals.** `resolveReadinessBlockersOnRejudge()` was
+written on 2026-08-27 for exactly this (the Fight 3D game, buildId 5e2de8c4 — *"the report then named,
+as the build's root cause, a line of code that no longer existed"*). There are **three** heals that
+re-judge readiness and recover the build:
+
+| site | heal | cleared the stale blocker? |
+|---|---|---|
+| `agentv3.ts:15747` | duplicate-import dedupe | ✅ |
+| `agentv3.ts:15851` | Rules-of-Hooks heal | ❌ |
+| `agentv3.ts:15899` | incomplete-code heal ← **fired in this build** | ❌ |
+
+The dedupe site's own comment reads *"re-judge, exactly as the hooks heal and the incomplete-code heal
+below already do"* — true of the re-judging, false of the clearing. The sibling was never hunted. Same
+shape as `a38c6fef`: **the instance was fixed; the class was not.**
+
+**Fix (rule 4 step 2 — make the wrong branch impossible):** `recordReadinessRecovery(code, message)` on
+`BuildDiagnostics` does both halves in one call, and all three sites now go through it. There is no
+longer a way to record a recovery and forget what it supersedes, so a fourth heal written later cannot
+get it wrong. The caller's obligation is unchanged and is what keeps it honest: reach it only after
+re-running `assessBuildReadiness()` and only on `verdict.ready`.
+
+### 🔴 ROOT CAUSE 2 — the report named a provider that was never contacted
+
+This build's **first** model call is recorded as a failed `anthropic / claude-sonnet-4-6`, 90 seconds
+long — on a FREE, weak-tier build whose own billing block says `noClaude: true` and where
+`enforceNoClaude` had stripped Claude out of the chain entirely.
+
+**Claude was never called.** `fastGenerateOnce` initialises `let usedProvider = 'CLAUDE'` and only
+overwrites it from the runner's `onProviderUsed` callback; the build-budget refusal is thrown at the
+*top* of the runner, before any network call, so nothing ever reported in. The failure path then
+recorded `model: fbModel` unconditionally — and `fbModel` is the Claude-tier id by definition (its own
+call site says *"GLM/Kimi ignore it and force their own ladder"*).
+
+Three costs, rising: it contradicts the same report's `noClaude: true`; it pins a 90-second stall on a
+named third party that was never contacted (rule 5 step 5); and it makes a build look like it breached
+the one routing rule the admin called unbreakable. **Identical shape to the 153-rung "Provider GLM
+failed" cascade fixed in #2913** — GLM never failed, GLM was never called.
+
+**Fix:** `fastLaneCallIdentity(reported, usedProvider, claudeTierModel)` — pure, exported, used by
+**both** record paths. With no provider reported the call is `unknown/unknown`, never a guess.
+`providerReported` is the only thing that separates "Claude served this" from "CLAUDE is what the
+variable was initialised to".
+
+### The five-bucket ledger
+
+| | count | |
+|---|---|---|
+| ✅ self-healed | **4** | incomplete code completed · readiness re-judged READY · 7 provider fallbacks absorbed · stale preview copy caught and demoted |
+| 🔀 worked around | **7** | every one a provider fallback: KIMI 4 timeouts + 1 budget-ended, GLM 7 rate-limits + 1 timeout |
+| ⏭️ skipped | **4** | page-render check (needs a live app) · user journey (*no form to fill*) · the app's Playwright suite (`@playwright/test` not installed) · platform typecheck |
+| ❌ still broken | **6 unresolved**, of which the gate counted **1** | the blocker — **now fixed**. The rest: 4 dependency CVEs (1 high), design 50/100, a11y 60/100 |
+| 🥵 struggled | **4 places** | the fast lane FAILED outright (`SIMPLE_BUILD_OUTCOME: BUILD_FAILED`, *"the engine did not respond in time"*) · a 90 s first call killed by the budget · 26.6 min against an ETA of *"~2–4 min"* · 87% sandbox idle |
+
+### Still open — named, not implied fixed
+
+- 🔴 **The ETA is not an estimate, it is a guess with a number on it.** `ETA_BASIS` recorded
+  *"~2–4 min (midpoint ~3 min) · basis heuristic · confidence 0.4"*; the build took **26.6 minutes** —
+  nine times the midpoint. This is the third autopsy in a row to record the ETA lying. Its own
+  confidence field says 0.4, and we print the number anyway.
+- 🔴 **The fast lane failed and cost 90 seconds before the real build started.** `preambleCapMs` bounds
+  the plan call, and it did its job; the question this report cannot answer is why the first call hung
+  for the whole cap. Needs the provider-side timing, not a diagnostics change.
+- 🔴 **"the typecheck did not run" while the agent ran `tsc --noEmit` clean, twice** (commands 6 and 7,
+  exit 0). This is the **evidence-ledger** root cause already recorded from autopsy `697b38ee` — and
+  deliberately NOT patched here. Two traps make a quick fix wrong: command 7 is
+  `tsc --noEmit 2>&1 | head -30`, whose exit code belongs to `head` and proves nothing; and **both** tsc
+  runs predate the incomplete-code heal that rewrote a file, so neither is evidence about the shipped
+  tree. A gate that accepted either would be trading one wrong verdict for another. The real answer is
+  still the shared ledger.
+- 🟡 4 dependency vulnerabilities (1 high) shipped — `AGENTV3_AUDIT_FIX` ran (`npm audit fix`, exit 1)
+  and could not fix them within a major version.
+- 🟡 87% sandbox idle on a 3.4-minute session.
+
+### Tests
+
+`tests/healedVerdictStands.test.ts` — **12 tests**, replaying this build's exact sequence end to end.
+**Proven by reversion: 8 tests fail** when `recordReadinessRecovery` stops clearing. The guard in
+`BuildDiagnostics.test.ts` was rewritten from a literal to a RULE — it used to pin the old method name
+at the FIRST call site, which is precisely why it passed unchanged while two of three sites were wrong.
+It now asserts every recovery site goes through the one method, each preceded by a passing re-judge,
+and that no site records a `READINESS_RECOVERED_*` code the long way round.
+
+Gate on the final state: typecheck · noUnusedImports · typecheck:server · build · test:bundle ·
+boot:check — all green; **1643 files / 22,893 tests passed / 1 skipped / 0 FAIL**.
 ## 2026-09-14 — A failed store build now reports itself to the admin, automatically, on its own page
 
 Admin (verbatim): *"jab bhi koi user, navbharatai par 'APK' banwaye. aur apk bane nahi, fail ho jaye. to
@@ -54544,3 +54884,46 @@ test:bundle, boot:check, and the full `npx vitest run` — **1649 files / 23004 
 0 FAIL**. Checked open PRs first (#2929, #2931, #2928, #2900) — #2929/#2931 autopsy a different build
 with no overlapping code paths; no duplicate work. PR #2933 opened; per the standing merge-hold rule,
 driven to green CI but not merged without the admin's explicit go-ahead.
+---
+
+## 2026-09-14 — TWO SESSIONS AUTOPSIED BUILD `1ef27cd7`. The other one was better, so mine was cut down.
+
+Both #2929 (mine) and #2931 landed the same finding from the same report: the incomplete-code heal
+completed a placeholder, re-ran the FULL readiness gate, got **READY 92/100**, set `ok: true` — and the
+release gate then counted the blocker from *before* the heal, went RED, and flipped the verdict back.
+Both traced it to the same cause: `resolveReadinessBlockersOnRejudge()` existed since 2026-08-27 and
+only ONE of the three re-judging heals ever called it.
+
+**#2931 wins on coverage, and it also found something I missed.** Beyond the shared fix it repairs
+`fastLaneCallIdentity`: `fastGenerateOnce` initialises `usedProvider = 'CLAUDE'` and only overwrites it
+when a provider reports in, so a call that died *before any provider was contacted* (the build budget
+ending is thrown at the top of each runner) was recorded as a failed **`anthropic / claude-sonnet-4-6`**
+call — on a FREE, weak-tier build whose own report says `noClaude: true` and where `enforceNoClaude`
+had stripped Claude from the chain. That is a 90-second stall pinned on a named third party we never
+called, and worse, it makes a build look like it breached the weak-tier routing law the admin called
+unbreakable. I read that same report and did not spot it.
+
+On the shared fix the two designs differ slightly: mine wrapped the re-judge itself
+(`recoverAfterRejudge`), theirs bundles resolve+record (`recordReadinessRecovery`) and leaves the
+re-judge to the caller. Mine is marginally stricter; theirs is smaller and lives on the class that
+already owns `resolveReadinessBlockersOnRejudge`. **That difference is not worth two competing
+mechanisms for one question** — which is the exact thing both PRs' own comments warn against. So
+`readinessRecovery.ts`, its tests, and my rewrite of the wiring test were dropped.
+
+**What survived from #2929, because #2931 does not have it:** the vulnerability note advised
+`npm audit fix` when `AGENTV3_AUDIT_FIX=on` means the build had *already run it* (exit 1, npm saying
+the rest need `--force`). Since `looksLikeDependencyInstall` matches `audit`, the note was re-parsed
+from that very output and still gave the advice. `npmAuditNote` now takes `compatibleFixAlreadyRun`,
+read from the **command log** rather than the env flag, so a build that skipped the fix still gets the
+advice. `--force` is still never suggested.
+
+⚠️ **This is the second time today two sessions autopsied one report in parallel** (see the earlier
+"Two sessions fixed the same bug" entry). Both times the duplicate cost a full gate run and a
+conflicted merge. The concurrent-sessions rule says to read the OPEN PRs before starting — a build
+report handed to two sessions is the case that rule does not cover, because neither PR exists yet when
+the second session begins. Recorded as an observation, not a fix.
+
+**Open items from `1ef27cd7` remain open** and are listed in this file's earlier entry for that build:
+the 6–9× wrong ETA, the 354-second silent model call, the missing evidence ledger, and the strong
+suspicion — unverified, because the generated sources are not in the report — that the delivered
+"video editor" cannot edit video.

@@ -1604,17 +1604,55 @@ describe('a repaired blocker must stop being a blocker (Fight 3D, buildId 5e2de8
     expect(d.shippingIssueCount('error')).toBe(1);
   });
 
-  it('is only ever called after the SAME gate has re-run and passed', () => {
-    // The method trusts its caller, so the call site is the honesty guarantee and is pinned here.
+  it('recordReadinessRecovery does BOTH halves — the class fix (build 1ef27cd7, 2026-09-14)', () => {
+    const d = withBlocker();
+    const cleared = d.recordReadinessRecovery('READINESS_RECOVERED_AFTER_COMPLETION', 'now READY (92/100)');
+    expect(cleared).toBe(1);
+    // The gate must stop counting the superseded blocker...
+    expect(d.shippingIssueCount('error')).toBe(0);
+    // ...and the recovery must still be on the timeline, resolved, for the reader.
+    const rec = d.report().issues.find((i) => i.code === 'READINESS_RECOVERED_AFTER_COMPLETION');
+    expect(rec?.autoResolved).toBe(true);
+  });
+
+  it('leaves a genuinely unrelated error standing — it clears the re-judged question, not the report', () => {
+    const d = withBlocker();
+    d.record({ phase: 'build', severity: 'error', code: 'BUILD_ERROR', message: 'something else broke', autoResolved: false });
+    d.recordReadinessRecovery('READINESS_RECOVERED_AFTER_HOOKS_HEAL', 'now READY');
+    expect(d.shippingIssueCount('error')).toBe(1);
+  });
+
+  it('EVERY heal that recovers the build clears its stale blocker, and each is guarded by a passing re-judge', () => {
+    /**
+     * 🔴 THE BUG THIS PINS. The 2026-08-27 fix was applied to ONE of the three heals that re-judge
+     * readiness. The hooks heal and the incomplete-code heal recorded their recovery and left the
+     * superseded blocker unresolved — so the release gate counted a finding about code that had just
+     * been fixed, went RED, and told the user their app was broken (build 1ef27cd7: re-judged READY
+     * 92/100, production build OK, verdict NOT ok twenty seconds later).
+     *
+     * Asserted as a RULE, not as a literal: any number of recovery sites is fine, so long as every one
+     * goes through the method that does both halves and every one is preceded by a passing re-judge.
+     * The previous version of this test pinned the old method name at one call site — it would have
+     * passed unchanged while two of three sites were wrong, because it only ever looked at the first.
+     */
     const routes = require('fs').readFileSync(
       require('path').join(__dirname, '../routes/agentv3.ts'), 'utf8',
     ) as string;
-    const call = routes.indexOf('buildDiag.resolveReadinessBlockersOnRejudge()');
-    expect(call).toBeGreaterThan(-1);
-    // The nearest preceding lines must be the re-judge and its ready check.
-    const before = routes.slice(Math.max(0, call - 400), call);
-    expect(before).toContain('await dispatcher.assessBuildReadiness()');
-    expect(before).toContain('verdict.ready');
+
+    // Every recovery goes through the one method...
+    const calls = [...routes.matchAll(/buildDiag\.recordReadinessRecovery\(/g)].map((m) => m.index ?? -1);
+    expect(calls.length).toBeGreaterThanOrEqual(3); // dedupe · hooks heal · incomplete-code heal
+
+    // ...and each one is reached only after the SAME gate re-ran and passed.
+    for (const at of calls) {
+      const before = routes.slice(Math.max(0, at - 600), at);
+      expect(before).toContain('await dispatcher.assessBuildReadiness()');
+      expect(before).toContain('verdict.ready');
+    }
+
+    // Nothing records a READINESS_RECOVERED_* code the long way round, which is how two of the three
+    // sites came to skip the clearing in the first place.
+    expect(routes).not.toMatch(/code: 'READINESS_RECOVERED_[A-Z_]+'/);
   });
 });
 

@@ -7,7 +7,7 @@ import {
 } from './neonatalDosing';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { answerOffline } from './offlineAssistant';
+
 import { AppContextInjector } from '../server/AppContext/AppContextInjector';
 import { loadVials, saveVial, forgetVial } from './vialMemory';
 
@@ -253,37 +253,11 @@ describe('the whole chart is transcribed, and the arithmetic is exact', () => {
   });
 });
 
-describe('WIRING — the OFFLINE AI answers a dose with no network and no model', () => {
-  it('answers a full dose question offline, with the arithmetic', () => {
-    const a = answerOffline('ampicillin dose for 2.5 kg baby 3 days old sepsis');
-    expect(a.kind).toBe('answer');
-    expect(a.answerKind).toBe('dose');
-    expect(a.answerText).toMatch(/125 mg/);
-    expect(a.answerText).toMatch(/every 12 hours/);
-  });
-
-  it('asks offline for the indication instead of guessing it', () => {
-    const a = answerOffline('ampicillin dose for 2.5 kg baby 3 days old');
-    expect(a.answerText).toMatch(/sepsis, pneumonia, or meningitis/i);
-  });
-
-  it('the DOSE branch runs BEFORE the calculator — a dose question is not treated as arithmetic', () => {
-    // "2.5 kg" and "50" in one sentence is exactly what the arithmetic evaluator would try to consume.
-    const a = answerOffline('gentamicin 2 kg 4 din sepsis dose');
-    expect(a.answerKind).toBe('dose');
-    expect(a.answerText).toMatch(/10 mg/);
-  });
-
-  it('ordinary talk that merely mentions a drug is NOT hijacked into a dose reply', () => {
-    const a = answerOffline('we started gentamicin yesterday');
-    expect(a.answerKind).not.toBe('dose');
-  });
-
-  it('plain arithmetic still works — the new branch must not swallow the calculator', () => {
-    const a = answerOffline('what is 12 * 4');
-    expect(a.answerKind).toBe('math');
-  });
-});
+// The OFFLINE AI wiring block was removed with that feature on 2026-09-14 (admin: "offline ai ko
+// hamesha ke liye parmanent delete karo"). What it guarded is NOT lost: the dose CALCULATOR
+// (neonatalDosing.ts) is untouched and still has its own tests above, the 💊 Dose Calculator screen
+// still uses it, and the ONLINE wiring block below still proves every AI gets a COMPUTED dose rather
+// than a remembered one — which was always the safety-critical half.
 
 describe('WIRING — every ONLINE AI gets the dose computed, not remembered', () => {
   it('injects the calculated answer at the one place all AIs ask for context', () => {

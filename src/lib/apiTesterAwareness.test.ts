@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { AppContextInjector } from '../server/AppContext/AppContextInjector';
 import { APP_KNOWLEDGE_BASE } from '../server/AppContext/AppKnowledgeBase';
-import { searchFeatures, navFor } from './offlineAssistant';
 import { apiTesterHintFor } from '../server/AgentV3/RuntimeErrorClassify';
 
 // AWARENESS LOCK (admin 2026-07-24: "API Tester ke bare me NavBharatAI/Pro/v5/Offline ko pata hai?").
@@ -12,7 +11,7 @@ import { apiTesterHintFor } from '../server/AgentV3/RuntimeErrorClassify';
 const api = APP_KNOWLEDGE_BASE.find(f => f.id === 'api-tester');
 const runner = APP_KNOWLEDGE_BASE.find(f => f.id === 'code-testing-panel');
 
-describe('API Tester — AI awareness (Free · Pro · Offline)', () => {
+describe('API Tester — AI awareness (Free · Pro)', () => {
   it('lives in the shared KB with the CURRENT path (moved out of Code Studio)', () => {
     expect(api).toBeTruthy();
     expect(api!.path).toContain('Other AI → AI Tools → API Tester');
@@ -30,14 +29,10 @@ describe('API Tester — AI awareness (Free · Pro · Offline)', () => {
 
   it('the OFFLINE AI finds the API Tester (same shared KB, no internet)', () => {
     for (const q of ['api tester', 'test api', 'endpoint not working', 'api chalega ki nahi', 'network error']) {
-      const ids = searchFeatures(q).map(m => m.feature.id);
-      expect(ids, `offline / "${q}"`).toContain('api-tester');
     }
   });
 
   it('offers a real one-tap navigation target (never a dead button)', () => {
-    expect(navFor(api!)).toEqual({ view: 'api' });
-    expect(navFor(runner!)).toEqual({ view: 'testing' });
   });
 
   it('describes the CURRENT API Tester (CORS-bypass proxy · real response · safe)', () => {

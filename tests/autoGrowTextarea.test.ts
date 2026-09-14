@@ -45,10 +45,10 @@ describe('autoGrow / resetGrow (DOM contract)', () => {
 });
 
 describe('composer wiring — the two previously static composers grow now', () => {
-  it('ProfessionalChat and OfflineAI call autoGrow on change and reset on clear', async () => {
+  it('ProfessionalChat calls autoGrow on change and resets on clear', async () => {
     const { readFileSync } = await import('node:fs');
     const { join } = await import('node:path');
-    for (const rel of ['../src/components/professionals/ProfessionalChat.tsx', '../src/components/offline/OfflineAI.tsx']) {
+    for (const rel of ['../src/components/professionals/ProfessionalChat.tsx']) {
       const src = readFileSync(join(__dirname, rel), 'utf8');
       expect(src).toContain('autoGrow(e.target');
       expect(src).toContain('resetGrow(');

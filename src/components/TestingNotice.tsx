@@ -70,7 +70,14 @@ export const TestingNotice: React.FC<{
       onTouchStart={hold}
       onTouchEnd={release}
       className={cn(
-        'fixed left-1/2 z-[60] w-[calc(100%-2rem)] max-w-md -translate-x-1/2',
+        // 🔴 CENTRED WITHOUT A TRANSFORM, DELIBERATELY — see the note above `nb-testing-notice-in`
+        // in index.css. `left-1/2 -translate-x-1/2` put the card HALF OFF THE LEFT EDGE on a real
+        // phone, because Tailwind v4 centres with the standalone `translate` property while the
+        // entry animation centres again with `transform`, and CSS applies both. Left and right
+        // insets plus `mx-auto` need no transform at all, so the animation owns `transform` alone
+        // and the two can never fight again.
+        'fixed z-[60] mx-auto max-w-md',
+        'left-[calc(env(safe-area-inset-left,0px)+1rem)] right-[calc(env(safe-area-inset-right,0px)+1rem)]',
         // Below the top bar on every screen, and clear of the notch on a phone.
         'top-[calc(env(safe-area-inset-top,0px)+4.5rem)]',
         'rounded-2xl border p-3.5 shadow-2xl backdrop-blur',

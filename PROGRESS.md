@@ -52666,4 +52666,18 @@ now carries that phrase inside an instruction NOT to use it. A guard that cannot
 from a promise is worse than none: it would push the next author to delete the warning to get CI
 green. It checks the promise wording instead.
 
+7 new tests.
+
+🔴 **AND THE TIMING MATTERS, because it is why this needed a SECOND pull request.** #2905 was merged
+at 19:21 — carrying another session's fix for Growth (100 → 50) and nothing else. My corrections
+(Starter 25 → 15, the knowledge base, the guard test) landed on that branch at 22:40, **after** the
+merge. So for three hours `main` — which auto-deploys — held a Starter allowance nobody agreed to and
+a knowledge base promising every user a ₹150 monthly credit that does not exist.
+
+A merged pull request cannot carry new work, so the fix is a fresh branch off `main` rather than more
+commits on a closed one. **The general lesson is not about git:** two sessions were correcting the
+same number at the same time, one of them merged, and neither noticed the other had a different half
+of the fix. Re-fetching before a push catches a conflict; it does not catch a PR being merged out from
+under a branch you are still improving. **Check whether your PR is still OPEN before pushing a
+correction to it** — a push that succeeds to a merged branch is silent and reaches nobody.
 7 new tests. Fixed on the P5 branch (#2905) and merged up the stack to #2908 and #2909.

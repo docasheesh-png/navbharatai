@@ -54149,3 +54149,117 @@ is not.
 ### Verification
 
 56 tests across two files. Bite-checked by removing the on-open fetch — the wiring test fails.
+
+## 2026-09-14 — AUTOPSY `424ecdab`: "your job is to tell me" built a recruitment ATS
+
+**The prompt, verbatim:** *"You are my ruthless mentor.Dont sugar coat anything.if my idea is weak call
+it trash and tell me why .your job is to tell me until it's a bullet proof"*
+
+The user asked for a persona. `\bjob\b` in `RequirementGapAnalyzer` matched **"your *job* is to tell
+me"**, the analyzer returned `domain: 'jobs'`, and `buildRequirementGuidance` — which is phrased as an
+order (*"INCLUDE them by default (real, wired — never stubbed)"*) — was **prepended** to the build
+prompt. The report contains the exact moment it worked:
+
+| t | the model |
+|---|---|
+| ~2 min | *"Got it. I'll be your ruthless mentor — no fluff, no padding, no 'that's a great idea' when it's not."* |
+| ~2.5 min | *"I hear you — no more talk, let's build. **I'm treating this as a jobs app (the requirement awareness flagged it**, and you're demanding files)."* |
+
+**The model read the request correctly and our own injection turned it around.** 15.2 minutes, 19 files,
+a full job board (Login / Register / CandidateDashboard / EmployerDashboard / PostJob / Apply /
+ScheduleInterview / Pipeline), `ok: false`, `RELEASE_GATE: RED`. Billed ₹0 — NavBharatAI absorbed
+VERTEX 1,018,963 in / 10,829 out, KIMI 305,261 / 8,337, GLM 35,691 / 1,688.
+
+### The five-bucket ledger (270 entries)
+
+| | n | |
+|---|---|---|
+| ✅ self-healed | 3 | 24 import specifiers normalized · fast-lane failure handed to the full builder · `edit_file` miss recovered by re-reading |
+| 🔀 worked around | 6 | every one a `PROVIDER_FALLBACK` — KIMI 120 s timeouts ×3, GLM 429 ×4 |
+| ⏭️ skipped | 5 | one-shot lane · page-render check · user journey · typecheck · E2E scaffold (all "the build did not succeed") |
+| ❌ still broken | 9 unresolved | the 3 undefined JSX components · 4 dependency CVEs (1 high) · design 62/100 · a11y 70/100 · 2× `DESIGN_PAGE_INCONSISTENT` · no tests |
+| 🥵 struggled | 5 | 90 s first call killed by the budget · fast lane FAILED outright · ETA *"~2–4 min"* against 15.2 min · `react-datepicker` missing so the dev server would not start · **16.4 min sandbox, 1.5 min of our operations, 14.9 min idle (91%)** |
+
+### Root cause 1 — ordinary English selected a domain. FIXED.
+
+🔴 **The existing tripwire could not have caught this, and that is the lesson.** The corpus test in
+`RequirementGapAnalyzer.test.ts` calls itself *"the tripwire for the whole class"*, written after the
+2026-08-02 autopsy. Every case in it is a **substring** leak — `cartoon`, `photoshop`, `mobile-friendly`,
+`portable` — and every fix was a `\b` anchor. **`\bjob\b` is already anchored and still wrong**, because
+the word is whole and the *sense* is ordinary English. The class was never "a stem leaks inside a longer
+word"; it was "a keyword is also ordinary English", of which substrings are one species. Nine keywords
+had been narrowed one at a time (`shop`, `store`, `cart`, `friend`, `book`, `table`, `tutor`, `like`,
+`game plan`) and the class was declared closed each time.
+
+🔬 **Measured, not assumed: swept against 26 innocent sentences a real user types, 22 selected a domain.**
+`"good job!"` → jobs · `"in order to make this faster"` → ecommerce · `"of course"` → education ·
+`"add a click event listener"` → events · `"set the CSS property"` → real-estate · `"add a hamburger
+menu"` → restaurant · `"send a POST request"` → social · `"the database driver keeps timing out"` →
+logistics · `"a team of three developers"` → saas · `"store the result"` → ecommerce. Every one would
+have been handed that domain's implicit-feature list **to build**.
+
+**The fix is one mechanism, not a tenth narrowing:** `NON_DOMAIN_USES` — a single list of the
+constructions in which these words do NOT mean the domain — stripped once by `stripNonDomainUses()`,
+which **both** entry points call (`analyzeRequirementGaps` and `missingDomainFeatures` had duplicate
+selection code; letting one strip and not the other is the `a38c6fef` shape). A leaking keyword now adds
+a line there instead of another lookahead buried in a twelve-alternative regex. **24 of 26 now return
+`general`**; `india` deliberately still reads the ORIGINAL text so stripping can never hide "₹"/"Hindi".
+
+⚠️ **Two residuals, named rather than forced:** *"write a blog post about this"* and *"show a chat with
+the assistant"* still resolve to `social`. Both are genuine grey areas — a blog with posts and a chat
+really are social surfaces — and inventing a rule to kill them would risk a real social app's domain.
+
+### Root cause 2 (the other 50%) — a domain became an INSTRUCTION on a turn that asked for no app. FIXED.
+
+The only gate was `intent === 'new_build'`, which answers *"which lane runs this turn?"*. Whether an app
+was **asked for** is a different question, and this repo already records what reusing one verdict for two
+questions costs (`userAskedForAnAppToBeBuilt`'s own docstring). `buildRequirementGuidance` now takes that
+answer, and the two halves are gated **separately**: the DOMAIN half invents an app and is withheld; the
+INDIA half restates a market the user's own words named, invents nothing, and stays. Defaults to `true`,
+so every existing caller is byte-identical.
+
+⚠️ **Stated plainly: this layer would NOT have saved this build.** `userAskedForAnAppToBeBuilt` returns
+**true** for this prompt — signal `long-message`. A long message is read as a high-confidence
+`new_build` regardless of what it says. **OPEN ROOT CAUSE: the `long-message` signal treats length as
+build intent**, which is exactly the "READ THE MOOD FIRST" failure one layer up.
+
+### Root cause 3 — the RED blocker had no heal at all. PARTIALLY FIXED.
+
+`READINESS_BLOCKER: 3 undefined JSX component(s) … <IndianRupee>@JobDetail.tsx:37, <Clock>@JobDetail.tsx:38,
+<Link>@Apply.tsx:36`. Detected precisely, to the line — and **nothing tried to repair it**. Incomplete
+code has a heal, Rules-of-Hooks has a heal, duplicate imports have a heal; the single most common defect
+an LLM produces does not, because `addMissingProjectImports` indexed **project modules only** and all
+three names are **package** exports.
+
+**Fixed for the sub-class that can be PROVEN:** the index now also holds packages the project *already
+imports that exact name from*, so the heal **copies an import the project has already proven correct** —
+`Link` is imported from `react-router-dom` in `Layout.tsx`, so adding it to `Apply.tsx` cannot be wrong in
+a way the project was not already wrong. Aliased imports prove nothing and are skipped; two packages
+claiming one name is never guessed; a project module always wins, so no existing outcome changes.
+
+🔴 **STILL OPEN, and deliberately not guessed at: the two icons.** `Clock` and `IndianRupee` are imported
+**nowhere** in that project. Fixing them means asserting what `lucide-react` exports, and a wrong guess
+adds an import that will not resolve — turning a broken build into one that cannot parse, which is the
+precise bug this healer caused once before (Fight 3D, 2026-08-27). The honest blocker stands.
+**The real answer is to read the installed package's own type declarations**; that is the next thing to
+take on this root cause.
+
+### Other open root causes recorded from this report
+
+- 🔴 **91% of a 16.4-minute sandbox was idle** (1.5 min inside our operations). Third report in a row.
+- 🔴 **The ETA said "~2–4 min" for a 15.2-minute build** — `confidence 0.4`, printed as a number anyway.
+  Fourth autopsy to record it.
+- 🔴 **`RELEASE_GATE` said "the typecheck did not run"** — the **evidence-ledger** root cause from
+  `697b38ee`, still open, now with a third witness.
+- 🟡 `react-datepicker` was used but never installed, so the dev server would not start — the
+  dependency-sync gap.
+- 🟡 4 dependency vulnerabilities (1 high) with `AGENTV3_AUDIT_FIX=on`; npm could not fix them within a
+  major version.
+
+### Verification
+
+`tests/domainKeywordIdioms.test.ts` — 58 tests: the exact reported prompt, the 26-sentence innocent
+corpus as a LAW, 19 genuine prompts asserted **unchanged** (stripping can delete a real domain, which is
+the one way this fix could hurt a build), both entry points, and the guidance gate.
+**Proven by reversion: 25 fail** when `stripNonDomainUses` stops stripping; **1 fails** when the package
+index is removed.

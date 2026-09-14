@@ -52,12 +52,15 @@ describe('publicTierLabel — the choke point', () => {
     // A white-labelled name is not an excuse for a useless one — the tiers must still be rankable.
     expect(publicTierLabel('weak')).toMatch(/free/i);
     expect(publicTierLabel('off')).toMatch(/balanced/i);
-    expect(publicTierLabel('mini')).toMatch(/stronger/i);
-    expect(publicTierLabel('medium')).toMatch(/most capable/i);
-    expect(publicTierLabel('max')).toMatch(/maximum effort/i);
-    // Every tier is distinct — five identical safe strings would be white-label theatre.
-    const all = ['weak', 'off', 'mini', 'medium', 'max'].map(publicTierLabel);
-    expect(new Set(all).size).toBe(5);
+    expect(publicTierLabel('mini')).toMatch(/strong/i);
+    // The three LIVE tiers must be distinct — identical safe strings would be white-label theatre
+    // rather than a fix.
+    const live = ['weak', 'off', 'mini'].map(publicTierLabel);
+    expect(new Set(live).size).toBe(3);
+    // ⚠️ The retired tiers deliberately share 'mini' text: the server remaps a stored 'medium'/'max'
+    // UP to Strong, so an old preference must read the tier it is ACTUALLY getting.
+    expect(publicTierLabel('medium')).toBe(publicTierLabel('mini'));
+    expect(publicTierLabel('max')).toBe(publicTierLabel('mini'));
   });
 
   it('an unknown tier falls back to the brand, never to a vendor', () => {

@@ -49,11 +49,14 @@ export function publicTierLabel(powerLevel: string | null | undefined): string {
     case 'off':
       return 'Normal — balanced, adapts to the job';
     case 'mini':
-      return 'Stronger engine · pinned 100% of the build';
+      return 'Strong — the full engine';
+    // ⚠️ RETIRED TIERS, DELIBERATELY STILL MAPPED. 'medium' ("Powerful") and 'max' ("Full Team") no
+    // longer appear in the picker — the server remaps a stored one UP to 'mini'. They are kept here so
+    // an account carrying an old preference reads the tier it is ACTUALLY getting, rather than falling
+    // through to the generic default. Same text as 'mini' because that is genuinely what runs.
     case 'medium':
-      return 'Most capable engine · higher reasoning effort';
     case 'max':
-      return 'Most capable engine · maximum effort (ultracode)';
+      return 'Strong — the full engine';
     default:
       // An unknown tier must never fall through to a vendor string. Naming nothing is always safe.
       return 'NavBharatAI engine';

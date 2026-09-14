@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   decideAlertActions, snapshotFromWindow, alertMessage, resolvedMessage,
+  alertDigestMessage, resolvedDigestMessage,
   runAlertSweep, alertCooldownMs, alertWindowHours, alertsEnabled,
   detectSandboxSpike, sandboxSpikeMultiple, sandboxSpikeMinUsd,
   type AlertState,
@@ -212,6 +213,48 @@ describe('alert messages', () => {
   });
 });
 
+describe('🔒 alertDigestMessage / resolvedDigestMessage — one mail per SWEEP, not one per alert id (admin 2026-09-14: "emails aye hi ja rahe hai")', () => {
+  it('a single alert reads byte-identical to alertMessage — no behaviour change for the common case', () => {
+    expect(alertDigestMessage([alert('high-error-rate')], 1)).toBe(alertMessage(alert('high-error-rate'), 1));
+  });
+
+  it('several alerts in one sweep become ONE message naming all of them', () => {
+    const msg = alertDigestMessage([alert('high-error-rate'), alert('slow-builds', 'warning')], 1);
+    expect(msg).toContain('high-error-rate fired');
+    expect(msg).toContain('slow-builds fired');
+    expect(msg).toContain('2 alerts');
+    expect(msg).toContain('Admin → Monitor');
+  });
+
+  it('the digest is marked critical if ANY alert in it is critical, even if most are warnings', () => {
+    const msg = alertDigestMessage([alert('a', 'warning'), alert('b', 'critical'), alert('c', 'warning')], 1);
+    expect(msg.startsWith('🔴')).toBe(true);
+  });
+
+  it('an all-warning digest is marked warning, not critical', () => {
+    const msg = alertDigestMessage([alert('a', 'warning'), alert('b', 'warning')], 1);
+    expect(msg.startsWith('🟡')).toBe(true);
+  });
+
+  it('resolvedDigestMessage: single id reads byte-identical to resolvedMessage', () => {
+    expect(resolvedDigestMessage(['slow-builds'])).toBe(resolvedMessage('slow-builds'));
+  });
+
+  it('resolvedDigestMessage: several ids become one message', () => {
+    const msg = resolvedDigestMessage(['slow-builds', 'high-error-rate']);
+    expect(msg).toContain('Slow builds');
+    expect(msg).toContain('High error rate');
+    expect(msg).toContain('resolved (2)');
+  });
+
+  it('digests carry no provider/model name either', () => {
+    const text = alertDigestMessage([alert('a'), alert('b')], 1) + resolvedDigestMessage(['a', 'b']);
+    for (const vendor of ['glm', 'kimi', 'claude', 'sonnet', 'opus', 'gemini', 'grok']) {
+      expect(text.toLowerCase()).not.toContain(vendor);
+    }
+  });
+});
+
 describe('runAlertSweep — the honesty rules', () => {
   const baseDeps = {
     now: () => 1_000,
@@ -264,6 +307,23 @@ describe('runAlertSweep — the honesty rules', () => {
   it('a throwing reader is contained', async () => {
     const res = await runAlertSweep({ ...baseDeps, readSummary: async () => { throw new Error('boom'); } });
     expect(res).toEqual({ notified: 0, resolved: 0 });
+  });
+
+  it('🔒 several alerts newly due in ONE sweep produce exactly ONE notify() call, not one each', async () => {
+    // The exact shape of the admin's complaint (2026-09-14): a bad window trips high-error-rate AND
+    // slow-builds AND a sandbox-cost-spike at once, and the old loop mailed three times in one sweep.
+    const sent: string[] = [];
+    const res = await runAlertSweep({
+      ...baseDeps,
+      readSummary: async () => summary({
+        builds: 20, buildsOk: 5, buildsFailed: 15, previewOk: 20,
+        buildMs: 100_000, successRate: 0.25, previewRate: 1, avgBuildMs: 20 * 60_000,
+      }),
+      extraAlerts: async () => [{ id: 'sandbox-cost-spike', severity: 'warning' as const, message: 'VM spend is 5x', metric: 'x', value: 5, threshold: 3 }],
+      notify: async (m) => { sent.push(m); },
+    });
+    expect(res.notified).toBeGreaterThan(1); // multiple DISTINCT alerts really did fire this sweep…
+    expect(sent).toHaveLength(1);            // …but the mailbox was touched exactly once for it
   });
 });
 

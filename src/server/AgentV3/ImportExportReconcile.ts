@@ -270,7 +270,65 @@ export async function addMissingProjectImports(files: Record<string, string>): P
       }
     } catch { /* skip a file we can't read exports from */ }
   }
-  if (exportIndex.size === 0) return unchanged;
+
+  // PACKAGE INDEX — the same question asked of the project's DEPENDENCIES (autopsy 424ecdab,
+  // 2026-09-14). That build ended RED on exactly three names: `<IndianRupee>` and `<Clock>` (lucide-
+  // react) and `<Link>` (react-router-dom). The blocker was detected precisely, down to file and line,
+  // and no heal could touch it — because this index only ever held PROJECT modules, so a forgotten
+  // import of a PACKAGE export was structurally unfixable however obvious it was.
+  //
+  // 🔒 WHAT MAKES THIS SAFE, and it is the same standard as the project half: the only packages
+  // considered are ones THIS PROJECT ALREADY IMPORTS THAT EXACT NAME FROM, in another file. We are not
+  // asking "does lucide-react export Clock?" — we cannot know that here, and a guess that invents an
+  // import turns a broken build into one that will not parse. We are copying an import the project has
+  // already proven correct: `Link` is imported from 'react-router-dom' in Layout.tsx, so adding it to
+  // Apply.tsx cannot be wrong in a way the project was not already wrong.
+  //
+  // ⚠️ Consequence, stated rather than hidden: a name used in exactly ONE file and imported NOWHERE is
+  // still not healed — the two icons above are that case. This fixes the sub-class it can prove, and
+  // leaves the rest to the honest blocker, which is the only correct behaviour when the alternative is
+  // guessing at a package's export list.
+  //
+  // A PROJECT module always wins over a package (the merge below), so every existing outcome is
+  // byte-identical; only names no project module exports can reach this index at all.
+  const packageIndex = new Map<string, Set<string>>();
+  for (const [, sf] of sources) {
+    try {
+      for (const decl of sf.getImportDeclarations()) {
+        const spec = decl.getModuleSpecifierValue?.();
+        // Bare specifiers only — a relative/absolute path is a project module, handled above.
+        if (typeof spec !== 'string' || !spec || spec.startsWith('.') || spec.startsWith('/')) continue;
+        if (decl.isTypeOnly?.()) continue;
+        for (const named of decl.getNamedImports?.() ?? []) {
+          // An ALIASED import binds a different local name, so it proves nothing about what to write
+          // in another file. Only a plain `{ Name }` is a copyable fact.
+          if (named.getAliasNode?.()) continue;
+          if (named.isTypeOnly?.()) continue;
+          const nameNode = named.getNameNode?.();
+          const nm = nameNode ? nameNode.getText() : '';
+          if (!nm) continue;
+          if (!packageIndex.has(nm)) packageIndex.set(nm, new Set());
+          packageIndex.get(nm)!.add(spec);
+        }
+      }
+    } catch { /* skip a file whose imports we cannot read */ }
+  }
+
+  // name -> where a missing use of it should be imported FROM. `undefined` owner means "a project
+  // module path"; a package entry carries the bare specifier verbatim.
+  const candidates = new Map<string, { owner: string; isPackage: boolean }>();
+  for (const [name, owners] of exportIndex) {
+    if (owners.size !== 1) continue;                       // ambiguous export → never guess
+    candidates.set(name, { owner: [...owners][0], isPackage: false });
+  }
+  for (const [name, specs] of packageIndex) {
+    if (candidates.has(name)) continue;                    // a project module already owns it
+    if (exportIndex.has(name)) continue;                   // ambiguous across project modules → leave it
+    if (specs.size !== 1) continue;                        // two packages claim it → never guess
+    candidates.set(name, { owner: [...specs][0], isPackage: true });
+  }
+
+  if (candidates.size === 0) return unchanged;
 
   const added: AddedImport[] = [];
   const touched = new Set<string>();
@@ -333,10 +391,9 @@ export async function addMissingProjectImports(files: Record<string, string>): P
 
     // Candidate: iterate the (small) set of project-exported names and see if THIS file uses one as a
     // value without declaring/importing it.
-    for (const [name, owners] of exportIndex) {
-      if (owners.size !== 1) continue;             // ambiguous export → never guess
-      const owner = [...owners][0];
-      if (owner === path) continue;                 // a module can't import from itself
+    for (const [name, cand] of candidates) {
+      const owner = cand.owner;
+      if (!cand.isPackage && owner === path) continue; // a module can't import from itself
       if (local.has(name)) continue;                // already declared/imported here
       let usedAsValue = false;
       try {
@@ -365,7 +422,7 @@ export async function addMissingProjectImports(files: Record<string, string>): P
       } catch { usedAsValue = false; }
       if (!usedAsValue) continue;
 
-      const spec = relImportSpecifier(path, owner);
+      const spec = cand.isPackage ? owner : relImportSpecifier(path, owner);
       try {
         sf.addImportDeclaration({ moduleSpecifier: spec, namedImports: [name] });
         touched.add(path);

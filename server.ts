@@ -8,6 +8,7 @@ import { LEGACY_EMBEDDED_API_KEY } from './src/server/lib/aiClients';
 import { corsMiddleware } from './src/server/lib/cors';
 import { registerPwaRoutes, type PwaStore } from './src/server/routes/pwa';
 import { spaFallbackShouldDefer } from './src/server/lib/spaFallback';
+import { noteWebsiteVisit } from './src/server/lib/ownAudience';
 import { registerTelemetryRoutes } from './src/server/routes/telemetry';
 import { registerTeamRoutes } from './src/server/routes/team';
 import { registerShareRoutes } from './src/server/routes/share';
@@ -524,6 +525,17 @@ setInterval(() => {
         if (spaFallbackShouldDefer(req.path)) {
           return next();
         }
+        // ONE VISIT TO NAVBHARATAI'S OWN WEBSITE. Counted HERE because this is the single line every
+        // real page view passes through, and because the request already carries the IP and user-agent
+        // to us — counting it collects nothing new and cannot be blocked by an ad-blocker, which would
+        // quietly under-report and make the number a lie. It never throws and never delays the page.
+        noteWebsiteVisit({
+          path: req.path,
+          ip: req.ip || '',
+          userAgent: String(req.headers['user-agent'] ?? ''),
+          headers: req.headers as Record<string, unknown>,
+          nowMs: Date.now(),
+        });
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.sendFile(path.join(distPath, 'index.html'));
       });

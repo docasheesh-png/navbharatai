@@ -5,6 +5,8 @@ import {
   appleDomainAssociation, appleDomainAssociationSource, APPLE_DOMAIN_ASSOCIATION_PATH,
 } from '../lib/appleDomainAssociation';
 import { diagnoseAppleSignIn, type AppleSelfFetch } from '../lib/appleSignInDiagnosis';
+import { siteAnalyticsStore } from '../lib/siteAnalyticsStore';
+import { OWN_WEBSITE_ID, OWN_APP_ID, lifetimeViews, audienceView, peopleAudience } from '../lib/ownAudience';
 import { APPLE_SERVICE_ID, APPLE_WEB_RETURN_URL } from '../../components/socialSignInPolicy';
 import { needsRealServer, builtAServer, tallyServerNecessity, necessityHeadline } from '../AgentV3/serverNecessity';
 import type { Express, Request, Response, NextFunction } from 'express';
@@ -349,6 +351,73 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // Observability: live token-usage/cost + build-success metrics (Phase 5, item 28).
   // Phase 4.3 — include triggered alerts (error rate / preview rate / latency) so
   // the admin panel surfaces health issues, not just raw numbers.
+  /**
+   * WHO CAME, AND HOW MANY — NavBharatAI's own website and its own app.
+   *
+   * Every number here is measured by us. Where a number cannot honestly be produced, this route says
+   * so IN THE PAYLOAD rather than sending a zero, because a zero and "we cannot see this" look
+   * identical on a dashboard and only one of them means nobody came.
+   *
+   * 🔴 THREE THINGS IT DELIBERATELY DOES NOT ANSWER:
+   *   • PLAY STORE INSTALLS. Google Play holds that number; nothing here can reach it. What is
+   *     reported is an app OPEN — a device that launched the app and reached our server.
+   *   • ALL-TIME UNIQUE PEOPLE. The visitor code rotates daily by design, so the same person cannot be
+   *     recognised tomorrow. All-time VIEWS is a real running total; all-time "people" would need a
+   *     permanent per-person identifier, which is exactly what the rotation refuses to keep.
+   *   • WHO an anonymous visitor was. Only people who SIGNED IN can be named, and they are listed from
+   *     their own accounts — never from the visit counter, which cannot identify anybody.
+   */
+  app.get('/api/admin/audience', verifyAdminToken, async (_req: Request, res: Response) => {
+    const days = 30;
+    const [webDays, appDays, webLife, appLife, people] = await Promise.all([
+      siteAnalyticsStore.summary(OWN_WEBSITE_ID, days).catch(() => null),
+      siteAnalyticsStore.summary(OWN_APP_ID, days).catch(() => null),
+      lifetimeViews(OWN_WEBSITE_ID).catch(() => null),
+      lifetimeViews(OWN_APP_ID).catch(() => null),
+      // WHO came — the only half of this question that can name anybody, because these people signed
+      // in. Read LAZILY: the panel asks for this route only when the admin opens the card, so the
+      // wallet scan and the Firebase Auth lookups below never run on a routine tab switch.
+      (async () => {
+        try {
+          const wallets = await getDocs(collection(getDb() as any, 'user_token_wallets'));
+          const rows = wallets.docs.map((d: any) => ({ id: d.id, ...d.data() })) as any[];
+          const meta = await fetchAuthMetadata(rows.map((u: any) => u.userId || u.id), await firebaseAuthBatch());
+          return peopleAudience(rows.map((u: any) => {
+            const uid = u.userId || u.id;
+            const m = meta.get(uid) ?? null;
+            return {
+              userId: uid,
+              name: u.userName || 'NavBharat User',
+              email: u.userEmail || '—',
+              joinedMs: resolveJoinedAt(m, u.createdAt).atMs ?? null,
+              lastActiveMs: resolveLastActiveAt(m, { walletUpdatedAt: u.updatedAt }).atMs ?? null,
+            };
+          }), Date.now());
+        } catch {
+          return null; // never a fabricated zero — the screen says it could not be read
+        }
+      })(),
+    ]);
+    res.json({
+      website: audienceView(webDays, webLife),
+      app: audienceView(appDays, appLife),
+      people,
+      // Stated in the payload so the screen cannot drift from the truth by being edited on its own.
+      notes: {
+        appOpensAreNotInstalls:
+          'This counts devices that OPENED the app and reached our server. Google Play holds the install count; someone who installs and never opens is not here.',
+        allTimePeopleUnavailable:
+          'All-time visits are a running total. All-time PEOPLE cannot be counted: the visitor code rotates every day so the same person is not recognisable tomorrow — that is deliberate, not a gap.',
+        crawlersExcluded:
+          'Requests that declare themselves as bots are not counted. A crawler that pretends to be a browser is counted, so treat these as close, not exact.',
+        dayIsUtc:
+          'A day here runs midnight to midnight UTC (5:30 AM IST). Both halves of this card use the same day, so they never disagree about what "today" means.',
+        onlySignedInCanBeNamed:
+          'Only people who signed in can be named. A visitor who never signed in is counted but cannot be identified — the visit counter has no way to know who they were.',
+      },
+    });
+  });
+
   app.get('/api/admin/metrics', verifyAdminToken, (_req: Request, res: Response) => {
     const snapshot = getMetrics().snapshot();
     res.json({ ...snapshot, alerts: evaluateAlerts(snapshot) });

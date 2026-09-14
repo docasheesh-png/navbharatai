@@ -2067,10 +2067,28 @@ admin's word is the ONLY trigger.
   admin setup (documented in the workflow header); the keystore is the app's permanent identity
   and must live only with the admin. If a secret is missing the workflow FAILS EARLY with an
   honest message — **never** hand back or fake an unsigned bundle (Play would reject it anyway).
-- Claude CANNOT download the artifact or upload to Play Console. After the run is green, the
-  **admin** downloads `app-release.aab` and uploads it to Play Console (Play App Signing handles
-  the final signing). Automating the Play upload (a Play service-account + `r0adz0/upload-google-play`
-  step) is a future infra item — until it exists, the upload is the admin's manual step.
+- Claude CANNOT download the artifact or upload to Play Console, and CANNOT set the service-account
+  secret. What happens after a green run depends on ONE repo secret:
+  ✅ **AUTO-UPLOAD ALREADY EXISTS — do not build it, and do not tell the admin it is missing.**
+  `android-aab.yml` has carried a **`upload_to_play`** workflow input and a real
+  `r0adkll/upload-google-play` step since before 2026-09-14. Ticked, the freshly-signed bundle goes
+  straight to Play's **INTERNAL testing track** (`track: internal`, `status: completed`); the admin
+  still promotes it to production themselves, so the API can never publish to production on its own.
+  Unticked (the default) the run just produces the downloadable artifact — byte-identical to before.
+  🔴 **THE ONLY THING MISSING IS `PLAY_SERVICE_ACCOUNT_JSON`** (a GitHub REPO secret — the whole
+  service-account JSON key). Without it the admin downloads `app-release.aab` and uploads by hand.
+  Ticking the box WITHOUT the secret fails the run EARLY with a message naming the secret — it can
+  never silently skip the upload and report success.
+  ⚠️ It is NOT the same as `GOOGLE_PLAY_SA_JSON`, which is a CLOUD RUN env for verifying in-app
+  purchases. Same JSON file may serve both if the account holds both permission sets, but they are
+  two different places and each must be set separately.
+  ⚠️ **CORRECTED 2026-09-14 — this bullet said automating the upload "is a future infra item" and
+  that was FALSE for an unknown length of time**, so a session reading it would propose building a
+  feature that already shipped, or tell the admin to upload by hand when one secret would have done
+  it. **And it named the action as `r0adz0/upload-google-play` — a slug that does not exist.** The
+  workflow's own comment records that exact typo as a real incident: GitHub resolves every `uses:`
+  up front regardless of the `if:` guard, so the bad slug broke even artifact-only runs. A doc that
+  propagates a typo already paid for is worse than a doc that says nothing.
 - The iOS counterpart is `.github/workflows/ios-ipa.yml` (App Store `.ipa` → TestFlight); the same
   discipline applies. Trigger it via the GitHub MCP `actions_run_trigger` on `ios-ipa.yml`, ref `main`,
   with input `upload: true` to ship straight to TestFlight (leave it off for a signing dry-run artifact).

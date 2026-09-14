@@ -11068,10 +11068,22 @@ async function noteBuildOutcome(
           });
         } catch { /* billing enrichment is best-effort — never blocks finalization */ }
       }
+      // STALE-SUCCESS SUMMARY ON THE TIMEOUT PATH (real report, 2026-09-14, an "EduTube" build):
+      // the model had already emitted a `done` event mid-build ("Your app is live and ready …
+      // zero TypeScript errors") minutes before the watchdog fired — `BuildDiagnostics.ingestEvent`
+      // sets `this.summary` unconditionally on every `done` event, not just the terminal one. Passing
+      // `undefined` here left that celebratory text as the PERSISTED diagnostics report's `summary`
+      // even though the build never converged and the chat bubble below (`pauseMsg.summary`) already
+      // tells the honest story. Anyone reading the report — admin dashboard, the user's own download,
+      // the APK/build-report inboxes — saw "zero TypeScript errors" on a build that timed out mid-repair.
+      // Computed unconditionally (cheap, pure — just formats `writtenFiles.size`) so both the diagnostics
+      // report and the emitted result below use the exact same honest text; not needed for reasoning
+      // about the plain success (`ok`) case.
+      const pauseMsgForReport = deadlinePauseMessage(writtenFiles.size);
       let dl: BuildDiagnosticsReport | undefined;
       try {
         if (!ok) buildDiagRef?.record({ phase: 'build', severity: 'error', code: 'BUILD_TIMEOUT', message: `Build exceeded the ${Math.round(deadlineMs / 1000)}s wall-clock cap and was stopped.`, autoResolved: false });
-        buildDiagRef?.finish(ok, ok ? buildResultRef?.summary : undefined);
+        buildDiagRef?.finish(ok, ok ? buildResultRef?.summary : pauseMsgForReport.summary);
         dl = buildDiagRef?.report();
         if (dl) {
           lastDiagnostics.set(buildKey, dl);
@@ -11126,7 +11138,7 @@ async function noteBuildOutcome(
         // window build reads as one continuous build. The `summary` is kept on the result for the record
         // (never rendered as a bubble on the resumable path). RC-4's honest-wording lives in the client
         // stopMessage now, so nothing here can claim "almost done".
-        const pauseMsg = deadlinePauseMessage(writtenFiles.size);
+        const pauseMsg = pauseMsgForReport;
         // P-Layer3 — mark this result RESUMABLE so the client can auto-continue (bounded) without the
         // user having to type "continue". A normal failure has no `resumable` flag, so it won't auto-retry.
         // `filesWritten` is the PROGRESS signal (FleetOps): the client keeps auto-continuing a wall-clock
@@ -19018,7 +19030,13 @@ async function noteBuildOutcome(
       let crashReportForClient: unknown = undefined;
       try {
         buildDiagRef?.record({ phase: 'build', severity: 'error', code: 'BUILD_EXCEPTION', message: errMsg, autoResolved: false });
-        buildDiagRef?.finish(false);
+        // SAME STALE-SUMMARY SIBLING AS THE WATCHDOG PATH (see the comment beside `pauseMsgForReport`
+        // above): `ingestEvent`'s `case 'done'` sets `this.summary` unconditionally on every mid-build
+        // `done` event, and `finish()` only overwrites it when a summary is actually passed. Calling
+        // `finish(false)` with none left a build that crashed AFTER a premature "done" narration
+        // reporting that stale, celebratory text as its persisted `summary` — the crash report's OWN
+        // `ok: false` and this BUILD_EXCEPTION entry said the opposite of what `summary` claimed.
+        buildDiagRef?.finish(false, `Build stopped — an unexpected error occurred: ${errMsg}`.slice(0, 500));
         const crashReport = buildDiagRef?.report();
         if (crashReport) {
           // 🔒 THE CLIENT GETS THE ANONYMIZED REPORT — NEVER THE RAW ONE (white-label law, 2026-08-16).

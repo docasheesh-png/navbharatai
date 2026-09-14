@@ -299,6 +299,69 @@ export function ensureFrameworkCoreDeps(content: string, framework: string | und
   return { content: JSON.stringify(obj, null, 2) + trailingNl, added };
 }
 
+/**
+ * Guarantee a written package.json never silently DROPS a dependency that was already on disk.
+ * ADD-ONLY, generalizing ensureFrameworkCoreDeps's exact same policy from a curated framework-core
+ * list to EVERY dependency the existing file declared — because a plain `npm install <pkg>` is a
+ * shell command that edits package.json directly and never routes back through this write path, so
+ * any dep missing here was dropped by an LLM-authored full-file WRITE, never by a deliberate
+ * `npm uninstall`. A key the new content still declares (at any version, even a bump) is left
+ * untouched — this restores only what the new file dropped ENTIRELY, so a considered version change
+ * or a genuine removal made BY EDITING THIS SAME FILE is never overridden.
+ *
+ * ROOT CAUSE this closes (EduTube autopsy, 2026-09-14): a one-shot "continue — you were cut off"
+ * rescue call (FastLaneContinuation.ts) re-emits every file from a truncated ~2.5KB prompt that
+ * carries no current package.json/scaffold state. Its dumped package.json silently reverted
+ * react-router-dom and lucide-react — both correctly `npm install`ed 13 minutes earlier in the SAME
+ * build — so every subsequent `tsc`/`vite build` failed with "Cannot find module" for packages that
+ * genuinely were installed, and the build never converged before its wall-clock cap. The existing
+ * `ensureFrameworkCoreDeps` guard only covers the framework's OWN binary (react/vite/next/…), not an
+ * arbitrary dependency the agent added mid-build — exactly the CargoPilot fix's own policy, just not
+ * yet generalized past its original curated list.
+ *
+ * Values-only mutation, preserves key order (restored keys appended). Non-JSON / non-object / empty
+ * `existingContent` (a genuinely NEW file — nothing to preserve) → unchanged. PURE + unit-testable.
+ */
+export function restoreDroppedDependencies(content: string, existingContent: string): { content: string; restored: string[] } {
+  if (!existingContent || !existingContent.trim()) return { content, restored: [] };
+  let pkg: unknown;
+  let prevPkg: unknown;
+  try { pkg = JSON.parse(content); } catch { return { content, restored: [] }; }
+  try { prevPkg = JSON.parse(existingContent); } catch { return { content, restored: [] }; }
+  if (!pkg || typeof pkg !== 'object' || !prevPkg || typeof prevPkg !== 'object') return { content, restored: [] };
+  const obj = pkg as Record<string, unknown>;
+  const prevObj = prevPkg as Record<string, unknown>;
+  const newDeps = obj.dependencies && typeof obj.dependencies === 'object' ? (obj.dependencies as Record<string, unknown>) : null;
+  const newDev = obj.devDependencies && typeof obj.devDependencies === 'object' ? (obj.devDependencies as Record<string, unknown>) : null;
+  const alreadyDeclared = (name: string) =>
+    (newDeps ? Object.prototype.hasOwnProperty.call(newDeps, name) : false) ||
+    (newDev ? Object.prototype.hasOwnProperty.call(newDev, name) : false);
+
+  let depsOut = newDeps;
+  let devOut = newDev;
+  const restored: string[] = [];
+  for (const section of ['dependencies', 'devDependencies'] as const) {
+    const prevDeps = prevObj[section];
+    if (!prevDeps || typeof prevDeps !== 'object') continue;
+    for (const [name, ver] of Object.entries(prevDeps as Record<string, unknown>)) {
+      if (alreadyDeclared(name)) continue;
+      if (section === 'devDependencies') {
+        devOut = devOut ?? {};
+        devOut[name] = ver;
+      } else {
+        depsOut = depsOut ?? {};
+        depsOut[name] = ver;
+      }
+      restored.push(`${name}@${String(ver)}`);
+    }
+  }
+  if (restored.length === 0) return { content, restored: [] };
+  if (depsOut) obj.dependencies = depsOut;
+  if (devOut) obj.devDependencies = devOut;
+  const trailingNl = content.endsWith('\n') ? '\n' : '';
+  return { content: JSON.stringify(obj, null, 2) + trailingNl, restored };
+}
+
 /** Any install sub-command whose real exit code the shell will MASK because it is piped to tail/head. */
 const PIPED_INSTALL_RE = /(?:npm|pnpm|yarn)\s+(?:install|i|add|ci)\b[^\n]*\|\s*(?:tail|head)\b/;
 /** npm/pnpm/yarn failure signatures that appear in stdout even when the pipe reports exit 0. */

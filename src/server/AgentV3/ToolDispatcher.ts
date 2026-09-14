@@ -125,7 +125,7 @@ import { analyzeEffectCleanup, effectCleanupSummary } from './effectCleanupAnaly
 import { analyzeCoupling, couplingSummary } from './couplingAnalysis';
 import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAnalysis';
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
-import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, npmInstallMaskedFailure } from './DependencyAutoFix';
+import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, restoreDroppedDependencies, npmInstallMaskedFailure } from './DependencyAutoFix';
 import { quoteShellRouteGroupPaths } from './shellCommandSafety';
 import { resolveStringArg, missingArgMessage } from './toolArgRepair';
 import { prismaRepairHint, isPrismaCliMissingError } from './prismaRepairHint';
@@ -2204,7 +2204,7 @@ export class ToolDispatcher {
    * and emits an honest narration when it corrects a version. LearnLoop autopsy 2026-07-18. Kill switch
    * AGENTV3_PKG_PIN_GUARD=off.
    */
-  private pinPackageJsonContent(path: string, content: string): string {
+  private pinPackageJsonContent(path: string, content: string, existingContent: string): string {
     if (envKillSwitch('AGENTV3_PKG_PIN_GUARD')) return content;
     if (!/(^|\/)package\.json$/.test(path)) return content;
     try {
@@ -2228,6 +2228,19 @@ export class ToolDispatcher {
           getWorkspaceMemory(this.workspaceId).recordAudit(`[PKG-CORE] restored framework core deps in ${path}: ${core.added.join('; ')}`);
         } catch { /* audit best-effort */ }
         this.narrate('fix.coreDeps', { added: core.added.join('; ') });
+      }
+      // ANY DROPPED DEP GUARD (EduTube autopsy 2026-09-14): the same add-only policy as the framework
+      // core guard above, generalized to every dependency the workspace already had — a fast-lane
+      // "continue, you were cut off" rescue call can re-emit package.json from a truncated context and
+      // silently revert a real `npm install` made minutes earlier. See restoreDroppedDependencies's own
+      // header for the full root cause.
+      const restored = restoreDroppedDependencies(out, existingContent);
+      if (restored.restored.length > 0) {
+        out = restored.content;
+        try {
+          getWorkspaceMemory(this.workspaceId).recordAudit(`[PKG-RESTORE] restored dropped deps in ${path}: ${restored.restored.join('; ')}`);
+        } catch { /* audit best-effort */ }
+        this.narrate('fix.restoredDeps', { restored: restored.restored.join('; ') });
       }
       return out;
     } catch {
@@ -2331,12 +2344,11 @@ export class ToolDispatcher {
         // forgets to strip) has it removed before it reaches durable storage, so the bridge can never
         // be published inside a user's app. Both ends, deliberately: unlikely is not impossible.
         content = withoutPreviewBridge(path, content);
-        // PACKAGE.JSON DEP PIN (LearnLoop autopsy 2026-07-18): force known-breaking deps (Prisma → ^6)
-        // to their known-good major IN the written package.json, so a later plain `npm install` (which
-        // carries no package tokens, so pinKnownDepsInInstallCommand can't fire) never pulls a breaking
-        // version. This is the sibling choke point to the install-command pin (#1526).
-        content = this.pinPackageJsonContent(path, content);
-        content = this.dedupeImportsForSource(path, content, agent);
+        // Read the CURRENT on-disk content before any pinning — pinPackageJsonContent needs it to tell
+        // a genuinely dropped dependency (restore it) from one the new content never had in the first
+        // place (a brand-new file, nothing to compare against). Moved ahead of the pin call itself
+        // (EduTube autopsy 2026-09-14) — it used to be read only afterwards, purely for the self-destruct
+        // guard below, which is why the pin guard had no way to see what a rewrite had just dropped.
         let kind: 'create' | 'modify' = 'create';
         let existingContent = '';
         try {
@@ -2345,6 +2357,12 @@ export class ToolDispatcher {
         } catch {
           kind = 'create';
         }
+        // PACKAGE.JSON DEP PIN (LearnLoop autopsy 2026-07-18): force known-breaking deps (Prisma → ^6)
+        // to their known-good major IN the written package.json, so a later plain `npm install` (which
+        // carries no package tokens, so pinKnownDepsInInstallCommand can't fire) never pulls a breaking
+        // version. This is the sibling choke point to the install-command pin (#1526).
+        content = this.pinPackageJsonContent(path, content, existingContent);
+        content = this.dedupeImportsForSource(path, content, agent);
         // Self-destruct guard (StudySync autopsy 2026-07-16): refuse to BLANK a populated source file.
         // Overwriting src/App.tsx with "" deletes its code and breaks every importer — the same
         // catastrophe as `rm`, but via the tool path (bypasses the shell guard). Checked BEFORE writing
@@ -2530,7 +2548,10 @@ export class ToolDispatcher {
           const shrink = kind === 'modify' && assessFullRewrite(priorContent, file.content).level === 'shrink';
           // PACKAGE.JSON DEP PIN (parity with write_file, LearnLoop autopsy 2026-07-18): force known-
           // breaking deps to their known-good major so a later plain `npm install` can't pull a breaker.
-          const writtenContent = this.dedupeImportsForSource(file.path, this.pinPackageJsonContent(file.path, file.content), agent);
+          // `priorContent` (read above for the create-vs-modify verdict) also lets the ADD-ONLY dropped-
+          // dep guard (EduTube autopsy 2026-09-14) see what this batch is about to drop — this batch
+          // path is the one a full-file-dump rescue call actually writes through.
+          const writtenContent = this.dedupeImportsForSource(file.path, this.pinPackageJsonContent(file.path, file.content, priorContent), agent);
           await this.actuator.writeFile(this.workspaceId, file.path, writtenContent);
           // Consistency with write_file: run the per-write hook (security scan / durable tracking) —
           // batch-written files were previously skipping it entirely. Best-effort + '?.'-guarded.

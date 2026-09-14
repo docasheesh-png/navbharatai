@@ -71,6 +71,7 @@ import { recordTakedown, hashContent } from '../lib/takedownLedger';
 import { hostingPlansEnabled, hostingPlanPriceInr, probeHostingPlan } from '../lib/hostingPlan';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import { remixGate, remixRefusal } from '../lib/remixPlanGate';
+import { routeParam, routeParams } from '../lib/expressCompat';
 import {
   downloadSignInRequired, signDownloadTicket, verifyDownloadTicket, downloadTicketQuery,
   ticketRefusalMessage, ticketSecret, DOWNLOAD_TICKET_TTL_MS,
@@ -407,7 +408,7 @@ export function registerNavStoreRoutes(app: Express): void {
   /** One approved app's full detail. */
   app.get('/api/nav-store/app/:id', async (req: Request, res: Response) => {
     try {
-      const found = await getApp(String(req.params.id || ''));
+      const found = await getApp(String(routeParam(req.params.id) || ''));
       if (!found || found.status !== 'approved') return res.status(404).json({ error: 'That app is not available.' });
       res.json({ app: toPublic(found) });
     } catch {
@@ -438,7 +439,7 @@ export function registerNavStoreRoutes(app: Express): void {
     if (!me?.uid) return res.status(401).json({ error: 'Please sign in to download this app.', needsSignIn: true });
     let found: Awaited<ReturnType<typeof getApp>> = null;
     try {
-      found = await getApp(String(req.params.id || ''));
+      found = await getApp(String(routeParam(req.params.id) || ''));
     } catch {
       return res.status(502).json({ error: 'Could not reach the store just now.' });
     }
@@ -474,7 +475,7 @@ export function registerNavStoreRoutes(app: Express): void {
 
     let found: Awaited<ReturnType<typeof getApp>> = null;
     try {
-      found = await getApp(String(req.params.id || ''));
+      found = await getApp(String(routeParam(req.params.id) || ''));
     } catch {
       return fail(502, 'Could not reach the store just now.');
     }
@@ -856,7 +857,7 @@ export function registerNavStoreRoutes(app: Express): void {
   /** Public listing metadata. A removed app is gone for viewers, honestly 404. */
   app.get('/api/nav-store/web/app/:id', async (req: Request, res: Response) => {
     try {
-      const found = await getWebApp(String(req.params.id || ''));
+      const found = await getWebApp(String(routeParam(req.params.id) || ''));
       if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
       // The detail view is the ONE place the screenshot bytes ship — never on the browse list, so a
       // gallery of listings stays light. Best-effort: a screenshot read failure still returns the app.
@@ -875,7 +876,7 @@ export function registerNavStoreRoutes(app: Express): void {
    */
   app.post('/api/nav-store/web/app/:id/open', async (req: Request, res: Response) => {
     try {
-      const appId = String(req.params.id || '');
+      const appId = String(routeParam(req.params.id) || '');
       /**
        * Both reads start together. See the note at the fast path below for why this is safe: the
        * bake is addressed by id and self-describes its version, so it cannot serve a stale page just
@@ -994,7 +995,7 @@ export function registerNavStoreRoutes(app: Express): void {
     const me = await verifyFirebaseIdentity(req);
     if (!me?.uid) return res.status(401).json({ error: 'Sign in first.' });
     try {
-      const found = await getWebApp(String(req.params.id || ''));
+      const found = await getWebApp(String(routeParam(req.params.id) || ''));
       if (!found || found.uid !== me.uid) return res.status(404).json({ error: 'No such app of yours.' });
       if (req.body?.action === 'unpublish') {
         // An owner unpublishing their own app is recorded too, marked `owner` — it is not a takedown,
@@ -1065,7 +1066,7 @@ export function registerNavStoreRoutes(app: Express): void {
    */
   app.post('/api/nav-store/web/app/:id/remix', async (req: Request, res: Response) => {
     try {
-      const found = await getWebApp(String(req.params.id || ''));
+      const found = await getWebApp(String(routeParam(req.params.id) || ''));
       if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
       if (found.visibility === 'private') {
         const pw = typeof req.body?.password === 'string' ? req.body.password : '';
@@ -1240,7 +1241,7 @@ export function registerNavStoreRoutes(app: Express): void {
     const reason = (typeof req.body?.reason === 'string' ? req.body.reason : '').trim();
     if (reason.length < 5) return res.status(400).json({ error: 'Say briefly what is wrong with this app.' });
     try {
-      const found = await getWebApp(String(req.params.id || ''));
+      const found = await getWebApp(String(routeParam(req.params.id) || ''));
       if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
       await reportWebApp(found.id, me?.uid || 'anon', reason);
       res.json({ ok: true });
@@ -1294,10 +1295,10 @@ export function registerNavStoreRoutes(app: Express): void {
 
   app.post('/api/nav-store/web/app/:id/data/:collection', dataWriteLimiter, async (req: Request, res: Response) => {
     dataCors(res);
-    const collection = String(req.params.collection || '');
+    const collection = String(routeParam(req.params.collection) || '');
     if (!isValidDataCollection(collection)) return res.status(400).json({ error: 'Collection names are short lowercase words (letters, digits, - or _).' });
     try {
-      const found = await getWebApp(String(req.params.id || ''));
+      const found = await getWebApp(String(routeParam(req.params.id) || ''));
       if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
       const result = await addDataRow(found.id, collection, req.body?.data);
       if (!result.ok) return res.status(result.status).json({ error: result.reason });
@@ -1310,10 +1311,10 @@ export function registerNavStoreRoutes(app: Express): void {
 
   app.get('/api/nav-store/web/app/:id/data/:collection', dataReadLimiter, async (req: Request, res: Response) => {
     dataCors(res);
-    const collection = String(req.params.collection || '');
+    const collection = String(routeParam(req.params.collection) || '');
     if (!isValidDataCollection(collection)) return res.status(400).json({ error: 'Collection names are short lowercase words (letters, digits, - or _).' });
     try {
-      const found = await getWebApp(String(req.params.id || ''));
+      const found = await getWebApp(String(routeParam(req.params.id) || ''));
       if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
       res.json({ rows: await listDataRows(found.id, collection, Number(req.query.limit) || 50) });
     } catch (e) {

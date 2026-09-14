@@ -141,6 +141,7 @@ export const realEstate = new RealEstateService();
 
 export const REAL_ESTATE_ROUTES_SOURCE = `import { Router } from 'express';
 import { realEstate, InvalidTransitionError, ListingClosedError } from './realEstateService';
+import { routeParam, routeParams } from './expressCompat';
 
 export const realEstateRouter = Router();
 
@@ -163,12 +164,12 @@ realEstateRouter.get('/listings', (req, res) => handle(res, () => realEstate.sea
   minBedrooms: req.query.minBedrooms ? Number(req.query.minBedrooms) : undefined,
 })));
 realEstateRouter.post('/listings', (req, res) => handle(res, () => realEstate.createListing(req.body)));
-realEstateRouter.get('/listings/:id', (req, res) => handle(res, () => realEstate.get(req.params.id)));
-realEstateRouter.patch('/listings/:id/status', (req, res) => handle(res, () => realEstate.setStatus(req.params.id, req.body?.status))); // 409 on invalid
-realEstateRouter.patch('/listings/:id/price', (req, res) => handle(res, () => realEstate.changePrice(req.params.id, Number(req.body?.price)))); // 409 if off-market
-realEstateRouter.get('/listings/:id/price-history', (req, res) => handle(res, () => realEstate.priceHistory(req.params.id)));
-realEstateRouter.post('/listings/:id/inquiries', (req, res) => handle(res, () => realEstate.addInquiry(req.params.id, req.body))); // 409 if off-market
-realEstateRouter.get('/listings/:id/inquiries', (req, res) => handle(res, () => realEstate.inquiriesFor(req.params.id)));
+realEstateRouter.get('/listings/:id', (req, res) => handle(res, () => realEstate.get(routeParam(req.params.id))));
+realEstateRouter.patch('/listings/:id/status', (req, res) => handle(res, () => realEstate.setStatus(routeParam(req.params.id), req.body?.status))); // 409 on invalid
+realEstateRouter.patch('/listings/:id/price', (req, res) => handle(res, () => realEstate.changePrice(routeParam(req.params.id), Number(req.body?.price)))); // 409 if off-market
+realEstateRouter.get('/listings/:id/price-history', (req, res) => handle(res, () => realEstate.priceHistory(routeParam(req.params.id))));
+realEstateRouter.post('/listings/:id/inquiries', (req, res) => handle(res, () => realEstate.addInquiry(routeParam(req.params.id), req.body))); // 409 if off-market
+realEstateRouter.get('/listings/:id/inquiries', (req, res) => handle(res, () => realEstate.inquiriesFor(routeParam(req.params.id))));
 `;
 
 export const REAL_ESTATE_README = `# Real-estate / property-portal starter

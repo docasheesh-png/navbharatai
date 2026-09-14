@@ -192,6 +192,7 @@ export const hospital = new HospitalService();
 
 export const HOSPITAL_ROUTES_SOURCE = `import { Router, type Request, type Response } from 'express';
 import { hospital, DoubleBookingError, AccessDeniedError, type Role } from './hospitalService';
+import { routeParam, routeParams } from './expressCompat';
 
 export const hospitalRouter = Router();
 
@@ -214,16 +215,16 @@ function handle(res: Response, fn: () => unknown): void {
 
 hospitalRouter.get('/patients', (req, res) => handle(res, () => hospital.listPatients(actorOf(req))));
 hospitalRouter.post('/patients', (req, res) => handle(res, () => hospital.createPatient(actorOf(req), req.body)));
-hospitalRouter.get('/patients/:id', (req, res) => handle(res, () => hospital.getPatient(actorOf(req), req.params.id)));
-hospitalRouter.get('/patients/:id/notes', (req, res) => handle(res, () => hospital.notesFor(actorOf(req), req.params.id)));
-hospitalRouter.post('/patients/:id/notes', (req, res) => handle(res, () => hospital.addNote(actorOf(req), req.params.id, String(req.body?.text ?? ''))));
+hospitalRouter.get('/patients/:id', (req, res) => handle(res, () => hospital.getPatient(actorOf(req), routeParam(req.params.id))));
+hospitalRouter.get('/patients/:id/notes', (req, res) => handle(res, () => hospital.notesFor(actorOf(req), routeParam(req.params.id))));
+hospitalRouter.post('/patients/:id/notes', (req, res) => handle(res, () => hospital.addNote(actorOf(req), routeParam(req.params.id), String(req.body?.text ?? ''))));
 
 hospitalRouter.get('/appointments', (req, res) => handle(res, () => hospital.listAppointments({
   doctorId: req.query.doctorId as string | undefined,
   patientId: req.query.patientId as string | undefined,
 })));
 hospitalRouter.post('/appointments', (req, res) => handle(res, () => hospital.bookAppointment(actorOf(req), req.body)));
-hospitalRouter.patch('/appointments/:id/status', (req, res) => handle(res, () => hospital.setAppointmentStatus(actorOf(req), req.params.id, req.body?.status)));
+hospitalRouter.patch('/appointments/:id/status', (req, res) => handle(res, () => hospital.setAppointmentStatus(actorOf(req), routeParam(req.params.id), req.body?.status)));
 
 hospitalRouter.get('/audit', (_req, res) => handle(res, () => hospital.auditTrail()));
 `;

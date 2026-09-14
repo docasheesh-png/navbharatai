@@ -153,7 +153,7 @@ activityFeedRouter.get('/', (req: Request, res: Response) => {
 activityFeedRouter.get('/actor/:actor', (req: Request, res: Response) => {
   const cursor = req.query.cursor === undefined ? null : Number(req.query.cursor);
   const limit = req.query.limit === undefined ? undefined : Number(req.query.limit);
-  return res.status(200).json(activityFeed.actorFeed(req.params.actor, { cursor, limit }));
+  return res.status(200).json(activityFeed.actorFeed(routeParam(req.params.actor), { cursor, limit }));
 });
 
 // Unseen counter for a viewer. ?viewer=<id>.
@@ -189,6 +189,7 @@ the exact bug that naive offset/limit pagination introduces. Files:
 
 \`\`\`ts
 import { activityFeedRouter } from './server/activity/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api/activity', activityFeedRouter);
 \`\`\`
 

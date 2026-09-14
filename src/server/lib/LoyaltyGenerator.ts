@@ -142,12 +142,12 @@ loyaltyRouter.post('/loyalty/redeem', (req: Request, res: Response) => {
 
 // Current balance for a member.
 loyaltyRouter.get('/loyalty/:member/balance', (req: Request, res: Response) => {
-  return res.status(200).json({ member: req.params.member, balance: loyalty.balance(req.params.member) });
+  return res.status(200).json({ member: routeParam(req.params.member), balance: loyalty.balance(routeParam(req.params.member)) });
 });
 
 // Full point history for a member.
 loyaltyRouter.get('/loyalty/:member/history', (req: Request, res: Response) => {
-  return res.status(200).json(loyalty.history(req.params.member));
+  return res.status(200).json(loyalty.history(routeParam(req.params.member)));
 });
 `;
 
@@ -164,6 +164,7 @@ history). Optional point **expiry** is supported. Files:
 
 \`\`\`ts
 import { loyaltyRouter } from './server/loyalty/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', loyaltyRouter);
 \`\`\`
 

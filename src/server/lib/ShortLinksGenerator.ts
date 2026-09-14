@@ -147,7 +147,7 @@ shortLinkRouter.post('/api/links', (req: Request, res: Response) => {
 
 // Link stats (does NOT count a click).
 shortLinkRouter.get('/api/links/:code', (req: Request, res: Response) => {
-  const link = shortLinks.get(req.params.code);
+  const link = shortLinks.get(routeParam(req.params.code));
   if (!link) return res.status(404).json({ error: 'link not found' });
   return res.status(200).json(link);
 });
@@ -156,20 +156,20 @@ shortLinkRouter.get('/api/links/:code', (req: Request, res: Response) => {
 shortLinkRouter.patch('/api/links/:code', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { active?: unknown };
   try {
-    return res.status(200).json(shortLinks.setActive(req.params.code, Boolean(body.active)));
+    return res.status(200).json(shortLinks.setActive(routeParam(req.params.code), Boolean(body.active)));
   } catch (err) {
     return res.status(404).json({ error: err instanceof Error ? err.message : 'link not found' });
   }
 });
 
 shortLinkRouter.delete('/api/links/:code', (req: Request, res: Response) => {
-  if (!shortLinks.remove(req.params.code)) return res.status(404).json({ error: 'link not found' });
+  if (!shortLinks.remove(routeParam(req.params.code))) return res.status(404).json({ error: 'link not found' });
   return res.status(204).send();
 });
 
 // The public redirect. Counts the click; 404 if unknown / disabled / expired.
 shortLinkRouter.get('/:code', (req: Request, res: Response) => {
-  const url = shortLinks.resolve(req.params.code);
+  const url = shortLinks.resolve(routeParam(req.params.code));
   if (!url) return res.status(404).json({ error: 'link not found or expired' });
   return res.redirect(302, url);
 });
@@ -187,6 +187,7 @@ and an **expired or disabled** link stops resolving. Files:
 
 \`\`\`ts
 import { shortLinkRouter } from './server/shortlinks/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/', shortLinkRouter);
 \`\`\`
 

@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import type { Express, Request, Response } from 'express';
 import { BuildJobManager } from '../AppMakerLab/jobs/BuildJobManager';
+import { routeParam, routeParams } from '../lib/expressCompat';
 
 /**
  * AppMaker execution-telemetry + job-status routes extracted from the server.ts
@@ -36,7 +37,7 @@ export function registerAppmakerRoutes(app: Express): void {
 
   app.get('/api/appmaker/executions/:executionId', async (req: Request, res: Response) => {
     try {
-      const { executionId } = req.params;
+      const { executionId } = routeParams(req.params);
       const filePath = path.join(HISTORY_DIR, `${executionId}.json`);
       if (!fs.existsSync(filePath)) {
         return res.status(404).json({ error: 'Execution not found' });
@@ -51,7 +52,7 @@ export function registerAppmakerRoutes(app: Express): void {
 
   app.get('/api/appmaker/jobs/:jobId', async (req: Request, res: Response) => {
     try {
-      const { jobId } = req.params;
+      const { jobId } = routeParams(req.params);
       const job = await BuildJobManager.getJob(jobId);
       if (!job) {
         return res.status(404).json({ error: 'Job not found' });

@@ -163,7 +163,7 @@ collectionRouter.post('/', (req: Request, res: Response) => {
 // One collection with its items.
 collectionRouter.get('/:id', (req: Request, res: Response) => {
   try {
-    return res.status(200).json(collections.view(req.params.id));
+    return res.status(200).json(collections.view(routeParam(req.params.id)));
   } catch (err) {
     return res.status(404).json({ error: err instanceof Error ? err.message : 'collection not found' });
   }
@@ -173,7 +173,7 @@ collectionRouter.get('/:id', (req: Request, res: Response) => {
 collectionRouter.patch('/:id', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { name?: unknown };
   try {
-    return res.status(200).json(collections.rename(req.params.id, String(body.name ?? '')));
+    return res.status(200).json(collections.rename(routeParam(req.params.id), String(body.name ?? '')));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'bad request';
     if (message === 'collection not found') return res.status(404).json({ error: message });
@@ -182,7 +182,7 @@ collectionRouter.patch('/:id', (req: Request, res: Response) => {
 });
 
 collectionRouter.delete('/:id', (req: Request, res: Response) => {
-  if (!collections.remove(req.params.id)) return res.status(404).json({ error: 'collection not found' });
+  if (!collections.remove(routeParam(req.params.id))) return res.status(404).json({ error: 'collection not found' });
   return res.status(204).send();
 });
 
@@ -190,8 +190,8 @@ collectionRouter.delete('/:id', (req: Request, res: Response) => {
 collectionRouter.post('/:id/items', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { itemId?: unknown };
   try {
-    collections.saveItem(req.params.id, String(body.itemId ?? ''));
-    return res.status(200).json(collections.view(req.params.id));
+    collections.saveItem(routeParam(req.params.id), String(body.itemId ?? ''));
+    return res.status(200).json(collections.view(routeParam(req.params.id)));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'bad request';
     return res.status(message === 'collection not found' ? 404 : 400).json({ error: message });
@@ -201,8 +201,8 @@ collectionRouter.post('/:id/items', (req: Request, res: Response) => {
 // Remove an item from a collection.
 collectionRouter.delete('/:id/items/:itemId', (req: Request, res: Response) => {
   try {
-    collections.removeItem(req.params.id, req.params.itemId);
-    return res.status(200).json(collections.view(req.params.id));
+    collections.removeItem(routeParam(req.params.id), routeParam(req.params.itemId));
+    return res.status(200).json(collections.view(routeParam(req.params.id)));
   } catch (err) {
     return res.status(404).json({ error: err instanceof Error ? err.message : 'collection not found' });
   }
@@ -222,6 +222,7 @@ duplicate-free and newest-saved first. Files:
 
 \`\`\`ts
 import { collectionRouter } from './server/collections/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api/collections', collectionRouter);
 \`\`\`
 

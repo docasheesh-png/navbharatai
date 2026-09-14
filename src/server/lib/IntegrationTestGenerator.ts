@@ -125,14 +125,14 @@ ${echoLines}
 
   // Read one
   app.get('${r.route}/:id', (req: Request, res: Response) => {
-    const row = store.get(req.params.id);
+    const row = store.get(routeParam(req.params.id));
     if (!row) return res.status(404).json({ error: 'not found' });
     return res.status(200).json(row);
   });
 
   // Update
   app.put('${r.route}/:id', (req: Request, res: Response) => {
-    const row = store.get(req.params.id);
+    const row = store.get(routeParam(req.params.id));
     if (!row) return res.status(404).json({ error: 'not found' });
     const body = (req.body ?? {}) as Record<string, unknown>;
 ${updateLines}
@@ -142,8 +142,8 @@ ${updateLines}
 
   // Delete
   app.delete('${r.route}/:id', (req: Request, res: Response) => {
-    if (!store.has(req.params.id)) return res.status(404).json({ error: 'not found' });
-    store.delete(req.params.id);
+    if (!store.has(routeParam(req.params.id))) return res.status(404).json({ error: 'not found' });
+    store.delete(routeParam(req.params.id));
     return res.status(204).end();
   });
 
@@ -167,6 +167,7 @@ function integrationTest(r: Resolved): string {
   return `import { describe, it, expect, beforeEach } from 'vitest';
 import request from 'supertest';
 import { createInMemory${Name}App } from './support/inMemory${Name}App';
+import { routeParam, routeParams } from './expressCompat';
 
 // Full-lifecycle integration test for the ${r.resource} resource: create -> list -> read -> update ->
 // delete -> 404. These are REAL assertions on real response bodies (not placeholder stubs). The suite runs

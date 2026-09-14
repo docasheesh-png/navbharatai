@@ -5,20 +5,30 @@ import './index.css';
 import { installDomTranslateGuard } from './lib/domTranslateGuard';
 import { clampFontScale, FONT_SCALE_STORAGE_KEY } from './lib/a11y';
 import { installZoomLock } from './lib/zoomLock';
+import { isNativeShell } from './lib/apiBase';
 
 // FIRST, before React touches the DOM: make removeChild/insertBefore resilient so Google Translate (Chrome's
 // "Translate to Hindi", very common on this India-facing app) can't crash React with "Failed to execute
 // 'insertBefore' on 'Node' … not a child of this node". Keeps translation working instead of disabling it.
 installDomTranslateGuard();
 
-// NO PINCH-ZOOM (admin 2026-08-24: "do unglio se jaise webpage zoom karte hai woh zoom app me nahi
-// hona chahiye"). Installed here rather than in the native-shell block below on purpose: the CSS and
-// meta-tag layers of this already apply everywhere, and every other native-feel fix in index.css
-// (tap-highlight, pull-to-refresh, rubber-band) is global too — gating only this one to Capacitor
-// would leave the installed PWA behaving differently from the store build for no reason anyone could
-// state. On desktop it is inert: `gesturestart` is a touch/trackpad-pinch event, and ctrl+wheel and
-// the browser's own zoom are deliberately untouched. See src/lib/zoomLock.ts.
-installZoomLock(typeof document !== 'undefined' ? document : null);
+// NO PINCH-ZOOM — NATIVE APP ONLY (admin 2026-08-24: "do unglio se jaise webpage zoom karte hai woh
+// zoom app me nahi hona chahiye").
+//
+// 🔴 CORRECTED 2026-09-14 (admin, verbatim: "mobile app me off karne ko kaha tha, apne website par
+// bhi pinch zoom band kar di!"). This used to install unconditionally, reasoned as "the CSS and
+// meta-tag layers already apply everywhere, so gating only this one to Capacitor would leave the
+// installed PWA behaving differently from the store build for no reason anyone could state" — that
+// argued for consistency between the app and a hosted PWA wrapper of it, but the admin's original ask
+// was about the APP specifically, and the unconditional install silently took pinch-zoom — a real
+// accessibility aid (WCAG 1.4.4) — away from every visitor to the plain WEBSITE too, who never asked
+// for app behaviour. `<html>` only carries the `nb-native-shell` class inside the native shell (set
+// pre-paint in index.html, gated on `window.Capacitor`), and the matching CSS rule in index.css is
+// scoped the same way — this JS layer now matches both. Gated here, not deleted: on desktop and the
+// website this is simply never installed.
+if (isNativeShell(typeof window !== 'undefined' ? window as never : ({} as never))) {
+  installZoomLock(typeof document !== 'undefined' ? document : null);
+}
 import { BuildProvider } from './components/ide/BuildContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { offlineQueue, installOfflineQueueFlush } from './lib/offlineQueue';
@@ -29,7 +39,7 @@ import { SharePortal } from './components/SharePortal';
 import { MobileEngagementGate } from './components/MobileEngagementGate';
 import { hasAnalyticsConsent, getConsent, CONSENT_EVENT } from './lib/consent';
 import { isChunkLoadError, shouldReloadForStaleChunk } from './lib/chunkReload';
-import { installNativeApiRewrite, isNativeShell } from './lib/apiBase';
+import { installNativeApiRewrite } from './lib/apiBase';
 import { initMetaPixel, fetchPixelIdFromServer } from './lib/metaPixel';
 import { syncNativeMetaConsent, nativeMetaConsentGranted } from './lib/metaNativeConsent';
 import { installNativeShellPolish, loadNativeShellContext } from './lib/nativeShell';

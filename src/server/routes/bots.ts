@@ -13,6 +13,7 @@ import { botStore } from '../bots/BotStore';
 import { runBotTurn, type BotFlow } from '../bots/botFlowRunner';
 import { tgGetMe, tgSetWebhook, tgDeleteWebhook, tgSendMessage, parseTelegramUpdate } from '../bots/telegramApi';
 import { waSendMessage, parseWhatsAppMessage, verifyWhatsAppSubscription } from '../bots/whatsappApi';
+import { routeParam, routeParams } from '../lib/expressCompat';
 
 /** Our public HTTPS base (for the webhook URL Telegram will call). Prefer an explicit env; else derive
  *  from the forwarded request headers (Cloud Run sets x-forwarded-proto). */
@@ -63,7 +64,7 @@ export function registerBotRoutes(app: Express): void {
   // ——— Telegram: incoming updates (Telegram → us). Auth = the per-bot secret header. Always 200 fast. ———
   app.post('/api/bots/telegram/webhook/:botId', async (req: Request, res: Response) => {
     try {
-      const bot = await botStore.get(req.params.botId);
+      const bot = await botStore.get(routeParam(req.params.botId));
       if (!bot || bot.platform !== 'telegram' || !bot.active) return res.status(200).end();
       if (req.headers['x-telegram-bot-api-secret-token'] !== bot.webhookSecret) return res.status(401).end();
       const upd = parseTelegramUpdate(req.body);
@@ -80,7 +81,7 @@ export function registerBotRoutes(app: Express): void {
 
   // ——— WhatsApp Cloud API: webhook VERIFY (GET, Meta's subscription handshake) ———
   app.get('/api/bots/whatsapp/webhook/:botId', async (req: Request, res: Response) => {
-    const bot = await botStore.get(req.params.botId);
+    const bot = await botStore.get(routeParam(req.params.botId));
     const challenge = verifyWhatsAppSubscription(req.query, bot?.webhookSecret || '');
     if (challenge !== null) return res.status(200).send(challenge);
     return res.status(403).end();
@@ -89,7 +90,7 @@ export function registerBotRoutes(app: Express): void {
   // ——— WhatsApp Cloud API: incoming messages (Meta → us) ———
   app.post('/api/bots/whatsapp/webhook/:botId', async (req: Request, res: Response) => {
     try {
-      const bot = await botStore.get(req.params.botId);
+      const bot = await botStore.get(routeParam(req.params.botId));
       if (!bot || bot.platform !== 'whatsapp' || !bot.active || !bot.phoneNumberId) return res.status(200).end();
       const msg = parseWhatsAppMessage(req.body);
       if (!msg) return res.status(200).end();

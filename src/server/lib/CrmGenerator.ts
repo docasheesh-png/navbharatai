@@ -199,7 +199,7 @@ crmRouter.post('/leads', (req: Request, res: Response) => {
 crmRouter.patch('/leads/:id/stage', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { stage?: unknown };
   try {
-    return res.status(200).json(crm.moveStage(req.params.id, String(body.stage ?? '') as 'new'));
+    return res.status(200).json(crm.moveStage(routeParam(req.params.id), String(body.stage ?? '') as 'new'));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'could not update';
     if (message === 'lead not found') return res.status(404).json({ error: message });
@@ -210,7 +210,7 @@ crmRouter.patch('/leads/:id/stage', (req: Request, res: Response) => {
 crmRouter.patch('/leads/:id/assign', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { owner?: unknown };
   try {
-    return res.status(200).json(crm.assign(req.params.id, body.owner == null ? null : String(body.owner)));
+    return res.status(200).json(crm.assign(routeParam(req.params.id), body.owner == null ? null : String(body.owner)));
   } catch {
     return res.status(404).json({ error: 'lead not found' });
   }
@@ -219,7 +219,7 @@ crmRouter.patch('/leads/:id/assign', (req: Request, res: Response) => {
 crmRouter.post('/leads/:id/notes', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { author?: unknown; body?: unknown };
   try {
-    return res.status(201).json(crm.addNote(req.params.id, String(body.author ?? ''), String(body.body ?? '')));
+    return res.status(201).json(crm.addNote(routeParam(req.params.id), String(body.author ?? ''), String(body.body ?? '')));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'bad request';
     if (message === 'lead not found') return res.status(404).json({ error: message });
@@ -242,6 +242,7 @@ A real CRM backend. The core guarantee: a lead's stage follows an allowed sales 
 
 \`\`\`ts
 import { crmRouter } from './server/crm/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', crmRouter);
 \`\`\`
 

@@ -87,7 +87,7 @@ inventoryRouter.get('/stock', (_req: Request, res: Response) => {
 
 // Get one SKU's quantity.
 inventoryRouter.get('/stock/:sku', (req: Request, res: Response) => {
-  return res.status(200).json({ sku: req.params.sku, quantity: inventory.getStock(req.params.sku) });
+  return res.status(200).json({ sku: routeParam(req.params.sku), quantity: inventory.getStock(routeParam(req.params.sku)) });
 });
 
 // Set / restock. { quantity, mode?: 'set' | 'restock' } (default 'set').
@@ -96,11 +96,11 @@ inventoryRouter.put('/stock/:sku', (req: Request, res: Response) => {
   const quantity = Number(body.quantity);
   try {
     if (body.mode === 'restock') {
-      const next = inventory.restock(req.params.sku, quantity);
-      return res.status(200).json({ sku: req.params.sku, quantity: next });
+      const next = inventory.restock(routeParam(req.params.sku), quantity);
+      return res.status(200).json({ sku: routeParam(req.params.sku), quantity: next });
     }
-    inventory.setStock(req.params.sku, quantity);
-    return res.status(200).json({ sku: req.params.sku, quantity: inventory.getStock(req.params.sku) });
+    inventory.setStock(routeParam(req.params.sku), quantity);
+    return res.status(200).json({ sku: routeParam(req.params.sku), quantity: inventory.getStock(routeParam(req.params.sku)) });
   } catch (err) {
     return res.status(400).json({ error: err instanceof Error ? err.message : 'bad request' });
   }
@@ -110,8 +110,8 @@ inventoryRouter.put('/stock/:sku', (req: Request, res: Response) => {
 inventoryRouter.post('/stock/:sku/reserve', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { quantity?: unknown };
   try {
-    const remaining = inventory.reserve(req.params.sku, Number(body.quantity));
-    return res.status(200).json({ sku: req.params.sku, reserved: Number(body.quantity), remaining });
+    const remaining = inventory.reserve(routeParam(req.params.sku), Number(body.quantity));
+    return res.status(200).json({ sku: routeParam(req.params.sku), reserved: Number(body.quantity), remaining });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'could not reserve';
     const status = message === 'insufficient stock' ? 409 : 400;
@@ -123,8 +123,8 @@ inventoryRouter.post('/stock/:sku/reserve', (req: Request, res: Response) => {
 inventoryRouter.post('/stock/:sku/release', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { quantity?: unknown };
   try {
-    const quantity = inventory.release(req.params.sku, Number(body.quantity));
-    return res.status(200).json({ sku: req.params.sku, quantity });
+    const quantity = inventory.release(routeParam(req.params.sku), Number(body.quantity));
+    return res.status(200).json({ sku: routeParam(req.params.sku), quantity });
   } catch (err) {
     return res.status(400).json({ error: err instanceof Error ? err.message : 'bad request' });
   }
@@ -142,6 +142,7 @@ insufficient and never lets on-hand go negative. Files:
 
 \`\`\`ts
 import { inventoryRouter } from './server/inventory/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', inventoryRouter);
 \`\`\`
 

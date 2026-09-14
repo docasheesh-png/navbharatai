@@ -125,7 +125,7 @@ eventRouter.post('/events', (req: Request, res: Response) => {
 });
 
 eventRouter.get('/events/:id', (req: Request, res: Response) => {
-  const e = events.getEvent(req.params.id);
+  const e = events.getEvent(routeParam(req.params.id));
   if (!e) return res.status(404).json({ error: 'event not found' });
   return res.status(200).json({ ...e, seatsLeft: events.seatsLeft(e.id) });
 });
@@ -134,14 +134,14 @@ eventRouter.get('/events/:id', (req: Request, res: Response) => {
 eventRouter.get('/events/:id/attendees', (req: Request, res: Response) => {
   const q = req.query as { status?: string };
   const status = ['confirmed', 'waitlist', 'cancelled'].includes(String(q.status)) ? (q.status as 'confirmed') : undefined;
-  return res.status(200).json(events.attendees(req.params.id, status));
+  return res.status(200).json(events.attendees(routeParam(req.params.id), status));
 });
 
 // RSVP. Returns the rsvp with status 'confirmed' or 'waitlist' (auto). 404 unknown event, 409 duplicate.
 eventRouter.post('/events/:id/rsvp', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { attendee?: unknown };
   try {
-    return res.status(201).json(events.rsvp(req.params.id, String(body.attendee ?? '')));
+    return res.status(201).json(events.rsvp(routeParam(req.params.id), String(body.attendee ?? '')));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'could not rsvp';
     if (message === 'event not found') return res.status(404).json({ error: message });
@@ -153,7 +153,7 @@ eventRouter.post('/events/:id/rsvp', (req: Request, res: Response) => {
 // Cancel an RSVP (frees a confirmed seat → promotes the first waitlisted attendee).
 eventRouter.delete('/rsvps/:rsvpId', (req: Request, res: Response) => {
   try {
-    return res.status(200).json(events.cancelRsvp(req.params.rsvpId));
+    return res.status(200).json(events.cancelRsvp(routeParam(req.params.rsvpId)));
   } catch {
     return res.status(404).json({ error: 'rsvp not found' });
   }
@@ -172,6 +172,7 @@ automatically **promotes** the first waitlisted attendee. Files:
 
 \`\`\`ts
 import { eventRouter } from './server/events/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', eventRouter);
 \`\`\`
 

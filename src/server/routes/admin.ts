@@ -118,6 +118,7 @@ const GROWING_COLLECTIONS: readonly string[] = [
   'workspace_memory_v3', 'workspace_diagnostics_v3', 'workspace_manual_edits_v3', 'project_plans_v3',
 ];
 import { adminLockoutEnabled, checkAdminLock, recordAdminFail, recordAdminSuccess } from '../lib/adminLoginGuard';
+import { routeParam, routeParams } from '../lib/expressCompat';
 
 /**
  * Admin dashboard routes extracted from the server.ts monolith (Phase 1).
@@ -1093,7 +1094,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
 
   app.get('/api/admin/all-builds/:workspaceId', verifyAdminToken, async (req: Request, res: Response) => {
     try {
-      const workspaceId = String(req.params.workspaceId || '');
+      const workspaceId = String(routeParam(req.params.workspaceId) || '');
       const [latest, history] = await Promise.all([
         loadDiagnostics(workspaceId).catch(() => null),
         listDiagnosticsHistory(workspaceId).catch(() => []),
@@ -1110,7 +1111,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // the download always actually loads — omissions are counted, never silent).
   app.get('/api/admin/all-builds/:workspaceId/download', verifyAdminToken, async (req: Request, res: Response) => {
     try {
-      const workspaceId = String(req.params.workspaceId || '');
+      const workspaceId = String(routeParam(req.params.workspaceId) || '');
       const buildId = typeof req.query.build === 'string' ? req.query.build : '';
       if (buildId) {
         const report = await getDiagnosticsHistoryItem(workspaceId, buildId);
@@ -1147,7 +1148,11 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // still needs work, which is the failure this feature exists to prevent.
   app.post('/api/admin/all-builds/:workspaceId/mark', verifyAdminToken, async (req: Request, res: Response) => {
     try {
-      const workspaceId = String(req.params.workspaceId || '').trim();
+      // Through `routeParam` like every other route since the Express 5 migration (#2936) — not
+      // because this one can receive an array (it is not a wildcard), but because leaving one route
+      // reading `req.params` raw is how the next migration finds a straggler it has no reason to look
+      // for. The reasoning lives in expressCompat.ts, in one place, with its evidence.
+      const workspaceId = String(routeParam(req.params.workspaceId) || '').trim();
       if (!workspaceId) { res.status(400).json({ error: 'A workspace id is required.' }); return; }
       const body = (req.body ?? {}) as { downloaded?: unknown; fixed?: unknown; note?: unknown };
       const triage = await markBuildTriage(workspaceId, {
@@ -1166,7 +1171,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
 
   app.get('/api/admin/build-reports/:id', verifyAdminToken, async (req: Request, res: Response) => {
     try {
-      const record = await getAdminBuildReport(String(req.params.id));
+      const record = await getAdminBuildReport(String(routeParam(req.params.id)));
       if (!record) { res.status(404).json({ error: 'Build report not found.' }); return; }
       res.json(record);
     } catch (err: any) {
@@ -1186,7 +1191,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   app.post('/api/admin/build-reports/:id/mark', verifyAdminToken, async (req: Request, res: Response) => {
     try {
       const body = (req.body ?? {}) as { downloaded?: unknown; fixed?: unknown; note?: unknown };
-      const triage = await markAdminBuildReport(String(req.params.id), {
+      const triage = await markAdminBuildReport(String(routeParam(req.params.id)), {
         // TRI-STATE, like `fixed` below. `body.downloaded === true` would turn an ABSENT field into
         // `false` — and since `false` now CLEARS the mark, that would erase the download every time
         // the admin ticked "Mark fixed".
@@ -1209,7 +1214,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // workspace diagnostics — different collection, different purpose.
   app.delete('/api/admin/build-reports/:id', verifyAdminToken, async (req: Request, res: Response) => {
     try {
-      const ok = await deleteAdminBuildReport(String(req.params.id));
+      const ok = await deleteAdminBuildReport(String(routeParam(req.params.id)));
       if (!ok) { res.status(404).json({ error: 'Build report not found (or it could not be deleted).' }); return; }
       res.json({ ok: true });
     } catch (err: any) {
@@ -1248,7 +1253,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
 
   app.get('/api/admin/apk-reports/:id', verifyAdminToken, async (req: Request, res: Response) => {
     try {
-      const record = await getApkReport(String(req.params.id));
+      const record = await getApkReport(String(routeParam(req.params.id)));
       if (!record) { res.status(404).json({ error: 'APK build report not found.' }); return; }
       res.json(record);
     } catch (err: any) {
@@ -1263,7 +1268,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         res.status(400).json({ error: 'Pass { fixed: true|false } to mark this report.' });
         return;
       }
-      const ok = await markApkReportFixed(String(req.params.id), body.fixed, typeof body.note === 'string' ? body.note : null);
+      const ok = await markApkReportFixed(String(routeParam(req.params.id)), body.fixed, typeof body.note === 'string' ? body.note : null);
       if (!ok) { res.status(404).json({ error: 'APK build report not found (or the mark could not be saved).' }); return; }
       res.json({ ok: true });
     } catch (err: any) {
@@ -1273,7 +1278,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
 
   app.delete('/api/admin/apk-reports/:id', verifyAdminToken, async (req: Request, res: Response) => {
     try {
-      const ok = await deleteApkReport(String(req.params.id));
+      const ok = await deleteApkReport(String(routeParam(req.params.id)));
       if (!ok) { res.status(404).json({ error: 'APK build report not found (or it could not be deleted).' }); return; }
       res.json({ ok: true });
     } catch (err: any) {
@@ -1808,7 +1813,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // ── User token adjustment ─────────────────────────────────────────────────
   app.post('/api/admin/users/:userId/tokens', verifyAdminToken, async (req: Request, res: Response) => {
     const db = getDb() as any;
-    const { userId } = req.params;
+    const { userId } = routeParams(req.params);
     const { delta, reason } = req.body;
     if (!delta || typeof delta !== 'number') return res.status(400).json({ error: 'delta (number) required' });
     try {
@@ -1854,7 +1859,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // wallet is zeroed and stamped `mergedInto` so it can never be spent again or double-merged.
   app.post('/api/admin/users/:userId/merge', verifyAdminToken, async (req: Request, res: Response) => {
     const db = getDb() as any;
-    const { userId } = req.params;             // the account to KEEP (merge INTO)
+    const { userId } = routeParams(req.params);             // the account to KEEP (merge INTO)
     const fromUserId = req.body?.fromUserId;   // the duplicate account to merge and retire
     if (!fromUserId || typeof fromUserId !== 'string') return res.status(400).json({ error: 'fromUserId (string) required' });
     if (fromUserId === userId) return res.status(400).json({ error: 'Cannot merge an account into itself' });
@@ -1888,7 +1893,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // ── Ban / unban user ──────────────────────────────────────────────────────
   app.post('/api/admin/users/:userId/ban', verifyAdminToken, async (req: Request, res: Response) => {
     const db = getDb() as any;
-    const { userId } = req.params;
+    const { userId } = routeParams(req.params);
     const { banned, reason } = req.body;
     try {
       const walletRef = doc(db, 'user_token_wallets', userId);
@@ -1915,7 +1920,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // Take a live app down: delete its real Firebase Hosting channel, then mark it taken_down so it can
   // never republish (the deploy choke point re-checks status). Honest — reports the real result.
   app.post('/api/admin/deployments/:workspaceId/takedown', verifyAdminToken, async (req: Request, res: Response) => {
-    const { workspaceId } = req.params;
+    const { workspaceId } = routeParams(req.params);
     const { reason } = req.body || {};
     if (!workspaceId) return res.status(400).json({ error: 'workspaceId required' });
     try {
@@ -2290,7 +2295,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // its owner (Unpublish) or to a deliberate takedown, which also marks the registry so it cannot
   // silently republish. A tool that could do both would eventually do the wrong one.
   app.post('/api/admin/hosting/channels/:channelId/reclaim', verifyAdminToken, async (req: Request, res: Response) => {
-    const { channelId } = req.params;
+    const { channelId } = routeParams(req.params);
     if (!channelId) return res.status(400).json({ error: 'channelId required' });
     try {
       const [chan, reg] = await Promise.all([
@@ -2336,7 +2341,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // Restore a held/taken-down app to active (reverses an over-eager takedown/hold). Does NOT
   // re-publish — the owner must redeploy; this only clears the registry block.
   app.post('/api/admin/deployments/:workspaceId/restore', verifyAdminToken, async (req: Request, res: Response) => {
-    const { workspaceId } = req.params;
+    const { workspaceId } = routeParams(req.params);
     if (!workspaceId) return res.status(400).json({ error: 'workspaceId required' });
     try {
       const ok = await deploymentStore.setStatus(workspaceId, 'active');

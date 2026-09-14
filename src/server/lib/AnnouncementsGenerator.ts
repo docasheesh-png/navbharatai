@@ -186,7 +186,7 @@ announcementRouter.post('/', (req: Request, res: Response) => {
 announcementRouter.patch('/:id', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as Record<string, unknown>;
   try {
-    return res.status(200).json(announcements.update(req.params.id, body));
+    return res.status(200).json(announcements.update(routeParam(req.params.id), body));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'bad request';
     return res.status(message === 'announcement not found' ? 404 : 400).json({ error: message });
@@ -194,7 +194,7 @@ announcementRouter.patch('/:id', (req: Request, res: Response) => {
 });
 
 announcementRouter.delete('/:id', (req: Request, res: Response) => {
-  if (!announcements.remove(req.params.id)) return res.status(404).json({ error: 'announcement not found' });
+  if (!announcements.remove(routeParam(req.params.id))) return res.status(404).json({ error: 'announcement not found' });
   return res.status(204).send();
 });
 
@@ -202,7 +202,7 @@ announcementRouter.delete('/:id', (req: Request, res: Response) => {
 announcementRouter.post('/:id/dismiss', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { user?: unknown };
   try {
-    const ok = announcements.dismiss(String(body.user ?? ''), req.params.id);
+    const ok = announcements.dismiss(String(body.user ?? ''), routeParam(req.params.id));
     return res.status(200).json({ dismissed: ok });
   } catch (err) {
     return res.status(400).json({ error: err instanceof Error ? err.message : 'bad request' });
@@ -223,6 +223,7 @@ published), and once a user **dismisses** a dismissible banner it **never** show
 
 \`\`\`ts
 import { announcementRouter } from './server/announcements/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api/announcements', announcementRouter);
 \`\`\`
 

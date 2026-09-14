@@ -140,6 +140,7 @@ export class FieldServiceService {
 export const FIELD_SERVICE_ROUTES_SOURCE = `// Express router for the field-service backend. Mount with: app.use('/api/field', fieldServiceRouter(service)).
 import { Router, type Request, type Response } from 'express';
 import { FieldServiceService, type JobStatus } from './fieldService';
+import { routeParam, routeParams } from './expressCompat';
 
 export function fieldServiceRouter(svc: FieldServiceService = new FieldServiceService()): Router {
   const router = Router();
@@ -150,7 +151,7 @@ export function fieldServiceRouter(svc: FieldServiceService = new FieldServiceSe
     catch (err) { fail(res, err); }
   });
   router.get('/technicians', (_req: Request, res: Response) => res.json(svc.listTechnicians()));
-  router.get('/technicians/:id/active-job', (req: Request, res: Response) => res.json(svc.activeJobOf(req.params.id) || null));
+  router.get('/technicians/:id/active-job', (req: Request, res: Response) => res.json(svc.activeJobOf(routeParam(req.params.id)) || null));
 
   router.post('/jobs', (req: Request, res: Response) => {
     try { res.status(201).json(svc.createJob(req.body?.customerName, req.body?.address, req.body?.description)); }
@@ -162,22 +163,22 @@ export function fieldServiceRouter(svc: FieldServiceService = new FieldServiceSe
     res.json(svc.listJobs({ status, technicianId }));
   });
   router.get('/jobs/:id', (req: Request, res: Response) => {
-    const j = svc.getJob(req.params.id);
+    const j = svc.getJob(routeParam(req.params.id));
     if (!j) { res.status(404).json({ error: 'No such job.' }); return; }
     res.json(j);
   });
   // Assign a requested job to a technician — 409 if that technician already has an active job.
   router.patch('/jobs/:id/assign', (req: Request, res: Response) => {
-    try { res.json(svc.assign(req.params.id, req.body?.technicianId)); }
+    try { res.json(svc.assign(routeParam(req.params.id), req.body?.technicianId)); }
     catch (err) { fail(res, err); }
   });
   // Advance the lifecycle (en_route / on_site / completed / requested-to-unassign) — 409 on an invalid jump.
   router.patch('/jobs/:id/status', (req: Request, res: Response) => {
-    try { res.json(svc.setStatus(req.params.id, req.body?.status as JobStatus)); }
+    try { res.json(svc.setStatus(routeParam(req.params.id), req.body?.status as JobStatus)); }
     catch (err) { fail(res, err); }
   });
   router.patch('/jobs/:id/cancel', (req: Request, res: Response) => {
-    try { res.json(svc.cancel(req.params.id)); }
+    try { res.json(svc.cancel(routeParam(req.params.id))); }
     catch (err) { fail(res, err); }
   });
 

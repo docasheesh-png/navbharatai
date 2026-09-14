@@ -6,6 +6,19 @@
          saved theme with no dark→theme flash (FOUC). React keeps it in sync afterwards (App.tsx). -->
     <script>
       try { document.documentElement.setAttribute('data-theme', localStorage.getItem('theme') || 'dark'); } catch (e) {}
+      // NATIVE-ONLY: mark <html> and tighten the viewport BEFORE first paint, same reasoning as the
+      // theme line above — a class/attribute added after React mounts would let one frame of website
+      // behaviour (pinch-enabled) flash before the app-only rules kick in. `window.Capacitor` is
+      // injected by the WebView bridge before this script runs, so the check is synchronous and safe
+      // on the plain website (Capacitor is simply undefined there). See src/lib/zoomLock.ts and the
+      // touch-action rule in src/index.css, which key off the SAME 'nb-native-shell' class.
+      try {
+        if (window.Capacitor && (typeof window.Capacitor.isNativePlatform !== 'function' || window.Capacitor.isNativePlatform())) {
+          document.documentElement.classList.add('nb-native-shell');
+          var vp = document.querySelector('meta[name="viewport"]');
+          if (vp) vp.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover');
+        }
+      } catch (e) {}
     </script>
     <!-- viewport replaced below with viewport-fit=cover for PWA -->
     <title>NavBharatAI v5.0 — AI App Maker</title>
@@ -22,16 +35,21 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="NavBharatAI" />
 
-    <!-- Safe-area / notch support, and NO PINCH-ZOOM (admin 2026-08-24: "do unglio se jaise webpage
-         zoom karte hai woh zoom app me nahi hona chahiye").
+    <!-- Safe-area / notch support. Pinch-zoom stays ALLOWED here by default — the website is a normal
+         web page and pinch-zoom is a real accessibility aid (WCAG 1.4.4).
 
-         `user-scalable=no, maximum-scale=1` is the ANDROID half of the answer and is honoured there.
-         iOS has ignored it since Safari 10, on purpose — so on iPhone this line does nothing on its
-         own and the real blocker is the `gesturestart` handler in src/lib/zoomLock.ts. The CSS
-         `touch-action: pan-x pan-y` in index.css is the third layer (Chrome's standards-based one).
-         All three are needed; each platform answers to a different mechanism. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-    
+         🔴 CORRECTED 2026-09-14 (admin, verbatim: "mobile app me off karne ko kaha tha, apne website
+         par bhi pinch zoom band kar di!") — this tag used to hardcode `maximum-scale=1,
+         user-scalable=no` unconditionally, so the WEBSITE lost pinch-zoom along with the installed
+         app. The admin's 2026-08-24 ask ("do unglio se jaise webpage zoom karte hai woh zoom app me
+         nahi hona chahiye") was about the APP, not the website. `user-scalable=no` is the ANDROID half
+         of that answer (iOS has ignored it since Safari 10, on purpose) — so it is now added by JS,
+         ONLY inside the native shell, in the SAME inline script that sets the theme before first paint
+         (see below). `src/lib/zoomLock.ts` (the iOS `gesturestart` blocker) and the `touch-action`
+         rule in `src/index.css` are the other two layers, and both are now native-gated the same way —
+         see those files for why all three are needed. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
     <!-- Open Graph (Metadata for WhatsApp, Telegram, Discord link sharing) -->
     <meta property="og:title" content="NavBharatAI v5.0" />
     <meta property="og:description" content="नए भारत का अपना AI - Sovereign Intelligent Enterprise Architect Console" />

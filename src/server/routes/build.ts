@@ -41,6 +41,7 @@ import { userBuildHistoryStore, type BuildStatus } from '../lib/UserBuildHistory
 import { usdToInr } from '../lib/UsdInrRate';
 import { envFlag } from '../lib/envFlag';
 import { workspacePrefixFor } from '../lib/workspaceIdentity';
+import { routeParam, routeParams } from '../lib/expressCompat';
 
 /**
  * Phase 4 integration — the real, engine-backed build endpoint.
@@ -779,7 +780,7 @@ export function registerBuildRoutes(app: Express): void {
   // the last completed build for a sessionId without re-running the build.
   app.get('/api/build-session/:sessionId', async (req: Request, res: Response) => {
     try {
-      const { sessionId } = req.params;
+      const { sessionId } = routeParams(req.params);
       if (!sessionId || typeof sessionId !== 'string') return res.status(400).json({ error: 'sessionId required' });
       const session = await proBuildSessionStore.load(sessionId);
       if (!session) return res.status(404).json({ error: 'not found' });
@@ -793,7 +794,7 @@ export function registerBuildRoutes(app: Express): void {
   // Used by the frontend version history panel.
   app.get('/api/build-history/:sessionId', async (req: Request, res: Response) => {
     try {
-      const { sessionId } = req.params;
+      const { sessionId } = routeParams(req.params);
       if (!sessionId || typeof sessionId !== 'string') return res.status(400).json({ error: 'sessionId required' });
       const versions = await buildHistoryStore.list(sessionId);
       return res.json({ versions });
@@ -805,7 +806,7 @@ export function registerBuildRoutes(app: Express): void {
   // Phase 2.1 — Fetch a specific version's full file snapshot for restore.
   app.get('/api/build-history/:sessionId/:versionId', async (req: Request, res: Response) => {
     try {
-      const { sessionId, versionId } = req.params;
+      const { sessionId, versionId } = routeParams(req.params);
       if (!sessionId || !versionId) return res.status(400).json({ error: 'sessionId and versionId required' });
       const version = await buildHistoryStore.get(sessionId, versionId);
       if (!version) return res.status(404).json({ error: 'version not found' });
@@ -822,7 +823,7 @@ export function registerBuildRoutes(app: Express): void {
   // capability, mirroring the GET routes above.
   app.post('/api/build-history/:sessionId/checkpoint', async (req: Request, res: Response) => {
     try {
-      const { sessionId } = req.params;
+      const { sessionId } = routeParams(req.params);
       const body = req.body as { name?: unknown; files?: unknown };
       if (!sessionId || typeof sessionId !== 'string') return res.status(400).json({ error: 'sessionId required' });
       if (!body?.files || typeof body.files !== 'object' || Array.isArray(body.files)) {
@@ -882,7 +883,7 @@ export function registerBuildRoutes(app: Express): void {
   // spend; without the check any uid could be read. Client sends the Bearer token via authedHeaders();
   // VITEST skips the check (see requireUserMatch).
   app.get('/api/user/usage/:userId', requireUserMatch('userId'), async (req: Request, res: Response) => {
-    const { userId } = req.params;
+    const { userId } = routeParams(req.params);
     if (!userId) return res.status(400).json({ error: 'userId required' });
     const month = typeof req.query.month === 'string' ? req.query.month : undefined;
     const doc = await userCostStore.get(userId, month);

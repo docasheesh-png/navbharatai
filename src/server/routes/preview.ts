@@ -13,6 +13,7 @@ import { getPreviewService } from '../runtime/PreviewService';
 import { buildProxyUrl } from '../runtime/proxyUrl';
 import { buildVuePreview } from '../runtime/VuePreview';
 import { sendSafeError } from '../lib/httpError';
+import { splatPath, routeParam } from '../lib/expressCompat';
 
 // ── Server-side esbuild bundler for React/TS preview ────────────────────────
 // Eliminates the browser-side Babel CDN + complex require() runtime entirely.
@@ -287,11 +288,12 @@ export function registerPreviewRoutes(app: Express, limiter: RequestHandler = pr
   // Reverse proxy: server-container previews are reachable via the main server
   // (no raw internal port exposed). Forwards /preview-app/:sessionId/<rest> to the
   // session's dev server. (HTTP only for now; WS/HMR upgrade handled separately.)
-  app.all('/preview-app/:sessionId/*', async (req: Request, res: Response) => {
-    const target = previewService.serverTarget(req.params.sessionId);
+  // EXPRESS 5: the trailing bare '*' is invalid and `req.params[0]` no longer exists — see splatPath.
+  app.all('/preview-app/:sessionId/*splat', async (req: Request, res: Response) => {
+    const target = previewService.serverTarget(routeParam(req.params.sessionId));
     if (!target) return res.status(404).json({ error: 'Preview session not found or not running' });
     try {
-      const rest = (req.params as any)[0] || '';
+      const rest = splatPath(req.params);
       const url = buildProxyUrl(target.origin, rest, req.originalUrl);
       const headers: Record<string, string> = {};
       for (const [k, v] of Object.entries(req.headers)) {
@@ -326,7 +328,7 @@ export function registerPreviewRoutes(app: Express, limiter: RequestHandler = pr
   });
 
   app.get('/preview/:sessionId', (req: Request, res: Response) => {
-    const html = previewService.static.getHtml(req.params.sessionId);
+    const html = previewService.static.getHtml(routeParam(req.params.sessionId));
     if (!html) {
       return res.status(404).send('<!DOCTYPE html><meta charset="utf-8"><body style="font-family:system-ui;background:#0d1117;color:#c9d1d9;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><p>Preview expired or not found.</p></body>');
     }

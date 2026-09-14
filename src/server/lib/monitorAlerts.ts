@@ -266,6 +266,40 @@ export function resolvedMessage(alertId: string): string {
 }
 
 /**
+ * ONE MAIL PER SWEEP, NOT ONE PER ALERT (admin, 2026-09-14: "ek jaisi information ke liye 1 email
+ * hona chahiye... emails aye hi ja rahe hai"). `decideAlertActions` correctly caps EACH alert id at
+ * 2 mails/48h — that part of the 2026-09-12 fix was never broken. What it does not do, because it is
+ * not its job, is stop a SINGLE sweep from deciding that several DIFFERENT ids are all newly due at
+ * once (a real provider outage routinely raises the error rate, slows builds AND spikes sandbox cost
+ * in the same 15-minute window) — and the old delivery loop sent one email per id, so one real
+ * incident could still land 3-5 separate mails in the same few minutes, each individually within its
+ * own budget. This digest is the delivery-side half: everything a sweep decided to announce goes out
+ * as ONE message, however many ids it covers. `decideAlertActions`'s per-id state and caps are
+ * untouched — this only changes how many times the mailbox is touched to deliver the same verdict.
+ */
+export function alertDigestMessage(alerts: MetricAlert[], windowHours: number): string {
+  if (alerts.length === 1) return alertMessage(alerts[0], windowHours);
+  const scope = windowHours === 1 ? 'the last hour' : `the last ${windowHours} hours`;
+  const worst = alerts.some((a) => a.severity === 'critical') ? '🔴' : '🟡';
+  const lines = alerts.map((a) => `${a.severity === 'critical' ? '🔴' : '🟡'} ${a.message}`);
+  return [
+    `${worst} NavBharatAI Monitor — ${alerts.length} alerts (measured over ${scope}):`,
+    ...lines,
+    'Open Admin → Monitor for the live charts.',
+  ].join('\n');
+}
+
+/** The all-clear counterpart of alertDigestMessage — see its header for why this exists. */
+export function resolvedDigestMessage(alertIds: string[]): string {
+  if (alertIds.length === 1) return resolvedMessage(alertIds[0]);
+  const labels = alertIds.map((id) => id.split('-').join(' ').replace(/^\w/, (c) => c.toUpperCase()));
+  return [
+    `🟢 NavBharatAI Monitor — resolved (${alertIds.length}):`,
+    ...labels.map((l) => `🟢 ${l} is back within its normal range.`),
+  ].join('\n');
+}
+
+/**
  * VM-COST SPIKE — the alert that exists because this is the admin's largest bill.
  *
  * E2B is measured at roughly ₹15,000/month, and nothing in the product would have said a word if it
@@ -363,16 +397,18 @@ export async function runAlertSweep(deps: AlertSweepDeps): Promise<AlertSweepRes
       decideAlertActions(alerts, prev, nowMs, deps.cooldownMs, deps.resolveAfterMs));
     if (!actions) return { skipped: 'no-storage', notified: 0, resolved: 0 };
 
-    for (const a of actions.notify) {
-      await deps.notify(alertMessage(a, deps.windowHours)).catch(() => {});
+    // ONE MAIL PER SWEEP (see alertDigestMessage's header): everything this sweep decided is due goes
+    // out as a single message, whether that is one alert or several that happened to cross their
+    // threshold in the same window. `decideAlertActions` still caps each id at 2 mails/48h on its own.
+    if (actions.notify.length > 0) {
+      await deps.notify(alertDigestMessage(actions.notify, deps.windowHours)).catch(() => {});
     }
-    // The all-clear. One per EPISODE by construction (the entry only reaches `resolved` after the
-    // condition has been continuously clear for the confirmation window), and droppable entirely for
-    // an admin who wants alerts but not their endings.
+    // The all-clear. One per SWEEP by construction (each id only reaches `resolved` after being
+    // continuously clear for the confirmation window), and droppable entirely for an admin who wants
+    // alerts but not their endings.
     const announceResolved = deps.resolvedNotices ?? true;
-    for (const id of actions.resolved) {
-      if (!announceResolved) break;
-      await deps.notify(resolvedMessage(id)).catch(() => {});
+    if (announceResolved && actions.resolved.length > 0) {
+      await deps.notify(resolvedDigestMessage(actions.resolved)).catch(() => {});
     }
     return { notified: actions.notify.length, resolved: actions.resolved.length };
   } catch {

@@ -55141,6 +55141,84 @@ When nothing contradicts the failure count the old wording stands, untouched. Te
   accurate and purely an admin action — Admin → Overview → Publish Capacity. No code change; the ceiling
   itself already has its plan in ROADMAP §10.3 (serve published apps from the bucket), gated on the three
   `PUBLISHED_APPS_*` keys in the order that entry records.
+## 2026-09-14 — "imaandar phase dikhao ya real number?" — the answer was never a choice between them
+
+The admin asked, after three consecutive autopsies had each recorded the build ETA lying (`d11ad529`
+12 min, `1ef27cd7` 26.6 min, `909d13c6` 26.6 min — all opened with **"~2–4 min"**): should the build
+show an honest phase, or a real time? And asked for an engineer's judgement rather than a preference.
+
+**The judgement: it is one rule, not two options — show the number wherever it is MEASURED, and the
+phase wherever it is not.** Both halves already had a home in this repo; only one of them was being
+applied.
+
+### The defect: `progressEta.ts`'s own discipline governed the live line and never the first one
+
+That module has refused to guess since 2026-08-23 — it returns **null rather than a number** in every
+case where it would be extrapolating from nothing — and its header states exactly why the prompt-word
+heuristic cannot be trusted: it runs **BACKWARDS**. `complexityFromPrompt` counts page-words and
+feature-words, so *"Make an VPN App"* contains neither, scores the floor of every formula, and receives
+the **smallest estimate in the system**. The shorter and more ambitious the request, the shorter its
+promise.
+
+The first line never got that rule. It printed a figure the heuristic had produced, at confidence 0.4,
+before anything existed to measure — and then the heartbeat **counted down from it**: *"~53s to go"* on
+a build with eight minutes left. The original 2026-08-23 report that created this whole module was a
+complaint about the broken promise, not about the wait.
+
+### The fix
+
+- **`estimateIsEvidenced(est)`** (`AgentV3/etaEvidence.ts`) gates the opening line. An estimate this
+  workspace's own past builds DOMINATE is a measurement — of real durations, on the real engine, at the
+  real tier — and keeps its number, unchanged. A cold one shows `unevidencedFirstEtaLine()`: the phase,
+  no figure, and a promise of a real one.
+- ⚠️ **THE DISCRIMINATOR IS `historyWeight`, NOT `basis`, and that is the whole precision of it.**
+  `basis` reads `'blended'` as soon as a SINGLE distant past build exists, even where that build
+  contributes under a tenth of the figure — branching on it would have kept showing heuristic numbers
+  under a label claiming otherwise. `estimateBuildTime` has always COMPUTED the blend weight and then
+  discarded it; it is now reported as `BuildEstimate.historyWeight`. Purely additive: no caller reads
+  it except this gate, and `/api/build-estimate` simply carries one more number.
+- 🔴 **THE SECOND HALF, WITHOUT WHICH THIS WOULD HAVE BEEN HALF A FIX.** Withholding the opening number
+  while the heartbeat still counted down from it would have fixed the headline and left the body. The
+  tick now emits `unevidencedEtaTickLine(elapsedMs)` — **elapsed time only, which has already happened
+  and therefore promises nothing** — until something real anchors the budget.
+- 🔒 **A MEASUREMENT IS EVIDENCE.** The measured branch already re-anchors `etaTotalMs` to this build's
+  own observed pace; it now also sets `etaEvidenced`, so if measurement later stops applying (the build
+  enters repair) `liveEtaTick` may honestly own the line again — continuing from something real rather
+  than from the prompt guess it used to still be carrying.
+- ⚠️ **`etaTotalMs` stays SEEDED on the unevidenced path, deliberately.** Zeroing it to suppress the
+  countdown was the first thing tried and it is wrong: that budget is what lets the heartbeat run at
+  all, and the heartbeat is where the measured line comes from — so the "fix" would have switched off
+  the measurement it exists to reach. Test-locked, because nothing else would have caught it.
+- The admin's report (`ETA_BASIS`) now carries `etaEvidenceNote(est)`, which states whether a number was
+  shown and why — and distinguishes *"no past builds"* from *"history too thin to dominate"*. The report
+  is never allowed to be the less honest surface (autopsy f04421ef).
+
+### 🔒 The order rule — the guard is against a bad MERGE, not a bad author
+
+**PR #2932 (another session, in flight as this was written) adds a SECOND measurement to the same
+function** — the architect's plan-step extrapolation, inserted between the file measurement and the
+fallback. The two changes are complementary and the correct resolution keeps **both**: every
+measurement first, the evidence gate after them, the countdown last. A resolution that drops a
+measurement, or puts the gate ahead of one, would silently return the build to guessing and **fail
+nothing**.
+
+So `tests/etaEvidenceWiring.test.ts` asserts the ORDER structurally and name-agnostically: every
+`measuredRemaining*` call in the tick must precede the gate, the gate must precede `liveEtaTick`, and
+each measured branch must `return`. A wrong resolution fails CI instead of shipping quietly.
+⚠️ **`AppKnowledgeBase.ts` also needs reconciling with #2932 on merge** — that PR's entry says the first
+line is always "an honest first guess with a range", which this change makes true only for a user with
+build history. One reconciled sentence, not two.
+
+**Proven by reversion: 3 tests fail** when the tick guard is removed. 23 new tests across two suites.
+
+### Still open, named rather than implied fixed
+
+- **`FINISH_ALLOWANCE_MS` is 60 s against a measured ~3.5 min tail** (#2932's finding, unchanged here):
+  every measured estimate is systematically short by roughly that much. Retuning it needs the real
+  distribution of post-file tails, which nobody has measured — swapping a wrong constant for a
+  differently-wrong one is what `progressEta.ts`'s own header warns against.
+- **The abandoned fast lane still costs ~90 s and produces nothing** — the honest fix is a stall signal,
+  not a smaller cap.
 ## 2026-09-14 — TWO SESSIONS AUTOPSIED BUILD `1ef27cd7`. The other one was better, so mine was cut down.
 
 Both #2929 (mine) and #2931 landed the same finding from the same report: the incomplete-code heal

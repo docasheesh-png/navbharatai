@@ -1152,7 +1152,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       // because this one can receive an array (it is not a wildcard), but because leaving one route
       // reading `req.params` raw is how the next migration finds a straggler it has no reason to look
       // for. The reasoning lives in expressCompat.ts, in one place, with its evidence.
-      const workspaceId = String(routeParam(req.params.workspaceId) || '').trim();
+      const workspaceId = routeParam(req.params.workspaceId).trim();
       if (!workspaceId) { res.status(400).json({ error: 'A workspace id is required.' }); return; }
       const body = (req.body ?? {}) as { downloaded?: unknown; fixed?: unknown; note?: unknown };
       const triage = await markBuildTriage(workspaceId, {
@@ -1191,7 +1191,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   app.post('/api/admin/build-reports/:id/mark', verifyAdminToken, async (req: Request, res: Response) => {
     try {
       const body = (req.body ?? {}) as { downloaded?: unknown; fixed?: unknown; note?: unknown };
-      const triage = await markAdminBuildReport(String(routeParam(req.params.id)), {
+      const triage = await markAdminBuildReport(routeParam(req.params.id), {
         // TRI-STATE, like `fixed` below. `body.downloaded === true` would turn an ABSENT field into
         // `false` — and since `false` now CLEARS the mark, that would erase the download every time
         // the admin ticked "Mark fixed".

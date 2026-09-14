@@ -46,8 +46,19 @@ describe('the ETA record states what the user was shown', () => {
   });
 
   it('the line quoted in the report is the SAME string emitted to the user', () => {
-    // One value, used twice — so the report cannot drift from the screen.
-    expect(code).toMatch(/const etaShown = firstEtaLine\(est, past\.length\)/);
+    // ONE value, bound once and used twice — that is the rule, and it is what stops the report
+    // drifting from the screen. Asserted as the rule rather than as the expression that produces it:
+    // this test used to pin `firstEtaLine(est, past.length)` literally and went red when the line
+    // gained an honest no-number branch for a build with no history to measure against — a change
+    // that keeps the rule perfectly (autopsy 2026-09-14, see AgentV3/etaEvidence.ts).
+    expect(code).toMatch(/const etaShown = /);
+    // Whatever produces it, the user-facing line must be built from the estimate we just computed…
+    const at = code.indexOf('const etaShown = ');
+    const assignment = code.slice(at, code.indexOf(';', at));
+    expect(assignment).toMatch(/EtaLine\(/);
+    // …the report must quote that same binding…
+    expect(code).toMatch(/code: 'ETA_BASIS'[\s\S]{0,600}?Shown to the user: "\$\{etaShown/);
+    // …and the user must be emitted that same binding, not a second rendering of it.
     expect(code).toMatch(/type: 'narration'[^\n]*text: etaShown/);
   });
 });

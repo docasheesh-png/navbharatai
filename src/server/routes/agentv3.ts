@@ -417,7 +417,7 @@ import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
-import { classifyIntentSmart, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild } from '../AgentV3/IntentClassifier';
+import { classifyIntentSmart, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild, userAskedForAnAppToBeBuilt } from '../AgentV3/IntentClassifier';
 import { looksLikeRefusal } from '../lib/promptSafety';
 import { assessBuildInput } from '../AgentV3/buildableInput';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
@@ -1123,6 +1123,60 @@ export function emptyBuildFailureSummary(
   // can never have rendered anything, so that verdict must still win if the two ever disagree.
   if (appRenders) return null;
   return 'The build produced no files. Please try again — you have not been charged.';
+}
+
+/**
+ * The honest SUCCESS summary for a turn that changed nothing because nothing needed changing — and
+ * PROVED it.
+ *
+ * 🔴 THE REPORT (697b38ee, 2026-09-14). "Continue from where you left off and finish/fix the build so
+ * the app works end-to-end." The engine did exactly that, twice over: `tsc --noEmit` exit 0, `npm run
+ * build` exit 0, dev server up, preview published, opened in a real browser and seen rendering, the
+ * project's own Playwright suite installed and PASSED, PROD_BUILD_OK, GREEN_GUARD_SAVE, release gate
+ * "It runs and renders". Then it told the user:
+ *
+ *     "The build produced no files. Please try again — you have not been charged."
+ *     "NavBharatAI's engine is running slowly right now and your build could not finish."
+ *
+ * Every clause of that is false. The build finished, the engine answered, and the app works. The user
+ * asked whether their app was working; we checked, found that it was, and reported a failure.
+ *
+ * 🔒 THE CLASS, AND WHY A NARROWER PATCH WOULD NOT HAVE FIXED IT: the platform measures DELIVERY by
+ * FILES WRITTEN. A turn whose correct output is a VERDICT rather than a diff — "continue", "is it
+ * working?", "did you finish?", "fix the build" — is therefore structurally incapable of succeeding,
+ * however well it runs. `shouldRetryEmptyBuild` had already conceded the point in words two months ago
+ * ("the distinction is not 'did files change' but 'is there an app'") and applied it only to the
+ * RETRY. This applies it to the VERDICT, which is the half the user actually reads.
+ *
+ * ⚠️ EVIDENCE, NEVER ASSUMPTION. It returns a success ONLY when a real browser was watched rendering
+ * the app on this run (`appRendered`, the same flag the release gate is fed). A turn that wrote nothing
+ * and proved nothing is still an honest failure — silence about an app is not good news about it, and
+ * "no files" must never become a way to pass.
+ *
+ * Pure + exported for testing.
+ */
+export function verifiedNoChangeSummary(opts: {
+  expectsArtifacts: boolean;
+  filesWritten: number;
+  sandboxUnavailable: boolean;
+  /** The turn ran as an edit — there was an app here before it started. */
+  isEditMode: boolean;
+  existingProjectFiles: number;
+  /** Did the user ask for an APP TO BE PRODUCED? See `userAskedForAnAppToBeBuilt`. */
+  userAskedToBuildAnApp: boolean;
+  /** A real browser was opened on the running app and it rendered. The one piece of proof that counts. */
+  appRendered: boolean;
+}): string | null {
+  if (!opts.expectsArtifacts || opts.filesWritten > 0) return null;
+  if (opts.sandboxUnavailable) return null;              // nothing could have been verified either
+  if (!opts.isEditMode || opts.existingProjectFiles <= 0) return null; // no app to have been fine already
+  if (opts.userAskedToBuildAnApp) return null;           // they wanted an app produced; none was
+  if (!opts.appRendered) return null;                    // no proof ⇒ no success
+  return (
+    'Nothing needed changing — I checked your app from end to end and it works. '
+    + 'It compiles, the production build succeeds, the server starts, and I opened it in a real browser '
+    + 'and watched it render. No file was modified, because none had to be.'
+  );
 }
 
 /**
@@ -9627,7 +9681,21 @@ async function noteBuildOutcome(
      * This constant is the missing distinction: the reclassification still protects the user's app, and
      * a zero-file outcome is still judged against what they actually asked for.
      */
-    const userAskedToBuildAnApp = intent === 'new_build';
+    /**
+     * 🔴 IT USED TO BE `intent === 'new_build'`, AND THAT CANCELLED THE VERY GUARD BELOW IT (report
+     * 697b38ee, 2026-09-14). The prompt was *"Continue from where you left off and finish/fix the
+     * build so the app works end-to-end."* — the byte-identical sentence quoted in
+     * `shouldRetryEmptyBuild`'s doc comment as the Shiv Medical Store case that must NOT be retried.
+     * The keyword ladder matched the NOUN "build" in *"fix the build"*, returned new_build at HIGH
+     * confidence, this line said true, and the whole build re-ran on a second model: 6.2 minutes of
+     * finished work became 13.1.
+     *
+     * The two questions are different and now have different answers. `intent` decides WHICH LANE
+     * runs the turn (edit, correctly — the narration even said "✏️ Editing your existing app"). This
+     * decides whether a zero-file outcome may be called a FAILURE, which is a question about what the
+     * user wanted. `userAskedForAnAppToBeBuilt` asks only the second one.
+     */
+    const userAskedToBuildAnApp = userAskedForAnAppToBeBuilt(prompt);
     // DETERMINISTIC SAFETY-NET (kept from the workspace-aware fix): even if the LLM is down/slow and
     // the keyword fallback returned new_build, a build-intent turn on a NON-empty project — with no
     // explicit "start over" — is an EDIT, never a rebuild-from-scratch. The smart classifier usually
@@ -12736,6 +12804,22 @@ async function noteBuildOutcome(
       // "made by NavBharatAI" signature: default ON, off only when the user toggled it off in
       // Settings → General. The dispatcher bakes the badge into index.html on preview publish.
       dispatcher.setSignatureEnabled(appSignatureEnabled);
+      // THE TYPED "STOP" (admin 2026-09-14, build 70115adf). `abortBuild(..., 'user-stop')` has always
+      // existed for the Stop BUTTON; this is the same cause reached from a SENTENCE. The message
+      // already travels to the model through steerPoll — the model decides, because only it can tell
+      // "chhod do" from "ruko, pehle login theek karo" — and this is how its decision reaches the run.
+      // Same abort path, same cause, so the summary, the report and the billing all already know what
+      // a user stop means; nothing new had to learn it.
+      dispatcher.setStopBuild((reason) => {
+        try {
+          buildDiag.record({
+            phase: 'build', severity: 'info', code: 'USER_STOPPED_BUILD', autoResolved: true,
+            message: 'The user asked for this build to stop, and it was stopped.',
+            detail: reason ? `user said: ${reason}` : undefined,
+          });
+        } catch { /* the record must never be what prevents the stop */ }
+        abortBuild({ abort: (r?: unknown) => abort.abort(r) }, 'user-stop');
+      });
       // C2 — load the project's own "never touch this" list and ARM THE GUARD before any tool runs.
       // Reading the file into the prompt alone would be a wish, not a rule: a model told nicely still
       // edits a protected folder during a big refactor, and the user finds out when their live payment
@@ -17252,6 +17336,11 @@ async function noteBuildOutcome(
           // the builds where every runtime check skipped.
           filesWritten: writtenFiles.size,
           buildWasRequested: userAskedToBuildAnApp,
+          // "TypeScript type-check passes cleanly" beside a release gate recording "the typecheck did
+          // not run" — both in build 7bc15e40's own report. Read from the gate's own evidence, which
+          // starts at 'not-run' and is only ever moved by a check that actually ran, so this cannot
+          // claim a typecheck happened when it did not.
+          typecheckRan: gateEvidence.typecheck !== 'not-run',
         });
         if (contradictions.length > 0) {
           result = { ...result, summary: `${result.summary}${claimCorrection(contradictions)}` };
@@ -17740,8 +17829,40 @@ async function noteBuildOutcome(
       // (already ₹0 via zeroBillReason), and telemetry all agree the build did NOT succeed. This runs
       // BEFORE the SPM settle / billing / finish below so every downstream consumer sees the truth.
       if (result && result.ok) {
-        const emptyFail = emptyBuildFailureSummary(expectsArtifacts, writtenFiles.size, sandboxUnavailable, buildObs.previewRendered);
-        if (emptyFail) result = { ...result, ok: false, summary: emptyFail };
+        // …UNLESS the turn's job was to CHECK, and it checked. See `verifiedNoChangeSummary`: report
+        // 697b38ee proved a working app was reported as a failed empty build because delivery is
+        // measured in files written. Tested FIRST, and only on real browser evidence — a turn that
+        // wrote nothing and proved nothing still falls through to the honest failure below.
+        const verifiedNoChange = verifiedNoChangeSummary({
+          expectsArtifacts,
+          filesWritten: writtenFiles.size,
+          sandboxUnavailable,
+          isEditMode: intent === 'edit_existing',
+          existingProjectFiles: editFileTree?.length ?? 0,
+          userAskedToBuildAnApp,
+          appRendered: previewVerifiedRendered,
+        });
+        if (verifiedNoChange) {
+          result = { ...result, summary: verifiedNoChange };
+          buildDiag.record({
+            phase: 'build', severity: 'info', code: 'VERIFIED_NO_CHANGE', autoResolved: true,
+            message: 'No file changed and none had to: this was a check-and-finish turn on an existing app, '
+              + 'and the app was opened in a real browser and rendered. Reported as a success rather than as an empty build.',
+          });
+        } else {
+          // TWO GUARDS, ONE CONDITION, AND THE SECOND IS NOT THE FIRST WITH A CHECK REMOVED (merge of
+          // #2917 and #2919, 2026-09-14). `verifiedNoChangeSummary` above WRITES a success sentence, so
+          // it is deliberately narrow: it refuses to say "nothing needed changing" to somebody who asked
+          // for an app to be produced (`userAskedToBuildAnApp`), because that claim would be false.
+          // `appRenders` here makes no claim at all — it only declines to call a RENDERING app an empty
+          // build. So it may fire on the case the first one excludes, which is exactly report fd021c64:
+          // "Yess create karo" reads as a new-build request, so the guard above stands down, and the
+          // user's own 25-file app — restored, served, and watched rendering — was told it produced
+          // nothing. The app keeps whatever summary the turn actually produced, and a zero-file build is
+          // free either way (`effectiveBilledUsd = 0` a few hundred lines below, unconditionally).
+          const emptyFail = emptyBuildFailureSummary(expectsArtifacts, writtenFiles.size, sandboxUnavailable, buildObs.previewRendered);
+          if (emptyFail) result = { ...result, ok: false, summary: emptyFail };
+        }
       }
 
       // FALSE-SUCCESS GUARD (normal settle) — mirror the deadline finalizer's check. A build whose
@@ -18223,19 +18344,25 @@ async function noteBuildOutcome(
       // "Preview is EARNED" cuts both ways: no artifacts, no charge.
       if (expectsArtifacts && writtenFiles.size === 0) {
         effectiveBilledUsd = 0;
-        zeroBillReason = 'empty build (0 files produced) — never charged';
+        // A VERIFIED_NO_CHANGE turn is a SUCCESS that wrote nothing (report 697b38ee), so calling it an
+        // "empty build" in the admin's own ledger would re-tell the exact falsehood this change removes.
+        // It stays FREE either way: charging for it would be a pricing decision, and this is a bug fix.
+        zeroBillReason = result.ok
+          ? 'verified-no-change turn (nothing needed changing) — not charged'
+          : 'empty build (0 files produced) — never charged';
         // FREE-TIER: a cheap-only free build that produced nothing is NOT rescued on Claude (that would
         // spend the very budget free-tier protects). Instead, honestly invite the user to add credits
         // and finish on the strongest engine — converting the user to paid without shipping a broken app.
-        if (freeTierBuildActive) {
-          // 🔴 FOUR INDEPENDENT REASONS NOT TO ASK FOR MONEY, AND THEY COMPOSE. Three sessions each
-          // found one of the first three on the same day, in this one guard; a merge that kept only
-          // one would silently restore the others, so the order below is the whole resolution. The
-          // fourth arrived on 2026-09-14 from report fd021c64.
-          //
-          // ⚠️ THE COUNT IN THIS SENTENCE IS PART OF THE GUARD. It said "three" for a day after the
-          // fourth landed — and a reader who trusts a stale count stops looking for the branch that
-          // is not in it. Whoever adds the fifth updates this line in the same edit.
+        // 🔴 …AND A FOURTH REASON TO SAY NOTHING AT ALL: THE BUILD SUCCEEDED (report 697b38ee).
+        // Before `verifiedNoChangeSummary` existed, zero files ALWAYS forced ok:false a few hundred
+        // lines above, so `!result.ok` was true on every path that reached here and this guard changes
+        // nothing for any of them. It exists so the one turn that now legitimately succeeds without
+        // writing a file cannot still be handed a "your build could not finish" message underneath its
+        // own success — which is precisely the contradiction the report showed.
+        if (freeTierBuildActive && !result.ok) {
+          // 🔴 THREE INDEPENDENT REASONS NOT TO ASK FOR MONEY, AND THEY COMPOSE. Three sessions each
+          // found one of them on the same day, in this one guard; a merge that kept only one would
+          // silently restore the other two bugs, so the order below is the whole resolution.
           //
           // (a) THE MODELS REFUSED (report 03997004). The user asked for a pornography site; the
           // models refused eight times; this line then said *"Your app needs our strongest engine…
@@ -18265,16 +18392,17 @@ async function noteBuildOutcome(
           // providers are down we do not know whether the prompt was buildable, and blaming the
           // user's wording for our outage is the same mistake in a politer sentence.
           //
-          // (d) THE APP ALREADY WORKS (report fd021c64, 2026-09-14). "Yess create karo" into a
-          // workspace holding the user's own 25-file app: the engine restored it, opened it in a real
-          // browser, watched it render, built it for production — and then asked the user to add
-          // credits so a stronger engine could "finish" it. Tested BEFORE degraded and before (c)
-          // because it is the strongest evidence of the four: the other three reason about why we
-          // produced nothing, and this one observes that the app EXISTS AND RUNS. Nothing to sell.
+          // ⚠️ A FOURTH REASON WAS PROPOSED HERE AND DELIBERATELY NOT ADDED (#2919 into #2917's gate,
+          // 2026-09-14): "the app already renders, so there is nothing to sell" (report fd021c64).
+          // It is a real reason and it IS enforced — one screen up, where a verified render now stops
+          // `emptyBuildFailureSummary` calling a running app an empty build, so `result.ok` survives
+          // and the `!result.ok` gate on this whole block never opens. Writing it a second time here
+          // would leave two answers to one question, which is the exact shape of the bug all three of
+          // (a)-(c) came from. If the render evidence ever needs to suppress an upsell on a build that
+          // genuinely DID fail, that is a new decision with its own evidence — not this one restated.
           const refused = looksLikeRefusal(result.summary);
-          const appAlreadyRuns = !refused && buildObs.previewRendered;
-          const degraded = !refused && !appAlreadyRuns && providerFailuresLookDegraded(buildDiag.providerFailureBreakdown());
-          if (!refused && !appAlreadyRuns) {
+          const degraded = !refused && providerFailuresLookDegraded(buildDiag.providerFailureBreakdown());
+          if (!refused) {
             const emptyCause = assessBuildInput(prompt).buildable ? 'engine' : 'no-instruction';
             events.emit({
               type: 'narration',
@@ -18283,14 +18411,12 @@ async function noteBuildOutcome(
               ts: Date.now(),
             });
           }
-          if (refused || degraded || appAlreadyRuns) {
+          if (refused || degraded) {
             buildDiag.record({
               phase: 'build', severity: 'warning', code: 'UPSELL_SUPPRESSED', autoResolved: false,
               message: refused
                 ? 'Did not ask this user to add credits: the engine REFUSED this request on policy grounds. A refusal is an answer, not a capability limit — selling a stronger engine after one offers to do the very thing we just declined to do.'
-                : appAlreadyRuns
-                  ? 'Did not ask this user to add credits: their app was opened in a real browser and RENDERED on this turn. No files needed writing because nothing was broken — selling a stronger engine to finish an app that already works is the plainest false claim this guard can make.'
-                  : 'Did not ask this user to add credits: the build failed because the engine did not respond, not because the app needed a stronger one. Charging for our own slowness is what this check exists to prevent.',
+                : 'Did not ask this user to add credits: the build failed because the engine did not respond, not because the app needed a stronger one. Charging for our own slowness is what this check exists to prevent.',
             });
           }
         }
@@ -18770,13 +18896,33 @@ async function noteBuildOutcome(
         result = { ...result, summary: `${result.summary}\n\n${livePreviewLine}` };
       }
       // WEAK-TIER FAILURE GUIDANCE (admin spec 2026-08-02): when a real build attempt FAILS on the weak
-      // tier (the free engine, or a paid user who picked Weak), tell the user — in their OWN language —
-      // the honest, actionable reason: a complex app needs a stronger tier, switchable via the ⚙️ options
-      // button. Gated to `!result.ok && noClaudeBuild && expectsArtifacts` so it only fires on a genuine
-      // failed build on the weak tier — infra/sandbox failures short-circuit earlier and never reach here,
-      // so the tier is never blamed for a platform outage. White-label safe (names tiers, never a model).
-      // Kill switch AGENTV3_WEAK_FAIL_NOTICE=off. Appended to the failure summary so it rides the same bubble.
-      if (!result.ok && noClaudeBuild && expectsArtifacts && (process.env.AGENTV3_WEAK_FAIL_NOTICE ?? '').trim().toLowerCase() !== 'off') {
+      // tier (the free engine, or a paid user who picked Weak) for a reason that is genuinely about the
+      // WEAK TIER'S OWN CAPABILITY, tell the user — in their OWN language — the honest, actionable
+      // reason: a complex app needs a stronger tier, switchable via the ⚙️ options button.
+      //
+      // 🔴 CORRECTED 2026-09-14 (admin: "app fail ho jaye kisi bhi reason se, to user ko batao ki free
+      // plan me complex app nahi ban sakti"). The comment here used to claim "infra/sandbox failures
+      // short-circuit earlier and never reach here" — that was never actually enforced. THREE non-capability
+      // causes reach this exact line with `result.ok === false`: a cost-ceiling stop (`costCeilingFired`,
+      // the build hit its own spend limit — not a capability gap), a sandbox/E2B outage that killed the
+      // build AFTER some files were already written (the empty-build guard's own `sandboxUnavailable`
+      // check above only applies when ZERO files were produced, so a mid-build infra death slips past
+      // it), and a genuinely degraded provider (`providerFailuresLookDegraded` — the SAME check the
+      // empty-build branch above already uses to avoid blaming the tier for our own outage). All three
+      // are now excluded here too, so "this app is complex, upgrade" is said only when the evidence
+      // actually points at the tier's capability — never at our spend limit, our infra, or our outage.
+      //
+      // White-label safe (names tiers, never a model). Kill switch AGENTV3_WEAK_FAIL_NOTICE=off.
+      // Appended to the failure summary so it rides the same bubble.
+      if (
+        !result.ok &&
+        noClaudeBuild &&
+        expectsArtifacts &&
+        !sandboxUnavailable &&
+        !costCeilingFired &&
+        !providerFailuresLookDegraded(buildDiag.providerFailureBreakdown()) &&
+        (process.env.AGENTV3_WEAK_FAIL_NOTICE ?? '').trim().toLowerCase() !== 'off'
+      ) {
         const failLang = detectLanguageHint(prompt)?.code ?? null;
         result = { ...result, summary: `${result.summary ? `${result.summary}\n\n` : ''}${weakTierBuildFailedNotice(failLang)}` };
       }

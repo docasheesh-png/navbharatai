@@ -48,7 +48,11 @@ const REGISTRY: Record<AgentRole, RoleConfig> = {
       'Prefer delegating independent pieces in parallel; integrate their results, ' +
       'verify the app genuinely works, and only finish when it does. Never fake ' +
       'completion.',
-    tools: [...BUILD_TOOLS, 'task', 'second_opinion', 'consensus', 'web_search', 'screenshot', 'browser_action', 'console_errors', 'deploy'],
+    // ⚠️ `stop_build` is the ARCHITECT'S ALONE, and deliberately not in BUILD_TOOLS. It is the agent
+    // the user actually talks to — steer messages are injected into ITS turn — and a sub-agent
+    // ending the whole build over a message it half-saw is not a risk worth taking for a
+    // capability it has no way to need.
+    tools: [...BUILD_TOOLS, 'stop_build', 'task', 'second_opinion', 'consensus', 'web_search', 'screenshot', 'browser_action', 'console_errors', 'deploy'],
     capabilities: ['orchestrate', 'plan', 'delegate', 'integrate', 'architecture', 'coordinate'],
   },
 

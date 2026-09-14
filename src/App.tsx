@@ -41,6 +41,8 @@ import { MOBILE_NAV_TOTAL_HEIGHT, publishMobileNavHeight } from './lib/mobileNav
 import { ModePickerSheet } from './components/chat/ModePickerSheet';
 import { isModeSurface, FREE_MODE_ID, NEW_FREE_MODE_ID } from './components/chat/modePicker';
 import { ReportSheet } from './components/ReportSheet';
+import { TestingNotice } from './components/TestingNotice';
+import { shouldShowTestingNotice, testingNoticeAlreadyShown } from './lib/testingNotice';
 import { useShakeToReport } from './hooks/useShakeToReport';
 // EngineerAIChat retired — replaced by NavBharatAI Pro (ProV3Surface).
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -1364,6 +1366,12 @@ export default function App() {
 
   // A shake anywhere in the app opens the report sheet. The hook is a no-op on desktop and wherever
   // the device will not give a page motion access — see useShakeToReport for why iOS is deliberate.
+  /**
+   * The testing notice, for THIS app open. Seeded from sessionStorage so a reload or a fresh app
+   * launch shows it again while tapping Home a second time does not — see lib/testingNotice.ts.
+   * Read once, in the initialiser, so a re-render can never resurrect a notice the user dismissed.
+   */
+  const [testingNoticeOpen, setTestingNoticeOpen] = useState(() => !testingNoticeAlreadyShown());
   useShakeToReport(useCallback(() => setReportOpen(true), []));
 
   // Persist ONLY the v5.0 view so a reload lands back in Pro v5.0 (see activeView init). Any other
@@ -3013,6 +3021,17 @@ export default function App() {
           {/* Reachable from every screen: shake, or the sidebar's "Report a problem". It portals to
               document.body, so being rendered here costs nothing in layout. */}
           <ReportSheet open={reportOpen} onClose={() => setReportOpen(false)} view={activeView} />
+
+          {/* WE ARE STILL TESTING — say so once per app open, on the home screen, and hand over the
+              way to report rather than only asking for it. Rendered beside the sheet it opens, so
+              the notice and its destination are one change. See lib/testingNotice.ts. */}
+          {shouldShowTestingNotice({ activeView, alreadyShown: !testingNoticeOpen }) && (
+            <TestingNotice
+              theme={theme}
+              onReport={() => setReportOpen(true)}
+              onDone={() => setTestingNoticeOpen(false)}
+            />
+          )}
 
           {shouldRenderV3Surface(activeView, v3Preview.running === true, openTabs.includes('nbi_pro_chat')) && (
             /* NavBharatAI Pro — replaces the retired Pro v2.0 builder. ProV3Surface shows the

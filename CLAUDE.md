@@ -231,6 +231,46 @@ reached it. Two months later it failed a 28-minute build whose app had already r
 told the user their app was not ready. **The instance was fixed; the class was not. That is what this
 bar forbids.**
 
+### 📄 "ZERO FILES" IS NOT "NOTHING HAPPENED" — delivery is not measured in diffs (autopsy 697b38ee, 2026-09-14)
+
+The prompt was *"Continue from where you left off and finish/fix the build so the app works end-to-end."*
+The engine did precisely that: `tsc` clean, `npm run build` exit 0, dev server up, preview published,
+opened in a real browser and seen rendering, the project's own Playwright suite installed and **passed**,
+`PROD_BUILD_OK`, `GREEN_GUARD_SAVE`, release gate *"It runs and renders"*. It then told the user:
+*"The build produced no files. Please try again"* and *"our engine is running slowly and your build could
+not finish."* **Every clause was false, and the app on screen was working while it said so.**
+
+- **A turn whose correct output is a VERDICT, not a diff, could not succeed by construction.** Delivery
+  was measured by `writtenFiles.size`, so "continue", "is it working?", "fix the build" and "did you
+  finish?" were all structurally incapable of passing however well they ran. `verifiedNoChangeSummary`
+  is the other half of a concession `shouldRetryEmptyBuild` made in words two months earlier — *"the
+  distinction is not 'did files change' but 'is there an app'"* — and had applied only to the RETRY.
+  **It requires real browser evidence**: no proof still means an honest failure; "no files" must never
+  become a way to pass.
+- 🔴 **THE SAME SENTENCE HAD ALREADY BEEN ROOT-CAUSED, AND THE GUARD WAS CANCELLED SIX DAYS LATER.**
+  `shouldRetryEmptyBuild`'s doc comment quotes this prompt **verbatim** as the Shiv Medical Store case
+  that must not retry (2026-08-10). On 2026-08-16 a widening for build 5b4f9b63 added
+  `userAskedToBuildAnApp = intent === 'new_build'` — and the keyword ladder matches the **noun** "build"
+  in *"fix the build"*. The whole build re-ran on a second model: 6.2 finished minutes became 13.1.
+  **Both suites stayed green because each was tested against the other's FLAG and neither against the
+  SENTENCE.** A boolean derived from another subsystem's verdict is not a test of your own question —
+  `userAskedForAnAppToBeBuilt` asks it directly, and `intent` (routing) is deliberately untouched.
+- ⚠️ **A HAND-OFF THAT BECOMES AN OVERRIDE BREAKS THE THING IT WAS HELPING.** `withSandboxBrowsers`
+  pinned `PLAYWRIGHT_BROWSERS_PATH` at the pre-baked path, pointing Playwright **away** from a chromium
+  the agent had installed into the default cache 22 seconds earlier — so a suite that PASSED was
+  re-reported as *"COULD NOT RUN — browsers are not installed"*, and the release gate then said the app
+  *"has no test suite that could be run here"*. It is a **fallback** now: the project's own cache wins,
+  ours is used only when it has none (the case the helper was written for). Playwright matches browser
+  builds exactly, so a fresh install after a version bump makes the pre-baked copy wrong as well as unused.
+- 🔎 **THE MISSING SUBSYSTEM, named so it is not re-discovered: there is no shared EVIDENCE LEDGER.**
+  The agent's shell commands and the platform's gates keep private notions of what has been proven, and
+  the gates trust only their own. That one report contains `RELEASE_GATE` saying *"the typecheck did not
+  run"* after two clean `tsc` runs, `RUNTIME_UNCHECKED` after three successful console reads, and
+  `CLAIM_UNSUPPORTED` (*"not one file was changed"*) two seconds before `Incremental: 2 changed, 2 new`.
+  Every fact needed to contradict them was already recorded as `SANDBOX_CMD` lines in the same report.
+  **Until one ledger exists that any actor writes a proven fact into and every verdict reads from, this
+  class returns** — it is an OPEN root cause in `PROGRESS.md`, not a closed item.
+
 **Step 1 — Read the WHOLE report and build an itemized ledger (every flaw, however small).**
 Read the report end to end — never a truncated tail. Enumerate EVERY issue, imperfection,
 warning, retry, and rough edge, no matter how tiny, and classify each into exactly one bucket,
@@ -2027,10 +2067,28 @@ admin's word is the ONLY trigger.
   admin setup (documented in the workflow header); the keystore is the app's permanent identity
   and must live only with the admin. If a secret is missing the workflow FAILS EARLY with an
   honest message — **never** hand back or fake an unsigned bundle (Play would reject it anyway).
-- Claude CANNOT download the artifact or upload to Play Console. After the run is green, the
-  **admin** downloads `app-release.aab` and uploads it to Play Console (Play App Signing handles
-  the final signing). Automating the Play upload (a Play service-account + `r0adz0/upload-google-play`
-  step) is a future infra item — until it exists, the upload is the admin's manual step.
+- Claude CANNOT download the artifact or upload to Play Console, and CANNOT set the service-account
+  secret. What happens after a green run depends on ONE repo secret:
+  ✅ **AUTO-UPLOAD ALREADY EXISTS — do not build it, and do not tell the admin it is missing.**
+  `android-aab.yml` has carried a **`upload_to_play`** workflow input and a real
+  `r0adkll/upload-google-play` step since before 2026-09-14. Ticked, the freshly-signed bundle goes
+  straight to Play's **INTERNAL testing track** (`track: internal`, `status: completed`); the admin
+  still promotes it to production themselves, so the API can never publish to production on its own.
+  Unticked (the default) the run just produces the downloadable artifact — byte-identical to before.
+  🔴 **THE ONLY THING MISSING IS `PLAY_SERVICE_ACCOUNT_JSON`** (a GitHub REPO secret — the whole
+  service-account JSON key). Without it the admin downloads `app-release.aab` and uploads by hand.
+  Ticking the box WITHOUT the secret fails the run EARLY with a message naming the secret — it can
+  never silently skip the upload and report success.
+  ⚠️ It is NOT the same as `GOOGLE_PLAY_SA_JSON`, which is a CLOUD RUN env for verifying in-app
+  purchases. Same JSON file may serve both if the account holds both permission sets, but they are
+  two different places and each must be set separately.
+  ⚠️ **CORRECTED 2026-09-14 — this bullet said automating the upload "is a future infra item" and
+  that was FALSE for an unknown length of time**, so a session reading it would propose building a
+  feature that already shipped, or tell the admin to upload by hand when one secret would have done
+  it. **And it named the action as `r0adz0/upload-google-play` — a slug that does not exist.** The
+  workflow's own comment records that exact typo as a real incident: GitHub resolves every `uses:`
+  up front regardless of the `if:` guard, so the bad slug broke even artifact-only runs. A doc that
+  propagates a typo already paid for is worse than a doc that says nothing.
 - The iOS counterpart is `.github/workflows/ios-ipa.yml` (App Store `.ipa` → TestFlight); the same
   discipline applies. Trigger it via the GitHub MCP `actions_run_trigger` on `ios-ipa.yml`, ref `main`,
   with input `upload: true` to ship straight to TestFlight (leave it off for a signing dry-run artifact).

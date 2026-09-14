@@ -607,3 +607,65 @@ export function classifyIntent(message: string): BuildIntent {
   // place where intent is decided, and the confidence tier is simply discarded here.
   return classifyIntentWithConfidence(message).intent;
 }
+
+/**
+ * Did the user ask for an APP TO BE PRODUCED — as opposed to asking us to CONTINUE, FINISH or REPAIR
+ * one that already exists?
+ *
+ * 🔴 THE REPORT THIS EXISTS FOR (697b38ee, 2026-09-14), and the reason it is infuriating: the prompt
+ * was *"Continue from where you left off and finish/fix the build so the app works end-to-end."* —
+ * **the byte-identical sentence already quoted in `shouldRetryEmptyBuild`'s own doc comment** as the
+ * Shiv Medical Store case that must never be retried. The guard written on 2026-08-10 to protect that
+ * exact sentence did not fire, and the whole 6-minute build re-ran on a second model. 13.1 minutes for
+ * work that was finished at 6.2.
+ *
+ * WHY IT DID NOT FIRE. The route asked `intent === 'new_build'`, and the keyword ladder answers that
+ * question with `firstSignalWord(lower, NEW_BUILD_SIGNALS)`. The word it matched was **the noun
+ * "build"** in *"fix the build"* — the thing being repaired, not a verb ordering one. HIGH confidence,
+ * Step 1, returned long before Step 4.5 would have seen `continue`.
+ *
+ * 🔒 THE CLASS, NOT THE INSTANCE: `intent` answers "which lane runs this turn?", which is a routing
+ * question. `userAskedToBuildAnApp` answers "may a zero-file outcome be called a failure?", which is a
+ * judgement about what the user WANTED. Reusing one verdict for both is what let a six-day-old
+ * widening (build 5b4f9b63, 2026-08-16) silently cancel a six-day-old narrowing (2026-08-10) without a
+ * single test failing — because both were tested against each other's FLAG and neither against the
+ * SENTENCE. This predicate is the second question, asked separately.
+ *
+ * ⚠️ ASYMMETRY, and it runs the same way as every other guard here: a continuation misread as a build
+ * request costs a wasted second build (this report). A build request misread as a continuation costs a
+ * missed retry on a turn that produced nothing — which the honest empty-build summary still reports.
+ * So a continuation or problem phrase wins; everything else keeps exactly today's answer.
+ *
+ * Pure.
+ */
+export function userAskedForAnAppToBeBuilt(message: string): boolean {
+  if (typeof message !== 'string' || !message.trim()) return false;
+  const lower = message.toLowerCase();
+  // "continue", "finish it", "retry", "dobara karo" — and "preview nahi chala", "it isn't working".
+  // Both families describe work ALREADY STARTED. Neither is a request for a new app, whatever nouns
+  // they happen to contain.
+  if (matchesSignal(lower, CONTINUATION_SIGNALS)) return false;
+  if (matchesSignal(lower, PROBLEM_SIGNALS)) return false;
+  return classifyIntentWithConfidence(withoutNounisedBuildWords(message)).intent === 'new_build';
+}
+
+/**
+ * Determiners that turn a creation VERB into the NAME OF A THING: "fix **the build**", "**the
+ * install** failed", "**this design** is off". NEW_BUILD_SIGNALS is a list of verbs, and every one of
+ * these readings is a report about something that already exists.
+ */
+const NOUNISED_BUILD_WORD =
+  /\b(the|this|that|these|those|my|our|your|its|last|previous|current|first|whole|entire)\s+(build|create|make|design|render|install|setup|deploy|migrate)\b/g;
+
+/**
+ * The message with determiner+verb pairs removed, so the ladder judges what is left.
+ *
+ * Used ONLY by `userAskedForAnAppToBeBuilt`, never by `intent` itself — routing a repair turn through
+ * the edit lane is already what happens and is correct; the narrower question here is whether a
+ * zero-file outcome may be called a failure. Keeping the blast radius to that one question is
+ * deliberate: this is a heuristic, and a heuristic belongs where a wrong answer costs one retry rather
+ * than a whole lane.
+ */
+function withoutNounisedBuildWords(message: string): string {
+  return message.replace(NOUNISED_BUILD_WORD, ' ');
+}

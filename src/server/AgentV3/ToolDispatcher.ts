@@ -514,6 +514,30 @@ export class ToolDispatcher {
   }
 
   /**
+   * STOP THE BUILD BECAUSE THE USER ASKED — set by the composition root.
+   *
+   * 🔴 THE GAP THIS CLOSES (build 70115adf, admin 2026-09-14). `buildAbortCause.ts` has had a
+   * first-class `user-stop` for a month — but it is the Stop BUTTON. A message TYPED during a build
+   * goes through `steerPoll` and becomes an ordinary user turn, so the model READ "मेरा आदेश है कि
+   * अभी छोड़ दो", ANSWERED "ठीक है, मैं इस काम को अभी यहीं रोक देता हूँ" — and had no way on earth to
+   * act on it. The build ran on. The button was wired and the sentence was not.
+   *
+   * 🔑 THE MODEL IS THE CLASSIFIER, AND THAT IS THE POINT (admin: "woh message provider tak bhej
+   * kar, build roke"). A local phrase list cannot separate "chhod do" from "ruko, pehle login theek
+   * karo" — they are one word apart and the second is a STEER, where stopping would destroy work
+   * somebody is waiting for. The message already reaches the model; all that was missing was a way
+   * for its decision to reach the build. The tool's description carries the precision rules.
+   *
+   * Unset ⇒ the tool reports honestly that it cannot stop, rather than claiming it did.
+   */
+  private stopBuild?: (reason: string) => void;
+
+  /** Wire the stop. Called once per build by the composition root. */
+  setStopBuild(fn: (reason: string) => void): void {
+    this.stopBuild = fn;
+  }
+
+  /**
    * C2 — paths the project owner declared off-limits in `.navbharataiignore`. Empty by default, so a
    * project without the file behaves exactly as before.
    */
@@ -3536,6 +3560,18 @@ export class ToolDispatcher {
           } catch { return ''; }
         })();
         return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${observabilitySummary(obsIssues)}\n\n${gracefulShutdownSummary(shutdownIssues)}\n\n${securityHeadersSummary(secHeaderIssues)}\n\n${sriSummary(sriIssues)}\n\n${cspSummary(cspIssues)}\n\n${commentLanguageSummary(commentLangIssues)}\n\n${uploadValidationSummary(uploadIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}\n\n${envTemplateSecretSummary(envTemplateSecrets)}\n\n${asyncPatternSummary(asyncPatterns)}\n\n${designSummary(design)}\n\n${maintainabilitySummary(analyzeMaintainability(snap.sources))}\n\n${heavyImportSummary(analyzeHeavyImports(snap.sources))}${queryPatternLine ? `\n\n${queryPatternLine}` : ''}${effectLeakLine ? `\n\n${effectLeakLine}` : ''}${queryOptLine ? `\n\n${queryOptLine}` : ''}${couplingLine ? `\n\n${couplingLine}` : ''}${apiWiringLine ? `\n\n${apiWiringLine}` : ''}${threatLine ? `\n\n${threatLine}` : ''}${monorepoLine ? `\n\n${monorepoLine}` : ''}${schemaLine ? `\n\n${schemaLine}` : ''}${sqlSchemaLine ? `\n\n${sqlSchemaLine}` : ''}${ciWorkflowLine ? `\n\n${ciWorkflowLine}` : ''}\n\n${lockfileSummary(analyzeLockfiles(snap.files))}${(() => { const pm = packageManagerSummary(detectPackageManager(snap.files)); return pm ? `\n\n${pm}` : ''; })()}${depAutoFix ? `\n\n${depAutoFix}` : ''}${pwaLine ? `\n\n${pwaLine}` : ''}`;
+      }
+
+      case 'stop_build': {
+        const reason = (optStr(input, 'reason') || '').slice(0, 300);
+        if (!this.stopBuild) {
+          // HONEST, NOT SILENT. Returning "stopped." with nothing wired would make the model tell the
+          // user their build had ended while it carried on — the exact fake-success the second
+          // absolute rule forbids.
+          return 'Could not stop this build — stopping is not available here. Tell the user plainly, and keep going or wrap up.';
+        }
+        this.stopBuild(reason);
+        return 'Stopping this build now. The files written so far are saved; the user can resume with one message.';
       }
 
       case 'update_todo': {

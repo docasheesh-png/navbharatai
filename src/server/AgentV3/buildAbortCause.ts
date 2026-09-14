@@ -99,7 +99,15 @@ export function abortSummary(cause: AbortCause, ctx: AbortSummaryContext = {}): 
 
   switch (cause) {
     case 'user-stop':
-      return 'Build stopped by the user.';
+      // ⚠️ IT MUST NAME THE WAY BACK, and this file's own opening argues why: being blamed is bad,
+      // "being blamed AND quietly denied the recovery path is what makes it costly". The old sentence
+      // was six words and told a user who had just stopped a build nothing about what survived. That
+      // mattered little while the only way to stop was a button the user had just pressed on purpose;
+      // it matters now that a TYPED sentence stops a build (2026-09-14), because the person may not
+      // realise anything was kept at all.
+      return saved
+        ? "Stopped, as you asked. Your files so far are saved — send another message and I'll continue from here."
+        : 'Stopped, as you asked. Nothing had been written yet, so nothing was lost.';
     case 'watchdog':
       return mins
         ? `I stopped after about ${mins} min to avoid an endless loop — this build was not converging.${resume}`

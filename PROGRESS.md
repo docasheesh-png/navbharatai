@@ -52701,6 +52701,485 @@ Free tier, weak, KIMI, **5m03s**, `ok: false`. Prompt: **"Yess create karo"**.
 **Nothing was broken. Nothing needed writing.** The workspace already held the user's 25-file Fantasy
 Football app (`durable read 356ms (25 file(s))`, before any model call). The engine restored it, ran the
 dev server, opened it, verified the render, built it for production — and reported that it did not exist.
+## 2026-09-14 — A TYPED "stop" now stops the build, and the MODEL is the one who decides
+
+Admin's ruling, after the `70115adf` autopsy left this open: *"build rokne ko kaha jaye, to bhi build
+ruk jani chahiye. **par woh message provider tak bhej kar, build roke!!**"*
+
+That second sentence is the design, and it answers the exact objection this file recorded yesterday.
+I had declined to build a stop-intent classifier because the asymmetry runs the wrong way — wrong
+toward stopping KILLS a live build, and *"ruko, pehle login theek karo"* is a steer one word away from
+*"chhod do"*. The admin's answer removes the objection rather than overruling it: **do not write a
+matcher at all. The message already reaches the model; give the model's decision a way to reach the
+build.**
+
+**What was actually missing, read rather than guessed.** `buildAbortCause.ts` has had a first-class
+`user-stop` cause since 2026-08-15 — but it is the Stop BUTTON. A message typed during a build goes
+through `steerPoll` in `AgentRunner` and is injected as an ordinary user turn. In `70115adf` the model
+READ the order, ANSWERED *"ठीक है, मैं इस काम को अभी यहीं रोक देता हूँ"*, and had no way on earth to
+act on it. **The button was wired and the sentence was not.**
+
+**The fix: a `stop_build` tool.** The model calls it; it reaches `abortBuild(..., 'user-stop')` — the
+SAME cause the button uses, so the summary, the report's user-vs-platform attribution and the billing
+all already knew what it means and nothing new had to learn it.
+
+🔑 **The tool's DESCRIPTION is the entire safety mechanism**, so it is written as a precision rule and
+test-locked clause by clause. It names stop words in the languages people actually type (stop, cancel,
+rehne do, chhod do, band karo, मुझे नहीं चाहिए) AND — more importantly — the near-misses that must
+never fire it:
+- **impatience** ("kitna time lagega?", "itni der?") — this very user sent one of those FIRST, and the
+  build was right to continue;
+- **a change of direction** ("ruko, pehle login theek karo") — the pair that makes a phrase list
+  impossible;
+- **stopping one PART** ("ye feature mat banao").
+And the honest default: if not certain the WHOLE build should end, do not call it — ask in the reply.
+
+Three decisions worth recording:
+
+- **It is the ARCHITECT'S tool alone**, deliberately not in `BUILD_TOOLS`. That is the agent the user
+  talks to and whose turn steer messages are injected into; a sub-agent ending the whole build over a
+  message it half-saw is not a risk worth taking for a capability it cannot need.
+- **An unwired dispatcher says so.** `stop_build` with no `setStopBuild` returns "could not stop —
+  tell the user plainly", never "stopped". Returning success with nothing wired would have the model
+  tell someone their build had ended while it carried on — the fake success the second absolute rule
+  forbids. Test-locked.
+- **The user-stop summary now names the way back.** It was six words — *"Build stopped by the user."*
+  — which told someone nothing about what survived. This file's own opening argues why that is not
+  cosmetic: *being blamed is bad, being blamed AND quietly denied the recovery path is what makes it
+  costly.* It mattered little while the only way to stop was a button the user had just pressed on
+  purpose; it matters now that a sentence can stop a build, because the person may not realise
+  anything was kept. It now says what is saved, or honestly that nothing had been written yet.
+
+⚠️ **Two existing tests pinned the old SENTENCE rather than the rule** (`buildAbortCause.test.ts` and
+its sibling in `AgentRunner.test.ts`) and both went red on a legitimate wording change. Both now assert
+the rule they were really protecting — that no PLATFORM-side cause is ever blamed on the user, which
+is the whole reason `buildAbortCause.ts` exists. **That is the third time in two days a test has
+pinned a literal where it meant a rule**; the others were the hosting catalogue's prices and the
+knowledge base's. 8 new tests.
+---
+
+## 2026-09-14 — Autopsy of build 7bc15e40: "Run it" was answered with "your build produced nothing, add credits"
+
+A REAL user (not the admin). The whole prompt was **"Run it"**, on a project that already had 33 files.
+
+### The five-bucket ledger
+
+| | Count | What |
+|---|---|---|
+| ✅ Self-healed | 0 | nothing was healed; nothing needed to be |
+| 🔀 Worked around | 0 | — |
+| ⏭️ Skipped | 3 | the page-render check, the user journey, and the typecheck all skipped — and the summary claimed two of them passed |
+| ❌ Still broken | 3 | a working build reported as FAILED · an upsell after a turn that succeeded · two unsupported claims the auditor could not see |
+| 🥵 Struggle | 1 | 98 s, of which 7 s was setup before the first model call — but the user's real cost was being told their working app had produced nothing |
+
+**What the engine actually did, and it was right:** read `package.json`, read `vite.config.ts`, ran
+`npm run dev` (server up on 5173), called `update_preview` (`PREVIEW_PUBLISHED`, a live URL), took a
+screenshot, and reported the app running. It wrote no files, **because running an app does not write
+one.**
+
+**What the platform then told that user:**
+> "The build produced no files. Please try again — you have not been charged."
+> "✨ Your app needs our strongest engine to finish cleanly. Add credits…"
+
+Their app was up on the preview at that moment. We reported a success as a failure and asked for money
+to fix it.
+
+### The missing subsystem (step 2)
+
+**The platform has one question — "did this turn write files?" — and uses it to answer a different one:
+"did this turn do what the user asked?"** For a request whose correct completion involves no write
+("run it", "start the server", "is it working?", "show me the preview") those two questions have
+**opposite** answers. There was no concept of a turn whose success is an ACTION rather than an artifact.
+
+### 🔴 The contradiction was already in the code, and one half of it already knew
+
+- `shouldRetryEmptyBuild` declined to retry, in its own words: *"An edit on a project that already
+  exists may legitimately change nothing."*
+- `emptyBuildFailureSummary` was never told. Its entire input was
+  `(expectsArtifacts, fileCount, sandboxUnavailable)` — so "zero files ⇒ failure" is the only answer it
+  was capable of giving.
+
+Same build, same facts, opposite verdicts. The verdict is now computed **once** and reused by the
+failure message and the upsell, so they cannot disagree again.
+
+🔒 **The excuse needs TWO pieces of POSITIVE evidence, never the absence of something** — because the
+dangerous direction is the other one. (1) the user's own words ask to RUN or LOOK, with no change
+requested, and (2) the app really came up on this turn (`previewVerifiedRendered || lastPreviewUrl`).
+Fail either and today's behaviour is byte-identical. "Build me an app" that wrote nothing still fails
+(the 5b4f9b63 protection is untouched), an ordinary edit that wrote nothing still fails, and a dead
+sandbox still fails whatever was asked — that guard is tested *before* the new one.
+
+### The upsell: a FOURTH reason not to ask for money, in the same guard
+
+Three sessions had each found one reason and patched it — a refusal (03997004), our own provider
+outage, and a prompt with nothing to build from (#2887). None covered **a turn that did exactly what
+was asked**. Same mistake, fourth face: "zero files" read as a verdict on the ENGINE when it was a fact
+about the REQUEST.
+
+### 🔴 And the summary made two claims the report itself contradicts
+
+The engine wrote *"✅ No runtime errors in the browser console"* while the same report recorded
+`RUNTIME_UNCHECKED` — the console was never captured. And *"✅ TypeScript type-check passes cleanly"*
+while the release gate recorded *"the typecheck did not run"*. `CLAIM_UNSUPPORTED` exists for exactly
+this and **did not fire**:
+
+- **One adjective defeated the console check.** Every pattern spelled out an exact word sequence:
+  `no errors in the console` matched, `no RUNTIME errors in the console` did not. Verified empirically
+  before the fix, not read off the regex. Fixed as a CLASS — the negation and the noun may now be
+  separated by a short bounded run of words, in both orders — so "zero JavaScript errors in the
+  console" is caught too, rather than adding one more literal spelling per phrasing.
+- **There was no typecheck claim check at all.** Added, reading `gateEvidence.typecheck`, which starts
+  at `'not-run'` and is only ever moved by a check that actually ran — so it cannot claim a typecheck
+  happened when it did not. An UNKNOWN status never accuses.
+
+Six negative cases were tested explicitly ("there were 3 errors, which I fixed", "the typecheck is
+still failing", "run a typecheck before publishing"): none is flagged, and a fully-measured honest
+summary is accused of nothing.
+
+### A bug in my own first draft, recorded rather than quietly fixed
+
+The change-verb veto listed `karo` / `kardo`. Those mean **"do"**, not "change" — so *"app chalu karo"*
+("start the app") was being vetoed as an edit request. The specific verbs still catch what matters:
+*"chalao aur ek button add karo"* is vetoed by `add`. Caught by the Hinglish test, which is why it was
+written.
+
+### Verification
+
+32 tests across three files. Four reverts tried, four failures: the verdict not reaching the failure
+summary, the evidence half dropped, the console pattern narrowed back, and the typecheck fact unwired.
+
+### Still open (rule 6)
+
+- **The 7 s before the first model call** is recorded (`TIME_TO_FIRST_CALL`) and unaddressed here.
+- **`assessBuildInput('Run it').buildable` returns TRUE**, which is why the 'engine' upsell fired
+  rather than the gentler 'no-instruction' one. Left alone deliberately: the run-action verdict now
+  suppresses the message entirely, so changing `buildable` would be a second answer to a question that
+  is already settled — and it is consulted elsewhere.
+
+---
+
+## 2026-09-14 — The home-screen testing notice
+
+Admin: *"home page par hi jab bhi user app open kare, 3 seconds ke liye ek popup aa jaye"* — telling
+people the app is in active testing and asking them to report failures — *"isko aur acche se
+professionally likho. english me"*.
+
+**The copy:**
+> **NavBharatAI is in active testing**
+> If something doesn't work, please report it — that's how we make it stronger. Thank you.
+> `[ Report a problem ]`
+
+**🔒 It asks for something, so it hands over the means.** A notice saying "please report failures"
+that leaves the person to find out how is the half-built state the second absolute rule forbids —
+real instruction, missing means. NavBharatAI already has a genuine app-wide reporting sheet
+(`ReportSheet`, from the sidebar's "Report a problem" and by shaking the phone, attaching the screen,
+device, build and recorded errors by itself), so the notice carries a **button that opens that exact
+sheet**. Its label is asserted against the sidebar's own source, so the notice can never name a menu
+entry the app does not carry.
+
+**"Once per app open" is a storage decision, and it is the whole feature.** `sessionStorage`: a cold
+launch, a new tab or a reload each start a new session and show it again — which is what "whenever
+the user opens the app" means — while tapping Home a second time does not. `localStorage` would have
+meant once per device ever; an in-memory flag would have nagged on every Home tap.
+
+**⚠️ Three seconds is short for a message that asks the reader to act, and that is said plainly
+rather than quietly overridden.** The admin asked for three, so three it is — but the countdown
+**pauses on hover, focus and touch**, so nobody reading it is cut off mid-sentence and no button
+disappears from under a finger. The instruction is kept; its one sharp edge is removed.
+
+**Reduced motion needed no code.** `index.css` already clamps every animation under
+`.nb-reduce-motion` (Settings → General → Reduce Animations), so using a CSS animation rather than a
+JS one honours the setting **by construction** instead of through a prop somebody must remember to
+pass. Pinned by a test that reads both files.
+
+### 🔴 A test that passed while the feature was broken
+
+The first bite-check swapped `sessionStorage` for `localStorage` — turning "every app open" into
+"once per device, ever" — and **all 23 tests still passed.** They inject a fake store, so they prove
+the logic and cannot see which store the code actually reaches for. The most important behavioural
+decision in the feature was untested against the real code.
+
+Fixed by asserting the real default in the source. **The lesson is not "add a test" — it is that a
+unit test with an injected dependency proves the logic and says nothing about the wiring**, and the
+wiring is where this class of feature actually fails.
+
+### Verification
+
+24 tests across two files. Four reverts tried, four failures: the storage swap (after the gap above
+was closed), the label drifting from the sidebar, the touch-pause handlers dropped, and the button
+wired to nothing. `AppKnowledgeBase.ts` updated in the same change — the notice is a third way into
+the reporting sheet, recorded on that feature's existing entry rather than as a new one, because a
+transient notice is not a navigable feature of its own.
+
+---
+
+## 2026-09-14 — The floating "copy this page" button on every admin page
+
+**Admin, verbatim:** *"admin panel me ek floating 'copy' button bana — x(close) button ke sath. jab
+chahe admin kisi bhi page par ho. waha ek floting 'copy' button dikhe. (moving — finger se kahi bhi
+draw/khiska sake, aur x(close) kar sake) is copy button ka kaam : pure page ka screenshot le kar
+keyboard pe copy kar lena! pure 100% pages ko. woh page mai apko bhejunga, aur aap waha jo bhi
+problem ho, woh solve karoge!"*
+
+The button is exactly as asked: it floats over **every** admin tab, drags anywhere with a finger or
+a mouse, remembers where it was left, and closes with an ×. One press puts the whole page on the
+clipboard.
+
+### 🔴 What it copies is TEXT, not an image — and that was a judgement call, so it is recorded here
+
+A browser **cannot photograph its own window.** The two things people reach for instead both fail the
+"100% of pages" half of the instruction:
+
+- **A DOM-painting library** (`html2canvas` and friends) does not capture the screen — it **re-draws
+  the page** from the DOM, and gets it wrong often enough to mislead whoever reads the result. This
+  repo had already refused it once for exactly this reason: `ReportSheet.tsx` records *"a DOM-painting
+  library that renders the page WRONG often enough to mislead the person reading the report."* A
+  wrong picture sent to a debugger is worse than no picture — it sends the fix to the wrong place.
+- **`getDisplayMedia`** prompts the user to pick a window on every single call, is desktop-only, and
+  does not exist in the Android WebView the admin actually uses.
+
+So the copy is a **structured text snapshot**: page name, time, which frontend and app build is
+running, screen size and density, device/browser/language/online state, anything reaching past the
+edge of the screen, the last errors the browser recorded, then an indented outline of everything
+visible — headings, values, buttons, form fields, and **one line per table row** (an admin table is
+the most common thing on these pages; one line per *cell* would turn fifty rows into six hundred
+lines of confetti). It works on 100% of pages, on every device, with no prompt and no new dependency
+— and it carries strictly more of what a fix needs than an image does. The phone's own screenshot
+button remains the right tool for a purely visual complaint, and that is said plainly rather than
+papered over.
+
+### 🔴 The bug the tests caught, which would have leaked a live credential
+
+The opt-out attribute is written `data-nb-no-copy=""` — the form React emits for a valueless
+attribute. `getAttribute` returns an **empty string** for it, and my first implementation tested that
+value for **truthiness**, so the opt-out silently opted every marked element straight back **in**.
+
+The first thing marked with it is the admin's **live TOTP secret and its `otpauth://` URI**, rendered
+on the Security tab. Pressing Copy there would have put a working second factor on the clipboard and
+then into a chat. Fixed with an explicit presence check (`hasAttr`), which is now the only reader of
+that attribute, with a comment saying why truthiness is wrong. `otpauth://` URIs are additionally
+redacted **by pattern** wherever they appear, so the protection does not rest on one attribute alone;
+password fields and anything named like a token/key/secret/PIN copy as `[hidden]`.
+
+### Honesty
+
+`copyTextToClipboard` **returns false** rather than throwing when the browser refuses — so an
+unconditional "Copied!" is the exact fake success this repo forbids, and the admin would paste their
+previous clipboard with no way to know why the page did not match. The button branches on the real
+result and says which happened. A page too long for one copy says the copy is **only the top of the
+page**; a page that could not be read says so instead of showing an empty body; and "read as empty"
+and "could not be read" are deliberately different sentences.
+
+### Verification
+
+79 tests across three files (`pageSnapshot`, `floatingButtonPosition`, `adminCopyButtonWiring`). The
+clamp is tested against the two cases that actually strand a floating button — a position saved on a
+laptop and replayed on a phone, and a rotation — plus the narrow-screen case where the two bounds
+cross and the **left** edge must win, because that is the one edge a finger cannot drag it back from.
+Bite-checked by removing the secret's opt-out: the wiring test fails. `AppKnowledgeBase.ts` gained an
+`admin-page-copy` entry.
+## 2026-09-14 — AUTOPSY 697b38ee: a working app was reported as a failed build (three root causes, one open)
+
+**Report.** Prompt: *"Continue from where you left off and finish/fix the build so the app works
+end-to-end."* Existing 21-file TradingView-style React+Vite app. 13.1 min · `ok:false` · 171 items
+(3 errors, 24 warnings, 7 auto-resolved, 14 workarounds, 6 unresolved) · 21 provider failures (KIMI 11
+rate-limit, GLM 9 rate-limit + 1 timeout) · free tier, weak, billed ₹0.
+
+**What the engine actually achieved, from its own transcript:** `tsc --noEmit` exit 0 (twice, +64.5s and
++520.7s) · `npm run build` exit 0 · dev server up · preview published · opened in a real browser and
+rendered · watchlist click updates the chart · the project's own Playwright suite installed and **passed**
+(exit 0, +636.9s) · `PROD_BUILD_OK` · `PREVIEW_SNAPSHOT_SAVED` · `GREEN_GUARD_SAVE` · release gate
+*"It runs and renders"*.
+
+**What the user was told:** *"The build produced no files. Please try again — you have not been charged."*
+and *"NavBharatAI's engine is running slowly right now and your build could not finish."*
+
+### Ledger
+
+- ✅ **Self-healed (7):** `@playwright/test` added to package.json automatically (+2.1s) · the agent
+  installed the missing chromium itself and re-ran the suite green · recovered from a `browser_action`
+  that landed on `about:blank` · the weak checkpoint nudged a stalled loop (+345.4s) · the fallback chain
+  absorbed all 21 provider failures · `UPSELL_SUPPRESSED` correctly withheld the credits pitch
+  (`laneFailure.ts`, another session's fix, working exactly as designed).
+- 🔀 **Workarounds (14):** every rate-limit fallback — the build was delivered by VERTEX (8) and GEMINI (1)
+  out of 32 deliveries, i.e. the free ladder's last rungs, because the cheap floor could not answer ·
+  `npm audit fix` exit 1, so 2 vulnerabilities (1 high) stayed · the second attempt re-did `npm install`,
+  `tsc`, dev server, preview and screenshot because nothing told it the first attempt had already succeeded.
+- ⏭️ **Skipped (4):** `DESIGN_CONSISTENCY 50/100 (D)` — the design gate is `on`, but its repair is gated on
+  `resultOk`, which the false failure had already set to false, so a D-grade app shipped with no repair and
+  no note saying why · `ACCESSIBILITY 84/100 (B)`, 2 unlabelled form fields · `DEPENDENCY_VULNERABILITIES`
+  (1 high) · `JOURNEY_NOT_DERIVED` says *"no form … nothing here takes user input"* while `ACCESSIBILITY`
+  found 2 form fields in the same 15 files, recorded 0.0s apart; nothing reconciled them.
+- ❌ **Still broken (5) — all honesty defects, all in the last 4 seconds of the run:** the false failure
+  verdict itself · `TEST_SUITE_UNVERIFIED` claiming the Playwright binaries are not installed, 167s after
+  the install and 145s after the suite passed · `RELEASE_GATE` saying *"the typecheck did not run"* (it ran
+  twice, clean) and *"the app has no test suite that could be run here"* · `RUNTIME_UNCHECKED` after three
+  successful `console_errors` reads · `CLAIM_UNSUPPORTED` (*"not one file was created or changed"*) 1.9s
+  before `Incremental: 2 changed, 2 new`.
+- 🥵 **Struggle (5):** `EMPTY_BUILD_RETRY` at +371.7s re-ran the entire build — **6.2 finished minutes
+  became 13.1** · 130 seconds of dead silence after *"rebuilding with a stronger model"* (+371.7s → +501.6s),
+  heartbeats only · two more silences of 53s and 68s during the rate-limit storm · ETA said ~3 min
+  (confidence 0.4) against 13.1 actual, and at +239.8s promised "about 3 min more" before nine more minutes ·
+  sandbox 45.7 min up, 2.0 min of our operations, **43.6 min idle (96%)**, started by `files` — roughly ₹11
+  of E2B time on a ₹0 build.
+
+### Root causes and fixes
+
+**RC-1 — the retry: a boolean derived from another subsystem's verdict.** `userAskedToBuildAnApp` was
+`intent === 'new_build'`, and the keyword ladder matched the **noun** "build" in *"fix the build"* at HIGH
+confidence in Step 1, long before Step 4.5 would have seen `continue`. That cancelled the 2026-08-10
+narrowing written for **this byte-identical sentence** — it is quoted verbatim in `shouldRetryEmptyBuild`'s
+own doc comment as the Shiv Medical Store case — six days after it shipped, via the 2026-08-16 widening for
+build 5b4f9b63. **Both test suites stayed green because each asserted the other's FLAG and neither the
+SENTENCE.** Fix: `userAskedForAnAppToBeBuilt(message)` in `IntentClassifier.ts` asks the question directly —
+a continuation or problem phrase is never a build request, and a creation verb after a determiner ("the
+build", "this design", "the install") is a noun, not an order. `classifyIntent` is deliberately untouched:
+routing was correct, and the blast radius stays on the one question. This also silences the report's
+`CLAIM_UNSUPPORTED`, which reads the same flag.
+
+**RC-2 — the verdict: delivery was measured in files written.** A turn whose correct output is a VERDICT
+rather than a diff could not succeed by construction. Fix: `verifiedNoChangeSummary()` in `routes/agentv3.ts`,
+checked *before* `emptyBuildFailureSummary` and only on real browser evidence (`previewVerifiedRendered`),
+returns an honest success — *"Nothing needed changing — I checked your app from end to end and it works."*
+A turn that wrote nothing and proved nothing still fails honestly. The turn stays **free** (changing that is
+a pricing decision, not a bug fix) and the ledger now says `verified-no-change turn … not charged` instead
+of `empty build`. The free-tier narration block is gated on `!result.ok` so a success can never carry a
+"could not finish" message underneath it.
+
+**RC-3 — a hand-off that became an override.** `withSandboxBrowsers` pinned `PLAYWRIGHT_BROWSERS_PATH` at
+the pre-baked `/home/user/.e-tools/.browsers`, pointing Playwright **away** from the chromium the agent had
+installed into the default cache 22 seconds earlier — turning a suite that passed into
+`TEST_SUITE_UNVERIFIED`, which then made the release gate deny the suite existed. Fix: the project's own
+cache wins when it holds a `chromium-*`; ours is the fallback, which is the Shiv Medical Store case the
+helper was written for, unchanged. Resolved in-shell (verified in both `sh` and `bash`), so there is no
+extra sandbox round-trip and no window for the answer to go stale. Sibling call site in `ToolDispatcher`
+gets the same fix from the same helper.
+
+**Tests:** `tests/verifiedNoChangeTurn.test.ts` (35) — including build 5b4f9b63 asserted unchanged, so this
+fix cannot regress the one it narrows. `src/server/AgentV3/sandboxBrowsersPath.test.ts` extended.
+
+### 🔴 OPEN ROOT CAUSE — there is no shared EVIDENCE LEDGER (rule 6)
+
+The three fixes above each stop one wrong sentence. **The condition that produced all of them is that the
+agent's shell commands and the platform's gates keep private notions of what has been proven, and the gates
+trust only their own.** Every fact needed to contradict `RELEASE_GATE`, `RUNTIME_UNCHECKED` and
+`TEST_SUITE_UNVERIFIED` was already in the same report as `SANDBOX_CMD` lines with exit codes. Until one
+ledger exists that any actor writes a proven fact into (`typecheck: passed, by agent bash, exit 0, +64.5s`)
+and every verdict reads from, this class returns in a new place. Recorded here as open rather than patched
+per-gate.
+
+### Other items not yet actioned (deliberately, with reasons)
+
+- **The 130-second silence after "rebuilding with a stronger model"** is a genuine UX hole, but the retry
+  it belongs to should now not fire on this prompt shape at all; measure again before building a fix for a
+  path that just got rarer.
+- **The ETA (~3 min vs 13.1)** needs the real distribution of build durations to correct — the same
+  measurement CLAUDE.md already records as missing for the 10-minute slow-build alert threshold. Replacing
+  a wrong estimate with a differently-wrong one is not an improvement.
+- **The sandbox at 96% idle, started by `files`** is a cost item for the `sandbox_starts` instrument that
+  PR D added, not a build defect. It wants a few days of that data read before anything is changed.
+## 2026-09-14 — The weak-tier "this app is complex, upgrade" notice was firing on our own failures too
+
+The admin asked, plainly: whenever a user's build fails, for ANY reason, tell them the free (Weak)
+tier can't build a complex app and to switch to Normal/Strong. Taken literally, that would have been
+a NEW dishonesty — most build failures are not about the tier's capability at all (a provider outage,
+our own mid-build cost-ceiling stop, a sandbox/E2B death). Blaming "your app is too complex" for those
+would contradict the White-Label/honesty rules this file already enforces elsewhere.
+
+**Investigated first, per the fourth absolute rule, and found the message already exists.**
+`weakTierBuildFailedNotice()` (`src/server/AgentV3/weakTierNotice.ts`) is near-word-for-word the exact
+notice the admin described — it was built 2026-08-02. Its own header comment claimed it fires "ONLY
+when a real build attempt failed on the weak tier (never on an infra/sandbox failure, which
+short-circuits earlier)" — but the actual call site in `routes/agentv3.ts` never enforced that: the
+gate was just `!result.ok && noClaudeBuild && expectsArtifacts`. Three non-capability causes could
+reach it: a cost-ceiling stop (`costCeilingFired` — the build hit ITS OWN spend limit, not a
+capability gap), a mid-build sandbox/E2B outage (the empty-build guard's `sandboxUnavailable` check
+only covers the case where ZERO files were produced, so a build that dies after writing some files
+slips past it), and a genuinely degraded provider (`providerFailuresLookDegraded` — the same signal
+the empty-build branch already uses to avoid blaming the tier for our own outage, but not reused here).
+
+**Root-caused rather than literally implementing blanket messaging.** Added `!sandboxUnavailable`,
+`!costCeilingFired`, and `!providerFailuresLookDegraded(buildDiag.providerFailureBreakdown())` to the
+existing gate — reusing state and a function that were already in scope and already exist for exactly
+this purpose elsewhere in the same file. No new imports, no new state, the message text itself
+unchanged, the kill switch (`AGENTV3_WEAK_FAIL_NOTICE=off`) untouched. This makes the notice do what
+its own comment always claimed: fire reliably, and ONLY when the evidence actually points at the
+tier's own capability — never at our spend limit, our infra, or our outage.
+
+Locked with a new regression test, `tests/weakTierFailNotice.test.ts`: asserts the gate's exclusions
+are present and the original capability conditions are untouched (an ADDITION, not a replacement),
+the kill switch line is untouched, and the message text stays White-Label-compliant (no
+provider/model name) and non-empty for every language it claims to support.
+
+Verified against a freshly-rebased `origin/main` (`6c53f4e`) and the full CI-parity gate before
+pushing: `tsc --noEmit` (frontend) clean, `tsc -p tsconfig.server.json --noEmit` (server) clean,
+`node scripts/noUnusedImports.mjs` clean, full `npx vitest run` — 22566 passed, 1 skipped, 0 FAIL
+lines, `npm run build` clean, `npm run test:bundle` within budget, `npm run boot:check` PASS. Checked
+open PRs first (#2915, #2914, #2913, #2912, #2900) — none touch `weakTierBuildFailedNotice`, the
+`costCeilingFired`/`sandboxUnavailable` flags, or this call site; #2914 is nearby (the empty-build
+upsell guard) but edits a different function region with no textual overlap.
+
+Reported to the admin: the literal ask already existed in the code but was unconditional and
+therefore dishonest in three specific cases; fixed the gate instead of adding a second, competing
+mechanism. Per the 2026-09-13 merge-hold rule, the PR is opened and driven to green CI but NOT
+merged without the admin's explicit go-ahead.
+## 2026-09-14 — `70115adf` follow-up: a verdict from a partial view, and the typed "stop" nobody hears
+
+Two of the three items left open by the `70115adf` autopsy. The third is deliberately NOT built — see
+the end.
+
+### FIXED — `UI_WITHOUT_BUILD` judged a project it could not see
+
+It told a user their app had *"no index.html and no frontend build tool in any package.json"*, while
+the same report's own `ls -la` listed `index.html`, `vite.config.ts` and `package.json`, and
+`PROD_BUILD_OK` said the production build had succeeded.
+
+**Nothing was wrong with its three rules.** The CALLER hands it the durable store, which holds only
+the files the AI wrote — the scaffold lives in the sandbox and is never persisted. The view was **one
+file long**, so two of the three rules "passed" by looking at nothing. Any build where the AI edits
+only `src/App.tsx` would get this.
+
+🔒 **The guard is exact rather than a trade-off, which is why it belongs in the module and not the
+call site.** UI source cannot exist in a runnable project without a package.json — every scaffold in
+this repo ships one. So its TOTAL absence proves we are looking at a **fragment**, never that a
+builder is missing. Concluding from it is the "a conclusion drawn from a capped result set is not a
+verified fact" mistake this file already records twice.
+
+It stays SILENT rather than announcing "I could not tell", matching the function's own stated stance
+("fine, or at least not diagnosable as this") — an advisory that fired on every ordinary build is how
+a real finding gets ignored. The genuine node-express detection is untouched and pinned: the same
+paths WITH a package.json still return `stranded: true`, and an UNREADABLE package.json still counts
+as a view (a corrupted manifest must not buy silence). 4 tests; the 26 existing ones pass unchanged.
+
+### 🔴 OPEN, AND DELIBERATELY NOT BUILT — typing "stop" does not stop a build
+
+The user wrote *"इतनी देर मै नहीं इंतजार कर सकता हूँ"* and then *"मेरा आदेश है कि अभी छोड़ दो, मुझे
+दूसरा काम करना है"*. The model understood and answered *"ठीक है, मैं इस काम को अभी यहीं रोक देता हूँ"*
+— and the build carried on for **30 more seconds** of post-build gates and produced a verdict.
+
+**The mechanism, read rather than guessed.** `buildAbortCause.ts` has a first-class `user-stop` cause
+and `isUserInitiated()` — but that is the **Stop BUTTON**. A message TYPED during a build goes through
+`steerPoll` in `AgentRunner` and is injected as an ordinary user turn; nothing connects it to
+`abortBuild(controller, 'user-stop')`. So the button is wired and the sentence is not.
+
+⚠️ **A stop-intent classifier is NOT something a session should add on its own initiative, and the
+asymmetry is the reason.** Wrong toward stopping kills a live build a user is waiting on — *"ruko,
+pehle login theek karo"* is a steer, not a cancel, and the two are one word apart. Wrong toward not
+stopping costs what happened here: some waiting. That is the OPPOSITE asymmetry to the "READ THE MOOD
+FIRST" rule, where wrong-toward-chat cost one message and wrong-toward-build cost 29 minutes — and
+that rule is precisely why the direction has to be argued from the cost each time rather than copied.
+
+So it is recorded as an **open root cause** for the admin to decide, with the options stated: (a) a
+narrow, high-precision phrase list that only fires on unambiguous cancels; (b) the LLM intention-reader
+already used by `IntentClassifier`, consulted only for messages that look like a cancel; (c) leave it,
+and make the Stop button more visible during a build. **The RED verdict half of this incident is
+already gone** with the budget-ended fix (#2913) — that build would now end `ok: true`, so what
+remains is the 30 seconds, not a false failure.
+## 2026-09-14 — AUTOPSY of build `70115adf`: a working app was declared RED, and 153 innocent providers were blamed
+
+Report: free tier, weak power level, KIMI delivered, 4m22s, `ok: false`. The user's app **built** —
+`PROD_BUILD_OK` ("the production build succeeded"), a preview snapshot was saved and confirmed current
+— and the summary told them *"1 thing is still broken, so it is NOT ready to use yet"*.
 
 ### The five buckets
 
@@ -52782,3 +53261,216 @@ telling someone their working app produced nothing.
 - ⚠️ **The 153-rung provider cascade is NOT present in this report.** `providerChain` lists the
   configured ladder, but there is no `providerFailures` key at all and `providerDelivery` is KIMI × 16.
   Recorded explicitly because the previous report's cascade makes this easy to misread as a recurrence.
+| ✅ self-healed | **0** | the report's own tally, and it is honest |
+| 🔀 worked around | **7** | fast lane → full builder handoff, and the provider chain walking to a backstop |
+| ⏭️ skipped | **4** | route smoke check, page-render check, e2e scaffold, user journey — all need a live preview that never came up |
+| ❌ still broken | **8 unresolved** | of which the gate counted **1** as a blocker |
+| 🥵 struggled | **3 places** | 93s on an abandoned lane · 153-rung provider cascade · a 108s plan call that returned nothing |
+
+### The single root cause behind the two worst items
+
+Both come from one unrecognised string. The fast lane timed out at 90s and handed off; the full
+builder then finished the app. But the abandoned lane's plan call **outlived its lane by 18 seconds**
+and threw `build budget exhausted before this call could start`.
+
+PR #2894 worded those messages so `isTimeoutProviderError` would not match them — correct, and not
+sufficient, because **nothing else recognised them either**:
+
+1. **153 rungs walked for nothing.** The refusal is thrown at the TOP of each runner, before any
+   network call, so the chain sprinted through the whole GLM key-pool ladder in milliseconds and
+   recorded `Provider GLM failed` **153 times**. GLM never failed — we never called it. The final
+   error string names 54 providers. That is a false statement about a third party in our own
+   diagnostics, which the fifth rule's step 5 forbids directly.
+2. **The build was declared RED.** The resulting `LLM_CALL_FAILED` is an unresolved ERROR;
+   `shippingIssueCount('error')` counts exactly those; the release gate reported "1 build-breaking
+   blocker"; `OUTCOME_RELEASE_GATE_RED` flipped the verdict to NOT ok. **This is the `a38c6fef` shape
+   again** — an app that had already built, reported to its owner as not ready.
+
+⚠️ **AND LOWERING THE SEVERITY WOULD NOT HAVE WORKED.** `resolveRecoveredOnSuccess` forgives
+transients when a build succeeds — and success is precisely what this issue prevented. The error made
+the gate RED, the RED gate made `ok` false, and `ok` false meant the error was never forgiven. A
+closed circle, breakable only where the fact is actually known: at the moment of recording.
+
+**Fixed at the root, one concept in three places:** `isBudgetEndedError` in `turnDeadline.ts`;
+`MultiProviderTurnRunner` now **aborts the chain** on it (beside `isHopelesslyOversizedError`, because
+it is the same kind of fact — a condition no later rung can change) with a message that names OUR
+budget and says *"No provider failed"*; and `recordLlmCall` records it as `LLM_CALL_BUDGET_ENDED`,
+info + resolved, so it stays on the timeline but is never a blocker. 11 tests, including one that
+builds a 154-rung chain and asserts exactly ONE provider is asked.
+
+### 🧬 The missing SUBSYSTEM (step 2), named honestly
+
+**There is no concept of "this lane is closed" that reaches the things the lane started.** Every lane
+artefact is carefully marked resolved at handoff — `SIMPLE_BUILD_FALLBACK`, `SIMPLE_BUILD_OUTCOME`,
+`SIMPLE_BUILD_SALVAGE`, all `autoResolved: true`, with comments recording the three earlier autopsies
+that hardened them. The orphan call bypassed all of it because it reported through a *different* path,
+*after* the handoff. #2894 gave the lane a deadline; what is still missing is a lane IDENTITY on the
+work it spawned, so a late arrival can be attributed to a lane that no longer exists. Recorded as an
+**open root cause** — today's fix classifies by the error string, which is correct and narrower than
+the general answer.
+
+### Still open (deliberately not guessed)
+
+- 🔴 **`UI_WITHOUT_BUILD` is a FALSE POSITIVE here** and it was not the blocker — it is a warning, so
+  it did not turn the gate RED, but it is wrong and it would frighten a user. It reports "there is no
+  index.html and no frontend build tool", while `commands[0]`'s own `ls -la` in the same report lists
+  `index.html`, `vite.config.ts` and `package.json`, and the production build succeeded. Cause: the
+  check reads the DURABLE store, which held **1 file** (`src/App.tsx`) — the scaffold lives in the
+  sandbox and is never persisted. So **any build where the AI edits only `src/App.tsx` gets this
+  warning.** Not fixed here because the fix is a choice between persisting the scaffold and teaching
+  the check to read the sandbox, and that decision affects the publish path too.
+- 🔴 **"Stop" did not stop.** The user wrote *"मेरा आदेश है कि अभी छोड़ दो"*, the agent answered
+  *"ठीक है, मैं इस काम को अभी यहीं रोक देता हूँ"* — and then **30 more seconds** of post-build gates
+  ran and produced the RED verdict. A user who asked to stop was handed a failure report.
+- **The ETA lied twice.** "~2–4 min" at the start; at minute 2, "~53s to go"; at minute 4, "this app
+  is bigger than expected — about 3 min more to go" — and it finished 22 seconds later.
+- **95% sandbox idle** — 7.9 min up, 0.4 min doing our work. Billed.
+- Design consistency C (70/100), accessibility A (92/100) — neither healed; this workspace was not in
+  the `AGENTV3_FEATURE_HEAL_PCT=20` cohort.
+## 2026-09-14 — CLAUDE.md said the Play auto-upload did not exist. It has existed all along.
+
+The admin asked what it would take to get `upload: true` for the Android `.aab`, the way iOS ships
+straight to TestFlight. The honest answer turned out to be **one GitHub secret** — because the
+feature was already built and nobody had used it.
+
+`android-aab.yml` carries a **`upload_to_play`** workflow input and a real
+`r0adkll/upload-google-play@v1.1.5` step. Ticked, the signed bundle goes to Play's **internal**
+testing track (`status: completed`), and the admin promotes to production from the console — the API
+never publishes to production itself. The only missing piece is the repo secret
+**`PLAY_SERVICE_ACCOUNT_JSON`**.
+
+**What CLAUDE.md said instead:** *"Automating the Play upload (a Play service-account +
+`r0adz0/upload-google-play` step) is a future infra item — until it exists, the upload is the
+admin's manual step."*
+
+🔴 **TWO failures in one sentence, and the second is the worse one.**
+
+1. **"A future infra item"** was false for an unknown length of time. A session reading it would
+   either propose building a feature that already ships, or tell the admin to keep uploading by
+   hand — which is exactly what would have happened here had the workflow not been read first.
+2. **It named the action `r0adz0/upload-google-play`, a slug that does not exist.** The workflow's
+   own comment records that typo as a REAL incident: GitHub resolves every `uses:` up front
+   regardless of the `if:` guard, so the bad slug broke even artifact-only builds. So the doc was
+   not merely out of date — it was preserving, in the place sessions are told to trust, the precise
+   mistake the code had already paid to fix.
+
+🔒 **THE RULE THIS IS THE THIRD INSTANCE OF.** This file already records an idle-minutes default
+that read "NOT taken" eight days after it was taken, and a privacy-policy claim drawn from a
+truncated grep. Same shape every time: **a confident statement about the CODE, written once, never
+re-checked, and acted on as fact.** What caught it here was reading `android-aab.yml` before
+answering rather than answering from the doc — which is safeguard #1 applied to a capability
+question instead of a roadmap one.
+
+**Fixed:** the bullet now states the feature exists, names the one secret that gates it, records the
+internal-track boundary, distinguishes it from the Cloud Run `GOOGLE_PLAY_SA_JSON` (different place,
+different purpose, possibly the same JSON), and keeps the correction visible rather than quietly
+rewriting the old claim.
+
+---
+
+## 2026-09-14 — Two sessions fixed the same bug. Mine was dropped, and that is the right outcome
+
+While PR #2914 sat open, **#2917 landed `verifiedNoChangeSummary` on `main`** — a fix for the exact
+defect my first commit (`12f21eed`) addressed: a turn that wrote no files, on a working app, reported
+as a failed empty build and followed by an invitation to pay. Same class, same two files
+(`routes/agentv3.ts`, `tests/pornographyBan.test.ts`), different report (`697b38ee` against my
+`7bc15e40`).
+
+**The conflict is also why the PR had no CI for forty minutes, and my first explanation was wrong.**
+I said it looked like a GitHub incident, citing the workflow's own recorded precedent. It was not —
+other branches were getting runs the whole time. A `pull_request` run is built on the merge ref
+GitHub computes, and a **conflicted PR has no merge ref, so no run is created and nothing anywhere
+says so.** The green/red signal and the conflict signal are the same signal, and I read the silence
+as the wrong one.
+
+### Which fix is better, decided from the code rather than from ownership
+
+| | Mine (`emptyTurnWasLegitimate`) | Theirs (`verifiedNoChangeSummary`, on `main`) |
+|---|---|---|
+| Evidence the app came up | `previewVerifiedRendered` **OR a stored `lastPreviewUrl`** | `previewVerifiedRendered` only |
+| Reads the user's words | yes — a change verb anywhere vetoes it | no |
+| Suppresses the upsell | a fourth named clause in the guard | `!result.ok` — the turn simply succeeded |
+
+**Theirs is stricter where it counts and mine is weaker there.** A stored `lastPreviewUrl` can be
+left over from an earlier turn, so it is not evidence that *this* turn brought the app up — and their
+comment says so in as many words: *"only on real browser evidence — a turn that wrote nothing and
+proved nothing still falls through to the honest failure below."* My PR claimed "the app really came
+up on this turn"; with that `||` the claim was not guaranteed. Their upsell guard is also more
+general than my extra clause: any successful turn is silent, not merely a run-action one.
+
+So `runActionTurn.ts` and its three test files are **deleted**, `emptyBuildFailureSummary` is back to
+its three-argument form, and `routes/agentv3.ts` now differs from `main` by exactly one hunk. Keeping
+both would have left two answers to one question — the drift this repo has paid for repeatedly.
+
+**What survives, because it was genuinely separate:** the claim auditor's two blind spots from the
+same report — `CONSOLE_CLEAN` widened from one phrase to a class (one adjective, "no **runtime**
+errors in the console", defeated it) and a `TYPECHECK_CLEAN` check that did not exist at all, reading
+`gateEvidence.typecheck`, which starts at `'not-run'`. Now in `tests/summaryClaimAudit.test.ts`, with
+the file saying plainly what was dropped from around it and why.
+
+### 🔴 One thing NOT closed, recorded rather than papered over (rule 6)
+
+Their guard requires `previewVerifiedRendered`. I cannot verify from here whether that flag was true
+in build `7bc15e40` — the report showed `PREVIEW_PUBLISHED` and a screenshot, which is why my version
+also accepted `lastPreviewUrl`. **If it was false, that specific build is still reported as a
+failure.** The fix for that is to make the preview verification actually run and record, not to
+accept weaker proof — loosening the evidence rule would re-introduce exactly what their comment
+warns against. Left open here rather than guessed at.
+
+---
+
+## 2026-09-14 — MERGE RESOLUTION: #2919's render evidence into #2917's ok-gate (one mechanism, not two)
+
+**What #2919 fixes, and it is real.** Report fd021c64: a user typed *"Yess create karo"* into a
+workspace already holding their own 25-file Fantasy Football app. The engine restored it, started the
+dev server, **opened it in a real browser and watched it render**, built it for production green — then
+told them *"The build produced no files. Please try again"* and asked them to **add credits**. The whole
+build then ran a SECOND time on a stronger model to reach the same conclusion: five minutes and sixteen
+model calls to tell somebody their working app does not exist.
+
+**Why it is NOT redundant with #2917, which landed first and looks like the same fix.**
+`verifiedNoChangeSummary` (#2917) deliberately stands down when `userAskedToBuildAnApp` is true, because
+it WRITES a success sentence ("nothing needed changing") that would be false for somebody who asked for
+an app to be produced. *"Yess create karo"* classifies as `new_build` through
+`userAskedForAnAppToBeBuilt`, so #2917's guard returns null and fd021c64 is still reported as a failure.
+#2919 makes no claim at all — it only declines to call a RENDERING app an empty build — so it may
+legitimately fire on the case #2917 excludes. Two guards, one condition, and the second is not the first
+with a check removed.
+
+**The evidence is the stronger of the two, not the weaker.** `buildObs.previewRendered` is set at ONE
+site (route line ~16326), alongside `previewVerifiedRendered`, which has a second assignment at ~16147.
+So the flag #2919 reads is a strict subset of the one #2917 reads.
+
+**What was dropped from #2919, and why.** It also added a fourth branch (`appAlreadyRuns`) inside the
+free-tier upsell guard. That was written against a `main` whose guard read `if (freeTierBuildActive)`;
+#2917 has since made it `if (freeTierBuildActive && !result.ok)`. With the render evidence now stopping
+`emptyBuildFailureSummary` from flipping `ok`, `result.ok` survives and that gate never opens — the
+upsell is already silent. Keeping the branch would have left **two answers to one question**, which is
+the exact shape of the bug all three of that guard's existing reasons (a policy refusal, our own
+provider outage, a prompt with no instruction) came from. The decision is recorded in the code at the
+site where the branch would have gone, so a later reader does not re-add it from the report.
+
+**No billing change, checked rather than assumed.** `if (expectsArtifacts && writtenFiles.size === 0)
+{ effectiveBilledUsd = 0; }` is unconditional — a zero-file build is free whatever its `ok` verdict. The
+only thing this change alters is what the user is TOLD.
+
+**`tests/pornographyBan.test.ts` — the same assertion, over-specified for the fourth time.** Both sides
+of the merge had independently replaced the fixed `start + 4500` window; main's bound (the next real
+token, `zeroBillForUnrenderedPreview(`) was kept because it survives comment growth without limit.
+#2919's extra assertion was kept on its merits: `not.toMatch(/if \(!refused\s*\|\|/)` pins that every
+condition added to that guard may only ever SUPPRESS further, never re-open the path a refusal closes.
+
+**`tests/rendersIsNotEmpty.test.ts` — the wiring, which #2919 had not tested.** The original file tested
+only the pure function, and the whole defect in fd021c64 was a CALL SITE. It now reads the route and
+asserts the observation is actually passed in, and that the `!result.ok` gate (the thing that keeps the
+upsell silent) is present. Both were proven by reversion: removing the 4th argument fails it, and
+removing the gate fails it. One assertion I had first written — banning the identifier `appAlreadyRuns`
+forever — was softened before commit, because banning a name is the same over-specification this very
+file has now been burned by three times.
+
+**Gate:** `npm run typecheck` · `noUnusedImports` · `typecheck:server` · `vitest run` · `build` ·
+`test:bundle` · `boot:check` — all green on the fully-merged state.
+
+**Also on 2026-09-14:** #2914 merged (`ff9cd845`) after its own session resolved the #2917 overlap and
+CI went green on `802eaa7e`; the full gate was re-run locally on main+#2914 before the merge, per the
+concurrent-sessions rule that a gate run before a merge proves nothing.

@@ -168,27 +168,27 @@ describe('the wiring — both surfaces, and no upsell after a refusal', () => {
     // here could only ever describe one of them, so it would have had to be deleted (losing the
     // guard) or kept (blocking the other two). What must hold is the intent: the model's own answer
     // is read, and NOTHING is said to the user when that answer was no.
-    const start = route.indexOf("zeroBillReason = 'empty build (0 files produced) — never charged'");
+    // ⚠️ Anchored on the reason STRING alone, not on the assignment. Autopsy 697b38ee turned that
+    // assignment into a ternary (a verified-no-change turn is a success and must not be logged as an
+    // empty build), which broke this anchor while the guard it protects was untouched.
+    const start = route.indexOf("'empty build (0 files produced) — never charged'");
     expect(start).toBeGreaterThan(0);
-    // ⚠️ THE WINDOW IS DERIVED FROM CONTENT, NOT A CHARACTER COUNT. It used to be `start + 4500`, and
-    // adding one comment to the guard pushed the code it checks outside the slice — a green-to-red
-    // that says nothing about the behaviour. `UPSELL_SUPPRESSED` is the block's own last statement, so
-    // the window now grows with the block instead of being a number somebody has to remember.
-    // The block ends with the UPSELL_SUPPRESSED record, so the window runs to the close of that call.
-    const suppressed = route.indexOf('UPSELL_SUPPRESSED', start);
-    expect(suppressed).toBeGreaterThan(start);
-    const end = route.indexOf('});', suppressed);
-    expect(end).toBeGreaterThan(suppressed);
-    const block = route.slice(start, end + 3);
+    // ⚠️ THE *WINDOW* IS THE THIRD OVER-SPECIFICATION IN THIS ONE ASSERTION, and it was found the
+    // only way it could be: by merging every open PR together before merging any of them. A fixed
+    // `start + 4500` broke the moment a sibling PR added ten lines of COMMENT to the guard — the
+    // guard was strictly more correct and this test failed anyway. Widening the number only moves
+    // the next break, so the window is bounded by the next real thing in the file instead. Comments
+    // may now grow without limit; deleting the guard still fails, which is all this must catch.
+    const end = route.indexOf('zeroBillForUnrenderedPreview(', start);
+    expect(end).toBeGreaterThan(start);
+    const block = route.slice(start, end);
     expect(block).toContain('const refused = looksLikeRefusal(result.summary);');
     // The narration — the upsell OR the degraded notice — is reachable only when there was no refusal.
     //
-    // ⚠️ MATCHED AS "the guard STARTS with !refused", not as one exact expression. A FOURTH suppression
-    // reason landed on 2026-09-14 (the app already renders — report fd021c64), turning `if (!refused)`
-    // into `if (!refused && !appAlreadyRuns)`. That is the guard getting STRONGER, and the literal
-    // above would have failed on it — which is the same "pinned a sentence where it meant a rule"
-    // fragility this file's own comment warns about two lines up.
-    expect(block).toMatch(/if \(!refused(\s*&&[^)]*)?\)\s*\{[\s\S]*freeTierUpsellMessage\(/);
+    // ⚠️ MATCHED AS "the guard STARTS with !refused", not as one exact expression, so a fifth honest
+    // suppression reason can be added as a further `&&` clause without failing a test for a change
+    // that strengthens the very thing it guards. Deleting `!refused` still fails.
+    expect(block).toMatch(/if \(!refused(?:\s*&&[^)]*)?\) \{[\s\S]*freeTierUpsellMessage\(/);
     // …and the upsell is never reachable with `refused` alone being false — every added condition may
     // only ever SUPPRESS further, never re-open the path a refusal closes.
     expect(block).not.toMatch(/if \(!refused\s*\|\|/);

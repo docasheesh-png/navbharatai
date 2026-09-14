@@ -52681,3 +52681,42 @@ of the fix. Re-fetching before a push catches a conflict; it does not catch a PR
 under a branch you are still improving. **Check whether your PR is still OPEN before pushing a
 correction to it** — a push that succeeds to a merged branch is silent and reaches nobody.
 7 new tests. Fixed on the P5 branch (#2905) and merged up the stack to #2908 and #2909.
+
+## 2026-09-14 — CLAUDE.md said the Play auto-upload did not exist. It has existed all along.
+
+The admin asked what it would take to get `upload: true` for the Android `.aab`, the way iOS ships
+straight to TestFlight. The honest answer turned out to be **one GitHub secret** — because the
+feature was already built and nobody had used it.
+
+`android-aab.yml` carries a **`upload_to_play`** workflow input and a real
+`r0adkll/upload-google-play@v1.1.5` step. Ticked, the signed bundle goes to Play's **internal**
+testing track (`status: completed`), and the admin promotes to production from the console — the API
+never publishes to production itself. The only missing piece is the repo secret
+**`PLAY_SERVICE_ACCOUNT_JSON`**.
+
+**What CLAUDE.md said instead:** *"Automating the Play upload (a Play service-account +
+`r0adz0/upload-google-play` step) is a future infra item — until it exists, the upload is the
+admin's manual step."*
+
+🔴 **TWO failures in one sentence, and the second is the worse one.**
+
+1. **"A future infra item"** was false for an unknown length of time. A session reading it would
+   either propose building a feature that already ships, or tell the admin to keep uploading by
+   hand — which is exactly what would have happened here had the workflow not been read first.
+2. **It named the action `r0adz0/upload-google-play`, a slug that does not exist.** The workflow's
+   own comment records that typo as a REAL incident: GitHub resolves every `uses:` up front
+   regardless of the `if:` guard, so the bad slug broke even artifact-only builds. So the doc was
+   not merely out of date — it was preserving, in the place sessions are told to trust, the precise
+   mistake the code had already paid to fix.
+
+🔒 **THE RULE THIS IS THE THIRD INSTANCE OF.** This file already records an idle-minutes default
+that read "NOT taken" eight days after it was taken, and a privacy-policy claim drawn from a
+truncated grep. Same shape every time: **a confident statement about the CODE, written once, never
+re-checked, and acted on as fact.** What caught it here was reading `android-aab.yml` before
+answering rather than answering from the doc — which is safeguard #1 applied to a capability
+question instead of a roadmap one.
+
+**Fixed:** the bullet now states the feature exists, names the one secret that gates it, records the
+internal-track boundary, distinguishes it from the Cloud Run `GOOGLE_PLAY_SA_JSON` (different place,
+different purpose, possibly the same JSON), and keeps the correction visible rather than quietly
+rewriting the old claim.

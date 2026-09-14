@@ -52682,6 +52682,58 @@ under a branch you are still improving. **Check whether your PR is still OPEN be
 correction to it** — a push that succeeds to a merged branch is silent and reaches nobody.
 7 new tests. Fixed on the P5 branch (#2905) and merged up the stack to #2908 and #2909.
 
+## 2026-09-14 — `70115adf` follow-up: a verdict from a partial view, and the typed "stop" nobody hears
+
+Two of the three items left open by the `70115adf` autopsy. The third is deliberately NOT built — see
+the end.
+
+### FIXED — `UI_WITHOUT_BUILD` judged a project it could not see
+
+It told a user their app had *"no index.html and no frontend build tool in any package.json"*, while
+the same report's own `ls -la` listed `index.html`, `vite.config.ts` and `package.json`, and
+`PROD_BUILD_OK` said the production build had succeeded.
+
+**Nothing was wrong with its three rules.** The CALLER hands it the durable store, which holds only
+the files the AI wrote — the scaffold lives in the sandbox and is never persisted. The view was **one
+file long**, so two of the three rules "passed" by looking at nothing. Any build where the AI edits
+only `src/App.tsx` would get this.
+
+🔒 **The guard is exact rather than a trade-off, which is why it belongs in the module and not the
+call site.** UI source cannot exist in a runnable project without a package.json — every scaffold in
+this repo ships one. So its TOTAL absence proves we are looking at a **fragment**, never that a
+builder is missing. Concluding from it is the "a conclusion drawn from a capped result set is not a
+verified fact" mistake this file already records twice.
+
+It stays SILENT rather than announcing "I could not tell", matching the function's own stated stance
+("fine, or at least not diagnosable as this") — an advisory that fired on every ordinary build is how
+a real finding gets ignored. The genuine node-express detection is untouched and pinned: the same
+paths WITH a package.json still return `stranded: true`, and an UNREADABLE package.json still counts
+as a view (a corrupted manifest must not buy silence). 4 tests; the 26 existing ones pass unchanged.
+
+### 🔴 OPEN, AND DELIBERATELY NOT BUILT — typing "stop" does not stop a build
+
+The user wrote *"इतनी देर मै नहीं इंतजार कर सकता हूँ"* and then *"मेरा आदेश है कि अभी छोड़ दो, मुझे
+दूसरा काम करना है"*. The model understood and answered *"ठीक है, मैं इस काम को अभी यहीं रोक देता हूँ"*
+— and the build carried on for **30 more seconds** of post-build gates and produced a verdict.
+
+**The mechanism, read rather than guessed.** `buildAbortCause.ts` has a first-class `user-stop` cause
+and `isUserInitiated()` — but that is the **Stop BUTTON**. A message TYPED during a build goes through
+`steerPoll` in `AgentRunner` and is injected as an ordinary user turn; nothing connects it to
+`abortBuild(controller, 'user-stop')`. So the button is wired and the sentence is not.
+
+⚠️ **A stop-intent classifier is NOT something a session should add on its own initiative, and the
+asymmetry is the reason.** Wrong toward stopping kills a live build a user is waiting on — *"ruko,
+pehle login theek karo"* is a steer, not a cancel, and the two are one word apart. Wrong toward not
+stopping costs what happened here: some waiting. That is the OPPOSITE asymmetry to the "READ THE MOOD
+FIRST" rule, where wrong-toward-chat cost one message and wrong-toward-build cost 29 minutes — and
+that rule is precisely why the direction has to be argued from the cost each time rather than copied.
+
+So it is recorded as an **open root cause** for the admin to decide, with the options stated: (a) a
+narrow, high-precision phrase list that only fires on unambiguous cancels; (b) the LLM intention-reader
+already used by `IntentClassifier`, consulted only for messages that look like a cancel; (c) leave it,
+and make the Stop button more visible during a build. **The RED verdict half of this incident is
+already gone** with the budget-ended fix (#2913) — that build would now end `ok: true`, so what
+remains is the 30 seconds, not a false failure.
 ## 2026-09-14 — AUTOPSY of build `70115adf`: a working app was declared RED, and 153 innocent providers were blamed
 
 Report: free tier, weak power level, KIMI delivered, 4m22s, `ok: false`. The user's app **built** —

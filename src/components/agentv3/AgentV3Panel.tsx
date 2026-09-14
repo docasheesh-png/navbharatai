@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { appRanDespiteFailedVerdict, fixRemainingIssuePrompt, appRunningNoticeText } from './failedButRunning';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
 import { FilesPanel, type FilesPanelProps } from '../panels/FilesPanel';
@@ -4512,20 +4513,50 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 )}
               </div>
             )}
+            {/* THE APP RAN, BUT THE VERDICT SAID IT DID NOT (admin 2026-09-14). Two cards, one condition,
+                and the difference is evidence rather than tone: when the platform OPENED this app in a
+                real browser and SAW IT RENDER, telling its owner it is broken is a claim we can already
+                contradict — and the old button's prompt ("finish/fix the build so the app works
+                end-to-end") asserted that breakage to the model, which then edited a working app until
+                it had something to show. The verdict, the summary and the zero charge are all
+                unchanged; what changes is that we stop saying something we know to be false, and stop
+                ordering a rebuild of an app that works. See failedButRunning.ts. */}
             {state.done && state.ok === false && !state.error && !state.budgetReached && state.summary && (
-              <div className="px-3 py-2 bg-amber-950/50 text-amber-200 text-xs rounded">
-                <div className="flex items-start gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0" /> <span className="whitespace-pre-wrap break-words">{state.summary}</span>
+              appRanDespiteFailedVerdict({
+                ok: state.ok, appRendered: state.appRendered, running,
+                hasError: !!state.error, budgetReached: state.budgetReached, summary: state.summary,
+              }) ? (
+                <div className="px-3 py-2 bg-emerald-950/40 text-emerald-100 text-xs rounded border border-emerald-900/60">
+                  <div className="flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                    <span className="whitespace-pre-wrap break-words">{appRunningNoticeText()}</span>
+                  </div>
+                  <div className="mt-1.5 pl-6 text-emerald-200/80 whitespace-pre-wrap break-words">{state.summary}</div>
+                  {!running && (
+                    <button
+                      onClick={() => fixWithAI(fixRemainingIssuePrompt(state.summary || ''))}
+                      title="Look at the one remaining check — without rebuilding the app that already works"
+                      className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-white bg-emerald-700 hover:bg-emerald-600 rounded px-2.5 py-1"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" /> Look at the remaining check
+                    </button>
+                  )}
                 </div>
-                {!running && (
-                  <button
-                    onClick={() => fixWithAI('Continue from where you left off and finish/fix the build so the app works end-to-end.')}
-                    className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded px-2.5 py-1"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" /> Fix with AI
-                  </button>
-                )}
-              </div>
+              ) : (
+                <div className="px-3 py-2 bg-amber-950/50 text-amber-200 text-xs rounded">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" /> <span className="whitespace-pre-wrap break-words">{state.summary}</span>
+                  </div>
+                  {!running && (
+                    <button
+                      onClick={() => fixWithAI('Continue from where you left off and finish/fix the build so the app works end-to-end.')}
+                      className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded px-2.5 py-1"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" /> Fix with AI
+                    </button>
+                  )}
+                </div>
+              )
             )}
             {state.pendingSecrets && (
               <SecretRequestCard

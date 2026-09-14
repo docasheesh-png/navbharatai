@@ -133,7 +133,7 @@ export type AgentV3WireEvent =
    * which opens the verify sheet instead of leaving the user reading a sentence with nowhere to go.
    */
   | { type: 'error'; message: string; ts: number; code?: string; diagnostics?: unknown }
-  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; costBreakdown?: CostBreakdown; diagnostics?: unknown; resumable?: boolean; budgetReached?: boolean; tokens?: number; planRemaining?: number; filesWritten?: number; walletTokensDebited?: number; walletTokenBalance?: number; readiness?: BuildHealth; buildId?: string; promptHash?: string };
+  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; costBreakdown?: CostBreakdown; diagnostics?: unknown; resumable?: boolean; budgetReached?: boolean; tokens?: number; planRemaining?: number; filesWritten?: number; walletTokensDebited?: number; walletTokenBalance?: number; readiness?: BuildHealth; buildId?: string; promptHash?: string; appRendered?: boolean };
 
 /** One live agent card in the "AI Team" tracker (D9 — driven by REAL events only). */
 export interface AgentCard {
@@ -257,6 +257,14 @@ export interface AgentV3ClientState {
   /** T1-cost-transparency — the "why this build cost ₹X" breakdown (token split, tier, markup, base). */
   costBreakdown?: CostBreakdown;
   /** T1-budget-ux — the build paused ONLY because it hit the per-build budget cap (work saved, resumable). */
+  /**
+   * Did the platform OPEN this app in a real browser and see it RENDER?
+   *
+   * Optional because the Android shell is BUNDLED — a phone can run last month's client against
+   * today's server. `undefined` means "this build did not say", and an unknown must resolve to
+   * today's behaviour, never to a claim that the app is fine. See failedButRunning.ts.
+   */
+  appRendered?: boolean;
   budgetReached?: boolean;
   /** R2 §4.6 — the objective readiness verdict for the finished build (build-health card). */
   buildHealth?: BuildHealth;

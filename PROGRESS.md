@@ -54740,3 +54740,86 @@ the second session begins. Recorded as an observation, not a fix.
 the 6–9× wrong ETA, the 354-second silent model call, the missing evidence ledger, and the strong
 suspicion — unverified, because the generated sources are not in the report — that the delivered
 "video editor" cannot edit video.
+
+---
+
+## 2026-09-14 — 🔴 WE WERE BREAKING WORKING APPS OURSELVES. The admin named it; it is the worst bug in this week's ledger.
+
+The counting bug two entries up ("at least 1 build rendered and was counted as failed") looked like a
+dashboard problem. The admin read it and supplied the half no report could have shown — **what happens
+next, in production**, verbatim:
+
+> *"actually yah hota hai. kabhi kabhi app ban jata hai, par chatbox me ai bolta 'fix with ai' aur woh
+> build fail me count ho jata hai (10-12% time, not always). **aur ham aise builds ko fix with ai press
+> hote hi sach me tod dete hai.** yaha 3 nuksan hai: 1- jo galat failed count hua, uska charge = 0.
+> 2- wapas se wahi sahi app ko build karna padega. 3- user ka trust bhi gaya!!"*
+
+**So the wrong verdict was never the end of the damage — it was the trigger for it.** The full chain,
+every link verified in code:
+
+1. The build finishes. The platform opens the app in a real browser and **sees it render**
+   (`GREEN_GUARD_SAVE` — *"recorded as the last known good state"*).
+2. Something unrelated still sets `ok: false` — a budget-refused provider call counted as a blocker
+   (#2913), a healed blocker never cleared (#2929/#2931), a release gate summarising a finding that is
+   not about the app at all (`d11ad529`).
+3. `AgentV3Panel.tsx` renders the amber failure card, and its button sends:
+   **`"Continue from where you left off and finish/fix the build so the app works end-to-end."`**
+4. 🔴 **That sentence asserts, as fact, that the app does not work end-to-end.** On an app that does, it
+   is a false premise — and a model handed a false premise does not reply *"nothing is wrong"*. It goes
+   looking, finds nothing, and **changes working code until it has something to show for the turn.**
+
+⚠️ **The sentence in step 3 is the SAME ONE** `shouldRetryEmptyBuild`'s doc comment quotes verbatim as
+the Shiv Medical Store case (2026-08-10) and that autopsy `697b38ee` was written about. It has now cost
+three separate incidents. It was never examined as a *prompt* — only as an input to a retry decision.
+
+### The 50/50 split, and why this half is the one that lasts
+
+Killing each cause of a wrong verdict is the first half, and it is being done one cause at a time
+(#2913 merged, #2929 and #2931 merged). **The admin's own number is why that cannot be the whole
+answer: it happens 10–12% of the time and it will never be exactly zero.** So the durable half is this
+— *even when the verdict is wrong, the user must never be invited to "fix" an app the platform has just
+watched working.* The evidence and the invitation must come from the same place.
+
+### The fix
+
+- **The one fact the client never had.** The server knew `buildObs.previewRendered` — the same
+  observation `GREEN_GUARD_SAVE` and the preview telemetry already use — and never sent it. The
+  terminal result now carries `appRendered`. Additive and optional, because the Android shell is
+  BUNDLED: an older client ignores it and keeps today's behaviour exactly.
+- **`failedButRunning.ts`** — pure, so every rule is testable. `appRanDespiteFailedVerdict` requires
+  `appRendered === true` **identically**: a missing field, a null, or a truthy non-boolean can never
+  open this path. An unknown resolves to today's behaviour, never to *"the app is fine"*.
+- **The card leads with what is true and checkable:** *"Your app is built and running — I opened it in
+  a browser and it rendered. One check did not pass, so I have not marked this build complete (and you
+  have not been charged for it)."* The order is not decoration — putting the caveat first would keep
+  the impression this card exists to remove.
+- **The prompt does three things, each because its absence is what broke apps.** It STATES THE EVIDENCE
+  (so the model is not left inferring that everything is suspect); it FORBIDS THE REBUILD explicitly
+  (the failure mode is not a wrong edit, it is a large, confident, unnecessary one); and it gives an
+  explicit **licence to change nothing** — *"that is a complete and correct answer, and I would rather
+  have it than an edit"* — because a model with no way to report "there was nothing to fix" will invent
+  work.
+
+🔒 **NOTHING IS HIDDEN, and this must never be turned into something that hides.** The verdict is
+untouched, the build is still not billed, the summary is still shown in full, and the action is still
+offered. A genuinely broken app keeps the blunt card and the original prompt — test-locked, so this
+change can only ever narrow what the old card claims, never delete it.
+
+**Tests:** `tests/fixWithAiDoesNotBreakWorkingApps.test.ts` (18). Every line of the wiring **fails
+nothing if dropped**, so the wiring is asserted too, and the guard is **proven by reversion**: deleting
+the server's one field fails the suite.
+
+### 🔴 Still open — the three costs, honestly
+
+1. **The zero charge.** A build the platform watched render, marked failed, is not billed. Fixing that
+   means fixing the VERDICT, not the billing: under the "working app or free" law a build marked
+   not-ok must never be charged, and charging one would be the worse bug. **Nothing here changes
+   billing, deliberately.** The money comes back when the verdict is right.
+2. **Rebuilding a working app** — addressed: the user is no longer told to.
+3. **Trust** — addressed: the message now matches what the platform actually saw.
+
+⚠️ **AND THE UNDO HAS A HOLE WORTH NAMING.** `GreenGuard` Layer 2 restores the last known good set, but
+only on `provenBroken` — we opened the app and saw it broken. A repair turn that leaves the app
+**still rendering but functionally worse** (a button that stops working, a feature quietly dropped) is
+not caught by that test, and nothing else catches it either. Prevention above is what covers this case
+today; a real fix needs a behavioural check, not a render check. **Recorded as an open root cause.**

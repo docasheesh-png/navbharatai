@@ -19083,7 +19083,13 @@ async function noteBuildOutcome(
           // A notice is never worth failing a successful build over — stay silent and ship the app.
         }
       }
-      emit({ type: 'result', ...result, ...projectContinue, buildId, promptHash, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...(diagnostics ? { diagnostics } : {}), ...(costBreakdown ? { costBreakdown } : {}), readiness: buildHealth });
+      // THE ONE FACT THE CLIENT WAS MISSING (admin 2026-09-14). The platform knows whether it opened
+      // this app in a real browser and saw it render — it is the same observation `GREEN_GUARD_SAVE`
+      // and the preview telemetry already use. Without it in the payload, the chat's failure card had
+      // no way to tell a broken app from a working one carrying a wrong verdict, so it offered to
+      // "fix" both — and fixing a working app is how we broke it. See failedButRunning.ts.
+      // Additive and optional: an older BUNDLED Android client ignores the field entirely.
+      emit({ type: 'result', ...result, ...projectContinue, buildId, promptHash, appRendered: buildObs.previewRendered === true, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...(diagnostics ? { diagnostics } : {}), ...(costBreakdown ? { costBreakdown } : {}), readiness: buildHealth });
       // Native push notification (admin 2026-07-26): fire-and-forget — never delays or fails the
       // response the client already has. A resumable module turn is an intermediate step, not a
       // finished build, so it's excluded (the user is mid-flow inside the app already).

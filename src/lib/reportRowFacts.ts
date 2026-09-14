@@ -33,13 +33,29 @@ export interface RowFact {
 }
 
 /** The subset of a user-submitted report row these facts are read from. */
+/**
+ * The ACCOUNT's tier, as the ⓘ panel prints it. Mirrors server/lib/accountTier.ts's own labels so the
+ * filter control and the panel can never word the same bucket differently.
+ */
+export function tierFactFor(accountTier: unknown): RowFact {
+  switch (String(accountTier ?? '')) {
+    case 'paid': return { label: 'User', value: 'Paid', tone: 'good', hint: 'This account has bought tokens with real ₹.' };
+    case 'free': return { label: 'User', value: 'Free', tone: 'muted', hint: 'A real account that has never purchased.' };
+    case 'admin': return { label: 'User', value: 'Admin / tester', tone: 'warn', hint: 'On the free list — these builds are deliberately not billed.' };
+    default: return { label: 'User', value: 'Unknown', tone: 'muted', hint: 'No account record was found — not the same as "never paid".' };
+  }
+}
+
 export interface SubmittedRowLike {
   name?: string | null;
   email?: string | null;
   userId?: string | null;
   reportedAt?: number | null;
+  /** How THIS BUILD was billed — e.g. "free (welcome bonus — cheap engines)". Not the account. */
   userTier?: string | null;
   tier?: string | null;
+  /** The ACCOUNT's tier: has this person ever bought tokens with real ₹? */
+  accountTier?: string | null;
   billedInr?: number | null;
   billedUsd?: number | null;
   ok?: boolean | null;
@@ -58,7 +74,10 @@ export interface AllBuildRowLike {
   startedAt?: number | null;
   endedAt?: number | null;
   ok?: boolean | null;
+  /** How THIS BUILD was billed. Not the account — see `tier`. */
   userTier?: string | null;
+  /** The ACCOUNT's tier: has this person ever bought tokens with real ₹? */
+  tier?: string | null;
   billedInr?: number | null;
   billedUsd?: number | null;
   zeroBillReason?: string | null;
@@ -145,7 +164,11 @@ export function submittedRowFacts(r: SubmittedRowLike, now?: number): RowFact[] 
     { label: 'Sender', value: text(r.name) || NOT_RECORDED, tone: text(r.name) ? 'default' : 'muted' },
     { label: 'Email', value: text(r.email) || text(r.userId) || NOT_RECORDED, tone: text(r.email) ? 'default' : 'muted' },
     { label: 'Reported', value: formatWhen(r.reportedAt, now) },
-    { label: 'User type', value: text(r.userTier) || text(r.tier) || NOT_RECORDED, tone: text(r.userTier) || text(r.tier) ? 'default' : 'muted' },
+    // TWO DIFFERENT FACTS, shown as two (admin 2026-09-14). "User" answers the admin's question — has
+    // this person ever paid us? "This build" says how that one build was routed, which a user changes
+    // by choosing the Weak engine. Collapsing them is what made a ₹500 customer read as Free.
+    tierFactFor(r.accountTier),
+    { label: 'This build', value: text(r.userTier) || text(r.tier) || NOT_RECORDED, tone: 'muted', hint: 'How this one build was billed — not whether the user has ever paid.' },
     formatCharge(r.billedInr, r.billedUsd, null),
     formatOutcome(r.ok, r.inFlight),
   ];
@@ -165,7 +188,8 @@ export function allBuildRowFacts(b: AllBuildRowLike, now?: number): RowFact[] {
     // "Reported" on the other list; here nobody reported anything — the row exists because the build
     // ran. Naming it "Built" rather than reusing the word is the honest difference between the lists.
     { label: 'Built', value: formatWhen(b.savedAt ?? b.startedAt, now) },
-    { label: 'User type', value: text(b.userTier) || NOT_RECORDED, tone: text(b.userTier) ? 'default' : 'muted' },
+    tierFactFor(b.tier),
+    { label: 'This build', value: text(b.userTier) || NOT_RECORDED, tone: 'muted', hint: 'How this one build was billed — not whether the user has ever paid.' },
     formatCharge(b.billedInr, b.billedUsd, b.zeroBillReason),
     formatOutcome(b.ok, false),
   ];

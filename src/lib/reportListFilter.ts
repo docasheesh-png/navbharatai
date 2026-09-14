@@ -19,6 +19,12 @@
 // Pure and unit-tested.
 
 export type ListStatusFilter = 'all' | 'failed' | 'succeeded' | 'unknown';
+/**
+ * PAID / FREE (admin 2026-09-14: "jis user ne real ₹ se token purchase kiye hai, woh paid user hai").
+ * A fact about the ACCOUNT, decided once in server/lib/accountTier.ts — never about how one build was
+ * routed, which a user changes simply by choosing the Weak engine.
+ */
+export type ListTierFilter = 'all' | 'paid' | 'free' | 'admin' | 'unknown';
 export type ListDateFilter = 'all' | 'today' | '7d' | '30d';
 
 /** The controls both bars render, so neither list can quietly grow a filter the other lacks. */
@@ -28,14 +34,16 @@ export interface ListFilterState {
   date: ListDateFilter;
   /** A user id, or '' for every user. */
   uid: string;
+  /** Paid / free / admin / unknown — see ListTierFilter. */
+  tier: ListTierFilter;
 }
 
-export const EMPTY_FILTERS: ListFilterState = { query: '', status: 'all', date: 'all', uid: '' };
+export const EMPTY_FILTERS: ListFilterState = { query: '', status: 'all', date: 'all', uid: '', tier: 'all' };
 
 /** True when anything is narrowing the list — i.e. when a "Clear" button is worth showing. Pure. */
 export function hasActiveFilters(f: ListFilterState | null | undefined): boolean {
   if (!f) return false;
-  return Boolean(f.query.trim()) || f.status !== 'all' || f.date !== 'all' || Boolean(f.uid);
+  return Boolean(f.query.trim()) || f.status !== 'all' || f.date !== 'all' || Boolean(f.uid) || (f.tier ?? 'all') !== 'all';
 }
 
 /** The epoch-ms floor a date filter means, or null for "any time". Pure. */
@@ -49,6 +57,18 @@ export function sinceMsFor(date: ListDateFilter, now: number = Date.now()): numb
 }
 
 /** The label each date option carries. Kept here so the two bars cannot word them differently. */
+/** The tier options both bars render, so neither can word them differently. */
+export const TIER_OPTIONS: ReadonlyArray<{ value: ListTierFilter; label: string }> = [
+  { value: 'all', label: 'All users' },
+  { value: 'paid', label: 'Paid' },
+  { value: 'free', label: 'Free' },
+  { value: 'admin', label: 'Admin/Tester' },
+  // Shown because an UNKNOWN is never folded into "free": an anonymous build and a real user who has
+  // never purchased are different things, and hiding the first inside the second would inflate the
+  // very number ("how many have never paid?") this filter exists to answer.
+  { value: 'unknown', label: 'Unknown' },
+];
+
 export const DATE_OPTIONS: ReadonlyArray<{ value: ListDateFilter; label: string }> = [
   { value: 'all', label: 'Any time' },
   { value: 'today', label: 'Last 24 hours' },
@@ -95,6 +115,8 @@ export interface FilterableRow {
   /** The time this row is dated by — reported-at for the inbox, saved-at for all-builds. */
   at?: number | null;
   uid?: string | null;
+  /** The ACCOUNT's tier — see accountTier.ts. Absent/null is treated as 'unknown'. */
+  tier?: ListTierFilter | null;
   /** Everything the search box should look through. */
   search: ReadonlyArray<string | null | undefined>;
 }
@@ -104,6 +126,9 @@ export function rowMatches(row: FilterableRow, f: ListFilterState, now: number =
   if (!matchesStatus(row.ok, f.status)) return false;
   if (!matchesDate(row.at, f.date, now)) return false;
   if (f.uid && String(row.uid ?? '') !== f.uid) return false;
+  // An absent tier means UNKNOWN, so a row we could not classify is reachable by the Unknown chip
+  // rather than being invisible to every choice but "All users".
+  if (f.tier && f.tier !== 'all' && (row.tier ?? 'unknown') !== f.tier) return false;
   if (!matchesQuery(row.search, f.query)) return false;
   return true;
 }

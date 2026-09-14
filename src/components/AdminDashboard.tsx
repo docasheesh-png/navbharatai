@@ -95,10 +95,23 @@ interface AdminBuildReportRow extends ReportTriage {
    * an error, and neither should read as one.
    */
   userNote?: string | null;
+  /**
+   * THE ACCOUNT'S tier — "has this person ever bought tokens with real ₹?" (admin 2026-09-14).
+   * Resolved server-side by lib/accountTier.ts.
+   *
+   * ⚠️ NOT the same field as `tier` above, and that is the point. `tier` is
+   * `classifyReportTier(billing.userTier)` — how THAT BUILD was routed, which a user turns to "free"
+   * simply by choosing the Weak engine. A customer who had paid ₹500 and picked Weak was listed as
+   * Free, so "show me my paying users" hid a real customer. Both are kept: one is the build, one is
+   * the person, and only the second answers the admin's question.
+   */
+  accountTier?: ListFilterState['tier'] | null;
 }
 
 type ReportSortKey = 'time' | 'name' | 'app' | 'tier' | 'charged';
-type ReportTierFilter = 'all' | 'paid' | 'free' | 'admin';
+// `ReportTierFilter` lived here for this inbox's own paid/free select. That control moved into the
+// shared ReportFilterBar and its vocabulary into ListTierFilter (reportListFilter.ts), which BOTH
+// lists now use — and which carries 'unknown', a bucket this one silently folded into nothing.
 
 const statCard = (label: string, value: string | number, sub: string, color: string, Icon: React.ComponentType<any>) => (
   <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-5 relative overflow-hidden">
@@ -269,6 +282,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     userTier?: string | null; billedInr?: number | null; billedUsd?: number | null; zeroBillReason?: string | null;
     /** Has this row already been handed to someone? (admin 2026-09-14 — one report, two sessions.) */
     triage?: ReportTriage | null;
+    /** The ACCOUNT's tier — paid means this person has bought tokens with real ₹. */
+    tier?: ListFilterState['tier'] | null;
   }
   const [allBuilds, setAllBuilds] = useState<AllBuildRow[]>([]);
   const [allBuildsLoading, setAllBuildsLoading] = useState(false);
@@ -277,6 +292,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [allBuildsStatus, setAllBuildsStatus] = useState<'all' | 'failed' | 'succeeded' | 'unknown'>('all');
   const [allBuildsDate, setAllBuildsDate] = useState<'all' | 'today' | '7d' | '30d'>('all');
   const [allBuildsUid, setAllBuildsUid] = useState('');
+  /** Paid / free / admin / unknown — decided on the ACCOUNT, server-side (see lib/accountTier.ts). */
+  const [allBuildsTier, setAllBuildsTier] = useState<ListFilterState['tier']>('all');
   const [allBuildsCounts, setAllBuildsCounts] = useState<{ all: number; failed: number; succeeded: number; unknown: number } | null>(null);
   const [allBuildsUsers, setAllBuildsUsers] = useState<Array<{ uid: string; count: number; label: string }>>([]);
   const [allBuildsFetched, setAllBuildsFetched] = useState<{ fetched: number; limit: number } | null>(null);
@@ -290,7 +307,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   // actually complain) and a per-user picker. The tier select and the sort toggle survive alongside
   // it — they are extra, not duplicates, and dropping them would be a regression dressed as parity.
   const [reportFilters, setReportFilters] = useState<ListFilterState>(EMPTY_FILTERS);
-  const [reportTierFilter, setReportTierFilter] = useState<ReportTierFilter>('all');
   const [reportSortKey, setReportSortKey] = useState<ReportSortKey>('time');
   const [reportSortAsc, setReportSortAsc] = useState(false); // default: newest first
 
@@ -302,6 +318,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
    */
   const reportFilterRow = useCallback((r: AdminBuildReportRow) => ({
     ok: r.ok, at: r.reportedAt, uid: r.userId,
+    // The ACCOUNT's tier, not the build's — see `accountTier` on the row type.
+    tier: r.accountTier ?? 'unknown',
     search: [r.name, r.email, r.appLabel, r.userId, r.userNote, r.rootCause],
   }), []);
 
@@ -323,10 +341,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   }, [buildReports]);
 
   const visibleBuildReports = useMemo(() => {
-    const filtered = buildReports.filter((r) => {
-      if (reportTierFilter !== 'all' && r.tier !== reportTierFilter) return false;
-      return rowMatches(reportFilterRow(r), reportFilters);
-    });
+    const filtered = buildReports.filter((r) => rowMatches(reportFilterRow(r), reportFilters));
     const dir = reportSortAsc ? 1 : -1;
     const sorted = [...filtered].sort((a, b) => {
       switch (reportSortKey) {
@@ -339,7 +354,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       }
     });
     return sorted;
-  }, [buildReports, reportFilters, reportTierFilter, reportSortKey, reportSortAsc, reportFilterRow]);
+  }, [buildReports, reportFilters, reportSortKey, reportSortAsc, reportFilterRow]);
 
   // `fmtCharge` and `tierBadge` lived here to fill two columns of the nine-column table that this
   // change removed. Their replacements are `formatCharge` and the "User type" fact in
@@ -820,11 +835,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   // live state.
   const fetchAllBuilds = useCallback(async (override?: {
     q?: string; status?: typeof allBuildsStatus; date?: typeof allBuildsDate; uid?: string;
+    tier?: ListFilterState['tier'];
   }) => {
     const q = override?.q ?? allBuildsSearch;
     const status = override?.status ?? allBuildsStatus;
     const date = override?.date ?? allBuildsDate;
     const uid = override?.uid ?? allBuildsUid;
+    // Server-side, like every other filter on this list: the tier lives on the ACCOUNT, and narrowing
+    // in the browser would only narrow the 500 rows already fetched — "my paying users" would quietly
+    // mean "my paying users among the newest 500 builds".
+    const tier = override?.tier ?? allBuildsTier;
     setAllBuildsLoading(true);
     try {
       const params = new URLSearchParams();
@@ -832,6 +852,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       if (status !== 'all') params.set('status', status);
       if (date !== 'all') params.set('date', date);
       if (uid) params.set('uid', uid);
+      if (tier && tier !== 'all') params.set('tier', tier);
       const qs = params.toString() ? `?${params}` : '';
       const r = await fetch(`/api/admin/all-builds${qs}`, { headers });
       const d = await r.json();
@@ -842,7 +863,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     } catch (e) { console.error(e); setAllBuilds([]); setAllBuildsCounts(null); setAllBuildsUsers([]); }
     finally { setAllBuildsLoading(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminToken, allBuildsSearch, allBuildsStatus, allBuildsDate, allBuildsUid]);
+  }, [adminToken, allBuildsSearch, allBuildsStatus, allBuildsDate, allBuildsUid, allBuildsTier]);
 
   // Always the LATEST closure, so the effect above can leave `fetchAllBuilds` out of its deps (which
   // would re-run it on every keystroke) without ever calling a stale one that forgets the search box.
@@ -1187,7 +1208,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   useEffect(() => {
     if (activeTab !== 'reports') return;
     void fetchAllBuildsRef.current();
-  }, [activeTab, allBuildsStatus, allBuildsDate, allBuildsUid]);
+  }, [activeTab, allBuildsStatus, allBuildsDate, allBuildsUid, allBuildsTier]);
   useEffect(() => { if (activeTab === 'userreports') fetchUserReports(); }, [activeTab, fetchUserReports]);
   useEffect(() => { if (activeTab === 'apkreports') fetchApkReports(); }, [activeTab, fetchApkReports]);
   const fetchLatencyAnomaly = useCallback(async () => {
@@ -3290,19 +3311,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     of which are recent". The inbox filters in the browser because it already holds
                     every row. Same meanings, applied where each list can afford them. */}
                 <ReportFilterBar
-                  value={{ query: allBuildsSearch, status: allBuildsStatus, date: allBuildsDate, uid: allBuildsUid }}
+                  value={{ query: allBuildsSearch, status: allBuildsStatus, date: allBuildsDate, uid: allBuildsUid, tier: allBuildsTier }}
                   onChange={(next) => {
                     setAllBuildsSearch(next.query);
                     setAllBuildsStatus(next.status);
                     setAllBuildsDate(next.date);
                     setAllBuildsUid(next.uid);
+                    setAllBuildsTier(next.tier);
                     // ⚠️ EXPLICIT OVERRIDES, and that is not a convenience. React state is set
                     // asynchronously, so fetching straight after the setters above would send the
                     // PREVIOUS values — the list would lag one click behind every control.
                     // Typing is deliberately NOT auto-fetched: that would be one request per
                     // keystroke. Enter (onSubmitSearch) and Load are what submit the search box.
                     if (next.query === allBuildsSearch) {
-                      void fetchAllBuilds({ q: next.query, status: next.status, date: next.date, uid: next.uid });
+                      void fetchAllBuilds({ q: next.query, status: next.status, date: next.date, uid: next.uid, tier: next.tier });
                     }
                   }}
                   onSubmitSearch={() => void fetchAllBuilds()}
@@ -3579,18 +3601,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   searchPlaceholder="Search: app, sender, email, or the user's own words…"
                   trailing={(
                     <>
-                      <select
-                        value={reportTierFilter}
-                        onChange={(e) => setReportTierFilter(e.target.value as ReportTierFilter)}
-                        className="shrink-0 bg-[#0d1117] border border-white/10 rounded-xl px-2.5 py-2 text-[11px] text-white outline-none focus:border-indigo-500"
-                        title="Filter by user type"
-                        aria-label="Filter by user type"
-                      >
-                        <option value="all">All users</option>
-                        <option value="paid">Paid</option>
-                        <option value="free">Free</option>
-                        <option value="admin">Admin/Tester</option>
-                      </select>
                       <select
                         value={reportSortKey}
                         onChange={(e) => setReportSortKey(e.target.value as ReportSortKey)}

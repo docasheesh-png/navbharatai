@@ -54893,3 +54893,55 @@ the second session begins. Recorded as an observation, not a fix.
 the 6–9× wrong ETA, the 354-second silent model call, the missing evidence ledger, and the strong
 suspicion — unverified, because the generated sources are not in the report — that the delivered
 "video editor" cannot edit video.
+
+### 2026-09-14 (follow-up, same PR) — the paid/free filter, on both lists, meaning what the admin said
+
+**Admin:** *"par filter me paid/free user wala filter nhi lagaya — woh lagao!! **jis user ne real ₹ se
+token purchase kiye hai, woh paid user hai!!**"*
+
+They were right on the first count: the tier select had stayed on the inbox alone, passed in as a
+one-off rather than living in the shared bar — which is exactly how it came to exist on only one list.
+It is now a first-class control **inside `ReportFilterBar`**, so both lists carry it by construction.
+
+🔴 **The second half is the one that mattered, and it was a real defect.** The existing filter answered
+a *different question*. `classifyReportTier(billing.userTier)` describes how **that build** was routed,
+and `routes/agentv3.ts` contains:
+
+```
+if (!freeTierBuildActive && powerSpecResolved.cheapOnly && …) freeTierBuildActive = true;
+```
+
+— so **choosing the Weak engine** stamps a build `"free (welcome bonus — cheap engines)"`, whoever you
+are. **A customer who had paid ₹500 and picked Weak was listed as Free**, so *"show me my paying
+users"* hid a real customer.
+
+`server/lib/accountTier.ts` asks the account instead, using the admin's definition verbatim:
+
+- **`totalMoneySpent > 0`**, and it is the right field because it has **exactly one writer** —
+  `computeCreditedWallet`, on a verified purchase, whose own comment reads *"GROSS here on purpose:
+  'how much has this user paid us' is the full amount"*. Verified against every other credit path: the
+  welcome bonus, the weekly gift, coupons and admin adjustments all go through
+  `mirroredCreditPatch(…, 'gift')`, which never touches it. **A gifted balance can never look like a
+  purchase.**
+- **The rule is shared, not copied.** `hasEverPaid` sits beside `isFreeTierUser` in
+  `FreeTierBuildRouting.ts` — the build router's own definition of a paying user — so the admin list
+  and the engine cannot disagree about who is a customer.
+- 🔒 **UNKNOWN is never folded into FREE.** An anonymous build and a uid with no wallet record are
+  `unknown`, and the filter offers that bucket. Calling them "free" would inflate the exact number
+  (*"how many of my users have never paid?"*) the filter exists to answer.
+- **It costs no extra read.** `resolveUserIdentities` already fetches each wallet document for the name
+  and email; `paid` rides in on the identity it already returns.
+- **Both facts are kept and shown as two:** `User: Paid` (the account) and `This build: free (welcome
+  bonus…)` (the routing). The build's tier is genuinely useful — it just no longer answers a question
+  it was never about.
+- All-builds narrows **server-side** (`?tier=`), like its other filters: filtering in the browser would
+  make *"my paying users"* quietly mean *"my paying users among the newest 500 builds"*.
+
+⚠️ **One thing deliberately NOT tightened, and locked by a test so nobody tidies it later:**
+`hasEverPaid({ totalMoneySpent: '500' })` is **true**. `Number('500')` is 500, a legacy string really
+does mean they paid, and this predicate also drives **build routing** — rejecting the string would
+silently move a paying customer onto the cheap free-tier ladder. Tightening it would have fixed nothing
+and broken something.
+
+`tests/paidUserFilter.test.ts` — 24 tests, including the ₹500-customer-on-Weak case that the old
+classification got wrong. Full gate green on the final state: **1657 files · 23,195 passed · 0 FAIL**.

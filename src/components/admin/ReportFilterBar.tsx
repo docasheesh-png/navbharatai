@@ -1,4 +1,4 @@
-import { DATE_OPTIONS, hasActiveFilters, type ListFilterState, type ListStatusFilter } from '../../lib/reportListFilter';
+import { DATE_OPTIONS, TIER_OPTIONS, hasActiveFilters, type ListFilterState, type ListStatusFilter } from '../../lib/reportListFilter';
 
 /**
  * The ONE filter bar both admin build-report lists render (admin 2026-09-14: "filter bhi all build
@@ -75,6 +75,24 @@ export function ReportFilterBar({
 
         <span className="w-px h-5 bg-white/10 mx-1" aria-hidden="true" />
 
+        {/* PAID / FREE (admin 2026-09-14: "filter me paid/free user wala filter nhi lagaya — woh
+            lagao!! jis user ne real ₹ se token purchase kiye hai, woh paid user hai").
+
+            It lives HERE, in the shared bar, rather than being passed in per list — that is the whole
+            point of the ask. It had existed on the user-submitted inbox alone, and even there it
+            answered a different question: `billing.userTier` describes how one BUILD was routed, and
+            a user turns that to "free" simply by choosing the Weak engine. A customer who had paid
+            ₹500 and picked Weak was listed as Free. See server/lib/accountTier.ts. */}
+        <select
+          value={value.tier ?? 'all'}
+          onChange={(e) => set({ tier: e.target.value as ListFilterState['tier'] })}
+          className="bg-[#0d1117] border border-white/10 rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-indigo-500"
+          aria-label="Filter by paid or free user"
+          title="Paid = this account has bought tokens with real ₹"
+        >
+          {TIER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+
         <select
           value={value.date}
           onChange={(e) => set({ date: e.target.value as ListFilterState['date'] })}
@@ -103,7 +121,7 @@ export function ReportFilterBar({
         {hasActiveFilters(value) && (
           <button
             type="button"
-            onClick={() => onChange({ query: '', status: 'all', date: 'all', uid: '' })}
+            onClick={() => onChange({ query: '', status: 'all', date: 'all', uid: '', tier: 'all' })}
             className="text-[10px] font-bold px-2 py-1.5 rounded-lg text-[#8b949e] hover:text-white underline"
           >
             Clear

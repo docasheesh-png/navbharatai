@@ -25,14 +25,14 @@ const NOW = Date.parse('2026-09-14T12:00:00Z');
 describe('PARITY: the two lists show the same facts, in the same order, under the same labels', () => {
   const submitted = {
     name: 'Lok Up', email: 'lokup528@gmail.com', userId: 'uid-1', reportedAt: NOW - 3600_000,
-    userTier: 'free', tier: 'free', billedInr: 12.5, billedUsd: 0.14, ok: false, buildMs: 900_000,
+    userTier: 'free', tier: 'free', accountTier: 'free', billedInr: 12.5, billedUsd: 0.14, ok: false, buildMs: 900_000,
     workspaceId: 'agentv3-abc-1',
   };
   const allBuild = {
     workspaceId: 'agentv3-abc-1', ownerUid: 'uid-1',
     owner: { label: 'Lok Up', email: 'lokup528@gmail.com', name: 'Lok Up', anonymous: false },
     savedAt: NOW - 3600_000, startedAt: NOW - 4500_000, endedAt: NOW - 3600_000,
-    ok: false, userTier: 'free', billedInr: 12.5, billedUsd: 0.14, zeroBillReason: null,
+    ok: false, userTier: 'free', tier: 'free', billedInr: 12.5, billedUsd: 0.14, zeroBillReason: null,
   };
 
   it('the label set is IDENTICAL apart from the one word that is genuinely different', () => {
@@ -50,7 +50,11 @@ describe('PARITY: the two lists show the same facts, in the same order, under th
       const text = factsToText(facts);
       expect(text).toMatch(/Sender: Lok Up/);
       expect(text).toMatch(/Email: lokup528@gmail\.com/);
-      expect(text).toMatch(/User type: free/);
+      // TWO facts now, not one (admin 2026-09-14): "User" is the ACCOUNT — has this person ever paid
+      // us — and "This build" is how that one build was routed. Collapsing them made a ₹500 customer
+      // who picked the Weak engine read as Free.
+      expect(text).toMatch(/User: (Paid|Free|Admin \/ tester|Unknown)/);
+      expect(text).toMatch(/This build: free/);
       expect(text).toMatch(/Charged: ₹12\.50/);
       expect(text).toMatch(/Status: Failed/);
       expect(text).toMatch(/Build time:/);

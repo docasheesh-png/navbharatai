@@ -42,6 +42,8 @@ import { listAllDiagnostics, listBuildFacts, listDiagnosticsHistory, getDiagnost
 import { resolveUserIdentities, identityFrom, identityLabel } from '../lib/adminUserLookup';
 import { fetchAuthMetadata, firebaseAuthBatch, resolveJoinedAt, resolveLastActiveAt } from '../lib/adminUserActivity';
 import { parseStatusFilter, parseDateFilter, sinceMsFor, buildMatchesFilters, statusCounts, usersInBuilds } from '../lib/buildListFilter';
+import { accountTier, matchesTier, parseTierFilter, type AccountTier } from '../lib/accountTier';
+import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import { sandboxStore } from '../AgentV3/SandboxStore';
 import { liveSandboxNote, type LiveSandboxCount } from '../AgentV3/liveSandboxCount';
 import { buildActuator } from './actuatorFactory';
@@ -802,7 +804,32 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     try {
       const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '100'), 10) || 100, 1), 500);
       const reports = await listAdminBuildReports(limit);
-      res.json({ reports });
+
+      // THE SAME PAID/FREE ANSWER THE ALL-BUILDS LIST GIVES (admin 2026-09-14). This inbox already had
+      // a `tier`, but it was `classifyReportTier(billing.userTier)` — how that BUILD was routed, which
+      // a user turns to "free" simply by choosing the Weak engine. A customer who has paid ₹500 and
+      // picked Weak was listed as Free, so "show me my paying users" hid a real customer.
+      //
+      // `accountTier` answers the admin's question instead: has this person ever bought tokens with
+      // real ₹? One batched wallet read for the page, the same call the All-builds list makes.
+      //
+      // ⚠️ The build's own tier is KEPT as `tier` and still shown — "this build ran free" is a real and
+      // useful fact. It is simply not the same question, so it no longer answers it.
+      const identities = await resolveUserIdentities(reports.map((r) => r.userId), getDb() as never)
+        .catch(() => new Map());
+      const withTier = reports.map((r) => {
+        const resolved = (r.userId ? identities.get(String(r.userId).trim()) : null) ?? identityFrom(r.userId, null);
+        return {
+          ...r,
+          accountTier: accountTier({
+            anonymous: resolved.anonymous,
+            freeListed: isAgentV3FreeUser(r.userId, r.email || resolved.email || null),
+            wallet: resolved.paid === null ? null : { totalMoneySpent: resolved.paid ? 1 : 0 },
+            walletFound: resolved.paid !== null,
+          }) as AccountTier,
+        };
+      });
+      res.json({ reports: withTier });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to load build reports.' });
     }
@@ -1003,6 +1030,10 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const status = parseStatusFilter(req.query.status);
       const dateFilter = parseDateFilter(req.query.date);
       const uid = String(req.query.uid ?? '').trim() || null;
+      // PAID / FREE (admin 2026-09-14) — a fact about the ACCOUNT ("has this person ever bought tokens
+      // with real ₹?"), never about how this one build was routed. See lib/accountTier.ts for why the
+      // two disagree, and for the real customer the old reading would have hidden.
+      const tierFilter = parseTierFilter(req.query.tier);
 
       // The date bound goes into the QUERY (see listAllDiagnostics) so a "last 30 days" view is not
       // secretly "the newest 500 rows". Status and user are applied below, in memory, because `ok`
@@ -1024,11 +1055,22 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       // failure yields an empty map, so the list degrades to no badges rather than to no list.
       const triage = await getBuildTriage(matched.map((b) => b.workspaceId));
 
-      const builds = matched.map((b) => {
+      const withTier = matched.map((b) => {
         const identity = b.ownerUid ? identities.get(String(b.ownerUid).trim()) ?? null : null;
         const resolved = identity ?? identityFrom(b.ownerUid, null);
-        return { ...b, owner: { ...resolved, label: identityLabel(resolved) }, triage: triage.get(b.workspaceId) ?? null };
+        const tier: AccountTier = accountTier({
+          anonymous: resolved.anonymous,
+          freeListed: isAgentV3FreeUser(b.ownerUid, resolved.email || null),
+          // `paid` already rode in on the identity, read from the wallet document this route fetched
+          // for the name and email — so the tier costs no extra Firestore read.
+          wallet: resolved.paid === null ? null : { totalMoneySpent: resolved.paid ? 1 : 0 },
+          walletFound: resolved.paid !== null,
+        });
+        return { ...b, owner: { ...resolved, label: identityLabel(resolved) }, tier, triage: triage.get(b.workspaceId) ?? null };
       });
+      // Applied AFTER the identity resolve, because the tier is not knowable from the build record —
+      // it lives on the account. The chip counts below still describe the fetched set.
+      const builds = withTier.filter((b) => matchesTier(b.tier, tierFilter));
 
       // The counts describe the FETCHED set (before status/user narrowing), so the chips can show how
       // much each choice would hide -- and `total` is stated separately so the panel never implies it

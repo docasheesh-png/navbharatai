@@ -15,7 +15,25 @@ import { TOOLS_DIR } from './PageRouteCheck';
 describe('withSandboxBrowsers — hand the existing browser to the suite that needs one', () => {
   it('a Playwright suite is pointed at the browser the sandbox already downloaded', () => {
     const out = withSandboxBrowsers('npx playwright test', 'playwright');
-    expect(out).toBe(`PLAYWRIGHT_BROWSERS_PATH=${SANDBOX_BROWSERS_PATH} npx playwright test`);
+    expect(out).toContain('PLAYWRIGHT_BROWSERS_PATH=');
+    expect(out).toContain(SANDBOX_BROWSERS_PATH);   // still the fallback when the project has none
+    expect(out).toContain('npx playwright test');
+  });
+
+  // 🔴 REGRESSION — report 697b38ee (2026-09-14). The hand-off was an OVERRIDE, so it pointed
+  // Playwright AWAY from a browser the agent had just installed into the DEFAULT cache: the suite
+  // passed at +636.9s and the vaccine, re-running it 145s later with the variable pinned, reported
+  // "COULD NOT RUN — the browser binaries are not installed". The release gate then told the user the
+  // app had no runnable test suite. The project's own cache must win when it has one.
+  it('prefers the browser the PROJECT already has, and falls back to ours only when it has none', () => {
+    const out = withSandboxBrowsers('npx playwright test', 'playwright');
+    const varValue = out.slice(out.indexOf('=') + 1, out.indexOf(' npx'));
+    expect(varValue).toContain('$HOME/.cache/ms-playwright');  // the preferred branch
+    expect(varValue).toContain(SANDBOX_BROWSERS_PATH);         // the fallback branch
+    // The preferred branch must be the one taken when the project's cache is populated: the test is
+    // the `ls` of a chromium-* directory, not the mere existence of the folder (an empty
+    // ~/.cache/ms-playwright is created by a failed install and holds no browser at all).
+    expect(varValue).toMatch(/ls -d "\$HOME\/\.cache\/ms-playwright"\/chromium-\*/);
   });
 
   it('an opaque npm "test" script gets it too — it may well BE a browser run', () => {

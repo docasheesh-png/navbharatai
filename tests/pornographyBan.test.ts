@@ -168,9 +168,20 @@ describe('the wiring — both surfaces, and no upsell after a refusal', () => {
     // here could only ever describe one of them, so it would have had to be deleted (losing the
     // guard) or kept (blocking the other two). What must hold is the intent: the model's own answer
     // is read, and NOTHING is said to the user when that answer was no.
-    const start = route.indexOf("zeroBillReason = 'empty build (0 files produced) — never charged'");
+    // ⚠️ Anchored on the reason STRING alone, not on the assignment. Autopsy 697b38ee turned that
+    // assignment into a ternary (a verified-no-change turn is a success and must not be logged as an
+    // empty build), which broke this anchor while the guard it protects was untouched.
+    const start = route.indexOf("'empty build (0 files produced) — never charged'");
     expect(start).toBeGreaterThan(0);
-    const block = route.slice(start, start + 4500);
+    // ⚠️ THE *WINDOW* IS THE THIRD OVER-SPECIFICATION IN THIS ONE ASSERTION, and it was found the
+    // only way it could be: by merging every open PR together before merging any of them. A fixed
+    // `start + 4500` broke the moment a sibling PR added ten lines of COMMENT to the guard — the
+    // guard was strictly more correct and this test failed anyway. Widening the number only moves
+    // the next break, so the window is bounded by the next real thing in the file instead. Comments
+    // may now grow without limit; deleting the guard still fails, which is all this must catch.
+    const end = route.indexOf('zeroBillForUnrenderedPreview(', start);
+    expect(end).toBeGreaterThan(start);
+    const block = route.slice(start, end);
     expect(block).toContain('const refused = looksLikeRefusal(result.summary);');
     // The narration — the upsell OR the degraded notice — is reachable only when there was no refusal.
     expect(block).toMatch(/if \(!refused\) \{[\s\S]*freeTierUpsellMessage\(/);

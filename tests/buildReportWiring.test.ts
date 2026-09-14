@@ -32,7 +32,9 @@ describe('the engine chain is recorded', () => {
   it('buildTurnRunner hands the FINAL guarded chain to its caller', () => {
     // The guarded chain — never the pre-guard one, or a weak build would be reported as containing
     // a Sonnet rung that enforceNoClaude had already stripped.
-    expect(code).toMatch(/opts\?\.onChain\?\.\(guardedChain/);
+    // `opts` became a required parameter on 2026-09-14 (the tier is mandatory), so the optional chain on
+    // it is optional here too — the rule is that the GUARDED chain is what is handed over.
+    expect(code).toMatch(/opts\??\.onChain\?\.\(guardedChain/);
   });
 
   it('the main build client actually passes onChain through to the report', () => {

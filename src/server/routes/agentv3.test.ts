@@ -362,11 +362,21 @@ describe('planGrokEnabled — planning runs on Grok when a key is set', () => {
 // Model Routing Policy (admin 2026-07-12): judge is mode-aware — Free=Grok, Paid=Grok/Sonnet, Power=Opus.
 describe('resolveJudgeKind — mode-aware judge selection', () => {
   it('POWER → always Opus (judge runs on Opus like everything in power mode)', () => {
-    expect(resolveJudgeKind('power', undefined, undefined)).toBe('opus');
-    expect(resolveJudgeKind('power', 'grok-key', 'sonnet')).toBe('opus'); // power ignores grok/env
+    // THE JUDGE UNDER THE 2026-09-14 AUTHORITY GRANT: a different model from the builder, at the
+    // lowest input price that reasons well. Weak/Normal build on glm-5.3-flash → judge glm-5.3 when a
+    // GLM key exists; Strong builds on glm-5.3 → judge Grok (outside every ladder). Opus never.
+    expect(resolveJudgeKind('power', 'grok-key', undefined, 'glm-key')).toBe('grok');
+    expect(resolveJudgeKind('power', undefined, undefined, 'glm-key')).toBe('sonnet');
+    expect(resolveJudgeKind('power', 'grok-key', 'sonnet', 'glm-key')).toBe('sonnet'); // AGENTV3_REVIEWER=sonnet still forces Sonnet
+    expect(resolveJudgeKind('paid', 'grok-key', undefined, 'glm-key')).toBe('glm');
+    expect(resolveJudgeKind('free', 'grok-key', undefined, 'glm-key')).toBe('glm');
+    expect(resolveJudgeKind('paid', 'grok-key', undefined, '   ')).toBe('grok'); // whitespace key ≠ set
+    for (const mode of ['free', 'paid', 'power'] as const) {
+      for (const key of ['grok-key', undefined]) expect(resolveJudgeKind(mode, key, undefined, 'glm-key') as string).not.toBe('opus');
+    }
   });
   it('FREE → Grok when a Grok key exists; never a Claude judge', () => {
-    expect(resolveJudgeKind('free', 'grok-key', undefined)).toBe('grok');
+    expect(resolveJudgeKind('free', 'grok-key', undefined)).toBe('grok'); // no GLM key → Grok
   });
   it('FREE without a Grok key → "sonnet" signal (caller SKIPS the judge — free never spends Claude)', () => {
     expect(resolveJudgeKind('free', undefined, undefined)).toBe('sonnet');
@@ -1902,11 +1912,14 @@ describe('enforceNoClaude — the UNBREAKABLE weak-module guard (admin rule 2026
   // "weak module me claude haiku add kar de? to last me … sonnet ya opus never never"): CLAUDE
   // (Sonnet/Opus) is still stripped no matter how the chain was assembled; the model-pinned
   // CLAUDE_HAIKU backstop is KEPT and moved to the END ("to last me").
-  it('strips CLAUDE (Sonnet/Opus) and keeps the model-pinned Haiku backstop LAST', () => {
+  it('strips CLAUDE (Sonnet/Opus) and keeps the model-pinned Haiku backstop IN PLACE', () => {
+    // Since 2026-09-14 the ladder owns the ORDER (the admin's weak ladder puts GPT-5.4 after Haiku),
+    // so this guard only removes; it no longer moves Haiku to the end. Same fixture, Sonnet gone,
+    // everything else exactly where it was.
     const out = enforceNoClaude(chain, true).map((r) => r.name);
-    expect(out).toEqual(['GLM', 'KIMI', 'VERTEX', 'GEMINI', 'CLAUDE_HAIKU']);
+    expect(out).toEqual(chain.map((r) => r.name).filter((n) => n !== 'CLAUDE'));
     expect(out).not.toContain('CLAUDE');
-    expect(out[out.length - 1]).toBe('CLAUDE_HAIKU'); // haiku — to last me
+    expect(out).toContain('CLAUDE_HAIKU');
   });
 
   it('leaves the chain untouched for a non-weak build (noClaude false)', () => {
@@ -1918,10 +1931,13 @@ describe('enforceNoClaude — the UNBREAKABLE weak-module guard (admin rule 2026
     expect(enforceNoClaude(cheapOnly, true).map((r) => r.name)).toEqual(['GLM', 'KIMI']);
   });
 
-  it('is exhaustive — no Sonnet/Opus runner survives in any position; Haiku always lands last', () => {
+  it('is exhaustive — no Sonnet/Opus runner survives in any position; Haiku keeps its LADDER position (2026-09-14)', () => {
     const weird = [{ name: 'CLAUDE' }, { name: 'CLAUDE_HAIKU' }, { name: 'GLM' }, { name: 'CLAUDE' }];
     const out = enforceNoClaude(weird, true).map((r) => r.name);
-    expect(out).toEqual(['GLM', 'CLAUDE_HAIKU']); // Sonnet gone; mid-chain Haiku moved to the end
+    // Sonnet gone; Haiku stays WHERE THE LADDER PUT IT. The 2026-07-13 "to last me" reorder was for a
+    // boolean-assembled chain; the admin's 2026-09-14 weak ladder places GPT-5.4 after Haiku, so the
+    // guard decides WHAT may run on weak and the ladder decides WHERE (see tierLadder.ts).
+    expect(out).toEqual(['CLAUDE_HAIKU', 'GLM']);
   });
 
   // REGRESSION (admin 2026-07-20, verbatim: "weak module me claude ka only haiku use hona chahiye. sonnet
@@ -1946,13 +1962,23 @@ describe('planRunnerChainNames — the plan phase respects WEAK ⇒ NO CLAUDE (a
   // THE exact confirmed leak: grokPlanRunner hardwired [GROK → CLAUDE] OUTSIDE buildTurnRunner, so
   // enforceNoClaude never saw it — one Grok timeout ran a weak (free) build's plan turn on a real
   // Claude call. The chain membership is now this pure function, so the invariant is locked here.
-  it('a noClaude (weak) build plans on Grok ALONE — no Claude fallback rung exists', () => {
-    expect(planRunnerChainNames(true)).toEqual(['GROK']);
-    expect(planRunnerChainNames(true)).not.toContain('CLAUDE');
+  // PLAN RUNS ON THE TIER'S PLAN LADDER (admin-approved table 2026-09-14): its plan rung first, then
+  // its own ladder — Grok no longer plans (it judges), and no tier plans on another tier's model.
+  it('a weak build plans on glm-5.3-flash, then its own ladder — never Sonnet/Opus', () => {
+    const names = planRunnerChainNames(true, 'weak');
+    expect(names[0]).toBe('GLM');
+    expect(names).not.toContain('CLAUDE');
+    expect(names).not.toContain('CLAUDE_OPUS');
+    expect(names).not.toContain('GROK');
   });
 
-  it('a normal/paid build keeps the Grok → Claude fallback (resilience unchanged)', () => {
-    expect(planRunnerChainNames(false)).toEqual(['GROK', 'CLAUDE']);
+  it('normal plans on glm-5.3-flash first; strong on glm-5.3 first with Opus last', () => {
+    expect(planRunnerChainNames(false, 'off')).toEqual(['GLM', 'KIMI', 'GLM', 'CLAUDE']);
+    expect(planRunnerChainNames(false, 'mini')).toEqual(['GLM', 'CLAUDE', 'CLAUDE_OPUS']);
+  });
+
+  it('the guard still strips every Claude rung from a weak plan whatever the ladder said', () => {
+    expect(planRunnerChainNames(true, 'mini')).toEqual(['GLM']);
   });
 });
 

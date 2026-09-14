@@ -82,6 +82,21 @@ const LEVEL_WORD: Record<LoadLevel, string> = {
 };
 
 /**
+ * The one-word chip beside the title. PURE, exported for the same reason as `loadHeadline`.
+ *
+ * "Not measured" as the chip while the sentence beneath said "10 of 12 ceilings have room" read as
+ * "nothing was measured" (admin Monitor capture, 2026-09-14). The level is still `unknown` — an
+ * unread ceiling is still the worst thing on the board — but the chip now says how MANY were unread,
+ * so a board that is mostly seen is not summarised as a board that was not looked at.
+ */
+export function chipWord(worst: LoadLevel, unreadCount: number, tileCount: number): string {
+  if (worst === 'unknown' && unreadCount > 0 && unreadCount < tileCount) {
+    return `${unreadCount} not measured`;
+  }
+  return LEVEL_WORD[worst] ?? 'Not measured';
+}
+
+/**
  * The headline sentence. PURE, and exported so its honesty is testable without a browser.
  *
  * 🔒 "All clear" is only ever said when every ceiling was actually READ. A board with three green
@@ -164,7 +179,7 @@ export function LoadBoard({ adminToken }: { adminToken: string }): React.ReactEl
           <Gauge className="w-4 h-4 text-indigo-400" />
           <h3 className="text-sm font-black text-white uppercase tracking-tight">Platform Load</h3>
           <span className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-full border ${tone.chip}`}>
-            {LEVEL_WORD[worst] ?? 'Not measured'}
+            {chipWord(worst, unreadable.length, tiles.length)}
           </span>
         </div>
         <button

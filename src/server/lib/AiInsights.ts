@@ -47,16 +47,32 @@ export function hasNoTelemetry(snap: MetricsSnapshot): boolean {
  * Derive readable insights from the real metrics snapshot. Deterministic + pure.
  * Ordered most-actionable first (critical → warning → good/info).
  */
+export interface InsightScope {
+  /**
+   * False when the snapshot's source does not record repair attempts (the timeline window does not).
+   * The repairs insight is then SKIPPED rather than reporting "0 repair attempts" from a field that
+   * was never measured — see windowSnapshot.ts.
+   */
+  repairsTracked?: boolean;
+  /** What the numbers cover, for the no-data sentence: "the last 6 hours" / "since this server started". */
+  label?: string;
+}
+
 export function generateInsights(
   snap: MetricsSnapshot,
   thresholds: InsightThresholds = DEFAULT_INSIGHT_THRESHOLDS,
+  scope: InsightScope = {},
 ): Insight[] {
   if (hasNoTelemetry(snap)) {
+    // Say WHAT was empty. "in this window" was printed beneath a chart of the same window showing
+    // three builds (admin Monitor capture, 2026-09-14) because the words were fixed and the data
+    // was not the window's. The label now comes from whoever built the snapshot.
+    const where = scope.label ? scope.label : 'in this window';
     return [{
       id: 'no-data',
       severity: 'info',
       headline: 'No telemetry recorded yet',
-      detail: 'No builds or model calls have been recorded in this window, so there is nothing to analyse yet.',
+      detail: `No builds or model calls have been recorded ${where}, so there is nothing to analyse yet.`,
     }];
   }
 
@@ -90,7 +106,7 @@ export function generateInsights(
       });
     }
 
-    if (b.total > 0) {
+    if (b.total > 0 && scope.repairsTracked !== false) {
       const avgRepairs = b.totalRepairAttempts / b.total;
       if (avgRepairs >= 1) {
         out.push({

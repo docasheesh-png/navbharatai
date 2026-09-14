@@ -58,12 +58,29 @@ describe('the cause survives the abort', () => {
 });
 
 describe('what the user is told', () => {
-  it('ONLY a real Stop says the user stopped it', () => {
+  it('ONLY a real Stop attributes it to the user', () => {
+    // ⚠️ ASSERT THE RULE, NOT THE SENTENCE. This used to require the exact words "stopped by the
+    // user", and the wording legitimately changed on 2026-09-14 when a TYPED stop became possible and
+    // the message had to start naming the way back. The rule it was really protecting — that no
+    // PLATFORM-side cause is ever blamed on the user, which is the whole reason this module exists —
+    // is unchanged, so that is what is checked now.
+    const BLAMES_THE_USER = /by the user|as you asked|you stopped/i;
     for (const cause of ALL) {
       const said = abortSummary(cause, { minutes: 30, builtSomething: true });
-      if (cause === 'user-stop') expect(said).toMatch(/stopped by the user/i);
-      else expect(said, cause).not.toMatch(/by the user/i);
+      if (cause === 'user-stop') expect(said).toMatch(BLAMES_THE_USER);
+      else expect(said, cause).not.toMatch(BLAMES_THE_USER);
     }
+  });
+
+  it('a typed stop tells the user what SURVIVED — the way back, not just the fact', () => {
+    // The old six-word sentence said nothing about the files. That was survivable while the only way
+    // to stop was a button the user had just pressed; with a typed stop the person may not realise
+    // anything was kept at all.
+    expect(abortSummary('user-stop', { builtSomething: true })).toMatch(/saved/i);
+    expect(abortSummary('user-stop', { builtSomething: true })).toMatch(/continue|resume|another message/i);
+    // …and never promises saved files when there were none.
+    expect(abortSummary('user-stop', { builtSomething: false })).toMatch(/nothing was lost/i);
+    expect(abortSummary('user-stop', { builtSomething: false })).not.toMatch(/files so far are saved/i);
   });
 
   it('the watchdog tells the user their work SURVIVED and how to continue', () => {

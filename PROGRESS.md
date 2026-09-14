@@ -54212,3 +54212,131 @@ green, not the PR being merged, not the PR's description saying it was included.
 alongside the list-pagination work. One conflict in `routes/agentv3.ts`, where `main` carries a
 strictly newer 4-argument `emptyBuildFailureSummary(..., buildObs.previewRendered)` from #2919 —
 HEAD's version kept, my older 3-argument call discarded.
+## 2026-09-14 — the admin Monitor page contradicted itself in five places; nine items root-caused, one PR
+
+The admin sent a text capture of the Monitor page and asked what was wrong with it. Nine items were
+worked; six turned out to be code defects, two were engine facts working as designed, and three of the
+"text defects" were artefacts of the capture tool. Everything below was verified from code before it
+was called a bug.
+
+### 🔴 M6-live — a Reclaim button on the site's own production channel (the one that mattered most)
+
+Firebase Hosting's `channels.list` returns the site's built-in **`live`** channel beside the preview
+channels, and nothing filtered it. It has no deployment record (it is not an app), so with a complete
+registry `classifyChannels` called it `unknown` — and `unknown` is reclaimable. The Publish Capacity
+card showed a card literally named "live" under *Wasted channels — no live app is using these*,
+counted it as one of "30 of about 50" preview channels, and offered a **Reclaim** button that would
+have issued a delete against the production channel. Whether Google's API would have refused is not a
+thing a platform may rely on.
+
+**Fix:** a new `default` state — never reclaimable, never counted against the preview-channel cap
+(the "N of about 50" figure was off by one on every site, always), sorted last; the reclaim endpoint
+refuses it by name as defence in depth. Test-locked (5 cases) including the case where a *workspace*
+named "live" hashes to a normal preview id.
+
+### 🔴 M1 + M2 — two provider accountings, and labels that claimed more than they measured
+
+- **"API Usage Ranking: VERTEX 0 tokens" beside "Provider Token Burn: VERTEX 1,40,925 tokens".** The
+  burn map was keyed by `providerName` as written (`VERTEX`); the ranking was a second, hand-rolled
+  tally that looked tokens up by `name.toLowerCase()` and found nothing. It also printed 888 legacy
+  `auto` rows as a provider called "auto" at "0 ms · 0 tokens" — three months after the writer that
+  invented them was fixed. **Both panels now read the one `summariseUsage().byProvider` rollup**
+  (`auto` folded into `unknown`, latency `null` when unrecorded, a `measuredCalls` count so 888
+  unmeasured calls read as unmeasured rather than free).
+- **"Platform Margin ₹-1.92 · Revenue minus AI cost" on a day the Monitor showed ₹231 of build cost in
+  six hours.** Every AI number on the Business panel comes from `ai_usage_logs`, which the CHAT route
+  alone writes; builds record into the Firestore timeline and never touch it. So the margin was
+  revenue minus *chat* cost, and "Output Tokens · All providers combined" omitted the provider (kimi)
+  that had done 94% of the work. The numbers were right for what they measured; the labels lied about
+  what that was. The route now declares `scope: 'chat'` and the tiles say *Chat margin*, *Chat
+  assistants only — builds are on the Monitor*, *Direct provider cost · chat only*.
+  🔴 **OPEN (rule 6):** the two accountings should become one. Writing builds into `ai_usage_logs`, or
+  reading both into one ledger, is a money-audit-sized change and is NOT in this PR — the honest label
+  is what ships today.
+- **"Website Hits Today 86 · 86 total"** — `serverStats.totalHits` is in-memory, per instance, since
+  boot; the process was 49 s old. Route now sends `hitsSinceBoot: true`; the tile says *since this
+  server started — resets on deploy* instead of *All time requests*.
+
+### 🔴 M3 — Insights and Health analysed a different dataset from the charts above them
+
+Captured 49 s after a deploy: the charts (Firestore timeline) showed 3 builds / ₹231.36 for the last
+6 hours; **Insights** said *"No builds or model calls have been recorded in this window"* and
+**Platform Health** said *"No data yet for: success"* — and scored **Reliability 100 beside three
+failed builds**. Both, plus Alerts and FinOps, were fed `getMetrics().snapshot()`, the since-boot
+registry. After every deploy the two halves of the page contradict each other until the registry
+refills, and the half that contradicts the evidence is the half that claims to analyse it.
+
+**Fix:** `windowSnapshot.ts` (pure) builds the analysers' snapshot from the timeline the charts draw;
+the monitor route feeds all four from it whenever the window has data, and returns `metricsScope` so
+each panel prints what it analysed (*for the last 6 hours* / *since this server started (49s ago)*).
+`generateInsights` takes a scope: the no-data sentence names it instead of a fixed "in this window",
+and the repair-burden insight is **skipped** when the source does not record repairs (the timeline
+does not) rather than reporting "0 attempts" from a field that was never measured.
+
+### 🔴 M5 — every server-log row was INFO with an empty message
+
+`audit()` computes the real severity for the Cloud Logging mirror (`DIAGNOSTICS_READ_FAILED` →
+WARNING) and then handed the durable store `level: 'info'`, **hardcoded**, one statement later. And
+`message: meta.message` was `undefined` for every caller in the codebase — they pass `error`, `path`,
+`kind`, `key` — so nine `DIAGNOSTICS_READ_FAILED` rows, each carrying the failure text in
+`meta.error`, rendered as `DIAGNOSTICS_READ_FAILED — ` at INFO. `BLOCKED_SCAN` lives in **`server.ts`
+at the repo root** (safeguard #6, again). **Fix:** pure `persistedAuditEntry()` — the durable level is
+the mirror's severity mapped down, the message is the first meta field that says what happened,
+capped at 300 chars. The panel also shows a date once the 40 rows cross midnight (they ran
+13:22 → 22:36 with no day anywhere).
+
+### M4 — the Play Billing plugin was called on iOS
+
+`playBillingNative.ts` gated on `Capacitor.isNativePlatform()`, which is true on iOS; the plugin is
+Android-only, so every iPhone launch threw *"PlayBilling" plugin is not implemented on ios*. The rail
+still resolved to the web gateway, so no user lost anything — but the file's own header said "a
+no-op everywhere else", which was false for half the installed base. Gate is now
+`getPlatform() === 'android'` via an exported, tested predicate.
+
+### M9 — "Success 0%" beside "Preview 67%" was TRUE, and now says so
+
+The timeline records `ok` (passed the gates) and `previewAllowed` (the platform saw it render)
+separately; a build can render and still be ended by a gate, a cost cap, or a user stop. Two of
+the three did exactly that. The Success tile now names the gap — *0 ok · 3 failed · 2 rendered but
+did not pass* — so it reads as a state rather than a contradiction. **Why** those three failed needs
+a build report; the Monitor cannot say.
+
+### M6 — chip and clock
+
+The Platform Load chip said *Not measured* while the sentence beneath it said *10 of 12 ceilings have
+room*: the level is honestly `unknown` (an unread ceiling is the worst thing on the board), but the
+chip now says **`2 not measured`**. The header used 12-hour time while the log rows used 24-hour;
+both are 24-hour now.
+
+### Not bugs — stated so nobody re-investigates them
+
+- **"20 more app s", "Unrecovered spend .", the grievance text ending "…reach in"** — capture-tool
+  artefacts. React renders `app{plural}` as adjacent text nodes which the tool joins with a space; the
+  grievance constant genuinely ends with `info@navbharatai.com` and the tool cut the line.
+- **M7 — "reaches 559px past the right edge (and 4 more)"** — the admin tab strip is a
+  `flex … overflow-x-auto` scroller with `whitespace-nowrap` buttons; five tabs sit past the edge
+  *inside the scroll container*. The page body does not scroll sideways. By design.
+- **M8a — 9 live sandboxes, 0 builds on this instance.** The count asks E2B for `state === 'running'`
+  (`liveSandboxCount.ts`); it is the authority, so nine really were billing. The tile already says
+  several servers run at once; the instruments to attribute them (*why machines started*, `pausedBy`)
+  exist on the Reports card. Not a Monitor defect.
+- **M8b — free build with kimi ₹221 and GLM ₹0.** By design: `AGENTV3_FREE_KIMI_LEAD` (admin
+  2026-08-02) and the 2026-09-12 health-aware lead put KIMI first on free builds with GLM as the
+  error-fallback; Vertex appearing means the ladder climbed exactly as the routing policy is written.
+  The ₹221 spent on three failed builds is a build-report question, not a routing one.
+
+### Still open, named
+
+- **Grievance Officer warning is still showing.** `CLAUDE.md` records the key as set on 2026-09-12 and
+  names the disappearance of this warning as the verification signal. It has not disappeared. Cloud
+  Run console only — a session cannot see it.
+- **24 of 30 preview channels are waste** (23, once `live` is excluded). The Reclaim buttons exist and
+  now cannot touch the wrong channel.
+- **The three failed builds (₹231.36 in six hours).** Needs a build report.
+- **Unifying the chat and build accountings** (M2, above).
+
+### Gate
+
+typecheck · noUnusedImports · typecheck:server · build · test:bundle · boot:check — all green on the
+final state; **1642 files / 22,879 tests passed / 1 skipped / 0 FAIL**. 121 tests touched or added
+across nine suites; the `live`-channel, audit-severity and window-snapshot rules are each locked.

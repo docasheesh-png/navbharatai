@@ -44,7 +44,31 @@ export type ChannelState =
    * A missing record is only evidence of orphanhood if the registry was actually read in full. When it
    * was not, that is what this says — and it is never reclaimable.
    */
-  | 'indeterminate';
+  | 'indeterminate'
+  /**
+   * THE SITE'S OWN DEFAULT CHANNEL — Firebase Hosting's built-in `live`, which every site has and
+   * which is NOT a preview channel at all (admin Monitor capture, 2026-09-14).
+   *
+   * `channels.list` returns it beside the preview channels, and nothing filtered it: it has no
+   * deployment record (it is not an app), so with a complete registry it classified as `unknown` —
+   * and `unknown` is reclaimable. The Publish Capacity card showed a card whose name was the word
+   * "live", counted it as one of "30 of about 50" preview channels in use, listed it under "Wasted
+   * channels — no live app is using these", and offered a Reclaim button that would issue a delete
+   * against the site's production channel. Whether Google's API would have refused that delete is not
+   * something a platform may rely on; the correct answer is that the button must never exist.
+   *
+   * Never reclaimable, and never counted against the preview-channel ceiling — the cap is on preview
+   * channels, and this is not one.
+   */
+  | 'default';
+
+/** Firebase Hosting's built-in channel id. Named once so no caller re-types the literal. */
+export const DEFAULT_CHANNEL_ID = 'live';
+
+/** Is this the site's own default channel rather than a preview channel we created? Pure. */
+export function isDefaultChannel(channelId: string | null | undefined): boolean {
+  return String(channelId ?? '').trim().toLowerCase() === DEFAULT_CHANNEL_ID;
+}
 
 export interface ClassifiedChannel {
   channelId: string;
@@ -92,10 +116,14 @@ export function classifyChannels(
     if (!channelId || seen.has(channelId)) continue;
     seen.add(channelId);
     const rec = byChannel.get(channelId);
-    const state: ChannelState = rec
-      ? (isLiveDeployment(rec as DeploymentRecord) ? 'live' : 'stale')
-      // No record — but that only MEANS something when the registry was genuinely read in full.
-      : (registryComplete ? 'unknown' : 'indeterminate');
+    const state: ChannelState = isDefaultChannel(channelId)
+      // The site's own channel is checked FIRST: it never has a record, and "no record" must not be
+      // allowed to mean "orphaned waste" for the one channel that is supposed to have none.
+      ? 'default'
+      : rec
+        ? (isLiveDeployment(rec as DeploymentRecord) ? 'live' : 'stale')
+        // No record — but that only MEANS something when the registry was genuinely read in full.
+        : (registryComplete ? 'unknown' : 'indeterminate');
     out.push({
       channelId,
       url: typeof c?.url === 'string' ? c.url : '',
@@ -110,7 +138,7 @@ export function classifyChannels(
     });
   }
   // Waste first — it is what the screen exists to act on.
-  const rank: Record<ChannelState, number> = { unknown: 0, stale: 1, indeterminate: 2, live: 3 };
+  const rank: Record<ChannelState, number> = { unknown: 0, stale: 1, indeterminate: 2, live: 3, default: 4 };
   return out.sort((a, b) => rank[a.state] - rank[b.state] || a.channelId.localeCompare(b.channelId));
 }
 
@@ -151,8 +179,11 @@ export function channelCeilingVerdict(
   classified: readonly ClassifiedChannel[],
   cap = channelCap(),
 ): CeilingVerdict {
-  const used = classified.length;
-  const reclaimable = classified.filter((c) => c.reclaimable).length;
+  // The ceiling is on PREVIEW channels. The site's default channel is not one and must not spend a
+  // slot in this arithmetic — with it counted, "N of about 50" was off by one on every site, always.
+  const previewChannels = classified.filter((c) => c.state !== 'default');
+  const used = previewChannels.length;
+  const reclaimable = previewChannels.filter((c) => c.reclaimable).length;
   const remaining = Math.max(0, cap - used);
   const ratio = cap > 0 ? used / cap : 0;
   const level: CeilingVerdict['level'] = ratio >= 0.9 ? 'critical' : ratio >= 0.7 ? 'warn' : 'ok';

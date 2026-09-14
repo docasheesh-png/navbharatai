@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
   classifyChannels, channelCeilingVerdict, channelCap, channelIdFromResourceName,
-  isChannelQuotaError, HOSTING_FULL_MESSAGE,
+  isChannelQuotaError, HOSTING_FULL_MESSAGE, isDefaultChannel,
 } from './channelInventory';
 import { makeChannelId } from './Deployment';
 
@@ -246,5 +246,49 @@ describe('an incomplete registry can never condemn a live app', () => {
     const v = channelCeilingVerdict(classifyChannels(live(5), [], false), 50);
     expect(v.used).toBe(5);
     expect(v.reclaimable).toBe(0);
+  });
+});
+
+describe("the site's own default channel — Firebase's built-in `live` (admin Monitor capture, 2026-09-14)", () => {
+  // `channels.list` returns the site's default channel beside the preview channels. It has no
+  // deployment record because it is not an app — and "no record" used to mean "orphaned waste".
+  // The Publish Capacity card showed a card literally named "live" under "Wasted channels", counted
+  // it against the ~50 preview-channel cap, and offered a Reclaim button on the production channel.
+  it('is classified as `default`, never `unknown`, even with a complete registry', () => {
+    const [c] = classifyChannels([ch('live')], [], true);
+    expect(c.state).toBe('default');
+    expect(c.reclaimable).toBe(false);
+  });
+
+  it('is never reclaimable whatever the registry completeness says', () => {
+    expect(classifyChannels([ch('live')], [], false)[0].reclaimable).toBe(false);
+    expect(classifyChannels([ch('live')], [rec('ws-x')], true)[0].reclaimable).toBe(false);
+  });
+
+  it('is matched case-insensitively and with surrounding whitespace — the id is what the API sends', () => {
+    expect(isDefaultChannel('live')).toBe(true);
+    expect(isDefaultChannel('LIVE')).toBe(true);
+    expect(isDefaultChannel(' live ')).toBe(true);
+    expect(isDefaultChannel('live-2')).toBe(false);
+    expect(isDefaultChannel(makeChannelId('live'))).toBe(false); // a WORKSPACE named "live" hashes to a preview id
+    expect(isDefaultChannel('')).toBe(false);
+    expect(isDefaultChannel(null)).toBe(false);
+  });
+
+  it('does not spend a slot in the ceiling arithmetic — the cap is on PREVIEW channels', () => {
+    const classified = classifyChannels(
+      [ch('live'), ch(makeChannelId('ws-a')), ch('orphan-1')],
+      [rec('ws-a')],
+      true,
+    );
+    const v = channelCeilingVerdict(classified, 50);
+    expect(v.used).toBe(2);         // ws-a + orphan-1; `live` is not a preview channel
+    expect(v.reclaimable).toBe(1);  // orphan-1 only
+    expect(v.remaining).toBe(48);
+  });
+
+  it('sorts last — it is the one channel the screen never needs to act on', () => {
+    const out = classifyChannels([ch('live'), ch('orphan-1'), ch(makeChannelId('ws-a'))], [rec('ws-a')], true);
+    expect(out[out.length - 1].state).toBe('default');
   });
 });

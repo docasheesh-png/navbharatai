@@ -45,6 +45,8 @@ interface MonitorResponse {
   /** Can alerts reach the admin outside the app? Carries the reason, never the key. */
   emailAlerts?: { configured: boolean; reason: string; recipients: number };
   compliance?: { grievanceOfficerNamed: boolean; grievanceWarning: string };
+  /** What Insights / Health / Alerts / FinOps were computed from — the window, or the since-boot registry. */
+  metricsScope?: { source: 'window' | 'since-boot'; hours: number | null; since: string; repairsTracked: boolean; label: string };
   /** How hard the instance that answered this request is working. */
   serverLoad?: {
     cpuPercent: number | null;
@@ -83,6 +85,25 @@ interface LogEntry {
   event?: string;
   message?: string;
   workspaceId?: string;
+}
+
+/** True when the entries fall on more than one calendar day (local time). PURE. */
+export function logEntriesSpanDays(entries: ReadonlyArray<{ ts?: number }> | null | undefined): boolean {
+  const days = new Set<string>();
+  for (const e of entries ?? []) {
+    if (typeof e?.ts !== 'number' || !Number.isFinite(e.ts)) continue;
+    days.add(new Date(e.ts).toDateString());
+    if (days.size > 1) return true;
+  }
+  return false;
+}
+
+/** The timestamp a log row shows — day + time once the list spans days, time alone otherwise. PURE. */
+export function logStamp(ts: number | undefined, spanDays: boolean): string {
+  if (typeof ts !== 'number' || !Number.isFinite(ts)) return '--:--:--';
+  const d = new Date(ts);
+  const time = d.toLocaleTimeString('en-IN', { hour12: false });
+  return spanDays ? `${d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })} ${time}` : time;
 }
 
 const REFRESH_MS = 30_000;
@@ -213,6 +234,9 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
   const state = feedState({ loading: loading && !data, error, available: data?.timeline?.available, hasData: data?.timeline?.hasData });
   const chartsLive = state === 'live';
   const totals = useMemo(() => totalsFor(points), [points]);
+  // 40 newest entries can cross midnight (the capture that found this ran 13:22 → 22:36 with no date
+  // anywhere). When they do, every stamp carries its day; when they do not, the time alone is enough.
+  const logsSpanDays = useMemo(() => logEntriesSpanDays(logs), [logs]);
   const providers = useMemo(() => providerRows(data?.timeline?.providers), [data?.timeline?.providers]);
   const usdInr = data?.usdInr ?? null;
 
@@ -248,7 +272,7 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
           <div>
             <h2 className="text-xs font-black text-white uppercase tracking-widest">Live Monitor</h2>
             <p className="text-[9px] text-[#8b949e] font-bold uppercase tracking-widest">
-              {lastLoadedAt ? `Updated ${new Date(lastLoadedAt).toLocaleTimeString('en-IN')}` : 'Loading…'}
+              {lastLoadedAt ? `Updated ${new Date(lastLoadedAt).toLocaleTimeString('en-IN', { hour12: false })}` : 'Loading…'}
               {data?.instanceUptimeSeconds != null && ` · server up ${humanDuration(data.instanceUptimeSeconds * 1000)}`}
             </p>
           </div>
@@ -371,7 +395,9 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
         <Tile
           label="Success rate"
           value={chartsLive ? percent(totals.successRate) : '—'}
-          sub={chartsLive && totals.builds > 0 ? `${totals.buildsOk} ok · ${totals.buildsFailed} failed` : 'No build in window'}
+          sub={chartsLive && totals.builds > 0
+            ? `${totals.buildsOk} ok · ${totals.buildsFailed} failed${totals.renderedNotOk > 0 ? ` · ${totals.renderedNotOk} rendered but did not pass` : ''}`
+            : 'No build in window'}
           tone={toneClass(rateTone(totals.successRate))}
           Icon={CheckCircle2}
         />
@@ -644,7 +670,7 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
           <div className="flex items-center justify-between mb-3">
             <div>
               <h3 className={PANEL_TITLE}>Platform health</h3>
-              <p className={PANEL_SUB}>Build success · engine errors · latency · uptime</p>
+              <p className={PANEL_SUB}>Build success · engine errors · latency · uptime{data?.metricsScope ? ` · ${data.metricsScope.label}` : ''}</p>
             </div>
             {health?.grade && (
               <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-full border ${
@@ -711,7 +737,7 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
             <div className={PANEL}>
               <div className="mb-3">
                 <h3 className={PANEL_TITLE}>Insights</h3>
-                <p className={PANEL_SUB}>Derived from live metrics — not predicted</p>
+                <p className={PANEL_SUB}>Derived from live metrics{data?.metricsScope ? ` for ${data.metricsScope.label}` : ''} — not predicted</p>
               </div>
               <div className="space-y-2">
                 {insights.slice(0, 6).map((i: any, idx: number) => (
@@ -755,7 +781,7 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
             {logs.map((l, i) => (
               <div key={i} className="flex gap-2.5 items-start hover:bg-white/5 rounded px-1.5 py-0.5">
                 <span className="text-[#484f58] shrink-0">
-                  {l.ts ? new Date(l.ts).toLocaleTimeString('en-IN', { hour12: false }) : '--:--:--'}
+                  {logStamp(l.ts, logsSpanDays)}
                 </span>
                 <span className={`shrink-0 font-black uppercase ${
                   l.level === 'error' ? 'text-red-400' : l.level === 'warn' ? 'text-amber-400' : 'text-sky-400'}`}>

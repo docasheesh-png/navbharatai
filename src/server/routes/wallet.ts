@@ -16,6 +16,7 @@ import { readHostingPlanStatus, purchaseHostingPlan, setHostingPlanAutoRenew } f
 import { HOSTING_TIERS } from '../../lib/hostingTiers';
 import { registerHostingPlanSweep, reattachSuspendedDomains } from '../lib/hostingPlanSweep';
 import { sendSafeError } from '../lib/httpError';
+import { userSafeUsageLog } from '../lib/usageLogPublic';
 
 /** Resolve a login uid to its canonical wallet id (follows `mergedInto`). No-op unless
  *  WALLET_MERGE_RESOLVE=on, so a merged/retired account transparently reads its unified wallet. */
@@ -566,14 +567,22 @@ export function registerWalletRoutes(app: Express): void {
       const logsRef = collection(db, 'ai_usage_logs');
       const q = query(logsRef, where('userId', '==', userId), orderBy('createdAt', 'desc'), limit(50));
       const snap = await getDocs(q);
-      const logs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // WHITE-LABEL LAW, AT THE ROUTE (2026-09-14). These documents carry `providerName` and
+      // `modelName`, and this handler used to spread the WHOLE document into the response — so a
+      // user's own browser received the vendor and model id of every call, whatever the UI chose to
+      // render. "No admin-only diagnostic may ever be surfaced to an end user" is about what LEAVES
+      // the server, not about what a component happens to paint.
+      const logs = snap.docs.map(d => userSafeUsageLog(d.id, d.data()));
       return res.json(logs);
     } catch (err: any) {
       try {
         const logsRef = collection(db, 'ai_usage_logs');
         const q = query(logsRef, where('userId', '==', userId), limit(100));
         const snap = await getDocs(q);
-        const logs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        // The SAME redaction on the index-missing fallback. A guard applied to only one of two paths
+        // is a guard that leaks on exactly the day the primary query fails, which is the day nobody
+        // is looking at the shape of the response.
+        const logs = snap.docs.map(d => userSafeUsageLog(d.id, d.data()));
         logs.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         return res.json(logs);
       } catch (fallbackErr: any) {

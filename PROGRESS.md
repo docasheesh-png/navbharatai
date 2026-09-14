@@ -53821,3 +53821,83 @@ boot:check · **1633 files / 22,777 passed / 1 skipped / 0 FAIL**.
 - `AGENT_NOTE` / `PREVIEW_SNAPSHOT_STALE` / the incremental line contradicting each other.
 - `@playwright/test` added to a project whose sandbox has no browsers installed.
 - The ETA lying, and 90–95% sandbox idle.
+
+## 2026-09-14 — the user's "Rupees Charged" column could only ever print ₹0.0000
+
+Admin: *"user ko ai call by provider ki jagah par total AI spend dikhna chahiye — jahan hamne (admin)
+user se app building me jo charge liya hai, wo show hona chahiye."*
+
+The billing screen's **"Prompt Dedution logs (Deducted per command output)"** table showed one row per AI
+call, read from `ai_usage_logs`. Investigating it found three faults, and only the first is the one that
+was asked about.
+
+### 1 · It asked the wrong question
+
+`ai_usage_logs` is a per-provider-call ENGINE log. A user does not buy calls, they buy builds. The
+number they care about — what left their wallet — was on no screen at all.
+
+### 2 · 🔴 Its money column was structurally incapable of being non-zero
+
+It read `log.amount_deducted || log.amountDeducted` and `log.output_tokens || log.outputTokens`.
+**Neither is written any more.** The streamed turn (which is the one that carries real chat traffic)
+records no token counts at all, and `estimated_provider_cost` was *deliberately deleted* in the
+2026-09-12 money audit — *"a field whose only value was a lie is not worth keeping"*.
+
+So every row rendered **`-₹0.0000`**, for every user, on every account, however much they had really
+been charged. The audit removed the lie from the collection and nobody checked who was still reading it.
+
+The same table also declared **four header columns over five body cells**, so every value sat one column
+to the right of its own label: "Output Tokens" headed an empty cell, "Rupees Charged" headed the token
+count, "Datetime" headed the rupees, and the date had no header at all. `colSpan={4}` on the empty state
+and a `text-red-405` class (no such Tailwind shade) are from the same edit.
+
+### 3 · 🔴 And those rows were leaking the provider to the user's browser
+
+`GET /api/wallet/:userId/logs` spread the **whole Firestore document** into its response —
+`{ id: d.id, ...d.data() }` — on its primary query *and* its index-missing fallback. Those documents
+carry `providerName` and `modelName` (`routes/chat.ts` writes both), so every signed-in user's client
+received the vendor and model id of every call made for them.
+
+The UI never painted those fields, **which is exactly why it went unnoticed: the leak was in the
+payload, not the pixels.** The White-Label Law is about what reaches the user, and a JSON body in their
+own devtools is as surfaced as a rendered table.
+
+### The fix
+
+**`src/lib/aiSpendSummary.ts`** (pure) — the real charge has always been in the **wallet ledger**.
+`computeDebitedWallet` writes one `type:'usage'` entry per charge with the exact tokens debited, the
+build it belongs to and our own description. That is the authoritative record: it *is* the balance
+movement, not telemetry sitting beside it.
+
+- 🔒 **₹ is DERIVED from tokens, never parsed out of the description.** The debit computes
+  `billedInr = tokens / TOKENS_PER_RUPEE`; recomputing from the same field through the same shared
+  constant reproduces the charge exactly and cannot drift when the wording changes.
+- 🔒 **`ledgerAvailable: false` is a distinct outcome from `totalInr === 0`.** An unreadable wallet
+  renders an honest "Spend not loaded — this is not ₹0", never a zero. This is the lesson of the Live
+  Metrics bug found four days earlier: a dashboard of confident zeros assembled out of `?? 0` fallbacks
+  is worse than no dashboard.
+- The card headlines the **total**, splits it into **App building** and **Assistants**, and lists the
+  charges underneath — `chargeCount` stays honest even though the rows are capped for rendering.
+
+**`src/server/lib/usageLogPublic.ts`** — the route now returns an **allow-list**, built field by field
+so the type system enforces it. Deleting `providerName`/`modelName` would have closed today's leak and
+nothing else; the next field written into that collection would ship to users by default with no test
+failing. `latencyMs` and `raced` are withheld too — neither names a vendor, but `raced` reveals that two
+models were asked and a latency distribution is how someone infers which engine served them.
+
+### Tests
+
+`tests/aiSpendSummary.test.ts` — 19 tests. **The allow-list guard was proven by reversion**: restoring
+the raw spread fails 4 of them. Also covered — a description whose ₹ contradicts its tokens must not
+move the total, a sub-token charge counts but adds no rupees, junk rows degrade rather than poison, and
+**both** query paths apply the redaction (a guard on one path leaks on exactly the day the other runs).
+
+Gate on the final state: typecheck · noUnusedImports · typecheck:server · build · test:bundle ·
+boot:check · **1634 files / 22,788 passed / 1 skipped / 0 FAIL**.
+
+### Follow-up, recorded rather than bundled (rule 6)
+
+With the table gone, the `billingLogs` prop and its `/logs` fetch have **no consumer left** —
+`usePaymentEngine` still requests it on every wallet load and threads it through `App.tsx` into a prop
+nobody reads. Removing that chain touches three more files for no user-visible benefit, so it is not in
+this change; the leak it carried is closed at the route either way. Worth doing as its own tidy-up.

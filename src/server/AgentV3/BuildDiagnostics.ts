@@ -1477,6 +1477,37 @@ export class BuildDiagnostics {
   }
 
   /**
+   * Record that a heal's re-judge PASSED — and clear the blockers that re-judge just superseded.
+   *
+   * 🔴 WHY THIS IS ONE METHOD AND NOT TWO CALLS (build 1ef27cd7, 2026-09-14). The fix above was written
+   * on 2026-08-27 for the dedupe heal and applied to that ONE call site. There are THREE heals that
+   * re-judge readiness and recover the build — dedupe, the Rules-of-Hooks heal, and the incomplete-code
+   * heal — and the other two never cleared the stale blocker. The dedupe site's own comment even says
+   * it re-judges *"exactly as the hooks heal and the incomplete-code heal below already do"*, which was
+   * true of the re-judging and false of the clearing.
+   *
+   * What that cost, in one real build: the engine detected a placeholder, completed it, re-judged the
+   * app READY **92/100**, and the production build succeeded — and then the release gate counted the
+   * superseded blocker from two minutes earlier, went RED, and the user was told
+   *     *"1 thing is still broken, so it is NOT ready to use yet"*
+   * about an app the platform had already re-judged as ready. The same class as the 2026-08-27 report
+   * this was first fixed for: a finding that describes code which no longer exists.
+   *
+   * So recording the recovery and clearing what it supersedes are now a SINGLE action. A fourth heal
+   * written later cannot record its recovery and forget the other half, because there is no longer a
+   * way to do one without the other.
+   *
+   * 🔒 THE CALLER'S OBLIGATION IS UNCHANGED, and it is what keeps this honest: reach here ONLY after
+   * re-running `assessBuildReadiness()` and only on `verdict.ready`. This clears blockers because the
+   * same gate that raised them has looked again and passed — never because a repair "probably worked".
+   */
+  recordReadinessRecovery(code: string, message: string): number {
+    const cleared = this.resolveReadinessBlockersOnRejudge();
+    this.record({ phase: 'build', severity: 'info', code, message, autoResolved: true });
+    return cleared;
+  }
+
+  /**
    * How many findings of a severity are about THE APP, for the release gate.
    *
    * The exclusion list is the reason this is a method and not a filter at the call site. Several

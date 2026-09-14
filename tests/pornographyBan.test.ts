@@ -184,7 +184,14 @@ describe('the wiring — both surfaces, and no upsell after a refusal', () => {
     const block = route.slice(start, end);
     expect(block).toContain('const refused = looksLikeRefusal(result.summary);');
     // The narration — the upsell OR the degraded notice — is reachable only when there was no refusal.
+    //
+    // ⚠️ MATCHED AS "the guard STARTS with !refused", not as one exact expression, so a fifth honest
+    // suppression reason can be added as a further `&&` clause without failing a test for a change
+    // that strengthens the very thing it guards. Deleting `!refused` still fails.
     expect(block).toMatch(/if \(!refused(?:\s*&&[^)]*)?\) \{[\s\S]*freeTierUpsellMessage\(/);
+    // …and the upsell is never reachable with `refused` alone being false — every added condition may
+    // only ever SUPPRESS further, never re-open the path a refusal closes.
+    expect(block).not.toMatch(/if \(!refused\s*\|\|/);
     // …and a suppressed upsell is recorded, so the admin sees the check fire rather than inferring it.
     expect(block).toContain('UPSELL_SUPPRESSED');
   });

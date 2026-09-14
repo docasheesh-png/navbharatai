@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, DragEvent, ChangeEvent, ClipboardEvent } from 'react';
+import { usePagedList } from '../../hooks/usePagedList';
+import { LoadMore } from '../../components/common/LoadMore';
 import { Upload, X, Copy, AlertCircle, ChevronDown, ChevronUp, Clock, Check, Image as ImageIcon, Clipboard, Globe } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 
@@ -95,6 +97,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
   const [isDragging, setIsDragging] = useState(false);
   const [copied, setCopied] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>(() => loadHistory());
+  const pagedHistory = usePagedList(history);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [clipboardSupported] = useState(() =>
     typeof navigator !== 'undefined' && !!(navigator.clipboard as any)?.read
@@ -621,12 +624,13 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
 
             {historyOpen && (
               <div className="border-t border-white/10 divide-y divide-white/5">
-                {history.map((entry, i) => (
+                {pagedHistory.visible.map((entry, i) => (
                   <div key={i} className="px-4 py-3 flex flex-col gap-1">
                     <p className="text-xs text-gray-500">{formatTime(entry.timestamp)}</p>
                     <p className="text-xs text-gray-400 font-mono truncate">{entry.preview}</p>
                   </div>
                 ))}
+                <LoadMore list={pagedHistory} label="conversions" />
               </div>
             )}
           </div>

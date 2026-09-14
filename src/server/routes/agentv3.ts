@@ -423,6 +423,7 @@ import { assessBuildInput } from '../AgentV3/buildableInput';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
 import { realismIntent } from '../lib/realismIntent';
+import { heroObjectContract } from '../lib/heroObjectSpec';
 import { BuildCheckpoint } from '../AgentV3/BuildCheckpoints';
 import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
 import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrchestrator';
@@ -13594,6 +13595,35 @@ async function noteBuildOutcome(
               ? ' Say "real-looking" in your summary — never "photorealistic", which this cannot deliver.'
               : ' Keep it light and fast; this is what runs well on a mid-range phone.')
             + `\n\n${buildPrompt}`;
+          /**
+           * THE HERO OBJECT (admin screenshot 2026-09-14: "object ek dam nakli se bante hai").
+           *
+           * 🔴 THE TIER ABOVE CANNOT REACH AN OBJECT THE LIBRARY DOES NOT HAVE, and that is what the
+           * bike-racing screenshot was: a red capsule on two cylinders. Everything needed already
+           * existed — realismIntent read the intention, objects.ts builds genuinely good things, and
+           * the line directly above orders the model to use it — but the library had no BIKE, so
+           * "use the library, never hand-model" was an instruction the model could not obey. It
+           * hand-modelled with no spec, and `setDetailLevel` only ever reaches objects.ts builders,
+           * so the result was 'lite' whatever the user typed.
+           *
+           * Two halves, and this is the second: `createMotorcycle` fixes bikes, and this contract
+           * fixes the CONDITION — an N-builder library meets its N+1th request every day (an
+           * auto-rickshaw, a tractor, a fishing boat), and from that moment the engine is back to
+           * improvising. So the model now gets real-world dimensions and a required part list for
+           * whatever the game is about, whether or not a builder exists for it.
+           */
+          const hero = heroObjectContract(prompt);
+          if (hero.block) {
+            buildPrompt = `${hero.block}\n\n${buildPrompt}`;
+            try {
+              buildDiag.record({
+                phase: 'build', severity: 'info', code: 'HERO_OBJECTS', autoResolved: true,
+                message: `Hero object contract applied (${hero.tier} tier): ${hero.specs.map((x) => x.id).join(', ')}.`
+                  + ' Real-world dimensions and a required part list were handed to the builder, so an'
+                  + ' object with no library builder is modelled to a spec rather than improvised.',
+              });
+            } catch { /* the report must never affect the build it is describing */ }
+          }
         }
         // C1 — the project's OWN rules (NAVBHARATAI.md / AGENTS.md / CLAUDE.md / .cursorrules), so a
         // user does not have to repeat "Hindi labels", "rupees not dollars", "never touch payments" in

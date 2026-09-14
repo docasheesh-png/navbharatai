@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { usePagedList } from '../../hooks/usePagedList';
+import { LoadMore } from '../../components/common/LoadMore';
 import { MentionInbox } from './MentionInbox';
 import { teamAuthHeader } from './teamAuth';
 import {
@@ -155,6 +157,7 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
 
   // — Team state
   const [members, setMembers] = useState<TeamMember[]>(() => [makeSelf(userId)]);
+  const pagedMembers = usePagedList(members);
   const [rolesOpen, setRolesOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -437,7 +440,7 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
               </h2>
 
               <div className="flex flex-col gap-2" ref={menuRef}>
-                {members.map(member => (
+                {pagedMembers.visible.map(member => (
                   <div key={member.id} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-white/5 transition-colors relative group">
                     <Avatar member={member} />
                     <div className="flex-1 min-w-0">
@@ -491,6 +494,7 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
                     )}
                   </div>
                 ))}
+                <LoadMore list={pagedMembers} label="members" />
               </div>
 
               {/* Role descriptions — collapsible */}

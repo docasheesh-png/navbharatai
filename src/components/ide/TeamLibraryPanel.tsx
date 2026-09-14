@@ -4,6 +4,8 @@
 // the team-scoped library API (member-gated on the server). Self-contained: it resolves its own Firebase
 // token, so it can be dropped into the Team collaboration surface with just a teamId.
 import React, { useCallback, useEffect, useState } from 'react';
+import { usePagedList } from '../../hooks/usePagedList';
+import { LoadMore } from '../../components/common/LoadMore';
 import { Box, Plus, Trash2, Copy, Check } from 'lucide-react';
 import { authHeader } from '../../lib/authHeaders';
 
@@ -15,6 +17,7 @@ const KINDS: LibraryKind[] = ['prompt', 'template', 'component'];
 
 export const TeamLibraryPanel: React.FC<{ teamId: string }> = ({ teamId }) => {
   const [items, setItems] = useState<LibraryItem[]>([]);
+  const pagedItems = usePagedList(items);
   const [kind, setKind] = useState<LibraryKind>('prompt');
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
@@ -90,7 +93,7 @@ export const TeamLibraryPanel: React.FC<{ teamId: string }> = ({ teamId }) => {
         <p className="text-[11px] text-[#484f58]">No saved items yet. Save a prompt, template, or component your team can reuse.</p>
       ) : (
         <div className="space-y-2">
-          {items.map((item) => (
+          {pagedItems.visible.map((item) => (
             <div key={item.id} className="bg-[#0d1117] rounded-xl p-3 border border-white/5">
               <div className="flex items-center gap-2">
                 <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-[#8b949e] capitalize">{item.kind}</span>
@@ -105,6 +108,7 @@ export const TeamLibraryPanel: React.FC<{ teamId: string }> = ({ teamId }) => {
               <pre className="text-[10px] text-[#8b949e] mt-1.5 whitespace-pre-wrap break-words max-h-24 overflow-auto font-mono">{item.content.slice(0, 400)}</pre>
             </div>
           ))}
+          <LoadMore list={pagedItems} label="items" />
         </div>
       )}
     </div>

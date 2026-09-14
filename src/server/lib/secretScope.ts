@@ -187,3 +187,44 @@ export function withheldSecretNames(
   }
   return Array.from(out).sort();
 }
+
+/**
+ * What a "this key applies to all my apps" toggle must do to the rows already stored under that name.
+ *
+ * 🔴 WHY THIS EXISTS RATHER THAN A SAVE AT THE NEW SCOPE (admin 2026-09-13 asked for the toggle; this
+ * is the trap it would have walked into). Re-scoping by calling the ordinary save with the new scope
+ * does NOT move the key — `planSecretWrite` only ever touches rows of the SAME scope, deliberately, so
+ * the save would ADD a shared row and leave the app-scoped one alive. And `resolveScopedSecrets` makes
+ * an app-specific key beat a shared one however old it is. So that app would keep injecting the OLD
+ * value while this screen showed the new one, and every other app would get the new one — a split no
+ * user could see or diagnose.
+ *
+ * A move is therefore a MOVE: the row keeps its id and its ciphertext and changes only its scope. That
+ * also means the value is never decrypted to re-scope a key, which is the safest property of all.
+ *
+ * Returns the row to move (null when there is nothing to do) and the rows to retire — live rows of the
+ * SAME NAME already sitting at the target scope. Retiring them is the point: the user has just said
+ * which key they mean, and leaving a second row of that name at the destination would re-create by hand
+ * the duplicate pile `planSecretWrite` exists to collapse.
+ *
+ * PURE.
+ */
+export function planScopeMove(
+  existing: readonly StoredSecretDoc[] | null | undefined,
+  secretId: string,
+  targetScope: string | null,
+): { move: string | null; retire: string[]; alreadyThere: boolean } {
+  const wanted = String(targetScope ?? '').trim();
+  const live = (Array.isArray(existing) ? existing : []).filter((d) => d?.id && !d.deleted);
+  const subject = live.find((d) => d.id === secretId);
+  if (!subject) return { move: null, retire: [], alreadyThere: false };
+  // Already at the destination: nothing to write, and saying so lets the caller answer without a write.
+  if (String(subject.workspaceId ?? '').trim() === wanted) {
+    return { move: null, retire: [], alreadyThere: true };
+  }
+  return {
+    move: subject.id,
+    retire: live.filter((d) => d.id !== subject.id && String(d.workspaceId ?? '').trim() === wanted).map((d) => d.id),
+    alreadyThere: false,
+  };
+}

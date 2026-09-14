@@ -231,14 +231,17 @@ export async function runHostingBillingSweep(opts?: {
       const decision = decideOverage({
         gbToday,
         usage,
-        includedGb: tier.includedTransferGb,
+        // THE BACKEND allowance, explicitly. `gbToday` above is summed from `readHostingUsage`, which
+        // reads a Cloud Run metric — so this sweep has only ever measured server apps, whatever the old
+        // field name suggested. The frontend allowance is a separate number with a separate meter.
+        includedGb: tier.includedBackendGb,
         ratePerGb: HOSTING_OVERAGE_INR_PER_GB,
         hasPlan: true,
         agreed,
       });
 
       const costNote = `our cost $${costUsd.toFixed(6)} for the day`;
-      const usedNote = `${decision.periodGb.toFixed(3)} GB of ${tier.includedTransferGb} GB used this period`;
+      const usedNote = `${decision.periodGb.toFixed(3)} GB of ${tier.includedBackendGb} GB (server) used this period`;
       if (!decision.charge) {
         out.notes.push(`${ownerId} (${tier.name}): ${usedNote} — ${decision.reason.replace(/-/g, ' ')}, nothing charged. ${costNote}. ${gaps.join(' ')}`.trim());
         // The running total still advances even when nothing is owed — that is the whole point of it.

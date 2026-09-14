@@ -54850,3 +54850,46 @@ Full gate on the final state: `typecheck` · `noUnusedImports` · `typecheck:ser
 was taken; nothing records **who** took it or links it to the PR that came out. Two sessions started
 inside the same minute would still both see an unmarked row. A claim carrying an owner and a timestamp
 window is the real fix, and it is not built.
+---
+
+## 2026-09-14 — TWO SESSIONS AUTOPSIED BUILD `1ef27cd7`. The other one was better, so mine was cut down.
+
+Both #2929 (mine) and #2931 landed the same finding from the same report: the incomplete-code heal
+completed a placeholder, re-ran the FULL readiness gate, got **READY 92/100**, set `ok: true` — and the
+release gate then counted the blocker from *before* the heal, went RED, and flipped the verdict back.
+Both traced it to the same cause: `resolveReadinessBlockersOnRejudge()` existed since 2026-08-27 and
+only ONE of the three re-judging heals ever called it.
+
+**#2931 wins on coverage, and it also found something I missed.** Beyond the shared fix it repairs
+`fastLaneCallIdentity`: `fastGenerateOnce` initialises `usedProvider = 'CLAUDE'` and only overwrites it
+when a provider reports in, so a call that died *before any provider was contacted* (the build budget
+ending is thrown at the top of each runner) was recorded as a failed **`anthropic / claude-sonnet-4-6`**
+call — on a FREE, weak-tier build whose own report says `noClaude: true` and where `enforceNoClaude`
+had stripped Claude from the chain. That is a 90-second stall pinned on a named third party we never
+called, and worse, it makes a build look like it breached the weak-tier routing law the admin called
+unbreakable. I read that same report and did not spot it.
+
+On the shared fix the two designs differ slightly: mine wrapped the re-judge itself
+(`recoverAfterRejudge`), theirs bundles resolve+record (`recordReadinessRecovery`) and leaves the
+re-judge to the caller. Mine is marginally stricter; theirs is smaller and lives on the class that
+already owns `resolveReadinessBlockersOnRejudge`. **That difference is not worth two competing
+mechanisms for one question** — which is the exact thing both PRs' own comments warn against. So
+`readinessRecovery.ts`, its tests, and my rewrite of the wiring test were dropped.
+
+**What survived from #2929, because #2931 does not have it:** the vulnerability note advised
+`npm audit fix` when `AGENTV3_AUDIT_FIX=on` means the build had *already run it* (exit 1, npm saying
+the rest need `--force`). Since `looksLikeDependencyInstall` matches `audit`, the note was re-parsed
+from that very output and still gave the advice. `npmAuditNote` now takes `compatibleFixAlreadyRun`,
+read from the **command log** rather than the env flag, so a build that skipped the fix still gets the
+advice. `--force` is still never suggested.
+
+⚠️ **This is the second time today two sessions autopsied one report in parallel** (see the earlier
+"Two sessions fixed the same bug" entry). Both times the duplicate cost a full gate run and a
+conflicted merge. The concurrent-sessions rule says to read the OPEN PRs before starting — a build
+report handed to two sessions is the case that rule does not cover, because neither PR exists yet when
+the second session begins. Recorded as an observation, not a fix.
+
+**Open items from `1ef27cd7` remain open** and are listed in this file's earlier entry for that build:
+the 6–9× wrong ETA, the 354-second silent model call, the missing evidence ledger, and the strong
+suspicion — unverified, because the generated sources are not in the report — that the delivered
+"video editor" cannot edit video.

@@ -6,6 +6,7 @@ import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, weakFlagshi
 } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
+import { toPowerLevel } from '../AgentV3/powerLevel';
 import { isAgentV3FreeUser, buildRequiresSignIn } from '../AgentV3/featureFlag';
 import { userCostStore } from '../lib/UserCostStore';
 
@@ -1021,13 +1022,24 @@ describe('selectBuildModel — admin cost-routing (small=Haiku, complex=Sonnet, 
     expect(selectBuildModel('gemini', true)).toBe(opusModel());
     expect(selectBuildModel('sonnet', true)).toBe(opusModel());
   });
-  it('tier→model fidelity (admin 2026-07-13): Strong pins Sonnet, Powerful/Full Team pin Opus — regardless of analyser tier', () => {
+  it('tier→model fidelity: Strong pins Sonnet regardless of analyser tier; weak/off stay adaptive', () => {
     expect(selectBuildModel('gemini', 'mini')).toBe(sonnetModel());  // Strong = Sonnet 100%, never Opus
     expect(selectBuildModel('opus', 'mini')).toBe(sonnetModel());
-    expect(selectBuildModel('gemini', 'medium')).toBe(opusModel());
-    expect(selectBuildModel('haiku', 'max')).toBe(opusModel());
     expect(selectBuildModel('gemini', 'weak')).toBe(haikuModel());   // weak/off keep the adaptive routing
     expect(selectBuildModel('gemini', 'off')).toBe(haikuModel());
+  });
+  it('🔴 a RETIRED tier can no longer reach Opus through the model selector (three tiers, 2026-09-14)', () => {
+    // 'medium'/'max' used to pin Opus here. Every caller now passes a level that has been through
+    // clampPowerForUser → toPowerLevel, which remaps both to 'mini' — so the Opus branches were
+    // unreachable, and an unreachable Opus branch left in the selector reads later as a live
+    // guarantee. Asserted at the SELECTOR so the two halves cannot drift apart.
+    expect(selectBuildModel('gemini', toPowerLevel('medium'))).toBe(sonnetModel());
+    expect(selectBuildModel('haiku', toPowerLevel('max'))).toBe(sonnetModel());
+  });
+  it('the legacy onlyOpus BOOLEAN still means Opus — a different input, deliberately kept', () => {
+    // Call sites that never carried a power level at all pass the old boolean; removing that branch
+    // would silently downgrade them, which is the opposite of what retiring two tiers is meant to do.
+    expect(selectBuildModel('gemini', true)).toBe(opusModel());
   });
   it('maps real analyser verdicts: a calculator stays cheap (Haiku), an auth+DB app uses Sonnet', () => {
     const calc = analyzeRequest({ prompt: 'build me a calculator' });

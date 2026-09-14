@@ -2110,9 +2110,15 @@ export function tierToGeminiBuildModel(tier: StartTier): string {
  */
 export function selectBuildModel(tier: StartTier | undefined, power: boolean | PowerLevel, largeProject = false): string {
   // Admin tier→model redefinition (2026-07-13): a PAID PINNED tier runs exactly its model —
-  // Strong ('mini') → Sonnet 100%; Powerful/Full Team ('medium'/'max', legacy boolean true) → Opus.
+  // Strong ('mini') → Sonnet 100%.
+  // ⚠️ THE 'medium'/'max' COMPARISONS WERE REMOVED, NOT FORGOTTEN (three tiers, 2026-09-14). Every
+  // caller passes a level that has already been through `clampPowerForUser` → `toPowerLevel`, which
+  // now maps both retired keys to 'mini' — so those branches had become unreachable, and leaving an
+  // unreachable Opus branch in the model selector is exactly how a dead path later reads as a live
+  // guarantee. The legacy BOOLEAN is kept: it is a different input (the old "Only Opus" toggle) and
+  // still arrives from call sites that never carried a level at all.
   if (power === 'mini') return sonnetModel();
-  if (power === true || power === 'medium' || power === 'max') return opusModel();
+  if (power === true) return opusModel();
   // LARGE existing project → Sonnet DIRECTLY (admin decision 2026-07-05: "badi apps direct Sonnet").
   // The analyser tiers by the PROMPT's complexity — but on a big imported app even a simple ask
   // ("survey my app") carries a huge context, which Haiku + the cheap floor handled by timing out

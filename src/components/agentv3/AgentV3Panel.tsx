@@ -280,13 +280,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       setReverting(false);
     }
   }, [state.ownRepo, reverting, revertLastMerge, userId, email]);
-  // Power level (admin tier→model redefinition 2026-07-13): weak (free tier, GLM/Kimi — never Claude) /
-  // off="Normal" (Sonnet, adaptive) / mini="Strong" (Sonnet 100%) / medium="Powerful" (Opus medium
-  // effort) / max="Full Team" (Opus max — ultracode). A FREE user
-  // (server `powerUnlocked:false`) may pick ONLY 'weak'; a paid/free-list user gets all five, default Normal.
+  // Power level — THREE tiers since 2026-09-14 ("inko simple 3 me badlo"): weak (free tier, GLM/Kimi —
+  // never Claude) / off="Normal" (adaptive) / mini="Strong" (the top tier). 'medium' ("Powerful") and
+  // 'max' ("Full Team") were retired; a stored one is remapped UP to Strong by the server's
+  // toPowerLevel, never down to Normal. A FREE user (server `powerUnlocked:false`) may pick ONLY
+  // 'weak'; a paid/free-list user gets all three, default Normal.
   // The server clamps free→weak regardless, so this is purely presentation.
   const [powerUnlocked, setPowerUnlocked] = useState<boolean>(false); // false until /status confirms paid
-  const [powerLevel, setPowerLevel] = useState<'weak' | 'off' | 'mini' | 'medium' | 'max'>('off');
+  // THREE TIERS since 2026-09-14 (admin: "inko simple 3 me badlo — weak, normal, strong. bas").
+  // The internal keys are unchanged so nothing stored has to be migrated; the server's
+  // `toPowerLevel` maps a retired 'medium'/'max' UP to 'mini', never down to the default.
+  const [powerLevel, setPowerLevel] = useState<'weak' | 'off' | 'mini'>('off');
   // Once we know the account tier, snap the default: paid → Normal (off), free → weak (their only option).
   // Never fights a running build. Also clamps a stale paid-tier selection back to weak for a free user.
   useEffect(() => {
@@ -297,8 +301,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   useEffect(() => {
     try { localStorage.setItem('nbai_power_level', powerLevel); } catch { /* storage unavailable — the reader falls back to the weak-safe default */ }
   }, [powerLevel]);
-  // Derived for the existing boolean call sites (start/telemetry) — any Opus power level.
-  const onlyOpus = powerLevel === 'mini' || powerLevel === 'medium' || powerLevel === 'max';
+  // Derived for the existing boolean call sites (start/telemetry) — any PAID PINNED tier. With three
+  // tiers that is Strong alone; the name is kept because ~30 call sites and the server's `onlyOpus`
+  // parameter share it, and renaming a wire field is a separate change from retiring two tiers.
+  const onlyOpus = powerLevel === 'mini';
   // Planning + Thinking toggles removed from the Build-options popover (admin 2026-08-14: "no need now").
   // Kept as constants so the build contract is unchanged: plan-first stays OFF (Plan is still available as
   // its own chat MODE in the Build/Plan/Advise selector), and thinking stays adaptive/auto — the engine
@@ -559,7 +565,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // PreviewSurface's own auto-resume is deliberately gated to once per workspace.
   const [previewBootSignal, setPreviewBootSignal] = useState(0);
   // Stop any live dictation when the panel unmounts (never leave the mic hot).
-  // Fix 60 — Team HQ elapsed clock (Full Team tier): anchored when a build STARTS; ticks every
+  // Fix 60 — Team HQ elapsed clock (the TOP tier — Strong since 2026-09-14): anchored when a build STARTS; ticks every
   // second while the premium card is visible. FREEZE-ON-STOP (admin 2026-07-21 — "time reset ho
   // jata hai, error ane par nahi hona chahiye"): the old effect zeroed the clock the moment
   // `running` flipped false, so an error event wiped the elapsed time on screen. Now the clock
@@ -576,7 +582,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       buildStartRef.current = Date.now();
       setTeamElapsedMs(0);
     }
-    if (powerLevel !== 'max') return;
+    // The premium live-team card belongs to the TOP tier, which since 2026-09-14 is Strong. Retiring
+    // Full Team retired the label, not the feature — deleting a working premium experience because
+    // its tier was renamed would be a downgrade nobody asked for.
+    if (powerLevel !== 'mini') return;
     const t = setInterval(() => setTeamElapsedMs(Date.now() - buildStartRef.current), 1000);
     return () => clearInterval(t);
   }, [running, powerLevel]);
@@ -5018,10 +5027,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                           the connection. Toggleable ANYTIME (not disabled while running) so the user can turn
                           it on the moment they realise a long build is going. */}
                       <ToggleRow label="Keep screen on" checked={keepScreenOn} onClick={() => setKeepScreenOn((v) => !v)} />
-                      {/* Power tiers (admin tier→model redefinition 2026-07-13): Weak (free — GLM/Kimi, never
-                          Claude) / Normal (Sonnet, adaptive) / Strong (Sonnet 100%) / Powerful (Opus medium
-                          effort) / Full Team (Opus max — ultracode). ALL FIVE are
-                          always VISIBLE; a FREE user (powerUnlocked=false) sees the paid four LOCKED (🔒,
+                      {/* Power tiers — THREE since 2026-09-14: Weak (free — GLM/Kimi, never Claude) /
+                          Normal (adaptive) / Strong (the top tier). ALL THREE are
+                          always VISIBLE; a FREE user (powerUnlocked=false) sees the paid two LOCKED (🔒,
                           not selectable) until they recharge — and the server clamps free→weak regardless,
                           so a UI/API bypass can never reach a paid engine. Paid default = Normal. */}
                       <div className="px-3 py-2">
@@ -5031,8 +5039,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                             { key: 'weak', label: 'Weak' },
                             { key: 'off', label: 'Normal' },
                             { key: 'mini', label: 'Strong 💪' },
-                            { key: 'medium', label: 'Powerful' },
-                            { key: 'max', label: 'Full Team' },
                           ] as const).map((opt) => {
                             const locked = !powerUnlocked && opt.key !== 'weak';
                             return (
@@ -5063,11 +5069,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                             ? 'Free engine — fast & lightweight'
                             : powerLevel === 'off'
                             ? 'Normal — balanced (Sonnet)'
-                            : powerLevel === 'mini'
-                            ? 'Sonnet · 100%'
-                            : powerLevel === 'medium'
-                            ? 'Opus · medium effort'
-                            : 'Opus · ultracode (max effort)'}
+                            : 'Strong — the full engine'}
                           {!powerUnlocked && ' · 🔒 recharge (any amount) to unlock all tiers'}
                         </div>
                       </div>

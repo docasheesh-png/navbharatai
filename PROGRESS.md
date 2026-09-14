@@ -55515,3 +55515,65 @@ first (#2935, #2934, #2933, #2932, #2900) — none touch this area. Branched fre
 this session's other open PR (#2933, an unrelated AgentV3 fix) to keep the two changes independently
 reviewable. PR #2937 opened; per the standing merge-hold rule, driven to green CI but not merged
 without the admin's explicit go-ahead.
+
+---
+
+## 2026-09-14 — Five power tiers become three (admin: "inko simple 3 me badlo — weak, normal, strong. bas")
+
+**Slice 1 of 4** of the admin's engine-routing redesign (the others: per-mode ladders with "100% usi
+mode mein"; an OpenAI provider for GPT-5.4; retiring Gemini + Grok once the new keys are in). This
+slice retires 'medium' (Powerful) and 'max' (Full Team) **as choices** and changes no model routing —
+Strong is still Sonnet-pinned here, on purpose: turning it into a ladder moves `powerMode`'s meaning
+at ~30 call sites and must not ride a UI change.
+
+**What was decided, and why it is not just "delete two buttons":**
+- **The internal keys did not change** ('weak' / 'off' / 'mini'), so no stored preference, no
+  persisted build record and none of the ~20 consumer modules needs migrating. `RetiredPowerLevel`
+  names the two old keys as a type, so every place that must still understand an OLD value says so.
+- 🔴 **A retired tier maps UP to Strong, never down to the default.** A user whose stored preference is
+  'max' had deliberately chosen the strongest engine on offer; letting it fall through
+  `toPowerLevel`'s unknown-input default would hand exactly those users the middle tier with nothing
+  on screen to reveal it — a silent downgrade of the people paying most. The remap is inside
+  `toPowerLevel`, AFTER the free-user clamp, so it can never become a way to reach a paid engine.
+  Only the two keys we actually retired are remapped; junk still falls to 'off' (tested).
+- ⚠️ **Historical billing is deliberately untouched.** `pricing.ts`'s `BillingPowerLevel` still
+  accepts 'medium'/'max' and `powerToTier` still prices them at the Opus rate — build records written
+  before today were charged real-Opus × 2 and must keep saying so. Retiring a choice is not rewriting
+  what already happened. Test-locked.
+- **The Team HQ card follows the top tier, not a key.** `showTeamHq` now fires on 'mini' (and still
+  on an in-flight 'max'): the premium live-team experience was tied to the label "Full Team", and
+  deleting a working feature because its tier was renamed would be a downgrade nobody asked for.
+- `selectBuildModel`'s 'medium'/'max' → Opus branches were **removed, not left dormant**: every caller
+  passes a level that has been through `clampPowerForUser` → `toPowerLevel`, so they were unreachable,
+  and an unreachable Opus branch in the model selector reads later as a live guarantee. The legacy
+  BOOLEAN `true` → Opus is kept — it is a different input from call sites that never carried a level.
+
+**Corrected in the same session, recorded so it is not repeated:** I told the admin "GLM-5.3-Flash —
+aisa koi model nahi." Wrong. It is absent from THIS REPO (no rate line, no ladder), and z.ai's own
+benchmark page shows it exists. "I could not find it in the code" and "it does not exist" are
+different claims, and CLAUDE.md already says which one a session may make.
+
+⚠️ **Two facts the next slices need from the admin, named here so they are not guessed:**
+1. `glm-5.3-flash`'s real price. `providerRates.ts` prices any GLM id containing "flash" at **$0**
+   (the 4.7-flash rule), so without its own rate line a paid Normal build on 5.3-flash would be
+   silently under-billed. Slice 2 adds a line defaulting to the 4.7-coder rate with
+   `RATE_GLM53_FLASH_*` overrides; the admin sets the real number.
+2. Whether GPT-5.4 is cheaper than `kimi-k2.7`. It lands on the WEAK ladder, where every build is
+   paid by NavBharatAI, and the admin's own 2026-09-12 free-tier ceiling is kimi-k2.7's price. If it
+   is dearer, that is a knowing choice, not an accident — and Haiku stops being the absolute last rung.
+
+🔒 **Sequencing rule for slice 4 (Gemini + Grok retirement):** Grok is today the judge (free and
+paid), the free plan-phase model and Engineer AI's PRIMARY; Gemini/Vertex are the free-chat
+backstop and vision. **Keys must not be deleted from Cloud Run until the re-homing PR is merged**,
+or judge and Engineer AI go dark for the gap.
+
+**Tests:** `tests/threePowerTiers.test.ts` (8 — the ordered list, the picker on screen reads the same
+three keys, upward remap, junk still defaults, free clamp still wins, no selectable tier at the Opus
+multiplier, historical records still price Opus), plus `powerLevel.test.ts`, `powerGating.test.ts`
+and `agentv3.test.ts` rewritten to the new rules rather than silenced. `AppKnowledgeBase.ts` POWER
+SELECTOR entry rewritten for three tiers, including what to tell a user who asks where Full Team went.
+
+Gate on the final state: typecheck · noUnusedImports · typecheck:server · build · test:bundle ·
+boot:check all green; `vitest` **23,294 passed / 1 skipped**; the only 3 failures are
+`tests/esmMirror.test.ts`, verified to fail identically on a clean `main` in this sandbox (upstream
+CDN blocked by the agent proxy) while CI on `main` is green — environment, not code.

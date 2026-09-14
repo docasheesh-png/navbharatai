@@ -22,9 +22,16 @@ export function canSteerMidBuild(running: boolean, _powerLevel: string, chatMode
   return running === true && chatMode === 'build';
 }
 
-/** Whether the premium Team HQ card is shown: FULL TEAM tier + a build actually running. */
+/**
+ * Whether the premium Team HQ card is shown: the TOP tier + a build actually running.
+ *
+ * ⚠️ The top tier is 'mini' (Strong) since 2026-09-14, when the five tiers became three and
+ * 'max' (Full Team) was retired as a choice. The card is premium UX for whoever is paying the
+ * most, so it follows the top of the ladder rather than a particular key — and 'max' is still
+ * accepted because a stored preference or an in-flight build can still carry it.
+ */
 export function showTeamHq(running: boolean, powerLevel: string): boolean {
-  return running === true && powerLevel === 'max';
+  return running === true && (powerLevel === 'mini' || powerLevel === 'max');
 }
 
 export interface TeamHqModel {

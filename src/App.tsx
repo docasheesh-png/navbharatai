@@ -2,6 +2,8 @@ import UpdateBanner from './components/UpdateBanner';
 import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 // Native GitHub OAuth return — the deep-link parse and the resume decision, kept pure and tested.
 import { tokenFromDeepLink, ticketFromDeepLink, redeemGithubTicket, resumeOutcome, RESUME_GRACE_MS, GITHUB_CANCELLED_MESSAGE } from './lib/githubOauthReturn';
+// Native Supabase-connect return — the SAME deep-link shape, its own path (2026-09-14 fix).
+import { nonceFromSupabaseDeepLink, errorFromSupabaseDeepLink, SUPABASE_NATIVE_RETURN_EVENT } from './lib/supabaseOauthReturn';
 import { readTapFeedbackPrefs, shouldOpenMenuOnSwipe } from './lib/tapFeedbackPrefs';
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
@@ -2429,6 +2431,27 @@ export default function App() {
     };
     window.addEventListener('storage', handleStorageChange);
 
+    // NATIVE (Capacitor) Supabase-connect return (2026-09-14 fix):
+    // com.navbharat.ai://supabase-callback?nonce=… (or ?error=…). Stash into the SAME sessionStorage
+    // keys the web redirect already uses, land on Settings → Database, and fire the event
+    // SupabaseConnectCard listens for — it stays mounted the whole time on native (no page navigation),
+    // so it cannot pick this up on its own. Kept as its own function (not inlined into the appUrlOpen
+    // callback below) so the GitHub listener's own shape and tested content stay unchanged.
+    const handleSupabaseUrlOpen = (url: string | undefined): boolean => {
+      const sbNonce = nonceFromSupabaseDeepLink(url);
+      const sbErr = errorFromSupabaseDeepLink(url);
+      if (!sbNonce && !sbErr) return false;
+      try {
+        if (sbNonce) sessionStorage.setItem('nbai.sbConnectNonce', sbNonce);
+        if (sbErr) sessionStorage.setItem('nbai.sbConnectError', sbErr);
+      } catch { /* private mode — the card's status refresh still shows the true state */ }
+      toggleTab('settings');
+      setSettingsScreen('database');
+      window.dispatchEvent(new CustomEvent(SUPABASE_NATIVE_RETURN_EVENT));
+      void import('@capacitor/browser').then(({ Browser }) => Browser.close().catch(() => {})).catch(() => {});
+      return true;
+    };
+
     // NATIVE (Capacitor) GitHub OAuth return. The in-app browser redirects to
     // com.navbharat.ai://github-callback#gh_token=…, which fires the App plugin's `appUrlOpen`. Extract
     // the token, connect, and close the in-app browser so the user lands back in the app. NO-OP on web
@@ -2440,6 +2463,7 @@ export default function App() {
         if (Capacitor.isNativePlatform?.() !== true) return;
         const { App: CapApp } = await import('@capacitor/app');
         const handle = await CapApp.addListener('appUrlOpen', (data: { url?: string }) => {
+          if (handleSupabaseUrlOpen(data?.url)) return; // see handleSupabaseUrlOpen above
           // A TICKET, when the server had a verified identity to bind one to; the raw token otherwise.
           // Both are handled because the server chooses, not the client — see githubOauthReturn.ts.
           // The ticket path exists because a custom URI scheme is claimable by any installed app, and

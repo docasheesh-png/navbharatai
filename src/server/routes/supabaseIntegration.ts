@@ -26,7 +26,7 @@ import crypto from 'crypto';
 import {
   createPkcePair, signOAuthState, verifyOAuthState, buildSupabaseAuthorizeUrl,
   tokenExchangeBody, basicAuthHeader, parseCallbackParams, supabaseOAuthConfigured,
-  connectFailureMessage, SUPABASE_TOKEN_URL, OAUTH_STATE_TTL_MS,
+  connectFailureMessage, SUPABASE_TOKEN_URL, OAUTH_STATE_TTL_MS, supabaseReturnUrl,
 } from '../lib/supabaseOAuth';
 import { listOrganizations } from '../lib/supabaseProvision';
 import {
@@ -78,18 +78,23 @@ export function callbackUrl(): string {
  * restarts mid-consent the user retries, which is why the failure message says exactly that rather
  * than something vague. Entries are swept on every insert so an abandoned flow cannot accumulate.
  */
-const pendingVerifiers = new Map<string, { verifier: string; expiresAtMs: number }>();
+const pendingVerifiers = new Map<string, { verifier: string; isNative: boolean; expiresAtMs: number }>();
 
-function rememberVerifier(nonce: string, verifier: string, nowMs: number): void {
+function rememberVerifier(nonce: string, verifier: string, isNative: boolean, nowMs: number): void {
   for (const [k, v] of pendingVerifiers) if (v.expiresAtMs <= nowMs) pendingVerifiers.delete(k);
-  pendingVerifiers.set(nonce, { verifier, expiresAtMs: nowMs + OAUTH_STATE_TTL_MS });
+  pendingVerifiers.set(nonce, { verifier, isNative, expiresAtMs: nowMs + OAUTH_STATE_TTL_MS });
 }
 
-function takeVerifier(nonce: string, nowMs: number): string | null {
+/**
+ * `isNative` travels alongside the verifier (set once at `/start`, from the CLIENT's own platform
+ * check) so the callback — a top-level browser navigation that carries no headers of its own — still
+ * knows whether to send the browser back into the web app or hand the native app its deep link.
+ */
+function takeVerifier(nonce: string, nowMs: number): { verifier: string; isNative: boolean } | null {
   const hit = pendingVerifiers.get(nonce);
   pendingVerifiers.delete(nonce); // single use, whatever the outcome
   if (!hit || hit.expiresAtMs <= nowMs) return null;
-  return hit.verifier;
+  return { verifier: hit.verifier, isNative: hit.isNative };
 }
 
 /** The nonce is the third dot-segment of the state we signed. */
@@ -163,12 +168,9 @@ function stateSecret(): string {
  * over an authenticated fetch. The nonce in the URL is useless without a Bearer token for the exact
  * account that began the flow (see `claimPendingConnection`), and it is single-use + TTL'd.
  */
-function appRedirect(res: Response, params: { nonce?: string; error?: string }): void {
-  const origin = (process.env.APP_ORIGIN || 'https://navbharatai.com').replace(/\/$/, '');
-  const q = new URLSearchParams();
-  if (params.nonce) q.set('sbconnect', params.nonce);
-  if (params.error) q.set('sberror', params.error);
-  res.redirect(302, `${origin}/?${q.toString()}`);
+function appRedirect(res: Response, params: { nonce?: string; error?: string }, isNative = false): void {
+  const origin = process.env.APP_ORIGIN || 'https://navbharatai.com';
+  res.redirect(302, supabaseReturnUrl(isNative, origin, params));
 }
 
 export function registerSupabaseIntegrationRoutes(
@@ -201,7 +203,11 @@ export function registerSupabaseIntegrationRoutes(
     const now = Date.now();
     const nonce = crypto.randomBytes(16).toString('hex');
     const { verifier, challenge } = createPkcePair();
-    rememberVerifier(nonce, verifier, now);
+    // The NATIVE (Capacitor) app opens this URL in an in-app browser and needs the callback to return a
+    // deep link, not the web app's own-origin redirect — see supabaseOauthReturn.ts for why the web
+    // redirect strands a native user on the website with no Firebase session (2026-09-14). The client
+    // states its own platform here because the callback is a browser navigation that cannot ask it.
+    rememberVerifier(nonce, verifier, req.body?.native === true, now);
     const state = signOAuthState(stateSecret(), uid, now + OAUTH_STATE_TTL_MS, nonce);
     res.json({
       url: buildSupabaseAuthorizeUrl({
@@ -213,10 +219,16 @@ export function registerSupabaseIntegrationRoutes(
     });
   });
 
-  // Where Supabase sends the user back. This is a browser navigation, so both outcomes REDIRECT
-  // into the app (Settings → Database), which shows the result where the user is actually looking.
+  // Where Supabase sends the user back. This is a browser navigation, so both outcomes REDIRECT —
+  // into the WEB app's own origin (Settings → Database) for a browser flow, or into a
+  // `com.navbharat.ai://supabase-callback` deep link for the flow a NATIVE app's in-app browser started
+  // (see supabaseOauthReturn.ts for why the web redirect alone stranded native users, 2026-09-14).
   app.get('/api/integrations/supabase/callback', async (req: Request, res: Response) => {
-    const fail = (msg: string): void => { appRedirect(res, { error: msg }); };
+    // Resolved once the verifier is found (below); every failure before that point cannot yet know
+    // whether this was a native flow, so it degrades to the web redirect — the same honest "please
+    // retry from the app" page a native user would see for a genuinely expired/forged attempt anyway.
+    let isNative = false;
+    const fail = (msg: string): void => { appRedirect(res, { error: msg }, isNative); };
     if (!supabaseOAuthConfigured() || !stateSecret()) { fail(connectFailureMessage('not-configured')); return; }
 
     const parsed = parseCallbackParams(req.query as Record<string, unknown>);
@@ -231,11 +243,13 @@ export function registerSupabaseIntegrationRoutes(
     // the whole flow impossible for every user (the 2026-08-20 root cause; see the pending-store
     // note above). The signed state still proves WHO began the flow; the OWNERSHIP proof happens at
     // `/complete`, on a request that can actually carry a Bearer token.
-    const verifier = takeVerifier(nonceFromState(parsed.state), now);
-    if (!verifier) {
+    const verifierHit = takeVerifier(nonceFromState(parsed.state), now);
+    if (!verifierHit) {
       fail('This connection attempt timed out or was already used. Please tap "Connect database" again.');
       return;
     }
+    isNative = verifierHit.isNative;
+    const verifier = verifierHit.verifier;
 
     let body: TokenResponse | null = null;
     try {
@@ -275,7 +289,7 @@ export function registerSupabaseIntegrationRoutes(
       orgName: orgs.orgs[0].name,
       connectedAtMs: now,
     }, orgs.orgs[0].name, now);
-    appRedirect(res, { nonce });
+    appRedirect(res, { nonce }, isNative);
   });
 
   // The authenticated half of the callback: the opener claims the stashed consent with its Bearer

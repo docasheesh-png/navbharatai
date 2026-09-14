@@ -53321,3 +53321,69 @@ also accepted `lastPreviewUrl`. **If it was false, that specific build is still 
 failure.** The fix for that is to make the preview verification actually run and record, not to
 accept weaker proof — loosening the evidence rule would re-introduce exactly what their comment
 warns against. Left open here rather than guessed at.
+
+---
+
+## 2026-09-14 — Eleven saved credentials shown as "No credentials saved yet"
+
+**Admin, with a screenshot:** *"maine abhi 11 credentials save kiye. par yaha aa raha hai save nahi hai."*
+
+**The keys were saved. Every one of them.** The save path was never the problem — it goes through
+`POST /api/secrets`, which uses the ADMIN SDK. What failed was the screen's ability to *see* them.
+
+### The root cause: the browser was reading a collection only the server owns
+
+`SecretManager.tsx` rendered the table as `rows ∩ metas`:
+
+- **`rows`** — the real keys, from `POST /api/secrets/:userId/reveal`. Server-side, ticketed, correct.
+  All eleven were in here.
+- **`metas`** — an `onSnapshot` **straight onto the `user_secrets` collection from the browser**.
+
+A browser read is subject to Firestore security rules; the Admin SDK is not. And the rule guarding it
+was wrong in a way that reads as protection:
+
+```
+match /user_secrets/{userId}/{document=**} { allow read, write: if isOwner(userId); }
+```
+
+That guards a **per-user subtree which has never existed.** The server writes **flat documents with
+auto-ids** and a `user_id` **field** (`addDoc(collection(db, 'user_secrets'), …)`), so under
+`rules_version = '2'` the `{userId}` wildcard bound to a **random document id** and `isOwner(<auto-id>)`
+could never be true. The query was refused.
+
+**And the refusal arrived nowhere.** `onSnapshot(q, cb)` was registered with **no error callback**, so
+the denial was swallowed, `secrets` stayed `[]`, the allow-list was empty — and every real key was
+filtered out of a list that then announced *"No credentials saved yet."*
+
+### Why this is one bug and not two
+
+The class is **a client reading a server-owned, Admin-SDK-written collection directly** — which cannot
+work, and whose failure mode is silence. So the fix is not a better rule: it is to stop doing that.
+`listSecrets()` already existed in `src/lib/secretsApi.ts` for exactly this (names + scope, never a
+value), carries the user's token, is bounded by a timeout, and throws. The list now uses it, reloads
+after a save, and `firestore.rules` states the truth — `user_secrets` is **server-only**, denied
+outright, a rule that cannot be mistaken for a permission that works.
+
+⚠️ **The trade, stated rather than discovered later:** a one-shot read has no live updates. It reloads
+on mount and after a save — the same moments the old snapshot would have fired — and it now reads from
+the same source the build engine does.
+
+### The honesty half, which matters more than the read
+
+A failed read still empties `rows ∩ metas`, so it would have printed the same sentence. Those two
+states now differ: an unreadable list says **why**, and says the keys are safe. And the catch block
+deliberately **does not blank the list it already had** — turning a transient network failure into "you
+have nothing saved" is the same lie arriving by a slower route. Test-locked, including that one.
+
+### 🔴 Not verified from here, and not claimed
+
+I cannot read the **deployed** Firestore rules — `firestore.rules` in this repo is only live if someone
+ran a Firebase deploy. The diagnosis above is from the repo's rule and the code's real document shape.
+**It does not matter for the fix** (the client no longer reads that collection at all, so the deployed
+rule cannot affect this screen either way), but the specific claim "the deployed rule denied it" is an
+inference, not a measurement, and is written here as one.
+
+### Verification
+
+9 tests (`tests/secretListReadPath.test.ts`). Two reverts tried, two failures: removing the server read,
+and collapsing the honest empty-state back into one sentence.

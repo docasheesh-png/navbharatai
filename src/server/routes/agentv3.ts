@@ -12713,6 +12713,22 @@ async function noteBuildOutcome(
       // "made by NavBharatAI" signature: default ON, off only when the user toggled it off in
       // Settings → General. The dispatcher bakes the badge into index.html on preview publish.
       dispatcher.setSignatureEnabled(appSignatureEnabled);
+      // THE TYPED "STOP" (admin 2026-09-14, build 70115adf). `abortBuild(..., 'user-stop')` has always
+      // existed for the Stop BUTTON; this is the same cause reached from a SENTENCE. The message
+      // already travels to the model through steerPoll — the model decides, because only it can tell
+      // "chhod do" from "ruko, pehle login theek karo" — and this is how its decision reaches the run.
+      // Same abort path, same cause, so the summary, the report and the billing all already know what
+      // a user stop means; nothing new had to learn it.
+      dispatcher.setStopBuild((reason) => {
+        try {
+          buildDiag.record({
+            phase: 'build', severity: 'info', code: 'USER_STOPPED_BUILD', autoResolved: true,
+            message: 'The user asked for this build to stop, and it was stopped.',
+            detail: reason ? `user said: ${reason}` : undefined,
+          });
+        } catch { /* the record must never be what prevents the stop */ }
+        abortBuild({ abort: (r?: unknown) => abort.abort(r) }, 'user-stop');
+      });
       // C2 — load the project's own "never touch this" list and ARM THE GUARD before any tool runs.
       // Reading the file into the prompt alone would be a wish, not a rule: a model told nicely still
       // edits a protected folder during a big refactor, and the user finds out when their live payment

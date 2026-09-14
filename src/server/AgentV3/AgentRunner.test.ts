@@ -169,7 +169,11 @@ describe('AgentRunner (native tool-use loop)', () => {
     );
     const result = await runner.run('build something big');
     expect(result.ok).toBe(false);
-    expect(result.summary).toMatch(/stopped by the user/i);
+    // ⚠️ THE RULE, NOT THE SENTENCE — the sibling of the same fix in buildAbortCause.test.ts. The
+    // wording changed on 2026-09-14 when a TYPED stop became possible and the message had to start
+    // naming what survived. What this test is really protecting is that the runner stops between
+    // turns and attributes it to the USER, and that is what is checked.
+    expect(result.summary).toMatch(/by the user|as you asked|you stopped/i);
     expect(events.some((e) => e.type === 'done')).toBe(true);
   });
 

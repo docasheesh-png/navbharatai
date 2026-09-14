@@ -17,6 +17,7 @@ export type ToolName =
   | 'grep'
   | 'glob'
   | 'update_todo'
+  | 'stop_build'
   | 'update_preview'
   | 'recall'
   | 'evaluate'

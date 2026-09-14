@@ -52681,3 +52681,59 @@ of the fix. Re-fetching before a push catches a conflict; it does not catch a PR
 under a branch you are still improving. **Check whether your PR is still OPEN before pushing a
 correction to it** — a push that succeeds to a merged branch is silent and reaches nobody.
 7 new tests. Fixed on the P5 branch (#2905) and merged up the stack to #2908 and #2909.
+
+## 2026-09-14 — A TYPED "stop" now stops the build, and the MODEL is the one who decides
+
+Admin's ruling, after the `70115adf` autopsy left this open: *"build rokne ko kaha jaye, to bhi build
+ruk jani chahiye. **par woh message provider tak bhej kar, build roke!!**"*
+
+That second sentence is the design, and it answers the exact objection this file recorded yesterday.
+I had declined to build a stop-intent classifier because the asymmetry runs the wrong way — wrong
+toward stopping KILLS a live build, and *"ruko, pehle login theek karo"* is a steer one word away from
+*"chhod do"*. The admin's answer removes the objection rather than overruling it: **do not write a
+matcher at all. The message already reaches the model; give the model's decision a way to reach the
+build.**
+
+**What was actually missing, read rather than guessed.** `buildAbortCause.ts` has had a first-class
+`user-stop` cause since 2026-08-15 — but it is the Stop BUTTON. A message typed during a build goes
+through `steerPoll` in `AgentRunner` and is injected as an ordinary user turn. In `70115adf` the model
+READ the order, ANSWERED *"ठीक है, मैं इस काम को अभी यहीं रोक देता हूँ"*, and had no way on earth to
+act on it. **The button was wired and the sentence was not.**
+
+**The fix: a `stop_build` tool.** The model calls it; it reaches `abortBuild(..., 'user-stop')` — the
+SAME cause the button uses, so the summary, the report's user-vs-platform attribution and the billing
+all already knew what it means and nothing new had to learn it.
+
+🔑 **The tool's DESCRIPTION is the entire safety mechanism**, so it is written as a precision rule and
+test-locked clause by clause. It names stop words in the languages people actually type (stop, cancel,
+rehne do, chhod do, band karo, मुझे नहीं चाहिए) AND — more importantly — the near-misses that must
+never fire it:
+- **impatience** ("kitna time lagega?", "itni der?") — this very user sent one of those FIRST, and the
+  build was right to continue;
+- **a change of direction** ("ruko, pehle login theek karo") — the pair that makes a phrase list
+  impossible;
+- **stopping one PART** ("ye feature mat banao").
+And the honest default: if not certain the WHOLE build should end, do not call it — ask in the reply.
+
+Three decisions worth recording:
+
+- **It is the ARCHITECT'S tool alone**, deliberately not in `BUILD_TOOLS`. That is the agent the user
+  talks to and whose turn steer messages are injected into; a sub-agent ending the whole build over a
+  message it half-saw is not a risk worth taking for a capability it cannot need.
+- **An unwired dispatcher says so.** `stop_build` with no `setStopBuild` returns "could not stop —
+  tell the user plainly", never "stopped". Returning success with nothing wired would have the model
+  tell someone their build had ended while it carried on — the fake success the second absolute rule
+  forbids. Test-locked.
+- **The user-stop summary now names the way back.** It was six words — *"Build stopped by the user."*
+  — which told someone nothing about what survived. This file's own opening argues why that is not
+  cosmetic: *being blamed is bad, being blamed AND quietly denied the recovery path is what makes it
+  costly.* It mattered little while the only way to stop was a button the user had just pressed on
+  purpose; it matters now that a sentence can stop a build, because the person may not realise
+  anything was kept. It now says what is saved, or honestly that nothing had been written yet.
+
+⚠️ **Two existing tests pinned the old SENTENCE rather than the rule** (`buildAbortCause.test.ts` and
+its sibling in `AgentRunner.test.ts`) and both went red on a legitimate wording change. Both now assert
+the rule they were really protecting — that no PLATFORM-side cause is ever blamed on the user, which
+is the whole reason `buildAbortCause.ts` exists. **That is the third time in two days a test has
+pinned a literal where it meant a rule**; the others were the hosting catalogue's prices and the
+knowledge base's. 8 new tests.

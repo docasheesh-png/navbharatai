@@ -138,6 +138,31 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'stop_build',
+      description:
+        'STOP this build now, because the user asked you to. Call this the moment the user tells you '
+        + 'to stop, cancel, abandon or leave the work — in any language ("stop", "cancel", "rehne do", '
+        + '"chhod do", "band karo", "ab mat banao", "मुझे नहीं चाहिए"). Their files so far are saved and '
+        + 'they can resume with one message, so stopping costs them nothing.\n'
+        + 'DO NOT call it for anything else. These are NOT stop requests and calling it on them destroys '
+        + 'work the user is waiting for:\n'
+        + '  • impatience — "kitna time lagega?", "itni der?", "jaldi karo", "hurry up"\n'
+        + '  • a change of direction — "ruko, pehle login theek karo", "wait, do X first", "actually make it blue"\n'
+        + '  • stopping one PART — "ye feature mat banao", "skip the tests"\n'
+        + 'If you are not certain the user wants the WHOLE build to end, do not call this — keep working '
+        + 'and ask them in your reply instead. Answer the user in the same message you call this from.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          reason: {
+            type: 'string',
+            description: "The user's own words, quoted, that asked for the stop. For the build record.",
+          },
+        },
+        required: ['reason'],
+      },
+    },
+    {
       name: 'update_todo',
       description: 'Update the ONE running build plan shown to the user. Send the full list with statuses updated and new items appended — never a fresh shorter plan (completed items always stay; the workspace keeps finished work even if you omit it).',
       input_schema: {
@@ -3332,6 +3357,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
 
 /** The set of base tool names the catalog exposes (for validation). */
 export const CATALOG_TOOL_NAMES = [
+  'stop_build',
   'read_file',
   'write_file',
   'write_files_batch',

@@ -168,7 +168,10 @@ describe('the wiring — both surfaces, and no upsell after a refusal', () => {
     // here could only ever describe one of them, so it would have had to be deleted (losing the
     // guard) or kept (blocking the other two). What must hold is the intent: the model's own answer
     // is read, and NOTHING is said to the user when that answer was no.
-    const start = route.indexOf("zeroBillReason = 'empty build (0 files produced) — never charged'");
+    // ⚠️ Anchored on the reason STRING alone, not on the assignment. Autopsy 697b38ee turned that
+    // assignment into a ternary (a verified-no-change turn is a success and must not be logged as an
+    // empty build), which broke this anchor while the guard it protects was untouched.
+    const start = route.indexOf("'empty build (0 files produced) — never charged'");
     expect(start).toBeGreaterThan(0);
     const block = route.slice(start, start + 4500);
     expect(block).toContain('const refused = looksLikeRefusal(result.summary);');

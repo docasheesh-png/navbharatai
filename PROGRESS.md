@@ -52681,3 +52681,106 @@ of the fix. Re-fetching before a push catches a conflict; it does not catch a PR
 under a branch you are still improving. **Check whether your PR is still OPEN before pushing a
 correction to it** — a push that succeeds to a merged branch is silent and reaches nobody.
 7 new tests. Fixed on the P5 branch (#2905) and merged up the stack to #2908 and #2909.
+
+---
+
+## 2026-09-14 — AUTOPSY 697b38ee: a working app was reported as a failed build (three root causes, one open)
+
+**Report.** Prompt: *"Continue from where you left off and finish/fix the build so the app works
+end-to-end."* Existing 21-file TradingView-style React+Vite app. 13.1 min · `ok:false` · 171 items
+(3 errors, 24 warnings, 7 auto-resolved, 14 workarounds, 6 unresolved) · 21 provider failures (KIMI 11
+rate-limit, GLM 9 rate-limit + 1 timeout) · free tier, weak, billed ₹0.
+
+**What the engine actually achieved, from its own transcript:** `tsc --noEmit` exit 0 (twice, +64.5s and
++520.7s) · `npm run build` exit 0 · dev server up · preview published · opened in a real browser and
+rendered · watchlist click updates the chart · the project's own Playwright suite installed and **passed**
+(exit 0, +636.9s) · `PROD_BUILD_OK` · `PREVIEW_SNAPSHOT_SAVED` · `GREEN_GUARD_SAVE` · release gate
+*"It runs and renders"*.
+
+**What the user was told:** *"The build produced no files. Please try again — you have not been charged."*
+and *"NavBharatAI's engine is running slowly right now and your build could not finish."*
+
+### Ledger
+
+- ✅ **Self-healed (7):** `@playwright/test` added to package.json automatically (+2.1s) · the agent
+  installed the missing chromium itself and re-ran the suite green · recovered from a `browser_action`
+  that landed on `about:blank` · the weak checkpoint nudged a stalled loop (+345.4s) · the fallback chain
+  absorbed all 21 provider failures · `UPSELL_SUPPRESSED` correctly withheld the credits pitch
+  (`laneFailure.ts`, another session's fix, working exactly as designed).
+- 🔀 **Workarounds (14):** every rate-limit fallback — the build was delivered by VERTEX (8) and GEMINI (1)
+  out of 32 deliveries, i.e. the free ladder's last rungs, because the cheap floor could not answer ·
+  `npm audit fix` exit 1, so 2 vulnerabilities (1 high) stayed · the second attempt re-did `npm install`,
+  `tsc`, dev server, preview and screenshot because nothing told it the first attempt had already succeeded.
+- ⏭️ **Skipped (4):** `DESIGN_CONSISTENCY 50/100 (D)` — the design gate is `on`, but its repair is gated on
+  `resultOk`, which the false failure had already set to false, so a D-grade app shipped with no repair and
+  no note saying why · `ACCESSIBILITY 84/100 (B)`, 2 unlabelled form fields · `DEPENDENCY_VULNERABILITIES`
+  (1 high) · `JOURNEY_NOT_DERIVED` says *"no form … nothing here takes user input"* while `ACCESSIBILITY`
+  found 2 form fields in the same 15 files, recorded 0.0s apart; nothing reconciled them.
+- ❌ **Still broken (5) — all honesty defects, all in the last 4 seconds of the run:** the false failure
+  verdict itself · `TEST_SUITE_UNVERIFIED` claiming the Playwright binaries are not installed, 167s after
+  the install and 145s after the suite passed · `RELEASE_GATE` saying *"the typecheck did not run"* (it ran
+  twice, clean) and *"the app has no test suite that could be run here"* · `RUNTIME_UNCHECKED` after three
+  successful `console_errors` reads · `CLAIM_UNSUPPORTED` (*"not one file was created or changed"*) 1.9s
+  before `Incremental: 2 changed, 2 new`.
+- 🥵 **Struggle (5):** `EMPTY_BUILD_RETRY` at +371.7s re-ran the entire build — **6.2 finished minutes
+  became 13.1** · 130 seconds of dead silence after *"rebuilding with a stronger model"* (+371.7s → +501.6s),
+  heartbeats only · two more silences of 53s and 68s during the rate-limit storm · ETA said ~3 min
+  (confidence 0.4) against 13.1 actual, and at +239.8s promised "about 3 min more" before nine more minutes ·
+  sandbox 45.7 min up, 2.0 min of our operations, **43.6 min idle (96%)**, started by `files` — roughly ₹11
+  of E2B time on a ₹0 build.
+
+### Root causes and fixes
+
+**RC-1 — the retry: a boolean derived from another subsystem's verdict.** `userAskedToBuildAnApp` was
+`intent === 'new_build'`, and the keyword ladder matched the **noun** "build" in *"fix the build"* at HIGH
+confidence in Step 1, long before Step 4.5 would have seen `continue`. That cancelled the 2026-08-10
+narrowing written for **this byte-identical sentence** — it is quoted verbatim in `shouldRetryEmptyBuild`'s
+own doc comment as the Shiv Medical Store case — six days after it shipped, via the 2026-08-16 widening for
+build 5b4f9b63. **Both test suites stayed green because each asserted the other's FLAG and neither the
+SENTENCE.** Fix: `userAskedForAnAppToBeBuilt(message)` in `IntentClassifier.ts` asks the question directly —
+a continuation or problem phrase is never a build request, and a creation verb after a determiner ("the
+build", "this design", "the install") is a noun, not an order. `classifyIntent` is deliberately untouched:
+routing was correct, and the blast radius stays on the one question. This also silences the report's
+`CLAIM_UNSUPPORTED`, which reads the same flag.
+
+**RC-2 — the verdict: delivery was measured in files written.** A turn whose correct output is a VERDICT
+rather than a diff could not succeed by construction. Fix: `verifiedNoChangeSummary()` in `routes/agentv3.ts`,
+checked *before* `emptyBuildFailureSummary` and only on real browser evidence (`previewVerifiedRendered`),
+returns an honest success — *"Nothing needed changing — I checked your app from end to end and it works."*
+A turn that wrote nothing and proved nothing still fails honestly. The turn stays **free** (changing that is
+a pricing decision, not a bug fix) and the ledger now says `verified-no-change turn … not charged` instead
+of `empty build`. The free-tier narration block is gated on `!result.ok` so a success can never carry a
+"could not finish" message underneath it.
+
+**RC-3 — a hand-off that became an override.** `withSandboxBrowsers` pinned `PLAYWRIGHT_BROWSERS_PATH` at
+the pre-baked `/home/user/.e-tools/.browsers`, pointing Playwright **away** from the chromium the agent had
+installed into the default cache 22 seconds earlier — turning a suite that passed into
+`TEST_SUITE_UNVERIFIED`, which then made the release gate deny the suite existed. Fix: the project's own
+cache wins when it holds a `chromium-*`; ours is the fallback, which is the Shiv Medical Store case the
+helper was written for, unchanged. Resolved in-shell (verified in both `sh` and `bash`), so there is no
+extra sandbox round-trip and no window for the answer to go stale. Sibling call site in `ToolDispatcher`
+gets the same fix from the same helper.
+
+**Tests:** `tests/verifiedNoChangeTurn.test.ts` (35) — including build 5b4f9b63 asserted unchanged, so this
+fix cannot regress the one it narrows. `src/server/AgentV3/sandboxBrowsersPath.test.ts` extended.
+
+### 🔴 OPEN ROOT CAUSE — there is no shared EVIDENCE LEDGER (rule 6)
+
+The three fixes above each stop one wrong sentence. **The condition that produced all of them is that the
+agent's shell commands and the platform's gates keep private notions of what has been proven, and the gates
+trust only their own.** Every fact needed to contradict `RELEASE_GATE`, `RUNTIME_UNCHECKED` and
+`TEST_SUITE_UNVERIFIED` was already in the same report as `SANDBOX_CMD` lines with exit codes. Until one
+ledger exists that any actor writes a proven fact into (`typecheck: passed, by agent bash, exit 0, +64.5s`)
+and every verdict reads from, this class returns in a new place. Recorded here as open rather than patched
+per-gate.
+
+### Other items not yet actioned (deliberately, with reasons)
+
+- **The 130-second silence after "rebuilding with a stronger model"** is a genuine UX hole, but the retry
+  it belongs to should now not fire on this prompt shape at all; measure again before building a fix for a
+  path that just got rarer.
+- **The ETA (~3 min vs 13.1)** needs the real distribution of build durations to correct — the same
+  measurement CLAUDE.md already records as missing for the 10-minute slow-build alert threshold. Replacing
+  a wrong estimate with a differently-wrong one is not an improvement.
+- **The sandbox at 96% idle, started by `files`** is a cost item for the `sandbox_starts` instrument that
+  PR D added, not a build defect. It wants a few days of that data read before anything is changed.

@@ -231,6 +231,46 @@ reached it. Two months later it failed a 28-minute build whose app had already r
 told the user their app was not ready. **The instance was fixed; the class was not. That is what this
 bar forbids.**
 
+### 📄 "ZERO FILES" IS NOT "NOTHING HAPPENED" — delivery is not measured in diffs (autopsy 697b38ee, 2026-09-14)
+
+The prompt was *"Continue from where you left off and finish/fix the build so the app works end-to-end."*
+The engine did precisely that: `tsc` clean, `npm run build` exit 0, dev server up, preview published,
+opened in a real browser and seen rendering, the project's own Playwright suite installed and **passed**,
+`PROD_BUILD_OK`, `GREEN_GUARD_SAVE`, release gate *"It runs and renders"*. It then told the user:
+*"The build produced no files. Please try again"* and *"our engine is running slowly and your build could
+not finish."* **Every clause was false, and the app on screen was working while it said so.**
+
+- **A turn whose correct output is a VERDICT, not a diff, could not succeed by construction.** Delivery
+  was measured by `writtenFiles.size`, so "continue", "is it working?", "fix the build" and "did you
+  finish?" were all structurally incapable of passing however well they ran. `verifiedNoChangeSummary`
+  is the other half of a concession `shouldRetryEmptyBuild` made in words two months earlier — *"the
+  distinction is not 'did files change' but 'is there an app'"* — and had applied only to the RETRY.
+  **It requires real browser evidence**: no proof still means an honest failure; "no files" must never
+  become a way to pass.
+- 🔴 **THE SAME SENTENCE HAD ALREADY BEEN ROOT-CAUSED, AND THE GUARD WAS CANCELLED SIX DAYS LATER.**
+  `shouldRetryEmptyBuild`'s doc comment quotes this prompt **verbatim** as the Shiv Medical Store case
+  that must not retry (2026-08-10). On 2026-08-16 a widening for build 5b4f9b63 added
+  `userAskedToBuildAnApp = intent === 'new_build'` — and the keyword ladder matches the **noun** "build"
+  in *"fix the build"*. The whole build re-ran on a second model: 6.2 finished minutes became 13.1.
+  **Both suites stayed green because each was tested against the other's FLAG and neither against the
+  SENTENCE.** A boolean derived from another subsystem's verdict is not a test of your own question —
+  `userAskedForAnAppToBeBuilt` asks it directly, and `intent` (routing) is deliberately untouched.
+- ⚠️ **A HAND-OFF THAT BECOMES AN OVERRIDE BREAKS THE THING IT WAS HELPING.** `withSandboxBrowsers`
+  pinned `PLAYWRIGHT_BROWSERS_PATH` at the pre-baked path, pointing Playwright **away** from a chromium
+  the agent had installed into the default cache 22 seconds earlier — so a suite that PASSED was
+  re-reported as *"COULD NOT RUN — browsers are not installed"*, and the release gate then said the app
+  *"has no test suite that could be run here"*. It is a **fallback** now: the project's own cache wins,
+  ours is used only when it has none (the case the helper was written for). Playwright matches browser
+  builds exactly, so a fresh install after a version bump makes the pre-baked copy wrong as well as unused.
+- 🔎 **THE MISSING SUBSYSTEM, named so it is not re-discovered: there is no shared EVIDENCE LEDGER.**
+  The agent's shell commands and the platform's gates keep private notions of what has been proven, and
+  the gates trust only their own. That one report contains `RELEASE_GATE` saying *"the typecheck did not
+  run"* after two clean `tsc` runs, `RUNTIME_UNCHECKED` after three successful console reads, and
+  `CLAIM_UNSUPPORTED` (*"not one file was changed"*) two seconds before `Incremental: 2 changed, 2 new`.
+  Every fact needed to contradict them was already recorded as `SANDBOX_CMD` lines in the same report.
+  **Until one ledger exists that any actor writes a proven fact into and every verdict reads from, this
+  class returns** — it is an OPEN root cause in `PROGRESS.md`, not a closed item.
+
 **Step 1 — Read the WHOLE report and build an itemized ledger (every flaw, however small).**
 Read the report end to end — never a truncated tail. Enumerate EVERY issue, imperfection,
 warning, retry, and rough edge, no matter how tiny, and classify each into exactly one bucket,

@@ -277,7 +277,14 @@ describe('it is wired into the build', () => {
     // one to a constant would make the check unable to fire on the build that motivated it.
     expect(routes).toContain('filesWritten: writtenFiles.size');
     expect(routes).toContain('buildWasRequested: userAskedToBuildAnApp');
-    expect(routes).toContain("const userAskedToBuildAnApp = intent === 'new_build'");
+    // 🔴 IT USED TO ASSERT `intent === 'new_build'`, AND THAT WAS THE BUG (autopsy 697b38ee). The
+    // keyword ladder matches the NOUN "build" in "fix the build", so "Continue from where you left off
+    // and finish/fix the build" set this flag true, fired a whole second build, and made this very
+    // claim check accuse an honest verification turn of not delivering the app. The flag now comes
+    // from a predicate that asks the question it is named after; asserting the old form is asserting
+    // the defect.
+    expect(routes).toContain('const userAskedToBuildAnApp = userAskedForAnAppToBeBuilt(prompt);');
+    expect(routes).not.toContain("const userAskedToBuildAnApp = intent === 'new_build'");
   });
 
   it('the fabrication check is told when the written files are NOT the app', () => {

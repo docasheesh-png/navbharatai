@@ -1,18 +1,17 @@
-// Code Studio → "Upload ZIP" — the replace warning, in the user's own language (admin 2026-08-05:
-// "warning user ki language me aye").
+// Code Studio -> "Upload ZIP" — the replace warning.
 //
-// This warning matters more than most copy in the app: saying yes DELETES the project currently in the
-// workspace. A user who does not fully understand the sentence cannot give real consent, and an English
-// -only warning in front of a Hindi-speaking user is consent theatre. So the words follow the language
-// they are already typing in.
+// This warning matters more than most copy in the app: saying yes DELETES the project currently in
+// the workspace, and it cannot be undone. So the sentence must be plain and it must be readable by
+// every user.
 //
-// It reuses `detectNoticeLang` rather than shipping a second detector. One language decision in the app
-// means the update notice and this warning can never disagree about who the user is — and the day a
-// fourth language is added, it appears in both. (That detector covers English, Hindi and Hinglish
-// confidently and falls back to English for anything else; we do not ship a translation we cannot
-// stand behind.)
-
-import { detectNoticeLang, type NoticeLang } from './updateNoticeI18n';
+// 🔴 ENGLISH ONLY (admin 2026-09-14): "ui me professional language (english only) honi chahiye …
+// south india wale kaise padhenge isko??" A Tamil, Telugu, Kannada or Malayalam speaker cannot read
+// Devanagari, so a Hindi-only string is not "the user's language" — it is one region's language shown
+// to a national audience. English is the script every user of this app shares. See CLAUDE.md's
+// language standard, and tests/uiLanguageEnglishOnly.test.ts, which now fails CI on any new one.
+//
+// It SUPERSEDES the 2026-08-05 instruction "warning user ki language me aye", which had this module
+// pick between English, Hindi and Hinglish from the words the user was typing.
 
 export interface ZipWarningText {
   /** Dialog heading. */
@@ -31,49 +30,19 @@ export interface ZipWarningText {
   menuLabel: string;
 }
 
-const TEXT: Record<NoticeLang, ZipWarningText> = {
-  en: {
-    title: 'Replace this project?',
-    body: 'Uploading a ZIP replaces everything currently in this workspace. The files you have now will be deleted and cannot be brought back. Your uploaded project takes their place.',
-    confirm: 'Replace project',
-    cancel: 'Cancel',
-    working: 'Uploading your project…',
-    failed: 'The project could not be uploaded',
-    menuLabel: 'Upload ZIP',
-  },
-  hi: {
-    title: 'क्या यह प्रोजेक्ट बदल दें?',
-    body: 'ZIP अपलोड करने पर इस वर्कस्पेस की सभी मौजूदा फाइलें हट जाएँगी और वापस नहीं आएँगी। उनकी जगह आपका अपलोड किया हुआ प्रोजेक्ट आ जाएगा।',
-    confirm: 'प्रोजेक्ट बदलें',
-    cancel: 'रहने दें',
-    working: 'आपका प्रोजेक्ट अपलोड हो रहा है…',
-    failed: 'प्रोजेक्ट अपलोड नहीं हो सका',
-    menuLabel: 'ZIP अपलोड करें',
-  },
-  hinglish: {
-    title: 'Is project ko replace karein?',
-    body: 'ZIP upload karne par is workspace ki saari maujuda files hat jaayengi aur wapas nahi aayengi. Unki jagah aapka upload kiya hua project aa jaayega.',
-    confirm: 'Project replace karein',
-    cancel: 'Rehne dein',
-    working: 'Aapka project upload ho raha hai…',
-    failed: 'Project upload nahi ho saka',
-    menuLabel: 'ZIP upload karein',
-  },
+const TEXT: ZipWarningText = {
+  title: 'Replace this project?',
+  body: 'Uploading a ZIP replaces everything currently in this workspace. The files you have now will be deleted and cannot be brought back. Your uploaded project takes their place.',
+  confirm: 'Replace project',
+  cancel: 'Cancel',
+  working: 'Uploading your project…',
+  failed: 'The project could not be uploaded',
+  menuLabel: 'Upload ZIP',
 };
 
-/** The warning text for an explicit language. */
-export function zipReplaceWarning(lang: NoticeLang): ZipWarningText {
-  return TEXT[lang] ?? TEXT.en;
-}
-
-/**
- * The warning text for whatever language the user is actually writing in.
- *
- * Pass the user's own most recent words (their last message, or what is in the composer). Empty or
- * unrecognised input falls back to English — never to a guess.
- */
-export function zipReplaceWarningFor(userText: string | undefined | null): ZipWarningText {
-  return zipReplaceWarning(detectNoticeLang(userText));
+/** The warning text. Pure. */
+export function zipReplaceWarning(): ZipWarningText {
+  return TEXT;
 }
 
 /**

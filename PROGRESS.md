@@ -55899,3 +55899,58 @@ measurement instead. Branch `claude/build-cost-card`.
 first rows will mostly be re-priced from call logs, and the ones at the cap will read as lower bounds.
 The card gets exact from the first build after deploy. Sandbox cost is shown as its own column and is
 ₹0 unless `AGENTV3_BILL_SANDBOX` + `E2B_USD_PER_HOUR` are set — it is not folded into the token cost.
+
+### 2026-09-14 — 🔴 UI TEXT WAS IN DEVANAGARI ON SEVEN SURFACES. English only, and CI now enforces it.
+
+The admin, from his own phone, with a screenshot of the voice-chat consent popup rendered entirely in
+Hindi: *"maine apko bola tha, aur claude.md me bhi likha hai — ui me professional language (english
+only) honi chahiye. apne fir bhi devnagri likh di? **south india wale kaise padhenge isko??** batao"*
+
+**That question is the whole argument, and it is not about style.** NavBharatAI is a national product
+and Devanagari is not a national script: a Tamil, Telugu, Kannada or Malayalam speaker cannot read a
+Hindi string at all. "Show it in the user's language" had quietly become "show it in one region's
+language" — and on the surface he caught, the string was a **price the user was about to be charged**.
+
+🔎 **THE SHAPE OF THE BUG IS THE FINDING, and it is why an edit was not the fix.** This was never one
+careless string. **Six modules had independently grown the same `lang === 'hi' ? … : …` branch**, each
+from a different change, each believing it served Indian users — and three of them cited an admin
+instruction as justification (2026-07-20 *"language wahi ho jo user likh raha ho"*, 2026-08-05
+*"warning user ki language me aye"*, 2026-08-10 *"user ki language me ek popup aaye"*). A seventh had
+Hindi hard-coded straight into JSX, and the donation defaults in `src/config/defaultContent.ts` were
+Hindi too. **CLAUDE.md forbade all of it the entire time.** A rule that lives only in a document is a
+rule a new session may miss; this one was missed seven times.
+
+🔴 **THE OLDER INSTRUCTIONS ARE SUPERSEDED, and that is stated rather than quietly reversed.** The
+admin did ask for user-language warnings on 2026-07-20, 2026-08-05 and 2026-08-10. Those asks and this
+one cannot both be kept. This is his own correction after seeing the result, so it wins — and each
+module now carries the supersession in its header, so nobody re-derives the old behaviour from the old
+quote.
+
+**Fixed (branch `claude/ui-english-only`):** `voiceChatBilling.ts` (the screenshot),
+`zipReplaceWarning.ts`, `updateNoticeI18n.ts` → `updateNotice.ts`, `chatToolbar.ts`,
+`apkChargeNotice.ts`, `chatMessageActions.ts`, `DonationPanel.tsx`, `defaultContent.ts`.
+
+**The 50/50 half — the wrong branch is now IMPOSSIBLE, not merely unused.** The `VoiceLang`,
+`ChatToolbarLang`, `ChargeLang` and `NoticeLang` types are deleted, `resolveVoiceLang` is deleted, and
+so is `detectNoticeLang` with its whole Hinglish token list — a chooser with one choice is dead
+machinery that invites the second choice back. `AppUpdateChatNotice`'s `userText` prop went with it
+(six call sites), because it existed only to infer a language.
+⚠️ Three of the six branches were already DORMANT — no caller passed `'hi'` — so they shipped nothing
+to a user and would have fired the day someone did. They were removed on the same rule.
+
+🔒 **`tests/uiLanguageEnglishOnly.test.ts` is the half that lasts.** It walks every client file
+(`src/**` minus `src/server/**`), strips comments, and fails on Devanagari in real code. **Proven by
+injection, not assumed**: a Hindi string added to `chatToolbar.ts` fails it, and a Hindi quote in a
+comment does not. A file is **guilty until listed**, same discipline as
+`tests/whiteLabelClientSurfaces.test.ts`, and a stale allowlist entry fails too.
+
+**Deliberately ALLOWED, each with its reason in the test** — these are not UI strings: greeting
+DETECTION patterns fed to a model (`apnapanEngine.ts`); the localisation editor for the USER's own app,
+where a language picker must print each language in its own script (`LocalizationManager.tsx`); build-
+prompt content for a generated app (`TemplatesPanel.tsx`); parsing of what the user typed
+(`useChatEngine.ts`); a negative code example inside an AI prompt (`appUtils.ts`).
+
+**Scope stated honestly:** comments are NOT rewritten, in client or server. CLAUDE.md asks for English
+there too, but the Hindi in them is the admin's own verbatim words kept as evidence, and destroying
+that trail to satisfy a lint would cost more than it buys. Server prompts written TO models are also
+out of scope — they are not UI.

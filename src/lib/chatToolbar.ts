@@ -17,7 +17,11 @@
 // people do with a chat on a phone, and it was the one button in the row that acted on the past
 // rather than the message being written. The admin cut it; nothing here replaces it.
 
-export type ChatToolbarLang = 'en' | 'hi';
+// 🔴 ENGLISH ONLY (admin 2026-09-14): "ui me professional language (english only) honi chahiye …
+// south india wale kaise padhenge isko??" A Tamil, Telugu, Kannada or Malayalam speaker cannot read
+// Devanagari, so a Hindi-only string is not "the user's language" — it is one region's language shown
+// to a national audience. English is the script every user of this app shares. See CLAUDE.md's
+// language standard, and tests/uiLanguageEnglishOnly.test.ts, which now fails CI on any new one.
 
 /** Where the send-on-Enter preference lives. ONE key for every AI — the whole point of unifying. */
 export const SEND_ON_ENTER_KEY = 'chat_sendOnEnter';
@@ -42,12 +46,7 @@ export function sendToggleLabel(sendOnEnter: boolean): string {
 }
 
 /** The tooltip. Spells out BOTH halves, since the label alone cannot say what the other key now does. */
-export function sendToggleTitle(sendOnEnter: boolean, lang: ChatToolbarLang = 'en'): string {
-  if (lang === 'hi') {
-    return sendOnEnter
-      ? 'Enter दबाने पर मैसेज चला जाएगा · नई लाइन के लिए Shift+Enter'
-      : 'Shift+Enter दबाने पर मैसेज जाएगा · Enter से नई लाइन बनेगी';
-  }
+export function sendToggleTitle(sendOnEnter: boolean): string {
   return sendOnEnter
     ? 'Enter sends the message · Shift+Enter starts a new line'
     : 'Shift+Enter sends the message · Enter starts a new line';
@@ -87,10 +86,7 @@ export function toolbarActionsVisible(messageCount: number): boolean {
 }
 
 /** What Clear asks before it destroys a conversation. Never silent — this is not undoable. */
-export function clearConfirmText(messageCount: number, lang: ChatToolbarLang = 'en'): string {
-  if (lang === 'hi') {
-    return `पूरी बातचीत हटा दें? ${messageCount} मैसेज मिट जाएंगे और वापस नहीं आएंगे।`;
-  }
+export function clearConfirmText(messageCount: number): string {
   return `Clear this conversation? ${messageCount} message${messageCount === 1 ? '' : 's'} will be deleted and cannot be brought back.`;
 }
 
@@ -131,7 +127,7 @@ export function searchActive(query: string): boolean {
 }
 
 /** "3 of 41" — so a search that finds nothing says so, instead of looking like a broken screen. */
-export function searchResultLabel(found: number, total: number, lang: ChatToolbarLang = 'en'): string {
-  if (found === 0) return lang === 'hi' ? 'कुछ नहीं मिला' : 'No matches';
-  return lang === 'hi' ? `${total} में से ${found}` : `${found} of ${total}`;
+export function searchResultLabel(found: number, total: number): string {
+  if (found === 0) return 'No matches';
+  return `${found} of ${total}`;
 }

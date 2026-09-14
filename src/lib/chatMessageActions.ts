@@ -92,8 +92,8 @@ export function editMessage<T extends ChatMsgLike>(messages: readonly T[], id: s
 }
 
 /** The marker shown beside an edited message — small, honest, and never hidden. PURE. */
-export function editedLabel(lang: 'en' | 'hi' = 'en'): string {
-  return lang === 'hi' ? 'बदला गया' : 'edited';
+export function editedLabel(): string {
+  return 'edited';
 }
 
 /**

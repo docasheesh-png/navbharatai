@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { usePagedList } from '../../hooks/usePagedList';
+import { LoadMore } from '../../components/common/LoadMore';
 import {
   Store, Loader2, ShieldCheck, ShieldAlert, AlertTriangle, Download,
   CheckCircle2, X, Clock, ExternalLink, Info, Globe, Play, Link2, Trash2, Lock, Package, Flag,
@@ -110,8 +112,11 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
   const [pubBusy, setPubBusy] = useState(false);
   const [pubResult, setPubResult] = useState<{ ok: boolean; message: string; shareUrl?: string } | null>(null);
   const [apps, setApps] = useState<PublicApp[]>([]);
+  const pagedApps = usePagedList(apps);
   const [mine, setMine] = useState<MineApp[]>([]);
+  const pagedMine = usePagedList(mine);
   const [queue, setQueue] = useState<QueueApp[]>([]);
+  const pagedQueue = usePagedList(queue);
   // The tab badge counts only what still needs a DECISION — approved apps are a record, not work.
   const pendingCount = pendingReviewCount(queue);
   /**
@@ -148,10 +153,13 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
 
   // WEB APPS — run in the viewer's browser, nothing to install. Deep link opens the player directly.
   const [webApps, setWebApps] = useState<WebApp[]>([]);
+  const pagedWebApps = usePagedList(webApps);
   const [webMine, setWebMine] = useState<WebApp[]>([]);
+  const pagedWebMine = usePagedList(webMine);
   const [webQueue, setWebQueue] = useState<WebApp[]>([]);
   /** What viewers actually reported. Written since the store shipped; until now, read by nobody. */
   const [reports, setReports] = useState<Array<{ appId: string; appName: string; appStatus: string; reporterUid: string; reason: string; at: number }>>([]);
+  const pagedReports = usePagedList(reports);
   /**
    * APPS YOU OWN (admin 2026-08-16: "purchase ho jaye to us par kharidne wale ka naam likh jaye, fir
    * jitni baar chahe code copy kare — par bas wahi ek app").
@@ -162,6 +170,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
    * usable. Hidden entirely when you own nothing, so it never shows an empty shelf.
    */
   const [owned, setOwned] = useState<Array<{ appId: string; name: string | null; priceInr: number; at: number; available: boolean }>>([]);
+  const pagedOwned = usePagedList(owned);
   // A share link (`/store/app/<id>`) opens the player IMMEDIATELY — the receiver tapped an app,
   // not a store; the store is what they see when they close it. Read once at mount.
   const [playingId, setPlayingId] = useState<string | null>(() => {
@@ -512,7 +521,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
               </p>
             ) : (
             <div className="grid gap-3 sm:grid-cols-2">
-              {webApps.map((a) => (
+              {pagedWebApps.visible.map((a) => (
                 <div key={a.id} className="flex gap-3 p-3 rounded-xl bg-[#161b22] border border-white/10 hover:border-white/25 transition-colors">
                   <button
                     onClick={() => void openWebDetail(a)}
@@ -551,6 +560,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                   </button>
                 </div>
               ))}
+              <LoadMore list={pagedWebApps} label="web apps" />
             </div>
             )}
           </div>
@@ -574,7 +584,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
               </p>
             ) : (
             <div className="grid gap-3 sm:grid-cols-2">
-              {apps.map((a) => (
+              {pagedApps.visible.map((a) => (
                 <button
                   key={a.id}
                   onClick={() => setOpenApp(a)}
@@ -593,6 +603,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                   </div>
                 </button>
               ))}
+              <LoadMore list={pagedApps} label="apps" />
             </div>
             )}
           </div>
@@ -821,7 +832,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                   You bought these. Copying is free and unlimited, for these apps only — buy once, take the code whenever you need it.
                 </p>
                 <div className="grid gap-2">
-                  {owned.map((o) => (
+                  {pagedOwned.visible.map((o) => (
                     <div key={o.appId} className="flex items-center gap-3 p-3 rounded-xl bg-[#161b22] border border-white/10">
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-semibold truncate">{o.name || 'An app you bought'}</p>
@@ -838,6 +849,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                       )}
                     </div>
                   ))}
+                  <LoadMore list={pagedOwned} label="apps" />
                 </div>
               </div>
             )}
@@ -845,7 +857,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
               <Globe size={12} /> My instant apps
             </p>
             <div className="space-y-2">
-              {webMine.map((a) => (
+              {pagedWebMine.visible.map((a) => (
                 <div key={a.id} className="p-3 rounded-xl bg-[#161b22] border border-white/10">
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="text-sm font-semibold">{a.name}</p>
@@ -904,6 +916,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                   )}
                 </div>
               ))}
+              <LoadMore list={pagedWebMine} label="web apps" />
             </div>
           </div>
         )}
@@ -913,7 +926,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
             <p className="text-center text-sm text-white/40 py-12">You have not submitted any apps yet.</p>
           ) : (
             <div className="space-y-2">
-              {mine.map((a) => (
+              {pagedMine.visible.map((a) => (
                 <div key={a.id} className="p-3 rounded-xl bg-[#161b22] border border-white/10">
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="text-sm font-semibold">{a.appName}</p>
@@ -931,6 +944,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                   {a.reviewNote && <p className="text-[11px] text-white/50 mt-1.5 leading-relaxed">Reviewer: {a.reviewNote}</p>}
                 </div>
               ))}
+              <LoadMore list={pagedMine} label="apps" />
             </div>
           )
         )}
@@ -945,7 +959,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
               <Flag size={12} /> Reported by viewers ({reports.length})
             </p>
             <div className="space-y-2">
-              {reports.map((r, i) => (
+              {pagedReports.visible.map((r, i) => (
                 <div key={`${r.appId}-${r.at}-${i}`} className="p-3 rounded-xl bg-[#161b22] border border-rose-500/20">
                   <div className="flex items-start justify-between gap-2">
                     <p className="text-sm font-semibold">{r.appName}</p>
@@ -974,6 +988,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                   )}
                 </div>
               ))}
+              <LoadMore list={pagedReports} label="reports" />
             </div>
           </div>
         )}
@@ -1035,7 +1050,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
             <p className="text-center text-sm text-white/40 py-12">Nothing waiting for review.</p>
           ) : (
             <div className="space-y-3">
-              {queue.map((a) => (
+              {pagedQueue.visible.map((a) => (
                 <div key={a.id} className="p-3 rounded-xl bg-[#161b22] border border-white/10">
                   <div className="flex items-start justify-between gap-2">
                     <p className="text-sm font-semibold">{a.appName} <span className="text-xs font-normal text-white/40">v{a.versionName}</span></p>
@@ -1106,6 +1121,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                   </div>
                 </div>
               ))}
+              <LoadMore list={pagedQueue} label="apps" />
             </div>
           )
         )}

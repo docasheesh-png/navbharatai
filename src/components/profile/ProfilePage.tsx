@@ -9,6 +9,8 @@
  *   5. Connected accounts — Google / GitHub status
  */
 import { useEffect, useState, useCallback } from 'react';
+import { usePagedList } from '../../hooks/usePagedList';
+import { LoadMore } from '../../components/common/LoadMore';
 import { User, Wallet, Clock, CheckCircle2, Circle, AlertCircle, ChevronRight, Edit3, Save, X, CalendarDays, Zap, Activity, LogOut, AlertTriangle, Smartphone } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import type { User as FirebaseUser } from 'firebase/auth';
@@ -155,6 +157,7 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   const [historyRecords, setHistoryRecords] = useState<BuildRecord[]>([]);
+  const pagedHistoryRecords = usePagedList(historyRecords);
   const [historySummary, setHistorySummary] = useState<HistorySummary | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
 
@@ -586,7 +589,7 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
                   </tr>
                 </thead>
                 <tbody>
-                  {historyRecords.map(r => (
+                  {pagedHistoryRecords.visible.map(r => (
                     <tr key={r.id} className="group">
                       <td className="bg-[#0d1117] rounded-l-xl px-3 py-3 text-white font-medium max-w-[180px]">
                         <span className="truncate block">{r.title || 'Untitled build'}</span>
@@ -610,6 +613,7 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
                       </td>
                     </tr>
                   ))}
+                  <LoadMore list={pagedHistoryRecords} label="entries" colSpan={2} />
                 </tbody>
               </table>
             </div>

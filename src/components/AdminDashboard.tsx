@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon } from 'lucide-react';
 import { TirangaLoader } from './ui/TirangaLoader';
+import { usePagedList } from '../hooks/usePagedList';
+import { LoadMore } from './common/LoadMore';
 import { stampLabel, dayLabel, signInMethodWords } from '../lib/adminUserDisplay';
 import { adultOptInSummary } from '../lib/adultContent';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
@@ -129,6 +131,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [usersError, setUsersError] = useState('');
   const [userSort, setUserSort] = useState('tokens');
   const [userSearch, setUserSearch] = useState('');
+  /**
+   * THE USER TABLE IS PAGED ON THE **SERVER** (admin 2026-09-14: "pehle sirf 10-12 line hi load ho").
+   *
+   * 🔴 AND IT IS THE ONE LIST WHERE A CLIENT-SIDE BUTTON WOULD HAVE BEEN A LIE. Everywhere else the
+   * rows are already in the browser, so showing twelve of them is the whole fix. Here the slowness is
+   * in the REQUEST: `/api/admin/users` looks up Firebase Auth metadata for every user, batched at
+   * Firebase's 100-identifier limit — so 5,000 users is fifty sequential round-trips before the first
+   * row can be drawn. Hiding rows after that arrives would change nothing the admin can feel.
+   *
+   * So "Load more" here asks the SERVER for more: 25 rows, then 50, then 75. Sort and search still
+   * run over every user (the server scans the whole collection for them, deliberately — see the
+   * route), so searching is never narrowed to the page you happen to be looking at.
+   */
+  const USER_PAGE = 25;
+  const [userLimit, setUserLimit] = useState(USER_PAGE);
+  const [userTotal, setUserTotal] = useState<number | null>(null);
+  // Back to page one whenever the list MEANS something different. Without this, an admin who pressed
+  // "Load more" five times and then typed a search would fetch 150 rows of the new result — the same
+  // reset `usePagedList` does for every client-side list, done here against the server instead.
+  useEffect(() => { setUserLimit(USER_PAGE); setUserTotal(null); }, [userSearch, userSort]);
   const [toastMsg, setToastMsg] = useState('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
@@ -349,6 +371,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
    */
   const [adultOptIns, setAdultOptIns] = useState<Array<{ userId: string; optedInAt: string; label: string }> | null>(null);
   const [adultError, setAdultError] = useState('');
+
+  /**
+   * The other admin lists, same rule, declared here because this is the first point at which every
+   * state they read exists. Each one grows with the platform and had no cap at all: every report ever
+   * filed, every app ever built, every promo code, every +18 opt-in.
+   *
+   * The `resetKey`s are the real filters above them — the report Open/All toggle, and the four
+   * controls over the all-builds table (search, status, date, user). Change any of those and the list
+   * means something different, so it starts at page one.
+   */
+  const pagedUserReports = usePagedList(userReports, { resetKey: reportFilter });
+  const pagedAllBuilds = usePagedList(allBuilds, { resetKey: `${allBuildsSearch}|${allBuildsStatus}|${allBuildsDate}|${allBuildsUid}` });
+  const pagedAdultOptIns = usePagedList(adultOptIns);
+  const pagedPromos = usePagedList(promos);
   const fetchAdultOptIns = useCallback(async () => {
     setAdultError('');
     try {
@@ -856,7 +892,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     setUsersLoading(true);
     setUsersError('');
     try {
-      const r = await fetch(`/api/admin/users?sort=${userSort}&search=${encodeURIComponent(userSearch)}`, { headers });
+      const r = await fetch(`/api/admin/users?sort=${userSort}&search=${encodeURIComponent(userSearch)}&paged=1&limit=${userLimit}`, { headers });
       // HONESTY (admin bug 2026-07-15: "users list show nahi ho rahi"): the old code did
       // `Array.isArray(d) ? d : []`, so a 401 (expired admin token) / 500 (Firestore error) response
       // body — an OBJECT, not an array — was silently shown as "No users found", indistinguishable from
@@ -870,13 +906,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
         return;
       }
       const d = await r.json();
-      setUsers(Array.isArray(d) ? d : []);
-      if (!Array.isArray(d)) setUsersError('Unexpected response from the server.');
+      // The envelope is what `paged=1` asks for; the bare array is what every older server returns.
+      // Reading both means this panel keeps working against either, which matters because the Android
+      // app is bundled and a phone can be a version behind.
+      const rows = Array.isArray(d) ? d : Array.isArray(d?.users) ? d.users : null;
+      if (!rows) { setUsers([]); setUsersError('Unexpected response from the server.'); return; }
+      setUsers(rows);
+      setUserTotal(typeof d?.total === 'number' ? d.total : rows.length);
     } catch (e: any) {
       setUsers([]);
       setUsersError(`Couldn't reach the server: ${e?.message || 'network error'}`);
     } finally { setUsersLoading(false); }
-  }, [adminToken, userSort, userSearch]);
+  }, [adminToken, userSort, userSearch, userLimit]);
 
   const fetchPromos = useCallback(async () => {
     try {
@@ -1675,6 +1716,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       ))}
                     </tbody>
                   </table>
+                  {userTotal !== null && users.length < userTotal && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center', padding: '12px 0', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => setUserLimit((l) => l + USER_PAGE)}
+                        disabled={usersLoading}
+                        className="px-4 py-2 rounded-full border border-white/10 bg-white/5 text-[11px] font-bold text-white hover:bg-white/10 disabled:opacity-50"
+                      >
+                        {usersLoading ? 'Loading…' : `Load ${Math.min(USER_PAGE, userTotal - users.length)} more`}
+                      </button>
+                      <span className="text-[10px] text-[#8b949e]">
+                        Showing {users.length.toLocaleString('en-IN')} of {userTotal.toLocaleString('en-IN')} users
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -2370,7 +2426,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 </p>
               ) : (
                 <div className="space-y-2">
-                  {userReports.map((r: any) => (
+                  {pagedUserReports.visible.map((r: any) => (
                     <button
                       key={r.id}
                       onClick={() => void openUserReport(r.id)}
@@ -2401,6 +2457,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       </p>
                     </button>
                   ))}
+                  <LoadMore list={pagedUserReports} label="reports" />
                 </div>
               )}
 
@@ -2992,6 +3049,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     aria-label="Filter by user"
                   >
                     <option value="">Every user</option>
+                    {/* ⚠️ DELIBERATELY NOT PAGED, and this is the useful half of the rule. A native
+                        <select> already renders its options lazily and scrolls them itself, and paging
+                        it would make the filter WORSE than the problem: a user outside the first twelve
+                        would become unreachable, so the control would silently stop doing its job.
+                        "Show 12 then a button" is for lists people READ, never for a picker. */}
                     {allBuildsUsers.map((u) => (
                       <option key={u.uid} value={u.uid}>{u.label} ({u.count})</option>
                     ))}
@@ -3025,7 +3087,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   <p className="text-[11px] text-[#8b949e]">Press Load to list the most recently active builds across all users.</p>
                 )}
                 <div className="space-y-1.5 max-h-[28rem] overflow-y-auto">
-                  {allBuilds.map((b) => (
+                  {pagedAllBuilds.visible.map((b) => (
                     <div key={b.workspaceId} className="border border-white/5 rounded-xl overflow-hidden">
                       <button
                         onClick={() => void expandWorkspaceBuilds(b.workspaceId)}
@@ -3105,6 +3167,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       )}
                     </div>
                   ))}
+                  <LoadMore list={pagedAllBuilds} label="apps" />
                 </div>
               </div>
 
@@ -3614,7 +3677,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 )}
                 {!adultError && adultOptIns !== null && adultOptIns.length > 0 && (
                   <div className="space-y-1.5">
-                    {adultOptIns.map((u) => (
+                    {pagedAdultOptIns.visible.map((u) => (
                       <button
                         key={u.userId}
                         onClick={() => void openAccount(u.userId)}
@@ -3626,6 +3689,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         </span>
                       </button>
                     ))}
+                    <LoadMore list={pagedAdultOptIns} label="accounts" />
                   </div>
                 )}
               </div>
@@ -3950,7 +4014,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         <th className="py-2 text-left">Code</th><th className="py-2 text-left">Tokens</th><th className="py-2 text-left">Discount</th><th className="py-2 text-left">Used</th><th className="py-2 text-left">Status</th>
                       </tr></thead>
                       <tbody className="divide-y divide-white/5">
-                        {promos.map((p: any) => (
+                        {pagedPromos.visible.map((p: any) => (
                           <tr key={p.id} className="hover:bg-white/5">
                             <td className="py-2 text-pink-400 font-black font-mono">{p.code}</td>
                             <td className="py-2 text-amber-400 font-mono">{p.freeTokens || 0}</td>
@@ -3959,6 +4023,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             <td className="py-2"><span className={`text-[9px] font-black uppercase ${p.active ? 'text-emerald-400' : 'text-red-400'}`}>{p.active ? 'Active' : 'Expired'}</span></td>
                           </tr>
                         ))}
+                        <LoadMore list={pagedPromos} label="codes" colSpan={6} />
                       </tbody>
                     </table>
                   </div>

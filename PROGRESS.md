@@ -54460,6 +54460,113 @@ guard is **proven by reversion**: deleting the one producer call fails the suite
 - **Design consistency 60/100 shipped unhealed** although `AGENTV3_DESIGN_GATE` is on in Cloud Run; no
   `DESIGN_HEALED` or `DESIGN_PARTIALLY_HEALED` was recorded. Not investigated here.
 - **Sandbox 93% idle** — 12.6 minutes billed for 0.9 minutes of our operations.
+## 2026-09-14 — build 1ef27cd7: the heal worked, the verdict did not (CapCut/Alight Motion, 26.6 min)
+
+Prompt: *"Bro give me a app that has all the features of Capcut and alight motion and it should have
+video for learning each feature in it"*. Free/weak tier, `noClaude: true`, 26.6 minutes, `ok: false`,
+`billedInr: 0`. **Two root causes fixed, both found inside the report's own timeline.**
+
+### 🔴 ROOT CAUSE 1 — the app was re-judged READY 92/100, then failed on the blocker that re-judge had superseded
+
+The build's own timeline, twenty seconds apart:
+
+| time | |
+|---|---|
+| 08:04:40 | `READINESS_BLOCKER` (error, **unresolved**) — *1 fake/incomplete code issue* |
+| 08:06:29 | `INCOMPLETE_CODE_HEALED` — *Completed 1 unfinished/placeholder code section* |
+| 08:06:36 | `READINESS_RECOVERED_AFTER_COMPLETION` — ***now READY (score 92/100)*** |
+| 08:06:45 | `PROD_BUILD_OK` — *ready to publish and to package* |
+| 08:06:56 | `RELEASE_GATE: RED — 1 build-breaking blocker` ← the superseded one |
+| | → `OUTCOME_RELEASE_GATE_RED` → `ok: false` |
+
+The user was told *"1 thing is still broken, so it is NOT ready to use yet"* about an app the platform
+had itself re-judged as ready, whose production build had succeeded, and which `GREEN_GUARD_SAVE`
+recorded as having rendered in a real browser.
+
+**Why: the August fix was applied to ONE of three heals.** `resolveReadinessBlockersOnRejudge()` was
+written on 2026-08-27 for exactly this (the Fight 3D game, buildId 5e2de8c4 — *"the report then named,
+as the build's root cause, a line of code that no longer existed"*). There are **three** heals that
+re-judge readiness and recover the build:
+
+| site | heal | cleared the stale blocker? |
+|---|---|---|
+| `agentv3.ts:15747` | duplicate-import dedupe | ✅ |
+| `agentv3.ts:15851` | Rules-of-Hooks heal | ❌ |
+| `agentv3.ts:15899` | incomplete-code heal ← **fired in this build** | ❌ |
+
+The dedupe site's own comment reads *"re-judge, exactly as the hooks heal and the incomplete-code heal
+below already do"* — true of the re-judging, false of the clearing. The sibling was never hunted. Same
+shape as `a38c6fef`: **the instance was fixed; the class was not.**
+
+**Fix (rule 4 step 2 — make the wrong branch impossible):** `recordReadinessRecovery(code, message)` on
+`BuildDiagnostics` does both halves in one call, and all three sites now go through it. There is no
+longer a way to record a recovery and forget what it supersedes, so a fourth heal written later cannot
+get it wrong. The caller's obligation is unchanged and is what keeps it honest: reach it only after
+re-running `assessBuildReadiness()` and only on `verdict.ready`.
+
+### 🔴 ROOT CAUSE 2 — the report named a provider that was never contacted
+
+This build's **first** model call is recorded as a failed `anthropic / claude-sonnet-4-6`, 90 seconds
+long — on a FREE, weak-tier build whose own billing block says `noClaude: true` and where
+`enforceNoClaude` had stripped Claude out of the chain entirely.
+
+**Claude was never called.** `fastGenerateOnce` initialises `let usedProvider = 'CLAUDE'` and only
+overwrites it from the runner's `onProviderUsed` callback; the build-budget refusal is thrown at the
+*top* of the runner, before any network call, so nothing ever reported in. The failure path then
+recorded `model: fbModel` unconditionally — and `fbModel` is the Claude-tier id by definition (its own
+call site says *"GLM/Kimi ignore it and force their own ladder"*).
+
+Three costs, rising: it contradicts the same report's `noClaude: true`; it pins a 90-second stall on a
+named third party that was never contacted (rule 5 step 5); and it makes a build look like it breached
+the one routing rule the admin called unbreakable. **Identical shape to the 153-rung "Provider GLM
+failed" cascade fixed in #2913** — GLM never failed, GLM was never called.
+
+**Fix:** `fastLaneCallIdentity(reported, usedProvider, claudeTierModel)` — pure, exported, used by
+**both** record paths. With no provider reported the call is `unknown/unknown`, never a guess.
+`providerReported` is the only thing that separates "Claude served this" from "CLAUDE is what the
+variable was initialised to".
+
+### The five-bucket ledger
+
+| | count | |
+|---|---|---|
+| ✅ self-healed | **4** | incomplete code completed · readiness re-judged READY · 7 provider fallbacks absorbed · stale preview copy caught and demoted |
+| 🔀 worked around | **7** | every one a provider fallback: KIMI 4 timeouts + 1 budget-ended, GLM 7 rate-limits + 1 timeout |
+| ⏭️ skipped | **4** | page-render check (needs a live app) · user journey (*no form to fill*) · the app's Playwright suite (`@playwright/test` not installed) · platform typecheck |
+| ❌ still broken | **6 unresolved**, of which the gate counted **1** | the blocker — **now fixed**. The rest: 4 dependency CVEs (1 high), design 50/100, a11y 60/100 |
+| 🥵 struggled | **4 places** | the fast lane FAILED outright (`SIMPLE_BUILD_OUTCOME: BUILD_FAILED`, *"the engine did not respond in time"*) · a 90 s first call killed by the budget · 26.6 min against an ETA of *"~2–4 min"* · 87% sandbox idle |
+
+### Still open — named, not implied fixed
+
+- 🔴 **The ETA is not an estimate, it is a guess with a number on it.** `ETA_BASIS` recorded
+  *"~2–4 min (midpoint ~3 min) · basis heuristic · confidence 0.4"*; the build took **26.6 minutes** —
+  nine times the midpoint. This is the third autopsy in a row to record the ETA lying. Its own
+  confidence field says 0.4, and we print the number anyway.
+- 🔴 **The fast lane failed and cost 90 seconds before the real build started.** `preambleCapMs` bounds
+  the plan call, and it did its job; the question this report cannot answer is why the first call hung
+  for the whole cap. Needs the provider-side timing, not a diagnostics change.
+- 🔴 **"the typecheck did not run" while the agent ran `tsc --noEmit` clean, twice** (commands 6 and 7,
+  exit 0). This is the **evidence-ledger** root cause already recorded from autopsy `697b38ee` — and
+  deliberately NOT patched here. Two traps make a quick fix wrong: command 7 is
+  `tsc --noEmit 2>&1 | head -30`, whose exit code belongs to `head` and proves nothing; and **both** tsc
+  runs predate the incomplete-code heal that rewrote a file, so neither is evidence about the shipped
+  tree. A gate that accepted either would be trading one wrong verdict for another. The real answer is
+  still the shared ledger.
+- 🟡 4 dependency vulnerabilities (1 high) shipped — `AGENTV3_AUDIT_FIX` ran (`npm audit fix`, exit 1)
+  and could not fix them within a major version.
+- 🟡 87% sandbox idle on a 3.4-minute session.
+
+### Tests
+
+`tests/healedVerdictStands.test.ts` — **12 tests**, replaying this build's exact sequence end to end.
+**Proven by reversion: 8 tests fail** when `recordReadinessRecovery` stops clearing. The guard in
+`BuildDiagnostics.test.ts` was rewritten from a literal to a RULE — it used to pin the old method name
+at the FIRST call site, which is precisely why it passed unchanged while two of three sites were wrong.
+It now asserts every recovery site goes through the one method, each preceded by a passing re-judge,
+and that no site records a `READINESS_RECOVERED_*` code the long way round.
+
+Gate on the final state: typecheck · noUnusedImports · typecheck:server · build · test:bundle ·
+boot:check — all green; **1643 files / 22,893 tests passed / 1 skipped / 0 FAIL**.
 ## 2026-09-14 — A failed store build now reports itself to the admin, automatically, on its own page
 
 Admin (verbatim): *"jab bhi koi user, navbharatai par 'APK' banwaye. aur apk bane nahi, fail ho jaye. to
@@ -54592,3 +54699,44 @@ When nothing contradicts the failure count the old wording stands, untouched. Te
   accurate and purely an admin action — Admin → Overview → Publish Capacity. No code change; the ceiling
   itself already has its plan in ROADMAP §10.3 (serve published apps from the bucket), gated on the three
   `PUBLISHED_APPS_*` keys in the order that entry records.
+## 2026-09-14 — TWO SESSIONS AUTOPSIED BUILD `1ef27cd7`. The other one was better, so mine was cut down.
+
+Both #2929 (mine) and #2931 landed the same finding from the same report: the incomplete-code heal
+completed a placeholder, re-ran the FULL readiness gate, got **READY 92/100**, set `ok: true` — and the
+release gate then counted the blocker from *before* the heal, went RED, and flipped the verdict back.
+Both traced it to the same cause: `resolveReadinessBlockersOnRejudge()` existed since 2026-08-27 and
+only ONE of the three re-judging heals ever called it.
+
+**#2931 wins on coverage, and it also found something I missed.** Beyond the shared fix it repairs
+`fastLaneCallIdentity`: `fastGenerateOnce` initialises `usedProvider = 'CLAUDE'` and only overwrites it
+when a provider reports in, so a call that died *before any provider was contacted* (the build budget
+ending is thrown at the top of each runner) was recorded as a failed **`anthropic / claude-sonnet-4-6`**
+call — on a FREE, weak-tier build whose own report says `noClaude: true` and where `enforceNoClaude`
+had stripped Claude from the chain. That is a 90-second stall pinned on a named third party we never
+called, and worse, it makes a build look like it breached the weak-tier routing law the admin called
+unbreakable. I read that same report and did not spot it.
+
+On the shared fix the two designs differ slightly: mine wrapped the re-judge itself
+(`recoverAfterRejudge`), theirs bundles resolve+record (`recordReadinessRecovery`) and leaves the
+re-judge to the caller. Mine is marginally stricter; theirs is smaller and lives on the class that
+already owns `resolveReadinessBlockersOnRejudge`. **That difference is not worth two competing
+mechanisms for one question** — which is the exact thing both PRs' own comments warn against. So
+`readinessRecovery.ts`, its tests, and my rewrite of the wiring test were dropped.
+
+**What survived from #2929, because #2931 does not have it:** the vulnerability note advised
+`npm audit fix` when `AGENTV3_AUDIT_FIX=on` means the build had *already run it* (exit 1, npm saying
+the rest need `--force`). Since `looksLikeDependencyInstall` matches `audit`, the note was re-parsed
+from that very output and still gave the advice. `npmAuditNote` now takes `compatibleFixAlreadyRun`,
+read from the **command log** rather than the env flag, so a build that skipped the fix still gets the
+advice. `--force` is still never suggested.
+
+⚠️ **This is the second time today two sessions autopsied one report in parallel** (see the earlier
+"Two sessions fixed the same bug" entry). Both times the duplicate cost a full gate run and a
+conflicted merge. The concurrent-sessions rule says to read the OPEN PRs before starting — a build
+report handed to two sessions is the case that rule does not cover, because neither PR exists yet when
+the second session begins. Recorded as an observation, not a fix.
+
+**Open items from `1ef27cd7` remain open** and are listed in this file's earlier entry for that build:
+the 6–9× wrong ETA, the 354-second silent model call, the missing evidence ledger, and the strong
+suspicion — unverified, because the generated sources are not in the report — that the delivered
+"video editor" cannot edit video.

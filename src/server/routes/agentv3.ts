@@ -2723,6 +2723,40 @@ export function fastLaneProviderLabel(used: string | undefined): string {
 }
 
 /**
+ * WHO ACTUALLY SERVED A FAST-LANE CALL — and, crucially, the honest answer when nobody did.
+ *
+ * 🔴 ROOT CAUSE (build 1ef27cd7, 2026-09-14). `fastGenerateOnce` initialises `usedProvider = 'CLAUDE'`
+ * and only overwrites it from the runner's `onProviderUsed` callback. A call that dies BEFORE any
+ * provider reports in — the build budget ending is thrown at the top of each runner, before a single
+ * network call — leaves that initialiser untouched. The failure path then recorded
+ * `model: fbModel` unconditionally, and `fbModel` is the CLAUDE-tier id by definition ("GLM/Kimi
+ * ignore it and force their own ladder", as the call site says).
+ *
+ * So a FREE, weak-tier build — where `enforceNoClaude` had stripped Claude out of the chain and it
+ * could not possibly have run — reported a failed `anthropic / claude-sonnet-4-6` call as its very
+ * first model call. Three things wrong with that, in rising order of seriousness: it contradicts the
+ * same report's own `noClaude: true`; it pins a 90-second stall on a named third party that was never
+ * contacted (rule 5, step 5 — the platform must tell the truth about what happened); and it makes a
+ * build look like it breached the one absolute routing rule the admin called unbreakable. Exactly the
+ * shape of the 153-rung "Provider GLM failed" cascade fixed in #2913: GLM never failed, GLM was never
+ * called.
+ *
+ * `reported` is the only thing that distinguishes "Claude served this" from "nobody served this and
+ * CLAUDE is merely what the variable was initialised to". PURE + exported for testing.
+ */
+export function fastLaneCallIdentity(
+  reported: boolean,
+  usedProvider: string | undefined,
+  claudeTierModel: string,
+): { provider: string; model: string } {
+  // No provider ever reported in — we do not know who would have served it, and we must not guess.
+  // 'unknown' is the same word `usageLedger`'s providerKey uses, so one vocabulary covers both.
+  if (!reported) return { provider: 'unknown', model: 'unknown' };
+  const provider = fastLaneProviderLabel(usedProvider);
+  return { provider, model: provider === 'anthropic' ? claudeTierModel : String(usedProvider || '').toLowerCase() };
+}
+
+/**
  * Routing for the post-build HEAL/retry runners (integrity / preview / C9 reviewer-autofix / runtime
  * auto-fix / the no-files rebuild). Model Routing Policy (admin 2026-07-12): a FREE build must NEVER
  * touch Claude — anywhere — so on a free build these runners go CHEAP-ONLY (GLM/Kimi, no Claude); a
@@ -14132,7 +14166,10 @@ async function noteBuildOutcome(
           // delivered this per-file call so the build report records the truth, not a fixed 'anthropic'.
           // Claude is always the backstop inside the chain, so a floor miss falls back to Sonnet.
           let usedProvider = 'CLAUDE';
-          const runner = makeFastTextRunner((used) => { usedProvider = used; });
+          // Whether the chain ever told us who served this call. The initialiser above is a DEFAULT,
+          // not an observation — see fastLaneCallIdentity for what reading it as one cost.
+          let providerReported = false;
+          const runner = makeFastTextRunner((used) => { usedProvider = used; providerReported = true; });
           let t;
           try {
             // RESILIENT (admin 2026-07-07, "jab sab fail ho jaye to last me gemini/vertex"): the lane's
@@ -14158,11 +14195,12 @@ async function noteBuildOutcome(
                 events.emit({ type: 'stream_delta', agent: 'architect', id: fastTurnId, kind: 'thinking', delta, ts: Date.now() }),
             });
           } catch (err) {
-            try { buildDiag.recordLlmCall({ model: fbModel, provider: fastLaneProviderLabel(usedProvider), promptPreview, promptChars: promptPreview.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) }); } catch { /* diagnostics best-effort */ }
+            const failedAs = fastLaneCallIdentity(providerReported, usedProvider, fbModel);
+            try { buildDiag.recordLlmCall({ model: failedAs.model, provider: failedAs.provider, promptPreview, promptChars: promptPreview.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) }); } catch { /* diagnostics best-effort */ }
             throw err;
           }
-          const provLabel = fastLaneProviderLabel(usedProvider);
-          try { buildDiag.recordLlmCall({ model: provLabel === 'anthropic' ? fbModel : usedProvider.toLowerCase(), provider: provLabel, promptPreview, promptChars: promptPreview.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true }); } catch { /* diagnostics best-effort */ }
+          const servedBy = fastLaneCallIdentity(providerReported, usedProvider, fbModel);
+          try { buildDiag.recordLlmCall({ model: servedBy.model, provider: servedBy.provider, promptPreview, promptChars: promptPreview.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true }); } catch { /* diagnostics best-effort */ }
           osUsage.inputTokens += t.usage.inputTokens;
           osUsage.outputTokens += t.usage.outputTokens;
           osUsage.cacheCreationInputTokens += t.usage.cacheCreationInputTokens ?? 0;
@@ -15814,12 +15852,12 @@ async function noteBuildOutcome(
             const verdict = await dispatcher.assessBuildReadiness();
             if (verdict.ready) {
               result = { ...result, ok: true, summary: 'Built your app — a duplicate import was detected and removed automatically, so it now compiles and runs.' };
-              buildDiag.resolveReadinessBlockersOnRejudge();
-              buildDiag.record({
-                phase: 'build', severity: 'info', code: 'READINESS_RECOVERED_AFTER_DEDUPE',
-                message: `Readiness re-judged after removing the duplicate import(s): now READY (score ${verdict.score}/100). The earlier blocker described code that no longer exists.`,
-                autoResolved: true,
-              });
+              // One call does both halves — see recordReadinessRecovery. This site was already correct;
+              // routing it through the shared method is what makes the other two impossible to get wrong.
+              buildDiag.recordReadinessRecovery(
+                'READINESS_RECOVERED_AFTER_DEDUPE',
+                `Readiness re-judged after removing the duplicate import(s): now READY (score ${verdict.score}/100). The earlier blocker described code that no longer exists.`,
+              );
             }
           } catch { /* re-judge is best-effort — the honest NOT-ready verdict stands */ }
         }
@@ -15918,7 +15956,10 @@ async function noteBuildOutcome(
                     const verdict = await dispatcher.assessBuildReadiness();
                     if (verdict.ready) {
                       result = { ...result, ok: true, summary: 'Built your app — a React Rules-of-Hooks issue was detected and automatically fixed, so it now runs correctly.' };
-                      buildDiag.record({ phase: 'build', severity: 'info', code: 'READINESS_RECOVERED_AFTER_HOOKS_HEAL', message: `Readiness re-judged after the hooks heal: now READY (score ${verdict.score}/100).`, autoResolved: true });
+                      buildDiag.recordReadinessRecovery(
+                        'READINESS_RECOVERED_AFTER_HOOKS_HEAL',
+                        `Readiness re-judged after the hooks heal: now READY (score ${verdict.score}/100).`,
+                      );
                     }
                   } catch { /* re-judge is best-effort — the honest NOT-ready verdict stands */ }
                 }
@@ -15966,7 +16007,10 @@ async function noteBuildOutcome(
                     const verdict = await dispatcher.assessBuildReadiness();
                     if (verdict.ready) {
                       result = { ...result, ok: true, summary: 'Built your app — an unfinished section of the code was detected and completed, so the feature now works.' };
-                      buildDiag.record({ phase: 'build', severity: 'info', code: 'READINESS_RECOVERED_AFTER_COMPLETION', message: `Readiness re-judged after completing the unfinished code: now READY (score ${verdict.score}/100).`, autoResolved: true });
+                      buildDiag.recordReadinessRecovery(
+                        'READINESS_RECOVERED_AFTER_COMPLETION',
+                        `Readiness re-judged after completing the unfinished code: now READY (score ${verdict.score}/100).`,
+                      );
                     }
                   } catch { /* re-judge is best-effort — the honest NOT-ready verdict stands */ }
                 }

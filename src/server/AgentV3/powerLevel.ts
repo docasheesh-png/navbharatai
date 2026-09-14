@@ -7,34 +7,55 @@
 // POWER LEVEL; each level PINS the exact model that runs the build — the user's
 // selection is what the backend calls, nothing else (admin fidelity rule 2026-07-13):
 //
+// 🔴 THREE TIERS, NOT FIVE (admin-mandated 2026-09-14: "inko simple 3 me badlo — weak, normal,
+// strong. bas"). 'medium' (Powerful) and 'max' (Full Team) are RETIRED as choices.
+//
 //   Weak      ('weak')   → GLM/Kimi cheap floor ONLY. Claude NEVER runs — not the
 //                          builder, not any heal gate (enforceNoClaude strips it from
 //                          every chain). The FREE-tier engine. Bills cheap (× 1.2).
 //   Normal    ('off')    → today's adaptive routing (Haiku/Sonnet ladder, cheap floor
 //                          allowed, Sonnet escalation ceiling). Bills cheap/sonnet by
-//                          what actually ran. UNCHANGED by the 2026-07-13 redefinition.
-//   Strong    ('mini')   → SONNET 100% (was Opus low). Pinned: the build + every heal
-//                          gate run Sonnet; no cheap floor, no Opus. Bills Sonnet × 3.
-//   Powerful  ('medium') → OPUS, effort 'medium' (was 'high'). Bills real Opus × 2.
-//   Full Team ('max')    → OPUS, effort 'max' (ultracode). Bills real Opus × 2.
+//                          what actually ran. UNCHANGED by every redefinition so far.
+//   Strong    ('mini')   → the PAID PREMIUM tier, and now the ONLY one above Normal.
+//                          Sonnet-pinned today; the admin's 2026-09-14 decision is that it
+//                          becomes a LADDER (strong lead, Opus only when evidence demands)
+//                          — that routing change is its own slice, see the note below.
+//
+// ⚠️ WHY THE INTERNAL KEYS DID NOT CHANGE. The three survivors keep the exact strings they
+// have always had ('weak' / 'off' / 'mini'), so no stored preference, no persisted build
+// record and none of the ~20 consumer modules has to be migrated. Only the two retired keys
+// need handling, and `toPowerLevel` maps them UP to 'mini' rather than down to 'off': a user
+// who had chosen Full Team picked the STRONGEST tier available, so the honest translation of
+// their choice is the strongest tier that still exists. Mapping them to the default would
+// silently downgrade the people paying most, with nothing on screen to reveal it.
+//
+// ⚠️ HISTORICAL BILLING IS DELIBERATELY NOT TOUCHED. `pricing.ts`'s `BillingPowerLevel` still
+// accepts 'medium'/'max' because build records written before today carry those values and
+// must keep pricing at the Opus rate they were actually billed at. Retiring a CHOICE is not
+// the same as rewriting what already happened.
 //
 // `effort` is the Opus 4.8 `output_config.effort` lever (GA, no beta header):
 // low | medium | high | xhigh | max. budget_tokens is REMOVED on Opus 4.8 — depth
 // is controlled by effort only, paired with adaptive thinking. PURE module so the
 // mapping is unit-testable without any provider key.
 
-import { NORMAL_MULTIPLIER, SONNET_MULTIPLIER, OPUS_MULTIPLIER } from './pricing';
+import { NORMAL_MULTIPLIER, SONNET_MULTIPLIER } from './pricing';
 
 /**
  * The user-facing power levels (admin UI redesign 2026-07-12). Internal keys are kept stable for
  * back-compat; the UI relabels them:
  *   'weak'   → "Weak"        — cheap floor (GLM/Kimi) ONLY, never Claude. The FREE-tier engine.
  *   'off'    → "Normal"      — adaptive routing (the paid default).
- *   'mini'   → "Strong"      — Sonnet, pinned 100% (admin 2026-07-13; was Opus low).
- *   'medium' → "Powerful"    — Opus, medium effort (admin 2026-07-13; was high).
- *   'max'    → "Full Team"   — Opus, max effort (ultracode).
+ *   'mini'   → "Strong"      — the paid premium tier, and the only one above Normal since 2026-09-14.
  */
-export type PowerLevel = 'weak' | 'off' | 'mini' | 'medium' | 'max';
+export type PowerLevel = 'weak' | 'off' | 'mini';
+
+/**
+ * The two tiers retired on 2026-09-14. Kept as a named type rather than loose strings so every place
+ * that has to understand an OLD stored value says so out loud, and so deleting one later is a compile
+ * error rather than a silent behaviour change.
+ */
+export type RetiredPowerLevel = 'medium' | 'max';
 
 /** Claude Opus reasoning-effort values (output_config.effort). */
 export type ClaudeEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
@@ -75,9 +96,10 @@ const SPECS: Record<PowerLevel, PowerSpec> = {
   // Admin tier→model redefinition (2026-07-13): Strong = SONNET pinned 100% (bills Sonnet × 3, the
   // "Sonnet actually ran" tier — billing follows the model that really works, never Opus rates for
   // Sonnet work); Powerful = Opus at effort 'medium' (was 'high'); Full Team = Opus at 'max'.
+  // Strong = the one paid premium tier. Still Sonnet-pinned HERE; the admin's 2026-09-14 decision
+  // turns it into a ladder (strong lead, Opus only on evidence) in its own routing slice, because
+  // that change moves `powerMode`'s meaning at ~30 call sites and must not ride a UI change.
   mini: { level: 'mini', powerMode: true, pinnedModel: 'sonnet', effort: undefined, ceilingEffort: 'low', multiplier: SONNET_MULTIPLIER },
-  medium: { level: 'medium', powerMode: true, pinnedModel: 'opus', effort: 'medium', ceilingEffort: 'low', multiplier: OPUS_MULTIPLIER },
-  max: { level: 'max', powerMode: true, pinnedModel: 'opus', effort: 'max', ceilingEffort: 'low', multiplier: OPUS_MULTIPLIER },
 };
 
 /**
@@ -88,7 +110,13 @@ const SPECS: Record<PowerLevel, PowerSpec> = {
 export function toPowerLevel(input: PowerLevel | boolean | string | undefined | null): PowerLevel {
   if (input === true) return 'mini';
   if (input === false || input == null) return 'off';
-  if (input === 'weak' || input === 'off' || input === 'mini' || input === 'medium' || input === 'max') return input;
+  if (input === 'weak' || input === 'off' || input === 'mini') return input;
+  // 🔴 THE RETIRED TIERS MAP **UP**, NOT DOWN (2026-09-14). 'medium' and 'max' were the two tiers
+  // ABOVE Strong, so whoever stored one had deliberately chosen the strongest engine on offer. Letting
+  // them fall through to the default below would hand exactly those users the middle tier, with
+  // nothing on screen to say their choice had been changed — a silent downgrade of the people paying
+  // most. 'mini' is now the top of the ladder, so it is the honest translation of "give me the best".
+  if (input === 'medium' || input === 'max') return 'mini';
   return 'off';
 }
 

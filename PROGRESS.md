@@ -55467,6 +55467,91 @@ only on `provenBroken` — we opened the app and saw it broken. A repair turn th
 not caught by that test, and nothing else catches it either. Prevention above is what covers this case
 today; a real fix needs a behavioural check, not a render check. **Recorded as an open root cause.**
 
+---
+
+## 2026-09-14 — A build the USER stopped is not a build that failed. Charging for it, honestly.
+
+Admin: *"kabhi kabhi app 90% tab ban jati hai, aur user … build cancel kar deta hai. to bhi woh build
+fail me jati hai, aise case me bhi charge 0 aata hai. **isko bhi fix karo! user ki galti hai, isme
+hamari nahi!**"* — then, importantly: *"mai non technical hu … aap **specialist ke tarah socho**, aur
+isko aise fix karo ki **dono ka nuksan na ho, na mera (admin) na user ka**."*
+
+**The gap is real.** `zeroBillForFailedBuild` makes every `ok:false` build free and cannot tell two
+completely different things apart:
+
+- **WE failed** — our engine broke, or a wrong verdict called a working app broken. → Free, always.
+  That is the "working app or free" law and nothing here touches it.
+- **THE USER stopped it** — we spent real provider tokens and real sandbox minutes, produced real
+  files, and the user **keeps** them (a stopped build is saved and resumable). → Free is wrong.
+  Nobody failed; the user changed their mind.
+
+### 🔴 Where I disagreed with the admin's own numbers — and it protects HIM, not the user
+
+He proposed a percentage table: cancel with the app built ⇒ **100%**; cancel with nothing built ⇒
+**50%**. The first half is exactly right and is implemented. **The second would over-charge by an
+order of magnitude**, because NavBharatAI does not price builds at a flat rate — since Fix 65 the bill
+IS the real measured provider cost × the tiered markup:
+
+- cancel at **90%** → the real cost is already ~90% of a full build → **the bill is already ~90%**.
+  His "100% charge" is achieved by simply not zeroing it. **No table needed.**
+- cancel at **5%** → the real cost is ~5% → a 50% charge would bill **ten times what the work cost**,
+  for an app the user cannot use. That takes money for work never done, breaks this repo's own billing
+  law (*never invent a cost*), and is the single most refund- and review-destroying thing a builder
+  can do.
+
+So the percentages are not the mechanism — the real cost already is. The tiers decide a **discount on
+that honest number**, across exactly the 0%–50% band the admin asked for, applied where each end of it
+is defensible:
+
+| What the user holds when they stop | Discount | Why |
+|---|---|---|
+| A **working app** — we opened it and watched it render | **0%** | they have the product |
+| Files saved and resumable, never seen running | **50%** | real code, not an app |
+| **Nothing** | **100% (free)** | charging for nothing is indefensible — and costs us almost nothing anyway |
+
+### 🔒 The four safety rules, which matter far more than the numbers
+
+Charging for our **own** failure would be worse than never charging at all — it is the one outcome
+that cannot be apologised away.
+
+1. **Only an explicit `user-stop`.** `buildAbortCause.ts` already exists for exactly this honesty
+   problem (*"maine nahi roki, khud ruki hai bhai"* — a watchdog stop reported as the user's). The six
+   other causes — watchdog, advisory-cap, reaper, deploy-drain, lock-reclaimed, cost-cap — stay FREE.
+2. **`'unknown'` is never the user.** That module's header already says an abort we cannot explain must
+   never be attributed to something the user did. An unknown cause bills nothing.
+3. **Never more than the build already cost.** Every branch starts from the number the normal billing
+   model already decided, so this can only ever REDUCE — cancelling can never cost more than finishing.
+4. **We charge only for what the user KEEPS.** Zero files is zero rupees, whatever we spent.
+
+⚠️ **AND ONE THING THE ADMIN ASSUMED THAT THE CODE DOES NOT DO — stated so nobody "fixes" it.**
+*"user app band kar deta hai"* does **not** cancel a build. `req.on('close')` only drops the event
+subscriber; the build runs to completion on the server and bills normally. A user on a train who loses
+signal is not cancelling anything and can never be touched by this module. **Only the Stop button
+reaches it.**
+
+### Transparency, because a surprise charge is its own kind of loss
+
+The Stop button now says so **before** it is pressed: *"your files so far are saved, and you are
+charged only for the work already done (never for a full build)."* After the stop, the user is told
+what they were charged and why, in NavBharatAI's own words — test-locked against the White-Label Law,
+so no vendor or model name can ever appear in it.
+
+**Kill switch:** `AGENTV3_BILL_CANCELLED=off` restores today's behaviour instantly, without a deploy —
+the convention every money-moving flag in this file follows. Admin report code:
+`CANCELLED_BUILD_CHARGED`, carrying the delivery tier and the discount, so a charged cancel always
+explains itself. Test-locked in `tests/cancelledBuildBilling.test.ts` (20), including that the decision
+runs **before** the blanket zero — after it there would be nothing left to charge.
+
+### 🔴 Still open
+
+- **The OTHER zero charge — a wrongly-failed build — is still free, and that is deliberate.** Fixing it
+  means fixing the **verdict**, not the billing: under "working app or free" a build marked not-ok must
+  never be charged, and charging one would be the worse bug. That money returns when the verdict is
+  right (#2913, #2929, #2931 merged; the admin reports it still happens ~10–12%).
+- **A user who stops because the build is going badly still pays the 50% tier** if files were written.
+  The `appRendered` test keeps them off the full tier, and zero files keeps them free, but there is no
+  signal today for *"they stopped because we were flailing"*. Naming it rather than pretending the
+  three tiers cover every case.
 ## 2026-09-14 — The website lost pinch-zoom, and swiping the footer dragged the whole app up
 
 Admin screenshot of the WEBSITE (navbharatai.com, mobile Safari — explicitly not the packaged app):
@@ -55553,3 +55638,301 @@ green on the final state: **1665 files · 23,293 passed · 0 FAIL**.
 **`4456m 8s`** — 74 hours — beside a build stamped `b:09-14 11:33`. That elapsed figure is almost
 certainly measuring from the wrong origin (a workspace's first build rather than this turn's start).
 Not investigated; raised as an open item.
+---
+
+## 2026-09-14 — 🔴 WHITE-LABEL BREACH: the provider's name was on a user screen. The one the admin found was not the worst one.
+
+Admin, from his own phone: *"navbharatai -> settings -> live metrics. **live metric me provider ka naam
+show ho raha hai!** maine kaha tha — kahi bhi kisi bhi prkar se real background provider ai ka naam
+show nahi hona chahiye (white labeling karni hai)."* The card read **`KIMI · 3 reqs · 23,73,820
+tokens · $1.4916`**.
+
+### What the sweep found — the leak he saw was the SMALLER of two
+
+| | surface | gate | severity |
+|---|---|---|---|
+| 1 | **Settings → Live Metrics** printed the raw provider key as a row heading | `isAdmin` **and** an admin token on `/api/admin/metrics` | no ordinary user ever saw it |
+| 2 | 🔴 **The POWER SELECTOR's description line** | **none** | **every user, on the main build screen** |
+
+Item 2 printed the vendor's own tier words straight to the user:
+`'Normal — balanced (Sonnet)'` · `'Sonnet · 100%'` · `'Opus · medium effort'` ·
+`'Opus · ultracode (max effort)'`.
+
+🔴 **And the shape of that bug is the finding.** The FIRST branch of the same five-branch ternary was
+already white-labelled correctly — `'Free engine — fast & lightweight'` — and the other four were not.
+Someone applied the law to one branch and moved on. **That is exactly what a per-call-site habit
+produces and exactly what CLAUDE.md's own §4 prescribed the cure for**: *"route every user-facing
+provider reference through ONE anonymizer … so a NavBharatAI label is applied by construction — never
+sprinkled ad-hoc per call site."* The server half of that (`providerRedaction.ts`) has existed since
+Fix 62/68. **The client half never got built** — so the client had no choke point, and the leak grew
+there.
+
+⚠️ The UI was also contradicting **our own documentation**: `AppKnowledgeBase.ts` has described these
+tiers as *"NavBharatAI's fast economy engine"*, *"the standard engine, adaptive"*, *"a stronger engine,
+pinned for the whole build"*, *"most capable engine at higher reasoning effort"* since it was written.
+The fix is simply to make the screen say what the docs already promised.
+
+### The fix
+
+- **`src/lib/engineLabels.ts`** — the missing client choke point. `publicTierLabel()` returns the
+  white-labelled description for every tier, and an **unknown tier falls back to the brand, never to a
+  vendor string**. Pure, so every rule is testable.
+- Both surfaces now render through it. The metrics card aggregates to **one `NavBharatAI engine` row**
+  and points at the Admin Panel → *Provider Token Burn* for the genuine per-engine breakdown — an
+  admin-only surface by construction, which is the one place §3 actually permits vendor identity.
+  **Nothing the admin needs is lost; it just stops living inside a user-facing file.**
+- 🔒 **`tests/whiteLabelClientSurfaces.test.ts`** walks **every** `.ts`/`.tsx` under `src/components`,
+  `src/lib` and `src/hooks`, strips comments and imports, and fails on any **string literal** that
+  names a vendor, model family or Claude tier word. **Proven by injection**: adding
+  `const leak = "Powered by Claude Sonnet"` to `GalleryPanel.tsx` fails the suite by name.
+- A test also asserts the five tier labels stay **distinct and rankable** — five identical safe strings
+  would be white-label theatre, not a fix.
+
+### ⚠️ The allowlist, and why it is not a hole
+
+The law covers **which engine NavBharatAI ran**. It does **not** cover a third-party AI the **user** is
+adding to **their own app** — the API marketplace, the BYO-key recipes, the IDE's provider picker.
+Those are the user's integrations, chosen and paid for by them, and scrubbing them would break the
+feature. Each allowlisted file carries its reason in the test, alongside the two genuinely admin-only
+surfaces (`AdminDashboard.tsx`, `agentV3CostSummary.ts`). **A new file is guilty until listed**, so the
+default is safe.
+
+### Still open
+
+- The sweep covers **string literals in client source**. A provider name arriving from the SERVER at
+  runtime and rendered raw would pass it — which is precisely how the metrics card leaked
+  (`{provider}` was an interpolation, not a literal). That one is fixed at its source, but the general
+  case needs the server to redact before it serializes, not the client to notice. `providerRedaction.ts`
+  is the right home; wiring every admin/metrics payload through it is not done.
+## 2026-09-14 — Five power tiers become three (admin: "inko simple 3 me badlo — weak, normal, strong. bas")
+
+**Slice 1 of 4** of the admin's engine-routing redesign (the others: per-mode ladders with "100% usi
+mode mein"; an OpenAI provider for GPT-5.4; retiring Gemini + Grok once the new keys are in). This
+slice retires 'medium' (Powerful) and 'max' (Full Team) **as choices** and changes no model routing —
+Strong is still Sonnet-pinned here, on purpose: turning it into a ladder moves `powerMode`'s meaning
+at ~30 call sites and must not ride a UI change.
+
+**What was decided, and why it is not just "delete two buttons":**
+- **The internal keys did not change** ('weak' / 'off' / 'mini'), so no stored preference, no
+  persisted build record and none of the ~20 consumer modules needs migrating. `RetiredPowerLevel`
+  names the two old keys as a type, so every place that must still understand an OLD value says so.
+- 🔴 **A retired tier maps UP to Strong, never down to the default.** A user whose stored preference is
+  'max' had deliberately chosen the strongest engine on offer; letting it fall through
+  `toPowerLevel`'s unknown-input default would hand exactly those users the middle tier with nothing
+  on screen to reveal it — a silent downgrade of the people paying most. The remap is inside
+  `toPowerLevel`, AFTER the free-user clamp, so it can never become a way to reach a paid engine.
+  Only the two keys we actually retired are remapped; junk still falls to 'off' (tested).
+- ⚠️ **Historical billing is deliberately untouched.** `pricing.ts`'s `BillingPowerLevel` still
+  accepts 'medium'/'max' and `powerToTier` still prices them at the Opus rate — build records written
+  before today were charged real-Opus × 2 and must keep saying so. Retiring a choice is not rewriting
+  what already happened. Test-locked.
+- **The Team HQ card follows the top tier, not a key.** `showTeamHq` now fires on 'mini' (and still
+  on an in-flight 'max'): the premium live-team experience was tied to the label "Full Team", and
+  deleting a working feature because its tier was renamed would be a downgrade nobody asked for.
+- `selectBuildModel`'s 'medium'/'max' → Opus branches were **removed, not left dormant**: every caller
+  passes a level that has been through `clampPowerForUser` → `toPowerLevel`, so they were unreachable,
+  and an unreachable Opus branch in the model selector reads later as a live guarantee. The legacy
+  BOOLEAN `true` → Opus is kept — it is a different input from call sites that never carried a level.
+
+**Corrected in the same session, recorded so it is not repeated:** I told the admin "GLM-5.3-Flash —
+aisa koi model nahi." Wrong. It is absent from THIS REPO (no rate line, no ladder), and z.ai's own
+benchmark page shows it exists. "I could not find it in the code" and "it does not exist" are
+different claims, and CLAUDE.md already says which one a session may make.
+
+⚠️ **Two facts the next slices need from the admin, named here so they are not guessed:**
+1. `glm-5.3-flash`'s real price. `providerRates.ts` prices any GLM id containing "flash" at **$0**
+   (the 4.7-flash rule), so without its own rate line a paid Normal build on 5.3-flash would be
+   silently under-billed. Slice 2 adds a line defaulting to the 4.7-coder rate with
+   `RATE_GLM53_FLASH_*` overrides; the admin sets the real number.
+2. Whether GPT-5.4 is cheaper than `kimi-k2.7`. It lands on the WEAK ladder, where every build is
+   paid by NavBharatAI, and the admin's own 2026-09-12 free-tier ceiling is kimi-k2.7's price. If it
+   is dearer, that is a knowing choice, not an accident — and Haiku stops being the absolute last rung.
+
+🔒 **Sequencing rule for slice 4 (Gemini + Grok retirement):** Grok is today the judge (free and
+paid), the free plan-phase model and Engineer AI's PRIMARY; Gemini/Vertex are the free-chat
+backstop and vision. **Keys must not be deleted from Cloud Run until the re-homing PR is merged**,
+or judge and Engineer AI go dark for the gap.
+
+**Tests:** `tests/threePowerTiers.test.ts` (8 — the ordered list, the picker on screen reads the same
+three keys, upward remap, junk still defaults, free clamp still wins, no selectable tier at the Opus
+multiplier, historical records still price Opus), plus `powerLevel.test.ts`, `powerGating.test.ts`
+and `agentv3.test.ts` rewritten to the new rules rather than silenced. `AppKnowledgeBase.ts` POWER
+SELECTOR entry rewritten for three tiers, including what to tell a user who asks where Full Team went.
+
+Gate on the final state: typecheck · noUnusedImports · typecheck:server · build · test:bundle ·
+boot:check all green; `vitest` **23,294 passed / 1 skipped**; the only 3 failures are
+`tests/esmMirror.test.ts`, verified to fail identically on a clean `main` in this sandbox (upstream
+CDN blocked by the agent proxy) while CI on `main` is green — environment, not code.
+
+---
+
+## 2026-09-14 — Three ladders, and "100% usi mode mein" becomes a property of the code (slice 2 of the engine-routing redesign)
+
+Admin, verbatim: *"user ne agar teeno mode me se jo select kiya hai, aap 100% usi mode me bane."* — and the
+three ladders, by name, with the correction *"Grok ko hatao mat … reviewer app tode na."*
+
+**The one module: `src/server/AgentV3/tierLadder.ts`.** Weak = GLM 4.7-flash → GLM 5.3-flash → Kimi k2.6 →
+Haiku → OpenAI gpt-5.4; Normal = Kimi k2.7-code → GLM 5.3-flash → Sonnet; Strong = Kimi k3 → Sonnet → Opus.
+`buildTurnRunner` now takes `tier` and maps the ladder to runners rung for rung (`ladderRunners`). Everything
+it used to assemble from five booleans is gone from the live path.
+
+**What was actually wrong before, found by reading the old assembly, not assumed:**
+- `buildTurnRunner` returned a **Claude-only runner when the floor was empty** — so a Normal build with
+  `AGENTV3_CHEAP_FLOOR=off` silently became a Sonnet build. That is the substitution the rule forbids by
+  name. Now a tier with no keyed rung is refused pre-flight (`ENGINE_UNAVAILABLE`, weak keeps
+  `WEAK_ENGINE_UNAVAILABLE`) and, as a second net, its runner throws a branded refusal on first use.
+- Vertex/Gemini rode into EVERY chain as a "last resort" the tier policy never named. Gone as build rungs;
+  they keep vision and the free-chat backstop, and **Grok keeps judge / plan / Engineer-AI primary** — the
+  admin's explicit instruction, which withdrew the earlier plan to retire them.
+- `enforceNoClaude` matched the one literal name `'CLAUDE'`, so the new `CLAUDE_OPUS` rung would have
+  **survived the weak-module guard**. It is a prefix rule now (every `CLAUDE*` except `CLAUDE_HAIKU`).
+  ⚠️ And it **no longer moves Haiku to the end**: the 2026-07-13 "to last me" was for a boolean-assembled
+  chain; the admin's own weak ladder puts GPT-5.4 after Haiku. The guard decides WHAT, the ladder WHERE.
+- Escalation used to be switched OFF for the pinned tiers (`onlyOpus`). Strong is a ladder now, so
+  escalation = **start the same ladder higher up** (`escalationPathForTier`, `ladderFrom`): Normal restarts at
+  Sonnet, Strong at Opus, Weak never. "Opus sirf zarurat par" is therefore literal, not aspirational.
+- Heal = the ladder minus its LEADING flash rung (`healLadder`) — the 2026-08-13 rule as one function.
+  Only the first flash rung: dropping every flash rung would skip glm-5.3-flash, the strongest cheap coder
+  on weak, and start a repair on a dearer model with no evidence the second rung was at fault.
+- The key-pool runner factory was a closure inside `cheapBuildFloorRunners`; it is `openAiCompatRunners`
+  now, shared by GLM, Kimi and OpenAI (all speak the same chat-completions tool protocol), with
+  `floorTuning()` holding the three timing knobs once.
+
+**Money, verified rather than reasoned about:** `powerToTier('mini')` is not the Opus tier, so Strong bills
+real cost + tiered markup, and an Opus rung that actually ran is priced at its real Opus rate inside that —
+**no billing change needed.** Two prices are unknown here and default to the rate card's own over-state-only
+bound: `glm-5.3-flash` → the glm-5 line (⚠️ NOT the $0 line its "flash" name would have matched — that was a
+silent under-bill waiting to happen, now test-locked), `gpt` → the Sonnet line. `RATE_GLM53_FLASH_*` /
+`RATE_GPT_*` set the real ones.
+
+**Two facts a later session must not re-derive:** the OpenAI rung is UNTESTED against a real response —
+`OPENAI_API_KEY` is not set, so today it yields nothing and changes no build; and the chat router has no
+OpenAI provider (slice 3, only if GPT should serve chat). `AGENTV3_LADDER_WEAK/_NORMAL/_STRONG` override a
+tier's ladder whole-or-not-at-all; a weak override naming Sonnet/Opus is REFUSED with the reason in the
+`TIER_LADDER` report line.
+
+**Inert for the build chain now, labelled in the route so nobody reads them as live:**
+`healRunnerRoutingOpts`, `cheapFloorDecision`, `cheapFloorAllowedForTier/User`, `resolveClaudeFirst`,
+`geminiLastResortEnabled`, `vertexPeerBuildEnabled`, `balanceFloorLead`, `tierToGeminiBuildModel`,
+`cheapBuildFloorRunners`, and the envs `AGENTV3_BUILD_CLAUDE_FIRST`, `AGENTV3_BUILD_ALLOW_GEMINI`,
+`AGENTV3_VERTEX_PEER`, `AGENTV3_FLOOR_BALANCE`, `AGENTV3_FREE_KIMI_LEAD`, `AGENTV3_WEAK_FLAGSHIP_HEAL`,
+`GLM_MODEL`/`KIMI_MODEL`/`AGENTV3_FREE_*_MODEL`. Kept only because their tests pin them; retire together.
+Trade stated plainly: without the live-health lead swap, a 429 storm on rung 1 costs one failed call per
+cooldown window (the shared bench still sidelines the rung) instead of a reorder.
+
+**Tests:** `tests/tierLadder.test.ts` (19), `tests/tierChainFidelity.test.ts` (16 — the CONSTRUCTED chain's
+(name, model) sequence per tier; keyless skip; empty tier → branded refusal naming no vendor; kill switch;
+heal/escalation within the ladder; override refusal; prefix guard; every inline call site passes `tier`;
+`ladderRunners` covers every provider the type can name), `tests/providerRatesNewRungs.test.ts` (9). Five
+existing suites re-anchored to rules rather than retired literals (`agentv3.test.ts`, `healRunnerAttribution`,
+`buildCostCeiling`, `buildReportWiring`, `tierChainFidelity`). CLAUDE.md routing policy superseded with a
+dated entry; AppKnowledgeBase tells every AI the picked tier is the engine that runs.
+
+Gate on the final state (merged with `main` 1d8786d9): typecheck · noUnusedImports · typecheck:server ·
+build · test:bundle · boot:check all green; `vitest` **23,337 passed / 1 skipped**; the only 3 failures are
+`tests/esmMirror.test.ts`, verified earlier today to fail identically on a clean `main` in this sandbox.
+
+### Addendum, same day — the agent × tier table wired into #2939 (admin: "theek hai, ab yahi banao")
+
+Three roles moved, two deliberately stayed, all test-locked in `tests/agentRolesPerTier.test.ts`:
+- **Judge = Grok on every tier** (`resolveJudgeKind` ignores the mode; `AGENTV3_REVIEWER=sonnet` still
+  forces Sonnet; no key ⇒ Sonnet). **Opus is never the judge** — it was the single most expensive call a
+  Strong build made (reads the whole app, $15/MTok in) for a verdict Grok gives at Sonnet-class price, and
+  a judge must sit outside the build ladders, which Grok does.
+- **Plan = the tier's plan rung, then its own ladder** (`PLAN_RUNG`: glm-5.3-flash / kimi-k2.7-code /
+  Sonnet; `planLadder`; `tierPlanRunner` replaces `grokPlanRunner`, built by the same `ladderRunners` +
+  `enforceNoClaude` as the build chain). Grok no longer plans.
+- **Vision: Strong is Claude-first** (`useClaude: powerSpecResolved.powerMode` — the retired `pinnedOpus`
+  flag was always false now, so Strong had silently lost Claude vision). The describe model stays Haiku
+  (`claudeVisionModel`), a deliberate deviation from the draft's "Sonnet": describe-tier work, cheaper.
+- **Stayed, with the reason recorded:** safety triage is deterministic (`triagePrompt` is synchronous —
+  my own earlier table wrongly gave it a model); the intent doubt-reader already runs on the FREE chat
+  router ($0, glm-4.7-flash led) for every tier — the draft's Haiku-on-Strong would cost more for a
+  one-word answer.
+`planGrokEnabled` joins the "not consulted" list. The full table is in CLAUDE.md's 2026-09-14 section.
+
+### Addendum — the real prices, from the admin (2026-09-14, same PR)
+
+- **glm-5.3-flash = $0.15 / $0.50** (cache at Z.ai's 25% convention, $0.0375). My placeholder had it at
+  the glm-5 line ($1.40 / $4.40) — the over-state-only bound the rate card's contract demands for an
+  unknown model, but ~10× the truth. It stood for a few hours in an unmerged branch; no bill was ever
+  computed from it. Test now pins the exact numbers.
+- **GLM-5.3 (non-flash) exists, $1.40 / $4.40** — exactly the glm-5 line the family rule already returns
+  for it. No new row. It is on no approved ladder; the honest question it raises is recorded below.
+- **GPT-5.4 Nano = $0.20 / $1.25** — a `gpt-nano` line so a Nano id can never be billed at the full-GPT
+  bound. **Not wired anywhere.** Every role a Nano could take here is either deterministic code (₹0) or
+  already on glm-4.7-flash ($0), so today it would add a vendor and a bill to a job that costs nothing.
+- **Full GPT-5.4: price still unknown** → still the Sonnet-line bound. It is the Weak ladder's last rung
+  by the admin's list, keyless today.
+
+**Open question for the admin, recorded rather than decided:** with GLM-5.3 at $1.40 / $4.40 and a
+95th-percentile coding score, it is a candidate for (a) Weak's LAST rung in place of gpt-5.4 — same vendor
+as rungs 1–2, no new key, no new bill surface — and (b) Normal's last rung in place of Sonnet ($3 / $15),
+which would cut Normal's worst-case cost ~3×. Both change an approved ladder, so neither was done.
+
+### Addendum — decided under the admin's full authority grant (2026-09-14, verbatim: "mera kam se kam kharcha; user ko best se best app, ek hi baar me; aapko puri authority hai — i approved")
+
+With the real prices known, the ladders were revised in the same PR (#2939). The reasoning, so it is
+not re-derived: **the lever behind both aims is the FIRST rung.** Every heal is a second model call,
+more sandbox minutes and a user watching a spinner; a $0 first rung that fails is dearer than a $0.15
+first rung that succeeds.
+
+| | Was (admin's first list) | Now | Why |
+|---|---|---|---|
+| Weak | 4.7-flash → 5.3-flash → k2.6 → Haiku → gpt-5.4 | **5.3-flash → k2.6 → 5.3 → Haiku** | 4.7-flash (DeepSWE ~46) was the rung most likely to need a heal; gpt-5.4 has no key and no price |
+| Normal | k2.7-code → 5.3-flash → Sonnet | **5.3-flash → k2.7-code → 5.3 → Sonnet** | 5.3-flash is $0.15 vs k2.7's $0.95 in, benchmarks beside the flagship; 5.3 ($1.40) sits under Sonnet ($3) |
+| Strong | k3 → Sonnet → Opus | **5.3 → Sonnet → Opus** | kimi-k3: unverified id, unknown price; 5.3 is 95th-percentile coding at less than half Sonnet |
+| Plan | 5.3-flash / k2.7-code / Sonnet | **5.3-flash / 5.3-flash / 5.3** | input-heavy call; cheapest rung that reasons well |
+| Judge | Grok / Grok / Grok | **5.3 / 5.3 / Grok** | different model from the builder; 5.3 is $1.40 in vs Grok's $3; Strong builds on 5.3 so Grok judges it |
+| Heal | ladder minus leading flash | **ladder** (drop the leader only if it is 4.7-flash) | 5.3-flash can repair its own work with the error in hand |
+
+- **Nothing to buy from OpenAI.** The gpt rungs are gone; the rate lines stay so an id, if it ever
+  appears in telemetry, prices honestly. Slice 3 (chat-side OpenAI) is cancelled.
+- **Grok stays** where the admin said: Strong's judge, Engineer AI's primary.
+- 🔴 **White-Label breach found and fixed while wiring the judge:** the user-facing narration printed
+  the judge's vendor — *"🔎 Grok is reviewing the cheap build…"* / *"re-reviewing…"*. Now
+  *"NavBharatAI's reviewer is checking the build…"*; the vendor label survives only in the admin's
+  verdict record. Test-locked in `tests/agentRolesPerTier.test.ts` (narration lines carrying the word
+  "reviewer" may name no vendor or model).
+- **Judge fallbacks are honest, never Opus:** `AGENTV3_REVIEWER=sonnet` forces Sonnet; no GLM key ⇒
+  Grok; no Grok key ⇒ Sonnet. `AGENTV3_GLM_JUDGE_MODEL` overrides the judge model (default `glm-5.3`).
+- **What this does NOT yet prove:** that 5.3-flash's first-try success rate is what the benchmarks
+  suggest on THIS engine. The build report already records `deliveredVia` and heal counts; after 20–30
+  real builds, compare heal rate per leading rung and move the leader if the data says so.
+
+### 2026-09-14 — Admin card: real cost vs bill, by tier × app size — MEASURED, not estimated (admin: "han banao")
+
+Asked what a simple / mid / full-stack app costs the USER versus the PLATFORM on each of the three
+tiers, the honest answer was an estimate from assumed token counts. The admin said build the
+measurement instead. Branch `claude/build-cost-card`.
+
+**What ships:**
+- **`GET /api/admin/build-costs?limit=30`** (`routes/admin.ts`, behind `verifyAdminToken`) → one row per
+  recent build (tier, app size, files, result, minutes, heals, real cost, sandbox cost, bill, margin) and
+  a tier × size summary where every average carries its own sample size. Rendered by
+  `src/components/admin/BuildCostCard.tsx` on the admin **Reports** tab, above the all-builds list.
+- 🔴 **THE ROOT CAUSE UNDER THE CARD, fixed rather than worked around: the settle never persisted the
+  real cost.** `decideBuildBilledUsd` priced the providers' real cost to compute the bill and then
+  threw the figure away; the report kept only the bill. Re-deriving it later from the stored call log
+  is not a measurement, because storage keeps only the newest **40** calls (`STORED_LLM_CALLS_MAX`,
+  now an exported constant instead of a literal) — a big build's re-priced cost would be a lower bound
+  presented as a fact. Now `decideBuildBilledUsd` returns `realCostUsd` + `sandboxUsd` on EVERY path
+  (Opus tier and legacy path included), and BOTH settle sites — the normal settle and the watchdog
+  finalizer (rule 3, the sibling that Fix 67 exists because of) — persist them on
+  `BuildBillingRecord.realCostUsd` / `.sandboxCostUsd`. Recorded on failure too: a failed build is
+  never charged, but it still cost us. Test-locked: both sites, and `userCostBreakdown` may never
+  carry either field (White-Label Law).
+- **Honesty rules in `src/server/lib/buildCostLedger.ts` (pure):** a settled figure wins; an older
+  report is re-priced from its call log through the SAME rate card (`realRateFor` + `usageCostUsd`);
+  a log AT the storage cap is `call-log-capped` — shown as "≥ ₹x", `measured: false`, **excluded from
+  every average and with no margin**, because a margin over a lower-bound cost overstates what we
+  made; a call with no token counts is counted as unpriced, never priced at zero; a rate that cannot
+  be read prices nothing. App size comes from the manifest's file list (complete), not
+  `generatedFiles` (capped at 20): any server/API/database path ⇒ full-stack, else ≤ 8 files simple,
+  ≤ 20 mid. The rule is printed on the card so the reader can disagree with it.
+- **Not an AppKnowledgeBase entry:** admin-only surface; nothing a user can reach.
+
+**What it does NOT do, said plainly:** builds settled before this merge carry no settled figure, so the
+first rows will mostly be re-priced from call logs, and the ones at the cap will read as lower bounds.
+The card gets exact from the first build after deploy. Sandbox cost is shown as its own column and is
+₹0 unless `AGENTV3_BILL_SANDBOX` + `E2B_USD_PER_HOUR` are set — it is not folded into the token cost.

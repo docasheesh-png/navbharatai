@@ -30,6 +30,7 @@ import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary }
 import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
 import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote } from '../AgentV3/etaEvidence';
+import { tierLadder, healLadder, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
 import { describeRunnerChain, chainProviders, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction } from '../AgentV3/AuthenticityAnalysis';
@@ -289,6 +290,7 @@ import { nextReviewAction, selectReviewer, cheapBounceCap } from '../AgentV3/Che
 import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
 import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState } from '../AgentV3/ProjectContext';
 import { computePlanProgress } from '../AgentV3/PlanProgress';
+import { decideCancelledBuildBill } from '../AgentV3/cancelledBuildBilling';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectModeEnabled, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
@@ -462,7 +464,7 @@ import { terminalDailyLimitSeconds, decideTerminalAccess, type TerminalAccess } 
 import { createMeterRegistry, attachStream, accrueFor, detachStream } from '../AgentV3/terminalMeter';
 import { terminalUsageStore } from '../AgentV3/TerminalUsageStore';
 import { lintBuiltApp, designLintSummary, a11yLintSummary } from '../AgentV3/buildQualityLint';
-import { abortBuild } from '../AgentV3/buildAbortCause';
+import { abortBuild, abortCauseOf } from '../AgentV3/buildAbortCause';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints, setCheckpointLabel, normalizeCheckpointLabel, CHECKPOINT_LABEL_MAX } from '../AgentV3/CheckpointStore';
@@ -1617,6 +1619,16 @@ export function decideBuildBilledUsd(
   reconciledProviderUsage: Record<string, { inputTokens: number; outputTokens: number }>;
   realCostRemainder: { inputTokens: number; outputTokens: number };
   isOpusTier: boolean;
+  /**
+   * What the PROVIDERS really cost us for this build (USD, tokens only — the per-model rate card over
+   * the ledger, aux remainder at the Sonnet bound), and the VM beside it. Returned on EVERY path,
+   * including the Opus tier and the legacy per-tier path, because it is the platform's own cost and
+   * is true whatever formula the bill used. Persisted on the report's billing record (admin
+   * 2026-09-14: "asli kharcha vs bill") so the admin cost card reads a figure the SAME code priced,
+   * instead of re-deriving it later from a call log that storage caps at its last 40 entries.
+   */
+  realCostUsd: number;
+  sandboxUsd: number;
 } {
   const reconciledProviderUsage = reconcileWithSink(providerLedger.byProvider(), sinkTotal);
   const flatBilledUsd = billedAmountUsd(sinkTotal, powerLevel);
@@ -1626,18 +1638,19 @@ export function decideBuildBilledUsd(
     outputTokens: Math.max(0, (sinkTotal.outputTokens || 0) - (ledgerAttributed.outputTokens || 0)),
   };
   const isOpusTier = powerToTier(powerLevel) === 'opus';
+  const tokenCost = realProviderCostUsd(providerLedger.entries(), realCostRemainder);
+  const vmCost = Math.max(0, sandboxUsd || 0);
   let effectiveBilledUsd: number;
   if (isOpusTier) {
     effectiveBilledUsd = flatBilledUsd; // real Opus × 2 — unchanged
   } else if (realCostBillingEnabled()) {
-    const tokenCost = realProviderCostUsd(providerLedger.entries(), realCostRemainder);
-    effectiveBilledUsd = tieredMarkupUsd(tokenCost + Math.max(0, sandboxUsd || 0));
+    effectiveBilledUsd = tieredMarkupUsd(tokenCost + vmCost);
   } else {
     effectiveBilledUsd = (perTierBillingEnabled() || costRoutingActiveFor(userId, email))
       ? perTierBilledUsd(reconciledProviderUsage, powerLevel)
       : flatBilledUsd;
   }
-  return { effectiveBilledUsd, reconciledProviderUsage, realCostRemainder, isOpusTier };
+  return { effectiveBilledUsd, reconciledProviderUsage, realCostRemainder, isOpusTier, realCostUsd: tokenCost, sandboxUsd: vmCost };
 }
 
 /**
@@ -2081,6 +2094,7 @@ export function shouldReclaimBuildLock(existing: RunningBuild | undefined, now: 
  * Explicit opts (escalation passes `true`) win; otherwise Claude-first by default, with
  * AGENTV3_BUILD_CLAUDE_FIRST=0 / "off" as the opt-out to the old cheap-first ladder.
  */
+// ⚠️ Not consulted by the build chain since 2026-09-14 — see the banner above healRunnerRoutingOpts.
 export function resolveClaudeFirst(optsClaudeFirst: boolean | undefined, env: string | undefined): boolean {
   if (typeof optsClaudeFirst === 'boolean') return optsClaudeFirst;
   return env !== '0' && env !== 'off';
@@ -2093,6 +2107,7 @@ export function resolveClaudeFirst(optsClaudeFirst: boolean | undefined, env: st
  * Billing is UNCHANGED (Opus-equivalent × 2.5 / × 5) — this lowers ONLY NavBharatAI's
  * own provider cost, so the margin is strictly wider. Exported for unit testing.
  */
+// ⚠️ Not consulted by the build chain since 2026-09-14 — see the banner above healRunnerRoutingOpts.
 export function tierToGeminiBuildModel(tier: StartTier): string {
   return tier === 'gemini' ? 'gemini-2.5-flash' : 'gemini-2.5-pro';
 }
@@ -2110,9 +2125,15 @@ export function tierToGeminiBuildModel(tier: StartTier): string {
  */
 export function selectBuildModel(tier: StartTier | undefined, power: boolean | PowerLevel, largeProject = false): string {
   // Admin tier→model redefinition (2026-07-13): a PAID PINNED tier runs exactly its model —
-  // Strong ('mini') → Sonnet 100%; Powerful/Full Team ('medium'/'max', legacy boolean true) → Opus.
+  // Strong ('mini') → Sonnet 100%.
+  // ⚠️ THE 'medium'/'max' COMPARISONS WERE REMOVED, NOT FORGOTTEN (three tiers, 2026-09-14). Every
+  // caller passes a level that has already been through `clampPowerForUser` → `toPowerLevel`, which
+  // now maps both retired keys to 'mini' — so those branches had become unreachable, and leaving an
+  // unreachable Opus branch in the model selector is exactly how a dead path later reads as a live
+  // guarantee. The legacy BOOLEAN is kept: it is a different input (the old "Only Opus" toggle) and
+  // still arrives from call sites that never carried a level at all.
   if (power === 'mini') return sonnetModel();
-  if (power === true || power === 'medium' || power === 'max') return opusModel();
+  if (power === true) return opusModel();
   // LARGE existing project → Sonnet DIRECTLY (admin decision 2026-07-05: "badi apps direct Sonnet").
   // The analyser tiers by the PROMPT's complexity — but on a big imported app even a simple ask
   // ("survey my app") carries a huge context, which Haiku + the cheap floor handled by timing out
@@ -2271,6 +2292,7 @@ export function parseKeyPool(env: string | undefined): string[] {
  * (GLM/KIMI timeouts + Anthropic credits exhausted). '0' / 'off' rolls back to the old exclusion;
  * '1' (the old opt-in) still enables. Pure + exported for testing.
  */
+// ⚠️ Not consulted by the build chain since 2026-09-14 — see the banner above healRunnerRoutingOpts.
 export function geminiLastResortEnabled(flag: string | undefined): boolean {
   const v = (flag || '').trim().toLowerCase();
   return v !== '0' && v !== 'off';
@@ -2286,6 +2308,7 @@ export function geminiLastResortEnabled(flag: string | undefined): boolean {
  * `AGENTV3_VERTEX_PEER=0`/`off` reverts to Vertex/Gemini as the absolute last resort (after Claude).
  * Pure + exported for testing.
  */
+// ⚠️ Not consulted by the build chain since 2026-09-14 — see the banner above healRunnerRoutingOpts.
 export function vertexPeerBuildEnabled(flag: string | undefined): boolean {
   const v = (flag || '').trim().toLowerCase();
   return v !== '0' && v !== 'off';
@@ -2315,6 +2338,53 @@ export function balanceFloorLead(runners: NamedRunner[], kimiFirst: boolean): Na
   return [...kimi, ...glm, ...rest];
 }
 
+/**
+ * The floor's timing knobs, read ONCE here so the legacy floor and the tier ladders cannot drift.
+ *   • 60 s GLM timeout (admin 2026-07-07: they are slow, not broken); KIMI 120 s (admin 2026-07-13,
+ *     measurably slower on the largest turns, floored no lower than GLM).
+ *   • Prompt-size skip default 0 = no skip (admin 2026-07-11: "1st try for every file glm/kimi").
+ */
+export function floorTuning(): { floorTimeoutMs: number; floorMaxPromptChars: number; kimiTimeoutMs: number } {
+  const floorTimeoutMs = Number(process.env.AGENTV3_CHEAP_FLOOR_TIMEOUT_MS) || 60_000;
+  const floorMaxRaw = (process.env.AGENTV3_CHEAP_FLOOR_MAX_PROMPT_CHARS ?? '').trim();
+  const floorMaxPromptChars = floorMaxRaw !== '' && Number.isFinite(Number(floorMaxRaw)) ? Number(floorMaxRaw) : 0;
+  const kimiTimeoutMs = Math.max(floorTimeoutMs, Number(process.env.AGENTV3_KIMI_TIMEOUT_MS) || 120_000);
+  return { floorTimeoutMs, floorMaxPromptChars, kimiTimeoutMs };
+}
+
+/**
+ * ONE factory for every OpenAI-protocol build rung — GLM (Z.ai), Kimi (Moonshot) and OpenAI itself all
+ * speak the same chat-completions tool protocol, so they share one runner class and one key-pool rule.
+ * Extracted (2026-09-14) from the closure inside cheapBuildFloorRunners so the per-tier ladders use the
+ * SAME code path, not a second copy that drifts.
+ *
+ * KEY POOL: the env may hold a comma/whitespace list of keys; each key becomes its own rung
+ * (name, name#2, …) so a 429 on one key fails over to the SAME model on the next key. A keyless
+ * provider yields NO rungs — a missing key is an off-switch, never a substitution.
+ */
+export function openAiCompatRunners(
+  name: string, apiKeyRaw: string | undefined, baseURL: string, models: string[],
+  runnerOpts: { thinkingControl?: boolean } = {}, timeoutMs: number = floorTuning().floorTimeoutMs,
+  floorMaxPromptChars: number = floorTuning().floorMaxPromptChars,
+): NamedRunner[] {
+  const out: NamedRunner[] = [];
+  const keys = parseKeyPool(apiKeyRaw);
+  if (keys.length === 0) return out;
+  for (const model of models) {
+    keys.forEach((apiKey, k) => {
+      try {
+        const client = new OpenAI({ apiKey, baseURL, timeout: timeoutMs, maxRetries: 0 });
+        const runner = pacedRunner(sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts }), floorMaxPromptChars), name);
+        out.push(k === 0
+          ? { name, runner, modelId: model }
+          : { name: `${name}#${k + 1}`, runner, reportAs: name, modelId: model });
+      } catch { /* misconfigured model/key rung — skip; the next rung still backstops */ }
+    });
+  }
+  return out;
+}
+
+// ⚠️ Not consulted by the build chain since 2026-09-14 — see the banner above healRunnerRoutingOpts.
 export function cheapBuildFloorRunners(opts?: { free?: boolean; flagshipOnly?: boolean; healLadder?: boolean }): NamedRunner[] {
   // DEFAULT = 'on' (admin 2026-07-12, "1st call claude nahi chahiye — jaisa CLAUDE.md me save hai"):
   // per the confirmed Model Routing Policy the FIRST build call must be the flagship cheap coder
@@ -2332,52 +2402,25 @@ export function cheapBuildFloorRunners(opts?: { free?: boolean; flagshipOnly?: b
   // over the size limit SKIPS the floor instantly (straight to Claude, no gamble); (3) prompt diet —
   // oversized blocks are trimmed before reaching the cheap model (sizeGatedRunner does 2+3); the
   // 2-consecutive-timeout BENCH lives in makeMultiProviderTurnRunner. All env-tunable.
-  const floorTimeoutMs = Number(process.env.AGENTV3_CHEAP_FLOOR_TIMEOUT_MS) || 60_000;
+  const { floorTimeoutMs, floorMaxPromptChars, kimiTimeoutMs } = floorTuning();
   // ADMIN OVERRIDE (2026-07-11, "kimi/glm se limit hata do — 1st try for every file glm/kimi"): the
   // 45k skip meant edit/continue turns (file grounding pushes the prompt just over 45k) NEVER used the
   // cheap floor — every one fell to Claude, defeating "direct sonnet kahi nahi chahiye". Default is now
   // 0 = NO size skip, so GLM/Kimi lead every prompt (the prompt-diet trim still applies; Claude still
   // backstops any real timeout). The env can RE-impose a positive limit if timeouts ever return.
-  const floorMaxRaw = (process.env.AGENTV3_CHEAP_FLOOR_MAX_PROMPT_CHARS ?? '').trim();
-  const floorMaxPromptChars = floorMaxRaw !== '' && Number.isFinite(Number(floorMaxRaw)) ? Number(floorMaxRaw) : 0;
   // KIMI-specific timeout (admin 2026-07-13, "kimi ka time badhao — 120 sec"): KIMI (Moonshot) is
   // measurably SLOWER than GLM on the LARGEST prompts (a 39-file full-stack build turn) — the real App #7
   // "Request timed out" failures were KIMI not finishing within the 60s floor, so the turn fell to Vertex
   // which then TRUNCATED. Giving KIMI 120s lets it finish the big turn instead of prematurely cascading to
   // the truncating fallback. GLM keeps the shorter floor timeout (fast fallback when a GLM key is throttled
   // is desirable). Env-tunable; a positive AGENTV3_CHEAP_FLOOR_TIMEOUT_MS still floors KIMI no lower than GLM.
-  const kimiTimeoutMs = Math.max(floorTimeoutMs, Number(process.env.AGENTV3_KIMI_TIMEOUT_MS) || 120_000);
   // KEY POOL / ROTATION (ROADMAP Tier-4, deep-test App #9/#10: GLM 429-saturation dominated failures).
   // GLM_API_KEY / KIMI_API_KEY may hold a COMMA- (or whitespace-) separated LIST of keys. Each key
   // becomes its own rung, so a 429 on one key immediately fails over to the SAME model on the NEXT key
   // (see model-major/key-minor ordering below) instead of dropping model quality or falling to Claude.
   // A single key → a list of one → byte-for-byte today's behaviour (fully backward-compatible).
   const add = (name: string, apiKeyRaw: string | undefined, baseURL: string, models: string[], runnerOpts: { thinkingControl?: boolean } = {}, timeoutMs: number = floorTimeoutMs): void => {
-    const keys = parseKeyPool(apiKeyRaw);
-    if (keys.length === 0) return; // no key → a second, independent off-switch
-    // MODEL-MAJOR, KEY-MINOR: try the BEST model across ALL keys before dropping a tier. So a throttled
-    // key #1 fails over to the same flagship model on key #2 (quality preserved); only when every key is
-    // exhausted for that model does the chain drop to a weaker one. Each KEY gets a distinct bench name
-    // ('GLM', 'GLM#2', …) so the 2-consecutive-429 bench sidelines only the throttled key, not the pool;
-    // every rung still reports as the base provider (reportAs) → one clean telemetry/no-Claude label.
-    for (const model of models) {
-      keys.forEach((apiKey, k) => {
-        try {
-          const client = new OpenAI({ apiKey, baseURL, timeout: timeoutMs, maxRetries: 0 });
-          // Proactive pacer (default-OFF, AGENTV3_RATE_PACER=on): pace this provider's calls under its rate
-          // + auto-shrink concurrency on 429/timeout. Keyed by the BASE provider name so all keys of one
-          // provider share one bucket (global per-provider pacing). No-op passthrough when the flag is off.
-          const runner = pacedRunner(sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts }), floorMaxPromptChars), name);
-          // `modelId` rides along so a rung whose MODEL is unreachable on this account can be retired
-          // on its own (see deadKeyFor in MultiProviderTurnRunner). It must be the model this rung
-          // actually calls — every rung of a ladder shares one bench name, so the model id is the only
-          // thing that tells `kimi-k2.5` (dead) apart from `kimi-k2.6` (the rung that delivers).
-          runners.push(k === 0
-            ? { name, runner, modelId: model }
-            : { name: `${name}#${k + 1}`, runner, reportAs: name, modelId: model });
-        } catch { /* misconfigured model/key rung — skip; the next rung / Claude still backstops */ }
-      });
-    }
+    runners.push(...openAiCompatRunners(name, apiKeyRaw, baseURL, models, runnerOpts, timeoutMs, floorMaxPromptChars));
   };
   // Explicit ALLOWLIST (not just "anything but off") so a stray/unrecognized value (a typo, an old
   // config left over from a different provider name) stays a safe no-op instead of silently turning
@@ -2551,16 +2594,38 @@ export function floorLeadReason(): string {
  * returns 'sonnet' as a signal that no non-Claude judge is available, and the free-ladder caller SKIPS
  * the judge rather than spend Claude. Exported for tests.
  */
-export function resolveJudgeKind(mode: 'free' | 'paid' | 'power', grokKey: string | undefined, reviewerEnv: string | undefined): 'grok' | 'sonnet' | 'opus' {
-  if (mode === 'power') return 'opus';
-  if (mode === 'free') return grokKey ? 'grok' : 'sonnet';
+export function resolveJudgeKind(mode: 'free' | 'paid' | 'power', grokKey: string | undefined, reviewerEnv: string | undefined, glmKey?: string): 'grok' | 'sonnet' | 'glm' {
+  // THE JUDGE, UNDER THE ADMIN'S AUTHORITY GRANT (2026-09-14: "kam se kam kharcha; best app ek hi baar").
+  // A judge must be a DIFFERENT model from the one that wrote the app, and it reads the whole app —
+  // input-heavy, so its input price is the cost. Weak/Normal build on glm-5.3-flash, so their judge is
+  // glm-5.3 ($1.40 in, GPQA 91.7): a different, stronger model at less than half Grok's $3. Strong
+  // builds on glm-5.3 itself, so its judge is Grok — outside every ladder, and the admin said "Grok ko
+  // hatao mat". Opus is never the judge ($15 in for a verdict). `AGENTV3_REVIEWER=sonnet` forces Sonnet
+  // everywhere; a missing key falls to the next honest choice, never to Opus.
+  if ((reviewerEnv || '').trim().toLowerCase() === 'sonnet') return 'sonnet';
+  if (mode !== 'power' && (glmKey || '').trim()) return 'glm';
   return selectReviewer({ reviewer: reviewerEnv, grokKey });
 }
 
-function selectReviewJudge(mode: 'free' | 'paid' | 'power' = 'paid'): { runTurn: JudgeRunTurn; modelId: string; kind: 'grok' | 'sonnet' | 'opus' } {
+function selectReviewJudge(mode: 'free' | 'paid' | 'power' = 'paid'): { runTurn: JudgeRunTurn; modelId: string; kind: 'grok' | 'sonnet' | 'opus' | 'glm' } {
   const grokKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY;
-  const kind = resolveJudgeKind(mode, grokKey, process.env.AGENTV3_REVIEWER);
-  if (kind === 'grok') {
+  const glmKey = parseKeyPool(process.env.GLM_API_KEY)[0];
+  const kind = resolveJudgeKind(mode, grokKey, process.env.AGENTV3_REVIEWER, glmKey);
+  if (kind === 'glm') {
+    try {
+      const client = new OpenAI({ apiKey: glmKey, baseURL: process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', timeout: 45_000, maxRetries: 1 });
+      const runTurn: JudgeRunTurn = async ({ model, system, messages, maxTokens }) => {
+        const r = await client.chat.completions.create({
+          model,
+          messages: [{ role: 'system', content: system }, ...messages.map((m) => ({ role: 'user' as const, content: m.content }))],
+          max_tokens: maxTokens,
+        });
+        return { text: r.choices?.[0]?.message?.content ?? '' };
+      };
+      return { runTurn, modelId: process.env.AGENTV3_GLM_JUDGE_MODEL || 'glm-5.3', kind: 'glm' };
+    } catch { /* client not constructable → fall through to Grok / Claude */ }
+  }
+  if ((kind === 'grok' || kind === 'glm') && (grokKey || '').trim()) {
     try {
       const client = new OpenAI({ apiKey: grokKey, baseURL: process.env.GROK_BASE_URL || 'https://api.x.ai/v1', timeout: 30_000, maxRetries: 1 });
       const runTurn: JudgeRunTurn = async ({ model, system, messages, maxTokens }) => {
@@ -2574,9 +2639,9 @@ function selectReviewJudge(mode: 'free' | 'paid' | 'power' = 'paid'): { runTurn:
       return { runTurn, modelId: process.env.GROK_JUDGE_MODEL || 'grok-3', kind: 'grok' };
     } catch { /* client not constructable → fall through to the Claude judge */ }
   }
-  // Claude judge — Opus in power mode, Sonnet otherwise.
+  // Claude judge — Sonnet. Never Opus (2026-09-14).
   const runTurn: JudgeRunTurn = (a) => new ClaudeClient(undefined, { maxRetries: 1 }).runTurn(a).then((t) => ({ text: t.text }));
-  return { runTurn, modelId: kind === 'opus' ? opusModel() : sonnetModel(), kind: kind === 'opus' ? 'opus' : 'sonnet' };
+  return { runTurn, modelId: sonnetModel(), kind: 'sonnet' };
 }
 
 /**
@@ -2587,6 +2652,7 @@ function selectReviewJudge(mode: 'free' | 'paid' | 'power' = 'paid'): { runTurn:
  * Claude still backstops). AGENTV3_CHEAP_FLOOR_ALL_TIERS=1 overrides → apply the floor to every tier.
  * Pure + exported for testing.
  */
+// ⚠️ Not consulted by the build chain since 2026-09-14 — see the banner above healRunnerRoutingOpts.
 export function cheapFloorAllowedForTier(startTier?: string, rolloutKey?: string): boolean {
   if (envFlag('AGENTV3_CHEAP_FLOOR_ALL_TIERS')) return true;
   // SMART CHEAP-FIRST (admin 2026-07-03): when ESCALATION is on, EVERY app — simple OR complex —
@@ -2777,6 +2843,18 @@ export function weakFlagshipHealEnabled(): boolean {
 }
 
 /**
+ * ⚠️ NOT CONSULTED BY THE BUILD CHAIN SINCE 2026-09-14. The chain is the tier's ladder (tierLadder.ts →
+ * buildTurnRunner); the boolean-assembled routing these helpers fed — claudeFirst / allowCheapFloor /
+ * cheapOnly / free / flagship, the Vertex-Gemini last resort, the GLM↔KIMI lead balance, the
+ * CHEAP_FLOOR_DECISION report line — is gone. They are kept ONLY because existing tests pin their pure
+ * behaviour and `cheapBuildFloorRunners` is still the legacy floor factory those tests exercise. Do not
+ * wire any of them back into a live path; retire them with their tests in a follow-up. Named here so a
+ * later session does not read an exported, tested function as a live guarantee:
+ *   healRunnerRoutingOpts · weakFlagshipHealEnabled · cheapFloorDecision · cheapFloorAllowedForTier ·
+ *   cheapFloorAllowedForUser · resolveClaudeFirst · geminiLastResortEnabled · vertexPeerBuildEnabled ·
+ *   balanceFloorLead / floorLeadReason · tierToGeminiBuildModel · cheapBuildFloorRunners (legacy floor).
+ */
+/**
  * Routing for a post-build HEAL/repair pass. A heal pass only ever runs when the build already has a
  * problem to fix, so this is the "the build is failing" moment.
  *
@@ -2835,133 +2913,122 @@ export function enforceNoClaude<T extends { name: string }>(chain: T[], noClaude
   //     no-Claude-zone chokepoint independently enforces the same (haiku ids allowed, all else refused).
   //   • Every kept CLAUDE_HAIKU is MOVED TO THE END of the chain ("to last me") — even on a defensive
   //     path where the chain was assembled with Haiku mid-chain, weak order stays cheap → … → Haiku last.
-  const kept = chain.filter((r) => r.name !== 'CLAUDE');
-  const haiku = kept.filter((r) => r.name === 'CLAUDE_HAIKU');
-  return [...kept.filter((r) => r.name !== 'CLAUDE_HAIKU'), ...haiku];
+  // PREFIX rule (2026-09-14): every Claude rung except the authorised Haiku one — 'CLAUDE' and the new
+  // 'CLAUDE_OPUS' alike. Matching the one literal name would have let an Opus rung survive this guard.
+  //
+  // ⚠️ HAIKU IS NO LONGER MOVED TO THE END. The 2026-07-13 amendment said "haiku … to last me" for a
+  // chain assembled from booleans, where Haiku's position was an accident of assembly. Since
+  // 2026-09-14 the ORDER is the tier's ladder, and the admin's own weak ladder places GPT-5.4 AFTER
+  // Haiku ("GLM-4.7-Flash, GLM-5.3-Flash, Kimi K2.6, Claude Haiku, GPT-5.4"). This guard decides
+  // WHAT may run on weak, and the ladder decides WHERE. Re-adding a reorder here would silently
+  // override the newer, explicit list.
+  return chain.filter((r) => !(r.name.startsWith('CLAUDE') && r.name !== 'CLAUDE_HAIKU'));
 }
 
-function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; cheapOnly?: boolean; free?: boolean; flagship?: boolean; heal?: boolean; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void; onChain?: (chain: ChainRung[]) => void }): TurnRunner {
-  // Explicit env overrides always win; absent them the cost-ladder tier model
-  // (when supplied) is preferred over the fixed gemini-2.5-pro default.
-  const buildModel = (envName: string): string =>
-    process.env[envName] || process.env.AGENTV3_BUILD_MODEL || opts?.geminiModel || 'gemini-2.5-pro';
-  const cheap: NamedRunner[] = [];
-  // Per-call timeout for the Gemini/Vertex runners — the Google GenAI SDK is constructed without an
-  // http timeout, so a stalled call would otherwise block the whole build (every other provider family
-  // already has a timeout). Default 120s (matches the Claude LLM timeout); AGENTV3_GEMINI_TIMEOUT_MS overrides.
-  const geminiTimeoutMs = Math.max(0, parseInt(process.env.AGENTV3_GEMINI_TIMEOUT_MS || '', 10) || 120_000);
-  // Vertex (function-calling, via the Cloud Run service account / ADC).
-  const project = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID;
-  if (project) {
-    try {
-      const vertex = new GoogleGenAI({ vertexai: true, project, location: process.env.GOOGLE_CLOUD_REGION || 'us-central1' });
-      cheap.push({ name: 'VERTEX', runner: new GeminiToolRunner(vertex as unknown as GeminiGenAiClient, { model: buildModel('AGENTV3_VERTEX_BUILD_MODEL'), timeoutMs: geminiTimeoutMs }) });
-    } catch { /* not constructable in this env — skip */ }
-  }
-  // Gemini direct (GEMINI_API_KEY).
-  if (process.env.GEMINI_API_KEY) {
-    try {
-      const gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      cheap.push({ name: 'GEMINI', runner: new GeminiToolRunner(gemini as unknown as GeminiGenAiClient, { model: buildModel('AGENTV3_GEMINI_BUILD_MODEL'), timeoutMs: geminiTimeoutMs }) });
-    } catch { /* skip */ }
-  }
-  // Bound Claude's retry ladder on the BUILD hot path. Claude now LEADS every build turn
-  // (claudeFirst), so the default 5× exponential backoff (≈30-60s) would stall each turn
-  // when the Anthropic account is overloaded — looking like "stuck midway / infinite
-  // loading". 2 retries falls through to Gemini/Vertex in a few seconds instead.
-  // AGENTV3_BUILD_CLAUDE_RETRIES overrides.
+/**
+ * Map one tier's ladder to live runners, rung for rung. Nothing is added that the ladder does not
+ * name; a rung whose provider has no key yields nothing (skipped, never substituted).
+ */
+export function ladderRunners(rungs: readonly LadderRung[]): NamedRunner[] {
+  const { floorTimeoutMs, floorMaxPromptChars, kimiTimeoutMs } = floorTuning();
   const buildRetry = { maxRetries: Math.max(0, parseInt(process.env.AGENTV3_BUILD_CLAUDE_RETRIES || '', 10) || 2) };
-  // Optional cheap floor (GLM/Kimi) that LEADS the build chain — [] unless the caller OPTS IN
-  // (allowCheapFloor: the FIRST build attempt for a non-complex app) AND AGENTV3_CHEAP_FLOOR names a
-  // provider with its key present. Escalation / claudeFirst retries never opt in, so they stay on
-  // Claude. Computed before the Claude-only early-return so the floor still applies in a Claude-only
-  // env (no Vertex/Gemini configured).
-  const floorRunners = opts?.allowCheapFloor ? cheapBuildFloorRunners({ free: opts?.free, flagshipOnly: opts?.flagship, healLadder: opts?.heal }) : [];
-  // Claude-only env shortcut — but NEVER for a weak/noClaude build (the guarded chain below handles it;
-  // a weak build with no non-Claude provider was already refused upstream as WEAK_ENGINE_UNAVAILABLE).
-  if (cheap.length === 0 && floorRunners.length === 0 && opts?.noClaude !== true) return makeResilientTurnRunner(new ClaudeClient(undefined, buildRetry)); // Claude-only env
-  const claude: NamedRunner = { name: 'CLAUDE', runner: new ClaudeClient(undefined, buildRetry) };
-  // P7 failover hardening: a final Claude-HAIKU backstop that FORCES the Haiku model
-  // regardless of the turn's requested model. It only ever runs after every prior provider
-  // (Vertex → Gemini → primary Claude) has thrown, so normal builds are unaffected — but if
-  // Sonnet/Opus is overloaded or rate-limited, Haiku still completes the turn and the build
-  // never breaks. Billing is unchanged (Opus-equivalent markup, D5/D6) regardless of which
-  // model actually answers. AGENTV3_DISABLE_HAIKU_BACKSTOP=1 removes it if ever needed.
-  const haikuBackstop: NamedRunner = { name: 'CLAUDE_HAIKU', runner: forceModelRunner(new ClaudeClient(undefined, buildRetry), haikuModel()) };
-  const withBackstop = envFlag('AGENTV3_DISABLE_HAIKU_BACKSTOP') ? [] : [haikuBackstop];
-  // Builds run on CLAUDE FIRST (Haiku/Sonnet/Opus do REAL tool-use → real files). Gemini/Vertex CAN
-  // hallucinate in the tool-use loop — reply describing files ("creating index.html…") without ever
-  // calling write_file — which is why they were EXCLUDED entirely from the build chain for a while
-  // (a REAL past incident: every build silently on Gemini/Vertex with ZERO files).
-  //
-  // NOW DEFAULT-ON as the TRUE LAST RESORT — the explicit, informed admin go-ahead this comment used
-  // to demand was given on 2026-07-07 ("jab sab fail ho jaye to last me gemini/vertex se try
-  // karwao"), during a real outage where GLM/KIMI were timing out AND the Anthropic account was out
-  // of credits — every build died with NO final resort. Vertex/Gemini only ever run after every
-  // prior provider (cheap floor → CLAUDE → forced-Haiku backstop) has thrown, and the old incident's
-  // failure mode is now caught by the safety nets built since: the empty-build retry-on-stronger-
-  // model net, the mandatory readiness gate, and the tsc verification gate — a zero-file hallucinated
-  // "build" cannot ship as success anymore. AGENTV3_BUILD_ALLOW_GEMINI=0/off rolls back the exclusion.
-  const fallback = geminiLastResortEnabled(process.env.AGENTV3_BUILD_ALLOW_GEMINI) ? cheap : [];
-  const claudeFirst = resolveClaudeFirst(opts?.claudeFirst, process.env.AGENTV3_BUILD_CLAUDE_FIRST);
-  // NOTE: fallback (Vertex/Gemini) sits AFTER withBackstop in the claudeFirst branch — Claude and its
-  // forced-Haiku backstop are exhausted FIRST, Vertex/Gemini is the absolute last resort, matching the
-  // requested chain "CLAUDE_HAIKU/sonnet (by complexity) -> vertex/gemini". The claudeFirst===false
-  // branch is a DIFFERENT, separately-opted-into cost strategy (try the cheap model before Claude) —
-  // left unchanged; the admin's chain applies to the default (claudeFirst===true) path.
-  const baseChain = claudeFirst ? [claude, ...withBackstop, ...fallback] : [...fallback, claude, ...withBackstop];
-  // FREE-TIER cheap-only (admin 2026-07-10, amended 2026-07-13): a not-yet-paying user's build runs on
-  // the cheap floor first — Sonnet/Opus NEVER — with Vertex/Gemini and (since the 2026-07-13 Haiku
-  // amendment) the model-pinned Claude-HAIKU backstop as the graduated last resorts, so NavBharatAI's
-  // premium Claude budget is never spent on a free build (Haiku is the one authorized, cheap exception).
-  // Guarded so it can only take effect when a floor actually exists (floorRunners non-empty); if the
-  // caller asks for cheapOnly with no floor configured we fall back to the normal chain rather than
-  // build an empty (always-failing) chain. When the cheap build can't deliver, the route converts the
-  // user to paid (upsell) instead of rescuing on Sonnet.
-  const cheapOnly = opts?.cheapOnly === true && floorRunners.length > 0;
-  // Cheap floor LEADS when active; [] → `[...[], ...baseChain]` is byte-for-byte today's chain.
-  // Claude + Haiku backstop remain inside baseChain, so failures always fall back safely.
-  //
-  // FREE-TIER last resort ladder (Model Routing Policy, admin 2026-07-12 + HAIKU AMENDMENT 2026-07-13):
-  // a free/weak cheap-only build climbs GLM/Kimi → Vertex/Gemini → **Claude HAIKU as the absolute LAST
-  // rung** (admin verbatim: "weak module me claude haiku add kar de? to last me. par sart yeh hai …
-  // haiku ke alawa kuch aur nahi chalna chahiye, matlab sonnet ya opus never never"). The Haiku rung is
-  // the forced-Haiku backstop — model-pinned by forceModelRunner, so it can never run Sonnet/Opus — and
-  // enforceNoClaude + the ClaudeClient zone chokepoint below independently guarantee the "never never".
-  // Non-free cheap-only gets floor → Haiku (no Vertex/Gemini — unchanged policy for that path).
-  // VERTEX/GEMINI AS A CHEAP-FLOOR PEER (admin 2026-07-20 "GLM fail ho to Kimi AUR Vertex dono"): on a
-  // floor-led paid build, try Vertex/Gemini right after GLM/Kimi and BEFORE Claude — the same order the
-  // free tier already uses. Only when a floor is active, claudeFirst, the fallback (Vertex/Gemini) exists,
-  // and the peer flag is on; otherwise today's chain (Vertex/Gemini as the absolute last resort) stands.
-  const vertexPeer = vertexPeerBuildEnabled(process.env.AGENTV3_VERTEX_PEER)
-    && floorRunners.length > 0 && fallback.length > 0 && claudeFirst && !cheapOnly;
-  const chain = cheapOnly
-    ? (opts?.free ? [...floorRunners, ...cheap, ...withBackstop] : [...floorRunners, ...withBackstop])
-    : vertexPeer
-      ? [...floorRunners, ...fallback, claude, ...withBackstop] // GLM → Kimi → Vertex/Gemini → Claude → Haiku
-      : [...floorRunners, ...baseChain];
+  const floorOff = ['off', ''].includes((process.env.AGENTV3_CHEAP_FLOOR || 'on').trim().toLowerCase());
+  const anthropicKey = !!(process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.trim());
+  const openaiTimeoutMs = Math.max(floorTimeoutMs, Number(process.env.AGENTV3_OPENAI_TIMEOUT_MS) || 120_000);
+  const out: NamedRunner[] = [];
+  for (const rung of rungs) {
+    switch (rung.provider) {
+      case 'GLM':
+        // AGENTV3_CHEAP_FLOOR=off is still the kill switch for the GLM/Kimi rungs (env-authoritative).
+        if (!floorOff) out.push(...openAiCompatRunners('GLM', process.env.GLM_API_KEY, process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', [rung.model], { thinkingControl: true }, floorTimeoutMs, floorMaxPromptChars));
+        break;
+      case 'KIMI':
+        if (!floorOff) out.push(...openAiCompatRunners('KIMI', process.env.KIMI_API_KEY, process.env.KIMI_BASE_URL || 'https://api.moonshot.ai/v1', [rung.model], {}, kimiTimeoutMs, floorMaxPromptChars));
+        break;
+      case 'OPENAI':
+        // Same protocol, same runner. ⚠️ Untested against a real OpenAI response until the admin buys
+        // the key — keyless today, so this rung yields nothing and changes no build.
+        out.push(...openAiCompatRunners('OPENAI', process.env.OPENAI_API_KEY, process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1', [rung.model], {}, openaiTimeoutMs, floorMaxPromptChars));
+        break;
+      case 'CLAUDE':
+        if (anthropicKey) out.push({ name: 'CLAUDE', runner: forceModelRunner(new ClaudeClient(undefined, buildRetry), sonnetModel()), modelId: sonnetModel() });
+        break;
+      case 'CLAUDE_HAIKU':
+        if (anthropicKey && !envFlag('AGENTV3_DISABLE_HAIKU_BACKSTOP')) out.push({ name: 'CLAUDE_HAIKU', runner: forceModelRunner(new ClaudeClient(undefined, buildRetry), haikuModel()), modelId: haikuModel() });
+        break;
+      case 'CLAUDE_OPUS':
+        if (anthropicKey) out.push({ name: 'CLAUDE_OPUS', runner: forceModelRunner(new ClaudeClient(undefined, buildRetry), opusModel()), modelId: opusModel() });
+        break;
+      default:
+        break;
+    }
+  }
+  return out;
+}
+
+/**
+ * A runner for a tier whose rungs are ALL missing here. It throws the honest, branded refusal on
+ * first use instead of borrowing another tier's model — "100% usi mode mein" holds even when the mode
+ * cannot run at all. The pre-flight 503 catches this before a stream starts; this is the second net.
+ */
+function unavailableTierRunner(level: PowerLevel, ladderText: string, missingKeys: string[]): TurnRunner {
+  console.warn(`[AGENTV3] ${tierDisplayName(level)} engine unavailable — ladder ${ladderText}; missing keys: ${missingKeys.join(', ') || 'none named'}`);
+  return {
+    runTurn: async () => {
+      throw new Error(`The ${tierDisplayName(level)} engine is not available right now — none of its engines is configured on this server. Please try again shortly, or pick another power level.`);
+    },
+  } as unknown as TurnRunner;
+}
+
+/**
+ * THE BUILD CHAIN IS THE TIER'S LADDER — NOTHING ELSE (admin 2026-09-14: "user ne jo select kiya hai,
+ * aap 100% usi mode me bane"). See AgentV3/tierLadder.ts for the three ladders and the reasoning.
+ *
+ * `tier`         the resolved power level (through clampPowerForUser → toPowerLevel).
+ * `heal`         a repair pass: the ladder minus its leading flash rung (admin 2026-08-13).
+ * `fromProvider` ESCALATION: start the SAME ladder at this rung ("bring in a stronger engine" means
+ *                higher up this tier's own ladder, never another tier's model).
+ * `noClaude`     the weak-module guard — enforceNoClaude strips every Sonnet/Opus rung from the FINAL
+ *                chain whatever the ladder said, keeping only the model-pinned Haiku rung in its place.
+ *
+ * WHAT IS GONE, deliberately: the five-boolean assembly (claudeFirst / allowCheapFloor / cheapOnly /
+ * free / flagship), the Vertex/Gemini "last resort" rungs, the GLM↔KIMI live-health lead swap, and the
+ * Claude-only fallback for an empty floor — that last one was a Normal build silently becoming a Sonnet
+ * build when the floor was off, which is exactly what the rule forbids. A 429-storm on rung 1 now costs
+ * one failed call per cooldown window (the shared bench still sidelines the rung), not a reorder.
+ */
+export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void; onChain?: (chain: ChainRung[]) => void }): TurnRunner {
+  const level = toPowerLevel(opts.tier as PowerLevel | boolean | string | undefined | null);
+  const parsed = tierLadder(level);
+  if (parsed.rejected) console.warn(`[AGENTV3] ${parsed.rejected}`);
+  let rungs: LadderRung[] = opts.heal ? healLadder(parsed.rungs) : [...parsed.rungs];
+  if (opts.fromProvider) {
+    const from = ladderFrom(rungs, opts.fromProvider);
+    if (from.length > 0) rungs = from;
+  }
+  const runners = ladderRunners(rungs);
+  if (runners.length === 0) {
+    const missing = [...new Set(rungs.map((r) => keyEnvFor(r.provider)))].filter((k) => !(process.env[k] && String(process.env[k]).trim()));
+    return unavailableTierRunner(level, describeLadder(rungs), missing);
+  }
   // UNBREAKABLE WEAK-MODULE GUARD (admin absolute rule 2026-07-13, HAIKU AMENDMENT same day): a
-  // weak/noClaude build can NEVER touch Sonnet/Opus. enforceNoClaude strips 'CLAUDE' from the FINAL
-  // chain no matter how it was assembled — so even a heal gate that forgot to set cheapOnly cannot leak
-  // a Sonnet call onto a free build — and keeps ONLY the model-pinned 'CLAUDE_HAIKU' backstop, moved to
-  // the END ("haiku … to last me"). Weak order: cheap floor → Vertex/Gemini → Haiku last.
-  const guardedChain = enforceNoClaude(chain, opts?.noClaude === true);
+  // weak/noClaude build can NEVER touch Sonnet/Opus. The weak ladder never names them and
+  // parseLadderOverride refuses an env that tries — this is the third, independent net on the FINAL
+  // chain, so even a heal gate that forgot the tier cannot leak a Sonnet call onto a free build.
+  const guardedChain = enforceNoClaude(runners, opts.noClaude === true);
   // Hand the caller the chain it is ACTUALLY getting, so the build report can say which providers were
   // configured — the only way to read "GLM: 0 turns" as "never reached" rather than "never present".
-  try { opts?.onChain?.(guardedChain as ChainRung[]); } catch { /* observation only — never affects a build */ }
+  try { opts.onChain?.(guardedChain as ChainRung[]); } catch { /* observation only — never affects a build */ }
   return makeMultiProviderTurnRunner(guardedChain, {
     onProviderUsed: (used, from) => {
       if (from.length) console.log(`[AGENTV3] build turn via ${used} (after ${from.join(' → ')})`);
-      // PR4 — surface EVERY delivered turn's provider (even with no fallback) so the caller can
-      // measure which model actually drove the build (the cheap-floor-vs-Claude tripwire).
-      opts?.onProviderUsed?.(used, from);
+      opts.onProviderUsed?.(used, from);
     },
     onProviderError: (name, err) => {
       console.log(`[AGENTV3] build ${name} failed: ${err instanceof Error ? err.message : String(err)}`);
-      opts?.onProviderError?.(name, err);
+      opts.onProviderError?.(name, err);
     },
-    // Billing Phase 3 — forward per-turn (provider, tokens) to the caller's ProviderUsageLedger.
-    ...(opts?.onTurnComplete ? { onTurnComplete: opts.onTurnComplete } : {}),
+    ...(opts.onTurnComplete ? { onTurnComplete: opts.onTurnComplete } : {}),
   });
 }
 
@@ -2977,6 +3044,8 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; a
  */
 /** Whether the PLAN phase should run on Grok: a Grok/xAI key is set and not disabled.
  *  Pure + exported for unit testing. */
+// ⚠️ Not consulted by the plan phase since 2026-09-14 (plan runs on the tier's plan ladder; Grok judges).
+// Kept because tests pin it; retire with the banner list above healRunnerRoutingOpts.
 export function planGrokEnabled(apiKey: string | undefined, disableFlag: string | undefined): boolean {
   return !!apiKey && disableFlag !== '0' && disableFlag !== 'off';
 }
@@ -2988,8 +3057,10 @@ export function planGrokEnabled(apiKey: string | undefined, disableFlag: string 
  * the leak this kills: this chain is assembled OUTSIDE buildTurnRunner, so enforceNoClaude never
  * saw it, and one Grok timeout ran a weak (free) build's plan turn on a real Claude call.
  */
-export function planRunnerChainNames(noClaude: boolean): string[] {
-  return noClaude ? ['GROK'] : ['GROK', 'CLAUDE'];
+export function planRunnerChainNames(noClaude: boolean, level: PowerLevel | string | boolean | null | undefined = 'off'): string[] {
+  // The plan chain is the tier's plan rung followed by the tier's own ladder (tierLadder.ts), then the
+  // same weak-module guard the build chain gets. Grok no longer plans — it judges (see resolveJudgeKind).
+  return enforceNoClaude(planLadder(level).map((r) => ({ name: r.provider })), noClaude).map((r) => r.name);
 }
 
 /**
@@ -3073,26 +3144,16 @@ export function sanitizeSteerMessage(raw: unknown): string | null {
   return t.length > 2000 ? t.slice(0, 2000) : t;
 }
 
-function grokPlanRunner(opts?: { noClaude?: boolean }): TurnRunner | null {
-  const apiKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY;
-  if (!planGrokEnabled(apiKey, process.env.AGENTV3_PLAN_GROK)) return null;
+/**
+ * The PLAN runner for a tier: its plan rung first (glm-5.3-flash / kimi-k2.7-code / Sonnet), then the
+ * tier's own ladder — mapped by the same ladderRunners the build uses, guarded by the same
+ * enforceNoClaude. Null when nothing in it has a key; the caller then plans on the build client, which
+ * is the same tier's ladder anyway. Replaces grokPlanRunner (2026-09-14): Grok is the judge now.
+ */
+function tierPlanRunner(level: PowerLevel | string | boolean | null | undefined, noClaude: boolean): TurnRunner | null {
   try {
-    // 25s timeout matches the cheap-floor decision: a stalled plan call should fail FAST to the Claude
-    // fallback, not burn a flat 60s in front of the user-visible approval gate. Overridable via env.
-    const timeoutMs = Number(process.env.AGENTV3_GROK_PLAN_TIMEOUT_MS) || 25_000;
-    const client = new OpenAI({ apiKey, baseURL: 'https://api.x.ai/v1', timeout: timeoutMs, maxRetries: 0 });
-    // Default to a current FAST xAI tier ('grok-4-fast-non-reasoning') instead of the older/slower
-    // grok-3 — the plan is a single update_todo tool call, so a fast non-reasoning model is ideal.
-    // Overridable via AGENTV3_GROK_PLAN_MODEL; the Claude-Haiku fallback guards any model regression.
-    const model = process.env.AGENTV3_GROK_PLAN_MODEL || 'grok-4-fast-non-reasoning';
-    const grok: NamedRunner = { name: 'GROK', runner: new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model }) };
-    // Chain membership comes from planRunnerChainNames (the pure, tested invariant): on a noClaude
-    // build the chain is Grok ALONE — a Grok failure surfaces as a plan error handled best-effort by
-    // the caller, never a Claude call.
-    const chain: NamedRunner[] = [grok];
-    if (planRunnerChainNames(opts?.noClaude === true).includes('CLAUDE')) {
-      chain.push({ name: 'CLAUDE', runner: new ClaudeClient(undefined, { maxRetries: 2 }) });
-    }
+    const chain = enforceNoClaude(ladderRunners(planLadder(level)), noClaude);
+    if (chain.length === 0) return null;
     return makeMultiProviderTurnRunner(chain, {
       onProviderError: (name, err) => console.log(`[AGENTV3] plan ${name} failed: ${err instanceof Error ? err.message : String(err)}`),
     });
@@ -9331,10 +9392,18 @@ async function noteBuildOutcome(
     // Honest guard (rule 6): if a build is forced onto the cheap 'weak' tier but NO cheap floor is
     // configured (AGENTV3_CHEAP_FLOOR unset / keyless), there is nothing to run it on — and it must NOT
     // silently fall back to Claude (that is the exact free-user money leak). Refuse honestly instead.
-    if (powerSpecResolved.cheapOnly && cheapBuildFloorRunners().length === 0) {
+    // Generalised to EVERY tier (2026-09-14): a tier whose ladder has no keyed rung cannot build, and
+    // the honest answer is a refusal naming the tier — never a build on some other tier's model.
+    if (!tierEngineAvailable(powerLevelReqEffective)) {
       activeBuilds.delete(buildKey);
-      audit('AGENTV3_WEAK_TIER_NO_FLOOR', { userId }, 'warn');
-      res.status(503).json({ error: 'The free engine is temporarily unavailable. Please try again shortly, or add credits to build on the full engine.', code: 'WEAK_ENGINE_UNAVAILABLE' });
+      audit('AGENTV3_TIER_ENGINE_UNAVAILABLE', { userId, tier: powerLevelReqEffective }, 'warn');
+      const tierName = tierDisplayName(toPowerLevel(powerLevelReqEffective));
+      res.status(503).json({
+        error: tierName === 'Weak'
+          ? 'The free engine is temporarily unavailable. Please try again shortly, or add credits to build on the full engine.'
+          : `The ${tierName} engine is temporarily unavailable. Please try again shortly, or pick another power level.`,
+        code: tierName === 'Weak' ? 'WEAK_ENGINE_UNAVAILABLE' : 'ENGINE_UNAVAILABLE',
+      });
       return;
     }
 
@@ -9584,7 +9653,7 @@ async function noteBuildOutcome(
         const docs = await buildDocumentContext(docAttachments);
         // Bounded (8s) — a stalled vision provider must not hang the request before the deadline
         // timer is armed; on timeout we proceed without the image description.
-        const vis = await raceTimeout(describeVisionAttachments(docAttachments, { useClaude: pinnedOpus, noClaude: noClaudeBuild, designContract: true }), 8_000, 'describeVisionAttachments')
+        const vis = await raceTimeout(describeVisionAttachments(docAttachments, { useClaude: powerSpecResolved.powerMode /* Strong: Claude-first (Haiku describe tier); Weak/Normal: Gemini → Grok */, noClaude: noClaudeBuild, designContract: true }), 8_000, 'describeVisionAttachments')
           .catch(() => '');
         // AP-8: pull the contract OUT of the description and strip its JSON from the prose, so the
         // build prompt carries the requirements once as instructions rather than twice — once as
@@ -11098,6 +11167,8 @@ async function noteBuildOutcome(
                   : 'billing-off (no charge)',
             billedUsd: Math.round(watchdogBilledUsd * 1_000_000) / 1_000_000,
             billedInr: Math.round(watchdogBilledUsd * usdInrRate() * 100) / 100,
+            realCostUsd: Math.round(decided.realCostUsd * 1_000_000) / 1_000_000,
+            sandboxCostUsd: Math.round(decided.sandboxUsd * 1_000_000) / 1_000_000,
             powerMode: onlyOpus,
             powerLevel: powerLevelReqEffective,
             noClaude: noClaudeBuild,
@@ -11376,6 +11447,13 @@ async function noteBuildOutcome(
             // later saturates, liveEtaTick continues from something measured rather than from the
             // prompt guess it would otherwise still be carrying.
             etaTotalMs = elapsedMs + byStep;
+            // A PLAN MEASUREMENT IS EVIDENCE TOO (merge of #2932 and #2934, 2026-09-14). The file
+            // branch above flips this flag for exactly the reason stated there — once a real
+            // measurement has anchored the budget, `liveEtaTick` may honestly own the line again if
+            // measurement later stops applying (the build enters repair). Leaving it unset here
+            // would silently suppress the countdown for the whole rest of a build we HAD measured,
+            // and it would fail nothing — which is the class both PRs warned about.
+            etaEvidenced = true;
             events.emit({ type: 'narration', agent: 'architect', text: stepEtaText(elapsedMs, byStep, etaStepsDone, etaPlannedSteps), ts: now, id: 'eta-live' });
             return;
           }
@@ -11709,24 +11787,21 @@ async function noteBuildOutcome(
       // users — OR is forced ON+cheap-ONLY for a not-yet-paying free-tier user. Computed ONCE here and
       // reused by BOTH the agentic architect chain AND the fast lane (Simple Builder / OneShot), so the
       // fast lane is governed by the SAME policy as everything else — no divergent "direct Sonnet" path.
-      const cheapTierAllowed = cheapFloorAllowedForTier(analysis?.startTier, workspaceId);
-      const cheapUserAllowed = cheapFloorAllowedForUser(userId, email);
-      // PAID PINNED tiers (admin fidelity rule 2026-07-13): the floor must NEVER lead a mini/medium/max
-      // build — the user selected an exact model (Sonnet or Opus) and that model leads 100%. Before this
-      // guard, escalation-on made cheapFloorAllowedForTier() return true for EVERY tier, so GLM/Kimi
-      // could lead even a paid Opus build — the exact substitution the admin forbade.
-      const allowCheapFloor = freeTierBuildActive || (!onlyOpus && !routeStrong && cheapTierAllowed && cheapUserAllowed);
-      // HONEST ROUTING RECORD (autopsy fae70e42): state in the build report EXACTLY why the cheap
-      // GLM/Kimi floor did or did not lead — so "1st call claude kyun?" is answered by the report
-      // itself, never a guess. Best-effort; never affects the build.
+      // HONEST ROUTING RECORD (2026-09-14, replaces CHEAP_FLOOR_DECISION): the chain IS the tier's
+      // ladder, so the report states the ladder, which rungs have a key here, and whether an env
+      // override was refused — "1st call kaun tha aur kyun" is answered by the report, never guessed.
       try {
-        const floorDecision = cheapFloorDecision(process.env, {
-          allowCheapFloor, routeStrong, freeTierBuildActive,
-          tierAllowed: cheapTierAllowed, userAllowed: cheapUserAllowed,
-        });
+        const parsedLadder = tierLadder(powerLevelReqEffective);
+        const keyless = parsedLadder.rungs.filter((r) => !(process.env[keyEnvFor(r.provider)] && String(process.env[keyEnvFor(r.provider)]).trim()));
         buildDiag.record({
-          phase: 'provider', severity: floorDecision.active ? 'info' : 'warning',
-          code: 'CHEAP_FLOOR_DECISION', message: floorDecision.reason, autoResolved: floorDecision.active,
+          phase: 'provider', severity: parsedLadder.rejected || keyless.length === parsedLadder.rungs.length ? 'warning' : 'info',
+          code: 'TIER_LADDER', autoResolved: !parsedLadder.rejected,
+          message: `${tierDisplayName(toPowerLevel(powerLevelReqEffective))} ladder (${parsedLadder.source}): ${describeLadder(parsedLadder.rungs)}`,
+          detail: [
+            keyless.length ? `Keyless rungs skipped: ${describeLadder(keyless)} (set ${[...new Set(keyless.map((r) => keyEnvFor(r.provider)))].join(', ')}).` : 'Every rung has a key.',
+            parsedLadder.rejected ? `Override refused: ${parsedLadder.rejected}` : '',
+            routeStrong ? 'Large project / import build (routeStrong) — the ladder is unchanged; the tier decides the engine.' : '',
+          ].filter(Boolean).join(' '),
         });
       } catch { /* diagnostics are best-effort — never blocks a build */ }
       const recordProviderFallback = (name: string, err: unknown): void => {
@@ -11748,10 +11823,7 @@ async function noteBuildOutcome(
       // fixed 'anthropic'. Token/billing accounting stays in each caller's existing sink (no onTurnComplete
       // here — avoids double-counting the fast lane's own buildUsage.add).
       const makeFastTextRunner = (onUsed?: (used: string) => void): TurnRunner => buildTurnRunner({
-        ...(analysis ? { geminiModel: tierToGeminiBuildModel(analysis.startTier) } : {}),
-        allowCheapFloor,
-        cheapOnly: freeTierBuildActive,
-        free: freeTierBuildActive,
+        tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
         onProviderUsed: (used) => { try { onUsed?.(used); } catch { /* caller callback best-effort */ } captureProvider(used); },
         // OBSERVATION ONLY — captureShadowUsage feeds the shadow ledger, never the billing one. This is
@@ -11760,16 +11832,7 @@ async function noteBuildOutcome(
         onProviderError: recordProviderFallback,
       });
       const client = buildTurnRunner({
-        ...(analysis ? { geminiModel: tierToGeminiBuildModel(analysis.startTier) } : {}),
-        // First attempt only opts the cheap floor in — and only for simple/medium apps (complex →
-        // straight to the strong model) AND only for allowlisted users (canary; empty list = all).
-        // NEVER for a large existing project (admin 2026-07-05): the floor timed out 8× on a 233KB
-        // Mitrify-scale prompt and every turn fell to Claude anyway — pure wasted minutes.
-        // Escalation builds below never pass this, so they stay Claude.
-        // FREE-TIER: force the cheap floor ON and cheap-ONLY (no Claude) for a not-yet-paying user.
-        allowCheapFloor,
-        cheapOnly: freeTierBuildActive,
-        free: freeTierBuildActive,
+        tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
         onProviderUsed: captureProvider,
         onTurnComplete: captureTurnUsage,
@@ -11822,7 +11885,8 @@ async function noteBuildOutcome(
        * to the honesty detector on exactly the tier where Claude is forbidden.
        */
       const healRunnerOpts = () => ({
-        ...healRunnerRoutingOpts(freeTierBuildActive),
+        tier: powerLevelReqEffective,
+        heal: true, // the tier's ladder minus its leading flash rung (admin 2026-08-13)
         noClaude: noClaudeBuild,
         onProviderUsed: captureProvider,
         onTurnComplete: captureTurnUsage,
@@ -13944,7 +14008,9 @@ async function noteBuildOutcome(
         // falls the plan runner to the normal build `client` + `model`, which there is Opus.
         // Strong ('mini' → Sonnet 100%, admin 2026-07-13) plans on Grok like Normal — planning on
         // Opus for a Sonnet-pinned tier would be exactly the cross-tier call the admin forbade.
-        const planGrok = pinnedOpus ? null : grokPlanRunner({ noClaude: noClaudeBuild });
+        // Plan on the tier's plan ladder (admin-approved table 2026-09-14). `planGrok` keeps its name
+        // for the lines below; it is no longer Grok — Grok judges.
+        const planGrok = tierPlanRunner(powerLevelReqEffective, noClaudeBuild);
         const planRunner = new AgentRunner({
           client: planGrok ?? client,
           // C2 — the plan runner has tool access too, so it gets the same guard. A planner that
@@ -13953,7 +14019,7 @@ async function noteBuildOutcome(
           state,
           events,
           usageSink: buildUsage, // billing accounting fix — the plan step's tokens are billed too
-          model: planGrok ? haikuModel() : model,
+          model: planGrok ? sonnetModel() : model, // every rung pins its own model; this is the Claude default only
           system: planSystemPrompt(),
           tools: catalogForTools(['update_todo']),
           onlyOpus,
@@ -14701,7 +14767,11 @@ async function noteBuildOutcome(
 
       // FREE-TIER: never escalate a free build — escalation climbs to Sonnet/Claude, and a not-yet-
       // paying user's build must never spend that budget. A failed free build converts to paid (upsell).
-      if (!result && analysis && !freeTierBuildActive && shouldEscalateBuild(analysis, onlyOpus, workspaceId)) {
+      // ESCALATION = HIGHER UP THE SAME LADDER (2026-09-14). Normal caps at Sonnet, Strong ends at Opus,
+      // Weak never escalates (NavBharatAI pays for every weak build). `onlyOpus` used to switch this off
+      // for the pinned tiers; Strong is a ladder now, so its path is derived from the ladder instead.
+      const tierEscalationPath = analysis ? escalationPathForTier(powerLevelReqEffective, analysis.escalationPath) : [];
+      if (!result && analysis && !freeTierBuildActive && tierEscalationPath.length > 1 && shouldEscalateBuild({ ...analysis, escalationPath: tierEscalationPath }, false, workspaceId)) {
         // STRONG JUDGE (admin 2026-07-03): the cheap floor (GLM/Kimi) builds attempt 1; a SONNET judge
         // reviews it — a cheap model can't reliably catch its own gaps (a cosmetic feature, a subtle
         // bug). Only on a judge FAIL do we spend Sonnet, and then to REPAIR the judge's specific
@@ -14709,7 +14779,7 @@ async function noteBuildOutcome(
         let judgeFindings: string[] = [];
         let lastAttempt = 0;
         const judgeOn = process.env.AGENTV3_SONNET_JUDGE !== 'off';
-        const esc = await runWithEscalation(analysis.escalationPath, {
+        const esc = await runWithEscalation(tierEscalationPath, {
           buildOnTier: async (tier, attempt) => {
             lastAttempt = attempt;
             if (attempt === 1) return runner.run(buildPrompt); // cheap-first start-tier runner
@@ -14723,7 +14793,7 @@ async function noteBuildOutcome(
             events.emit({ type: 'narration', agent: 'architect', text: repairing ? 'Bringing in NavBharatAI\'s stronger engine to fix what the review found…' : 'Bringing in NavBharatAI\'s stronger engine to finish the build…', ts: Date.now() });
             const escRunner = new AgentRunner({
               ...baseRunnerOpts,
-              client: buildTurnRunner({ geminiModel: tierToGeminiBuildModel(tier), claudeFirst: true, noClaude: noClaudeBuild, onProviderUsed: captureProvider, onTurnComplete: captureTurnUsage, onProviderError: (name, err) => { try { buildDiag.recordProviderFailure(name, err); } catch { /* best-effort */ } } }),
+              client: buildTurnRunner({ tier: powerLevelReqEffective, fromProvider: tier === 'opus' ? 'CLAUDE_OPUS' : 'CLAUDE', noClaude: noClaudeBuild, onProviderUsed: captureProvider, onTurnComplete: captureTurnUsage, onProviderError: (name, err) => { try { buildDiag.recordProviderFailure(name, err); } catch { /* best-effort */ } } }),
               // Opus ONLY in power mode — a power-off escalation caps at Sonnet, never Opus
               // (admin rule 2026-06-28). Escalation only runs in normal mode anyway.
               model: resolveModel(tier === 'opus' && onlyOpus),
@@ -14751,12 +14821,14 @@ async function noteBuildOutcome(
             // This escalation loop only runs for a paid, non-power build (free/power skip escalation),
             // so the mode is 'paid' here; passed explicitly so the judge selection is mode-correct.
             const judge = selectReviewJudge(onlyOpus ? 'power' : 'paid');
-            const reviewerName = judge.kind === 'grok' ? 'Grok' : judge.kind === 'opus' ? 'Opus' : 'Sonnet';
+            // ADMIN-ONLY label for the verdict record. It must never reach the user: the two narration
+            // lines below used to print it ("🔎 Grok is reviewing…") — a White-Label Law breach fixed 2026-09-14.
+            const reviewerName = judge.kind === 'grok' ? 'Grok' : judge.kind === 'glm' ? 'GLM' : judge.kind === 'opus' ? 'Opus' : 'Sonnet';
             const collectFiles = (): Array<{ path: string; content: string }> => [...writtenFiles.entries()].map(([path, content]) => ({ path, content }));
             const recordVerdict = (v: { pass: boolean; score: number; findings: string[] }, tag: string): void => {
               try { buildDiag.record({ phase: 'build', severity: v.pass ? 'info' : 'warning', code: 'CHEAP_REVIEW', message: `${tag}: ${v.pass ? 'PASS' : 'FAIL'} (score ${v.score})${v.pass ? '' : ' — ' + v.findings.slice(0, 3).join('; ')}`, autoResolved: true }); } catch { /* diagnostics best-effort */ }
             };
-            events.emit({ type: 'narration', agent: 'architect', text: `🔎 ${reviewerName} is reviewing the cheap build…`, ts: Date.now() });
+            events.emit({ type: 'narration', agent: 'architect', text: '🔎 NavBharatAI\'s reviewer is checking the build…', ts: Date.now() });
             let verdict = await judgeBuild(prompt, collectFiles(), judge.runTurn, judge.modelId);
             recordVerdict(verdict, `${reviewerName} review`);
             // BOUNCE loop: `nextReviewAction` bounds it — after `cap` cheap repairs it can ONLY go to
@@ -14769,7 +14841,7 @@ async function noteBuildOutcome(
               // know; the user is told what is happening to THEIR app.
               events.emit({ type: 'narration', agent: 'architect', text: '🔧 Review found issues — NavBharatAI is fixing them…', ts: Date.now() });
               try { await runner.run(judgeRepairPrompt(prompt, verdict.findings)); } catch { break; /* GLM/KIMI down → stop bouncing, escalate to Sonnet */ }
-              events.emit({ type: 'narration', agent: 'architect', text: `🔎 ${reviewerName} re-reviewing the fix…`, ts: Date.now() });
+              events.emit({ type: 'narration', agent: 'architect', text: '🔎 NavBharatAI\'s reviewer is re-checking the fix…', ts: Date.now() });
               verdict = await judgeBuild(prompt, collectFiles(), judge.runTurn, judge.modelId);
               recordVerdict(verdict, `${reviewerName} re-review`);
             }
@@ -18456,6 +18528,9 @@ async function noteBuildOutcome(
         // Needed by the failure ledger below: the tokens the per-provider ledger could not attribute.
         // Taken from the SAME call that decides the bill, so the two can never price a build differently.
         realCostRemainder: realCostRemainderForFailure,
+        // The platform's OWN cost, recorded beside the bill on every settle (success or failure) —
+        // the admin cost card's source of truth. Priced by the same call that priced the bill.
+        realCostUsd: decidedRealCostUsd, sandboxUsd: decidedSandboxUsd,
       } = decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, livePreviewCharge.usd);
       // PLATFORM TELEMETRY — feed the admin Monitor / Health Score / FinOps the REAL engine's numbers.
       // Until this line, those panels saw only the legacy Engineer-AI builder and were blind to every
@@ -18609,10 +18684,44 @@ async function noteBuildOutcome(
       // 2026-07-27: condition widened from `expectsArtifacts && !result.ok` to just `!ok` — see
       // zeroBillForFailedBuild. An import/survey turn has expectsArtifacts=false, so a FAILED one
       // (syntax error + 29-min timeout) was billed ₹19.08 while telling the user it was free.
-      if (zeroBillForFailedBuild(result.ok) && effectiveBilledUsd > 0) {
+      // 🔴 A BUILD THE USER STOPPED IS NOT A BUILD THAT FAILED (admin 2026-09-14: "user ki galti hai,
+      // isme hamari nahi"). `zeroBillForFailedBuild` could not tell our own failure from the user
+      // changing their mind, so a build cancelled at 90% — real tokens, real sandbox minutes, real
+      // files the user KEEPS and can resume from — was free. See cancelledBuildBilling.ts for the
+      // four safety rules, and in particular why the charge is the REAL COST already computed rather
+      // than a percentage of a full build (a percentage would over-charge a user who stopped early by
+      // an order of magnitude). Kill switch: AGENTV3_BILL_CANCELLED=off restores today's behaviour.
+      const cancelBill = (process.env.AGENTV3_BILL_CANCELLED ?? '').trim().toLowerCase() !== 'off'
+        ? decideCancelledBuildBill({
+          abortCause: abortCauseOf(abort.signal),
+          filesWritten: writtenFiles.size,
+          appRendered: buildObs.previewRendered === true,
+          decidedBilledUsd: effectiveBilledUsd,
+        })
+        : null;
+      if (cancelBill?.applies && cancelBill.billedUsd > 0) {
+        // Only ever REDUCES: `decideCancelledBuildBill` starts from the number already decided above
+        // and can never exceed it, so cancelling can never cost more than finishing.
+        effectiveBilledUsd = cancelBill.billedUsd;
+        zeroBillReason = undefined;
+        buildDiag.record({
+          phase: 'build', severity: 'info', code: 'CANCELLED_BUILD_CHARGED',
+          message: `${cancelBill.reason} (discount ${cancelBill.discountPct}%, delivery: ${cancelBill.delivery}).`,
+          autoResolved: true,
+        });
+        if (cancelBill.userMessage) events.emit({ type: 'narration', agent: 'architect', text: `🧾 ${cancelBill.userMessage}`, ts: Date.now() });
+      } else if (zeroBillForFailedBuild(result.ok) && effectiveBilledUsd > 0) {
         effectiveBilledUsd = 0;
-        zeroBillReason = 'build did not succeed — "working app or free", so no charge';
-        events.emit({ type: 'narration', agent: 'architect', text: '🛡️ This build did not fully succeed, so it is FREE — no charge. Send a follow-up and I will fix it.', ts: Date.now() });
+        zeroBillReason = cancelBill?.applies
+          ? cancelBill.reason
+          : 'build did not succeed — "working app or free", so no charge';
+        events.emit({
+          type: 'narration', agent: 'architect',
+          text: cancelBill?.applies
+            ? '🛡️ You stopped this build before anything was produced, so it is FREE — no charge. Your workspace is exactly as it was.'
+            : '🛡️ This build did not fully succeed, so it is FREE — no charge. Send a follow-up and I will fix it.',
+          ts: Date.now(),
+        });
       }
       if (userId && result.ok && effectiveBilledUsd > 0 && freeOnboardingLimit() > 0) {
         const isFree = await onboardingCreditStore
@@ -18772,6 +18881,8 @@ async function noteBuildOutcome(
                   : 'billing-off (no charge)',
             billedUsd: Math.round(effectiveBilledUsd * 1_000_000) / 1_000_000,
             billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100,
+            realCostUsd: Math.round(decidedRealCostUsd * 1_000_000) / 1_000_000,
+            sandboxCostUsd: Math.round(decidedSandboxUsd * 1_000_000) / 1_000_000,
             ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited } : {}),
             ...(zeroBillReason ? { zeroBillReason } : {}),
             powerMode: onlyOpus,

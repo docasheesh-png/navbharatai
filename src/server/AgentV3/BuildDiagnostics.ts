@@ -175,6 +175,16 @@ export interface BuildBillingRecord {
   billedInr?: number;
   /** Wallet tokens actually debited (absent when billing is off / nothing was charged). */
   walletTokensDebited?: number;
+  /**
+   * What the PROVIDERS really cost NavBharatAI for this build (USD, tokens only, at settle time's
+   * rate card) — recorded on success AND failure, because a failed build still cost us. ADMIN-ONLY:
+   * the White-Label Law forbids showing a user our cost or margin, and `userCostBreakdown` must never
+   * carry it. Absent on reports written before 2026-09-14; the admin cost card then falls back to the
+   * stored call log and says so.
+   */
+  realCostUsd?: number;
+  /** The sandbox VM's measured cost for the build (USD), 0 unless sandbox billing is configured. */
+  sandboxCostUsd?: number;
   /** WHY a build was free when tokens were really spent (empty build / unrendered preview / onboarding). */
   zeroBillReason?: string;
   /** Power (Only Opus) mode. */

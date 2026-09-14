@@ -2477,6 +2477,94 @@ no future edit can silently route a weak heal to Gemini/Haiku again.
 ladder, mode-aware judge, free-tier heal-gate re-route to cheap coders, power-mode judge+plan→Opus), each
 tested + gated + merged. Until a slice ships, the current behaviour (audited 2026-07-12) still applies.
 
+### 🔴 THREE TIERS, THREE LADDERS, "100% USI MODE MEIN" (admin-mandated 2026-09-14) — SUPERSEDES the five-tier table and the boolean-assembled chain above
+
+Admin, verbatim: *"abhi 5 type hai — week, normal, strong, power, full team. inko simple 3 me badlo, week,
+normal, strong. bas."* and *"user ne agar teeno mode me se jo select kiya hai, aap 100% usi mode me bane."*
+Everything above about 'medium' (Powerful) / 'max' (Full Team) and about `claudeFirst` / `allowCheapFloor`
+/ `cheapOnly` / the Vertex-Gemini "last resort" describes the engine BEFORE this date. The source of truth
+is now **`src/server/AgentV3/tierLadder.ts`**, and the build chain is built from it rung for rung.
+
+| Tier (UI) | Internal | The ladder (first → last) | Escalation cap |
+|---|---|---|---|
+| Weak (free) | `weak` | GLM `glm-5.3-flash` → KIMI `kimi-k2.6` → GLM `glm-5.3` → Claude **Haiku** | never escalates (NavBharatAI pays) |
+| Normal (paid economy) | `off` | GLM `glm-5.3-flash` → KIMI `kimi-k2.7-code` → GLM `glm-5.3` → Claude Sonnet | Sonnet |
+| Strong (paid premium) | `mini` | GLM `glm-5.3` → Claude Sonnet → Claude **Opus** | Opus (its last rung) |
+
+🔴 **REVISED THE SAME DAY UNDER THE ADMIN'S FULL AUTHORITY GRANT** (verbatim: *"mujhe yeh chahiye: mera
+kam se kam kharcha; user ko best se best app, ek hi baar me (build fail kam se kam). aapko puri authority
+hai, aap kis ai ka kaha use karna chahte ho — i approved"*). The admin's first list (4.7-flash-led Weak,
+Kimi-led Normal/Strong, gpt-5.4 last on Weak) was superseded once the real prices were known:
+**glm-5.3-flash $0.15 / $0.50, glm-5.3 $1.40 / $4.40.** The one lever behind both aims is that the FIRST
+rung must be strong enough that heals are rare — a $0 rung that fails costs more than a $0.15 rung that
+succeeds. So 5.3-flash leads Weak and Normal; 5.3 is the strong rung under Sonnet everywhere and leads
+Strong; Kimi stays as the second vendor on Weak/Normal; **glm-4.7-flash, kimi-k3 and gpt-5.4 are on no
+ladder** (weak-at-coding / unverified id + unknown price / no key + unknown price). **Nothing to buy from
+OpenAI.** Haiku is again Weak's last rung. `healLadder` now drops a leading rung only when it is the
+known-weak 4.7-flash.
+
+- **The chain IS the ladder.** A build on a tier runs that tier's rungs, in that order, and nothing else —
+  no Vertex/Gemini rung, no borrowed Sonnet when the floor is off, no live-health GLM↔KIMI lead swap. A
+  keyless rung is SKIPPED; a tier with no keyed rung is refused before the stream (`ENGINE_UNAVAILABLE`;
+  weak keeps `WEAK_ENGINE_UNAVAILABLE`) — never built on another tier's model. Test-locked in
+  `tests/tierChainFidelity.test.ts` against the CONSTRUCTED chain's (name, model) sequence.
+- **Escalation = higher up the same ladder** (`escalationPathForTier`, `ladderFrom`): a Normal build that
+  fails its gate restarts at its Sonnet rung; Strong at Opus. "Opus sirf zarurat par" is literal: Opus is
+  reached only when K3 and Sonnet failed, or the finished build failed its gate.
+- **Heal = the ladder minus its leading flash rung** (the 2026-08-13 rule, now one function: `healLadder`).
+- 🔒 **WEAK NEVER RUNS SONNET/OPUS — three nets:** the ladder never names them; `parseLadderOverride`
+  REFUSES an `AGENTV3_LADDER_WEAK` that does; `enforceNoClaude` strips every `CLAUDE*` rung except
+  `CLAUDE_HAIKU` from the FINAL chain. ⚠️ **It no longer moves Haiku to the end** — the 2026-07-13 "to
+  last me" was for a boolean-assembled chain; the admin's own list puts GPT-5.4 AFTER Haiku, so the guard
+  decides WHAT and the ladder decides WHERE.
+- **Grok STAYS** (admin, same day: *"Grok ko hatao mat … reviewer app tode na"*) — judge (free+paid), free
+  plan phase, Engineer AI primary. Gemini/Vertex stay for vision and the free-chat backstop. They are simply
+  not BUILD rungs. An earlier plan in this session to retire them is withdrawn.
+- **Strong is a LADDER now, not Sonnet-pinned.** This changes the 2026-07-13 fidelity rule's *meaning*, on
+  the admin's explicit choice (asked as a question, answered "Ladder: K3/Sonnet lead, Opus sirf zarurat
+  par"): fidelity is to the MODE, not to one model id. Billing is unchanged — `powerToTier('mini')` is not
+  the Opus tier, so Strong bills real cost + tiered markup, and an Opus rung that ran is priced at its real
+  Opus rate inside that. A stored 'medium'/'max' maps UP to 'mini' (never down to Normal).
+- **Env keys (names only):** `AGENTV3_LADDER_WEAK` / `_NORMAL` / `_STRONG` (override one tier's ladder,
+  `PROVIDER:model,…`, applied whole or refused with the reason in the `TIER_LADDER` report line);
+  `OPENAI_API_KEY` (⚠️ **NOT set** — the admin said they will buy it; until then the gpt-5.4 rung yields
+  nothing and changes no build) and `OPENAI_BASE_URL`, `AGENTV3_OPENAI_TIMEOUT_MS`; `RATE_GLM53_FLASH_IN`
+  / `_OUT` / `_CACHE` (**code default now the admin's real price, 2026-09-14: $0.15 / $0.50, cache
+  $0.0375** — an earlier placeholder priced it at the glm-5 line, ~10× too high, for a few hours, on
+  no user's bill); non-flash **GLM-5.3 is $1.40 / $4.40 = the existing glm-5 line**, no new row;
+  `RATE_GPT_NANO_IN` / `_OUT` (**$0.20 / $1.25**, GPT-5.4 Nano — priced so it can never be billed at the
+  full-GPT bound, but on NO ladder: the admin's own brief says Nano is for classification/extraction,
+  never an app-generation engine); `RATE_GPT_IN` / `_OUT` / `_CACHE` for the FULL gpt-5.4 — ⚠️ **still
+  unknown, still the Sonnet-line bound** until the admin has its price. `AGENTV3_CHEAP_FLOOR=off`
+  is still the GLM/KIMI kill switch. **Now inert for the build chain:** `AGENTV3_BUILD_CLAUDE_FIRST`,
+  `AGENTV3_BUILD_ALLOW_GEMINI`, `AGENTV3_VERTEX_PEER`, `AGENTV3_FLOOR_BALANCE`, `AGENTV3_FREE_KIMI_LEAD`,
+  `AGENTV3_WEAK_FLAGSHIP_HEAL`, `GLM_MODEL` / `KIMI_MODEL` / `AGENTV3_FREE_*_MODEL` (the ladders name their
+  models; those envs still feed the legacy `cheapBuildFloorRunners`, which only tests call now).
+- ⚠️ **Not yet done, said plainly:** the OpenAI rung is untested against a real response (no key); the
+  chat router (`AIRouterManager`) has no OpenAI provider — that is slice 3, only if GPT should serve chat.
+
+**THE AGENT × TIER TABLE (admin-approved 2026-09-14, aims verbatim: "user ki app best of best bane — 1 try
+me" · "mera kharcha kam se kam ho").** Test-locked in `tests/agentRolesPerTier.test.ts`.
+
+| Role | Weak | Normal | Strong | Note |
+|---|---|---|---|---|
+| Credits / abuse / free-clamp | code | code | code | ₹0 — never a model |
+| Safety triage | code | code | code | `triagePrompt` is deterministic, precision-first |
+| Intent doubt-reader | free chat router | free chat router | free chat router | glm-4.7-flash led, $0; one-word answer |
+| **Plan** | glm-5.3-flash → own ladder | glm-5.3-flash → own ladder | glm-5.3 → own ladder | `PLAN_RUNG` / `planLadder`; input-heavy call on the cheapest rung that reasons well; **Grok no longer plans** |
+| Builder + sub-agents + fast lane | tier ladder | tier ladder | tier ladder | above |
+| Heals | ladder minus leading flash | same | same | `healLadder` |
+| Lint / typecheck / build / preview / journey / fuzz / CVE | code | code | code | ₹0 |
+| **Judge / Reviewer** | **glm-5.3** | **glm-5.3** | **Grok** | a DIFFERENT model from the builder at the lowest input price that reasons well (glm-5.3 $1.40 in vs Grok $3); Strong builds on glm-5.3 so its judge is Grok, outside every ladder; `AGENTV3_REVIEWER=sonnet` forces Sonnet; no keys ⇒ Sonnet; **Opus is never the judge**. ⚠️ The user-facing review narration used to print the judge's vendor name ("🔎 Grok is reviewing…") — a White-Label breach, fixed |
+| Vision (describe) | Gemini → Grok | Gemini → Grok | Claude(Haiku describe tier) → Gemini → Grok | `useClaude` follows `powerMode` |
+| Escalation | never | own ladder from Sonnet | own ladder from Opus | `escalationPathForTier` |
+
+Deliberate deviations from the admin's draft, each for the two aims: no model on guard/router/lint (code
+already does it, ₹0); no Opus on plan or judge (input-heavy calls, and "Opus sirf zarurat par"); no
+"context summarizer" (none exists — context is deterministic); "fallback builder" is the ladder's next
+rung, not an agent; the explainer lives in chat, not the build. Two names in the draft are unverified
+here — a non-flash **GLM-5.3** and **GPT-5 Nano** — and were not wired.
+
 ### Billing model — REAL-COST + tiered markup for every non-Opus tier (admin-CONFIRMED 2026-07-14, Fix 65) — ⚠️ CONFIRM WITH ADMIN BEFORE CHANGING
 
 The admin verified the LIVE provider deductions on the GLM (Z.ai) + Kimi (Moonshot) dashboards and

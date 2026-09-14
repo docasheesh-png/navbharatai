@@ -16,6 +16,7 @@ import { reportParts, partJson, partsSummary, ordinal } from './adminReportParts
 import { MonitorPanels } from './admin/MonitorPanels';
 import { LoadBoard } from './admin/LoadBoard';
 import { AudienceCard } from './admin/AudienceCard';
+import { BuildCostCard } from './admin/BuildCostCard';
 import { AdminCopyButton } from './admin/AdminCopyButton';
 import { reportStatus, reportStatusLabel, reportStatusHint, openReportCount, type ReportTriage } from '../server/AgentV3/reportTriage';
 import { problemKindLabel } from '../lib/userReport';
@@ -3290,6 +3291,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   </details>
                 </div>
               )}
+
+              {/* BUILD COSTS (admin 2026-09-14): real cost vs bill per tier × app size, measured from
+                  the same durable records the list below reads. Admin-only by construction. */}
+              <BuildCostCard adminToken={adminToken} />
 
               {/* ALL BUILDS (admin 2026-08-06): every user's every build — 0→100% report downloadable
                   WITHOUT the user pressing Report. The engine already records every build durably;

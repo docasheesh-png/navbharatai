@@ -159,6 +159,13 @@ export function redactReportSecrets(report: BuildDiagnosticsReport): BuildDiagno
  * errors) to safe sizes while keeping the most recent, most useful detail. Pure + exported + tested.
  * SECURITY 2.1: secrets are redacted first, so every persisted/downloaded copy is clean.
  */
+/**
+ * How many per-call LLM records the STORED report keeps (the newest ones). Exported because the admin
+ * cost card recomputes an old build's cost from this list, and a list that has hit the cap is a
+ * lower bound, not a measurement — the reader must know the cap to say so.
+ */
+export const STORED_LLM_CALLS_MAX = 40;
+
 export function trimReportForStorage(reportIn: BuildDiagnosticsReport): BuildDiagnosticsReport {
   const report = redactReportSecrets(reportIn);
   const trimmedIssues = (report.issues ?? []).slice(-500);
@@ -170,7 +177,7 @@ export function trimReportForStorage(reportIn: BuildDiagnosticsReport): BuildDia
     // itself bypass this function's byte-budget trimming with an unbounded list of its own.
     problems: capProblems(trimmedIssues.filter((i) => i.severity !== 'info')),
     commands: lastN(report.commands, 40)?.map((c) => ({ ...c, stdout: cap(c.stdout, 1500) ?? '', stderr: cap(c.stderr, 1500) ?? '' })),
-    llmCalls: lastN(report.llmCalls, 40)?.map((c) => ({ ...c, promptPreview: cap(c.promptPreview, 800), responsePreview: cap(c.responsePreview, 800) })),
+    llmCalls: lastN(report.llmCalls, STORED_LLM_CALLS_MAX)?.map((c) => ({ ...c, promptPreview: cap(c.promptPreview, 800), responsePreview: cap(c.responsePreview, 800) })),
     errors: lastN(report.errors, 50)?.map((e) => ({ ...e, message: cap(e.message, 2000) ?? '', stack: cap(e.stack, 1500) })),
     // generatedFiles already capped at 20 × 6000 chars by BuildDiagnostics — kept as-is (the bug evidence).
     generatedFiles: report.generatedFiles,
@@ -716,6 +723,45 @@ export async function listBuildFacts(limit = 200): Promise<BuildFacts[]> {
         startedAt: typeof r.startedAt === 'number' ? r.startedAt : undefined,
         endedAt: typeof r.endedAt === 'number' ? r.endedAt : undefined,
       };
+    });
+  } catch {
+    return [];
+  }
+}
+
+/** One workspace's latest FULL stored report, for a reader that needs more than the metadata projection. */
+export interface StoredFullReport {
+  workspaceId: string;
+  savedAt: number;
+  ownerUid: string | null;
+  report: BuildDiagnosticsReport;
+}
+
+/**
+ * ADMIN-ONLY (2026-09-14, the cost card): the newest N workspaces' FULL latest reports, most recent
+ * first. `listAllDiagnostics` deliberately projects metadata only; the cost card needs the billing
+ * record, the call log, the manifest's file list and the counts of each build, so it reads the same
+ * documents whole. Bounded to 60 because each document can be several hundred KB and the card is a
+ * "last 30 builds" view, not a browser. Never throws — [] on any failure.
+ */
+export async function listRecentFullReports(limit = 30): Promise<StoredFullReport[]> {
+  const db = getDb();
+  if (!db) return [];
+  try {
+    const snap = await db
+      .collection(COLLECTION)
+      .orderBy('savedAt', 'desc')
+      .limit(Math.max(1, Math.min(60, limit)))
+      .get();
+    return snap.docs.flatMap((d) => {
+      const report = d.data()?.report as BuildDiagnosticsReport | undefined;
+      if (!report || typeof report !== 'object') return [];
+      return [{
+        workspaceId: d.id,
+        savedAt: (d.data()?.savedAt as number) ?? 0,
+        ownerUid: workspaceOwnerUid(d.id),
+        report,
+      }];
     });
   } catch {
     return [];

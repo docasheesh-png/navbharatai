@@ -8,11 +8,19 @@ describe('toPowerLevel', () => {
     expect(toPowerLevel(false)).toBe('off');
   });
 
-  it('passes through the four valid power levels', () => {
+  it('passes through the three valid power levels', () => {
+    expect(toPowerLevel('weak')).toBe('weak');
     expect(toPowerLevel('off')).toBe('off');
     expect(toPowerLevel('mini')).toBe('mini');
-    expect(toPowerLevel('medium')).toBe('medium');
-    expect(toPowerLevel('max')).toBe('max');
+  });
+
+  it('🔴 the retired tiers map UP to Strong, never down to the default', () => {
+    // 'medium' (Powerful) and 'max' (Full Team) were the two tiers ABOVE Strong, so a stored value
+    // of either means "give me the strongest engine you have". Falling through to the unknown-input
+    // default would hand exactly those users the MIDDLE tier, with nothing on screen to say their
+    // choice had been changed — a silent downgrade of the people paying most.
+    expect(toPowerLevel('medium')).toBe('mini');
+    expect(toPowerLevel('max')).toBe('mini');
   });
 
   it('defaults unknown / nullish input to off', () => {
@@ -39,20 +47,16 @@ describe('powerSpec', () => {
     expect(s.multiplier).toBe(SONNET_MULTIPLIER); // Sonnet work bills Sonnet × 3, never Opus rates
   });
 
-  it('medium / Powerful: Opus MEDIUM effort, real Opus × 2 (admin 2026-07-13; was high)', () => {
-    const s = powerSpec('medium');
-    expect(s.powerMode).toBe(true);
-    expect(s.pinnedModel).toBe('opus');
-    expect(s.effort).toBe('medium');
-    expect(s.multiplier).toBe(OPUS_MULTIPLIER);
-  });
-
-  it('max / Full Team (ultracode): Opus max effort, real Opus × 2', () => {
-    const s = powerSpec('max');
-    expect(s.powerMode).toBe(true);
-    expect(s.pinnedModel).toBe('opus');
-    expect(s.effort).toBe('max');
-    expect(s.multiplier).toBe(OPUS_MULTIPLIER);
+  it('a retired tier resolves to the Strong spec — one real tier, not a ghost of the old one', () => {
+    // Whatever a stored 'medium'/'max' used to mean, it must now resolve to a spec that genuinely
+    // exists. Returning an Opus-pinned spec for a tier nobody can select would leave an Opus billing
+    // multiplier reachable from a preference no screen can produce.
+    for (const retired of ['medium', 'max']) {
+      const s = powerSpec(retired);
+      expect(s.level).toBe('mini');
+      expect(s).toEqual(powerSpec('mini'));
+      expect(s.multiplier).not.toBe(OPUS_MULTIPLIER);
+    }
   });
 
   it('weak: cheap-only, never Claude — no pinned Claude model, cheap billing', () => {
@@ -63,9 +67,18 @@ describe('powerSpec', () => {
     expect(s.multiplier).toBe(NORMAL_MULTIPLIER);
   });
 
-  it('billing follows the pinned model: only the OPUS tiers bill × 2; Strong bills Sonnet × 3', () => {
+  it('billing follows the model the tier really runs: Strong bills Sonnet × 3, the cheap tiers × 1.2', () => {
     expect(powerSpec('mini').multiplier).toBe(SONNET_MULTIPLIER);
-    expect(powerSpec('medium').multiplier).toBe(OPUS_MULTIPLIER);
-    expect(powerSpec('max').multiplier).toBe(OPUS_MULTIPLIER);
+    expect(powerSpec('off').multiplier).toBe(NORMAL_MULTIPLIER);
+    expect(powerSpec('weak').multiplier).toBe(NORMAL_MULTIPLIER);
+  });
+
+  it('no selectable tier bills at the Opus multiplier any more', () => {
+    // With Powerful and Full Team retired, nothing a user can CHOOSE pins Opus — so nothing they can
+    // choose may carry the real-Opus × 2 markup. (Historical build records keep their own billing:
+    // pricing.ts still prices a stored 'medium'/'max' at the Opus rate it was actually charged.)
+    for (const level of ['weak', 'off', 'mini'] as const) {
+      expect(powerSpec(level).multiplier).not.toBe(OPUS_MULTIPLIER);
+    }
   });
 });

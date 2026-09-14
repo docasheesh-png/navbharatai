@@ -1,8 +1,9 @@
 // AgentV3 — POWER-TIER GATING by paid/free status (admin UI redesign 2026-07-12).
 //
-// The admin's design: the "Power" selector has five tiers — weak / normal / strong / powerful / full team
-// (internal keys: 'weak' | 'off' | 'mini' | 'medium' | 'max'). A FREE user (logged in, never purchased) may
-// use ONLY 'weak' (cheap floor GLM/Kimi, never Claude). A PAID user gets all five, defaulting to 'normal'.
+// The admin's design: the "Power" selector has THREE tiers — weak / normal / strong (internal keys:
+// 'weak' | 'off' | 'mini'), reduced from five on 2026-09-14 ("inko simple 3 me badlo"). A FREE user
+// (logged in, never purchased) may use ONLY 'weak' (cheap floor GLM/Kimi, never Claude). A PAID user
+// gets all three, defaulting to 'normal'.
 //
 // This gate is ENFORCED SERVER-SIDE, not just in the UI: a free user's build is clamped to 'weak' no matter
 // what power the client sends, so a free account can never spend NavBharatAI's Claude/Opus budget by
@@ -11,12 +12,12 @@
 import type { PowerLevel } from './powerLevel';
 import { toPowerLevel } from './powerLevel';
 
-/** The five tiers, cheapest → strongest, in display order. */
-export const POWER_LEVELS_ORDERED: PowerLevel[] = ['weak', 'off', 'mini', 'medium', 'max'];
+/** The three tiers, cheapest → strongest, in display order. */
+export const POWER_LEVELS_ORDERED: PowerLevel[] = ['weak', 'off', 'mini'];
 
 /**
  * The power levels a user may choose. A PAID user (has ever purchased, or a free-list admin/tester) gets
- * all five; a FREE user gets ONLY 'weak'. Pure.
+ * all three; a FREE user gets ONLY 'weak'. Pure.
  */
 export function allowedPowerLevels(isPaid: boolean): PowerLevel[] {
   return isPaid ? [...POWER_LEVELS_ORDERED] : ['weak'];

@@ -13,27 +13,42 @@ const route = readFileSync(resolve(__dirname, '../src/server/routes/agentv3.ts')
  * two it deliberately left alone, so a later "tidy-up" cannot quietly put Opus back on the judge or
  * Grok back on the plan.
  */
-describe('Judge = Grok on every tier; Opus is never the judge', () => {
-  it('pure: grok when a key exists, Sonnet otherwise, on free, paid AND power', () => {
+describe('Judge: a different model from the builder, at the lowest input price that reasons well; never Opus', () => {
+  it('pure: Weak/Normal judge on glm-5.3 when a GLM key exists; Strong on Grok; Sonnet is the fallback', () => {
+    expect(resolveJudgeKind('free', 'grok', undefined, 'glm')).toBe('glm');
+    expect(resolveJudgeKind('paid', 'grok', undefined, 'glm')).toBe('glm');
+    expect(resolveJudgeKind('power', 'grok', undefined, 'glm')).toBe('grok');
+    expect(resolveJudgeKind('paid', 'grok', undefined, undefined)).toBe('grok');
+    expect(resolveJudgeKind('paid', undefined, undefined, undefined)).toBe('sonnet');
     for (const mode of ['free', 'paid', 'power'] as const) {
-      expect(resolveJudgeKind(mode, 'k', undefined)).toBe('grok');
-      expect(resolveJudgeKind(mode, undefined, undefined)).toBe('sonnet');
-      expect(resolveJudgeKind(mode, 'k', 'sonnet')).toBe('sonnet');
+      expect(resolveJudgeKind(mode, 'grok', 'sonnet', 'glm')).toBe('sonnet'); // AGENTV3_REVIEWER=sonnet wins
+      expect(resolveJudgeKind(mode, 'grok', undefined, 'glm') as string).not.toBe('opus');
     }
   });
-  it('wiring: the judge chooser ignores the tier — one rule, not three', () => {
+  it('wiring: the judge chooser never returns Opus, and the Claude judge is Sonnet only', () => {
     const at = route.indexOf('export function resolveJudgeKind(');
     const body = route.slice(at, route.indexOf('\n}\n', at));
-    expect(body).not.toMatch(/return 'opus'/);
-    expect(body).toContain('selectReviewer({ reviewer: reviewerEnv, grokKey })');
+    expect(body).not.toMatch(/'opus'/);
+    const sel = route.indexOf('function selectReviewJudge(');
+    const selBody = route.slice(sel, route.indexOf('\n}\n', sel));
+    expect(selBody).toContain("modelId: process.env.AGENTV3_GLM_JUDGE_MODEL || 'glm-5.3', kind: 'glm'");
+    expect(selBody).not.toMatch(/opusModel\(\)/);
+  });
+  it('🔒 White-Label: the review narration the USER sees names no vendor or model', () => {
+    const lines = [...route.matchAll(/type: 'narration'[^\n]*reviewer[^\n]*/gi)].map((m) => m[0]);
+    expect(lines.length).toBeGreaterThanOrEqual(2);
+    for (const l of lines) {
+      expect(l).not.toMatch(/\$\{reviewerName\}/);
+      expect(l).not.toMatch(/grok|sonnet|opus|glm|claude|anthropic|gemini/i);
+    }
   });
 });
 
 describe('Plan = the tier\'s plan rung, then its own ladder; Grok no longer plans', () => {
-  it('pure: the plan rungs are the table\'s', () => {
+  it('pure: the plan rungs — the cheapest rung that reasons well, per tier', () => {
     expect(PLAN_RUNG.weak.model).toBe('glm-5.3-flash');
-    expect(PLAN_RUNG.off.model).toBe('kimi-k2.7-code');
-    expect(PLAN_RUNG.mini).toEqual({ provider: 'CLAUDE', model: 'sonnet' });
+    expect(PLAN_RUNG.off.model).toBe('glm-5.3-flash');
+    expect(PLAN_RUNG.mini).toEqual({ provider: 'GLM', model: 'glm-5.3' });
     for (const tier of ['weak', 'off', 'mini'] as const) expect(planRunnerChainNames(tier === 'weak', tier)).not.toContain('GROK');
   });
   it('wiring: the plan phase is built by tierPlanRunner from the resolved tier, and grokPlanRunner is gone', () => {

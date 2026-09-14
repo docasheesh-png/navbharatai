@@ -72,9 +72,13 @@ describe('a missing key removes a rung — it never substitutes another tier\'s 
     delete process.env.GLM_API_KEY; delete process.env.ANTHROPIC_API_KEY;
     expect(seq(chainFor({ tier: 'off' }))).toEqual(['KIMI:kimi-k2.7-code']);
   });
-  it('Weak without GLM/Kimi keys still never reaches Sonnet — Haiku and GPT only', () => {
+  it('Strong without a GLM key runs Sonnet → Opus — Anthropic under GLM, no Kimi rung by design', () => {
+    delete process.env.GLM_API_KEY;
+    expect(seq(chainFor({ tier: 'mini' }))).toEqual([`CLAUDE:${sonnetModel()}`, `CLAUDE_OPUS:${opusModel()}`]);
+  });
+  it('Weak without GLM/Kimi keys still never reaches Sonnet — Haiku alone', () => {
     delete process.env.GLM_API_KEY; delete process.env.KIMI_API_KEY;
-    expect(seq(chainFor({ tier: 'weak', noClaude: true }))).toEqual([`CLAUDE_HAIKU:${haikuModel()}`, 'OPENAI:gpt-5.4']);
+    expect(seq(chainFor({ tier: 'weak', noClaude: true }))).toEqual([`CLAUDE_HAIKU:${haikuModel()}`]);
   });
   it('🔴 a tier with NO keyed rung yields an honest refusal, not a borrowed engine', async () => {
     for (const k of ['GLM_API_KEY', 'KIMI_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY']) delete process.env[k];
@@ -91,7 +95,7 @@ describe('a missing key removes a rung — it never substitutes another tier\'s 
 });
 
 describe('heal and escalation move WITHIN the ladder', () => {
-  it('a heal drops the leading flash rung of Weak and nothing of Normal', () => {
+  it('a heal runs on the tier ladder itself (5.3-flash leads and can repair its own work)', () => {
     expect(seq(chainFor({ tier: 'weak', heal: true, noClaude: true }))).toEqual(ladderSeq(healLadder(TIER_LADDERS.weak)));
     expect(seq(chainFor({ tier: 'off', heal: true }))).toEqual(ladderSeq(TIER_LADDERS.off));
   });
@@ -121,7 +125,7 @@ describe('🔒 the weak-module guard, on the FINAL chain', () => {
   });
   it('even if Strong\'s ladder is forced through the guard, no Sonnet/Opus survives', () => {
     const names = chainFor({ tier: 'mini', noClaude: true }).map((r) => r.name);
-    expect(names).toEqual(['KIMI']);
+    expect(names).toEqual(['GLM']);
   });
 });
 

@@ -21,15 +21,31 @@
 // THE THREE LADDERS (admin 2026-09-14). Claude rungs carry a SYMBOLIC model ('sonnet' / 'opus' /
 // 'haiku') that the route resolves through models.ts, so a Claude id bump never touches this file.
 //
-//   WEAK   (free)      GLM glm-4.7-flash → GLM glm-5.3-flash → KIMI kimi-k2.6 → HAIKU → OPENAI gpt-5.4
-//   NORMAL (economy)   KIMI kimi-k2.7-code → GLM glm-5.3-flash → CLAUDE sonnet
-//   STRONG (premium)   KIMI kimi-k3 → CLAUDE sonnet → CLAUDE_OPUS opus
+//   WEAK   (free)      GLM glm-5.3-flash → KIMI kimi-k2.6 → GLM glm-5.3 → HAIKU
+//   NORMAL (economy)   GLM glm-5.3-flash → KIMI kimi-k2.7-code → GLM glm-5.3 → CLAUDE sonnet
+//   STRONG (premium)   GLM glm-5.3 → CLAUDE sonnet → CLAUDE_OPUS opus
+//
+// 🔴 DECIDED UNDER THE ADMIN'S FULL AUTHORITY GRANT (2026-09-14, verbatim: "mera kam se kam kharcha;
+// user ko best se best app, ek hi baar me (build fail kam se kam); aapko puri authority hai").
+// Two aims, one lever: THE FIRST RUNG MUST BE STRONG ENOUGH THAT HEALS ARE RARE. A heal pass is a
+// second model call, more sandbox minutes and a user watching a spinner — a "free" first rung that
+// fails costs more than a cheap one that succeeds. With the real prices in hand:
+//   • glm-5.3-flash ($0.15 / $0.50) benchmarks beside the flagship on coding and agentic work. It LEADS
+//     Weak and Normal. glm-4.7-flash ($0, DeepSWE ~46) is out of every build ladder — it keeps the $0
+//     jobs it is good at (intent doubt-reader, chat explainer), not the one it was failing at.
+//   • glm-5.3 ($1.40 / $4.40, 95th-percentile coding) is the strong rung under Sonnet ($3 / $15) on
+//     every tier and LEADS Strong — Sonnet and Opus are reached only when it fails or the build fails
+//     its gate. Same vendor as rung 1, so no new key and no new bill surface.
+//   • Kimi stays on Weak (k2.6) and Normal (k2.7-code) as the second-vendor rung, so a Z.ai 429 storm
+//     cannot take a tier down. kimi-k3 is OUT: its id is unverified on this account and its price is
+//     unknown (the rate card still carries it at the k2.7 placeholder).
+//   • gpt-5.4 is OUT of every ladder: no key, price unknown, and the admin's own brief says the Nano
+//     class is not an app-generation engine. Nothing to buy. Haiku is again Weak's last rung, exactly
+//     as the 2026-07-13 amendment described.
 //
 // 🔒 WEAK NEVER RUNS SONNET OR OPUS — the standing absolute rule (Haiku amendment 2026-07-13) is now
 // enforced HERE as well as in enforceNoClaude: `parseLadderOverride` refuses a weak override that
 // names either, so an env var cannot become the way that rule is broken.
-// ⚠️ GPT-5.4 is the weak ladder's last rung by the admin's list, which means Haiku is no longer the
-// "absolute last rung" the 2026-07-13 amendment described. Recorded, not hidden.
 //
 // WHAT IS DELIBERATELY NOT IN ANY LADDER. Grok, Gemini and Vertex (admin 2026-09-14: "Grok ko hatao
 // mat" — Grok stays the judge, the free plan model and Engineer AI's primary; Gemini/Vertex stay for
@@ -52,19 +68,19 @@ export interface LadderRung {
 
 export const TIER_LADDERS: Readonly<Record<PowerLevel, readonly LadderRung[]>> = {
   weak: [
-    { provider: 'GLM', model: 'glm-4.7-flash' },
     { provider: 'GLM', model: 'glm-5.3-flash' },
     { provider: 'KIMI', model: 'kimi-k2.6' },
+    { provider: 'GLM', model: 'glm-5.3' },
     { provider: 'CLAUDE_HAIKU', model: 'haiku' },
-    { provider: 'OPENAI', model: 'gpt-5.4' },
   ],
   off: [
-    { provider: 'KIMI', model: 'kimi-k2.7-code' },
     { provider: 'GLM', model: 'glm-5.3-flash' },
+    { provider: 'KIMI', model: 'kimi-k2.7-code' },
+    { provider: 'GLM', model: 'glm-5.3' },
     { provider: 'CLAUDE', model: 'sonnet' },
   ],
   mini: [
-    { provider: 'KIMI', model: 'kimi-k3' },
+    { provider: 'GLM', model: 'glm-5.3' },
     { provider: 'CLAUDE', model: 'sonnet' },
     { provider: 'CLAUDE_OPUS', model: 'opus' },
   ],
@@ -129,14 +145,15 @@ export function tierLadder(level: PowerLevel | string | boolean | null | undefin
 }
 
 /**
- * The ladder a HEAL pass runs on: the tier's ladder without its first rung, when that rung is a
- * flash model and something remains. The standing rule (admin 2026-08-13): a repair must not begin
- * on the model that produced the failing app. Only the LEADING flash rung is dropped — dropping every
- * flash rung would skip glm-5.3-flash, the strongest cheap coder on the weak ladder, and start the
- * heal on a dearer model for no evidence that the second rung was at fault.
+ * The ladder a HEAL pass runs on. The 2026-08-13 rule ("a repair must not begin on the model that
+ * produced the failing app") was written when the leading rung was glm-4.7-flash — a model too weak
+ * to repair what it broke. That rung is on no ladder now; glm-5.3-flash leads, and repairing on the
+ * same strong model WITH the error in hand is the ordinary, cheapest path. So a heal drops the
+ * leading rung only when it is that known-weak 4.7-flash (an env override could still put it there);
+ * otherwise the heal ladder IS the tier ladder.
  */
 export function healLadder(rungs: readonly LadderRung[]): LadderRung[] {
-  if (rungs.length > 1 && /flash/i.test(rungs[0].model)) return rungs.slice(1);
+  if (rungs.length > 1 && /4[.\-]?7[-.]?flash/i.test(rungs[0].model)) return rungs.slice(1);
   return [...rungs];
 }
 
@@ -193,14 +210,16 @@ export function escalationPathForTier<T extends string>(level: PowerLevel | stri
  * input-heavy call whose quality decides whether the build is right in ONE try — so it runs on the
  * tier's best cheap reasoner, not on its cheapest rung, and never on Opus ("Opus sirf zarurat par").
  * Grok no longer plans: it is the JUDGE on every tier, which needs a model OUTSIDE the build ladders.
- *   weak → glm-5.3-flash · normal → kimi-k2.7-code · strong → Sonnet
+ *   weak → glm-5.3-flash · normal → glm-5.3-flash · strong → glm-5.3
+ * (Under the 2026-09-14 authority grant: the plan is input-heavy, so it runs on the cheapest rung that
+ * reasons well — 5.3-flash at $0.15 in, and the $1.40 glm-5.3 for Strong instead of Sonnet at $3.)
  * The rest of the plan chain is the tier's own ladder (minus the plan rung), so a plan can never fall
  * back to another tier's model either.
  */
 export const PLAN_RUNG: Readonly<Record<PowerLevel, LadderRung>> = {
   weak: { provider: 'GLM', model: 'glm-5.3-flash' },
-  off: { provider: 'KIMI', model: 'kimi-k2.7-code' },
-  mini: { provider: 'CLAUDE', model: 'sonnet' },
+  off: { provider: 'GLM', model: 'glm-5.3-flash' },
+  mini: { provider: 'GLM', model: 'glm-5.3' },
 };
 
 /** The plan chain: the tier's plan rung first, then its ladder as the fallback — nothing else. */

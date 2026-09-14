@@ -362,18 +362,21 @@ describe('planGrokEnabled — planning runs on Grok when a key is set', () => {
 // Model Routing Policy (admin 2026-07-12): judge is mode-aware — Free=Grok, Paid=Grok/Sonnet, Power=Opus.
 describe('resolveJudgeKind — mode-aware judge selection', () => {
   it('POWER → always Opus (judge runs on Opus like everything in power mode)', () => {
-    // GROK JUDGES EVERY TIER (admin-approved table 2026-09-14): Opus is never the judge — it was the
-    // single most expensive call a Strong build made, for a verdict Grok gives at Sonnet-class price,
-    // and a judge must sit OUTSIDE the build ladders (Grok is on none of them).
-    expect(resolveJudgeKind('power', 'grok-key', undefined)).toBe('grok');
-    expect(resolveJudgeKind('power', undefined, undefined)).toBe('sonnet');
-    expect(resolveJudgeKind('power', 'grok-key', 'sonnet')).toBe('sonnet'); // AGENTV3_REVIEWER=sonnet still forces Sonnet
+    // THE JUDGE UNDER THE 2026-09-14 AUTHORITY GRANT: a different model from the builder, at the
+    // lowest input price that reasons well. Weak/Normal build on glm-5.3-flash → judge glm-5.3 when a
+    // GLM key exists; Strong builds on glm-5.3 → judge Grok (outside every ladder). Opus never.
+    expect(resolveJudgeKind('power', 'grok-key', undefined, 'glm-key')).toBe('grok');
+    expect(resolveJudgeKind('power', undefined, undefined, 'glm-key')).toBe('sonnet');
+    expect(resolveJudgeKind('power', 'grok-key', 'sonnet', 'glm-key')).toBe('sonnet'); // AGENTV3_REVIEWER=sonnet still forces Sonnet
+    expect(resolveJudgeKind('paid', 'grok-key', undefined, 'glm-key')).toBe('glm');
+    expect(resolveJudgeKind('free', 'grok-key', undefined, 'glm-key')).toBe('glm');
+    expect(resolveJudgeKind('paid', 'grok-key', undefined, '   ')).toBe('grok'); // whitespace key ≠ set
     for (const mode of ['free', 'paid', 'power'] as const) {
-      for (const key of ['grok-key', undefined]) expect(resolveJudgeKind(mode, key, undefined)).not.toBe('opus');
+      for (const key of ['grok-key', undefined]) expect(resolveJudgeKind(mode, key, undefined, 'glm-key') as string).not.toBe('opus');
     }
   });
   it('FREE → Grok when a Grok key exists; never a Claude judge', () => {
-    expect(resolveJudgeKind('free', 'grok-key', undefined)).toBe('grok');
+    expect(resolveJudgeKind('free', 'grok-key', undefined)).toBe('grok'); // no GLM key → Grok
   });
   it('FREE without a Grok key → "sonnet" signal (caller SKIPS the judge — free never spends Claude)', () => {
     expect(resolveJudgeKind('free', undefined, undefined)).toBe('sonnet');
@@ -1969,13 +1972,13 @@ describe('planRunnerChainNames — the plan phase respects WEAK ⇒ NO CLAUDE (a
     expect(names).not.toContain('GROK');
   });
 
-  it('normal plans on kimi-k2.7-code first; strong on Sonnet first with Opus last', () => {
-    expect(planRunnerChainNames(false, 'off')).toEqual(['KIMI', 'GLM', 'CLAUDE']);
-    expect(planRunnerChainNames(false, 'mini')).toEqual(['CLAUDE', 'KIMI', 'CLAUDE_OPUS']);
+  it('normal plans on glm-5.3-flash first; strong on glm-5.3 first with Opus last', () => {
+    expect(planRunnerChainNames(false, 'off')).toEqual(['GLM', 'KIMI', 'GLM', 'CLAUDE']);
+    expect(planRunnerChainNames(false, 'mini')).toEqual(['GLM', 'CLAUDE', 'CLAUDE_OPUS']);
   });
 
   it('the guard still strips every Claude rung from a weak plan whatever the ladder said', () => {
-    expect(planRunnerChainNames(true, 'mini')).toEqual(['KIMI']);
+    expect(planRunnerChainNames(true, 'mini')).toEqual(['GLM']);
   });
 });
 

@@ -2487,9 +2487,21 @@ is now **`src/server/AgentV3/tierLadder.ts`**, and the build chain is built from
 
 | Tier (UI) | Internal | The ladder (first → last) | Escalation cap |
 |---|---|---|---|
-| Weak (free) | `weak` | GLM `glm-4.7-flash` → GLM `glm-5.3-flash` → KIMI `kimi-k2.6` → Claude **Haiku** → OpenAI `gpt-5.4` | never escalates (NavBharatAI pays) |
-| Normal (paid economy) | `off` | KIMI `kimi-k2.7-code` → GLM `glm-5.3-flash` → Claude Sonnet | Sonnet |
-| Strong (paid premium) | `mini` | KIMI `kimi-k3` → Claude Sonnet → Claude **Opus** | Opus (its last rung) |
+| Weak (free) | `weak` | GLM `glm-5.3-flash` → KIMI `kimi-k2.6` → GLM `glm-5.3` → Claude **Haiku** | never escalates (NavBharatAI pays) |
+| Normal (paid economy) | `off` | GLM `glm-5.3-flash` → KIMI `kimi-k2.7-code` → GLM `glm-5.3` → Claude Sonnet | Sonnet |
+| Strong (paid premium) | `mini` | GLM `glm-5.3` → Claude Sonnet → Claude **Opus** | Opus (its last rung) |
+
+🔴 **REVISED THE SAME DAY UNDER THE ADMIN'S FULL AUTHORITY GRANT** (verbatim: *"mujhe yeh chahiye: mera
+kam se kam kharcha; user ko best se best app, ek hi baar me (build fail kam se kam). aapko puri authority
+hai, aap kis ai ka kaha use karna chahte ho — i approved"*). The admin's first list (4.7-flash-led Weak,
+Kimi-led Normal/Strong, gpt-5.4 last on Weak) was superseded once the real prices were known:
+**glm-5.3-flash $0.15 / $0.50, glm-5.3 $1.40 / $4.40.** The one lever behind both aims is that the FIRST
+rung must be strong enough that heals are rare — a $0 rung that fails costs more than a $0.15 rung that
+succeeds. So 5.3-flash leads Weak and Normal; 5.3 is the strong rung under Sonnet everywhere and leads
+Strong; Kimi stays as the second vendor on Weak/Normal; **glm-4.7-flash, kimi-k3 and gpt-5.4 are on no
+ladder** (weak-at-coding / unverified id + unknown price / no key + unknown price). **Nothing to buy from
+OpenAI.** Haiku is again Weak's last rung. `healLadder` now drops a leading rung only when it is the
+known-weak 4.7-flash.
 
 - **The chain IS the ladder.** A build on a tier runs that tier's rungs, in that order, and nothing else —
   no Vertex/Gemini rung, no borrowed Sonnet when the floor is off, no live-health GLM↔KIMI lead swap. A
@@ -2539,11 +2551,11 @@ me" · "mera kharcha kam se kam ho").** Test-locked in `tests/agentRolesPerTier.
 | Credits / abuse / free-clamp | code | code | code | ₹0 — never a model |
 | Safety triage | code | code | code | `triagePrompt` is deterministic, precision-first |
 | Intent doubt-reader | free chat router | free chat router | free chat router | glm-4.7-flash led, $0; one-word answer |
-| **Plan** | glm-5.3-flash → own ladder | kimi-k2.7-code → own ladder | Sonnet → own ladder | `PLAN_RUNG` / `planLadder`; **Grok no longer plans** |
+| **Plan** | glm-5.3-flash → own ladder | glm-5.3-flash → own ladder | glm-5.3 → own ladder | `PLAN_RUNG` / `planLadder`; input-heavy call on the cheapest rung that reasons well; **Grok no longer plans** |
 | Builder + sub-agents + fast lane | tier ladder | tier ladder | tier ladder | above |
 | Heals | ladder minus leading flash | same | same | `healLadder` |
 | Lint / typecheck / build / preview / journey / fuzz / CVE | code | code | code | ₹0 |
-| **Judge / Reviewer** | **Grok** | **Grok** | **Grok** | outside every ladder; `AGENTV3_REVIEWER=sonnet` forces Sonnet; **Opus is never the judge** |
+| **Judge / Reviewer** | **glm-5.3** | **glm-5.3** | **Grok** | a DIFFERENT model from the builder at the lowest input price that reasons well (glm-5.3 $1.40 in vs Grok $3); Strong builds on glm-5.3 so its judge is Grok, outside every ladder; `AGENTV3_REVIEWER=sonnet` forces Sonnet; no keys ⇒ Sonnet; **Opus is never the judge**. ⚠️ The user-facing review narration used to print the judge's vendor name ("🔎 Grok is reviewing…") — a White-Label breach, fixed |
 | Vision (describe) | Gemini → Grok | Gemini → Grok | Claude(Haiku describe tier) → Gemini → Grok | `useClaude` follows `powerMode` |
 | Escalation | never | own ladder from Sonnet | own ladder from Opus | `escalationPathForTier` |
 

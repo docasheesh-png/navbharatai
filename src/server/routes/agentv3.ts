@@ -2582,22 +2582,38 @@ export function floorLeadReason(): string {
  * returns 'sonnet' as a signal that no non-Claude judge is available, and the free-ladder caller SKIPS
  * the judge rather than spend Claude. Exported for tests.
  */
-export function resolveJudgeKind(mode: 'free' | 'paid' | 'power', grokKey: string | undefined, reviewerEnv: string | undefined): 'grok' | 'sonnet' | 'opus' {
-  // GROK JUDGES EVERY TIER (admin-approved table, 2026-09-14). Two reasons, both about the judge
-  // being worth paying for: (1) a judge must be a model OUTSIDE the build ladders — the model that
-  // wrote the app is the worst at finding its own mistakes, and Grok is on no tier's ladder; (2) the
-  // Opus judge was the single most expensive call a Strong build made (it reads the whole app, input-
-  // heavy, at $15/MTok), for a verdict Grok gives at Sonnet-class price. `mode` is kept for the call
-  // sites; it no longer changes the answer. `AGENTV3_REVIEWER=sonnet` still forces Sonnet everywhere,
-  // and no key ⇒ Sonnet. Opus is never the judge.
-  void mode;
+export function resolveJudgeKind(mode: 'free' | 'paid' | 'power', grokKey: string | undefined, reviewerEnv: string | undefined, glmKey?: string): 'grok' | 'sonnet' | 'glm' {
+  // THE JUDGE, UNDER THE ADMIN'S AUTHORITY GRANT (2026-09-14: "kam se kam kharcha; best app ek hi baar").
+  // A judge must be a DIFFERENT model from the one that wrote the app, and it reads the whole app —
+  // input-heavy, so its input price is the cost. Weak/Normal build on glm-5.3-flash, so their judge is
+  // glm-5.3 ($1.40 in, GPQA 91.7): a different, stronger model at less than half Grok's $3. Strong
+  // builds on glm-5.3 itself, so its judge is Grok — outside every ladder, and the admin said "Grok ko
+  // hatao mat". Opus is never the judge ($15 in for a verdict). `AGENTV3_REVIEWER=sonnet` forces Sonnet
+  // everywhere; a missing key falls to the next honest choice, never to Opus.
+  if ((reviewerEnv || '').trim().toLowerCase() === 'sonnet') return 'sonnet';
+  if (mode !== 'power' && (glmKey || '').trim()) return 'glm';
   return selectReviewer({ reviewer: reviewerEnv, grokKey });
 }
 
-function selectReviewJudge(mode: 'free' | 'paid' | 'power' = 'paid'): { runTurn: JudgeRunTurn; modelId: string; kind: 'grok' | 'sonnet' | 'opus' } {
+function selectReviewJudge(mode: 'free' | 'paid' | 'power' = 'paid'): { runTurn: JudgeRunTurn; modelId: string; kind: 'grok' | 'sonnet' | 'opus' | 'glm' } {
   const grokKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY;
-  const kind = resolveJudgeKind(mode, grokKey, process.env.AGENTV3_REVIEWER);
-  if (kind === 'grok') {
+  const glmKey = parseKeyPool(process.env.GLM_API_KEY)[0];
+  const kind = resolveJudgeKind(mode, grokKey, process.env.AGENTV3_REVIEWER, glmKey);
+  if (kind === 'glm') {
+    try {
+      const client = new OpenAI({ apiKey: glmKey, baseURL: process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', timeout: 45_000, maxRetries: 1 });
+      const runTurn: JudgeRunTurn = async ({ model, system, messages, maxTokens }) => {
+        const r = await client.chat.completions.create({
+          model,
+          messages: [{ role: 'system', content: system }, ...messages.map((m) => ({ role: 'user' as const, content: m.content }))],
+          max_tokens: maxTokens,
+        });
+        return { text: r.choices?.[0]?.message?.content ?? '' };
+      };
+      return { runTurn, modelId: process.env.AGENTV3_GLM_JUDGE_MODEL || 'glm-5.3', kind: 'glm' };
+    } catch { /* client not constructable → fall through to Grok / Claude */ }
+  }
+  if ((kind === 'grok' || kind === 'glm') && (grokKey || '').trim()) {
     try {
       const client = new OpenAI({ apiKey: grokKey, baseURL: process.env.GROK_BASE_URL || 'https://api.x.ai/v1', timeout: 30_000, maxRetries: 1 });
       const runTurn: JudgeRunTurn = async ({ model, system, messages, maxTokens }) => {
@@ -2611,9 +2627,9 @@ function selectReviewJudge(mode: 'free' | 'paid' | 'power' = 'paid'): { runTurn:
       return { runTurn, modelId: process.env.GROK_JUDGE_MODEL || 'grok-3', kind: 'grok' };
     } catch { /* client not constructable → fall through to the Claude judge */ }
   }
-  // Claude judge — Opus in power mode, Sonnet otherwise.
+  // Claude judge — Sonnet. Never Opus (2026-09-14).
   const runTurn: JudgeRunTurn = (a) => new ClaudeClient(undefined, { maxRetries: 1 }).runTurn(a).then((t) => ({ text: t.text }));
-  return { runTurn, modelId: kind === 'opus' ? opusModel() : sonnetModel(), kind: kind === 'opus' ? 'opus' : 'sonnet' };
+  return { runTurn, modelId: sonnetModel(), kind: 'sonnet' };
 }
 
 /**
@@ -14784,12 +14800,14 @@ async function noteBuildOutcome(
             // This escalation loop only runs for a paid, non-power build (free/power skip escalation),
             // so the mode is 'paid' here; passed explicitly so the judge selection is mode-correct.
             const judge = selectReviewJudge(onlyOpus ? 'power' : 'paid');
-            const reviewerName = judge.kind === 'grok' ? 'Grok' : judge.kind === 'opus' ? 'Opus' : 'Sonnet';
+            // ADMIN-ONLY label for the verdict record. It must never reach the user: the two narration
+            // lines below used to print it ("🔎 Grok is reviewing…") — a White-Label Law breach fixed 2026-09-14.
+            const reviewerName = judge.kind === 'grok' ? 'Grok' : judge.kind === 'glm' ? 'GLM' : judge.kind === 'opus' ? 'Opus' : 'Sonnet';
             const collectFiles = (): Array<{ path: string; content: string }> => [...writtenFiles.entries()].map(([path, content]) => ({ path, content }));
             const recordVerdict = (v: { pass: boolean; score: number; findings: string[] }, tag: string): void => {
               try { buildDiag.record({ phase: 'build', severity: v.pass ? 'info' : 'warning', code: 'CHEAP_REVIEW', message: `${tag}: ${v.pass ? 'PASS' : 'FAIL'} (score ${v.score})${v.pass ? '' : ' — ' + v.findings.slice(0, 3).join('; ')}`, autoResolved: true }); } catch { /* diagnostics best-effort */ }
             };
-            events.emit({ type: 'narration', agent: 'architect', text: `🔎 ${reviewerName} is reviewing the cheap build…`, ts: Date.now() });
+            events.emit({ type: 'narration', agent: 'architect', text: '🔎 NavBharatAI\'s reviewer is checking the build…', ts: Date.now() });
             let verdict = await judgeBuild(prompt, collectFiles(), judge.runTurn, judge.modelId);
             recordVerdict(verdict, `${reviewerName} review`);
             // BOUNCE loop: `nextReviewAction` bounds it — after `cap` cheap repairs it can ONLY go to
@@ -14802,7 +14820,7 @@ async function noteBuildOutcome(
               // know; the user is told what is happening to THEIR app.
               events.emit({ type: 'narration', agent: 'architect', text: '🔧 Review found issues — NavBharatAI is fixing them…', ts: Date.now() });
               try { await runner.run(judgeRepairPrompt(prompt, verdict.findings)); } catch { break; /* GLM/KIMI down → stop bouncing, escalate to Sonnet */ }
-              events.emit({ type: 'narration', agent: 'architect', text: `🔎 ${reviewerName} re-reviewing the fix…`, ts: Date.now() });
+              events.emit({ type: 'narration', agent: 'architect', text: '🔎 NavBharatAI\'s reviewer is re-checking the fix…', ts: Date.now() });
               verdict = await judgeBuild(prompt, collectFiles(), judge.runTurn, judge.modelId);
               recordVerdict(verdict, `${reviewerName} re-review`);
             }

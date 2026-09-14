@@ -55683,3 +55683,33 @@ Three roles moved, two deliberately stayed, all test-locked in `tests/agentRoles
 95th-percentile coding score, it is a candidate for (a) Weak's LAST rung in place of gpt-5.4 — same vendor
 as rungs 1–2, no new key, no new bill surface — and (b) Normal's last rung in place of Sonnet ($3 / $15),
 which would cut Normal's worst-case cost ~3×. Both change an approved ladder, so neither was done.
+
+### Addendum — decided under the admin's full authority grant (2026-09-14, verbatim: "mera kam se kam kharcha; user ko best se best app, ek hi baar me; aapko puri authority hai — i approved")
+
+With the real prices known, the ladders were revised in the same PR (#2939). The reasoning, so it is
+not re-derived: **the lever behind both aims is the FIRST rung.** Every heal is a second model call,
+more sandbox minutes and a user watching a spinner; a $0 first rung that fails is dearer than a $0.15
+first rung that succeeds.
+
+| | Was (admin's first list) | Now | Why |
+|---|---|---|---|
+| Weak | 4.7-flash → 5.3-flash → k2.6 → Haiku → gpt-5.4 | **5.3-flash → k2.6 → 5.3 → Haiku** | 4.7-flash (DeepSWE ~46) was the rung most likely to need a heal; gpt-5.4 has no key and no price |
+| Normal | k2.7-code → 5.3-flash → Sonnet | **5.3-flash → k2.7-code → 5.3 → Sonnet** | 5.3-flash is $0.15 vs k2.7's $0.95 in, benchmarks beside the flagship; 5.3 ($1.40) sits under Sonnet ($3) |
+| Strong | k3 → Sonnet → Opus | **5.3 → Sonnet → Opus** | kimi-k3: unverified id, unknown price; 5.3 is 95th-percentile coding at less than half Sonnet |
+| Plan | 5.3-flash / k2.7-code / Sonnet | **5.3-flash / 5.3-flash / 5.3** | input-heavy call; cheapest rung that reasons well |
+| Judge | Grok / Grok / Grok | **5.3 / 5.3 / Grok** | different model from the builder; 5.3 is $1.40 in vs Grok's $3; Strong builds on 5.3 so Grok judges it |
+| Heal | ladder minus leading flash | **ladder** (drop the leader only if it is 4.7-flash) | 5.3-flash can repair its own work with the error in hand |
+
+- **Nothing to buy from OpenAI.** The gpt rungs are gone; the rate lines stay so an id, if it ever
+  appears in telemetry, prices honestly. Slice 3 (chat-side OpenAI) is cancelled.
+- **Grok stays** where the admin said: Strong's judge, Engineer AI's primary.
+- 🔴 **White-Label breach found and fixed while wiring the judge:** the user-facing narration printed
+  the judge's vendor — *"🔎 Grok is reviewing the cheap build…"* / *"re-reviewing…"*. Now
+  *"NavBharatAI's reviewer is checking the build…"*; the vendor label survives only in the admin's
+  verdict record. Test-locked in `tests/agentRolesPerTier.test.ts` (narration lines carrying the word
+  "reviewer" may name no vendor or model).
+- **Judge fallbacks are honest, never Opus:** `AGENTV3_REVIEWER=sonnet` forces Sonnet; no GLM key ⇒
+  Grok; no Grok key ⇒ Sonnet. `AGENTV3_GLM_JUDGE_MODEL` overrides the judge model (default `glm-5.3`).
+- **What this does NOT yet prove:** that 5.3-flash's first-try success rate is what the benchmarks
+  suggest on THIS engine. The build report already records `deliveredVia` and heal counts; after 20–30
+  real builds, compare heal rate per leading rung and move the leader if the data says so.

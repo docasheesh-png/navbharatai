@@ -12,21 +12,32 @@ const seq = (rungs: readonly { provider: string; model: string }[]): string[] =>
  * The ladder IS the policy, so the policy is asserted literally — rung for rung, in order.
  */
 describe('the three ladders, exactly as the admin listed them', () => {
-  it('WEAK: glm-4.7-flash → glm-5.3-flash → kimi-k2.6 → Haiku → gpt-5.4', () => {
-    expect(seq(TIER_LADDERS.weak)).toEqual(['GLM:glm-4.7-flash', 'GLM:glm-5.3-flash', 'KIMI:kimi-k2.6', 'CLAUDE_HAIKU:haiku', 'OPENAI:gpt-5.4']);
+  it('WEAK: glm-5.3-flash → kimi-k2.6 → glm-5.3 → Haiku (Haiku last, as the 2026-07-13 amendment said)', () => {
+    expect(seq(TIER_LADDERS.weak)).toEqual(['GLM:glm-5.3-flash', 'KIMI:kimi-k2.6', 'GLM:glm-5.3', 'CLAUDE_HAIKU:haiku']);
+    expect(TIER_LADDERS.weak[TIER_LADDERS.weak.length - 1].provider).toBe('CLAUDE_HAIKU');
   });
-  it('NORMAL: kimi-k2.7-code → glm-5.3-flash → Sonnet', () => {
-    expect(seq(TIER_LADDERS.off)).toEqual(['KIMI:kimi-k2.7-code', 'GLM:glm-5.3-flash', 'CLAUDE:sonnet']);
+  it('NORMAL: glm-5.3-flash → kimi-k2.7-code → glm-5.3 → Sonnet', () => {
+    expect(seq(TIER_LADDERS.off)).toEqual(['GLM:glm-5.3-flash', 'KIMI:kimi-k2.7-code', 'GLM:glm-5.3', 'CLAUDE:sonnet']);
   });
-  it('STRONG: kimi-k3 → Sonnet → Opus, with Opus LAST ("Opus sirf zarurat par")', () => {
-    expect(seq(TIER_LADDERS.mini)).toEqual(['KIMI:kimi-k3', 'CLAUDE:sonnet', 'CLAUDE_OPUS:opus']);
+  it('STRONG: glm-5.3 → Sonnet → Opus, with Opus LAST ("Opus sirf zarurat par")', () => {
+    expect(seq(TIER_LADDERS.mini)).toEqual(['GLM:glm-5.3', 'CLAUDE:sonnet', 'CLAUDE_OPUS:opus']);
     expect(TIER_LADDERS.mini[TIER_LADDERS.mini.length - 1].provider).toBe('CLAUDE_OPUS');
   });
-  it('every selectable tier has a ladder, and no ladder names Grok, Gemini or Vertex', () => {
+  it('every selectable tier has a ladder, and no ladder names Grok, Gemini, Vertex or OpenAI', () => {
     for (const level of POWER_LEVELS_ORDERED) {
       expect(TIER_LADDERS[level].length).toBeGreaterThan(0);
-      for (const r of TIER_LADDERS[level]) expect(['GROK', 'GEMINI', 'VERTEX']).not.toContain(r.provider);
+      for (const r of TIER_LADDERS[level]) expect(['GROK', 'GEMINI', 'VERTEX', 'OPENAI']).not.toContain(r.provider);
     }
+  });
+  it('the known-weak glm-4.7-flash and the unverified kimi-k3 / gpt-5.4 are on no ladder', () => {
+    for (const level of POWER_LEVELS_ORDERED) {
+      for (const r of TIER_LADDERS[level]) expect(['glm-4.7-flash', 'kimi-k3', 'gpt-5.4']).not.toContain(r.model);
+    }
+  });
+  it('every tier keeps a second vendor below its leader, except Strong which has Anthropic under GLM', () => {
+    expect(new Set(TIER_LADDERS.weak.map((r) => r.provider)).size).toBeGreaterThanOrEqual(3);
+    expect(new Set(TIER_LADDERS.off.map((r) => r.provider)).size).toBeGreaterThanOrEqual(3);
+    expect(TIER_LADDERS.mini.map((r) => r.provider)).toEqual(['GLM', 'CLAUDE', 'CLAUDE_OPUS']);
   });
   it('🔒 the WEAK ladder never carries Sonnet or Opus (absolute rule)', () => {
     for (const r of TIER_LADDERS.weak) expect(['CLAUDE', 'CLAUDE_OPUS']).not.toContain(r.provider);
@@ -69,10 +80,14 @@ describe('overrides are applied whole or not at all', () => {
 });
 
 describe('heal, escalation and availability derive from the ladder — never from another tier', () => {
-  it('a heal drops only the LEADING flash rung', () => {
-    expect(seq(healLadder(TIER_LADDERS.weak))).toEqual(['GLM:glm-5.3-flash', 'KIMI:kimi-k2.6', 'CLAUDE_HAIKU:haiku', 'OPENAI:gpt-5.4']);
-    expect(seq(healLadder(TIER_LADDERS.off))).toEqual(seq(TIER_LADDERS.off));   // starts on k2.7-code, nothing dropped
-    expect(seq(healLadder([{ provider: 'GLM', model: 'glm-4.7-flash' }]))).toEqual(['GLM:glm-4.7-flash']); // never empties
+  it('a heal drops the leading rung ONLY when it is the known-weak glm-4.7-flash', () => {
+    // 5.3-flash leads every ladder now and is strong enough to repair its own work with the error in hand.
+    expect(seq(healLadder(TIER_LADDERS.weak))).toEqual(seq(TIER_LADDERS.weak));
+    expect(seq(healLadder(TIER_LADDERS.off))).toEqual(seq(TIER_LADDERS.off));
+    // An override that puts 4.7-flash back in front still heals from rung 2…
+    expect(seq(healLadder([{ provider: 'GLM', model: 'glm-4.7-flash' }, { provider: 'KIMI', model: 'kimi-k2.6' }]))).toEqual(['KIMI:kimi-k2.6']);
+    // …and never empties.
+    expect(seq(healLadder([{ provider: 'GLM', model: 'glm-4.7-flash' }]))).toEqual(['GLM:glm-4.7-flash']);
   });
   it('escalation is "start this ladder higher up": Normal → Sonnet, Strong → Opus, Weak → none', () => {
     expect(escalationProvider(TIER_LADDERS.off)).toBe('CLAUDE');
@@ -80,11 +95,13 @@ describe('heal, escalation and availability derive from the ladder — never fro
     expect(escalationProvider(TIER_LADDERS.weak)).toBeNull();
     expect(seq(ladderFrom(TIER_LADDERS.mini, 'CLAUDE_OPUS'))).toEqual(['CLAUDE_OPUS:opus']);
     expect(seq(ladderFrom(TIER_LADDERS.off, 'CLAUDE'))).toEqual(['CLAUDE:sonnet']);
+    expect(seq(ladderFrom(TIER_LADDERS.mini, 'CLAUDE'))).toEqual(['CLAUDE:sonnet', 'CLAUDE_OPUS:opus']);
     expect(ladderFrom(TIER_LADDERS.weak, 'CLAUDE_OPUS')).toEqual([]);
   });
   it('a keyless rung is skipped; a tier with no keyed rung is unavailable, never substituted', () => {
     const onlyKimi = { KIMI_API_KEY: 'k' } as NodeJS.ProcessEnv;
     expect(seq(availableRungs(TIER_LADDERS.off, onlyKimi))).toEqual(['KIMI:kimi-k2.7-code']);
+    expect(seq(availableRungs(TIER_LADDERS.mini, onlyKimi))).toEqual([]); // Strong has no Kimi rung
     expect(tierEngineAvailable('off', onlyKimi)).toBe(true);
     expect(tierEngineAvailable('mini', { ANTHROPIC_API_KEY: ' ' } as NodeJS.ProcessEnv)).toBe(false); // whitespace ≠ set
     expect(tierEngineAvailable('weak', {} as NodeJS.ProcessEnv)).toBe(false);
@@ -96,7 +113,7 @@ describe('heal, escalation and availability derive from the ladder — never fro
     for (const c of ['CLAUDE', 'CLAUDE_HAIKU', 'CLAUDE_OPUS'] as const) expect(keyEnvFor(c)).toBe('ANTHROPIC_API_KEY');
   });
   it('describeLadder names models for the cheap rungs and only the rung for Claude', () => {
-    expect(describeLadder(TIER_LADDERS.mini)).toBe('KIMI(kimi-k3) → CLAUDE → CLAUDE_OPUS');
+    expect(describeLadder(TIER_LADDERS.mini)).toBe('GLM(glm-5.3) → CLAUDE → CLAUDE_OPUS');
   });
 });
 
@@ -122,16 +139,16 @@ describe('escalation stays inside the tier', () => {
 });
 
 describe('the plan phase runs on the tier\'s best cheap reasoner, then its own ladder', () => {
-  it('plan rungs per tier — never Opus, never Grok', () => {
+  it('plan rungs per tier — never Opus, never Grok, never Sonnet (input-heavy call, cheapest good reasoner)', () => {
     expect(PLAN_RUNG.weak).toEqual({ provider: 'GLM', model: 'glm-5.3-flash' });
-    expect(PLAN_RUNG.off).toEqual({ provider: 'KIMI', model: 'kimi-k2.7-code' });
-    expect(PLAN_RUNG.mini).toEqual({ provider: 'CLAUDE', model: 'sonnet' });
+    expect(PLAN_RUNG.off).toEqual({ provider: 'GLM', model: 'glm-5.3-flash' });
+    expect(PLAN_RUNG.mini).toEqual({ provider: 'GLM', model: 'glm-5.3' });
     for (const r of Object.values(PLAN_RUNG)) expect(r.provider).not.toBe('CLAUDE_OPUS');
   });
   it('the plan chain is the plan rung followed by the tier ladder minus that rung — no other tier\'s model', () => {
-    expect(seq(planLadder('weak'))).toEqual(['GLM:glm-5.3-flash', 'GLM:glm-4.7-flash', 'KIMI:kimi-k2.6', 'CLAUDE_HAIKU:haiku', 'OPENAI:gpt-5.4']);
-    expect(seq(planLadder('off'))).toEqual(['KIMI:kimi-k2.7-code', 'GLM:glm-5.3-flash', 'CLAUDE:sonnet']);
-    expect(seq(planLadder('mini'))).toEqual(['CLAUDE:sonnet', 'KIMI:kimi-k3', 'CLAUDE_OPUS:opus']);
+    expect(seq(planLadder('weak'))).toEqual(['GLM:glm-5.3-flash', 'KIMI:kimi-k2.6', 'GLM:glm-5.3', 'CLAUDE_HAIKU:haiku']);
+    expect(seq(planLadder('off'))).toEqual(['GLM:glm-5.3-flash', 'KIMI:kimi-k2.7-code', 'GLM:glm-5.3', 'CLAUDE:sonnet']);
+    expect(seq(planLadder('mini'))).toEqual(['GLM:glm-5.3', 'CLAUDE:sonnet', 'CLAUDE_OPUS:opus']);
     expect(seq(planLadder('max'))).toEqual(seq(planLadder('mini')));
   });
   it('🔒 a weak plan never reaches Sonnet/Opus', () => {

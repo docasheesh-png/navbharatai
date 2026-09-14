@@ -1086,6 +1086,26 @@ export function emptyBuildFailureSummary(
   expectsArtifacts: boolean,
   fileCount: number,
   sandboxUnavailable: boolean,
+  /**
+   * Did the server's OWN eyes see this app come up and render in a browser on this turn?
+   *
+   * 🔴 THE FOURTH REASON "ZERO FILES" IS NOT A FAILURE (report fd021c64, 2026-09-14). A user typed
+   * "Yess create karo" into a workspace already holding their 25-file Fantasy Football app. The
+   * engine restored it, started the dev server, opened it in a real browser, confirmed it rendered,
+   * ran the production build green, and saved it as the last known good state — then told the user
+   * **"The build produced no files. Please try again"** and asked them to **add credits**.
+   *
+   * Nothing was broken. Nothing NEEDED writing. The whole build then ran a SECOND time on a stronger
+   * model to reach the same conclusion — five minutes and sixteen model calls to tell somebody their
+   * working app does not exist.
+   *
+   * 🔒 WHY THE RENDER IS THE RIGHT EVIDENCE, and not the model's own word for it. `ok: true` from the
+   * runner is a CLAIM — build 5b4f9b63 is exactly that claim being false ("your to-do app is complete
+   * and ready" over an unrelated project, zero files). A verified render is a MEASUREMENT the platform
+   * took itself. "Preview is EARNED" cuts both ways: it refuses a green tick without proof, and it
+   * must equally refuse a failure verdict against proof.
+   */
+  appRenders = false,
 ): string | null {
   if (!expectsArtifacts) return null;
   // SANDBOX DOWN ⇒ FAILURE regardless of file count (deep-test App #11, 2026-07-14). When the sandbox
@@ -1099,6 +1119,9 @@ export function emptyBuildFailureSummary(
     return 'The build could not run — the sandbox was unavailable (no files could be created, installed, or verified). Please try again in a moment; you have not been charged.';
   }
   if (fileCount > 0) return null;
+  // A WORKING APP IS NOT AN EMPTY BUILD. Checked after `sandboxUnavailable` on purpose: a dead sandbox
+  // can never have rendered anything, so that verdict must still win if the two ever disagree.
+  if (appRenders) return null;
   return 'The build produced no files. Please try again — you have not been charged.';
 }
 
@@ -17827,7 +17850,17 @@ async function noteBuildOutcome(
               + 'and the app was opened in a real browser and rendered. Reported as a success rather than as an empty build.',
           });
         } else {
-          const emptyFail = emptyBuildFailureSummary(expectsArtifacts, writtenFiles.size, sandboxUnavailable);
+          // TWO GUARDS, ONE CONDITION, AND THE SECOND IS NOT THE FIRST WITH A CHECK REMOVED (merge of
+          // #2917 and #2919, 2026-09-14). `verifiedNoChangeSummary` above WRITES a success sentence, so
+          // it is deliberately narrow: it refuses to say "nothing needed changing" to somebody who asked
+          // for an app to be produced (`userAskedToBuildAnApp`), because that claim would be false.
+          // `appRenders` here makes no claim at all — it only declines to call a RENDERING app an empty
+          // build. So it may fire on the case the first one excludes, which is exactly report fd021c64:
+          // "Yess create karo" reads as a new-build request, so the guard above stands down, and the
+          // user's own 25-file app — restored, served, and watched rendering — was told it produced
+          // nothing. The app keeps whatever summary the turn actually produced, and a zero-file build is
+          // free either way (`effectiveBilledUsd = 0` a few hundred lines below, unconditionally).
+          const emptyFail = emptyBuildFailureSummary(expectsArtifacts, writtenFiles.size, sandboxUnavailable, buildObs.previewRendered);
           if (emptyFail) result = { ...result, ok: false, summary: emptyFail };
         }
       }
@@ -18358,6 +18391,15 @@ async function noteBuildOutcome(
           // Degraded is then tested before (c) for the reason its own author gives: when our
           // providers are down we do not know whether the prompt was buildable, and blaming the
           // user's wording for our outage is the same mistake in a politer sentence.
+          //
+          // ⚠️ A FOURTH REASON WAS PROPOSED HERE AND DELIBERATELY NOT ADDED (#2919 into #2917's gate,
+          // 2026-09-14): "the app already renders, so there is nothing to sell" (report fd021c64).
+          // It is a real reason and it IS enforced — one screen up, where a verified render now stops
+          // `emptyBuildFailureSummary` calling a running app an empty build, so `result.ok` survives
+          // and the `!result.ok` gate on this whole block never opens. Writing it a second time here
+          // would leave two answers to one question, which is the exact shape of the bug all three of
+          // (a)-(c) came from. If the render evidence ever needs to suppress an upsell on a build that
+          // genuinely DID fail, that is a new decision with its own evidence — not this one restated.
           const refused = looksLikeRefusal(result.summary);
           const degraded = !refused && providerFailuresLookDegraded(buildDiag.providerFailureBreakdown());
           if (!refused) {

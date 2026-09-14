@@ -52682,6 +52682,25 @@ under a branch you are still improving. **Check whether your PR is still OPEN be
 correction to it** — a push that succeeds to a merged branch is silent and reaches nobody.
 7 new tests. Fixed on the P5 branch (#2905) and merged up the stack to #2908 and #2909.
 
+## 2026-09-14 — AUTOPSY of build `fd021c64`: a working app was told it did not exist, then asked for money
+
+Free tier, weak, KIMI, **5m03s**, `ok: false`. Prompt: **"Yess create karo"**.
+
+### What the report says about the app, in its own words
+
+> `PROD_BUILD_OK` — *"The production build succeeded"*
+> `GREEN_GUARD_SAVE` — *"The app was opened in a real browser and rendered — recorded as the last known good state"*
+> `RELEASE_GATE: YELLOW` — *"**It runs and renders.**"*
+> narration — *"✅ Preview verified — I opened the running app in a browser and it renders correctly"*
+
+### What the platform told the user
+
+> *"The build produced no files. Please try again"*
+> *"Your app needs our strongest engine to finish cleanly. **Add credits** and I will complete it on the best engine."*
+
+**Nothing was broken. Nothing needed writing.** The workspace already held the user's 25-file Fantasy
+Football app (`durable read 356ms (25 file(s))`, before any model call). The engine restored it, ran the
+dev server, opened it, verified the render, built it for production — and reported that it did not exist.
 ## 2026-09-14 — A TYPED "stop" now stops the build, and the MODEL is the one who decides
 
 Admin's ruling, after the `70115adf` autopsy left this open: *"build rokne ko kaha jaye, to bhi build
@@ -53166,6 +53185,82 @@ Report: free tier, weak power level, KIMI delivered, 4m22s, `ok: false`. The use
 
 | | Count | What |
 |---|---|---|
+| ✅ self-healed | **0** | one auto-add of a missing `@playwright/test` dependency — and see 🥵 below |
+| 🔀 worked around | **1** | the whole build re-run on a stronger model to reach the identical conclusion |
+| ⏭️ skipped | **3** | user journey (no form — correctly), e2e scaffold (already present), Playwright run (binaries absent) |
+| ❌ still broken | **2 unresolved** | the false verdict + upsell (fixed here); design consistency B (84/100), not healed |
+| 🥵 struggled | **1, and it is the whole second half of the run** | minutes 2–5 repeated minutes 0–2 exactly: 12 file reads, tsc, dev server, preview, screenshot, 3 browser actions, same summary |
+
+Cost of that repetition: **16 model calls, 441,699 input tokens**, five minutes of a user's time. ₹0 to
+them (free tier); ours to pay.
+
+### 🔴 THE ROOT CAUSE, and it is the FOURTH instance of one class
+
+`emptyBuildFailureSummary` and the free-tier upsell both asked *"how many files did the AI write?"*
+Three reasons that question gives the wrong answer were already found and fixed, each after a real
+report, each added as its own branch:
+
+1. **the model REFUSED** (report `03997004` — the pornography upsell)
+2. **our own PROVIDERS were degraded** (2026-09-13 — the user invited to pay for our slowness)
+3. **the PROMPT carried no instruction** (#2887 — a bare Drive link)
+
+This is the **fourth**, and it is the only one that is positive evidence about **the app** rather than
+about the model, the providers, or the prompt: **the app was opened in a browser and it rendered.**
+CLAUDE.md already states the general rule — *"Zero files is not always a capability failure"* — and it
+has now been re-derived one instance at a time, four times. That is rule 3 (hunt the siblings) failing
+on a class whose general form was already written down.
+
+**Fixed:** `emptyBuildFailureSummary` takes the render evidence and returns null when the app runs;
+the upsell gains `appAlreadyRuns`, tested **before** degraded and before (c) because it is the
+strongest of the four. `UPSELL_SUPPRESSED` records the reason. 6 tests.
+
+🔒 **WHY THE RENDER AND NOT THE RUNNER'S `ok`.** A runner's `ok: true` is a CLAIM, and build `5b4f9b63`
+is precisely that claim being false — *"your to-do app is complete and ready"* over an unrelated
+project, zero files. A verified render is a MEASUREMENT the platform took itself. **"Preview is EARNED"
+cuts both ways**: it refuses a green tick without proof, and it must equally refuse a FAILURE verdict
+against proof.
+⚠️ The dead-sandbox verdict still wins over a render, checked in that order — a sandbox that could not
+be created cannot have served a page, so if the two ever disagree, believe the one that says nothing
+could possibly have run.
+
+### 🔴 OPEN ROOT CAUSE — the retry was decided before the evidence existed
+
+The wasted second half is NOT fixed, and the reason is worth stating rather than patching around.
+
+`shouldRetryEmptyBuild` already exempts an edit on an existing project — *"an edit may legitimately
+change nothing"* — but that exemption is switched OFF by `userAskedToBuildAnApp`, which is
+`intent === 'new_build'`. **"Yess create karo"** is a bare confirmation carrying a build verb, so the
+classifier read it as a fresh build order and the exemption lifted. The narrowing itself is correct and
+was written for a real bug (`5b4f9b63`); it simply cannot tell "build me a to-do app" from "yes, do
+that".
+
+**The DNA-level problem is ORDERING, not classification.** The retry is decided at a point where the
+platform does not yet know whether the app works — `buildObs.previewRendered` is still false there, and
+only becomes true thousands of lines later. So the decision is made blind and the evidence that would
+settle it arrives afterwards. **The real fix is to probe first and decide second**; that is a
+reordering of the build's post-loop sequence, which is too large to do safely from a report alone and
+would risk trading one problem for another. Recorded here per rule 6 rather than guessed at.
+**The user-visible harm is gone either way** — with this change that build ends honest instead of
+telling someone their working app produced nothing.
+
+### Also found, not fixed (smaller, and each needs its own look)
+
+- **The `rootCause` is an autoResolved advisory.** The report blames *"postmessage-wildcard-origin @
+  index.html:9"* — a `READINESS_WARNING` marked `autoResolved: true`. CLAUDE.md already says advisory
+  findings must never be named as a build's root cause; `READINESS_WARNING` is evidently not on that
+  list. ⚠️ And `index.html:9` in a plain Vite scaffold is very likely **our own injected preview/beacon
+  script**, i.e. we may be reporting our own code to the user as their app's security issue — stated as
+  a suspicion because it was not verified against the injector.
+- **Two subsystems contradict each other in one report.** `AGENT_NOTE` says *"no files were changed"*;
+  `PREVIEW_SNAPSHOT_STALE` says *"a later pass changed a file after the copy was taken"*; the
+  incremental line says *"3 changed, 2 new"*. At least one of the three is wrong.
+- **We added a dependency we cannot run.** `@playwright/test` was auto-added to `package.json`, and
+  `TEST_SUITE_UNVERIFIED` then reports the Playwright browsers are not installed in the sandbox.
+- **90% sandbox idle** (6.3 min up, 0.6 min of our operations) and the **ETA lied again** — "~2–4 min",
+  then at minute 4 "about 3 min more to go", finished 1 minute later.
+- ⚠️ **The 153-rung provider cascade is NOT present in this report.** `providerChain` lists the
+  configured ladder, but there is no `providerFailures` key at all and `providerDelivery` is KIMI × 16.
+  Recorded explicitly because the previous report's cascade makes this easy to misread as a recurrence.
 | ✅ self-healed | **0** | the report's own tally, and it is honest |
 | 🔀 worked around | **7** | fast lane → full builder handoff, and the provider chain walking to a backstop |
 | ⏭️ skipped | **4** | route smoke check, page-render check, e2e scaffold, user journey — all need a live preview that never came up |
@@ -53321,3 +53416,61 @@ also accepted `lastPreviewUrl`. **If it was false, that specific build is still 
 failure.** The fix for that is to make the preview verification actually run and record, not to
 accept weaker proof — loosening the evidence rule would re-introduce exactly what their comment
 warns against. Left open here rather than guessed at.
+
+---
+
+## 2026-09-14 — MERGE RESOLUTION: #2919's render evidence into #2917's ok-gate (one mechanism, not two)
+
+**What #2919 fixes, and it is real.** Report fd021c64: a user typed *"Yess create karo"* into a
+workspace already holding their own 25-file Fantasy Football app. The engine restored it, started the
+dev server, **opened it in a real browser and watched it render**, built it for production green — then
+told them *"The build produced no files. Please try again"* and asked them to **add credits**. The whole
+build then ran a SECOND time on a stronger model to reach the same conclusion: five minutes and sixteen
+model calls to tell somebody their working app does not exist.
+
+**Why it is NOT redundant with #2917, which landed first and looks like the same fix.**
+`verifiedNoChangeSummary` (#2917) deliberately stands down when `userAskedToBuildAnApp` is true, because
+it WRITES a success sentence ("nothing needed changing") that would be false for somebody who asked for
+an app to be produced. *"Yess create karo"* classifies as `new_build` through
+`userAskedForAnAppToBeBuilt`, so #2917's guard returns null and fd021c64 is still reported as a failure.
+#2919 makes no claim at all — it only declines to call a RENDERING app an empty build — so it may
+legitimately fire on the case #2917 excludes. Two guards, one condition, and the second is not the first
+with a check removed.
+
+**The evidence is the stronger of the two, not the weaker.** `buildObs.previewRendered` is set at ONE
+site (route line ~16326), alongside `previewVerifiedRendered`, which has a second assignment at ~16147.
+So the flag #2919 reads is a strict subset of the one #2917 reads.
+
+**What was dropped from #2919, and why.** It also added a fourth branch (`appAlreadyRuns`) inside the
+free-tier upsell guard. That was written against a `main` whose guard read `if (freeTierBuildActive)`;
+#2917 has since made it `if (freeTierBuildActive && !result.ok)`. With the render evidence now stopping
+`emptyBuildFailureSummary` from flipping `ok`, `result.ok` survives and that gate never opens — the
+upsell is already silent. Keeping the branch would have left **two answers to one question**, which is
+the exact shape of the bug all three of that guard's existing reasons (a policy refusal, our own
+provider outage, a prompt with no instruction) came from. The decision is recorded in the code at the
+site where the branch would have gone, so a later reader does not re-add it from the report.
+
+**No billing change, checked rather than assumed.** `if (expectsArtifacts && writtenFiles.size === 0)
+{ effectiveBilledUsd = 0; }` is unconditional — a zero-file build is free whatever its `ok` verdict. The
+only thing this change alters is what the user is TOLD.
+
+**`tests/pornographyBan.test.ts` — the same assertion, over-specified for the fourth time.** Both sides
+of the merge had independently replaced the fixed `start + 4500` window; main's bound (the next real
+token, `zeroBillForUnrenderedPreview(`) was kept because it survives comment growth without limit.
+#2919's extra assertion was kept on its merits: `not.toMatch(/if \(!refused\s*\|\|/)` pins that every
+condition added to that guard may only ever SUPPRESS further, never re-open the path a refusal closes.
+
+**`tests/rendersIsNotEmpty.test.ts` — the wiring, which #2919 had not tested.** The original file tested
+only the pure function, and the whole defect in fd021c64 was a CALL SITE. It now reads the route and
+asserts the observation is actually passed in, and that the `!result.ok` gate (the thing that keeps the
+upsell silent) is present. Both were proven by reversion: removing the 4th argument fails it, and
+removing the gate fails it. One assertion I had first written — banning the identifier `appAlreadyRuns`
+forever — was softened before commit, because banning a name is the same over-specification this very
+file has now been burned by three times.
+
+**Gate:** `npm run typecheck` · `noUnusedImports` · `typecheck:server` · `vitest run` · `build` ·
+`test:bundle` · `boot:check` — all green on the fully-merged state.
+
+**Also on 2026-09-14:** #2914 merged (`ff9cd845`) after its own session resolved the #2917 overlap and
+CI went green on `802eaa7e`; the full gate was re-run locally on main+#2914 before the merge, per the
+concurrent-sessions rule that a gate run before a merge proves nothing.

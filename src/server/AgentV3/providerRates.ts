@@ -48,6 +48,15 @@ export function realRateCard(): Record<string, TokenRate> {
     // providers WITHOUT a cache line (Gemini/Grok/Claude rows below) omit it → full input rate
     // (no discount) by construction, so nothing can be under-billed.
     'glm-flash': { inputPerMTok: envRate('RATE_GLM_FLASH_IN', 0), outputPerMTok: envRate('RATE_GLM_FLASH_OUT', 0) },
+    // glm-5.3-flash (admin 2026-09-14: on the WEAK and NORMAL ladders). Its published price is NOT
+    // known here. ⚠️ It must NOT inherit the 'glm-flash' $0 line above — that line is the 4.7-flash
+    // price, and a "flash" in the NAME is not evidence of a $0 price: 5.3-flash benchmarks beside the
+    // flagship (Terminal Bench 84.3, DeepSWE 63.4 on z.ai's own page). Per this function's contract an
+    // unknown model may only OVER-state cost, so the default mirrors the glm-5 flagship line — the
+    // highest GLM rate we can verify. ⚠️ SET `RATE_GLM53_FLASH_IN`/`_OUT`/`_CACHE` to the real
+    // published rate: until then a paid Normal build on it is billed at the flagship rate (a user
+    // over-charge in the bounded, margin-safe direction, visible in the admin report as this rung).
+    'glm-5.3-flash': { inputPerMTok: envRate('RATE_GLM53_FLASH_IN', 1.4), outputPerMTok: envRate('RATE_GLM53_FLASH_OUT', 4.4), cacheReadPerMTok: envRate('RATE_GLM53_FLASH_CACHE', 0.35) },
     'glm-5': { inputPerMTok: envRate('RATE_GLM5_IN', 1.4), outputPerMTok: envRate('RATE_GLM5_OUT', 4.4), cacheReadPerMTok: envRate('RATE_GLM5_CACHE', 0.35) },
     'glm': { inputPerMTok: envRate('RATE_GLM_IN', 0.6), outputPerMTok: envRate('RATE_GLM_OUT', 2.2), cacheReadPerMTok: envRate('RATE_GLM_CACHE', 0.15) }, // glm-4.x coder
     // ── Kimi (Moonshot) ─────────────────────────────────────────────────────────────────────────
@@ -67,6 +76,13 @@ export function realRateCard(): Record<string, TokenRate> {
     // ── Anthropic (Claude) ────────────────────────────────────────────────────────────────────────
     'haiku': { inputPerMTok: envRate('RATE_HAIKU_IN', 1), outputPerMTok: envRate('RATE_HAIKU_OUT', 5) },
     'sonnet': sonnetRate(),
+    // ── OpenAI (GPT) — the last rung of the WEAK ladder (admin 2026-09-14) ──────────────────────
+    // No key exists yet and the price is not known here, so the default is this function's own
+    // "conservative upper bound" for an unknown model: the Sonnet rate. ⚠️ SET `RATE_GPT_IN`/`_OUT`
+    // (and `_CACHE` if the plan has a cache line) to the real published rate when the key is bought.
+    // Every WEAK build is paid by NavBharatAI, so an over-stated rate here inflates our own cost
+    // report, never a user's bill — the safe direction, but a wrong number all the same.
+    'gpt': { inputPerMTok: envRate('RATE_GPT_IN', sonnetRate().inputPerMTok), outputPerMTok: envRate('RATE_GPT_OUT', sonnetRate().outputPerMTok), cacheReadPerMTok: envRate('RATE_GPT_CACHE', sonnetRate().inputPerMTok) },
   };
 }
 
@@ -94,6 +110,9 @@ export function realRateFor(provider: string, model?: string): TokenRate {
     // most expensive rate we know — so an unrecognized model can only ever over-state cost, never
     // under-state it. Adding a real rate line for a new id (see 'kimi-k3') makes it exact.
     if (m.includes('glm')) {
+      // 5.3-flash BEFORE the generic flash rule: the generic rule is the 4.7-flash $0 line, and a
+      // "flash" in the name is not a price (see the rate line's own note).
+      if (/glm-?5[.\-]?3.*flash/.test(m)) return card['glm-5.3-flash'];
       if (m.includes('flash')) return card['glm-flash'];
       if (/glm-?4/.test(m)) return card.glm;              // the known cheap 4.x coder
       return card['glm-5'];                                // 5.x and anything newer/unknown
@@ -105,6 +124,7 @@ export function realRateFor(provider: string, model?: string): TokenRate {
     }
     if (m.includes('gemini')) return m.includes('pro') ? card['gemini-pro'] : card.gemini;
     if (m.includes('grok')) return card.grok;
+    if (m.startsWith('gpt') || /^o\d/.test(m)) return card.gpt; // gpt-5.4 and the o-series reasoning ids
   }
 
   // Provider label fallback (aux calls without a model id, or unrecognized model strings).
@@ -116,6 +136,7 @@ export function realRateFor(provider: string, model?: string): TokenRate {
     case 'VERTEX':
     case 'GEMINI': return card.gemini;
     case 'GROK': return card.grok;
+    case 'OPENAI': return card.gpt;
     default: return card.sonnet; // 'other'/unknown → conservative upper bound (never under-bill)
   }
 }

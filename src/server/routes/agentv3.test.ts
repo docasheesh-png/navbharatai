@@ -1902,11 +1902,14 @@ describe('enforceNoClaude — the UNBREAKABLE weak-module guard (admin rule 2026
   // "weak module me claude haiku add kar de? to last me … sonnet ya opus never never"): CLAUDE
   // (Sonnet/Opus) is still stripped no matter how the chain was assembled; the model-pinned
   // CLAUDE_HAIKU backstop is KEPT and moved to the END ("to last me").
-  it('strips CLAUDE (Sonnet/Opus) and keeps the model-pinned Haiku backstop LAST', () => {
+  it('strips CLAUDE (Sonnet/Opus) and keeps the model-pinned Haiku backstop IN PLACE', () => {
+    // Since 2026-09-14 the ladder owns the ORDER (the admin's weak ladder puts GPT-5.4 after Haiku),
+    // so this guard only removes; it no longer moves Haiku to the end. Same fixture, Sonnet gone,
+    // everything else exactly where it was.
     const out = enforceNoClaude(chain, true).map((r) => r.name);
-    expect(out).toEqual(['GLM', 'KIMI', 'VERTEX', 'GEMINI', 'CLAUDE_HAIKU']);
+    expect(out).toEqual(chain.map((r) => r.name).filter((n) => n !== 'CLAUDE'));
     expect(out).not.toContain('CLAUDE');
-    expect(out[out.length - 1]).toBe('CLAUDE_HAIKU'); // haiku — to last me
+    expect(out).toContain('CLAUDE_HAIKU');
   });
 
   it('leaves the chain untouched for a non-weak build (noClaude false)', () => {
@@ -1918,10 +1921,13 @@ describe('enforceNoClaude — the UNBREAKABLE weak-module guard (admin rule 2026
     expect(enforceNoClaude(cheapOnly, true).map((r) => r.name)).toEqual(['GLM', 'KIMI']);
   });
 
-  it('is exhaustive — no Sonnet/Opus runner survives in any position; Haiku always lands last', () => {
+  it('is exhaustive — no Sonnet/Opus runner survives in any position; Haiku keeps its LADDER position (2026-09-14)', () => {
     const weird = [{ name: 'CLAUDE' }, { name: 'CLAUDE_HAIKU' }, { name: 'GLM' }, { name: 'CLAUDE' }];
     const out = enforceNoClaude(weird, true).map((r) => r.name);
-    expect(out).toEqual(['GLM', 'CLAUDE_HAIKU']); // Sonnet gone; mid-chain Haiku moved to the end
+    // Sonnet gone; Haiku stays WHERE THE LADDER PUT IT. The 2026-07-13 "to last me" reorder was for a
+    // boolean-assembled chain; the admin's 2026-09-14 weak ladder places GPT-5.4 after Haiku, so the
+    // guard decides WHAT may run on weak and the ladder decides WHERE (see tierLadder.ts).
+    expect(out).toEqual(['CLAUDE_HAIKU', 'GLM']);
   });
 
   // REGRESSION (admin 2026-07-20, verbatim: "weak module me claude ka only haiku use hona chahiye. sonnet

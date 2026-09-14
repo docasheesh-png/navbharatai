@@ -146,7 +146,10 @@ describe('the wiring — the ceiling lives at the CHOKE POINT, not in the call s
   const captureTurnUsageBody = (): string => {
     const start = route.indexOf('const captureTurnUsage =');
     expect(start).toBeGreaterThan(0);
-    const end = route.indexOf('const cheapTierAllowed', start);
+    // End anchor: the next stable statement after the usage capture. It used to be
+    // `const cheapTierAllowed`, which the 2026-09-14 tier-ladder change retired (the chain is the tier's
+    // ladder now, so there is no cheap-floor decision to anchor on).
+    const end = route.indexOf('const recordProviderFallback =', start);
     expect(end).toBeGreaterThan(start);
     return route.slice(start, end);
   };

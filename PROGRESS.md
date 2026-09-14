@@ -55577,3 +55577,71 @@ Gate on the final state: typecheck · noUnusedImports · typecheck:server · bui
 boot:check all green; `vitest` **23,294 passed / 1 skipped**; the only 3 failures are
 `tests/esmMirror.test.ts`, verified to fail identically on a clean `main` in this sandbox (upstream
 CDN blocked by the agent proxy) while CI on `main` is green — environment, not code.
+
+---
+
+## 2026-09-14 — Three ladders, and "100% usi mode mein" becomes a property of the code (slice 2 of the engine-routing redesign)
+
+Admin, verbatim: *"user ne agar teeno mode me se jo select kiya hai, aap 100% usi mode me bane."* — and the
+three ladders, by name, with the correction *"Grok ko hatao mat … reviewer app tode na."*
+
+**The one module: `src/server/AgentV3/tierLadder.ts`.** Weak = GLM 4.7-flash → GLM 5.3-flash → Kimi k2.6 →
+Haiku → OpenAI gpt-5.4; Normal = Kimi k2.7-code → GLM 5.3-flash → Sonnet; Strong = Kimi k3 → Sonnet → Opus.
+`buildTurnRunner` now takes `tier` and maps the ladder to runners rung for rung (`ladderRunners`). Everything
+it used to assemble from five booleans is gone from the live path.
+
+**What was actually wrong before, found by reading the old assembly, not assumed:**
+- `buildTurnRunner` returned a **Claude-only runner when the floor was empty** — so a Normal build with
+  `AGENTV3_CHEAP_FLOOR=off` silently became a Sonnet build. That is the substitution the rule forbids by
+  name. Now a tier with no keyed rung is refused pre-flight (`ENGINE_UNAVAILABLE`, weak keeps
+  `WEAK_ENGINE_UNAVAILABLE`) and, as a second net, its runner throws a branded refusal on first use.
+- Vertex/Gemini rode into EVERY chain as a "last resort" the tier policy never named. Gone as build rungs;
+  they keep vision and the free-chat backstop, and **Grok keeps judge / plan / Engineer-AI primary** — the
+  admin's explicit instruction, which withdrew the earlier plan to retire them.
+- `enforceNoClaude` matched the one literal name `'CLAUDE'`, so the new `CLAUDE_OPUS` rung would have
+  **survived the weak-module guard**. It is a prefix rule now (every `CLAUDE*` except `CLAUDE_HAIKU`).
+  ⚠️ And it **no longer moves Haiku to the end**: the 2026-07-13 "to last me" was for a boolean-assembled
+  chain; the admin's own weak ladder puts GPT-5.4 after Haiku. The guard decides WHAT, the ladder WHERE.
+- Escalation used to be switched OFF for the pinned tiers (`onlyOpus`). Strong is a ladder now, so
+  escalation = **start the same ladder higher up** (`escalationPathForTier`, `ladderFrom`): Normal restarts at
+  Sonnet, Strong at Opus, Weak never. "Opus sirf zarurat par" is therefore literal, not aspirational.
+- Heal = the ladder minus its LEADING flash rung (`healLadder`) — the 2026-08-13 rule as one function.
+  Only the first flash rung: dropping every flash rung would skip glm-5.3-flash, the strongest cheap coder
+  on weak, and start a repair on a dearer model with no evidence the second rung was at fault.
+- The key-pool runner factory was a closure inside `cheapBuildFloorRunners`; it is `openAiCompatRunners`
+  now, shared by GLM, Kimi and OpenAI (all speak the same chat-completions tool protocol), with
+  `floorTuning()` holding the three timing knobs once.
+
+**Money, verified rather than reasoned about:** `powerToTier('mini')` is not the Opus tier, so Strong bills
+real cost + tiered markup, and an Opus rung that actually ran is priced at its real Opus rate inside that —
+**no billing change needed.** Two prices are unknown here and default to the rate card's own over-state-only
+bound: `glm-5.3-flash` → the glm-5 line (⚠️ NOT the $0 line its "flash" name would have matched — that was a
+silent under-bill waiting to happen, now test-locked), `gpt` → the Sonnet line. `RATE_GLM53_FLASH_*` /
+`RATE_GPT_*` set the real ones.
+
+**Two facts a later session must not re-derive:** the OpenAI rung is UNTESTED against a real response —
+`OPENAI_API_KEY` is not set, so today it yields nothing and changes no build; and the chat router has no
+OpenAI provider (slice 3, only if GPT should serve chat). `AGENTV3_LADDER_WEAK/_NORMAL/_STRONG` override a
+tier's ladder whole-or-not-at-all; a weak override naming Sonnet/Opus is REFUSED with the reason in the
+`TIER_LADDER` report line.
+
+**Inert for the build chain now, labelled in the route so nobody reads them as live:**
+`healRunnerRoutingOpts`, `cheapFloorDecision`, `cheapFloorAllowedForTier/User`, `resolveClaudeFirst`,
+`geminiLastResortEnabled`, `vertexPeerBuildEnabled`, `balanceFloorLead`, `tierToGeminiBuildModel`,
+`cheapBuildFloorRunners`, and the envs `AGENTV3_BUILD_CLAUDE_FIRST`, `AGENTV3_BUILD_ALLOW_GEMINI`,
+`AGENTV3_VERTEX_PEER`, `AGENTV3_FLOOR_BALANCE`, `AGENTV3_FREE_KIMI_LEAD`, `AGENTV3_WEAK_FLAGSHIP_HEAL`,
+`GLM_MODEL`/`KIMI_MODEL`/`AGENTV3_FREE_*_MODEL`. Kept only because their tests pin them; retire together.
+Trade stated plainly: without the live-health lead swap, a 429 storm on rung 1 costs one failed call per
+cooldown window (the shared bench still sidelines the rung) instead of a reorder.
+
+**Tests:** `tests/tierLadder.test.ts` (19), `tests/tierChainFidelity.test.ts` (16 — the CONSTRUCTED chain's
+(name, model) sequence per tier; keyless skip; empty tier → branded refusal naming no vendor; kill switch;
+heal/escalation within the ladder; override refusal; prefix guard; every inline call site passes `tier`;
+`ladderRunners` covers every provider the type can name), `tests/providerRatesNewRungs.test.ts` (9). Five
+existing suites re-anchored to rules rather than retired literals (`agentv3.test.ts`, `healRunnerAttribution`,
+`buildCostCeiling`, `buildReportWiring`, `tierChainFidelity`). CLAUDE.md routing policy superseded with a
+dated entry; AppKnowledgeBase tells every AI the picked tier is the engine that runs.
+
+Gate on the final state (merged with `main` 1d8786d9): typecheck · noUnusedImports · typecheck:server ·
+build · test:bundle · boot:check all green; `vitest` **23,337 passed / 1 skipped**; the only 3 failures are
+`tests/esmMirror.test.ts`, verified earlier today to fail identically on a clean `main` in this sandbox.

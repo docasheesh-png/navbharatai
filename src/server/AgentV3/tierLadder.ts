@@ -1,0 +1,227 @@
+// AgentV3 — ONE LADDER PER POWER TIER, AND A BUILD RUNS ON ITS OWN TIER'S LADDER ALONE.
+//
+// THE RULE (admin-mandated 2026-09-14, verbatim): "user ne agar teeno mode me se jo select kiya hai,
+// aap 100% usi mode me bane." Whatever tier the user selected, the build runs on THAT tier's rungs —
+// every one of them, in that order, and NOTHING ELSE. Not a stronger model borrowed when the tier's
+// own rungs are busy; not a cheaper one substituted when they are slow.
+//
+// WHAT THIS REPLACES. Until today the chain a build ran on was ASSEMBLED at the call site from five
+// booleans (claudeFirst / allowCheapFloor / cheapOnly / free / noClaude) plus four env flags, and the
+// assembly had a fallback the rule forbids by name: when a tier's own rungs were all missing, it
+// returned a Claude-only runner — a Weak build could not reach it (enforceNoClaude), but a Normal
+// build with the floor switched off silently became a Sonnet build. The chain also carried
+// Vertex/Gemini "last resort" rungs into every tier whether the tier's policy named them or not.
+//
+// NOW the ladder IS the policy. `buildTurnRunner` maps this list to runners one-for-one and refuses
+// to add anything the list does not name; a rung whose provider has no key is skipped (the existing
+// rule), and a tier whose rungs are ALL missing is reported as unavailable — honestly, never by
+// borrowing. `tests/tierChainFidelity.test.ts` asserts the CONSTRUCTED chain's (name, model) sequence
+// against this table, so the two cannot drift.
+//
+// THE THREE LADDERS (admin 2026-09-14). Claude rungs carry a SYMBOLIC model ('sonnet' / 'opus' /
+// 'haiku') that the route resolves through models.ts, so a Claude id bump never touches this file.
+//
+//   WEAK   (free)      GLM glm-4.7-flash → GLM glm-5.3-flash → KIMI kimi-k2.6 → HAIKU → OPENAI gpt-5.4
+//   NORMAL (economy)   KIMI kimi-k2.7-code → GLM glm-5.3-flash → CLAUDE sonnet
+//   STRONG (premium)   KIMI kimi-k3 → CLAUDE sonnet → CLAUDE_OPUS opus
+//
+// 🔒 WEAK NEVER RUNS SONNET OR OPUS — the standing absolute rule (Haiku amendment 2026-07-13) is now
+// enforced HERE as well as in enforceNoClaude: `parseLadderOverride` refuses a weak override that
+// names either, so an env var cannot become the way that rule is broken.
+// ⚠️ GPT-5.4 is the weak ladder's last rung by the admin's list, which means Haiku is no longer the
+// "absolute last rung" the 2026-07-13 amendment described. Recorded, not hidden.
+//
+// WHAT IS DELIBERATELY NOT IN ANY LADDER. Grok, Gemini and Vertex (admin 2026-09-14: "Grok ko hatao
+// mat" — Grok stays the judge, the free plan model and Engineer AI's primary; Gemini/Vertex stay for
+// vision and the free-chat backstop). They are simply not BUILD rungs any more. BEDROCK-GLM likewise:
+// it was an env-gated alternative floor and no tier names it.
+//
+// PURE — no clock, no I/O; env is passed in. The route owns the runners.
+
+import type { PowerLevel } from './powerLevel';
+import { toPowerLevel } from './powerLevel';
+
+/** A rung's provider. The names are the bench/telemetry names the chain already uses. */
+export type LadderProvider = 'GLM' | 'KIMI' | 'OPENAI' | 'CLAUDE' | 'CLAUDE_HAIKU' | 'CLAUDE_OPUS';
+
+export interface LadderRung {
+  provider: LadderProvider;
+  /** The exact model id for GLM/KIMI/OPENAI; a SYMBOLIC name ('sonnet'|'opus'|'haiku') for Claude rungs. */
+  model: string;
+}
+
+export const TIER_LADDERS: Readonly<Record<PowerLevel, readonly LadderRung[]>> = {
+  weak: [
+    { provider: 'GLM', model: 'glm-4.7-flash' },
+    { provider: 'GLM', model: 'glm-5.3-flash' },
+    { provider: 'KIMI', model: 'kimi-k2.6' },
+    { provider: 'CLAUDE_HAIKU', model: 'haiku' },
+    { provider: 'OPENAI', model: 'gpt-5.4' },
+  ],
+  off: [
+    { provider: 'KIMI', model: 'kimi-k2.7-code' },
+    { provider: 'GLM', model: 'glm-5.3-flash' },
+    { provider: 'CLAUDE', model: 'sonnet' },
+  ],
+  mini: [
+    { provider: 'KIMI', model: 'kimi-k3' },
+    { provider: 'CLAUDE', model: 'sonnet' },
+    { provider: 'CLAUDE_OPUS', model: 'opus' },
+  ],
+};
+
+/** Providers that may never appear on the WEAK ladder, whatever an override says. */
+const FORBIDDEN_ON_WEAK: ReadonlySet<LadderProvider> = new Set<LadderProvider>(['CLAUDE', 'CLAUDE_OPUS']);
+
+const PROVIDER_ALIASES: Record<string, LadderProvider> = {
+  GLM: 'GLM', KIMI: 'KIMI', OPENAI: 'OPENAI', GPT: 'OPENAI',
+  CLAUDE: 'CLAUDE', SONNET: 'CLAUDE', HAIKU: 'CLAUDE_HAIKU', CLAUDE_HAIKU: 'CLAUDE_HAIKU',
+  OPUS: 'CLAUDE_OPUS', CLAUDE_OPUS: 'CLAUDE_OPUS',
+};
+
+/** The env var that may override a tier's ladder. One per tier, so tuning one never touches another. */
+export function ladderEnvName(level: PowerLevel): string {
+  return level === 'weak' ? 'AGENTV3_LADDER_WEAK' : level === 'off' ? 'AGENTV3_LADDER_NORMAL' : 'AGENTV3_LADDER_STRONG';
+}
+
+export interface ParsedLadder {
+  rungs: LadderRung[];
+  /** 'default' = the code table; 'env' = a valid override was applied. */
+  source: 'default' | 'env';
+  /** Set when an override was PRESENT and REFUSED — the reason, for the admin report. */
+  rejected?: string;
+}
+
+/**
+ * Parse one tier's override: `PROVIDER:model,PROVIDER:model` (Claude rungs may be bare `HAIKU` /
+ * `SONNET` / `OPUS`). An override is applied WHOLE or not at all — a partially-applied ladder would
+ * quietly change what "this mode" means, which is the exact thing the rule forbids. Unreadable ⇒ the
+ * code default, with the reason recorded.
+ */
+export function parseLadderOverride(level: PowerLevel, raw: string | undefined): ParsedLadder {
+  const fallback: ParsedLadder = { rungs: [...TIER_LADDERS[level]], source: 'default' };
+  const text = String(raw ?? '').trim();
+  if (!text) return fallback;
+  const rungs: LadderRung[] = [];
+  for (const part of text.split(',').map((s) => s.trim()).filter(Boolean)) {
+    const [head, ...rest] = part.split(':');
+    const provider = PROVIDER_ALIASES[head.trim().toUpperCase()];
+    if (!provider) return { ...fallback, rejected: `${ladderEnvName(level)}: unknown provider "${head.trim()}" — the whole override was ignored and the code default is in use.` };
+    const model = rest.join(':').trim() || defaultSymbolicModel(provider);
+    if (!model) return { ...fallback, rejected: `${ladderEnvName(level)}: rung "${part}" names no model — the whole override was ignored.` };
+    if (level === 'weak' && FORBIDDEN_ON_WEAK.has(provider)) {
+      return { ...fallback, rejected: `${ladderEnvName(level)}: "${part}" would put ${provider} on the WEAK ladder — Sonnet/Opus never run on weak (absolute rule). The override was ignored.` };
+    }
+    rungs.push({ provider, model });
+  }
+  if (rungs.length === 0) return fallback;
+  return { rungs, source: 'env' };
+}
+
+function defaultSymbolicModel(provider: LadderProvider): string {
+  return provider === 'CLAUDE' ? 'sonnet' : provider === 'CLAUDE_OPUS' ? 'opus' : provider === 'CLAUDE_HAIKU' ? 'haiku' : '';
+}
+
+/** The ladder in force for a tier: the env override when valid, else the code table. */
+export function tierLadder(level: PowerLevel | string | boolean | null | undefined, env: NodeJS.ProcessEnv = process.env): ParsedLadder {
+  const lvl = toPowerLevel(level as PowerLevel | boolean | string | undefined | null);
+  return parseLadderOverride(lvl, env[ladderEnvName(lvl)]);
+}
+
+/**
+ * The ladder a HEAL pass runs on: the tier's ladder without its first rung, when that rung is a
+ * flash model and something remains. The standing rule (admin 2026-08-13): a repair must not begin
+ * on the model that produced the failing app. Only the LEADING flash rung is dropped — dropping every
+ * flash rung would skip glm-5.3-flash, the strongest cheap coder on the weak ladder, and start the
+ * heal on a dearer model for no evidence that the second rung was at fault.
+ */
+export function healLadder(rungs: readonly LadderRung[]): LadderRung[] {
+  if (rungs.length > 1 && /flash/i.test(rungs[0].model)) return rungs.slice(1);
+  return [...rungs];
+}
+
+/**
+ * The same ladder starting at a given provider — how ESCALATION works now. "Bring in a stronger
+ * engine" means "start this tier's own ladder higher up", never "borrow another tier's model".
+ * Empty when the provider is not on the ladder, which the caller treats as "cannot escalate".
+ */
+export function ladderFrom(rungs: readonly LadderRung[], provider: LadderProvider): LadderRung[] {
+  const at = rungs.findIndex((r) => r.provider === provider);
+  return at < 0 ? [] : rungs.slice(at);
+}
+
+/**
+ * Where a tier escalates to when its build does not complete: the strongest Claude rung it owns.
+ * Weak has none (it never escalates — NavBharatAI pays for every weak build), Normal → Sonnet,
+ * Strong → Opus. "Opus sirf zarurat par": Opus is the LAST rung of Strong, reached only when the
+ * rungs before it failed or the finished build failed its gate.
+ */
+export function escalationProvider(rungs: readonly LadderRung[]): LadderProvider | null {
+  if (rungs.some((r) => r.provider === 'CLAUDE_OPUS')) return 'CLAUDE_OPUS';
+  if (rungs.some((r) => r.provider === 'CLAUDE')) return 'CLAUDE';
+  return null;
+}
+
+/**
+ * The ESCALATION PATH a build may walk, derived from its tier — the analyser's path is a Claude-tier
+ * list ('gemini'|'haiku'|'sonnet'|'opus') keyed to the START tier; this keeps it inside the ladder:
+ *   • weak  → never escalates: NavBharatAI pays for every weak build, and its ladder owns no Sonnet/Opus.
+ *   • off   → capped at 'sonnet' (Normal's top rung); an 'opus' entry is dropped.
+ *   • mini  → ends at 'opus' (Strong's last rung); appended when the analyser's path stopped at Sonnet,
+ *             because a pinned analysis returns a one-tier path and the tier — not the analyser — is
+ *             what decides how far "a stronger engine" may go.
+ * Attempt 1 is always the tier's normal ladder; later attempts start the SAME ladder at 'CLAUDE' or
+ * 'CLAUDE_OPUS' (see ladderFrom). Pure.
+ */
+export function escalationPathForTier<T extends string>(level: PowerLevel | string | boolean | null | undefined, analyserPath: readonly T[] | undefined): T[] {
+  const lvl = toPowerLevel(level as PowerLevel | boolean | string | undefined | null);
+  const path = Array.isArray(analyserPath) ? [...analyserPath] : [];
+  if (path.length === 0) return [];
+  if (lvl === 'weak') return [path[0]];
+  if (lvl === 'off') {
+    const capped = path.filter((t) => t !== 'opus');
+    return capped.length > 0 ? capped : [path[0]];
+  }
+  // Strong: keep the analyser's climb, make sure Sonnet precedes Opus, and end at Opus.
+  const noOpus = path.filter((t) => t !== 'opus');
+  const withSonnet = noOpus.includes('sonnet' as T) ? noOpus : [...noOpus, 'sonnet' as T];
+  return [...withSonnet, 'opus' as T];
+}
+
+/** The env key whose presence lets a rung run. A keyless rung is skipped, never substituted. */
+export function keyEnvFor(provider: LadderProvider): string {
+  switch (provider) {
+    case 'GLM': return 'GLM_API_KEY';
+    case 'KIMI': return 'KIMI_API_KEY';
+    case 'OPENAI': return 'OPENAI_API_KEY';
+    default: return 'ANTHROPIC_API_KEY';
+  }
+}
+
+export function rungHasKey(rung: LadderRung, env: NodeJS.ProcessEnv = process.env): boolean {
+  const v = env[keyEnvFor(rung.provider)];
+  return typeof v === 'string' && v.trim().length > 0;
+}
+
+/** The rungs that can actually run in this environment, in ladder order. */
+export function availableRungs(rungs: readonly LadderRung[], env: NodeJS.ProcessEnv = process.env): LadderRung[] {
+  return rungs.filter((r) => rungHasKey(r, env));
+}
+
+/**
+ * Can this tier build at all here? False means every rung is keyless — the honest answer is a
+ * refusal naming the tier, never a build on some other tier's model.
+ */
+export function tierEngineAvailable(level: PowerLevel | string | boolean | null | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
+  return availableRungs(tierLadder(level, env).rungs, env).length > 0;
+}
+
+/** `GLM(glm-4.7-flash) → KIMI(kimi-k2.6) → CLAUDE_HAIKU` — for the admin report. */
+export function describeLadder(rungs: readonly LadderRung[]): string {
+  return rungs.map((r) => (r.provider.startsWith('CLAUDE') ? r.provider : `${r.provider}(${r.model})`)).join(' → ');
+}
+
+/** The user-facing tier name, for the honest "this engine is unavailable" refusal. */
+export function tierDisplayName(level: PowerLevel): 'Weak' | 'Normal' | 'Strong' {
+  return level === 'weak' ? 'Weak' : level === 'off' ? 'Normal' : 'Strong';
+}

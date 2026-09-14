@@ -2477,6 +2477,56 @@ no future edit can silently route a weak heal to Gemini/Haiku again.
 ladder, mode-aware judge, free-tier heal-gate re-route to cheap coders, power-mode judge+plan→Opus), each
 tested + gated + merged. Until a slice ships, the current behaviour (audited 2026-07-12) still applies.
 
+### 🔴 THREE TIERS, THREE LADDERS, "100% USI MODE MEIN" (admin-mandated 2026-09-14) — SUPERSEDES the five-tier table and the boolean-assembled chain above
+
+Admin, verbatim: *"abhi 5 type hai — week, normal, strong, power, full team. inko simple 3 me badlo, week,
+normal, strong. bas."* and *"user ne agar teeno mode me se jo select kiya hai, aap 100% usi mode me bane."*
+Everything above about 'medium' (Powerful) / 'max' (Full Team) and about `claudeFirst` / `allowCheapFloor`
+/ `cheapOnly` / the Vertex-Gemini "last resort" describes the engine BEFORE this date. The source of truth
+is now **`src/server/AgentV3/tierLadder.ts`**, and the build chain is built from it rung for rung.
+
+| Tier (UI) | Internal | The ladder (first → last) | Escalation cap |
+|---|---|---|---|
+| Weak (free) | `weak` | GLM `glm-4.7-flash` → GLM `glm-5.3-flash` → KIMI `kimi-k2.6` → Claude **Haiku** → OpenAI `gpt-5.4` | never escalates (NavBharatAI pays) |
+| Normal (paid economy) | `off` | KIMI `kimi-k2.7-code` → GLM `glm-5.3-flash` → Claude Sonnet | Sonnet |
+| Strong (paid premium) | `mini` | KIMI `kimi-k3` → Claude Sonnet → Claude **Opus** | Opus (its last rung) |
+
+- **The chain IS the ladder.** A build on a tier runs that tier's rungs, in that order, and nothing else —
+  no Vertex/Gemini rung, no borrowed Sonnet when the floor is off, no live-health GLM↔KIMI lead swap. A
+  keyless rung is SKIPPED; a tier with no keyed rung is refused before the stream (`ENGINE_UNAVAILABLE`;
+  weak keeps `WEAK_ENGINE_UNAVAILABLE`) — never built on another tier's model. Test-locked in
+  `tests/tierChainFidelity.test.ts` against the CONSTRUCTED chain's (name, model) sequence.
+- **Escalation = higher up the same ladder** (`escalationPathForTier`, `ladderFrom`): a Normal build that
+  fails its gate restarts at its Sonnet rung; Strong at Opus. "Opus sirf zarurat par" is literal: Opus is
+  reached only when K3 and Sonnet failed, or the finished build failed its gate.
+- **Heal = the ladder minus its leading flash rung** (the 2026-08-13 rule, now one function: `healLadder`).
+- 🔒 **WEAK NEVER RUNS SONNET/OPUS — three nets:** the ladder never names them; `parseLadderOverride`
+  REFUSES an `AGENTV3_LADDER_WEAK` that does; `enforceNoClaude` strips every `CLAUDE*` rung except
+  `CLAUDE_HAIKU` from the FINAL chain. ⚠️ **It no longer moves Haiku to the end** — the 2026-07-13 "to
+  last me" was for a boolean-assembled chain; the admin's own list puts GPT-5.4 AFTER Haiku, so the guard
+  decides WHAT and the ladder decides WHERE.
+- **Grok STAYS** (admin, same day: *"Grok ko hatao mat … reviewer app tode na"*) — judge (free+paid), free
+  plan phase, Engineer AI primary. Gemini/Vertex stay for vision and the free-chat backstop. They are simply
+  not BUILD rungs. An earlier plan in this session to retire them is withdrawn.
+- **Strong is a LADDER now, not Sonnet-pinned.** This changes the 2026-07-13 fidelity rule's *meaning*, on
+  the admin's explicit choice (asked as a question, answered "Ladder: K3/Sonnet lead, Opus sirf zarurat
+  par"): fidelity is to the MODE, not to one model id. Billing is unchanged — `powerToTier('mini')` is not
+  the Opus tier, so Strong bills real cost + tiered markup, and an Opus rung that ran is priced at its real
+  Opus rate inside that. A stored 'medium'/'max' maps UP to 'mini' (never down to Normal).
+- **Env keys (names only):** `AGENTV3_LADDER_WEAK` / `_NORMAL` / `_STRONG` (override one tier's ladder,
+  `PROVIDER:model,…`, applied whole or refused with the reason in the `TIER_LADDER` report line);
+  `OPENAI_API_KEY` (⚠️ **NOT set** — the admin said they will buy it; until then the gpt-5.4 rung yields
+  nothing and changes no build) and `OPENAI_BASE_URL`, `AGENTV3_OPENAI_TIMEOUT_MS`; `RATE_GLM53_FLASH_IN`
+  / `_OUT` / `_CACHE` and `RATE_GPT_IN` / `_OUT` / `_CACHE` — ⚠️ **both prices are UNKNOWN here and default
+  to the over-state-only bound** (glm-5 line; Sonnet line), which inflates a paid Normal build's bill on
+  5.3-flash in the bounded, margin-safe direction until the admin sets the real numbers. `AGENTV3_CHEAP_FLOOR=off`
+  is still the GLM/KIMI kill switch. **Now inert for the build chain:** `AGENTV3_BUILD_CLAUDE_FIRST`,
+  `AGENTV3_BUILD_ALLOW_GEMINI`, `AGENTV3_VERTEX_PEER`, `AGENTV3_FLOOR_BALANCE`, `AGENTV3_FREE_KIMI_LEAD`,
+  `AGENTV3_WEAK_FLAGSHIP_HEAL`, `GLM_MODEL` / `KIMI_MODEL` / `AGENTV3_FREE_*_MODEL` (the ladders name their
+  models; those envs still feed the legacy `cheapBuildFloorRunners`, which only tests call now).
+- ⚠️ **Not yet done, said plainly:** the OpenAI rung is untested against a real response (no key); the
+  chat router (`AIRouterManager`) has no OpenAI provider — that is slice 3, only if GPT should serve chat.
+
 ### Billing model — REAL-COST + tiered markup for every non-Opus tier (admin-CONFIRMED 2026-07-14, Fix 65) — ⚠️ CONFIRM WITH ADMIN BEFORE CHANGING
 
 The admin verified the LIVE provider deductions on the GLM (Z.ai) + Kimi (Moonshot) dashboards and

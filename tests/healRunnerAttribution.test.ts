@@ -92,8 +92,11 @@ describe('heal runners are attributed by construction', () => {
     const factory = src.slice(at, at + 400);
     expect(factory).toContain('onTurnComplete: captureTurnUsage');
     expect(factory).toContain('onProviderUsed: captureProvider');
-    // …and still carries the routing + the absolute no-Claude guard it replaced.
-    expect(factory).toContain('healRunnerRoutingOpts(freeTierBuildActive)');
+    // …and still carries the routing + the absolute no-Claude guard it replaced. Since 2026-09-14 the
+    // routing is the TIER (the heal runs on the tier's own ladder, minus its leading flash rung), not
+    // the retired healRunnerRoutingOpts booleans — asserted as the rule, not the old expression.
+    expect(factory).toMatch(/\btier:\s*powerLevelReqEffective/);
+    expect(factory).toMatch(/\bheal:\s*true/);
     expect(factory).toContain('noClaude: noClaudeBuild');
   });
 

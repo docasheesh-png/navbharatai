@@ -130,7 +130,9 @@ describe('the wiring, which is where this breaks silently', () => {
     expect(admin).toContain('r.userNote');
     expect(admin).toContain('selectedReport.meta.userNote');
     expect(admin).toContain('What the user said');
-    expect(admin).toContain("${r.userNote ?? ''}");
+    // The search haystack moved into `reportFilterRow`, which feeds the SHARED filter module — so
+    // the user's own words are still searchable, now by the same code the other list searches with.
+    expect(admin).toMatch(/search: \[r\.name, r\.email, r\.appLabel, r\.userId, r\.userNote/);
   });
 
   it('renders the note as text, never as markup', () => {

@@ -23,6 +23,8 @@
  */
 
 /** What the panel needs to show one person. */
+import { hasEverPaid } from '../AgentV3/FreeTierBuildRouting';
+
 export interface UserIdentity {
   uid: string;
   /** '' when unknown — never a placeholder address. */
@@ -33,6 +35,17 @@ export interface UserIdentity {
   shortUid: string;
   /** True when the build was made without signing in. */
   anonymous: boolean;
+  /**
+   * Has this account ever bought tokens with real ₹? (admin 2026-09-14: *"jis user ne real ₹ se token
+   * purchase kiye hai, woh paid user hai"*.)
+   *
+   * 🔑 `null` means UNKNOWN — no wallet record was found — and it is deliberately not `false`. We have
+   * not seen an account, so we have not seen that they never paid; calling that "free" would put an
+   * anonymous build in the same bucket as a real non-paying customer.
+   *
+   * Costs NOTHING: this module already reads the wallet document for the name and email.
+   */
+  paid: boolean | null;
 }
 
 /** Builds made without signing in carry this in place of a uid. */
@@ -56,17 +69,23 @@ export function shortUid(uid: string | null | undefined): string {
 export interface WalletIdentityRecord {
   userEmail?: unknown;
   userName?: unknown;
+  /** Total ₹ ever spent buying tokens. The ONE field that says "this person has paid us". */
+  totalMoneySpent?: unknown;
 }
 
 /** Build the identity for one uid from its (possibly absent) wallet record. Pure. */
 export function identityFrom(uid: string | null | undefined, record: WalletIdentityRecord | null | undefined): UserIdentity {
   const id = String(uid ?? '').trim();
   if (isAnonUid(id)) {
-    return { uid: id, email: '', name: '', shortUid: '', anonymous: true };
+    // A signed-out build has no account, so "has this person paid?" has no answer — not "no".
+    return { uid: id, email: '', name: '', shortUid: '', anonymous: true, paid: null };
   }
   const email = typeof record?.userEmail === 'string' ? record.userEmail.trim() : '';
   const name = typeof record?.userName === 'string' ? record.userName.trim() : '';
-  return { uid: id, email, name, shortUid: shortUid(id), anonymous: false };
+  // ONE rule, shared with the build router (FreeTierBuildRouting.hasEverPaid) so the admin list and
+  // the engine can never disagree about who is a paying user.
+  const paid = record ? hasEverPaid(record as { totalMoneySpent?: unknown }) : null;
+  return { uid: id, email, name, shortUid: shortUid(id), anonymous: false, paid };
 }
 
 /**

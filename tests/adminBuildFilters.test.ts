@@ -4,6 +4,10 @@ import { join } from 'path';
 import { parseStatusFilter, buildMatchesFilters, statusCounts } from '../src/server/lib/buildListFilter';
 
 const DASH = readFileSync(join(process.cwd(), 'src/components/AdminDashboard.tsx'), 'utf8');
+// Both admin build-report lists now render ONE filter bar (admin 2026-09-14: "filter bhi all build
+// report wala chahiye dono me"). The decisions these tests guard did not change — they MOVED, and a
+// guard that keeps pointing at the old address stops guarding anything.
+const BAR = readFileSync(join(process.cwd(), 'src/components/admin/ReportFilterBar.tsx'), 'utf8');
 
 const b = (id: string, ok?: boolean) => ({ workspaceId: id, ok, savedAt: 1 });
 
@@ -13,7 +17,9 @@ describe('the All-builds filters actually re-fetch (admin screenshot 2026-09-13)
   // changed — four dead controls from one missing effect.
   it('an effect re-fetches when a discrete filter changes', () => {
     expect(DASH).toMatch(/useEffect\(\(\) => \{\s*if \(activeTab !== 'reports'\) return;[\s\S]{0,120}fetchAllBuildsRef\.current\(\)/);
-    expect(DASH).toMatch(/\}, \[activeTab, allBuildsStatus, allBuildsDate, allBuildsUid\]\)/);
+    // `allBuildsTier` joined them when the paid/free filter was added (admin 2026-09-14) — it is a
+    // discrete control too, so it must re-fetch exactly like the other three.
+    expect(DASH).toMatch(/\}, \[activeTab, allBuildsStatus, allBuildsDate, allBuildsUid, allBuildsTier\]\)/);
   });
 
   // Free text must NOT re-fetch per keystroke — it keeps the Enter/Load trigger, which is why the
@@ -27,7 +33,10 @@ describe('the All-builds filters actually re-fetch (admin screenshot 2026-09-13)
   // React state is async, so a control that sets then fetches sends the PREVIOUS value and lags one
   // click behind — a subtler version of the same bug.
   it('Clear fetches with explicit overrides rather than trusting async state', () => {
-    expect(DASH).toContain("void fetchAllBuilds({ q: '', status: 'all', date: 'all', uid: '' });");
+    // Clear now lives in the shared bar, which hands back a whole filter object...
+    expect(BAR).toContain("onChange({ query: '', status: 'all', date: 'all', uid: '', tier: 'all' })");
+    // ...and the all-builds list fetches with THAT object, never with the state it has just set.
+    expect(DASH).toContain('void fetchAllBuilds({ q: next.query, status: next.status, date: next.date, uid: next.uid, tier: next.tier });');
   });
 });
 
@@ -57,6 +66,6 @@ describe('no build is reachable by zero filters — the chips have to add up', (
   });
 
   it('the chip only appears when there is something behind it', () => {
-    expect(DASH).toContain("...(allBuildsCounts?.unknown ? [['unknown', 'No outcome', allBuildsCounts.unknown] as const] : [])");
+    expect(BAR).toContain("...(counts?.unknown ? ([['unknown', 'No outcome', counts.unknown]] as const) : [])");
   });
 });

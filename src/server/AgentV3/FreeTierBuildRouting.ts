@@ -34,8 +34,34 @@ export interface FreeTierWallet {
  * user we cannot confirm as paying is treated as not-yet-paying, so we never spend Claude on them).
  */
 export function isFreeTierUser(wallet: FreeTierWallet | null | undefined): boolean {
+  return !hasEverPaid(wallet);
+}
+
+/**
+ * HAS THIS PERSON EVER GIVEN US REAL MONEY? (admin 2026-09-14, verbatim: *"jis user ne real ₹ se token
+ * purchase kiye hai, woh paid user hai"*.)
+ *
+ * 🔑 `totalMoneySpent` is the right field and it is the ONLY one: exactly one writer increments it —
+ * `computeCreditedWallet` in payments.ts, on a verified purchase — and its own comment states the
+ * meaning this function needs: *"GROSS here on purpose: 'how much has this user paid us' is the full
+ * amount, fee included."* Verified against every other credit path: the welcome bonus, the weekly
+ * gift, a coupon and an admin adjustment all go through `mirroredCreditPatch(..., 'gift')`, which
+ * never touches it. So a gifted balance can never make somebody look like a customer.
+ *
+ * ⚠️ THIS IS A FACT ABOUT THE ACCOUNT, NOT ABOUT A BUILD, and the two genuinely disagree. A build's
+ * `billing.userTier` says how THAT BUILD was routed — and `freeTierBuildActive` is set by feature
+ * flags and, at routes/agentv3.ts, by the user simply CHOOSING the Weak tier. So a customer who has
+ * paid ₹500 and picks Weak is recorded as *"free (welcome bonus — cheap engines)"* on that build.
+ * Asking "is this a paying user?" of that string gives the wrong answer for a real customer, which is
+ * why the admin list asks this instead.
+ *
+ * UNKNOWN IS NOT FREE: a caller with no wallet record at all (an anonymous build) gets `null` from
+ * `paidTier` below rather than being called free — we have not seen an account, so we have not seen
+ * that they never paid.
+ */
+export function hasEverPaid(wallet: FreeTierWallet | null | undefined): boolean {
   const paid = Number(wallet?.totalMoneySpent);
-  return !(Number.isFinite(paid) && paid > 0);
+  return Number.isFinite(paid) && paid > 0;
 }
 
 export interface FreeTierInputs {

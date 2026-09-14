@@ -55467,6 +55467,91 @@ only on `provenBroken` — we opened the app and saw it broken. A repair turn th
 not caught by that test, and nothing else catches it either. Prevention above is what covers this case
 today; a real fix needs a behavioural check, not a render check. **Recorded as an open root cause.**
 
+---
+
+## 2026-09-14 — A build the USER stopped is not a build that failed. Charging for it, honestly.
+
+Admin: *"kabhi kabhi app 90% tab ban jati hai, aur user … build cancel kar deta hai. to bhi woh build
+fail me jati hai, aise case me bhi charge 0 aata hai. **isko bhi fix karo! user ki galti hai, isme
+hamari nahi!**"* — then, importantly: *"mai non technical hu … aap **specialist ke tarah socho**, aur
+isko aise fix karo ki **dono ka nuksan na ho, na mera (admin) na user ka**."*
+
+**The gap is real.** `zeroBillForFailedBuild` makes every `ok:false` build free and cannot tell two
+completely different things apart:
+
+- **WE failed** — our engine broke, or a wrong verdict called a working app broken. → Free, always.
+  That is the "working app or free" law and nothing here touches it.
+- **THE USER stopped it** — we spent real provider tokens and real sandbox minutes, produced real
+  files, and the user **keeps** them (a stopped build is saved and resumable). → Free is wrong.
+  Nobody failed; the user changed their mind.
+
+### 🔴 Where I disagreed with the admin's own numbers — and it protects HIM, not the user
+
+He proposed a percentage table: cancel with the app built ⇒ **100%**; cancel with nothing built ⇒
+**50%**. The first half is exactly right and is implemented. **The second would over-charge by an
+order of magnitude**, because NavBharatAI does not price builds at a flat rate — since Fix 65 the bill
+IS the real measured provider cost × the tiered markup:
+
+- cancel at **90%** → the real cost is already ~90% of a full build → **the bill is already ~90%**.
+  His "100% charge" is achieved by simply not zeroing it. **No table needed.**
+- cancel at **5%** → the real cost is ~5% → a 50% charge would bill **ten times what the work cost**,
+  for an app the user cannot use. That takes money for work never done, breaks this repo's own billing
+  law (*never invent a cost*), and is the single most refund- and review-destroying thing a builder
+  can do.
+
+So the percentages are not the mechanism — the real cost already is. The tiers decide a **discount on
+that honest number**, across exactly the 0%–50% band the admin asked for, applied where each end of it
+is defensible:
+
+| What the user holds when they stop | Discount | Why |
+|---|---|---|
+| A **working app** — we opened it and watched it render | **0%** | they have the product |
+| Files saved and resumable, never seen running | **50%** | real code, not an app |
+| **Nothing** | **100% (free)** | charging for nothing is indefensible — and costs us almost nothing anyway |
+
+### 🔒 The four safety rules, which matter far more than the numbers
+
+Charging for our **own** failure would be worse than never charging at all — it is the one outcome
+that cannot be apologised away.
+
+1. **Only an explicit `user-stop`.** `buildAbortCause.ts` already exists for exactly this honesty
+   problem (*"maine nahi roki, khud ruki hai bhai"* — a watchdog stop reported as the user's). The six
+   other causes — watchdog, advisory-cap, reaper, deploy-drain, lock-reclaimed, cost-cap — stay FREE.
+2. **`'unknown'` is never the user.** That module's header already says an abort we cannot explain must
+   never be attributed to something the user did. An unknown cause bills nothing.
+3. **Never more than the build already cost.** Every branch starts from the number the normal billing
+   model already decided, so this can only ever REDUCE — cancelling can never cost more than finishing.
+4. **We charge only for what the user KEEPS.** Zero files is zero rupees, whatever we spent.
+
+⚠️ **AND ONE THING THE ADMIN ASSUMED THAT THE CODE DOES NOT DO — stated so nobody "fixes" it.**
+*"user app band kar deta hai"* does **not** cancel a build. `req.on('close')` only drops the event
+subscriber; the build runs to completion on the server and bills normally. A user on a train who loses
+signal is not cancelling anything and can never be touched by this module. **Only the Stop button
+reaches it.**
+
+### Transparency, because a surprise charge is its own kind of loss
+
+The Stop button now says so **before** it is pressed: *"your files so far are saved, and you are
+charged only for the work already done (never for a full build)."* After the stop, the user is told
+what they were charged and why, in NavBharatAI's own words — test-locked against the White-Label Law,
+so no vendor or model name can ever appear in it.
+
+**Kill switch:** `AGENTV3_BILL_CANCELLED=off` restores today's behaviour instantly, without a deploy —
+the convention every money-moving flag in this file follows. Admin report code:
+`CANCELLED_BUILD_CHARGED`, carrying the delivery tier and the discount, so a charged cancel always
+explains itself. Test-locked in `tests/cancelledBuildBilling.test.ts` (20), including that the decision
+runs **before** the blanket zero — after it there would be nothing left to charge.
+
+### 🔴 Still open
+
+- **The OTHER zero charge — a wrongly-failed build — is still free, and that is deliberate.** Fixing it
+  means fixing the **verdict**, not the billing: under "working app or free" a build marked not-ok must
+  never be charged, and charging one would be the worse bug. That money returns when the verdict is
+  right (#2913, #2929, #2931 merged; the admin reports it still happens ~10–12%).
+- **A user who stops because the build is going badly still pays the 50% tier** if files were written.
+  The `appRendered` test keeps them off the full tier, and zero files keeps them free, but there is no
+  signal today for *"they stopped because we were flailing"*. Naming it rather than pretending the
+  three tiers cover every case.
 ## 2026-09-14 — The website lost pinch-zoom, and swiping the footer dragged the whole app up
 
 Admin screenshot of the WEBSITE (navbharatai.com, mobile Safari — explicitly not the packaged app):
@@ -55518,6 +55603,70 @@ without the admin's explicit go-ahead.
 
 ---
 
+## 2026-09-14 — 🔴 WHITE-LABEL BREACH: the provider's name was on a user screen. The one the admin found was not the worst one.
+
+Admin, from his own phone: *"navbharatai -> settings -> live metrics. **live metric me provider ka naam
+show ho raha hai!** maine kaha tha — kahi bhi kisi bhi prkar se real background provider ai ka naam
+show nahi hona chahiye (white labeling karni hai)."* The card read **`KIMI · 3 reqs · 23,73,820
+tokens · $1.4916`**.
+
+### What the sweep found — the leak he saw was the SMALLER of two
+
+| | surface | gate | severity |
+|---|---|---|---|
+| 1 | **Settings → Live Metrics** printed the raw provider key as a row heading | `isAdmin` **and** an admin token on `/api/admin/metrics` | no ordinary user ever saw it |
+| 2 | 🔴 **The POWER SELECTOR's description line** | **none** | **every user, on the main build screen** |
+
+Item 2 printed the vendor's own tier words straight to the user:
+`'Normal — balanced (Sonnet)'` · `'Sonnet · 100%'` · `'Opus · medium effort'` ·
+`'Opus · ultracode (max effort)'`.
+
+🔴 **And the shape of that bug is the finding.** The FIRST branch of the same five-branch ternary was
+already white-labelled correctly — `'Free engine — fast & lightweight'` — and the other four were not.
+Someone applied the law to one branch and moved on. **That is exactly what a per-call-site habit
+produces and exactly what CLAUDE.md's own §4 prescribed the cure for**: *"route every user-facing
+provider reference through ONE anonymizer … so a NavBharatAI label is applied by construction — never
+sprinkled ad-hoc per call site."* The server half of that (`providerRedaction.ts`) has existed since
+Fix 62/68. **The client half never got built** — so the client had no choke point, and the leak grew
+there.
+
+⚠️ The UI was also contradicting **our own documentation**: `AppKnowledgeBase.ts` has described these
+tiers as *"NavBharatAI's fast economy engine"*, *"the standard engine, adaptive"*, *"a stronger engine,
+pinned for the whole build"*, *"most capable engine at higher reasoning effort"* since it was written.
+The fix is simply to make the screen say what the docs already promised.
+
+### The fix
+
+- **`src/lib/engineLabels.ts`** — the missing client choke point. `publicTierLabel()` returns the
+  white-labelled description for every tier, and an **unknown tier falls back to the brand, never to a
+  vendor string**. Pure, so every rule is testable.
+- Both surfaces now render through it. The metrics card aggregates to **one `NavBharatAI engine` row**
+  and points at the Admin Panel → *Provider Token Burn* for the genuine per-engine breakdown — an
+  admin-only surface by construction, which is the one place §3 actually permits vendor identity.
+  **Nothing the admin needs is lost; it just stops living inside a user-facing file.**
+- 🔒 **`tests/whiteLabelClientSurfaces.test.ts`** walks **every** `.ts`/`.tsx` under `src/components`,
+  `src/lib` and `src/hooks`, strips comments and imports, and fails on any **string literal** that
+  names a vendor, model family or Claude tier word. **Proven by injection**: adding
+  `const leak = "Powered by Claude Sonnet"` to `GalleryPanel.tsx` fails the suite by name.
+- A test also asserts the five tier labels stay **distinct and rankable** — five identical safe strings
+  would be white-label theatre, not a fix.
+
+### ⚠️ The allowlist, and why it is not a hole
+
+The law covers **which engine NavBharatAI ran**. It does **not** cover a third-party AI the **user** is
+adding to **their own app** — the API marketplace, the BYO-key recipes, the IDE's provider picker.
+Those are the user's integrations, chosen and paid for by them, and scrubbing them would break the
+feature. Each allowlisted file carries its reason in the test, alongside the two genuinely admin-only
+surfaces (`AdminDashboard.tsx`, `agentV3CostSummary.ts`). **A new file is guilty until listed**, so the
+default is safe.
+
+### Still open
+
+- The sweep covers **string literals in client source**. A provider name arriving from the SERVER at
+  runtime and rendered raw would pass it — which is precisely how the metrics card leaked
+  (`{provider}` was an interpolation, not a literal). That one is fixed at its source, but the general
+  case needs the server to redact before it serializes, not the client to notice. `providerRedaction.ts`
+  is the right home; wiring every admin/metrics payload through it is not done.
 ## 2026-09-14 — Five power tiers become three (admin: "inko simple 3 me badlo — weak, normal, strong. bas")
 
 **Slice 1 of 4** of the admin's engine-routing redesign (the others: per-mode ladders with "100% usi

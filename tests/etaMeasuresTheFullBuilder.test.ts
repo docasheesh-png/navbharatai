@@ -122,11 +122,19 @@ describe('the wiring — every piece of which fails NOTHING if dropped', () => {
     expect(file).toBeLessThan(step);
   });
 
-  it('the step branch re-anchors the fallback budget, as the file branch does', () => {
+  it('the step branch re-anchors the budget AND counts as evidence, as the file branch does', () => {
+    // Bounded by the branch's own closing `return;` rather than a byte count — a comment added later
+    // must not be able to push an assertion out of the window and turn a real guard into a pass.
     const at = route.indexOf('measuredRemainingFromSteps({ plannedSteps');
-    const near = route.slice(at, at + 900);
-    expect(near).toContain('etaTotalMs = elapsedMs + byStep');
-    expect(near).toContain('stepEtaText(');
+    expect(at).toBeGreaterThan(-1);
+    const end = route.indexOf('return;', at);
+    expect(end).toBeGreaterThan(at);
+    const branch = route.slice(at, end);
+    expect(branch).toContain('etaTotalMs = elapsedMs + byStep');
+    expect(branch).toContain('stepEtaText(');
+    // 🔴 Added on the #2932 / #2934 merge. Their file branch sets this; leaving it unset here would
+    // silently suppress the countdown for the rest of a build we HAD measured — and fail nothing.
+    expect(branch).toContain('etaEvidenced = true');
   });
 
   it('both counters only ever grow, so a shorter snapshot cannot walk the estimate backwards', () => {

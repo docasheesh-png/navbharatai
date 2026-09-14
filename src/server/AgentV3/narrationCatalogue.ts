@@ -69,6 +69,8 @@ export interface NarrationParams {
   'fix.pinnedDeps': { changed: string };
   /** Framework runtime deps re-added after a written package.json dropped them. */
   'fix.coreDeps': { added: string };
+  /** A dependency the workspace already had installed, re-added after a full-file rewrite dropped it. */
+  'fix.restoredDeps': { restored: string };
   /** Next.js middleware written somewhere it would never run, moved to the project root. */
   'fix.nextMiddlewareMoved': { from: string; to: string };
 }
@@ -121,6 +123,8 @@ const EN: Catalogue = {
     `🔧 Pinned known-breaking dependencies in package.json to their stable version (${changed}) so the install can't pull a version that bricks the build.`,
   'fix.coreDeps': ({ added }) =>
     `🔧 Kept the framework's core dependencies in package.json (${added}) so the dev server can't lose its own runtime.`,
+  'fix.restoredDeps': ({ restored }) =>
+    `🔧 Restored ${restored} in package.json — a rewrite had dropped it, but it was already installed and in use.`,
   'fix.nextMiddlewareMoved': ({ from, to }) =>
     `🔧 Moved \`${from}\` to \`${to}\` — Next.js only runs middleware from the project root, so the route guards were silently disabled where it was written.`,
 };

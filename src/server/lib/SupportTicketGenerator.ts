@@ -148,7 +148,7 @@ ticketRouter.get('/tickets', (req: Request, res: Response) => {
 
 // Get one ticket.
 ticketRouter.get('/tickets/:id', (req: Request, res: Response) => {
-  const t = tickets.get(req.params.id);
+  const t = tickets.get(routeParam(req.params.id));
   if (!t) return res.status(404).json({ error: 'ticket not found' });
   return res.status(200).json(t);
 });
@@ -157,7 +157,7 @@ ticketRouter.get('/tickets/:id', (req: Request, res: Response) => {
 ticketRouter.patch('/tickets/:id/status', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { status?: unknown };
   try {
-    const t = tickets.transition(req.params.id, String(body.status ?? '') as 'open');
+    const t = tickets.transition(routeParam(req.params.id), String(body.status ?? '') as 'open');
     return res.status(200).json(t);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'could not update';
@@ -170,7 +170,7 @@ ticketRouter.patch('/tickets/:id/status', (req: Request, res: Response) => {
 ticketRouter.patch('/tickets/:id/assign', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { assignee?: unknown };
   try {
-    const t = tickets.assign(req.params.id, body.assignee == null ? null : String(body.assignee));
+    const t = tickets.assign(routeParam(req.params.id), body.assignee == null ? null : String(body.assignee));
     return res.status(200).json(t);
   } catch {
     return res.status(404).json({ error: 'ticket not found' });
@@ -181,7 +181,7 @@ ticketRouter.patch('/tickets/:id/assign', (req: Request, res: Response) => {
 ticketRouter.post('/tickets/:id/comments', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { author?: unknown; body?: unknown };
   try {
-    const t = tickets.comment(req.params.id, String(body.author ?? ''), String(body.body ?? ''));
+    const t = tickets.comment(routeParam(req.params.id), String(body.author ?? ''), String(body.body ?? ''));
     return res.status(201).json(t);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'bad request';
@@ -203,6 +203,7 @@ back to another status). Files:
 
 \`\`\`ts
 import { ticketRouter } from './server/tickets/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', ticketRouter);
 \`\`\`
 

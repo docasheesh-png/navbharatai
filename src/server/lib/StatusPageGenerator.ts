@@ -175,7 +175,7 @@ statusRouter.post('/components', (req: Request, res: Response) => {
 statusRouter.patch('/components/:id', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { status?: unknown };
   try {
-    return res.status(200).json(statusPage.setComponentStatus(req.params.id, String(body.status ?? '') as ComponentStatus));
+    return res.status(200).json(statusPage.setComponentStatus(routeParam(req.params.id), String(body.status ?? '') as ComponentStatus));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'bad request';
     return res.status(message === 'component not found' ? 404 : 400).json({ error: message });
@@ -198,7 +198,7 @@ statusRouter.post('/incidents', (req: Request, res: Response) => {
 statusRouter.post('/incidents/:id/updates', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { status?: unknown; message?: unknown };
   try {
-    return res.status(200).json(statusPage.addUpdate(req.params.id, String(body.status ?? '') as IncidentStatus, String(body.message ?? '')));
+    return res.status(200).json(statusPage.addUpdate(routeParam(req.params.id), String(body.status ?? '') as IncidentStatus, String(body.message ?? '')));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'bad request';
     if (message === 'incident not found') return res.status(404).json({ error: message });
@@ -220,6 +220,7 @@ monitoring → resolved) — resolving stamps \`resolvedAt\` and a resolved inci
 
 \`\`\`ts
 import { statusRouter } from './server/status/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api/status', statusRouter);
 \`\`\`
 

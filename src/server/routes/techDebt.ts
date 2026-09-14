@@ -2,6 +2,7 @@ import type { Express, Request, Response } from 'express';
 import { loadDebt, recordDebt, prioritizeDebt, summarizeDebt, type IncomingFinding } from '../AppMakerLab/intelligence/TechnicalDebtTracker';
 import { requireWorkspaceAccess } from '../lib/WorkspaceAccess';
 import { validateBody, vobject, varray, vstring, venum } from '../lib/validate';
+import { routeParam, routeParams } from '../lib/expressCompat';
 
 /**
  * P-PME.3 — technical-debt register.
@@ -24,13 +25,13 @@ const recordSchema = vobject({
 
 export function registerTechDebtRoutes(app: Express): void {
   app.get('/api/techdebt/:userId/:projectId', requireWorkspaceAccess('userId'), async (req: Request, res: Response) => {
-    const items = prioritizeDebt(await loadDebt(req.params.userId, req.params.projectId));
+    const items = prioritizeDebt(await loadDebt(routeParam(req.params.userId), routeParam(req.params.projectId)));
     res.json({ items, summary: summarizeDebt(items) });
   });
 
   app.post('/api/techdebt/:userId/:projectId', requireWorkspaceAccess('userId'), validateBody(recordSchema), async (req: Request, res: Response) => {
     const findings = (req.body.findings || []) as IncomingFinding[];
-    const items = await recordDebt(req.params.userId, req.params.projectId, findings, new Date().toISOString());
+    const items = await recordDebt(routeParam(req.params.userId), routeParam(req.params.projectId), findings, new Date().toISOString());
     res.json({ items, summary: summarizeDebt(items) });
   });
 }

@@ -179,7 +179,7 @@ jobBoardRouter.patch('/jobs/:id/status', (req: Request, res: Response) => {
   const status = String(body.status ?? '');
   if (status !== 'open' && status !== 'closed') return res.status(400).json({ error: 'status must be open or closed' });
   try {
-    return res.status(200).json(jobBoard.setJobStatus(req.params.id, status));
+    return res.status(200).json(jobBoard.setJobStatus(routeParam(req.params.id), status));
   } catch (err) {
     return res.status(404).json({ error: err instanceof Error ? err.message : 'job not found' });
   }
@@ -189,7 +189,7 @@ jobBoardRouter.patch('/jobs/:id/status', (req: Request, res: Response) => {
 jobBoardRouter.post('/jobs/:id/apply', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { candidate?: unknown; note?: unknown };
   try {
-    return res.status(201).json(jobBoard.apply(req.params.id, String(body.candidate ?? ''), String(body.note ?? '')));
+    return res.status(201).json(jobBoard.apply(routeParam(req.params.id), String(body.candidate ?? ''), String(body.note ?? '')));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'could not apply';
     if (message === 'job not found') return res.status(404).json({ error: message });
@@ -203,14 +203,14 @@ jobBoardRouter.get('/jobs/:id/applications', (req: Request, res: Response) => {
   const q = req.query as { status?: string };
   const valid = ['applied', 'screening', 'interview', 'offer', 'hired', 'rejected'];
   const status = valid.includes(String(q.status)) ? (q.status as 'applied') : undefined;
-  return res.status(200).json(jobBoard.applicationsForJob(req.params.id, { status }));
+  return res.status(200).json(jobBoard.applicationsForJob(routeParam(req.params.id), { status }));
 });
 
 // Advance an application along the pipeline. { status } — 409 on an invalid transition.
 jobBoardRouter.patch('/applications/:id/status', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { status?: unknown };
   try {
-    return res.status(200).json(jobBoard.advance(req.params.id, String(body.status ?? '') as 'screening'));
+    return res.status(200).json(jobBoard.advance(routeParam(req.params.id), String(body.status ?? '') as 'screening'));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'could not advance';
     if (message === 'application not found') return res.status(404).json({ error: message });
@@ -232,6 +232,7 @@ accept applications. Files:
 
 \`\`\`ts
 import { jobBoardRouter } from './server/jobboard/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', jobBoardRouter);
 \`\`\`
 

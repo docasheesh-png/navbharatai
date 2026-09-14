@@ -14,6 +14,7 @@ import {
   generateApiKey, hashApiKey, normalizeScopes, extractApiKey, hasScope, API_SCOPES, type ApiScope,
 } from '../lib/ApiKeyManager';
 import { apiKeyStore } from '../lib/ApiKeyStore';
+import { routeParam, routeParams } from '../lib/expressCompat';
 
 /** Auth context attached to a request authenticated by an API key. */
 interface ApiKeyContext { userId: string; keyId: string; scopes: string[]; }
@@ -102,9 +103,9 @@ export function registerApiKeyRoutes(app: Express): void {
   app.delete('/api/keys/:id', async (req: Request, res: Response) => {
     const userId = await verifyFirebaseToken(req);
     if (!userId) return res.status(401).json({ error: 'Authentication required.' });
-    const revoked = await apiKeyStore.revoke(userId, req.params.id);
+    const revoked = await apiKeyStore.revoke(userId, routeParam(req.params.id));
     if (!revoked) return res.status(404).json({ error: 'Key not found or not yours.' });
-    return res.json({ ok: true, id: req.params.id });
+    return res.json({ ok: true, id: routeParam(req.params.id) });
   });
 
   // ── v1 data endpoint — authenticated by API KEY + scope. Proves keys work end-to-end. ──

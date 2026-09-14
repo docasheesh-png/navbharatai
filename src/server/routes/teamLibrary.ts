@@ -5,6 +5,7 @@ import { listMembers } from '../lib/TeamStore';
 import { teamLibraryStore, buildLibraryItem, normalizeKind, type LibraryKind } from '../lib/TeamLibraryStore';
 import { resolveMentions } from '../lib/MentionRouter';
 import { mentionNotificationStore, deliverMentions } from '../lib/MentionNotificationStore';
+import { routeParam, routeParams } from '../lib/expressCompat';
 
 /**
  * P-COLLAB.4 — team-scoped shared library (prompts / templates / components).
@@ -33,7 +34,7 @@ async function activeMemberUid(req: Request, teamId: string): Promise<string | n
 export function registerTeamLibraryRoutes(app: Express): void {
   // P-COLLAB.5 (resolution core) — resolve @mentions in a text to the team's ACTIVE members.
   app.post('/api/team/:teamId/mentions/resolve', async (req: Request, res: Response) => {
-    const teamId = String(req.params.teamId || '');
+    const teamId = String(routeParam(req.params.teamId) || '');
     const uid = await activeMemberUid(req, teamId);
     if (!uid) return res.status(403).json({ error: 'Active team membership required.' });
     const text = typeof req.body?.text === 'string' ? req.body.text : '';
@@ -46,7 +47,7 @@ export function registerTeamLibraryRoutes(app: Express): void {
   // P-COLLAB.5 (delivery) — DELIVER an @mention: store a notification in each tagged member's inbox.
   // Called when a message with mentions is actually sent (not on every keystroke preview).
   app.post('/api/team/:teamId/mentions/notify', async (req: Request, res: Response) => {
-    const teamId = String(req.params.teamId || '');
+    const teamId = String(routeParam(req.params.teamId) || '');
     const uid = await activeMemberUid(req, teamId);
     if (!uid) return res.status(403).json({ error: 'Active team membership required.' });
     const text = typeof req.body?.text === 'string' ? req.body.text.slice(0, 4000) : '';
@@ -97,7 +98,7 @@ export function registerTeamLibraryRoutes(app: Express): void {
   });
 
   app.get('/api/team/:teamId/library', async (req: Request, res: Response) => {
-    const teamId = String(req.params.teamId || '');
+    const teamId = String(routeParam(req.params.teamId) || '');
     const uid = await activeMemberUid(req, teamId);
     if (!uid) return res.status(403).json({ error: 'Active team membership required.' });
     const kind = typeof req.query.kind === 'string' ? normalizeKind(req.query.kind) : undefined;
@@ -106,7 +107,7 @@ export function registerTeamLibraryRoutes(app: Express): void {
   });
 
   app.post('/api/team/:teamId/library', async (req: Request, res: Response) => {
-    const teamId = String(req.params.teamId || '');
+    const teamId = String(routeParam(req.params.teamId) || '');
     const uid = await activeMemberUid(req, teamId);
     if (!uid) return res.status(403).json({ error: 'Active team membership required.' });
     const item = buildLibraryItem({
@@ -121,10 +122,10 @@ export function registerTeamLibraryRoutes(app: Express): void {
   });
 
   app.delete('/api/team/:teamId/library/:itemId', async (req: Request, res: Response) => {
-    const teamId = String(req.params.teamId || '');
+    const teamId = String(routeParam(req.params.teamId) || '');
     const uid = await activeMemberUid(req, teamId);
     if (!uid) return res.status(403).json({ error: 'Active team membership required.' });
-    const removed = await teamLibraryStore.remove(teamId, String(req.params.itemId || ''));
+    const removed = await teamLibraryStore.remove(teamId, String(routeParam(req.params.itemId) || ''));
     if (!removed) return res.status(404).json({ error: 'Item not found.' });
     return res.json({ ok: true });
   });

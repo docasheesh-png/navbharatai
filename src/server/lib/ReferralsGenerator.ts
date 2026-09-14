@@ -139,7 +139,7 @@ export const referralRouter = Router();
 // Get (or create) the caller's own referral code. In production, take the user from the auth session.
 referralRouter.get('/referrals/:user/code', (req: Request, res: Response) => {
   try {
-    return res.status(200).json({ user: req.params.user, code: referrals.codeFor(req.params.user) });
+    return res.status(200).json({ user: routeParam(req.params.user), code: referrals.codeFor(routeParam(req.params.user)) });
   } catch (err) {
     return res.status(400).json({ error: err instanceof Error ? err.message : 'bad request' });
   }
@@ -159,14 +159,14 @@ referralRouter.post('/referrals/attribute', (req: Request, res: Response) => {
 
 // Mark a referred user's qualifying event complete → credit the referrer once (idempotent).
 referralRouter.post('/referrals/:referred/complete', (req: Request, res: Response) => {
-  const ref = referrals.complete(req.params.referred);
+  const ref = referrals.complete(routeParam(req.params.referred));
   if (!ref) return res.status(404).json({ error: 'user was not referred' });
   return res.status(200).json(ref);
 });
 
 // A referrer's stats (total / pending / completed) — the basis for reward payout.
 referralRouter.get('/referrals/:referrer/stats', (req: Request, res: Response) => {
-  return res.status(200).json({ referrer: req.params.referrer, ...referrals.statsFor(req.params.referrer) });
+  return res.status(200).json({ referrer: routeParam(req.params.referrer), ...referrals.statsFor(routeParam(req.params.referrer)) });
 });
 `;
 
@@ -183,6 +183,7 @@ completion never double-credits. Files:
 
 \`\`\`ts
 import { referralRouter } from './server/referrals/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', referralRouter);
 \`\`\`
 

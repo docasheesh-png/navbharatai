@@ -16,6 +16,7 @@ import {
 import { professionalPassStore } from '../professionals/ProfessionalPassStore';
 import { professionalUsageStore } from '../professionals/ProfessionalUsageStore';
 import { gateProfessionalTurn } from '../professionals/passGate';
+import { routeParam, routeParams } from '../lib/expressCompat';
 // ATTACHMENT RECALL (admin 2026-08-19) — the sibling of Doctor AI's report memory: a file's
 // vision-derived text is remembered for this conversation so the NEXT turn can still answer from it.
 import {
@@ -74,9 +75,9 @@ export function registerProfessionalsRoutes(app: Express): void {
   });
 
   app.post('/api/professional/:id/chat', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
-    const config = getProfessional(req.params.id);
+    const config = getProfessional(routeParam(req.params.id));
     if (!config) {
-      res.status(404).json({ error: `Unknown professional: ${req.params.id}` });
+      res.status(404).json({ error: `Unknown professional: ${routeParam(req.params.id)}` });
       return;
     }
     const { message, history, fileAttachments } = req.body || {};

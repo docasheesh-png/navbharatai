@@ -118,8 +118,8 @@ export const reactionRouter = Router();
 reactionRouter.post('/:targetId', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { userId?: unknown; emoji?: unknown };
   try {
-    reactions.react(req.params.targetId, String(body.userId ?? ''), String(body.emoji ?? ''));
-    return res.status(200).json(reactions.summary(req.params.targetId, String(body.userId ?? '')));
+    reactions.react(routeParam(req.params.targetId), String(body.userId ?? ''), String(body.emoji ?? ''));
+    return res.status(200).json(reactions.summary(routeParam(req.params.targetId), String(body.userId ?? '')));
   } catch (err) {
     return res.status(400).json({ error: err instanceof Error ? err.message : 'bad request' });
   }
@@ -129,8 +129,8 @@ reactionRouter.post('/:targetId', (req: Request, res: Response) => {
 reactionRouter.delete('/:targetId', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { userId?: unknown };
   try {
-    reactions.unreact(req.params.targetId, String(body.userId ?? ''));
-    return res.status(200).json(reactions.summary(req.params.targetId, String(body.userId ?? '')));
+    reactions.unreact(routeParam(req.params.targetId), String(body.userId ?? ''));
+    return res.status(200).json(reactions.summary(routeParam(req.params.targetId), String(body.userId ?? '')));
   } catch (err) {
     return res.status(400).json({ error: err instanceof Error ? err.message : 'bad request' });
   }
@@ -139,7 +139,7 @@ reactionRouter.delete('/:targetId', (req: Request, res: Response) => {
 // Reaction summary for a target. ?viewer=<userId> to include the viewer's own emoji.
 reactionRouter.get('/:targetId', (req: Request, res: Response) => {
   try {
-    return res.status(200).json(reactions.summary(req.params.targetId, String(req.query.viewer ?? '')));
+    return res.status(200).json(reactions.summary(routeParam(req.params.targetId), String(req.query.viewer ?? '')));
   } catch (err) {
     return res.status(400).json({ error: err instanceof Error ? err.message : 'bad request' });
   }
@@ -159,6 +159,7 @@ replaces the old one), so per-emoji counts are **always exact**. Files:
 
 \`\`\`ts
 import { reactionRouter } from './server/reactions/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api/reactions', reactionRouter);
 \`\`\`
 

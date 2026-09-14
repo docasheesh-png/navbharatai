@@ -143,6 +143,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   const routerFile = `import { Router } from 'express';
 import { prisma } from '../lib/prisma';
 import { asyncHandler } from '../middleware/errorHandler';
+import { routeParam, routeParams } from './expressCompat';
 ${guardImport}import { create${Model}Schema, update${Model}Schema } from '../validation/${route}.schema';
 
 const router = Router();
@@ -172,7 +173,7 @@ router.get('/', asyncHandler(async (req, res) => {
 
 // GET one (excludes soft-deleted).
 router.get('/:id', asyncHandler(async (req, res) => {
-  const item = await prisma.${model}.findFirst({ where: { id: req.params.id, deletedAt: null } });
+  const item = await prisma.${model}.findFirst({ where: { id: routeParam(req.params.id), deletedAt: null } });
   if (!item) { res.status(404).json({ error: '${Model} not found' }); return; }
   res.json(item);
 }));
@@ -187,17 +188,17 @@ router.post('/', ${guardArg}asyncHandler(async (req, res) => {
 // UPDATE (validated, partial).
 router.patch('/:id', ${guardArg}asyncHandler(async (req, res) => {
   const data = update${Model}Schema.parse(req.body);
-  const existing = await prisma.${model}.findFirst({ where: { id: req.params.id, deletedAt: null } });
+  const existing = await prisma.${model}.findFirst({ where: { id: routeParam(req.params.id), deletedAt: null } });
   if (!existing) { res.status(404).json({ error: '${Model} not found' }); return; }
-  const updated = await prisma.${model}.update({ where: { id: req.params.id }, data });
+  const updated = await prisma.${model}.update({ where: { id: routeParam(req.params.id) }, data });
   res.json(updated);
 }));
 
 // DELETE — SOFT delete (sets deletedAt), so the row is recoverable and audit history survives.
 router.delete('/:id', ${guardArg}asyncHandler(async (req, res) => {
-  const existing = await prisma.${model}.findFirst({ where: { id: req.params.id, deletedAt: null } });
+  const existing = await prisma.${model}.findFirst({ where: { id: routeParam(req.params.id), deletedAt: null } });
   if (!existing) { res.status(404).json({ error: '${Model} not found' }); return; }
-  await prisma.${model}.update({ where: { id: req.params.id }, data: { deletedAt: new Date() } });
+  await prisma.${model}.update({ where: { id: routeParam(req.params.id) }, data: { deletedAt: new Date() } });
   res.status(204).end();
 }));
 

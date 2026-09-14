@@ -148,16 +148,16 @@ feedbackRouter.get('/feedback', (req: Request, res: Response) => {
 });
 
 feedbackRouter.get('/feedback/:id', (req: Request, res: Response) => {
-  const p = feedback.get(req.params.id);
+  const p = feedback.get(routeParam(req.params.id));
   if (!p) return res.status(404).json({ error: 'post not found' });
-  return res.status(200).json({ ...p, votedByYou: feedback.hasVoted(req.params.id, String((req.query as { user?: string }).user ?? '')) });
+  return res.status(200).json({ ...p, votedByYou: feedback.hasVoted(routeParam(req.params.id), String((req.query as { user?: string }).user ?? '')) });
 });
 
 // Upvote / un-vote. { user } — idempotent.
 feedbackRouter.post('/feedback/:id/upvote', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { user?: unknown };
   try {
-    return res.status(200).json(feedback.upvote(req.params.id, String(body.user ?? '')));
+    return res.status(200).json(feedback.upvote(routeParam(req.params.id), String(body.user ?? '')));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'could not vote';
     return res.status(message === 'post not found' ? 404 : 400).json({ error: message });
@@ -167,7 +167,7 @@ feedbackRouter.post('/feedback/:id/upvote', (req: Request, res: Response) => {
 feedbackRouter.delete('/feedback/:id/upvote', (req: Request, res: Response) => {
   const q = req.query as { user?: string };
   try {
-    return res.status(200).json(feedback.unvote(req.params.id, String(q.user ?? '')));
+    return res.status(200).json(feedback.unvote(routeParam(req.params.id), String(q.user ?? '')));
   } catch (err) {
     return res.status(404).json({ error: err instanceof Error ? err.message : 'post not found' });
   }
@@ -177,7 +177,7 @@ feedbackRouter.delete('/feedback/:id/upvote', (req: Request, res: Response) => {
 feedbackRouter.patch('/feedback/:id/status', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { status?: unknown };
   try {
-    return res.status(200).json(feedback.setStatus(req.params.id, String(body.status ?? '') as 'planned'));
+    return res.status(200).json(feedback.setStatus(routeParam(req.params.id), String(body.status ?? '') as 'planned'));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'could not update';
     if (message === 'post not found') return res.status(404).json({ error: message });
@@ -199,6 +199,7 @@ only. Files:
 
 \`\`\`ts
 import { feedbackRouter } from './server/feedback/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', feedbackRouter);
 \`\`\`
 

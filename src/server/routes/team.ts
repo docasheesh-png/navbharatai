@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import type { Express, Request, Response, NextFunction } from 'express';
 import { audit } from '../lib/audit';
 import { verifyFirebaseToken, setUserRole } from '../lib/authMiddleware';
+import { routeParam, routeParams } from '../lib/expressCompat';
 import {
   buildInviteRecord,
   buildMemberRecord,
@@ -91,7 +92,7 @@ export function registerTeamRoutes(app: Express): void {
   // Resolve an invite by token so the accept screen can show who/what it's for. Public: the token is
   // the capability. Returns only non-sensitive fields (never the inviter or internal ids).
   app.get('/api/team/invite/:token', async (req: Request, res: Response) => {
-    const token = String(req.params.token || '');
+    const token = String(routeParam(req.params.token) || '');
     if (!token) return res.status(400).json({ valid: false, error: 'token required' });
     const invite = await getInvite(token);
     if (!invite) return res.status(404).json({ valid: false, error: 'Invite not found or no longer available.' });
@@ -135,8 +136,8 @@ export function registerTeamRoutes(app: Express): void {
   });
 
   // List a team's members (owner/admin only).
-  app.get('/api/team/:teamId/members', requireTeamManager((req) => String(req.params.teamId || '')), async (req: Request, res: Response) => {
-    const teamId = String(req.params.teamId || '');
+  app.get('/api/team/:teamId/members', requireTeamManager((req) => String(routeParam(req.params.teamId) || '')), async (req: Request, res: Response) => {
+    const teamId = String(routeParam(req.params.teamId) || '');
     if (!teamId) return res.status(400).json({ error: 'teamId required' });
     const members = await listMembers(teamId);
     return res.json({ members });
@@ -144,10 +145,10 @@ export function registerTeamRoutes(app: Express): void {
 
   // Revoke a pending invite (owner/admin only).
   app.post('/api/team/invite/:token/revoke', requireTeamManager(async (req) => {
-    const inv = await getInvite(String(req.params.token || '')).catch(() => null);
+    const inv = await getInvite(String(routeParam(req.params.token) || '')).catch(() => null);
     return inv?.teamId || '';
   }), async (req: Request, res: Response) => {
-    const token = String(req.params.token || '');
+    const token = String(routeParam(req.params.token) || '');
     if (!token) return res.status(400).json({ error: 'token required' });
     await setInviteStatus(token, 'revoked');
     audit('TEAM_INVITE_REVOKED', { token });

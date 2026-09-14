@@ -8,6 +8,7 @@ import { ticketFor } from '../lib/vaultTicketHttp';
 import { auditVault } from '../lib/vaultAudit';
 import { allowAfterCooldown } from '../lib/callCooldown';
 import { probeCredentials, realProbeFetch } from '../AgentV3/credentialProbe';
+import { routeParam, routeParams } from '../lib/expressCompat';
 
 /** Shortest gap between two verify calls from one user. In-memory: a throttle, not an audit record. */
 export const VERIFY_COOLDOWN_MS = 5_000;
@@ -57,7 +58,7 @@ export function registerSecretsRoutes(app: Express): void {
   app.get('/api/secrets/:userId', requireUserMatch('userId'), trackDevice('userId'), async (req: Request, res: Response) => {
     const db = getDb() as any;
     try {
-      const { userId } = req.params;
+      const { userId } = routeParams(req.params);
       const secretsSnapshot = await getDocs(query(collection(db, 'user_secrets'), where('user_id', '==', userId)));
       // Return ONLY the metadata the UI needs (name + timestamp) — never the encrypted value. The
       // ciphertext has no reason to leave the server, and the client only ever renders the name.
@@ -82,7 +83,7 @@ export function registerSecretsRoutes(app: Express): void {
   app.post('/api/secrets/:userId', requireUserMatch('userId'), async (req: Request, res: Response) => {
     const db = getDb() as any;
     try {
-      const { userId } = req.params;
+      const { userId } = routeParams(req.params);
       const { secret_name, secret_value, workspace_id } = req.body;
       const encryptedValue = encrypt(secret_value);
       // WHICH APP IS THIS KEY FOR? (admin 2026-08-17). Absent/empty ⇒ SHARED with every app, which is
@@ -152,7 +153,7 @@ export function registerSecretsRoutes(app: Express): void {
   // version of the bug this fixes. We store it and tell the truth about it.
   app.post('/api/secrets/:userId/verify', requireUserMatch('userId'), async (req: Request, res: Response) => {
     try {
-      const { userId } = req.params;
+      const { userId } = routeParams(req.params);
       // Each call can fan out to MAX_PROBES outbound requests, so one caller must not be able to loop on
       // it. A short per-user cooldown keeps the button honest without needing shared state.
       if (!allowVerify(verifyCooldown, userId, Date.now())) {
@@ -187,7 +188,7 @@ export function registerSecretsRoutes(app: Express): void {
   app.patch('/api/secrets/:userId/:secretId/scope', requireUserMatch('userId'), async (req: Request, res: Response) => {
     const db = getDb() as any;
     try {
-      const { userId, secretId } = req.params;
+      const { userId, secretId } = routeParams(req.params);
       const ref = doc(db, 'user_secrets', secretId);
       const snap = await getDoc(ref);
       // Same IDOR guard as the delete route, for the same reason: this collection is FLAT, so matching
@@ -258,7 +259,7 @@ export function registerSecretsRoutes(app: Express): void {
   app.delete('/api/secrets/:userId/:secretId', requireUserMatch('userId'), async (req: Request, res: Response) => {
     const db = getDb() as any;
     try {
-      const { userId, secretId } = req.params;
+      const { userId, secretId } = routeParams(req.params);
       const ref = doc(db, 'user_secrets', secretId);
       const snap = await getDoc(ref);
       // IDOR guard: user_secrets is a FLAT collection, so requireUserMatch (caller === :userId) is
@@ -312,7 +313,7 @@ export function registerSecretsRoutes(app: Express): void {
   app.post('/api/secrets/:userId/reveal', requireUserMatch('userId'), async (req: Request, res: Response) => {
     const db = getDb() as any;
     try {
-      const { userId } = req.params;
+      const { userId } = routeParams(req.params);
       const unlock = ticketFor(req, userId);
       if (!unlock) {
         res.status(401).json({ error: 'Unlock the vault to see your keys.', needsUnlock: true });

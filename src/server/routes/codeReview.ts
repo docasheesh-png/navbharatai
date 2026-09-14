@@ -5,6 +5,7 @@ import { workspaceRateLimiter } from '../lib/authMiddleware';
 import { validateBody, vobject, vstring, vnumber, vboolean } from '../lib/validate';
 import { codeReviewStore, buildComment, buildReply } from '../lib/CodeReviewStore';
 import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
+import { routeParam, routeParams } from '../lib/expressCompat';
 
 /**
  * The one gate every route in this file goes through: a VERIFIED identity that OWNS the named
@@ -16,7 +17,7 @@ import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
 async function ownedWorkspace(req: Request, res: Response, action: string): Promise<{ uid: string; workspaceId: string } | null> {
   const uid = await verifyFirebaseToken(req);
   if (!uid) { res.status(401).json({ error: `Sign in to ${action}.` }); return null; }
-  const workspaceId = String(req.params.workspaceId || '');
+  const workspaceId = String(routeParam(req.params.workspaceId) || '');
   if (!ownedByVerifiedUid(uid, workspaceId)) {
     // 404, not 403 — see the header. Confirming the id exists is half of what a prober wants.
     res.status(404).json({ error: 'Workspace not found.' });
@@ -77,7 +78,7 @@ export function registerCodeReviewRoutes(app: Express): void {
     const owned = await ownedWorkspace(req, res, 'resolve a comment');
     if (!owned) return;
     const { resolved } = req.body as { resolved: boolean };
-    const ok = await codeReviewStore.resolve(owned.workspaceId, String(req.params.id || ''), resolved);
+    const ok = await codeReviewStore.resolve(owned.workspaceId, String(routeParam(req.params.id) || ''), resolved);
     if (!ok) { res.status(404).json({ error: 'Comment not found.' }); return; }
     res.json({ ok: true });
   });
@@ -87,7 +88,7 @@ export function registerCodeReviewRoutes(app: Express): void {
     if (!owned) return;
     const reply = buildReply({ author: owned.uid, body: (req.body as { body: string }).body, now: Date.now() });
     if (!reply) { res.status(400).json({ error: 'A non-empty reply is required.' }); return; }
-    const ok = await codeReviewStore.reply(owned.workspaceId, String(req.params.id || ''), reply);
+    const ok = await codeReviewStore.reply(owned.workspaceId, String(routeParam(req.params.id) || ''), reply);
     if (!ok) { res.status(404).json({ error: 'Comment not found.' }); return; }
     res.status(201).json({ reply });
   });

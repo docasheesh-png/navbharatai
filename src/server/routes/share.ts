@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import type { Express, Request, Response } from 'express';
 import { audit } from '../lib/audit';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
+import { routeParam, routeParams } from '../lib/expressCompat';
 import {
   buildShareRecord,
   buildFeedback,
@@ -63,7 +64,7 @@ export function registerShareRoutes(app: Express): void {
 
   // Resolve a share for the read-only viewer (public — the token is the capability).
   app.get('/api/share/:token', async (req: Request, res: Response) => {
-    const token = String(req.params.token || '');
+    const token = String(routeParam(req.params.token) || '');
     if (!token) return res.status(400).json({ valid: false, error: 'token required' });
     const share = await getShare(token);
     if (!share) return res.status(404).json({ valid: false, error: 'This shared app is not available.' });
@@ -75,7 +76,7 @@ export function registerShareRoutes(app: Express): void {
 
   // Leave feedback/approval on a shared app (public — clients aren't members).
   app.post('/api/share/:token/feedback', async (req: Request, res: Response) => {
-    const token = String(req.params.token || '');
+    const token = String(routeParam(req.params.token) || '');
     if (!token) return res.status(400).json({ error: 'token required' });
     const share = await getShare(token);
     if (!isShareValid(share, Date.now())) {
@@ -92,7 +93,7 @@ export function registerShareRoutes(app: Express): void {
   app.get('/api/share/:token/feedback', async (req: Request, res: Response) => {
     const uid = await verifyFirebaseToken(req);
     if (!uid) return res.status(401).json({ error: 'Authentication required.' });
-    const token = String(req.params.token || '');
+    const token = String(routeParam(req.params.token) || '');
     const share = await getShare(token);
     if (share && share.ownerId && share.ownerId !== uid) {
       return res.status(403).json({ error: 'Only the share owner can view its feedback.' });
@@ -105,7 +106,7 @@ export function registerShareRoutes(app: Express): void {
   app.post('/api/share/:token/revoke', async (req: Request, res: Response) => {
     const uid = await verifyFirebaseToken(req);
     if (!uid) return res.status(401).json({ error: 'Authentication required.' });
-    const token = String(req.params.token || '');
+    const token = String(routeParam(req.params.token) || '');
     const share = await getShare(token);
     if (share && share.ownerId && share.ownerId !== uid) {
       return res.status(403).json({ error: 'Only the share owner can revoke it.' });

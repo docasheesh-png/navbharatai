@@ -536,6 +536,7 @@ import {
 import { adminRequestOk } from '../lib/adminAuth';
 import { previewFidelityCaveats, previewFidelityNotice } from '../AgentV3/previewFidelity';
 import { journeyUserSummary } from '../AgentV3/journeyUserSummary';
+import { routeParam, routeParams } from '../lib/expressCompat';
 
 /**
  * The one user-facing sentence for "the builder is switched off on this server".
@@ -3399,7 +3400,7 @@ export function registerAgentV3Routes(app: Express): void {
       // opening such an entry restores the REAL transcript instead of an empty local copy.
       const store = getConversationStore();
       let rec: Awaited<ReturnType<typeof store.get>> = null;
-      for (const cid of candidateConversationIds(req.params.id, userId)) {
+      for (const cid of candidateConversationIds(routeParam(req.params.id), userId)) {
         // This is THE reopen path — the one consumer that renders the evidence layer, so it alone
         // asks for the timeline (hot-path get() calls elsewhere skip those reads).
         rec = await store.get(cid, { includeTimeline: true }).catch(() => null);
@@ -3455,7 +3456,7 @@ export function registerAgentV3Routes(app: Express): void {
       // and reappear on the next list (the "ghost row" bug).
       let removed = false;
       let forbidden = false;
-      for (const cid of candidateConversationIds(req.params.id, userId)) {
+      for (const cid of candidateConversationIds(routeParam(req.params.id), userId)) {
         const rec = await store.get(cid).catch(() => null);
         const access = conversationAccess(rec, userId);
         if (access === 'ok') {
@@ -3508,7 +3509,7 @@ export function registerAgentV3Routes(app: Express): void {
       const store = getConversationStore();
       let updated = false;
       let forbidden = false;
-      for (const cid of candidateConversationIds(req.params.id, userId)) {
+      for (const cid of candidateConversationIds(routeParam(req.params.id), userId)) {
         const rec = await store.get(cid).catch(() => null);
         const access = conversationAccess(rec, userId);
         if (access === 'ok' && rec) {
@@ -3577,7 +3578,7 @@ export function registerAgentV3Routes(app: Express): void {
     const store = getConversationStore();
     let source: Awaited<ReturnType<typeof store.get>> = null;
     let forbidden = false;
-    for (const cid of candidateConversationIds(req.params.id, userId)) {
+    for (const cid of candidateConversationIds(routeParam(req.params.id), userId)) {
       const rec = await store.get(cid).catch(() => null);
       const access = conversationAccess(rec, userId);
       if (access === 'ok' && rec) { source = rec; break; }
@@ -3637,7 +3638,7 @@ export function registerAgentV3Routes(app: Express): void {
       // the loop below, so carrying the two fields is what keeps the rule readable at the call sites.
       let renamed: { id: string; repoName?: string; deployRepoName?: string } | null = null;
       let forbidden = false;
-      for (const cid of candidateConversationIds(req.params.id, userId)) {
+      for (const cid of candidateConversationIds(routeParam(req.params.id), userId)) {
         const rec = await store.get(cid).catch(() => null);
         const access = conversationAccess(rec, userId);
         if (access !== 'ok' || !rec) {
@@ -3653,14 +3654,14 @@ export function registerAgentV3Routes(app: Express): void {
         // WHICH REPO TO MOVE. A pinned name is a fact and always wins. When none is pinned yet — the
         // normal state right after a first build, since the record is created only late in that
         // request — reconstruct the name the build path would have derived, from the SAME immutable
-        // inputs (`title` + `createdAt`) and the same project id the builder uses (`req.params.id` is
+        // inputs (`title` + `createdAt`) and the same project id the builder uses (`routeParam(req.params.id)` is
         // the client's sessionId, which is exactly that). A reconstruction that misses simply 404s and
         // is reported honestly; it can never rename the wrong repo, because the name is derived from
         // this record's own identity.
         renamed = {
           id: cid,
           deployRepoName: rec.deployRepoName,
-          repoName: rec.repoName || repoNameForProject(userId, req.params.id, {
+          repoName: rec.repoName || repoNameForProject(userId, routeParam(req.params.id), {
             appName: rec.title,
             createdAtMs: typeof rec.createdAt === 'number' && rec.createdAt > 0 ? rec.createdAt : Date.now(),
           }),

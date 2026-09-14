@@ -182,7 +182,7 @@ teamRouter.get('/', (req: Request, res: Response) => {
 // Members of a workspace.
 teamRouter.get('/:id/members', (req: Request, res: Response) => {
   try {
-    return res.status(200).json(teams.membersList(req.params.id));
+    return res.status(200).json(teams.membersList(routeParam(req.params.id)));
   } catch (err) {
     return res.status(404).json({ error: err instanceof Error ? err.message : 'workspace not found' });
   }
@@ -192,7 +192,7 @@ teamRouter.get('/:id/members', (req: Request, res: Response) => {
 teamRouter.post('/:id/invites', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { email?: unknown; role?: unknown };
   try {
-    return res.status(201).json(teams.invite(req.params.id, String(body.email ?? ''), (body.role as Role) ?? 'member'));
+    return res.status(201).json(teams.invite(routeParam(req.params.id), String(body.email ?? ''), (body.role as Role) ?? 'member'));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'bad request';
     return res.status(message === 'workspace not found' ? 404 : 400).json({ error: message });
@@ -214,7 +214,7 @@ teamRouter.post('/invites/accept', (req: Request, res: Response) => {
 teamRouter.patch('/:id/members/:userId', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { role?: unknown };
   try {
-    return res.status(200).json(teams.setRole(req.params.id, req.params.userId, (body.role as Role)));
+    return res.status(200).json(teams.setRole(routeParam(req.params.id), routeParam(req.params.userId), (body.role as Role)));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'bad request';
     if (message === 'workspace not found' || message === 'member not found') return res.status(404).json({ error: message });
@@ -225,7 +225,7 @@ teamRouter.patch('/:id/members/:userId', (req: Request, res: Response) => {
 // Remove a member. 409 if it would remove the last owner.
 teamRouter.delete('/:id/members/:userId', (req: Request, res: Response) => {
   try {
-    if (!teams.removeMember(req.params.id, req.params.userId)) return res.status(404).json({ error: 'member not found' });
+    if (!teams.removeMember(routeParam(req.params.id), routeParam(req.params.userId))) return res.status(404).json({ error: 'member not found' });
     return res.status(204).send();
   } catch (err) {
     const message = err instanceof Error ? err.message : 'bad request';
@@ -247,6 +247,7 @@ workspace **always keeps at least one owner** (you can't remove or demote the la
 
 \`\`\`ts
 import { teamRouter } from './server/teams/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api/workspaces', teamRouter);
 \`\`\`
 

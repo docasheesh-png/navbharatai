@@ -181,7 +181,7 @@ couponRouter.post('/coupons/redeem', (req: Request, res: Response) => {
 // Coupon usage stats.
 couponRouter.get('/coupons/:code/stats', (req: Request, res: Response) => {
   try {
-    return res.status(200).json(coupons.stats(req.params.code));
+    return res.status(200).json(coupons.stats(routeParam(req.params.code)));
   } catch (err) {
     return res.status(404).json({ error: err instanceof Error ? err.message : 'unknown coupon' });
   }
@@ -200,6 +200,7 @@ correctly — **percentage** (capped at the order total) or **fixed** (never bel
 
 \`\`\`ts
 import { couponRouter } from './server/coupons/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', couponRouter);
 \`\`\`
 

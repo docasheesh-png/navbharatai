@@ -53537,3 +53537,67 @@ file has now been burned by three times.
 **Also on 2026-09-14:** #2914 merged (`ff9cd845`) after its own session resolved the #2917 overlap and
 CI went green on `802eaa7e`; the full gate was re-run locally on main+#2914 before the merge, per the
 concurrent-sessions rule that a gate run before a merge proves nothing.
+
+---
+
+## 2026-09-14 — THE TESTING NOTICE SAT HALF OFF THE LEFT EDGE OF A REAL PHONE (admin screenshot)
+
+**The report.** The 3-second home-screen testing notice (#2914) appeared cropped: only its right-hand
+portion was on screen — *"active testing"*, *"work, please report it —"*, *"…BLEM"*. Admin: *"yeh popup
+mobile ke mid me ana chahiye, dekho side me aa raha hai, crop ho raha hai."*
+
+**ROOT CAUSE — the card centred itself TWICE, and the two ADD.** The element carried
+`left-1/2 -translate-x-1/2`, and the entry/exit keyframes carried `transform: translate(-50%, …)`. That
+reads as harmless duplication. It is not. **Tailwind v4 compiles `-translate-x-1/2` to the STANDALONE
+`translate` property**, confirmed by reading the built stylesheet rather than the docs:
+
+```css
+.-translate-x-1\/2 { --tw-translate-x:-50%; translate: var(--tw-translate-x) var(--tw-translate-y) }
+@keyframes nb-testing-notice-in { ... to { transform: translate(-50%) } }
+```
+
+CSS applies `translate` **first** and `transform` **after**, so they compose to **−100% of the card's own
+width**: its RIGHT edge lands on the screen's centre line and everything left of that is off-screen.
+
+**MEASURED, NOT ARGUED — both directions, in real Chromium at a 390px viewport:**
+
+| | left | right | on screen? |
+|---|---|---|---|
+| old (shipped) | **−163.0** | **195.0** ( = 390/2, the centre line) | **no** |
+| fixed | 16.0 | 374.0 | yes, gaps 16/16 |
+
+The fixed layout was measured at 320 / 360 / 390 / 768 px: centred at every width, never cropped, width
+capped at `max-w-md` on the tablet width.
+
+**🔴 WHY NOBODY CAUGHT IT, AND WHY THAT MATTERS MORE THAN THE BUG.** Under **Tailwind v3 the same
+utility compiled INTO `transform`**, where the animation simply REPLACED it — the pair was genuinely
+correct when it was written. The v4 upgrade changed the compilation target and broke it **with nothing
+failing anywhere**: no type error, no test, no CI signal, no console warning. This is the doc-vs-code
+drift class this repo already records twice (the idle-minutes default, the E2B rate), arriving through a
+*dependency upgrade* instead of a doc.
+
+**⚠️ AND IT WAS INVISIBLE TO EXACTLY THE PEOPLE MOST LIKELY TO CHECK.** `.nb-reduce-motion` disables the
+animation, so anyone testing with Reduce Animations on saw only the Tailwind `translate` — i.e. a
+correctly centred card. The bug was visible only to users who had motion ON.
+
+**THE FIX — remove the collision, not the symptom.** The card now centres with **left/right insets plus
+`mx-auto`** (`left-[calc(env(safe-area-inset-left,0px)+1rem)]`, same on the right), which needs **no
+transform at all**, so the keyframes own `transform` alone and the two can never fight again. The
+keyframes move on **Y only**. Safe-area insets on both sides are a small bonus over the old
+`w-[calc(100%-2rem)]`: `position: fixed` resolves against the viewport, not the safe-area-padded root, so
+the old version sat under the rounded corner in landscape.
+
+**REGRESSION LOCK — `tests/testingNoticeCentering.test.ts`**, and it states the RULE rather than this one
+bug: *an element whose position is animated by one of our keyframes must not ALSO be positioned by a
+Tailwind translate utility — one owner for the offset.* Four assertions, each proven by reversion
+(re-adding `-translate-x-1/2` fails it; restoring `translate(-50%)` in the keyframes fails it). The last
+one sweeps **every** `@keyframes nb-*` in `index.css` for X-axis movement, so the next toast or sheet
+someone animates is covered without anyone remembering this incident. jsdom does not compose transforms,
+so no render test could ever have caught this — a source rule is the only thing that can.
+
+**SIBLINGS HUNTED (rule 3).** 37 elements use `translate-x-1/2` / `translate-y-1/2`; **none** of them
+also carries an animation class, and `translate(-50%` appeared in no other keyframe. `nb-fadein` animates
+`transform: translateY(6px)` but is never combined with a translate utility. So this was the only live
+instance — and the new sweep assertion is what keeps it the last one.
+
+**Gate:** typecheck · noUnusedImports · typecheck:server · vitest · build · test:bundle · boot:check.

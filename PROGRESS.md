@@ -54162,3 +54162,53 @@ Devanagari matching, placement per kind, the strict parser, and the four ways th
 - **The ceiling has not moved:** this makes objects look deliberate and real-LOOKING. Photoreal still
   needs scanned `.glb` assets — a hosting, licensing and attribution project with a bill attached, and
   therefore the admin's decision, not a session's.
+
+---
+
+## 2026-09-14 — 🔴 CORRECTION: the 3D-object work was never "dropped by a squash". It was written onto a branch whose PR had already been merged and closed.
+
+**I told the admin, in writing, that "PR #2917's squash merge left the bike/catalogue work behind."
+That is FALSE, and the way it is false matters more than the fact that it is.** The recovery was
+right and nothing was lost — but a wrong root cause recorded as a finding is a trap for whoever
+reads it next, because it points the blame at a mechanism (squash merges dropping commits) that
+did not misbehave and cannot be fixed.
+
+**The real timeline, read out of git rather than reasoned about:**
+
+| UTC | What happened |
+|---|---|
+| 04:44:05 | `29c6c50` — the last commit actually pushed to PR #2917's head. Autopsy only. |
+| 04:50:24 | The admin merged #2917. The squash (`af268bc`) carried **exactly** those 9 files / 528 additions. |
+| 06:52:04 | `93eda8d` — `createMotorcycle`, `createBicycle`, `heroObjectSpec.ts`. Written **two hours AFTER the PR was merged and closed.** |
+| 06:57:59 | I edited the **closed** PR #2917's description to describe that new work. |
+| 07:25:25 | `867bf4d` — the 100-object catalogue, placement rules, `object_spec`. Also after the merge. |
+
+Verified: `git merge-base --is-ancestor 93eda8d 29c6c50` → **NO**. The bike work was never in the
+PR head, so there was nothing for the squash to drop. `git show 29c6c50:src/server/lib/Game3DGenerator.ts
+| grep -c createMotorcycle` → **0**.
+
+🔴 **THE ACTUAL ROOT CAUSE, and this repo's own rules already name it:** *"A merged pull request is
+finished — it cannot track new work and must not be reused."* I kept committing to the designated
+branch after its PR had merged, and then edited that closed PR's body as if a description could
+carry code. A PR body is not a delivery mechanism. **Work reaches `main` only through an OPEN PR.**
+
+⚠️ **WHY IT LOOKED LIKE A SQUASH BUG, so the same misreading is recognised next time.** The evidence
+I actually had was real and correctly gathered — the files were genuinely absent from `main`, and
+the PR whose body described them was genuinely merged. Every observation was true. The error was
+in the step between them: I inferred the CAUSE from two facts that were consistent with it, without
+checking the one thing that could have falsified it — **whether those commits had ever been in the
+merged head at all.** That is one `git merge-base --is-ancestor` away, and it takes seconds.
+
+This is the same failure shape this file already records twice: the E2B rate derivation that
+"could not fail", and the truncated grep that concluded a privacy policy did not exist. **A
+conclusion drawn from evidence that is merely CONSISTENT with it is not verified.** Ask what
+would have to be true if the theory were wrong, then go and look at that.
+
+🔒 **THE RULE THIS ADDS, in one line: after a PR merges, the next commit needs a NEW PR — and a
+change is not shipped until `git cat-file -e origin/main:<file>` says so.** Not the PR being
+green, not the PR being merged, not the PR's description saying it was included. The tree.
+
+**Recovery (no work lost):** `867bf4d` was merged into the branch and now ships in **#2927**,
+alongside the list-pagination work. One conflict in `routes/agentv3.ts`, where `main` carries a
+strictly newer 4-argument `emptyBuildFailureSummary(..., buildObs.previewRendered)` from #2919 —
+HEAD's version kept, my older 3-argument call discarded.

@@ -52179,6 +52179,79 @@ from my summary of the report instead of from the report.** The remaining `54197
 unchanged: the cheap-floor latency ceiling, and in-flight provider-call cancellation (owned by PR
 #2889's session, not this one).
 
+---
+
+## 2026-09-13 — Secrets screen, third pass: a shorter promise, a per-key "all my apps" switch, and the picker at the bottom
+
+Admin, in one message: *"yeh discription hatao… (mai non techie — aap isko theek se 1 ya 1.5 line me likho bas) pura
+bada sa hata do!"*, *"ek 'i' button ho har ek credidential ke starting me, jis par click karne se ek tick ✅ toggle
+dikhe, 'apply for my all app'… aur us credentials ke niche chota chota likha ho 'for all app'"*, and *"sabse niche
+dropdown selector box me user apni app select kare, jo app select ho, usi app ke credential upar dikhe!!"*
+
+### The description: four claims removed, one kept
+
+It listed variable-name examples, "scoped to your account", "injected at build time" and "never committed to git".
+Every one is still TRUE and still holds — they were answers to questions a non-technical owner is not asking while
+looking at this screen. The only promise they care about is who can see the value, so that is the only promise the
+screen now makes: **"Your keys and their values are saved encrypted — nobody can see them except you. Your apps use
+them automatically."**
+
+### The picker moved from the top to the bottom — same admin, same day, deliberately
+
+It was put at the TOP earlier today on *"sabse upar kis app ke credentials hai"*. Having seen it built, the admin
+asked for the opposite. At the top it asked a question before the user had seen anything; the answer they want first
+is "show me what I have". The existing test was an ORDER assertion, so it failed — and was updated to the new order
+rather than deleted, because the position is the instruction either way. Its label now names its job ("Show
+credentials for") and the sentence saying where the next NEW key will go moved with it, since that dropdown is two
+controls in one and the second behaviour has nothing else on screen to reveal it.
+
+### 🔴 THE TOGGLE LOOKED LIKE A ONE-LINE CHANGE AND WAS NOT — a plain save could NOT have done it
+
+There was no way to re-scope a saved key at all (the code said so in a comment: *"There is no UI anywhere to
+re-scope a saved key"*). The obvious implementation is to call the ordinary save with the new scope. **That does not
+move a key, and the bug it produces is invisible from this screen.**
+
+Two facts, both read out of the code rather than assumed:
+- `planSecretWrite` only ever touches rows of the **same** scope — deliberately, because that is what stops a shared
+  save from destroying a deliberate app-specific exception. So a save at the shared scope finds nothing to replace
+  and **ADDS a row**, leaving the app-scoped one alive.
+- `resolveScopedSecrets` makes an **app-specific key beat a shared one however old it is**.
+
+So that app would have kept injecting the OLD value while every other app got the new one — a split the user cannot
+see and cannot diagnose. Both facts are now pinned in `tests/secretScopeMove.test.ts`, including the resolution that
+proves the shadowing, so the trap cannot be walked into again by someone reaching for the easy implementation.
+
+**The fix is a MOVE, not a save** — `planScopeMove` + `PATCH /api/secrets/:userId/:secretId/scope`. The row keeps its
+id and its ciphertext and changes only `workspace_id`, so **the value is never decrypted to re-scope a key**, which
+is the safest property of the whole design. Any same-named row already at the destination is retired in the same
+operation; the retire runs FIRST, so a failure between the two writes leaves the key where it was rather than at the
+destination beside a duplicate.
+
+🔒 **It carries the same two guards as the delete, for the same reason.** The cross-user IDOR check (this collection
+is flat, so matching the caller to `:userId` does not prove the `:secretId` is theirs) and a live unlock ticket —
+widening a key puts a payment or database secret into the `.env` of apps that never had it, and an attacker who
+cannot read a vault would be satisfied by spraying one key across every app the victim owns. Ownership is checked
+BEFORE the ticket so a 401 can never reveal that someone else's key exists.
+
+⚠️ **`active` is not the only thing that had to stay honest.** Un-sharing needs an app to hand the key back to, and
+"All apps" names none. The switch is therefore ON-able but not OFF-able in that view, and says why, rather than
+failing silently or choosing an app on the user's behalf.
+
+### Two things found while building it, both fixed rather than worked around
+
+- **`tests/helpers/routeTestUtils.ts` had no `patch`.** The fake Express app lacked the verb, so registering the
+  route threw and a perfectly correct route looked broken. `supabaseIntegration.ts` had already registered a PATCH
+  before today, which means that whole module was untestable through this helper and nobody had found out.
+- **My first route test was testing the mock, not the route.** The `getDocs` mock ignored `where`, so it returned
+  every document — which made the sharpest test in the file incapable of failing. The route filters by
+  `secret_name`; a route that stopped doing so would **DELETE every other shared key** the moment somebody ticked
+  "apply to all my apps" on one of them. The mock now honours the query filters, and that test bites.
+
+### Verification
+
+34 new tests across three files. Three reverts tried, three failures: dropping the `secret_name` filter, removing
+the unlock ticket, and renaming the ⓘ button's label. `AppKnowledgeBase.ts` updated in the same change (the layout
+it described was the one that just moved).
 ## 2026-09-13 — MERGES ARE ONE SESSION'S JOB, ON THE ADMIN'S WORD
 
 Admin, verbatim: *"ab se PR merge sirf aap karoge! mai bolunga apko tab. woh session bas bana bana

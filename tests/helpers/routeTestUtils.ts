@@ -17,6 +17,7 @@ export interface CapturedApp {
   post(path: string, ...h: Handler[]): void;
   put(path: string, ...h: Handler[]): void;
   delete(path: string, ...h: Handler[]): void;
+  patch(path: string, ...h: Handler[]): void;
   all(path: string, ...h: Handler[]): void;
   options(path: string, ...h: Handler[]): void;
   use(...args: any[]): void;
@@ -35,6 +36,12 @@ export function captureRoutes(register: (app: any, ...rest: any[]) => void, ...r
     post: record('POST'),
     put: record('PUT'),
     delete: record('DELETE'),
+    // PATCH for the same reason OPTIONS is here, and it bit the same way: the vault's "which apps get
+    // this key" route is a PATCH (a partial update of one field), and a fake app missing a verb the real
+    // express has makes route REGISTRATION throw — so a perfectly correct route looks broken in tests.
+    // `supabaseIntegration.ts` already registered a PATCH before this was added, which means that whole
+    // module was untestable through this helper and nobody had found out yet.
+    patch: record('PATCH'),
     all: record('ALL'),
     // OPTIONS exists because real routes register CORS preflights (the store's shared-data API — its
     // caller is an opaque-origin iframe whose JSON POSTs always preflight). A fake app that lacks a

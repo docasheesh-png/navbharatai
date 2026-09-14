@@ -162,7 +162,7 @@ orderRouter.get('/', (req: Request, res: Response) => {
 
 // One order.
 orderRouter.get('/:id', (req: Request, res: Response) => {
-  const order = orders.get(req.params.id);
+  const order = orders.get(routeParam(req.params.id));
   if (!order) return res.status(404).json({ error: 'order not found' });
   return res.status(200).json(order);
 });
@@ -171,7 +171,7 @@ orderRouter.get('/:id', (req: Request, res: Response) => {
 orderRouter.patch('/:id/status', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { status?: unknown };
   try {
-    return res.status(200).json(orders.transition(req.params.id, String(body.status ?? '') as OrderStatus));
+    return res.status(200).json(orders.transition(routeParam(req.params.id), String(body.status ?? '') as OrderStatus));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'bad request';
     if (message === 'order not found') return res.status(404).json({ error: message });
@@ -182,7 +182,7 @@ orderRouter.patch('/:id/status', (req: Request, res: Response) => {
 // Cancel (allowed only before shipping). 409 once shipped/delivered.
 orderRouter.post('/:id/cancel', (req: Request, res: Response) => {
   try {
-    return res.status(200).json(orders.cancel(req.params.id));
+    return res.status(200).json(orders.cancel(routeParam(req.params.id)));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'bad request';
     if (message === 'order not found') return res.status(404).json({ error: message });
@@ -205,6 +205,7 @@ cents), and status moves \`placed → paid → shipped → delivered\` along **a
 
 \`\`\`ts
 import { orderRouter } from './server/orders/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api/orders', orderRouter);
 \`\`\`
 

@@ -21,6 +21,15 @@ html, body {
      and inner scrollable regions are unaffected — this only governs what happens when the DOCUMENT
      is dragged past its own boundary. */
   overscroll-behavior-y: none;
+  /* THE SIBLING FIX (admin report 2026-09-14): a swipe starting ON the fixed bottom nav could still
+     move the whole app up, leaving white space below it, on iOS Safari — a page-level swipe near the
+     bottom of the screen occasionally started right where the nav is drawn. `overscroll-behavior-y`
+     only stops a nested scroller's overscroll from CHAINING into the document; it does nothing if
+     `<html>` itself (the real `document.scrollingElement`, not `<body>`) is ever even fractionally
+     scrollable — which iOS Safari's own address-bar collapse/expand animation can transiently make it,
+     independent of `body`'s `overflow: hidden` below. `overflow: hidden` here removes html as a
+     scrollable element entirely, so there is nothing left for that swipe to scroll. */
+  overflow: hidden;
 }
 
 /* The html/body rule alone only stops the back/forward gesture when the page
@@ -33,20 +42,28 @@ html, body {
    horizontal scrolling — only the boundary overscroll that triggered nav. */
 * {
   overscroll-behavior-x: none;
-  /* NO PINCH-ZOOM (admin 2026-08-24: "do unglio se jaise webpage zoom karte hai woh zoom app me nahi
-     hona chahiye"). `pan-x pan-y` permits both scroll directions and withholds exactly two gestures:
-     pinch-zoom and double-tap-zoom.
+}
 
-     🔒 ON `*` DELIBERATELY, AND IT HAS TO BE. Pinch is a gesture of the two elements UNDER THE
-     FINGERS, not of the document — so declaring it on `html, body` alone leaves it working the moment
-     both fingers land on any ordinary div, which is essentially always. The universal selector is
-     also the SAFEST place for it rather than the most aggressive: `*` has zero specificity, so any
-     component that one day genuinely needs its own touch-action (a drawing canvas, a custom slider)
-     overrides this simply by declaring it.
+/* NO PINCH-ZOOM — NATIVE APP ONLY (admin 2026-08-24: "do unglio se jaise webpage zoom karte hai woh
+   zoom app me nahi hona chahiye"; corrected 2026-09-14 after it reached the website too — see the
+   viewport-meta comment in index.html for the full story). `pan-x pan-y` permits both scroll
+   directions and withholds exactly two gestures: pinch-zoom and double-tap-zoom.
 
-     Nothing in the app sets touch-action today (grepped), so this changes no existing behaviour, and
-     ordinary scrolling — including inside every nested scroll container — is untouched. See
-     src/lib/zoomLock.ts for why CSS alone does not finish the job on iOS. */
+   🔒 SCOPED TO `.nb-native-shell *`, NOT THE BARE UNIVERSAL SELECTOR. This used to be `* {
+   touch-action: pan-x pan-y }` with no gate at all — every layer of this feature (this rule, the
+   viewport meta tag, and src/lib/zoomLock.ts's `gesturestart` blocker) was applied to the plain
+   WEBSITE too, removing pinch-zoom — a real accessibility aid (WCAG 1.4.4) — from ordinary visitors
+   who never asked for app behaviour. `.nb-native-shell` is added to `<html>` by index.html's own
+   pre-paint script, ONLY when `window.Capacitor` is present, so a website visitor never carries the
+   class at all and this rule never matches for them.
+
+   Still on the UNIVERSAL selector WITHIN that scope, and it still has to be: pinch is a gesture of the
+   two elements UNDER THE FINGERS, not of the document, so scoping it to `.nb-native-shell` (on
+   `<html>`) alone would leave it working the moment both fingers land on any ordinary div inside the
+   native app, which is essentially always. Zero specificity either way, so a component that
+   genuinely needs its own touch-action (a drawing canvas, a custom slider) still overrides this simply
+   by declaring one. See src/lib/zoomLock.ts for why CSS alone does not finish the job on iOS. */
+.nb-native-shell * {
   touch-action: pan-x pan-y;
 }
 

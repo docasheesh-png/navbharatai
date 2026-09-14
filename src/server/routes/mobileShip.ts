@@ -70,6 +70,7 @@ import { mapRunSteps, buildMobileBuildReport } from '../lib/mobileBuildReport';
 // second copy to drift (this repo has already paid for that with four copies of one path helper).
 export { isValidArtifactId, pickBinaryName } from '../lib/buildArtifact';
 import { fetchBuildArtifact, isValidArtifactId, type ArtifactFetcher } from '../lib/buildArtifact';
+import { routeParam, routeParams } from '../lib/expressCompat';
 
 /** The real HTTP call, kept at the edge so the fetching logic itself stays testable without a network. */
 const githubZipFetcher: ArtifactFetcher = async (url, token) => {
@@ -436,7 +437,7 @@ export function registerMobileShipRoutes(app: Express): void {
       if (!identity?.uid) return res.status(401).json({ error: 'Sign in first.' });
       // `forget` checks ownership from the STORED row, not from the id's shape — the doc id is
       // guessable by construction, so the id alone must never be enough to delete somebody's row.
-      const removed = await appBuildStore.forget(identity.uid, String(req.params.id || ''));
+      const removed = await appBuildStore.forget(identity.uid, String(routeParam(req.params.id) || ''));
       if (!removed) return res.status(404).json({ error: 'That app is not on your list.' });
       res.json({ ok: true });
     } catch {

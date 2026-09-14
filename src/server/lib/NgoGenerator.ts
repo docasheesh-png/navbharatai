@@ -133,6 +133,7 @@ export class NgoService {
 export const NGO_ROUTES_SOURCE = `// Express router for the NGO/donation backend. Mount with: app.use('/api/ngo', ngoRouter(service)).
 import { Router, type Request, type Response } from 'express';
 import { NgoService } from './ngoService';
+import { routeParam, routeParams } from './expressCompat';
 
 export function ngoRouter(ngo: NgoService = new NgoService()): Router {
   const router = Router();
@@ -150,7 +151,7 @@ export function ngoRouter(ngo: NgoService = new NgoService()): Router {
   });
   router.get('/campaigns', (_req: Request, res: Response) => res.json(ngo.listCampaigns()));
   router.patch('/campaigns/:id/close', (req: Request, res: Response) => {
-    try { res.json(ngo.closeCampaign(req.params.id)); }
+    try { res.json(ngo.closeCampaign(routeParam(req.params.id))); }
     catch (err) { fail(res, err); }
   });
 
@@ -168,7 +169,7 @@ export function ngoRouter(ngo: NgoService = new NgoService()): Router {
     res.json(ngo.donationsFor({ donorId, campaignId }));
   });
   router.get('/donations/:id/receipt', (req: Request, res: Response) => {
-    const d = ngo.receiptFor(req.params.id);
+    const d = ngo.receiptFor(routeParam(req.params.id));
     if (!d) { res.status(404).json({ error: 'No such donation.' }); return; }
     res.json({ receiptNo: d.receiptNo, amount: d.amount, at: d.at, donorId: d.donorId });
   });

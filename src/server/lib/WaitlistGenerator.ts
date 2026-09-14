@@ -125,7 +125,7 @@ waitlistRouter.post('/waitlist', (req: Request, res: Response) => {
 
 // A given email's status + current position.
 waitlistRouter.get('/waitlist/:email', (req: Request, res: Response) => {
-  const entry = waitlist.get(req.params.email);
+  const entry = waitlist.get(routeParam(req.params.email));
   if (!entry) return res.status(404).json({ error: 'not on the waitlist' });
   return res.status(200).json({ ...entry, position: waitlist.position(entry.email) });
 });
@@ -146,7 +146,7 @@ waitlistRouter.get('/waitlist', (req: Request, res: Response) => {
 
 // Remove an email (unsubscribe).
 waitlistRouter.delete('/waitlist/:email', (req: Request, res: Response) => {
-  if (!waitlist.remove(req.params.email)) return res.status(404).json({ error: 'not on the waitlist' });
+  if (!waitlist.remove(routeParam(req.params.email))) return res.status(404).json({ error: 'not on the waitlist' });
   return res.status(204).send();
 });
 `;
@@ -164,6 +164,7 @@ remaining queue re-numbers correctly. Files:
 
 \`\`\`ts
 import { waitlistRouter } from './server/waitlist/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', waitlistRouter);
 \`\`\`
 

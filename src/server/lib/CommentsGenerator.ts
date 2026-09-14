@@ -168,19 +168,19 @@ commentRouter.post('/comments', (req: Request, res: Response) => {
 
 // The thread as a nested tree.
 commentRouter.get('/threads/:threadId/comments', (req: Request, res: Response) => {
-  return res.status(200).json(comments.tree(req.params.threadId));
+  return res.status(200).json(comments.tree(routeParam(req.params.threadId)));
 });
 
 // Live comment count for a thread.
 commentRouter.get('/threads/:threadId/count', (req: Request, res: Response) => {
-  return res.status(200).json({ threadId: req.params.threadId, count: comments.count(req.params.threadId) });
+  return res.status(200).json({ threadId: routeParam(req.params.threadId), count: comments.count(routeParam(req.params.threadId)) });
 });
 
 // Edit a comment's body.
 commentRouter.patch('/comments/:id', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { body?: unknown };
   try {
-    return res.status(200).json(comments.edit(req.params.id, String(body.body ?? '')));
+    return res.status(200).json(comments.edit(routeParam(req.params.id), String(body.body ?? '')));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'could not edit';
     return res.status(message === 'comment not found' ? 404 : 400).json({ error: message });
@@ -190,7 +190,7 @@ commentRouter.patch('/comments/:id', (req: Request, res: Response) => {
 // Soft-delete (tombstone if it has replies, else hard-remove).
 commentRouter.delete('/comments/:id', (req: Request, res: Response) => {
   try {
-    return res.status(200).json(comments.remove(req.params.id));
+    return res.status(200).json(comments.remove(routeParam(req.params.id)));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'could not delete';
     return res.status(message === 'comment not found' ? 404 : 400).json({ error: message });
@@ -210,6 +210,7 @@ the node (\`[deleted]\`) but **keeps its child replies** so the thread structure
 
 \`\`\`ts
 import { commentRouter } from './server/comments/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', commentRouter);
 \`\`\`
 

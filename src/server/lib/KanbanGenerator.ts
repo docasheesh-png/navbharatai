@@ -188,14 +188,14 @@ kanbanRouter.post('/columns', (req: Request, res: Response) => {
 
 // The whole board (columns + cards in order).
 kanbanRouter.get('/boards/:boardId', (req: Request, res: Response) => {
-  return res.status(200).json(kanban.board(req.params.boardId));
+  return res.status(200).json(kanban.board(routeParam(req.params.boardId)));
 });
 
 // Add a card to a column. { title, description? } — 409 if the column is at its WIP limit.
 kanbanRouter.post('/columns/:columnId/cards', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { title?: unknown; description?: unknown };
   try {
-    return res.status(201).json(kanban.addCard(req.params.columnId, { title: String(body.title ?? ''), description: String(body.description ?? '') }));
+    return res.status(201).json(kanban.addCard(routeParam(req.params.columnId), { title: String(body.title ?? ''), description: String(body.description ?? '') }));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'could not add card';
     if (message === 'column not found') return res.status(404).json({ error: message });
@@ -208,7 +208,7 @@ kanbanRouter.post('/columns/:columnId/cards', (req: Request, res: Response) => {
 kanbanRouter.patch('/cards/:id/move', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { toColumnId?: unknown; toPosition?: unknown };
   try {
-    return res.status(200).json(kanban.moveCard(req.params.id, String(body.toColumnId ?? ''), Number(body.toPosition ?? 0)));
+    return res.status(200).json(kanban.moveCard(routeParam(req.params.id), String(body.toColumnId ?? ''), Number(body.toPosition ?? 0)));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'could not move card';
     if (message === 'card not found' || message === 'column not found') return res.status(404).json({ error: message });
@@ -224,7 +224,7 @@ kanbanRouter.patch('/cards/:id', (req: Request, res: Response) => {
   if (body.title !== undefined) patch.title = String(body.title);
   if (body.description !== undefined) patch.description = String(body.description);
   try {
-    return res.status(200).json(kanban.updateCard(req.params.id, patch));
+    return res.status(200).json(kanban.updateCard(routeParam(req.params.id), patch));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'could not update';
     return res.status(message === 'card not found' ? 404 : 400).json({ error: message });
@@ -232,7 +232,7 @@ kanbanRouter.patch('/cards/:id', (req: Request, res: Response) => {
 });
 
 kanbanRouter.delete('/cards/:id', (req: Request, res: Response) => {
-  if (!kanban.removeCard(req.params.id)) return res.status(404).json({ error: 'card not found' });
+  if (!kanban.removeCard(routeParam(req.params.id))) return res.status(404).json({ error: 'card not found' });
   return res.status(204).send();
 });
 `;
@@ -249,6 +249,7 @@ an optional per-column **WIP limit** rejects an add/move that would overflow the
 
 \`\`\`ts
 import { kanbanRouter } from './server/kanban/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', kanbanRouter);
 \`\`\`
 

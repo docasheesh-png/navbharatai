@@ -4009,6 +4009,13 @@ export default function App() {
             // top border — so it reads as a clean native tab bar (admin 2026-07-15).
             height: MOBILE_NAV_TOTAL_HEIGHT,
             paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+            // NOT PANNABLE (admin report 2026-09-14): a touch starting on this bar and dragging up could
+            // move the whole app, revealing white space beneath it on iOS Safari — the global `pan-x
+            // pan-y` rule (index.css) permits vertical pan on every element so ordinary scroll views keep
+            // working, but this bar has no scrollable content of its own and a real native tab bar never
+            // pans under a swipe either. `none` stops a drag from being recognised as a pan gesture here
+            // at all; taps on the buttons inside are untouched (touch-action only governs panning).
+            touchAction: 'none',
           }}
         >
           {activeView === 'nbi_pro_chat' && v3FooterApi ? (

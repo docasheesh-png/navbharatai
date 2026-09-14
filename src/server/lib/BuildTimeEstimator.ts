@@ -31,6 +31,18 @@ export interface BuildEstimate {
   highMs: number;
   /** 0–1 confidence — higher with more, closer historical matches. */
   confidence: number;
+  /**
+   * 0–1: how much of `estimateMs` came from REAL past builds rather than from the prompt heuristic.
+   *
+   * `estimateBuildTime` has always computed this to blend the two sources and then thrown it away,
+   * which left every caller unable to tell a number the history DOMINATES from one the heuristic
+   * dominates — and `basis` cannot answer that: a single distant past build already scores
+   * `'blended'` while contributing under a tenth of the figure. The distinction matters because the
+   * heuristic is not merely imprecise, it is BACKWARDS (see progressEta.ts's header: the shorter and
+   * more ambitious the request, the smaller its estimate), so a number it dominates is not evidence
+   * of anything. 0 when there is no history at all.
+   */
+  historyWeight: number;
   basis: 'heuristic' | 'historical' | 'blended';
   etaText: string;
   complexityScore: number;
@@ -193,17 +205,22 @@ export function estimateBuildTime(complexity: Complexity, history: HistoricalBui
   let estimateMs: number;
   let basis: BuildEstimate['basis'];
   let confidence: number;
+  // How much of the final number is REAL past builds. Reported rather than discarded — see the
+  // `historyWeight` field's own note for why `basis` cannot stand in for it.
+  let historyWeight: number;
 
   if (!hist) {
     estimateMs = heuristic;
     basis = 'heuristic';
     confidence = 0.4; // no history → modest confidence
+    historyWeight = 0; // nothing but the prompt heuristic went into this number
   } else {
     // More (and closer) history → trust it more; blend with the heuristic otherwise.
     const histTrust = clamp(hist.n / 5, 0, 1) * clamp(hist.weight, 0, 1);
     estimateMs = Math.round(hist.ms * histTrust + heuristic * (1 - histTrust));
     basis = histTrust > 0.85 ? 'historical' : 'blended';
     confidence = clamp(0.5 + histTrust * 0.45, 0, 0.95);
+    historyWeight = histTrust;
   }
 
   // Range widens as confidence drops.
@@ -213,6 +230,7 @@ export function estimateBuildTime(complexity: Complexity, history: HistoricalBui
     lowMs: Math.round(estimateMs * (1 - spread * 0.5)),
     highMs: Math.round(estimateMs * (1 + spread * 0.8)),
     confidence: Math.round(confidence * 100) / 100,
+    historyWeight: Math.round(historyWeight * 100) / 100,
     basis,
     etaText: formatEta(estimateMs),
     complexityScore: Math.round(score * 100) / 100,

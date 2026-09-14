@@ -141,6 +141,7 @@ export const pharmacy = new PharmacyService();
 
 export const PHARMACY_ROUTES_SOURCE = `import { Router } from 'express';
 import { pharmacy, ExpiredStockError, InsufficientStockError, PrescriptionRequiredError } from './pharmacyService';
+import { routeParam, routeParams } from './expressCompat';
 
 export const pharmacyRouter = Router();
 
@@ -159,7 +160,7 @@ function handle(res: import('express').Response, fn: () => unknown): void {
 pharmacyRouter.get('/drugs', (_req, res) => handle(res, () => pharmacy.listDrugs()));
 pharmacyRouter.post('/drugs', (req, res) => handle(res, () => pharmacy.addDrug(req.body)));
 pharmacyRouter.post('/batches', (req, res) => handle(res, () => pharmacy.addBatch(req.body)));
-pharmacyRouter.get('/drugs/:id/stock', (req, res) => handle(res, () => ({ available: pharmacy.availableStock(req.params.id) })));
+pharmacyRouter.get('/drugs/:id/stock', (req, res) => handle(res, () => ({ available: pharmacy.availableStock(routeParam(req.params.id)) })));
 pharmacyRouter.post('/dispense', (req, res) => handle(res, () =>
   pharmacy.dispense({ drugId: req.body?.drugId, quantity: Number(req.body?.quantity), prescriptionId: req.body?.prescriptionId }))); // 403 no-Rx, 409 expired/insufficient
 pharmacyRouter.get('/dispense/history', (req, res) => handle(res, () => pharmacy.dispenseHistory(req.query.drugId as string | undefined)));

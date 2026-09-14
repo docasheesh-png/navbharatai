@@ -152,24 +152,24 @@ reviewRouter.post('/reviews', (req: Request, res: Response) => {
 
 // All reviews for an item.
 reviewRouter.get('/items/:itemId/reviews', (req: Request, res: Response) => {
-  return res.status(200).json(reviews.listForItem(req.params.itemId));
+  return res.status(200).json(reviews.listForItem(routeParam(req.params.itemId)));
 });
 
 // Exact aggregate (average + count + star distribution) for an item.
 reviewRouter.get('/items/:itemId/rating', (req: Request, res: Response) => {
-  return res.status(200).json(reviews.aggregate(req.params.itemId));
+  return res.status(200).json(reviews.aggregate(routeParam(req.params.itemId)));
 });
 
 // A single review by id.
 reviewRouter.get('/reviews/:id', (req: Request, res: Response) => {
-  const r = reviews.get(req.params.id);
+  const r = reviews.get(routeParam(req.params.id));
   if (!r) return res.status(404).json({ error: 'review not found' });
   return res.status(200).json(r);
 });
 
 // Delete a review.
 reviewRouter.delete('/reviews/:id', (req: Request, res: Response) => {
-  const ok = reviews.remove(req.params.id);
+  const ok = reviews.remove(routeParam(req.params.id));
   if (!ok) return res.status(404).json({ error: 'review not found' });
   return res.status(204).send();
 });
@@ -188,6 +188,7 @@ the current reviews. Files:
 
 \`\`\`ts
 import { reviewRouter } from './server/reviews/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', reviewRouter);
 \`\`\`
 

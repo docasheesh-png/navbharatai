@@ -35,12 +35,13 @@ import {
 } from '../lib/vaultPin';
 import { normaliseLockedAreas, effectiveLockedAreas } from '../../lib/appLockAreas';
 import { resolveEmailConfig, sendAlertEmail } from '../lib/alertEmail';
+import { routeParam, routeParams } from '../lib/expressCompat';
 
 export function registerAppLockRoutes(app: Express): void {
   /** The shape every screen reads. Never reveals the PIN, its hash, or a pending code. */
   app.get('/api/app-lock/:userId', requireUserMatch('userId'), async (req: Request, res: Response) => {
     try {
-      const { userId } = req.params;
+      const { userId } = routeParams(req.params);
       const now = Date.now();
       const record = await loadLockRecord(userId);
       const gate = pinGate(record, now);
@@ -81,7 +82,7 @@ export function registerAppLockRoutes(app: Express): void {
    */
   app.post('/api/app-lock/:userId/otp', requireUserMatch('userId'), async (req: Request, res: Response) => {
     try {
-      const { userId } = req.params;
+      const { userId } = routeParams(req.params);
       const now = Date.now();
       const purpose: OtpPurpose = String(req.body?.purpose ?? '') === 'reset' ? 'reset' : 'create';
 
@@ -146,7 +147,7 @@ export function registerAppLockRoutes(app: Express): void {
    */
   app.post('/api/app-lock/:userId/pin', requireUserMatch('userId'), async (req: Request, res: Response) => {
     try {
-      const { userId } = req.params;
+      const { userId } = routeParams(req.params);
       const now = Date.now();
       const pin = String(req.body?.pin ?? '').trim();
       const reject = pinRejectReason(pin);
@@ -194,7 +195,7 @@ export function registerAppLockRoutes(app: Express): void {
   /** Unlock with the PIN. The only place a PIN is ever compared, and it is compared here. */
   app.post('/api/app-lock/:userId/unlock', requireUserMatch('userId'), async (req: Request, res: Response) => {
     try {
-      const { userId } = req.params;
+      const { userId } = routeParams(req.params);
       const now = Date.now();
       const record = await loadLockRecord(userId);
       if (!hasPin(record)) {
@@ -259,7 +260,7 @@ export function registerAppLockRoutes(app: Express): void {
    */
   app.put('/api/app-lock/:userId/areas', requireUserMatch('userId'), async (req: Request, res: Response) => {
     try {
-      const { userId } = req.params;
+      const { userId } = routeParams(req.params);
       const record = await loadLockRecord(userId);
       if (!hasPin(record)) {
         res.status(409).json({ error: 'Set up your PIN before choosing what to lock.', needsSetup: true });

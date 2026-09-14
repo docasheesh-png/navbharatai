@@ -97,27 +97,53 @@ describe('installZoomLock', () => {
 });
 
 describe('🔒 all three layers are present — one alone does not cover every platform', () => {
-  it('the CSS layer is on `*`, because pinch belongs to the elements under the fingers', () => {
-    // On `html, body` alone it stops working the moment both fingers land on an ordinary div.
+  // CORRECTED 2026-09-14: all three layers now GATE on the native shell — the admin's original ask
+  // ("do unglio se jaise webpage zoom karte hai...") was about the installed APP, and an unconditional
+  // install had silently taken pinch-zoom off the plain WEBSITE too ("apne website par bhi pinch zoom
+  // band kar di!"). A website visitor must keep pinch-zoom (a real accessibility aid, WCAG 1.4.4).
+
+  it('the CSS layer is on `.nb-native-shell *`, because pinch belongs to the elements under the fingers', () => {
+    // Scoped to the elements under the fingers (not `html, body` alone, which stops working the moment
+    // both fingers land on an ordinary div) AND to the native shell (not the bare universal selector,
+    // which reached the website).
     const css = src('src/index.css');
     expect(css).toContain('touch-action: pan-x pan-y;');
-    const rule = css.slice(css.indexOf('* {'), css.indexOf('* {') + 1400);
+    const i = css.indexOf('.nb-native-shell * {');
+    expect(i).toBeGreaterThan(-1);
+    const rule = css.slice(i, i + 200);
     expect(rule).toContain('touch-action: pan-x pan-y;');
+    // The bare universal selector must NOT carry it — that was the bug.
+    const bareStar = css.slice(css.indexOf('\n* {'), css.indexOf('\n* {') + 200);
+    expect(bareStar).not.toContain('touch-action');
   });
 
-  it('the meta layer sets both attributes Android honours', () => {
+  it('the meta layer defaults to zoom-ALLOWED on the website, and is tightened by JS only inside the native shell', () => {
     const html = src('index.html');
     const viewport = html.slice(html.indexOf('<meta name="viewport"'), html.indexOf('<meta name="viewport"') + 200);
-    expect(viewport).toContain('user-scalable=no');
-    expect(viewport).toContain('maximum-scale=1');
+    // The STATIC tag (what every website visitor gets) must NOT hardcode the app-only restriction.
+    expect(viewport).not.toContain('user-scalable=no');
+    expect(viewport).not.toContain('maximum-scale=1');
     // The notch support this tag already carried must survive the edit.
     expect(viewport).toContain('viewport-fit=cover');
+    // The pre-paint script tightens it, but ONLY behind a Capacitor check.
+    const scriptStart = html.indexOf('<script>');
+    const script = html.slice(scriptStart, html.indexOf('</script>', scriptStart));
+    expect(script).toContain('window.Capacitor');
+    expect(script).toContain('user-scalable=no');
+    expect(script).toContain('maximum-scale=1');
+    expect(script.indexOf('window.Capacitor')).toBeLessThan(script.indexOf('user-scalable=no'));
   });
 
-  it('the JS layer is actually installed at startup, not merely written', () => {
+  it('the JS layer is installed at startup ONLY inside the native shell, never on web/desktop', () => {
     const main = src('src/main.tsx');
     expect(main).toContain("import { installZoomLock } from './lib/zoomLock';");
-    expect(main).toContain('installZoomLock(typeof document');
+    expect(main).toContain("import { isNativeShell } from './lib/apiBase';");
+    const i = main.indexOf('installZoomLock(typeof document');
+    expect(i).toBeGreaterThan(-1);
+    // The install call must be textually INSIDE an `isNativeShell(...)` guard, not called bare.
+    const guard = main.lastIndexOf('if (isNativeShell(', i);
+    expect(guard).toBeGreaterThan(-1);
+    expect(main.indexOf('}', i)).toBeGreaterThan(i); // the guard actually closes after the call
   });
 
   it('🔒 desktop zoom is deliberately untouched', () => {

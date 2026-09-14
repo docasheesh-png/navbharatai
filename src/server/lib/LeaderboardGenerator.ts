@@ -139,15 +139,15 @@ leaderboardRouter.get('/leaderboard', (req: Request, res: Response) => {
 // A player's standing: their entry (with rank) + neighbours (?k=&board=).
 leaderboardRouter.get('/leaderboard/:player', (req: Request, res: Response) => {
   const q = req.query as { k?: string; board?: string };
-  const entry = leaderboard.entryOf(req.params.player, q.board);
+  const entry = leaderboard.entryOf(routeParam(req.params.player), q.board);
   if (!entry) return res.status(404).json({ error: 'player not on this board' });
-  return res.status(200).json({ entry, around: leaderboard.around(req.params.player, q.k ? Number(q.k) : 2, q.board) });
+  return res.status(200).json({ entry, around: leaderboard.around(routeParam(req.params.player), q.k ? Number(q.k) : 2, q.board) });
 });
 
 // Remove a player from a board (?board=).
 leaderboardRouter.delete('/leaderboard/:player', (req: Request, res: Response) => {
   const q = req.query as { board?: string };
-  if (!leaderboard.remove(req.params.player, q.board)) return res.status(404).json({ error: 'player not on this board' });
+  if (!leaderboard.remove(routeParam(req.params.player), q.board)) return res.status(404).json({ error: 'player not on this board' });
   return res.status(204).send();
 });
 `;
@@ -165,6 +165,7 @@ score **earlier** ranks higher), so ranks are exact, 1-based and stable. Multipl
 
 \`\`\`ts
 import { leaderboardRouter } from './server/leaderboard/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', leaderboardRouter);
 \`\`\`
 

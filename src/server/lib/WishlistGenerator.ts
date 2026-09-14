@@ -140,16 +140,16 @@ favoritesRouter.delete('/favorites', (req: Request, res: Response) => {
 // A user's favorites in a collection (?collection=).
 favoritesRouter.get('/favorites/:user', (req: Request, res: Response) => {
   const q = req.query as { collection?: string };
-  return res.status(200).json(favorites.listByUser(req.params.user, q.collection));
+  return res.status(200).json(favorites.listByUser(routeParam(req.params.user), q.collection));
 });
 
 // An item's favorite count + whether a given user favorited it (?collection=&user=).
 favoritesRouter.get('/items/:item/favorites', (req: Request, res: Response) => {
   const q = req.query as { collection?: string; user?: string };
   return res.status(200).json({
-    item: req.params.item,
-    count: favorites.countForItem(req.params.item, q.collection),
-    favorited: q.user ? favorites.has(q.user, req.params.item, q.collection) : undefined,
+    item: routeParam(req.params.item),
+    count: favorites.countForItem(routeParam(req.params.item), q.collection),
+    favorited: q.user ? favorites.has(q.user, routeParam(req.params.item), q.collection) : undefined,
   });
 });
 `;
@@ -167,6 +167,7 @@ namespace. Files:
 
 \`\`\`ts
 import { favoritesRouter } from './server/favorites/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', favoritesRouter);
 \`\`\`
 

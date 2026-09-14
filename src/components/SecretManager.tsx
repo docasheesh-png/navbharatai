@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Lock, Eye, EyeOff, Trash2, ShieldCheck, AlertTriangle, Plus, RefreshCw, Loader2 } from 'lucide-react';
+import { Lock, Eye, EyeOff, Trash2, ShieldCheck, AlertTriangle, Plus, RefreshCw, Loader2, Info } from 'lucide-react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase'; // shared handle → navbharat-prod (NOT the (default) DB)
 // Authenticated vault client — always attaches the signed-in user's Firebase token. Raw axios calls
@@ -9,7 +9,7 @@ import { findRecipeSource } from '../lib/credentialRecipes';
 import { listApps, type AppChoice } from '../lib/appList';
 import { scopeControl, saveScope, scopeSentence, secretOwnerLabel, shortAppName } from '../lib/secretScope';
 import { AppLockGate } from './AppLockGate';
-import { revealSecrets, deleteSecretLocked, type RevealedSecret } from '../lib/vaultLock';
+import { revealSecrets, deleteSecretLocked, setSecretScope, type RevealedSecret } from '../lib/vaultLock';
 import type { UnlockState, VaultError } from '../lib/appLock';
 
 interface Secret {
@@ -191,13 +191,17 @@ export const SecretManager: React.FC<{
         embedded={embedded}
         render={(unlock, relock) => (unlock === null ? null : (
           <div className="space-y-4">
-            {/* One vault for every key an app needs — a Cashfree key is just a name/value secret, so it
-                is added here like any other. Saved keys are injected into the app you build at build time. */}
-            <p className="text-xs text-gray-400 leading-relaxed bg-indigo-500/5 p-3 rounded-lg border border-indigo-500/10">
-              Store any API key or secret your built app needs (e.g. <span className="font-mono text-indigo-300">OPENAI_API_KEY</span>,
-              <span className="font-mono text-indigo-300"> DATABASE_URL</span>, a payment or provider key). Keys are encrypted, scoped to your
-              account, and <strong className="text-indigo-200">injected into your app automatically at build time</strong> — never shown to the AI,
-              never pasted in chat, never committed to git. Use the exact variable name your app reads.
+            {/* ONE LINE, NOT A LECTURE (admin 2026-09-13: *"pura bada sa hata do… mai non techie — aap
+                isko theek se 1 ya 1.5 line me likho bas"*).
+
+                What went: the variable-name examples, "scoped to your account", "injected at build time",
+                "never committed to git". Every one of those is TRUE and still holds — they were simply
+                answers to questions a non-technical owner is not asking while looking at this screen. The
+                promise they actually care about is who can see the value, so that is the only promise the
+                screen makes, and the rest is left to the screen itself to demonstrate. */}
+            <p className="text-xs text-gray-300 leading-relaxed bg-indigo-500/5 p-3 rounded-lg border border-indigo-500/10">
+              Your keys and their values are saved <strong className="text-indigo-200">encrypted</strong> — nobody can see them except you.
+              Your apps use them automatically.
             </p>
 
             {/* 🔝 WHICH APP'S CREDENTIALS AM I LOOKING AT? (admin 2026-09-13: *"sabse upar kis app ke
@@ -237,36 +241,19 @@ export const SecretManager: React.FC<{
               </div>
             )}
 
-            {control === 'picker' && (
-              <div className="space-y-1 rounded-xl border border-white/5 bg-black/20 p-3">
-                <label htmlFor="secret-scope" className="block text-[11px] uppercase tracking-widest text-gray-500 font-bold">
-                  Credentials for
-                </label>
-                <select
-                  id="secret-scope"
-                  value={scope}
-                  onChange={(e) => setScope(e.target.value)}
-                  className="w-full bg-gray-900 border border-gray-700 p-3 rounded text-sm"
-                >
-                  <option value="">All apps (shared)</option>
-                  {apps.map((a) => (
-                    <option key={a.id} value={a.id}>{shortAppName(a.title)}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-
             {/* SAY WHERE A NEW KEY IS ABOUT TO GO — always, in every mode, and never only when a control
                 happens to be on screen. The answer matters most exactly when there is no control to imply it. */}
-            <p className="text-[11px] text-gray-500 leading-snug">
-              {scopeSentence({
-                control,
-                appName: currentAppName,
-                shareWithAll,
-                pickerTitle: appTitle(scope),
-                hasApps: apps.length > 0,
-              })}
-            </p>
+            {control !== 'picker' && (
+              <p className="text-[11px] text-gray-500 leading-snug">
+                {scopeSentence({
+                  control,
+                  appName: currentAppName,
+                  shareWithAll,
+                  pickerTitle: appTitle(scope),
+                  hasApps: apps.length > 0,
+                })}
+              </p>
+            )}
 
             <CredentialTable
               userId={userId}
@@ -275,7 +262,8 @@ export const SecretManager: React.FC<{
               metas={visibleSecrets}
               verdicts={verdicts}
               saveScopeId={effectiveScope}
-              showOwner={apps.length > 0 || !!defaultAppId}
+              viewingAppId={viewingAppId}
+              viewingAppName={control === 'fixed' ? currentAppName : (appTitle(scope) || '')}
               ownerLabel={(s) => secretOwnerLabel({ workspaceId: s.workspace_id, currentAppId: defaultAppId, titleOf: appTitle })}
               onSaved={(names) => void checkAllKeys(names)}
             />
@@ -297,6 +285,46 @@ export const SecretManager: React.FC<{
                 {checkedAt && !isVerifying && (
                   <span className="text-[10px] text-gray-500">Checked {checkedAt}</span>
                 )}
+              </div>
+            )}
+
+            {/* ⬇️ THE APP PICKER LIVES AT THE BOTTOM (admin 2026-09-13: *"sabse niche dropdown selector
+                box me user apni app select kare, jo app select ho, usi app ke credential upar dikhe!!"*).
+
+                It was at the TOP until today — put there on 2026-09-13 in response to *"sabse upar kis app
+                ke credentials hai"*. Same admin, same day, moved deliberately: at the top it was a question
+                asked before the user had seen anything, and the answer they actually want is "show me what
+                I have" first. So the list leads and the filter sits under it, which is also why the label
+                now names its job ("Show credentials for") instead of describing the rows above it.
+
+                ⚠️ IT IS TWO CONTROLS IN ONE, and the sentence beneath it is not decoration: this dropdown
+                both FILTERS the list above and chooses where the next NEW key is saved. Removing that line
+                would leave the second behaviour with nothing on screen to reveal it. */}
+            {control === 'picker' && (
+              <div className="space-y-1 rounded-xl border border-white/5 bg-black/20 p-3">
+                <label htmlFor="secret-scope" className="block text-[11px] uppercase tracking-widest text-gray-500 font-bold">
+                  Show credentials for
+                </label>
+                <select
+                  id="secret-scope"
+                  value={scope}
+                  onChange={(e) => setScope(e.target.value)}
+                  className="w-full bg-gray-900 border border-gray-700 p-3 rounded text-sm"
+                >
+                  <option value="">All apps (shared)</option>
+                  {apps.map((a) => (
+                    <option key={a.id} value={a.id}>{shortAppName(a.title)}</option>
+                  ))}
+                </select>
+                <p className="pt-1 text-[11px] leading-snug text-gray-500">
+                  {scopeSentence({
+                    control,
+                    appName: currentAppName,
+                    shareWithAll,
+                    pickerTitle: appTitle(scope),
+                    hasApps: apps.length > 0,
+                  })}
+                </p>
               </div>
             )}
           </div>
@@ -348,11 +376,20 @@ const CredentialTable: React.FC<{
   verdicts: SecretVerdict[];
   /** The scope a NEW credential is saved against — derived by the parent, never by this table. */
   saveScopeId: string;
-  showOwner: boolean;
+  /**
+   * The app whose keys this screen is currently showing, or '' for "All apps".
+   *
+   * Distinct from `saveScopeId`: that is where the NEXT key goes, this is what UN-sharing an existing
+   * key would tie it to. They are the same value in picker mode and deliberately differ in fixed mode,
+   * where ticking "also use new keys in my other apps" must not change what un-sharing means.
+   */
+  viewingAppId: string;
+  /** What to call that app when the row explains what un-sharing will do. */
+  viewingAppName: string;
   ownerLabel: (s: Secret) => string;
   /** The names just written, so the parent can ask the providers whether they actually work. */
   onSaved: (names: string[]) => void;
-}> = ({ userId, unlock, relock, metas, verdicts, saveScopeId, showOwner, ownerLabel, onSaved }) => {
+}> = ({ userId, unlock, relock, metas, verdicts, saveScopeId, viewingAppId, viewingAppName, ownerLabel, onSaved }) => {
   const [rows, setRows] = useState<RevealedSecret[] | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -363,6 +400,10 @@ const CredentialTable: React.FC<{
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [newRows, setNewRows] = useState<NewRow[]>([]);
   const [saving, setSaving] = useState(false);
+  /** Which row has its ⓘ panel open. One at a time — two open panels make a short list look like a form. */
+  const [infoOpen, setInfoOpen] = useState('');
+  /** The row whose scope is being written right now, so its toggle can show it is working. */
+  const [scoping, setScoping] = useState('');
 
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setError('');
@@ -456,6 +497,41 @@ const CredentialTable: React.FC<{
     }
   };
 
+  /**
+   * "APPLY THIS KEY TO ALL MY APPS" — and back again (admin 2026-09-13).
+   *
+   * Writes immediately rather than waiting for "Save and sync", because this is not an edit to text the
+   * user is still composing: it is a switch, and a switch that silently needs a second button pressed
+   * before it means anything is the "built but not really working" state the second absolute rule bans.
+   *
+   * 🔒 IT IS A MOVE, NOT A RE-SAVE. The server moves the row in place, so the value never leaves its
+   * ciphertext — see `planScopeMove`. Re-saving at the new scope would have left the old app-scoped row
+   * alive, and an app-specific key beats a shared one, so that app would have kept the old value while
+   * every other app got the new one.
+   */
+  const applyToAllApps = async (id: string, toAll: boolean) => {
+    setScoping(id);
+    setError('');
+    setNotice('');
+    try {
+      const target = toAll ? null : (viewingAppId || null);
+      await setSecretScope(userId, id, unlock.ticket, target);
+      // Re-read rather than patching state by hand: the server may have retired a duplicate of the same
+      // name at the destination, and a screen that guessed at that would show a row that no longer exists.
+      await load(true);
+      const label = rows?.find((r) => r.id === id)?.secret_name || 'This key';
+      setNotice(toAll
+        ? `${label} now applies to all your apps.`
+        : `${label} now applies only to ${viewingAppName || 'the selected app'}.`);
+    } catch (err: unknown) {
+      const e = err as VaultError;
+      if (e?.needsUnlock) { relock(); return; }
+      setError(e?.message || 'Could not change where this key applies.');
+    } finally {
+      setScoping('');
+    }
+  };
+
   const remove = async (id: string) => {
     setDeleting(id);
     setError('');
@@ -520,6 +596,23 @@ const CredentialTable: React.FC<{
         return (
           <div key={row.id} className="rounded-xl border border-white/5 bg-[#0d1117] p-2.5">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+              {/* ⓘ AT THE START OF EVERY CREDENTIAL (admin 2026-09-13: *"ek 'i' button ho har ek
+                  credidential ke starting me, jis par click karne se ek tick ✅ toggle dikhe, 'apply for
+                  my all app'"*). Closed by default: the answer it holds is the same for almost every key,
+                  so showing the switch on every row would put a control the user rarely wants beside one
+                  they use constantly. */}
+              <button
+                onClick={() => setInfoOpen((cur) => (cur === row.id ? '' : row.id))}
+                aria-label={`Settings for ${row.secret_name}`}
+                aria-expanded={infoOpen === row.id}
+                className={`shrink-0 self-start rounded-lg border p-2 ${
+                  infoOpen === row.id
+                    ? 'border-indigo-500/40 bg-indigo-500/10 text-indigo-200'
+                    : 'border-white/10 text-gray-400 hover:text-white'
+                }`}
+              >
+                <Info size={14} />
+              </button>
               {/* COLUMN 1 — the name. readOnly, not disabled: a disabled input cannot be selected, which
                   would break the very copy gesture these boxes exist for. Renaming a key is not an edit,
                   it is a different key, so the name is not editable on a saved row. */}
@@ -582,9 +675,52 @@ const CredentialTable: React.FC<{
               </div>
             </div>
 
+            {/* THE ⓘ PANEL — one switch and one sentence saying what it does. */}
+            {infoOpen === row.id && (() => {
+              const isShared = !meta?.workspace_id;
+              // Un-sharing has to know WHICH app to tie the key to. Viewing "All apps" names no app, so
+              // the switch can be turned on there but not off — and it says so, rather than failing
+              // silently or picking an app on the user's behalf.
+              const canUnshare = !!viewingAppId;
+              return (
+                <div className="mt-2 space-y-2 rounded-lg border border-indigo-500/20 bg-indigo-500/5 p-2.5">
+                  <label className={`flex items-start gap-2 select-none ${isShared && !canUnshare ? 'cursor-default' : 'cursor-pointer'}`}>
+                    <input
+                      type="checkbox"
+                      checked={isShared}
+                      disabled={scoping === row.id || (isShared && !canUnshare)}
+                      onChange={(e) => void applyToAllApps(row.id, e.target.checked)}
+                      className="mt-0.5 accent-indigo-500 disabled:opacity-40"
+                    />
+                    <span className="text-xs leading-snug text-gray-200">
+                      Apply to all my apps
+                      <span className="block text-[11px] text-gray-400">
+                        {scoping === row.id
+                          ? 'Saving…'
+                          : isShared
+                            ? (canUnshare
+                              ? `On — every app you build receives this key. Turn it off to use it only in ${shortAppName(viewingAppName) || 'the selected app'}.`
+                              : 'On — every app you build receives this key. Pick an app in the box at the bottom to tie it to just that one.')
+                            : `Off — only ${meta ? ownerLabel(meta) : 'this app'} receives it. Turn it on to use the same key everywhere.`}
+                      </span>
+                    </span>
+                  </label>
+                </div>
+              );
+            })()}
+
             <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 px-0.5">
               <span className="text-[10px] text-gray-500">
-                {dirty ? <span className="text-amber-300">Changed — press “Save and sync”.</span> : (showOwner && meta ? ownerLabel(meta) : '')}
+                {/* 🏷️ THE CAPTION UNDER EVERY SHARED KEY (admin 2026-09-13: *"us credentials ke niche
+                    chota chota likha ho 'for all app'"*) — so the state the ⓘ panel sets is legible
+                    without opening anything. `ownerLabel` already produced this sentence; what changed is
+                    that it is no longer conditional: the old `showOwner` prop was false for an account
+                    with no app list, which left a shared key looking identical to an app-scoped one. */}
+                {dirty
+                  ? <span className="text-amber-300">Changed — press “Save and sync”.</span>
+                  : (!meta?.workspace_id
+                    ? <span className="text-indigo-300/80">For all apps</span>
+                    : (meta ? `Only ${ownerLabel(meta)}` : ''))}
               </span>
               {/* A key with no verdict shows NOTHING — absence of a badge means "not checked", which is
                   the truth. A grey "unknown" pill on every unverifiable key would be noise that teaches

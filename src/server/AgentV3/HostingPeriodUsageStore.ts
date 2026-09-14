@@ -31,11 +31,26 @@ export interface PeriodUsageRecord extends PeriodUsage {
   owedInr: number;
   /** When the unpaid debt was first recorded. Cleared when it is paid. */
   owedSince: string | null;
+  /**
+   * Usage warnings already sent this period: `<meter>:<percent>` → the `periodStart` it fired for.
+   *
+   * Keyed on the period rather than cleared on renewal, the same way `hostingPlan.remindedFor` keys on
+   * `expiresAt` — a new period makes every key stale at once, so there is no reset step to forget.
+   */
+  warnedFor?: Record<string, string>;
+  /**
+   * Running FRONTEND GB for this period — a separate total because it is a separate allowance
+   * measured by a separate meter, and the agreement says the two are "counted separately, not added
+   * together". Nothing is charged against it yet (see `frontendUsage.ts`); it exists so the usage
+   * warnings can describe a period rather than a single day.
+   */
+  frontendGb?: number;
   updatedAt: number;
 }
 
 const EMPTY = (userId: string, periodStart: string): PeriodUsageRecord => ({
-  userId, periodStart, gbBefore: 0, gbBilled: 0, inrBilled: 0, owedInr: 0, owedSince: null, updatedAt: 0,
+  userId, periodStart, gbBefore: 0, gbBilled: 0, inrBilled: 0, owedInr: 0, owedSince: null,
+  warnedFor: {}, frontendGb: 0, updatedAt: 0,
 });
 
 function docId(userId: string, periodStart: string): string {
@@ -84,11 +99,13 @@ class HostingPeriodUsageStore {
     addInrBilled: number;
     owedInr: number;
     owedSince: string | null;
+    /** Replaces the map wholesale — the decision returns the complete new one. Omit to leave it. */
+    warnedFor?: Record<string, string>;
   }): Promise<void> {
     const db = this.getDb();
     if (!db || !userId || !periodStart) return;
     try {
-      await db.collection(COLLECTION).doc(docId(userId, periodStart)).set({
+      const doc: Record<string, unknown> = {
         userId,
         periodStart,
         gbBefore: Math.max(0, Number(patch.periodGb) || 0),
@@ -97,10 +114,46 @@ class HostingPeriodUsageStore {
         owedInr: Math.max(0, Number(patch.owedInr) || 0),
         owedSince: patch.owedSince,
         updatedAt: Date.now(),
-      }, { merge: true });
+      };
+      // Only written when the caller has a new map. A `merge` with an absent key leaves the stored
+      // one alone, which is what keeps a warning from being re-sent by a write that was about money.
+      if (patch.warnedFor) doc.warnedFor = patch.warnedFor;
+      await db.collection(COLLECTION).doc(docId(userId, periodStart)).set(doc, { merge: true });
     } catch (e) {
       // Loud, because a total that stopped moving means the allowance silently resets every day.
       console.error(`[hosting-bill] could not record period usage for ${userId}:`, e);
+    }
+  }
+
+  /**
+   * Persist a usage warning, and nothing else.
+   *
+   * 🔒 ITS OWN WRITE, DELIBERATELY. Threading `warnedFor` through `record()` would mean every future
+   * call site has to remember to carry it, and a call site that forgot would silently re-arm a
+   * warning the user has already had — the daily-repeat this whole feature exists to prevent. A write
+   * that touches only this field cannot disturb a money field either, whichever order the two land in.
+   */
+  async markWarned(userId: string, periodStart: string, warnedFor: Record<string, string>): Promise<void> {
+    const db = this.getDb();
+    if (!db || !userId || !periodStart) return;
+    try {
+      await db.collection(COLLECTION).doc(docId(userId, periodStart))
+        .set({ userId, periodStart, warnedFor, updatedAt: Date.now() }, { merge: true });
+    } catch (e) {
+      // Quiet: the cost of losing this is one repeated warning, not a wrong bill.
+      console.warn(`[hosting-bill] could not record usage warning for ${userId}:`, (e as Error)?.message ?? e);
+    }
+  }
+
+  /** Advance the running FRONTEND total. Separate allowance, separate write, never a money field. */
+  async recordFrontend(userId: string, periodStart: string, frontendGb: number): Promise<void> {
+    const db = this.getDb();
+    if (!db || !userId || !periodStart) return;
+    try {
+      await db.collection(COLLECTION).doc(docId(userId, periodStart))
+        .set({ userId, periodStart, frontendGb: Math.max(0, Number(frontendGb) || 0), updatedAt: Date.now() }, { merge: true });
+    } catch (e) {
+      console.warn(`[hosting-bill] could not record frontend usage for ${userId}:`, (e as Error)?.message ?? e);
     }
   }
 }

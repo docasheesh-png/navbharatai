@@ -2334,6 +2334,37 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'object_spec',
+      description:
+        'BEFORE hand-modelling ANY 3D object, call this with its name. Returns the object\u2019s REAL '
+        + 'dimensions in metres, the parts it cannot read as itself without, the ONE proportion that '
+        + 'carries its silhouette, and HOW that kind of thing is placed in a scene (grounded, '
+        + 'instanced, animated, shadowed). It answers for 100 built-in objects instantly and free '
+        + '(vehicles, people, animals, terrain, water, plants, sky, buildings, street props, '
+        + 'furniture, sport, weapons, pickups, containers, food, effects) and asks the engine for '
+        + 'anything else. '
+        + '\u{1F534} WHY IT EXISTS: a bike racing game once shipped a bike that was a capsule lying on '
+        + 'two cylinders \u2014 not because the model builds badly, but because nothing had decided '
+        + 'what a bike IS, so it went straight to primitives. Given "2.05 m long, 1.35 m wheelbase, '
+        + '0.30 m wheel radius, raked forks, a tank, a seat that falls to a kicked-up tail" it builds '
+        + 'a motorcycle. The spec is the missing input, not the skill. '
+        + 'If a library builder exists (createMotorcycle, createCar, createTree\u2026) the answer says '
+        + 'so \u2014 use it and do NOT hand-model. Costs nothing for a known object, and it can never '
+        + 'fail a build: with the engine unavailable it returns the spec-first protocol instead.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          object: {
+            type: 'string',
+            description:
+              'What to look up, in plain words \u2014 "motorcycle", "auto rickshaw", "bullock cart", '
+              + '"cricket bat", "hand pump". English or Hinglish; one object per call.',
+          },
+        },
+        required: ['object'],
+      },
+    },
+    {
       name: 'generate_game_3d',
       description:
         'Add the 3D layer for a game (three.js). Call generate_game_runtime FIRST — this builds on its '
@@ -2349,7 +2380,8 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'PBR metal has nothing to reflect and renders near-black), surfaces.ts (brick, wood, bark, '
         + 'stone, road, soil, grass, metal, cloth, tile, sand, each with generated bump/roughness/AO '
         + 'instead of one flat colour) and humanoid.ts + objects.ts — a properly proportioned figure, '
-        + 'and real cars, trees, mountains, rivers, deserts, roads and animals with setDetailLevel() '
+        + 'and real cars, MOTORCYCLES, bicycles, trees, mountains, rivers, deserts, roads and animals '
+        + 'with setDetailLevel() '
         + "choosing full detail or the lighter phone-friendly build from what the user MEANT. "
         + 'THE LOOK COMES FROM THESE SETTINGS, NOT FROM ASSET DETAIL: use ONE palette for the whole scene, '
         + 'share materials, scatter with instancing, and keep bloom subtle. Adds the `three` dependency.',
@@ -2364,7 +2396,8 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
               + 'humanoid, objects. Default = all; imports are pulled in automatically. '
               + 'environment = sky + image-based reflections; surfaces = brick/wood/bark/stone/road/soil/'
               + 'grass/metal/cloth/tile/sand with real bump + roughness; humanoid = a correctly '
-              + 'proportioned figure with joints; objects = createCar / createTree / createMountain / '
+              + 'proportioned figure with joints; objects = createCar / createMotorcycle / createBicycle '
+              + '/ createTree / createMountain / '
               + 'createRiver / createDesert / createRoad / createAnimal, with setDetailLevel() choosing '
               + 'full detail or the lighter phone-friendly build. '
               + '⚠️ NARROWING THIS IS HOW A 3D GAME ENDS UP LOOKING FLAT: without environment every '
@@ -3471,6 +3504,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_game_vfx',
   'generate_game_controller',
   'generate_game_3d',
+  'object_spec',
   'generate_game_runtime',
   'generate_animation',
   'generate_ui_states',

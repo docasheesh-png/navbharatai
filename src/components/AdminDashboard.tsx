@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon } from 'lucide-react';
+import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon, Smartphone, ExternalLink } from 'lucide-react';
 import { TirangaLoader } from './ui/TirangaLoader';
+import { usePagedList } from '../hooks/usePagedList';
+import { LoadMore } from './common/LoadMore';
 import { stampLabel, dayLabel, signInMethodWords } from '../lib/adminUserDisplay';
 import { adultOptInSummary } from '../lib/adultContent';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
@@ -26,7 +28,7 @@ interface AdminDashboardProps {
   onLogout: () => void;
 }
 
-type TabId = 'monitor' | 'users' | 'engines' | 'revenue' | 'reports' | 'userreports' | 'security' | 'settings';
+type TabId = 'monitor' | 'users' | 'engines' | 'revenue' | 'reports' | 'userreports' | 'apkreports' | 'security' | 'settings';
 
 const TABS: { id: TabId; label: string; icon: React.ComponentType<any> }[] = [
   // HOME = the live Monitor (2026-08-23). The old Overview content was not removed — it is rendered
@@ -41,6 +43,13 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<any> }[] = [
   // engine telling us about a build; this is a person telling us about the product or about another
   // person. Mixing them would bury the complaints that need a human.
   { id: 'userreports', label: 'User Reports', icon: Flag },
+  // APK REPORTS — a THIRD, separate page (admin 2026-09-14). "Build Reports" above is the in-house
+  // AgentV3 engine's own report, sent only when a user presses "Report"; this one is the Android/iOS
+  // store-build pipeline (a user's app compiled on their OWN GitHub via GitHub Actions), and it is
+  // written AUTOMATICALLY the moment such a build fails — no button, no user action. Different
+  // pipeline, different failure shape (Gradle/Xcode/npm, not an AI build turn), so it gets its own page
+  // rather than being squeezed into either existing inbox's fields.
+  { id: 'apkreports', label: 'APK Reports', icon: Smartphone },
   { id: 'security',  label: 'Security',     icon: Shield },
   { id: 'settings',  label: 'Settings',     icon: Settings },
 ];
@@ -119,6 +128,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [reportsLoading, setReportsLoading] = useState(false);
   const [openReport, setOpenReport] = useState<any>(null);
   const [reportFilter, setReportFilter] = useState<'open' | 'all'>('open');
+  // ── APK build-failure reports (admin 2026-09-14) — a separate inbox, see AdminApkReportStore.ts ──
+  const [apkReports, setApkReports] = useState<any[]>([]);
+  const [apkReportsLoading, setApkReportsLoading] = useState(false);
+  const [openApkReport, setOpenApkReport] = useState<any>(null);
   /** The account sheet: opened FROM a report (or from the Users tab), so a decision is made with the
    *  whole picture in front of the admin rather than from a complaint alone. */
   const [account, setAccount] = useState<any>(null);
@@ -139,6 +152,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [usersError, setUsersError] = useState('');
   const [userSort, setUserSort] = useState('tokens');
   const [userSearch, setUserSearch] = useState('');
+  /**
+   * THE USER TABLE IS PAGED ON THE **SERVER** (admin 2026-09-14: "pehle sirf 10-12 line hi load ho").
+   *
+   * 🔴 AND IT IS THE ONE LIST WHERE A CLIENT-SIDE BUTTON WOULD HAVE BEEN A LIE. Everywhere else the
+   * rows are already in the browser, so showing twelve of them is the whole fix. Here the slowness is
+   * in the REQUEST: `/api/admin/users` looks up Firebase Auth metadata for every user, batched at
+   * Firebase's 100-identifier limit — so 5,000 users is fifty sequential round-trips before the first
+   * row can be drawn. Hiding rows after that arrives would change nothing the admin can feel.
+   *
+   * So "Load more" here asks the SERVER for more: 25 rows, then 50, then 75. Sort and search still
+   * run over every user (the server scans the whole collection for them, deliberately — see the
+   * route), so searching is never narrowed to the page you happen to be looking at.
+   */
+  const USER_PAGE = 25;
+  const [userLimit, setUserLimit] = useState(USER_PAGE);
+  const [userTotal, setUserTotal] = useState<number | null>(null);
+  // Back to page one whenever the list MEANS something different. Without this, an admin who pressed
+  // "Load more" five times and then typed a search would fetch 150 rows of the new result — the same
+  // reset `usePagedList` does for every client-side list, done here against the server instead.
+  useEffect(() => { setUserLimit(USER_PAGE); setUserTotal(null); }, [userSearch, userSort]);
   const [toastMsg, setToastMsg] = useState('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
@@ -359,6 +392,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
    */
   const [adultOptIns, setAdultOptIns] = useState<Array<{ userId: string; optedInAt: string; label: string }> | null>(null);
   const [adultError, setAdultError] = useState('');
+
+  /**
+   * The other admin lists, same rule, declared here because this is the first point at which every
+   * state they read exists. Each one grows with the platform and had no cap at all: every report ever
+   * filed, every app ever built, every promo code, every +18 opt-in.
+   *
+   * The `resetKey`s are the real filters above them — the report Open/All toggle, and the four
+   * controls over the all-builds table (search, status, date, user). Change any of those and the list
+   * means something different, so it starts at page one.
+   */
+  const pagedUserReports = usePagedList(userReports, { resetKey: reportFilter });
+  const pagedAllBuilds = usePagedList(allBuilds, { resetKey: `${allBuildsSearch}|${allBuildsStatus}|${allBuildsDate}|${allBuildsUid}` });
+  const pagedAdultOptIns = usePagedList(adultOptIns);
+  const pagedPromos = usePagedList(promos);
   const fetchAdultOptIns = useCallback(async () => {
     setAdultError('');
     try {
@@ -510,6 +557,59 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     } catch { /* the row stays as it was; the admin can retry */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken, fetchUserReports]);
+
+  // ── APK build-failure reports — automatic inbox, see AdminApkReportStore.ts ──────────────────────
+  const fetchApkReports = useCallback(async () => {
+    setApkReportsLoading(true);
+    try {
+      const r = await fetch('/api/admin/apk-reports', { headers });
+      const d = await r.json();
+      setApkReports(Array.isArray(d?.reports) ? d.reports : []);
+    } catch (e) { console.error(e); setApkReports([]); }
+    finally { setApkReportsLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+
+  const openApkReportById = useCallback(async (id: string) => {
+    setOpenApkReport({ loading: true });
+    try {
+      const r = await fetch(`/api/admin/apk-reports/${encodeURIComponent(id)}`, { headers });
+      const d = await r.json();
+      setOpenApkReport(r.ok ? d : { error: d?.error || 'Could not open that report.' });
+    } catch { setOpenApkReport({ error: 'Could not open that report.' }); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+
+  const markApkReport = useCallback(async (id: string, fixed: boolean) => {
+    try {
+      await fetch(`/api/admin/apk-reports/${encodeURIComponent(id)}/mark`, {
+        method: 'POST', headers, body: JSON.stringify({ fixed }),
+      });
+      setOpenApkReport(null);
+      void fetchApkReports();
+    } catch { /* the row stays as it was; the admin can retry */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken, fetchApkReports]);
+
+  const deleteApkReportRow = useCallback(async (id: string) => {
+    if (!window.confirm('Delete this APK build report permanently?')) return;
+    try {
+      await fetch(`/api/admin/apk-reports/${encodeURIComponent(id)}`, { method: 'DELETE', headers });
+      setOpenApkReport(null);
+      setApkReports((rows) => rows.filter((row) => row.id !== id));
+    } catch { toast('Could not delete that report.'); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+
+  const clearApkReports = useCallback(async () => {
+    if (apkReports.length === 0) { toast('The inbox is already empty.'); return; }
+    if (!window.confirm(`Delete ALL ${apkReports.length} APK build reports permanently? This cannot be undone.`)) return;
+    try {
+      await fetch('/api/admin/apk-reports/clear', { method: 'POST', headers, body: JSON.stringify({ confirm: true }) });
+      setApkReports([]);
+    } catch { toast('Could not clear the APK reports.'); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken, apkReports.length]);
 
   /** One person's whole account. Every section says whether it was READ — see the route. */
   const openAccount = useCallback(async (uid: string) => {
@@ -866,7 +966,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     setUsersLoading(true);
     setUsersError('');
     try {
-      const r = await fetch(`/api/admin/users?sort=${userSort}&search=${encodeURIComponent(userSearch)}`, { headers });
+      const r = await fetch(`/api/admin/users?sort=${userSort}&search=${encodeURIComponent(userSearch)}&paged=1&limit=${userLimit}`, { headers });
       // HONESTY (admin bug 2026-07-15: "users list show nahi ho rahi"): the old code did
       // `Array.isArray(d) ? d : []`, so a 401 (expired admin token) / 500 (Firestore error) response
       // body — an OBJECT, not an array — was silently shown as "No users found", indistinguishable from
@@ -880,13 +980,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
         return;
       }
       const d = await r.json();
-      setUsers(Array.isArray(d) ? d : []);
-      if (!Array.isArray(d)) setUsersError('Unexpected response from the server.');
+      // The envelope is what `paged=1` asks for; the bare array is what every older server returns.
+      // Reading both means this panel keeps working against either, which matters because the Android
+      // app is bundled and a phone can be a version behind.
+      const rows = Array.isArray(d) ? d : Array.isArray(d?.users) ? d.users : null;
+      if (!rows) { setUsers([]); setUsersError('Unexpected response from the server.'); return; }
+      setUsers(rows);
+      setUserTotal(typeof d?.total === 'number' ? d.total : rows.length);
     } catch (e: any) {
       setUsers([]);
       setUsersError(`Couldn't reach the server: ${e?.message || 'network error'}`);
     } finally { setUsersLoading(false); }
-  }, [adminToken, userSort, userSearch]);
+  }, [adminToken, userSort, userSearch, userLimit]);
 
   const fetchPromos = useCallback(async () => {
     try {
@@ -1032,6 +1137,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     void fetchAllBuildsRef.current();
   }, [activeTab, allBuildsStatus, allBuildsDate, allBuildsUid]);
   useEffect(() => { if (activeTab === 'userreports') fetchUserReports(); }, [activeTab, fetchUserReports]);
+  useEffect(() => { if (activeTab === 'apkreports') fetchApkReports(); }, [activeTab, fetchApkReports]);
   const fetchLatencyAnomaly = useCallback(async () => {
     setAnomalyLoading(true);
     try {
@@ -1702,6 +1808,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       ))}
                     </tbody>
                   </table>
+                  {userTotal !== null && users.length < userTotal && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center', padding: '12px 0', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => setUserLimit((l) => l + USER_PAGE)}
+                        disabled={usersLoading}
+                        className="px-4 py-2 rounded-full border border-white/10 bg-white/5 text-[11px] font-bold text-white hover:bg-white/10 disabled:opacity-50"
+                      >
+                        {usersLoading ? 'Loading…' : `Load ${Math.min(USER_PAGE, userTotal - users.length)} more`}
+                      </button>
+                      <span className="text-[10px] text-[#8b949e]">
+                        Showing {users.length.toLocaleString('en-IN')} of {userTotal.toLocaleString('en-IN')} users
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -2397,7 +2518,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 </p>
               ) : (
                 <div className="space-y-2">
-                  {userReports.map((r: any) => (
+                  {pagedUserReports.visible.map((r: any) => (
                     <button
                       key={r.id}
                       onClick={() => void openUserReport(r.id)}
@@ -2428,6 +2549,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       </p>
                     </button>
                   ))}
+                  <LoadMore list={pagedUserReports} label="reports" />
                 </div>
               )}
 
@@ -2625,6 +2747,160 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                               className="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-xs font-bold text-white"
                             ><Shield size={13} /> Suspend this account</button>
                           )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'apkreports' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <h3 className="flex items-center gap-2 text-lg font-black text-white tracking-tight">
+                  <Smartphone size={18} className="text-indigo-400" /> APK Reports
+                  {apkReports.length > 0 && (
+                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-rose-500/40 text-rose-300">
+                      {apkReports.filter((r: any) => !r.fixed).length} open
+                    </span>
+                  )}
+                </h3>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => void fetchApkReports()} className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/60" aria-label="Refresh">
+                    <RefreshCw size={14} className={apkReportsLoading ? 'animate-spin' : ''} />
+                  </button>
+                  <button
+                    onClick={() => void clearApkReports()}
+                    disabled={apkReports.length === 0}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-white/5 hover:bg-white/10 text-white/60 disabled:opacity-40 disabled:cursor-not-allowed"
+                  ><Trash2 size={12} /> Clear all</button>
+                </div>
+              </div>
+              <p className="text-[11px] text-white/40 -mt-2">
+                Sent automatically the moment a user's own Android/iOS store build fails on their GitHub —
+                no button, no user action. Every row carries the classified cause, the log excerpt and a
+                link to the full run on GitHub, so a fix never needs the user asked for more detail.
+              </p>
+
+              {apkReportsLoading && apkReports.length === 0 ? (
+                <p className="text-xs text-white/40">Loading reports…</p>
+              ) : apkReports.length === 0 ? (
+                <p className="text-xs text-white/40">No failed store builds reported yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {apkReports.map((r: any) => (
+                    <button
+                      key={r.id}
+                      onClick={() => void openApkReportById(r.id)}
+                      className="w-full text-left rounded-xl border border-white/10 bg-white/[0.02] hover:bg-white/[0.05] p-3 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-white/15 text-white/60">
+                          {r.building || r.workflow}
+                        </span>
+                        {r.fixed ? (
+                          <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-emerald-500/30 text-emerald-300">Fixed</span>
+                        ) : (
+                          <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-rose-500/40 text-rose-300">Open</span>
+                        )}
+                        <span className="text-[10px] text-white/35 ml-auto">{new Date(r.reportedAt).toLocaleString()}</span>
+                      </div>
+                      <p className="text-sm text-white mt-1.5 line-clamp-2">{r.failure?.why || 'Build failed — no cause could be read.'}</p>
+                      <p className="text-[11px] text-white/40 mt-1">
+                        {r.owner}/{r.repo} · {r.email || r.userId}
+                        {r.failure?.stage && <> · stage: {r.failure.stage}</>}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {openApkReport && (
+                <div className="nb-sheet-overlay fixed inset-0 z-50 bg-black/70 flex items-center justify-center" onClick={() => setOpenApkReport(null)}>
+                  <div className="nb-sheet w-full max-w-2xl max-h-[85vh] supports-[height:100dvh]:max-h-[85dvh] overflow-y-auto bg-[#161b22] border border-white/10 rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
+                    {openApkReport.loading ? (
+                      <p className="text-sm text-white/60">Opening…</p>
+                    ) : openApkReport.error ? (
+                      <p className="text-sm text-amber-300">{openApkReport.error}</p>
+                    ) : (
+                      <>
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <h4 className="text-base font-bold text-white">{openApkReport.owner}/{openApkReport.repo}</h4>
+                            <p className="text-[11px] text-white/40">{openApkReport.building || openApkReport.workflow} · reported {new Date(openApkReport.reportedAt).toLocaleString()}</p>
+                          </div>
+                          <button onClick={() => setOpenApkReport(null)} className="text-white/40 hover:text-white p-1" aria-label="Close">✕</button>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 mt-4 text-[11px]">
+                          <div className="rounded-xl border border-white/10 p-3">
+                            <p className="text-white/40 uppercase tracking-widest text-[9px] font-black mb-1">Built by</p>
+                            <p className="text-white break-all">{openApkReport.email || openApkReport.userId}</p>
+                          </div>
+                          <div className="rounded-xl border border-white/10 p-3">
+                            <p className="text-white/40 uppercase tracking-widest text-[9px] font-black mb-1">Duration</p>
+                            <p className="text-white">{openApkReport.durationSeconds != null ? `${openApkReport.durationSeconds}s` : '—'}</p>
+                          </div>
+                        </div>
+
+                        {openApkReport.runUrl && (
+                          <a
+                            href={openApkReport.runUrl} target="_blank" rel="noopener noreferrer"
+                            className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-bold text-indigo-300 hover:text-indigo-200 underline decoration-indigo-300/30"
+                          ><ExternalLink size={12} /> Open the full run on GitHub</a>
+                        )}
+
+                        {openApkReport.steps?.length > 0 && (
+                          <div className="mt-4">
+                            <p className="text-white/40 uppercase tracking-widest text-[9px] font-black mb-2">Steps</p>
+                            <div className="space-y-1">
+                              {openApkReport.steps.map((s: any, idx: number) => (
+                                <div key={idx} className="flex items-center gap-2 text-[11px]">
+                                  <span className={`w-1.5 h-1.5 rounded-full ${s.state === 'failed' ? 'bg-rose-400' : s.state === 'done' ? 'bg-emerald-400' : 'bg-white/20'}`} />
+                                  <span className={s.state === 'failed' ? 'text-rose-300 font-semibold' : 'text-white/60'}>{s.label}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {openApkReport.failure && (
+                          <div className="mt-4">
+                            <p className="text-white/40 uppercase tracking-widest text-[9px] font-black mb-1">Why it failed</p>
+                            <p className="text-sm text-white bg-black/30 rounded-xl p-3 whitespace-pre-wrap">{openApkReport.failure.why}</p>
+                            {openApkReport.failure.detail && Object.keys(openApkReport.failure.detail).length > 0 && (
+                              <div className="mt-2 text-[11px] text-white/50 space-y-0.5">
+                                {Object.entries(openApkReport.failure.detail).map(([k, v]: [string, any]) => (
+                                  <p key={k}><span className="text-white/30">{k}:</span> {String(v)}</p>
+                                ))}
+                              </div>
+                            )}
+                            <p className="text-[10px] text-white/35 mt-2">
+                              {openApkReport.failure.navbharatCanFixItself
+                                ? "NavBharatAI's self-heal can attempt to fix this class automatically."
+                                : 'Outside the self-heal — needs a manual fix in the app or its build files.'}
+                            </p>
+                          </div>
+                        )}
+
+                        {openApkReport.failure?.logExcerpt?.length > 0 && (
+                          <div className="mt-4">
+                            <p className="text-white/40 uppercase tracking-widest text-[9px] font-black mb-1">Log excerpt (failed step)</p>
+                            <pre className="text-[10px] text-white/70 bg-black/50 rounded-xl p-3 overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap break-all">
+{openApkReport.failure.logExcerpt.join('\n')}
+                            </pre>
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-2 mt-5">
+                          {openApkReport.fixed ? (
+                            <button onClick={() => void markApkReport(openApkReport.id, false)} className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-bold text-white">Reopen</button>
+                          ) : (
+                            <button onClick={() => void markApkReport(openApkReport.id, true)} className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white">Mark fixed</button>
+                          )}
+                          <button onClick={() => void deleteApkReportRow(openApkReport.id)} className="ml-auto px-3 py-2 rounded-lg bg-rose-600/80 hover:bg-rose-500 text-xs font-bold text-white inline-flex items-center gap-1.5"><Trash2 size={12} /> Delete</button>
                         </div>
                       </>
                     )}
@@ -3019,6 +3295,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     aria-label="Filter by user"
                   >
                     <option value="">Every user</option>
+                    {/* ⚠️ DELIBERATELY NOT PAGED, and this is the useful half of the rule. A native
+                        <select> already renders its options lazily and scrolls them itself, and paging
+                        it would make the filter WORSE than the problem: a user outside the first twelve
+                        would become unreachable, so the control would silently stop doing its job.
+                        "Show 12 then a button" is for lists people READ, never for a picker. */}
                     {allBuildsUsers.map((u) => (
                       <option key={u.uid} value={u.uid}>{u.label} ({u.count})</option>
                     ))}
@@ -3052,7 +3333,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   <p className="text-[11px] text-[#8b949e]">Press Load to list the most recently active builds across all users.</p>
                 )}
                 <div className="space-y-1.5 max-h-[28rem] overflow-y-auto">
-                  {allBuilds.map((b) => (
+                  {pagedAllBuilds.visible.map((b) => (
                     <div key={b.workspaceId} className="border border-white/5 rounded-xl overflow-hidden">
                       <button
                         onClick={() => void expandWorkspaceBuilds(b.workspaceId)}
@@ -3132,6 +3413,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       )}
                     </div>
                   ))}
+                  <LoadMore list={pagedAllBuilds} label="apps" />
                 </div>
               </div>
 
@@ -3641,7 +3923,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 )}
                 {!adultError && adultOptIns !== null && adultOptIns.length > 0 && (
                   <div className="space-y-1.5">
-                    {adultOptIns.map((u) => (
+                    {pagedAdultOptIns.visible.map((u) => (
                       <button
                         key={u.userId}
                         onClick={() => void openAccount(u.userId)}
@@ -3653,6 +3935,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         </span>
                       </button>
                     ))}
+                    <LoadMore list={pagedAdultOptIns} label="accounts" />
                   </div>
                 )}
               </div>
@@ -3977,7 +4260,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         <th className="py-2 text-left">Code</th><th className="py-2 text-left">Tokens</th><th className="py-2 text-left">Discount</th><th className="py-2 text-left">Used</th><th className="py-2 text-left">Status</th>
                       </tr></thead>
                       <tbody className="divide-y divide-white/5">
-                        {promos.map((p: any) => (
+                        {pagedPromos.visible.map((p: any) => (
                           <tr key={p.id} className="hover:bg-white/5">
                             <td className="py-2 text-pink-400 font-black font-mono">{p.code}</td>
                             <td className="py-2 text-amber-400 font-mono">{p.freeTokens || 0}</td>
@@ -3986,6 +4269,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             <td className="py-2"><span className={`text-[9px] font-black uppercase ${p.active ? 'text-emerald-400' : 'text-red-400'}`}>{p.active ? 'Active' : 'Expired'}</span></td>
                           </tr>
                         ))}
+                        <LoadMore list={pagedPromos} label="codes" colSpan={6} />
                       </tbody>
                     </table>
                   </div>

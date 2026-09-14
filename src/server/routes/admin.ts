@@ -36,6 +36,7 @@ import { assistantSpendStore } from '../lib/AssistantSpendStore';
 import { summarizeBuildFailures } from '../AgentV3/buildFailureAnalytics';
 import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
 import { listAdminBuildReports, getAdminBuildReport, markAdminBuildReport, deleteAdminBuildReport, deleteAllAdminBuildReports } from '../AgentV3/AdminBuildReportStore';
+import { listApkReports, getApkReport, markApkReportFixed, deleteApkReport, deleteAllApkReports } from '../lib/AdminApkReportStore';
 import { listAllDiagnostics, listBuildFacts, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { resolveUserIdentities, identityFrom, identityLabel } from '../lib/adminUserLookup';
 import { fetchAuthMetadata, firebaseAuthBatch, resolveJoinedAt, resolveLastActiveAt } from '../lib/adminUserActivity';
@@ -1150,6 +1151,68 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     }
   });
 
+  // APK REPORTS — the automatic inbox for FAILED Android/iOS store builds (admin 2026-09-14). A separate
+  // inbox from Build Reports on purpose (see AdminApkReportStore.ts's header): that one is the in-house
+  // AgentV3 engine's own report, submitted only when a user presses "Report"; this one is written
+  // automatically by mobileShip.ts the moment a user's own GitHub Actions build fails — no user action.
+  app.get('/api/admin/apk-reports', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '200'), 10) || 200, 1), 500);
+      const reports = await listApkReports(limit);
+      res.json({ reports });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to load APK build reports.' });
+    }
+  });
+
+  app.get('/api/admin/apk-reports/:id', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const record = await getApkReport(String(req.params.id));
+      if (!record) { res.status(404).json({ error: 'APK build report not found.' }); return; }
+      res.json(record);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to load the APK build report.' });
+    }
+  });
+
+  app.post('/api/admin/apk-reports/:id/mark', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const body = (req.body ?? {}) as { fixed?: unknown; note?: unknown };
+      if (typeof body.fixed !== 'boolean') {
+        res.status(400).json({ error: 'Pass { fixed: true|false } to mark this report.' });
+        return;
+      }
+      const ok = await markApkReportFixed(String(req.params.id), body.fixed, typeof body.note === 'string' ? body.note : null);
+      if (!ok) { res.status(404).json({ error: 'APK build report not found (or the mark could not be saved).' }); return; }
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to mark the APK build report.' });
+    }
+  });
+
+  app.delete('/api/admin/apk-reports/:id', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const ok = await deleteApkReport(String(req.params.id));
+      if (!ok) { res.status(404).json({ error: 'APK build report not found (or it could not be deleted).' }); return; }
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to delete the APK build report.' });
+    }
+  });
+
+  app.post('/api/admin/apk-reports/clear', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      if ((req.body ?? {}).confirm !== true) {
+        res.status(400).json({ error: 'Pass { confirm: true } to clear all APK reports — this cannot be undone.' });
+        return;
+      }
+      const deleted = await deleteAllApkReports();
+      res.json({ ok: true, deleted });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to clear the APK build reports.' });
+    }
+  });
+
   /**
    * SERVER NECESSITY (admin 2026-08-12) — the ONE number that decides whether the browser-native plan
    * is worth building: how many past apps were given a Node server they never needed?
@@ -1503,9 +1566,40 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       // an unbounded number of Auth calls as the user base grows. Auth being unreachable degrades to
       // `lastActiveAt: null`, which the table renders as "—" — never as a fabricated date, and never
       // as the empty cell that would read like "never signed in".
-      const authMeta = await fetchAuthMetadata(users.map((u: any) => u.userId || u.id), await firebaseAuthBatch());
+      /**
+       * 🔴 ONLY LOOK UP THE ROWS WE ARE ABOUT TO SEND (admin 2026-09-14, on list speed).
+       *
+       * This is the half a "Load more" button CANNOT fix. The browser showing 12 rows instead of
+       * 5,000 makes the screen render fast, but the request was already slow before a single row was
+       * drawn — because `fetchAuthMetadata` batches at Firebase's 100-identifier limit, so 5,000
+       * users is FIFTY sequential Auth round-trips on every refresh of this panel, and the JSON is
+       * 5,000 rows wide either way.
+       *
+       * ⚠️ THE FIRESTORE SCAN STAYS, AND THAT IS DELIBERATE, NOT AN OVERSIGHT. Sort and search run
+       * over the WHOLE set, in memory, because Firestore cannot do substring search — so limiting
+       * the READ would silently reduce "search all users" to "search the first page", which is the
+       * fix trading one problem for a worse one. What is limited is the expensive part: the Auth
+       * calls and the payload.
+       *
+       * 🔒 OPT-IN, SO AN OLD CLIENT CANNOT BREAK. The Android app is BUNDLED, so a phone can be
+       * running last month's panel against today's server; that panel does `users.map(...)` on the
+       * response and would crash on an object. Without `?paged=1` the response is the same ARRAY it
+       * has always been — byte-identical behaviour — and only a client that asks for the envelope
+       * gets one.
+       */
+      const paged = String(req.query.paged || '') === '1';
+      const total = users.length;
+      const limitRaw = Number(req.query.limit);
+      const pageLimit = paged
+        ? Math.min(200, Math.max(1, Number.isFinite(limitRaw) && limitRaw > 0 ? Math.floor(limitRaw) : 25))
+        : total;
+      const offsetRaw = Number(req.query.offset);
+      const offset = paged && Number.isFinite(offsetRaw) && offsetRaw > 0 ? Math.floor(offsetRaw) : 0;
+      const page = paged ? users.slice(offset, offset + pageLimit) : users;
 
-      res.json(users.map((u: any) => {
+      const authMeta = await fetchAuthMetadata(page.map((u: any) => u.userId || u.id), await firebaseAuthBatch());
+
+      const rows = page.map((u: any) => {
         const uid = u.userId || u.id;
         const meta = authMeta.get(uid) ?? null;
         const joined = resolveJoinedAt(meta, u.createdAt);
@@ -1525,7 +1619,10 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
           lastActiveAt: lastActive.atMs,
           lastActiveAtSource: lastActive.source,
         };
-      }));
+      });
+      // The envelope carries `total` so the panel can say "Showing 25 of 4,331" honestly — a count it
+      // could otherwise only guess at from the rows it happens to hold.
+      res.json(paged ? { users: rows, total, offset, limit: pageLimit } : rows);
     } catch (e: any) {
       // Admin-only endpoint: surface the REAL failure reason (Firestore error / timeout) so the panel can
       // show WHY the list didn't load instead of a misleading "no users found". (Not a user-facing surface,

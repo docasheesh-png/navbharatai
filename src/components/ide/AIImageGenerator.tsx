@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { usePagedList } from '../../hooks/usePagedList';
+import { LoadMore } from '../../components/common/LoadMore';
 import { Wand2, Sparkles, Download, Palette, Copy, Trash2, Clock, Star, Check, Image as ImageIcon } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { TirangaLoader } from '../ui/TirangaLoader';
@@ -78,6 +80,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
   const [imageError, setImageError] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [history, setHistory] = useState<GeneratedImage[]>([]);
+  const pagedHistory = usePagedList(history);
   const [copied, setCopied] = useState(false);
   const [craftNotes, setCraftNotes] = useState<string[]>([]);
   const [actionNote, setActionNote] = useState(''); // honest fallback message for copy/download
@@ -546,7 +549,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
                 </button>
               </div>
               <div className="grid grid-cols-3 gap-2">
-                {history.map(item => (
+                {pagedHistory.visible.map(item => (
                   <button
                     key={item.id}
                     onClick={() => { setGeneratedUrl(item.url); setPrompt(item.prompt); setImageType(item.type || IMAGE_TYPES[0]); setStyle(item.style); setSize(item.size); }}
@@ -559,6 +562,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
                     </div>
                   </button>
                 ))}
+                <LoadMore list={pagedHistory} label="images" />
               </div>
             </div>
           )}

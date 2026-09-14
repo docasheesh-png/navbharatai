@@ -11,6 +11,8 @@
  *     point of the refusal is that they can act on it.
  */
 import React, { useCallback, useEffect, useState } from 'react';
+import { usePagedList } from '../../hooks/usePagedList';
+import { LoadMore } from '../../components/common/LoadMore';
 import { Globe, Search, Sparkles, Upload, AlertTriangle, GitFork } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { auth } from '../../lib/firebase';
@@ -57,7 +59,9 @@ async function authedHeaders(): Promise<Record<string, string>> {
 
 export const GalleryPanel: React.FC<GalleryPanelProps> = ({ user, files, onRemix, onOpenPlans }) => {
   const [apps, setApps] = useState<PublicApp[]>([]);
+  const pagedApps = usePagedList(apps);
   const [mine, setMine] = useState<PublicApp[]>([]);
+  const pagedMine = usePagedList(mine);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -213,7 +217,7 @@ export const GalleryPanel: React.FC<GalleryPanelProps> = ({ user, files, onRemix
         {mine.length > 0 && (
           <div className="pt-2 border-t border-white/5 space-y-1">
             <div className="text-[11px] font-bold text-[#8b949e]">Your submissions</div>
-            {mine.map((m) => (
+            {pagedMine.visible.map((m) => (
               <div key={m.id} className="flex items-center justify-between text-[11px]">
                 <span className="text-zinc-200 truncate">{m.title}</span>
                 <span className={cn('shrink-0 uppercase text-[9px] font-bold tracking-widest',
@@ -223,6 +227,7 @@ export const GalleryPanel: React.FC<GalleryPanelProps> = ({ user, files, onRemix
                 </span>
               </div>
             ))}
+            <LoadMore list={pagedMine} label="apps" />
           </div>
         )}
       </div>
@@ -248,7 +253,7 @@ export const GalleryPanel: React.FC<GalleryPanelProps> = ({ user, files, onRemix
           </p>
         ) : (
           <div className="space-y-2">
-            {apps.map((a) => (
+            {pagedApps.visible.map((a) => (
               <div key={a.id} className="bg-black/30 rounded px-3 py-2 space-y-1">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -268,6 +273,7 @@ export const GalleryPanel: React.FC<GalleryPanelProps> = ({ user, files, onRemix
                 </div>
               </div>
             ))}
+            <LoadMore list={pagedApps} label="apps" />
           </div>
         )}
       </div>

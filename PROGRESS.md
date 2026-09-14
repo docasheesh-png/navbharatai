@@ -52681,3 +52681,103 @@ of the fix. Re-fetching before a push catches a conflict; it does not catch a PR
 under a branch you are still improving. **Check whether your PR is still OPEN before pushing a
 correction to it** — a push that succeeds to a merged branch is silent and reaches nobody.
 7 new tests. Fixed on the P5 branch (#2905) and merged up the stack to #2908 and #2909.
+
+---
+
+## 2026-09-14 — Autopsy of build 7bc15e40: "Run it" was answered with "your build produced nothing, add credits"
+
+A REAL user (not the admin). The whole prompt was **"Run it"**, on a project that already had 33 files.
+
+### The five-bucket ledger
+
+| | Count | What |
+|---|---|---|
+| ✅ Self-healed | 0 | nothing was healed; nothing needed to be |
+| 🔀 Worked around | 0 | — |
+| ⏭️ Skipped | 3 | the page-render check, the user journey, and the typecheck all skipped — and the summary claimed two of them passed |
+| ❌ Still broken | 3 | a working build reported as FAILED · an upsell after a turn that succeeded · two unsupported claims the auditor could not see |
+| 🥵 Struggle | 1 | 98 s, of which 7 s was setup before the first model call — but the user's real cost was being told their working app had produced nothing |
+
+**What the engine actually did, and it was right:** read `package.json`, read `vite.config.ts`, ran
+`npm run dev` (server up on 5173), called `update_preview` (`PREVIEW_PUBLISHED`, a live URL), took a
+screenshot, and reported the app running. It wrote no files, **because running an app does not write
+one.**
+
+**What the platform then told that user:**
+> "The build produced no files. Please try again — you have not been charged."
+> "✨ Your app needs our strongest engine to finish cleanly. Add credits…"
+
+Their app was up on the preview at that moment. We reported a success as a failure and asked for money
+to fix it.
+
+### The missing subsystem (step 2)
+
+**The platform has one question — "did this turn write files?" — and uses it to answer a different one:
+"did this turn do what the user asked?"** For a request whose correct completion involves no write
+("run it", "start the server", "is it working?", "show me the preview") those two questions have
+**opposite** answers. There was no concept of a turn whose success is an ACTION rather than an artifact.
+
+### 🔴 The contradiction was already in the code, and one half of it already knew
+
+- `shouldRetryEmptyBuild` declined to retry, in its own words: *"An edit on a project that already
+  exists may legitimately change nothing."*
+- `emptyBuildFailureSummary` was never told. Its entire input was
+  `(expectsArtifacts, fileCount, sandboxUnavailable)` — so "zero files ⇒ failure" is the only answer it
+  was capable of giving.
+
+Same build, same facts, opposite verdicts. The verdict is now computed **once** and reused by the
+failure message and the upsell, so they cannot disagree again.
+
+🔒 **The excuse needs TWO pieces of POSITIVE evidence, never the absence of something** — because the
+dangerous direction is the other one. (1) the user's own words ask to RUN or LOOK, with no change
+requested, and (2) the app really came up on this turn (`previewVerifiedRendered || lastPreviewUrl`).
+Fail either and today's behaviour is byte-identical. "Build me an app" that wrote nothing still fails
+(the 5b4f9b63 protection is untouched), an ordinary edit that wrote nothing still fails, and a dead
+sandbox still fails whatever was asked — that guard is tested *before* the new one.
+
+### The upsell: a FOURTH reason not to ask for money, in the same guard
+
+Three sessions had each found one reason and patched it — a refusal (03997004), our own provider
+outage, and a prompt with nothing to build from (#2887). None covered **a turn that did exactly what
+was asked**. Same mistake, fourth face: "zero files" read as a verdict on the ENGINE when it was a fact
+about the REQUEST.
+
+### 🔴 And the summary made two claims the report itself contradicts
+
+The engine wrote *"✅ No runtime errors in the browser console"* while the same report recorded
+`RUNTIME_UNCHECKED` — the console was never captured. And *"✅ TypeScript type-check passes cleanly"*
+while the release gate recorded *"the typecheck did not run"*. `CLAIM_UNSUPPORTED` exists for exactly
+this and **did not fire**:
+
+- **One adjective defeated the console check.** Every pattern spelled out an exact word sequence:
+  `no errors in the console` matched, `no RUNTIME errors in the console` did not. Verified empirically
+  before the fix, not read off the regex. Fixed as a CLASS — the negation and the noun may now be
+  separated by a short bounded run of words, in both orders — so "zero JavaScript errors in the
+  console" is caught too, rather than adding one more literal spelling per phrasing.
+- **There was no typecheck claim check at all.** Added, reading `gateEvidence.typecheck`, which starts
+  at `'not-run'` and is only ever moved by a check that actually ran — so it cannot claim a typecheck
+  happened when it did not. An UNKNOWN status never accuses.
+
+Six negative cases were tested explicitly ("there were 3 errors, which I fixed", "the typecheck is
+still failing", "run a typecheck before publishing"): none is flagged, and a fully-measured honest
+summary is accused of nothing.
+
+### A bug in my own first draft, recorded rather than quietly fixed
+
+The change-verb veto listed `karo` / `kardo`. Those mean **"do"**, not "change" — so *"app chalu karo"*
+("start the app") was being vetoed as an edit request. The specific verbs still catch what matters:
+*"chalao aur ek button add karo"* is vetoed by `add`. Caught by the Hinglish test, which is why it was
+written.
+
+### Verification
+
+32 tests across three files. Four reverts tried, four failures: the verdict not reaching the failure
+summary, the evidence half dropped, the console pattern narrowed back, and the typecheck fact unwired.
+
+### Still open (rule 6)
+
+- **The 7 s before the first model call** is recorded (`TIME_TO_FIRST_CALL`) and unaddressed here.
+- **`assessBuildInput('Run it').buildable` returns TRUE**, which is why the 'engine' upsell fired
+  rather than the gentler 'no-instruction' one. Left alone deliberately: the run-action verdict now
+  suppresses the message entirely, so changing `buildable` would be a second answer to a question that
+  is already settled — and it is consulted elsewhere.

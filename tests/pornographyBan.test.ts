@@ -168,12 +168,19 @@ describe('the wiring — both surfaces, and no upsell after a refusal', () => {
     // here could only ever describe one of them, so it would have had to be deleted (losing the
     // guard) or kept (blocking the other two). What must hold is the intent: the model's own answer
     // is read, and NOTHING is said to the user when that answer was no.
+    //
+    // ⚠️ AND THE SHAPE ITSELF WAS STILL TOO EXACT — a FOURTH reason arrived (2026-09-14, build
+    // 7bc15e40: a turn that did exactly what was asked and so wrote no files) and `if (!refused) {`
+    // became `if (!refused && !emptyWasLegitimate) {`, failing this test for a change that
+    // strengthens the very thing it guards. The assertion now requires `!refused` to LEAD the
+    // condition and allows further `&&` clauses after it, so a fifth honest reason cannot break it —
+    // while deleting `!refused` still does.
     const start = route.indexOf("zeroBillReason = 'empty build (0 files produced) — never charged'");
     expect(start).toBeGreaterThan(0);
     const block = route.slice(start, start + 4500);
     expect(block).toContain('const refused = looksLikeRefusal(result.summary);');
     // The narration — the upsell OR the degraded notice — is reachable only when there was no refusal.
-    expect(block).toMatch(/if \(!refused\) \{[\s\S]*freeTierUpsellMessage\(/);
+    expect(block).toMatch(/if \(!refused(?:\s*&&[^)]*)?\) \{[\s\S]*freeTierUpsellMessage\(/);
     // …and a suppressed upsell is recorded, so the admin sees the check fire rather than inferring it.
     expect(block).toContain('UPSELL_SUPPRESSED');
   });

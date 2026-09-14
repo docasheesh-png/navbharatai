@@ -419,6 +419,7 @@ import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_P
 import { liveSearchContext } from '../lib/liveSearchContext';
 import { classifyIntentSmart, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild } from '../AgentV3/IntentClassifier';
 import { looksLikeRefusal } from '../lib/promptSafety';
+import { emptyTurnWasLegitimate } from '../AgentV3/runActionTurn';
 import { assessBuildInput } from '../AgentV3/buildableInput';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
@@ -1086,6 +1087,20 @@ export function emptyBuildFailureSummary(
   expectsArtifacts: boolean,
   fileCount: number,
   sandboxUnavailable: boolean,
+  /**
+   * Was writing nothing the CORRECT outcome for this turn? (build 7bc15e40 — the whole prompt was
+   * "Run it", the engine started the dev server and published a live preview, and this function
+   * called it "The build produced no files. Please try again".)
+   *
+   * 🔴 THE CONTRADICTION THIS CLOSES: `shouldRetryEmptyBuild` already declined to retry that build,
+   * in its own words — *"An edit on a project that already exists may legitimately change nothing"*.
+   * It knew. This function was never told, because its whole input was
+   * `(expectsArtifacts, fileCount, sandboxUnavailable)` — so it could only ever answer the question
+   * "were files written?", which is not the question "did the turn do what was asked?".
+   *
+   * Defaults to false, so every existing caller keeps today's behaviour exactly.
+   */
+  emptyWasLegitimate = false,
 ): string | null {
   if (!expectsArtifacts) return null;
   // SANDBOX DOWN ⇒ FAILURE regardless of file count (deep-test App #11, 2026-07-14). When the sandbox
@@ -1099,6 +1114,9 @@ export function emptyBuildFailureSummary(
     return 'The build could not run — the sandbox was unavailable (no files could be created, installed, or verified). Please try again in a moment; you have not been charged.';
   }
   if (fileCount > 0) return null;
+  // A run/inspect turn that genuinely ran the app wrote nothing BECAUSE THAT IS WHAT RUNNING IS.
+  // Checked after the sandbox guard above: a dead sandbox never ran anything, whatever was asked.
+  if (emptyWasLegitimate) return null;
   return 'The build produced no files. Please try again — you have not been charged.';
 }
 
@@ -17229,6 +17247,11 @@ async function noteBuildOutcome(
           // the builds where every runtime check skipped.
           filesWritten: writtenFiles.size,
           buildWasRequested: userAskedToBuildAnApp,
+          // "TypeScript type-check passes cleanly" beside a release gate recording "the typecheck did
+          // not run" — both in build 7bc15e40's own report. Read from the gate's own evidence, which
+          // starts at 'not-run' and is only ever moved by a check that actually ran, so this cannot
+          // claim a typecheck happened when it did not.
+          typecheckRan: gateEvidence.typecheck !== 'not-run',
         });
         if (contradictions.length > 0) {
           result = { ...result, summary: `${result.summary}${claimCorrection(contradictions)}` };
@@ -17716,8 +17739,25 @@ async function noteBuildOutcome(
       // Force ok:false with an honest, retry-able summary so the terminal event, build health, billing
       // (already ₹0 via zeroBillReason), and telemetry all agree the build did NOT succeed. This runs
       // BEFORE the SPM settle / billing / finish below so every downstream consumer sees the truth.
+      // Was writing nothing the CORRECT outcome here? Decided ONCE and reused by the upsell below,
+      // because the whole defect in build 7bc15e40 was two places answering this differently about
+      // the same build. `previewVerifiedRendered` is the evidence half — the app really came up on
+      // this turn — so the word "run" alone can never excuse a turn that did nothing.
+      const emptyWasLegitimate = emptyTurnWasLegitimate({
+        isEditMode,
+        existingProjectFiles: editFileTree?.length ?? 0,
+        userAskedToBuildAnApp,
+        prompt,
+        appWasRunAndShown: previewVerifiedRendered || Boolean(lastPreviewUrl),
+      });
+      if (emptyWasLegitimate && writtenFiles.size === 0) {
+        buildDiag.record({
+          phase: 'build', severity: 'info', code: 'RUN_ACTION_TURN', autoResolved: true,
+          message: 'No files were written, and that is the correct outcome: this turn asked for the app to be RUN, not changed, and the app was brought up and shown. Not treated as an empty build.',
+        });
+      }
       if (result && result.ok) {
-        const emptyFail = emptyBuildFailureSummary(expectsArtifacts, writtenFiles.size, sandboxUnavailable);
+        const emptyFail = emptyBuildFailureSummary(expectsArtifacts, writtenFiles.size, sandboxUnavailable, emptyWasLegitimate);
         if (emptyFail) result = { ...result, ok: false, summary: emptyFail };
       }
 
@@ -18205,9 +18245,9 @@ async function noteBuildOutcome(
         // spend the very budget free-tier protects). Instead, honestly invite the user to add credits
         // and finish on the strongest engine — converting the user to paid without shipping a broken app.
         if (freeTierBuildActive) {
-          // 🔴 THREE INDEPENDENT REASONS NOT TO ASK FOR MONEY, AND THEY COMPOSE. Three sessions each
-          // found one of them on the same day, in this one guard; a merge that kept only one would
-          // silently restore the other two bugs, so the order below is the whole resolution.
+          // 🔴 FOUR INDEPENDENT REASONS NOT TO ASK FOR MONEY, AND THEY COMPOSE. Four sessions each
+          // found one of them, in this one guard; a merge that kept only one would silently restore
+          // the other three bugs, so the order below is the whole resolution.
           //
           // (a) THE MODELS REFUSED (report 03997004). The user asked for a pornography site; the
           // models refused eight times; this line then said *"Your app needs our strongest engine…
@@ -18236,9 +18276,17 @@ async function noteBuildOutcome(
           // Degraded is then tested before (c) for the reason its own author gives: when our
           // providers are down we do not know whether the prompt was buildable, and blaming the
           // user's wording for our outage is the same mistake in a politer sentence.
+          //
+          // (d) THE TURN DID EXACTLY WHAT WAS ASKED (build 7bc15e40). The whole prompt was "Run it".
+          // The engine started the dev server, published a live preview and reported the app
+          // running — and wrote no files, because running an app does not write one. The user was
+          // then told their build produced nothing and invited to pay for a stronger engine while
+          // their app was up on the preview in front of them. Tested alongside the other three
+          // because it is the same mistake they each fixed one face of: "zero files" read as a
+          // verdict on the ENGINE, when it was a fact about the REQUEST. See runActionTurn.ts.
           const refused = looksLikeRefusal(result.summary);
           const degraded = !refused && providerFailuresLookDegraded(buildDiag.providerFailureBreakdown());
-          if (!refused) {
+          if (!refused && !emptyWasLegitimate) {
             const emptyCause = assessBuildInput(prompt).buildable ? 'engine' : 'no-instruction';
             events.emit({
               type: 'narration',
@@ -18247,12 +18295,14 @@ async function noteBuildOutcome(
               ts: Date.now(),
             });
           }
-          if (refused || degraded) {
+          if (refused || degraded || emptyWasLegitimate) {
             buildDiag.record({
               phase: 'build', severity: 'warning', code: 'UPSELL_SUPPRESSED', autoResolved: false,
               message: refused
                 ? 'Did not ask this user to add credits: the engine REFUSED this request on policy grounds. A refusal is an answer, not a capability limit — selling a stronger engine after one offers to do the very thing we just declined to do.'
-                : 'Did not ask this user to add credits: the build failed because the engine did not respond, not because the app needed a stronger one. Charging for our own slowness is what this check exists to prevent.',
+                : degraded
+                  ? 'Did not ask this user to add credits: the build failed because the engine did not respond, not because the app needed a stronger one. Charging for our own slowness is what this check exists to prevent.'
+                  : 'Did not ask this user to add credits: this turn asked for the app to be RUN, not built, and it ran. Writing no files was the correct outcome, so there is no engine limit to sell.',
             });
           }
         }

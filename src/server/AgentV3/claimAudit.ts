@@ -30,6 +30,16 @@
 export interface MeasuredFacts {
   /** Did the console capture actually run and return? */
   consoleCaptured: boolean;
+  /**
+   * Did a typecheck actually run on this build?
+   *
+   * Added after build 7bc15e40, where the summary claimed *"TypeScript type-check passes cleanly"*
+   * and the release gate recorded, in the same report, *"the typecheck did not run"*. There was no
+   * pattern for this claim at all — the auditor could not have caught it however it was worded.
+   *
+   * `undefined` means the caller could not tell us, and silence is never an accusation.
+   */
+  typecheckRan?: boolean;
   /** Did a screenshot tool call complete during this build? */
   screenshotTaken: boolean;
   /** Did a real browser open the preview and see it render? */
@@ -71,7 +81,7 @@ export interface MeasuredFacts {
   buildWasRequested?: boolean;
 }
 
-export type ClaimKind = 'console-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered';
+export type ClaimKind = 'console-clean' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered';
 
 export interface ClaimContradiction {
   kind: ClaimKind;
@@ -89,14 +99,45 @@ export interface ClaimContradiction {
  * is INVERTED here — this claim IS a negation ("koi error nahi"), so unlike the preview patterns the
  * "nahi" is the thing being matched rather than the thing being excluded.
  */
+/**
+ * 🔴 ONE ADJECTIVE DEFEATED THIS ENTIRE CHECK (build 7bc15e40, 2026-09-13, a real user).
+ *
+ * The summary said **"No runtime errors in the browser console"** while the platform's own record
+ * said `RUNTIME_UNCHECKED` — the console was never captured. The claim sailed through, because every
+ * pattern below spelled out an exact word sequence: `no errors in the console` matched,
+ * `no RUNTIME errors in the console` did not. One inserted word.
+ *
+ * That is a bug in the CLASS, not in a missing phrase — a model writes naturally, so "no runtime
+ * errors", "zero JavaScript errors", "no uncaught errors in the console" are all the same claim. So
+ * the negation and the noun are now allowed a short run of filler words between them, in BOTH
+ * orders (errors-then-console and console-then-errors), instead of adding one more literal spelling
+ * each time a summary phrases it a new way.
+ *
+ * The filler run is bounded (≤ 3 words, and the two halves must sit in the same sentence) so it
+ * cannot reach across into an unrelated clause and invent a claim nobody made.
+ */
 const CONSOLE_CLEAN = new RegExp([
-  /\b(no|zero|without any|free of)\s+(browser\s+)?console\s+errors?\b/,
+  // "no console errors", "no browser console errors", "zero remaining console errors"
+  /\b(?:no|zero|without any|free of)\s+(?:[\w-]+\s+){0,3}?console\s+errors?\b/,
+  // "No runtime errors in the browser console", "zero JavaScript errors in the console"
+  /\b(?:no|zero|without any|free of)\s+(?:[\w-]+\s+){0,3}?errors?\b[^.!\n]{0,40}?\bconsole\b/,
   /\bconsole\s+is\s+clean\b/,
   /\bno errors? in the (browser )?console\b/,
   // Hinglish: "console me koi error nahi", "koi console error nahi hai", "console bilkul saaf hai"
   /\b(?:console|कंसोल)\b[^.!\n]{0,30}?\b(?:koi\s+)?(?:error|errors|गलती)\b[^.!\n]{0,15}?\b(?:nahi|nahin|नहीं)\b/,
   /\bkoi\s+(?:console\s+)?error\s+nahi\b/,
   /\b(?:console|कंसोल)\b[^.!\n]{0,20}?\b(?:saaf|साफ)\b/,
+].map((r) => r.source).join('|'), 'i');
+
+/**
+ * A claim that the project COMPILES — the same shape of promise as a clean console, and just as
+ * checkable against whether the check was ever run. Deliberately requires a PASS word beside the
+ * typecheck word, so "the typecheck is still failing" and "run a typecheck" are not claims.
+ */
+const TYPECHECK_CLEAN = new RegExp([
+  /\b(?:type[\s-]?check(?:s|ing|ed)?|tsc|typescript)\b[^.!\n]{0,40}?\b(?:passes?|passed|passing|clean|cleanly|succeeds?|succeeded|no errors?)\b/,
+  /\b(?:no|zero)\s+(?:[\w-]+\s+){0,3}?type\s+errors?\b/,
+  /\b(?:compiles?|compiled)\s+(?:cleanly|successfully|without errors?)\b/,
 ].map((r) => r.source).join('|'), 'i');
 
 /**
@@ -244,6 +285,14 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
       kind: 'console-clean',
       claimed: 'that there are no console errors',
       measured: 'the browser console could not be captured on this run, so it was never checked',
+    });
+  }
+  // Only when the caller actually told us — an omitted fact must never become an accusation.
+  if (facts.typecheckRan === false && TYPECHECK_CLEAN.test(text)) {
+    out.push({
+      kind: 'typecheck-clean',
+      claimed: 'that the project type-checks cleanly',
+      measured: 'no typecheck ran on this build, so nothing was compiled to find out',
     });
   }
   if (!facts.screenshotTaken && SCREENSHOT_SEEN.test(text)) {

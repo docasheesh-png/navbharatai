@@ -17,6 +17,7 @@ import { HOSTING_TIERS } from '../../lib/hostingTiers';
 import { registerHostingPlanSweep, reattachSuspendedDomains } from '../lib/hostingPlanSweep';
 import { sendSafeError } from '../lib/httpError';
 import { userSafeUsageLog } from '../lib/usageLogPublic';
+import { routeParam, routeParams } from '../lib/expressCompat';
 
 /** Resolve a login uid to its canonical wallet id (follows `mergedInto`). No-op unless
  *  WALLET_MERGE_RESOLVE=on, so a merged/retired account transparently reads its unified wallet. */
@@ -146,7 +147,7 @@ export function registerWalletRoutes(app: Express): void {
   // sends the Bearer token via authedHeaders(); VITEST skips the check.
   app.get('/api/wallet/:userId', requireUserMatch('userId'), async (req: Request, res: Response) => {
     const db = getDb() as any;
-    const { userId: rawUserId } = req.params;
+    const { userId: rawUserId } = routeParams(req.params);
     const email = req.query.email as string || '';
     const name = req.query.name as string || '';
 
@@ -398,7 +399,7 @@ export function registerWalletRoutes(app: Express): void {
       if (!giftPlanV2Enabled()) {
         return res.json({ ok: false, granted: 0, message: claimRefusalMessage('disabled') });
       }
-      const userId = await canonicalWalletId(db, req.params.userId);
+      const userId = await canonicalWalletId(db, routeParam(req.params.userId));
 
       const normPhone = normalizePhoneForGift(await verifiedPhoneNumber(req));
       if (!normPhone) {
@@ -498,7 +499,7 @@ export function registerWalletRoutes(app: Express): void {
 
   app.get('/api/wallet/:userId/hosting-plan', requireUserMatch('userId'), async (req: Request, res: Response) => {
     try {
-      const status = await readHostingPlanStatus(getDb() as any, req.params.userId);
+      const status = await readHostingPlanStatus(getDb() as any, routeParam(req.params.userId));
       return res.json(status);
     } catch (err: any) {
       return sendSafeError(res, 500, 'Unable to load your plan right now. Please try again.', err, 'hosting plan status');
@@ -509,7 +510,7 @@ export function registerWalletRoutes(app: Express): void {
     try {
       // 🔒 APP LOCK (admin 2026-09-13). Checked BEFORE anything is charged, so a refusal costs the user
       // nothing but a PIN entry. Invisible to everyone who has not set a PIN or locked this area.
-      const blocked = await appLockBlocks(req, req.params.userId, 'hosting-plan-purchase');
+      const blocked = await appLockBlocks(req, routeParam(req.params.userId), 'hosting-plan-purchase');
       if (blocked) return res.status(blocked.status).json(blocked.body);
       // The tier and the agreement tick come from the body. `agreedToTerms` is checked SERVER-side
       // (computePlanPurchase refuses without it) rather than trusted to a disabled button: a purchase
@@ -523,7 +524,7 @@ export function registerWalletRoutes(app: Express): void {
       // client keeps today's behaviour (renew on) rather than being silently switched to one-off.
       const autoRenew = typeof req.body?.autoRenew === 'boolean' ? req.body.autoRenew : undefined;
       const result = await purchaseHostingPlan(
-        getDb() as any, req.params.userId, undefined, tierId ?? HOSTING_TIERS[0].id,
+        getDb() as any, routeParam(req.params.userId), undefined, tierId ?? HOSTING_TIERS[0].id,
         { agreedToTerms, ...(autoRenew === undefined ? {} : { autoRenew }) },
       );
       if (!result.ok) {
@@ -538,7 +539,7 @@ export function registerWalletRoutes(app: Express): void {
       }
       // Renewal undoes a lapse: any domain paused for the lapsed plan reconnects automatically.
       // Best-effort and non-blocking — the purchase result never waits on hosting calls.
-      void reattachSuspendedDomains(req.params.userId);
+      void reattachSuspendedDomains(routeParam(req.params.userId));
       return res.json(result);
     } catch (err: any) {
       return sendSafeError(res, 500, 'Could not complete the purchase — nothing was charged. Please try again.', err, 'hosting plan purchase');
@@ -549,20 +550,20 @@ export function registerWalletRoutes(app: Express): void {
     // 🔒 APP LOCK. Auto-renew decides whether this account is charged AGAIN, so it is guarded alongside
     // the purchase itself — switching it on is a commitment, and switching it off is one a thief would
     // never make but an argument over a shared phone might.
-    const blockedRenew = await appLockBlocks(req, req.params.userId, 'hosting-plan-auto-renew');
+    const blockedRenew = await appLockBlocks(req, routeParam(req.params.userId), 'hosting-plan-auto-renew');
     if (blockedRenew) return res.status(blockedRenew.status).json(blockedRenew.body);
     const autoRenew = req.body?.autoRenew;
     if (typeof autoRenew !== 'boolean') {
       return res.status(400).json({ error: 'autoRenew must be true or false.' });
     }
-    const ok = await setHostingPlanAutoRenew(getDb() as any, req.params.userId, autoRenew);
+    const ok = await setHostingPlanAutoRenew(getDb() as any, routeParam(req.params.userId), autoRenew);
     if (!ok) return res.status(404).json({ error: 'No hosting plan found on this account yet.' });
     return res.json({ ok: true, autoRenew });
   });
 
   app.get('/api/wallet/:userId/logs', requireUserMatch('userId'), async (req: Request, res: Response) => {
     const db = getDb() as any;
-    const { userId } = req.params;
+    const { userId } = routeParams(req.params);
     try {
       const logsRef = collection(db, 'ai_usage_logs');
       const q = query(logsRef, where('userId', '==', userId), orderBy('createdAt', 'desc'), limit(50));
@@ -593,7 +594,7 @@ export function registerWalletRoutes(app: Express): void {
 
   app.get('/api/wallet/:userId/transactions', requireUserMatch('userId'), async (req: Request, res: Response) => {
     const db = getDb() as any;
-    const { userId } = req.params;
+    const { userId } = routeParams(req.params);
     try {
       const txRef = collection(db, 'payment_transactions');
       const q = query(txRef, where('userId', '==', userId), orderBy('createdAt', 'desc'), limit(50));

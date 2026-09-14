@@ -29,6 +29,7 @@ import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
 import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
 import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange } from '../AgentV3/progressEta';
+import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote } from '../AgentV3/etaEvidence';
 import { describeRunnerChain, chainProviders, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction } from '../AgentV3/AuthenticityAnalysis';
@@ -536,6 +537,7 @@ import {
 import { adminRequestOk } from '../lib/adminAuth';
 import { previewFidelityCaveats, previewFidelityNotice } from '../AgentV3/previewFidelity';
 import { journeyUserSummary } from '../AgentV3/journeyUserSummary';
+import { routeParam, routeParams } from '../lib/expressCompat';
 
 /**
  * The one user-facing sentence for "the builder is switched off on this server".
@@ -3399,7 +3401,7 @@ export function registerAgentV3Routes(app: Express): void {
       // opening such an entry restores the REAL transcript instead of an empty local copy.
       const store = getConversationStore();
       let rec: Awaited<ReturnType<typeof store.get>> = null;
-      for (const cid of candidateConversationIds(req.params.id, userId)) {
+      for (const cid of candidateConversationIds(routeParam(req.params.id), userId)) {
         // This is THE reopen path — the one consumer that renders the evidence layer, so it alone
         // asks for the timeline (hot-path get() calls elsewhere skip those reads).
         rec = await store.get(cid, { includeTimeline: true }).catch(() => null);
@@ -3455,7 +3457,7 @@ export function registerAgentV3Routes(app: Express): void {
       // and reappear on the next list (the "ghost row" bug).
       let removed = false;
       let forbidden = false;
-      for (const cid of candidateConversationIds(req.params.id, userId)) {
+      for (const cid of candidateConversationIds(routeParam(req.params.id), userId)) {
         const rec = await store.get(cid).catch(() => null);
         const access = conversationAccess(rec, userId);
         if (access === 'ok') {
@@ -3508,7 +3510,7 @@ export function registerAgentV3Routes(app: Express): void {
       const store = getConversationStore();
       let updated = false;
       let forbidden = false;
-      for (const cid of candidateConversationIds(req.params.id, userId)) {
+      for (const cid of candidateConversationIds(routeParam(req.params.id), userId)) {
         const rec = await store.get(cid).catch(() => null);
         const access = conversationAccess(rec, userId);
         if (access === 'ok' && rec) {
@@ -3577,7 +3579,7 @@ export function registerAgentV3Routes(app: Express): void {
     const store = getConversationStore();
     let source: Awaited<ReturnType<typeof store.get>> = null;
     let forbidden = false;
-    for (const cid of candidateConversationIds(req.params.id, userId)) {
+    for (const cid of candidateConversationIds(routeParam(req.params.id), userId)) {
       const rec = await store.get(cid).catch(() => null);
       const access = conversationAccess(rec, userId);
       if (access === 'ok' && rec) { source = rec; break; }
@@ -3637,7 +3639,7 @@ export function registerAgentV3Routes(app: Express): void {
       // the loop below, so carrying the two fields is what keeps the rule readable at the call sites.
       let renamed: { id: string; repoName?: string; deployRepoName?: string } | null = null;
       let forbidden = false;
-      for (const cid of candidateConversationIds(req.params.id, userId)) {
+      for (const cid of candidateConversationIds(routeParam(req.params.id), userId)) {
         const rec = await store.get(cid).catch(() => null);
         const access = conversationAccess(rec, userId);
         if (access !== 'ok' || !rec) {
@@ -3653,14 +3655,14 @@ export function registerAgentV3Routes(app: Express): void {
         // WHICH REPO TO MOVE. A pinned name is a fact and always wins. When none is pinned yet — the
         // normal state right after a first build, since the record is created only late in that
         // request — reconstruct the name the build path would have derived, from the SAME immutable
-        // inputs (`title` + `createdAt`) and the same project id the builder uses (`req.params.id` is
+        // inputs (`title` + `createdAt`) and the same project id the builder uses (`routeParam(req.params.id)` is
         // the client's sessionId, which is exactly that). A reconstruction that misses simply 404s and
         // is reported honestly; it can never rename the wrong repo, because the name is derived from
         // this record's own identity.
         renamed = {
           id: cid,
           deployRepoName: rec.deployRepoName,
-          repoName: rec.repoName || repoNameForProject(userId, req.params.id, {
+          repoName: rec.repoName || repoNameForProject(userId, routeParam(req.params.id), {
             appName: rec.title,
             createdAtMs: typeof rec.createdAt === 'number' && rec.createdAt > 0 ? rec.createdAt : Date.now(),
           }),
@@ -11277,6 +11279,10 @@ async function noteBuildOutcome(
     // How many times the budget has been re-baselined. Threaded through liveEtaTick so a build that
     // has already broken its estimate stops making fresh countdown promises.
     let etaRevisions = 0;
+    // Is there EVIDENCE behind the countdown — real past builds up front, or a real measurement since?
+    // False while the only thing backing the budget is the prompt-word heuristic, and the heartbeat
+    // then shows elapsed time and the phase instead of a remaining time. See AgentV3/etaEvidence.ts.
+    let etaEvidenced = false;
     // MEASURED ETA state (2026-08-23). Everything above predicts from the PROMPT, which is how "Make an
     // VPN App" — a prompt with no page-words and no feature-words — scored the floor of the formula and
     // promised ~3 min for a build that ran 18m 42s. These two fields let the heartbeat stop predicting
@@ -11352,6 +11358,11 @@ async function noteBuildOutcome(
             // enters repair) liveEtaTick continues from the measured total rather than from the stale
             // prompt guess it was still carrying.
             etaTotalMs = elapsedMs + measured;
+            // A MEASUREMENT IS EVIDENCE. From here the budget is anchored to this build's own observed
+            // pace, so if measurement later stops applying (the build enters repair) liveEtaTick may
+            // honestly own the line again — it would be continuing from something real rather than
+            // from the prompt guess it was still carrying.
+            etaEvidenced = true;
             events.emit({ type: 'narration', agent: 'architect', text: measuredEtaText(elapsedMs, measured, writtenFiles.size, etaPlannedFiles), ts: now, id: 'eta-live' });
             return;
           }
@@ -11371,6 +11382,15 @@ async function noteBuildOutcome(
           // RE-BASELINING tick (autopsy 2026-08-02): liveEtaTick returns the line AND an extended budget
           // when the build overruns, so an over-estimate build keeps showing a fresh, honest number
           // instead of freezing on one "wrapping up (a little longer than estimated)" line for 20+ min.
+          // 🔴 NO EVIDENCE ⇒ NO COUNTDOWN. Without this the fix above would have been half a fix: the
+          // opening number was withheld, and two minutes later this line counted down from the very
+          // estimate we declined to show ("~53s to go" on a build with eight minutes left, autopsy
+          // d11ad529). Elapsed time is still reported — it has already happened, so it promises
+          // nothing — and the moment a real measurement lands the branch above takes over.
+          if (!etaEvidenced) {
+            events.emit({ type: 'narration', agent: 'architect', text: unevidencedEtaTickLine(elapsedMs), ts: now, id: 'eta-live' });
+            return;
+          }
           const tick = liveEtaTick(elapsedMs, etaTotalMs, etaBaseMs || etaTotalMs, etaRevisions);
           etaTotalMs = tick.totalMs;
           // Carry the revision count forward: it is what stops the countdown resuming its "~1 min to
@@ -11939,11 +11959,33 @@ async function noteBuildOutcome(
           // promised three minutes. They had not: `firstEtaLine` shows the BAND and says outright that
           // the figure is a first guess. The admin's own report was the least honest surface in the
           // system, which is backwards. It now carries the same band the user saw, verbatim.
-          const etaShown = firstEtaLine(est, past.length);
+          // 🔴 A NUMBER IS SHOWN ONLY WHERE THERE IS EVIDENCE FOR ONE (admin 2026-09-14, asked as
+          // "imaandar phase dikhao ya real number?"). It was never a choice between the two: the rule
+          // is the number wherever it is measured, the phase wherever it is not.
+          //
+          // `progressEta.ts` has refused to guess since 2026-08-23 — null rather than a figure in every
+          // case where it would be extrapolating from nothing — and its header records why the prompt
+          // heuristic cannot be trusted: it runs BACKWARDS, scoring a short, ambitious request smaller
+          // than a wordy modest one. That discipline governed the LIVE line and never this one, so a
+          // build still opened with a number the heuristic had produced. Three consecutive autopsies
+          // recorded the result: "~2–4 min" against real builds of 12, 26.6 and 26.6 minutes. The
+          // original report that started this whole module was a complaint about the broken promise,
+          // not about the wait.
+          //
+          // An estimate this workspace's own past builds DOMINATE is a measurement and keeps its
+          // number, unchanged. `historyWeight` is the discriminator rather than `basis`, because a
+          // single distant past build already reads as 'blended' while contributing a fraction of the
+          // figure — see etaEvidence.ts.
+          // ⚠️ `etaTotalMs`/`etaBaseMs` above stay seeded even when unevidenced, deliberately: they are
+          // what lets the heartbeat RUN at all, and the heartbeat is where the measured line comes
+          // from. What changes is that its fallback may not count down from a figure we declined to
+          // show — see the tick below, which withholds the countdown until something real anchors it.
+          etaEvidenced = estimateIsEvidenced(est);
+          const etaShown = etaEvidenced ? firstEtaLine(est, past.length) : unevidencedFirstEtaLine();
           buildDiag.record({
             phase: 'plan', severity: 'info', code: 'ETA_BASIS',
             message: `ETA ${formatEtaRange(est.lowMs, est.highMs, est.estimateMs)} (midpoint ${est.etaText}) · basis ${est.basis} · confidence ${est.confidence}`,
-            detail: `${etaBasisNote(past)} Shown to the user: "${etaShown.replace(/^⏱️\s*/, '')}"`,
+            detail: `${etaBasisNote(past)} ${etaEvidenceNote(est)} Shown to the user: "${etaShown.replace(/^⏱️\s*/, '')}"`,
             autoResolved: true,
           });
           // THE POINT ESTIMATE IS NOT WHAT WE KNOW. `estimateBuildTime` returns lowMs/highMs and a

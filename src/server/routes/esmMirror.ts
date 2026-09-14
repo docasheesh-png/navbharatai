@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from 'express';
 import { init as lexerInit, parse as lexerParse } from 'es-module-lexer';
+import { splatPath } from '../lib/expressCompat';
 
 /**
  * Same-origin dependency mirror for the in-browser preview (Bolt-parity slice 2, admin 2026-08-05:
@@ -185,9 +186,12 @@ export function registerEsmMirrorRoutes(
   const cache = opts?.cache ?? sharedMirrorCache;
   const doFetch: UpstreamFetch = opts?.fetchImpl ?? (fetch as unknown as UpstreamFetch);
 
-  app.get('/api/esm/*', (req: Request, res: Response) => {
+  // EXPRESS 5: '/api/esm/*' is invalid (path-to-regexp v8) and the numbered capture `req.params[0]`
+  // is gone with it. '/*splat' names the capture, and it arrives as an ARRAY of path segments — see
+  // splatPath, which rejoins them into the path this mirror has always been given.
+  app.get('/api/esm/*splat', (req: Request, res: Response) => {
     void (async () => {
-      const path = String(req.params[0] ?? '');
+      const path = splatPath(req.params);
       // Query participates in identity (?external=react,react-dom changes the produced module).
       const qi = req.originalUrl.indexOf('?');
       const query = qi >= 0 ? req.originalUrl.slice(qi) : '';

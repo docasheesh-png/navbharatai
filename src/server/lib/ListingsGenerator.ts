@@ -179,7 +179,7 @@ listingRouter.get('/listings', (req: Request, res: Response) => {
 });
 
 listingRouter.get('/listings/:id', (req: Request, res: Response) => {
-  const l = listings.get(req.params.id);
+  const l = listings.get(routeParam(req.params.id));
   if (!l) return res.status(404).json({ error: 'listing not found' });
   return res.status(200).json(l);
 });
@@ -188,7 +188,7 @@ listingRouter.get('/listings/:id', (req: Request, res: Response) => {
 listingRouter.patch('/listings/:id/status', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { status?: unknown };
   try {
-    return res.status(200).json(listings.setStatus(req.params.id, String(body.status ?? '') as 'active'));
+    return res.status(200).json(listings.setStatus(routeParam(req.params.id), String(body.status ?? '') as 'active'));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'could not update';
     if (message === 'listing not found') return res.status(404).json({ error: message });
@@ -200,7 +200,7 @@ listingRouter.patch('/listings/:id/status', (req: Request, res: Response) => {
 listingRouter.post('/listings/:id/buy', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { buyer?: unknown };
   try {
-    return res.status(200).json(listings.buy(req.params.id, String(body.buyer ?? '')));
+    return res.status(200).json(listings.buy(routeParam(req.params.id), String(body.buyer ?? '')));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'could not buy';
     if (message === 'listing not found') return res.status(404).json({ error: message });
@@ -223,6 +223,7 @@ Files:
 
 \`\`\`ts
 import { listingRouter } from './server/listings/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', listingRouter);
 \`\`\`
 

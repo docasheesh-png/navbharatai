@@ -152,12 +152,12 @@ tagRouter.get('/tags', (_req: Request, res: Response) => {
 
 // The entities carrying a tag.
 tagRouter.get('/tags/:tag/entities', (req: Request, res: Response) => {
-  return res.status(200).json({ tag: req.params.tag, entities: tags.entitiesWith(req.params.tag), count: tags.count(req.params.tag) });
+  return res.status(200).json({ tag: routeParam(req.params.tag), entities: tags.entitiesWith(routeParam(req.params.tag)), count: tags.count(routeParam(req.params.tag)) });
 });
 
 // The tags on an entity.
 tagRouter.get('/entities/:entity/tags', (req: Request, res: Response) => {
-  return res.status(200).json({ entity: req.params.entity, tags: tags.tagsOf(req.params.entity) });
+  return res.status(200).json({ entity: routeParam(req.params.entity), tags: tags.tagsOf(routeParam(req.params.entity)) });
 });
 
 // Rename a tag (cascades; merges if the target exists). { from, to }.
@@ -185,6 +185,7 @@ usage counts are **exact**. Files:
 
 \`\`\`ts
 import { tagRouter } from './server/tags/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', tagRouter);
 \`\`\`
 

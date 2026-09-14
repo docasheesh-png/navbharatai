@@ -222,6 +222,7 @@ export const school = new SchoolService();
 
 export const SCHOOL_ROUTES_SOURCE = `import { Router } from 'express';
 import { school, EnrollmentError, GradeRangeError, PaymentError } from './schoolService';
+import { routeParam, routeParams } from './expressCompat';
 
 export const schoolRouter = Router();
 
@@ -237,19 +238,19 @@ function handle(res: import('express').Response, fn: () => unknown): void {
 
 schoolRouter.post('/classes', (req, res) => handle(res, () => school.createClass(req.body)));
 schoolRouter.post('/students', (req, res) => handle(res, () => school.enroll(req.body)));
-schoolRouter.get('/classes/:id/roster', (req, res) => handle(res, () => school.roster(req.params.id)));
+schoolRouter.get('/classes/:id/roster', (req, res) => handle(res, () => school.roster(routeParam(req.params.id))));
 
 schoolRouter.post('/attendance', (req, res) => handle(res, () => school.markAttendance(req.body)));
-schoolRouter.get('/students/:id/attendance', (req, res) => handle(res, () => school.attendanceFor(req.params.id)));
-schoolRouter.get('/students/:id/attendance/rate', (req, res) => handle(res, () => ({ rate: school.attendanceRate(req.params.id) })));
+schoolRouter.get('/students/:id/attendance', (req, res) => handle(res, () => school.attendanceFor(routeParam(req.params.id))));
+schoolRouter.get('/students/:id/attendance/rate', (req, res) => handle(res, () => ({ rate: school.attendanceRate(routeParam(req.params.id)) })));
 
 schoolRouter.post('/assessments', (req, res) => handle(res, () => school.createAssessment(req.body)));
 schoolRouter.post('/grades', (req, res) => handle(res, () => school.recordGrade(req.body)));         // 409 on out-of-range
-schoolRouter.get('/students/:id/percentage', (req, res) => handle(res, () => ({ percentage: school.percentage(req.params.id) })));
+schoolRouter.get('/students/:id/percentage', (req, res) => handle(res, () => ({ percentage: school.percentage(routeParam(req.params.id)) })));
 
 schoolRouter.post('/fees/invoice', (req, res) => handle(res, () => school.invoiceFee(req.body?.studentId, Number(req.body?.amount), req.body?.note)));
 schoolRouter.post('/fees/pay', (req, res) => handle(res, () => school.payFee(req.body?.studentId, Number(req.body?.amount), req.body?.note))); // 409 if > balance
-schoolRouter.get('/students/:id/fees', (req, res) => handle(res, () => ({ balance: school.feeBalance(req.params.id), history: school.feeHistory(req.params.id) })));
+schoolRouter.get('/students/:id/fees', (req, res) => handle(res, () => ({ balance: school.feeBalance(routeParam(req.params.id)), history: school.feeHistory(routeParam(req.params.id)) })));
 `;
 
 export const SCHOOL_README = `# School / Education-ERP starter

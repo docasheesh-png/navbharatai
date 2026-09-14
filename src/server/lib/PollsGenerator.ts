@@ -140,7 +140,7 @@ pollRouter.post('/polls', (req: Request, res: Response) => {
 });
 
 pollRouter.get('/polls/:id', (req: Request, res: Response) => {
-  const p = polls.getPoll(req.params.id);
+  const p = polls.getPoll(routeParam(req.params.id));
   if (!p) return res.status(404).json({ error: 'poll not found' });
   return res.status(200).json(p);
 });
@@ -148,7 +148,7 @@ pollRouter.get('/polls/:id', (req: Request, res: Response) => {
 // Live results / tally.
 pollRouter.get('/polls/:id/results', (req: Request, res: Response) => {
   try {
-    return res.status(200).json(polls.results(req.params.id));
+    return res.status(200).json(polls.results(routeParam(req.params.id)));
   } catch {
     return res.status(404).json({ error: 'poll not found' });
   }
@@ -158,7 +158,7 @@ pollRouter.get('/polls/:id/results', (req: Request, res: Response) => {
 pollRouter.post('/polls/:id/vote', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { optionId?: unknown; voter?: unknown; allowChange?: unknown };
   try {
-    const out = polls.vote(req.params.id, String(body.optionId ?? ''), String(body.voter ?? ''), { allowChange: body.allowChange === true });
+    const out = polls.vote(routeParam(req.params.id), String(body.optionId ?? ''), String(body.voter ?? ''), { allowChange: body.allowChange === true });
     return res.status(200).json(out);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'could not vote';
@@ -171,7 +171,7 @@ pollRouter.post('/polls/:id/vote', (req: Request, res: Response) => {
 // Close a poll (no more votes).
 pollRouter.post('/polls/:id/close', (req: Request, res: Response) => {
   try {
-    return res.status(200).json(polls.closePoll(req.params.id));
+    return res.status(200).json(polls.closePoll(routeParam(req.params.id)));
   } catch {
     return res.status(404).json({ error: 'poll not found' });
   }
@@ -190,6 +190,7 @@ the tally is always exact. Files:
 
 \`\`\`ts
 import { pollRouter } from './server/polls/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', pollRouter);
 \`\`\`
 

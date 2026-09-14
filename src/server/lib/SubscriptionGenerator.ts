@@ -174,7 +174,7 @@ subscriptionRouter.get('/subscriptions', (req: Request, res: Response) => {
 });
 
 subscriptionRouter.get('/subscriptions/:id', (req: Request, res: Response) => {
-  const s = subscriptions.get(req.params.id);
+  const s = subscriptions.get(routeParam(req.params.id));
   if (!s) return res.status(404).json({ error: 'subscription not found' });
   return res.status(200).json({ ...s, due: subscriptions.isDue(s.id) });
 });
@@ -183,7 +183,7 @@ subscriptionRouter.get('/subscriptions/:id', (req: Request, res: Response) => {
 subscriptionRouter.patch('/subscriptions/:id/status', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { status?: unknown };
   try {
-    return res.status(200).json(subscriptions.setStatus(req.params.id, String(body.status ?? '') as 'active'));
+    return res.status(200).json(subscriptions.setStatus(routeParam(req.params.id), String(body.status ?? '') as 'active'));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'could not update';
     if (message === 'subscription not found') return res.status(404).json({ error: message });
@@ -194,7 +194,7 @@ subscriptionRouter.patch('/subscriptions/:id/status', (req: Request, res: Respon
 // Process a renewal (advance the renewal date + reactivate). Call this when your gateway confirms a charge.
 subscriptionRouter.post('/subscriptions/:id/renew', (req: Request, res: Response) => {
   try {
-    return res.status(200).json(subscriptions.renew(req.params.id));
+    return res.status(200).json(subscriptions.renew(routeParam(req.params.id)));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'could not renew';
     if (message === 'subscription not found') return res.status(404).json({ error: message });
@@ -216,6 +216,7 @@ schedule; the actual charging is your payment gateway's job (call \`renew\` when
 
 \`\`\`ts
 import { subscriptionRouter } from './server/subscriptions/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', subscriptionRouter);
 \`\`\`
 

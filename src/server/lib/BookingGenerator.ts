@@ -116,13 +116,13 @@ bookingRouter.get('/bookings', (req: Request, res: Response) => {
 
 // Check whether a slot is free.
 bookingRouter.get('/slots/:slotId/available', (req: Request, res: Response) => {
-  return res.status(200).json({ slotId: req.params.slotId, available: bookings.isSlotAvailable(req.params.slotId) });
+  return res.status(200).json({ slotId: routeParam(req.params.slotId), available: bookings.isSlotAvailable(routeParam(req.params.slotId)) });
 });
 
 // Cancel a booking (frees the slot). 404 if unknown.
 bookingRouter.delete('/bookings/:id', (req: Request, res: Response) => {
   try {
-    return res.status(200).json(bookings.cancel(req.params.id));
+    return res.status(200).json(bookings.cancel(routeParam(req.params.id)));
   } catch {
     return res.status(404).json({ error: 'booking not found' });
   }
@@ -140,6 +140,7 @@ frees the slot. Files:
 
 \`\`\`ts
 import { bookingRouter } from './server/booking/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', bookingRouter);
 \`\`\`
 

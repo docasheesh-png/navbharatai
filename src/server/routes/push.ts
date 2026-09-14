@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import { requireUserMatch, trackDevice } from '../lib/authMiddleware';
 import { deviceTokenStore, type DevicePlatform } from '../lib/DeviceTokenStore';
+import { routeParam, routeParams } from '../lib/expressCompat';
 
 const VALID_PLATFORMS: DevicePlatform[] = ['android', 'ios', 'web'];
 
@@ -16,7 +17,7 @@ const VALID_PLATFORMS: DevicePlatform[] = ['android', 'ios', 'web'];
 export function registerPushRoutes(app: Express): void {
   app.post('/api/push/:userId/register-token', requireUserMatch('userId'), trackDevice('userId'), async (req: Request, res: Response) => {
     try {
-      const { userId } = req.params;
+      const { userId } = routeParams(req.params);
       const { token, platform, appVersionCode } = req.body || {};
       if (typeof token !== 'string' || !token.trim()) {
         res.status(400).json({ error: 'token required' });
@@ -40,7 +41,7 @@ export function registerPushRoutes(app: Express): void {
 
   app.delete('/api/push/:userId/register-token', requireUserMatch('userId'), async (req: Request, res: Response) => {
     try {
-      const { userId } = req.params;
+      const { userId } = routeParams(req.params);
       const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
       if (!token) {
         res.status(400).json({ error: 'token required' });

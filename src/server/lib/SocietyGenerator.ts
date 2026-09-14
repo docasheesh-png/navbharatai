@@ -175,6 +175,7 @@ export class SocietyService {
 export const SOCIETY_ROUTES_SOURCE = `// Express router for the housing-society backend. Mount with: app.use('/api/society', societyRouter(service)).
 import { Router, type Request, type Response } from 'express';
 import { SocietyService, type ComplaintStatus } from './societyService';
+import { routeParam, routeParams } from './expressCompat';
 
 export function societyRouter(society: SocietyService = new SocietyService()): Router {
   const router = Router();
@@ -187,29 +188,29 @@ export function societyRouter(society: SocietyService = new SocietyService()): R
   router.get('/units', (_req: Request, res: Response) => res.json(society.listUnits()));
 
   router.post('/units/:id/invoice', (req: Request, res: Response) => {
-    try { res.status(201).json(society.invoice(req.params.id, Number(req.body?.amount), req.body?.note)); }
+    try { res.status(201).json(society.invoice(routeParam(req.params.id), Number(req.body?.amount), req.body?.note)); }
     catch (err) { fail(res, err); }
   });
   // A payment over the outstanding balance is rejected with 409 — the balance can never go negative.
   router.post('/units/:id/pay', (req: Request, res: Response) => {
-    try { res.status(201).json(society.pay(req.params.id, Number(req.body?.amount), req.body?.note)); }
+    try { res.status(201).json(society.pay(routeParam(req.params.id), Number(req.body?.amount), req.body?.note)); }
     catch (err) { fail(res, err); }
   });
   router.get('/units/:id/ledger', (req: Request, res: Response) => {
-    try { res.json({ balance: society.balanceOf(req.params.id), entries: society.ledgerFor(req.params.id) }); }
+    try { res.json({ balance: society.balanceOf(routeParam(req.params.id)), entries: society.ledgerFor(routeParam(req.params.id)) }); }
     catch (err) { fail(res, err); }
   });
   router.get('/defaulters', (_req: Request, res: Response) => res.json(society.defaulters()));
 
   router.post('/units/:id/visitors', (req: Request, res: Response) => {
-    try { res.status(201).json(society.checkInVisitor(req.params.id, req.body?.name, req.body?.purpose)); }
+    try { res.status(201).json(society.checkInVisitor(routeParam(req.params.id), req.body?.name, req.body?.purpose)); }
     catch (err) { fail(res, err); }
   });
   router.patch('/visitors/:id/checkout', (req: Request, res: Response) => {
-    try { res.json(society.checkOutVisitor(req.params.id)); }
+    try { res.json(society.checkOutVisitor(routeParam(req.params.id))); }
     catch (err) { fail(res, err); }
   });
-  router.get('/units/:id/visitors', (req: Request, res: Response) => res.json(society.visitorsFor(req.params.id)));
+  router.get('/units/:id/visitors', (req: Request, res: Response) => res.json(society.visitorsFor(routeParam(req.params.id))));
   router.get('/visitors/inside', (_req: Request, res: Response) => res.json(society.currentlyInside()));
 
   router.post('/complaints', (req: Request, res: Response) => {
@@ -217,7 +218,7 @@ export function societyRouter(society: SocietyService = new SocietyService()): R
     catch (err) { fail(res, err); }
   });
   router.patch('/complaints/:id/status', (req: Request, res: Response) => {
-    try { res.json(society.setComplaintStatus(req.params.id, req.body?.status as ComplaintStatus)); }
+    try { res.json(society.setComplaintStatus(routeParam(req.params.id), req.body?.status as ComplaintStatus)); }
     catch (err) { fail(res, err); }
   });
   router.get('/complaints', (req: Request, res: Response) => {

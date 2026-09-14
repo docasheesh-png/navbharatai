@@ -55141,6 +55141,84 @@ When nothing contradicts the failure count the old wording stands, untouched. Te
   accurate and purely an admin action — Admin → Overview → Publish Capacity. No code change; the ceiling
   itself already has its plan in ROADMAP §10.3 (serve published apps from the bucket), gated on the three
   `PUBLISHED_APPS_*` keys in the order that entry records.
+## 2026-09-14 — "imaandar phase dikhao ya real number?" — the answer was never a choice between them
+
+The admin asked, after three consecutive autopsies had each recorded the build ETA lying (`d11ad529`
+12 min, `1ef27cd7` 26.6 min, `909d13c6` 26.6 min — all opened with **"~2–4 min"**): should the build
+show an honest phase, or a real time? And asked for an engineer's judgement rather than a preference.
+
+**The judgement: it is one rule, not two options — show the number wherever it is MEASURED, and the
+phase wherever it is not.** Both halves already had a home in this repo; only one of them was being
+applied.
+
+### The defect: `progressEta.ts`'s own discipline governed the live line and never the first one
+
+That module has refused to guess since 2026-08-23 — it returns **null rather than a number** in every
+case where it would be extrapolating from nothing — and its header states exactly why the prompt-word
+heuristic cannot be trusted: it runs **BACKWARDS**. `complexityFromPrompt` counts page-words and
+feature-words, so *"Make an VPN App"* contains neither, scores the floor of every formula, and receives
+the **smallest estimate in the system**. The shorter and more ambitious the request, the shorter its
+promise.
+
+The first line never got that rule. It printed a figure the heuristic had produced, at confidence 0.4,
+before anything existed to measure — and then the heartbeat **counted down from it**: *"~53s to go"* on
+a build with eight minutes left. The original 2026-08-23 report that created this whole module was a
+complaint about the broken promise, not about the wait.
+
+### The fix
+
+- **`estimateIsEvidenced(est)`** (`AgentV3/etaEvidence.ts`) gates the opening line. An estimate this
+  workspace's own past builds DOMINATE is a measurement — of real durations, on the real engine, at the
+  real tier — and keeps its number, unchanged. A cold one shows `unevidencedFirstEtaLine()`: the phase,
+  no figure, and a promise of a real one.
+- ⚠️ **THE DISCRIMINATOR IS `historyWeight`, NOT `basis`, and that is the whole precision of it.**
+  `basis` reads `'blended'` as soon as a SINGLE distant past build exists, even where that build
+  contributes under a tenth of the figure — branching on it would have kept showing heuristic numbers
+  under a label claiming otherwise. `estimateBuildTime` has always COMPUTED the blend weight and then
+  discarded it; it is now reported as `BuildEstimate.historyWeight`. Purely additive: no caller reads
+  it except this gate, and `/api/build-estimate` simply carries one more number.
+- 🔴 **THE SECOND HALF, WITHOUT WHICH THIS WOULD HAVE BEEN HALF A FIX.** Withholding the opening number
+  while the heartbeat still counted down from it would have fixed the headline and left the body. The
+  tick now emits `unevidencedEtaTickLine(elapsedMs)` — **elapsed time only, which has already happened
+  and therefore promises nothing** — until something real anchors the budget.
+- 🔒 **A MEASUREMENT IS EVIDENCE.** The measured branch already re-anchors `etaTotalMs` to this build's
+  own observed pace; it now also sets `etaEvidenced`, so if measurement later stops applying (the build
+  enters repair) `liveEtaTick` may honestly own the line again — continuing from something real rather
+  than from the prompt guess it used to still be carrying.
+- ⚠️ **`etaTotalMs` stays SEEDED on the unevidenced path, deliberately.** Zeroing it to suppress the
+  countdown was the first thing tried and it is wrong: that budget is what lets the heartbeat run at
+  all, and the heartbeat is where the measured line comes from — so the "fix" would have switched off
+  the measurement it exists to reach. Test-locked, because nothing else would have caught it.
+- The admin's report (`ETA_BASIS`) now carries `etaEvidenceNote(est)`, which states whether a number was
+  shown and why — and distinguishes *"no past builds"* from *"history too thin to dominate"*. The report
+  is never allowed to be the less honest surface (autopsy f04421ef).
+
+### 🔒 The order rule — the guard is against a bad MERGE, not a bad author
+
+**PR #2932 (another session, in flight as this was written) adds a SECOND measurement to the same
+function** — the architect's plan-step extrapolation, inserted between the file measurement and the
+fallback. The two changes are complementary and the correct resolution keeps **both**: every
+measurement first, the evidence gate after them, the countdown last. A resolution that drops a
+measurement, or puts the gate ahead of one, would silently return the build to guessing and **fail
+nothing**.
+
+So `tests/etaEvidenceWiring.test.ts` asserts the ORDER structurally and name-agnostically: every
+`measuredRemaining*` call in the tick must precede the gate, the gate must precede `liveEtaTick`, and
+each measured branch must `return`. A wrong resolution fails CI instead of shipping quietly.
+⚠️ **`AppKnowledgeBase.ts` also needs reconciling with #2932 on merge** — that PR's entry says the first
+line is always "an honest first guess with a range", which this change makes true only for a user with
+build history. One reconciled sentence, not two.
+
+**Proven by reversion: 3 tests fail** when the tick guard is removed. 23 new tests across two suites.
+
+### Still open, named rather than implied fixed
+
+- **`FINISH_ALLOWANCE_MS` is 60 s against a measured ~3.5 min tail** (#2932's finding, unchanged here):
+  every measured estimate is systematically short by roughly that much. Retuning it needs the real
+  distribution of post-file tails, which nobody has measured — swapping a wrong constant for a
+  differently-wrong one is what `progressEta.ts`'s own header warns against.
+- **The abandoned fast lane still costs ~90 s and produces nothing** — the honest fix is a stall signal,
+  not a smaller cap.
 ## 2026-09-14 — TWO SESSIONS AUTOPSIED BUILD `1ef27cd7`. The other one was better, so mine was cut down.
 
 Both #2929 (mine) and #2931 landed the same finding from the same report: the incomplete-code heal
@@ -55236,6 +55314,78 @@ and broken something.
 classification got wrong. Full gate green on the final state: **1657 files · 23,195 passed · 0 FAIL**.
 ---
 
+## 2026-09-14 — EXPRESS 4 → 5, done as a migration rather than a version bump (#2900)
+
+Dependabot's #2900 changed two lines of `package.json` and nothing else. Its CI had been red for days
+with **80 type errors**, and the errors were the smallest of its three problems.
+
+### What actually breaks, measured rather than assumed
+
+| | Found | Caught by typecheck? |
+|---|---|---|
+| Bare `'*'` routes | **3** (`server.ts` SPA catch-all, the ESM mirror, the preview proxy) | ❌ — path-to-regexp v8 **throws at startup**, so the server does not run at all |
+| `req.params` widened to `string \| string[]` | **80 sites, 17 files** | ✅ |
+| `req.body` now `undefined` where it was `{}` | **419 reads** | ❌ — `req.body` is `any`, so every one type-checks clean and throws at runtime |
+| `req.query` assignment (a getter in v5) | **0** | — |
+| Optional `:param?` (removed in path-to-regexp v8) | **0** in real routes | — |
+
+🔴 **THE 419 `req.body` READS ARE THE REASON THIS COULD NOT BE A "GET CI GREEN" TASK.** A green
+typecheck proves nothing about them: a GET with no body, a POST whose client omitted the header, a
+webhook delivered as `text/plain` — each used to get `{}` and now gets `undefined`, on auth, wallet,
+secrets and webhook routes. Shipping a green CI over that would be precisely the false green the fifth
+rule forbids.
+
+**Fixed at the ONE point every request passes through**: `normalizeMissingBody`, registered
+immediately after the body parsers, restores the Express 4 default. All 419 sites behave exactly as
+before, and a test pins the ORDER — registered before the parsers it would overwrite real bodies.
+
+### The wildcard routes were the dangerous ones
+
+`'*'` is invalid in Express 5; `'/*splat'` is the replacement and hands the capture over as an
+**array**, where Express 4 gave a joined string in `req.params[0]`. Both of this repo's proxies (the
+ESM mirror and the live-preview forwarder) build an upstream URL out of that value — so getting it
+wrong does not throw, it quietly **fetches the wrong thing**. `splatPath` is the one place that
+conversion happens, and it accepts the array, a plain string and the legacy numbered key, so a route
+in either spelling is correct.
+
+### The 80 type errors are one class, fixed as one
+
+`ParamsDictionary` is now `{ [key: string]: string | string[] }` because a wildcard capture can be an
+array. This repo has exactly three wildcard routes and **all three read their capture through
+`splatPath`** — so for every other route a parameter is a plain string at runtime. `routeParam` /
+`routeParams` (in `lib/expressCompat.ts`) carry that reasoning with the evidence attached, instead of
+80 bare `as string` casts a later reader would have to justify one at a time.
+
+### Four safety tests failed, and they were right to
+
+`appLockEnforce` (×2), `duplicateAppWiring` and `hostingPlanSweep` pin the money and access guards by
+reading the source. Wrapping the id in `routeParam(...)` changed the spelling they matched.
+
+⚠️ **The guards were verified intact before any test was touched** — e.g.
+`appLockBlocks(req, routeParam(req.params.userId), 'hosting-plan-purchase')` is the same call, on the
+same user, still before `purchaseHostingPlan`. Changing a test to match broken behaviour is forbidden;
+these were not broken. The assertions now match the **rule** (this guard, this user, this purpose, in
+this order) rather than one spelling of an argument, so the next refactor cannot fail them for a change
+that alters nothing.
+
+### Verification
+
+Full CI gate on Express 5.2.1: `typecheck` · `noUnusedImports` · `typecheck:server` · `vitest`
+(**1655 files, 23145 passed, 0 FAIL**) · `build` · `test:bundle` · **`boot:check` — the server really
+starts**, which is the only thing that proves the rewritten routes register · `audit:gate` ·
+`license:gate`. 12 new tests; the two startup-breaking guards proven by reversion.
+
+⚠️ **AN EARLY GREEN IN THIS WORK WAS FALSE, and it is worth recording.** After editing `package.json`
+the server typecheck reported **0 errors** — because `node_modules` still held Express **4**. The 80
+errors only appeared after `npm ci` actually installed 5.2.1. A gate is only as true as the tree it ran
+against.
+
+### 🔴 WHAT THIS UPGRADE DOES NOT BUY, stated plainly
+
+**No security.** #2900's own body records that CVE-2024-51999 was **rejected**, and that 5.2.0's fix
+was **reverted in 5.2.1** — the version being installed. The case for merging is staying on a supported
+major, not a vulnerability being closed. That is a real reason; it is not the reason the PR's title
+implies, and the admin should have the honest version.
 ## 2026-09-14 — 🔴 WE WERE BREAKING WORKING APPS OURSELVES. The admin named it; it is the worst bug in this week's ledger.
 
 The counting bug two entries up ("at least 1 build rendered and was counted as failed") looked like a
@@ -55316,3 +55466,52 @@ only on `provenBroken` — we opened the app and saw it broken. A repair turn th
 **still rendering but functionally worse** (a button that stops working, a feature quietly dropped) is
 not caught by that test, and nothing else catches it either. Prevention above is what covers this case
 today; a real fix needs a behavioural check, not a render check. **Recorded as an open root cause.**
+
+## 2026-09-14 — The website lost pinch-zoom, and swiping the footer dragged the whole app up
+
+Admin screenshot of the WEBSITE (navbharatai.com, mobile Safari — explicitly not the packaged app):
+*"footer par press kar ke up swipe kiya jaye to puri app upar chali jati hai... niche white screen
+hai"* + *"mobile app me off karne ko kaha tha, apne website par bhi pinch zoom band kar di!"*
+
+**Root-caused as one systemic mistake, not two unrelated bugs:** the 2026-08-24 "no pinch-zoom" fix
+(admin ask: "do unglio se jaise webpage zoom karte hai woh zoom app me nahi hona chahiye" — about the
+APP) was implemented across three layers (`installZoomLock` in `main.tsx`, the viewport meta tag's
+`user-scalable=no`/`maximum-scale=1`, `index.css`'s universal `touch-action: pan-x pan-y`) and every
+layer was applied **unconditionally**, reasoned at the time as "consistency" with the CSS/meta layers
+already being global. That reasoning was the bug: it silently took pinch-zoom — a real accessibility
+aid, WCAG 1.4.4 — off the plain website for every visitor who never asked for app behaviour.
+
+**Fix (PR #2937):** all three layers now gate on the codebase's existing synchronous
+`isNativeShell(window)` check (`src/lib/apiBase.ts`) — `main.tsx` only installs the JS gesture blocker
+inside the native shell; `index.css` scopes `touch-action: pan-x pan-y` to `.nb-native-shell *` instead
+of the bare universal selector; `index.html`'s static viewport tag no longer hardcodes the restriction,
+and a pre-paint inline script (same pattern as the existing theme-flash-prevention script) adds both the
+`nb-native-shell` class and the tightened viewport content, but only when `window.Capacitor` is present.
+
+**The footer-swipe bug was a genuinely separate root cause**, found while investigating: the app shell's
+`vh`/`dvh` sizing was already correct everywhere (confirmed by an Explore pass — this is NOT the same
+class as `tests/mobileScrollGeometry.test.ts`, which is about scroll containers taller than the visible
+viewport). Two things were missing instead: `<html>` (the real `document.scrollingElement`, not
+`<body>`) had no `overflow: hidden` of its own, so iOS Safari's address-bar collapse/expand animation
+could transiently scroll it independently of `body`'s already-hidden overflow; and the fixed bottom nav
+(Home/AI/Preview/Studio/More) inherited the app-wide `pan-x pan-y` rule needed for ordinary scroll
+views, but has no scrollable content of its own — a real native tab bar never pans under a swipe.
+Fixed with `overflow: hidden` on `html` and `touchAction: 'none'` on the nav specifically.
+
+**Sibling correction, found in the same area (rule 3):** `AppTargetPicker.tsx` carried a comment
+crediting focus-zoom prevention on a 13px `<select>` to the viewport meta tag's `maximum-scale`. The
+real mechanism was always `index.css`'s touch-device rule — `font-size: 16px !important` on
+`input/textarea/select`, which overrides a non-important inline style regardless of the viewport tag —
+so removing the viewport-level lock for the website introduces no new focus-zoom regression there;
+the comment was corrected so a future session doesn't reason from the wrong cause.
+
+Regression-locked: `tests/zoomLock.test.ts` rewritten for the native-gated wiring across all three
+layers (and asserts the bare `*` selector does NOT carry touch-action); `tests/footerSwipeFix.test.ts`
+(new) for the html-overflow and nav-touch-action fixes.
+
+Verification gate: typecheck, noUnusedImports, typecheck:server, build, test:bundle, boot:check, and
+the full `npx vitest run` — **1658 files / 23187 tests passed / 1 skipped / 0 FAIL**. Checked open PRs
+first (#2935, #2934, #2933, #2932, #2900) — none touch this area. Branched fresh off `main` rather than
+this session's other open PR (#2933, an unrelated AgentV3 fix) to keep the two changes independently
+reviewable. PR #2937 opened; per the standing merge-hold rule, driven to green CI but not merged
+without the admin's explicit go-ahead.

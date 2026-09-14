@@ -189,14 +189,14 @@ blogRouter.get('/posts/published', (_req: Request, res: Response) => {
 
 // Public read by slug — 404 unless the post is published.
 blogRouter.get('/posts/slug/:slug', (req: Request, res: Response) => {
-  const p = blog.getBySlug(req.params.slug);
+  const p = blog.getBySlug(routeParam(req.params.slug));
   if (!p) return res.status(404).json({ error: 'post not found' });
   return res.status(200).json(p);
 });
 
 // Admin read by id (any status).
 blogRouter.get('/posts/:id', (req: Request, res: Response) => {
-  const p = blog.get(req.params.id);
+  const p = blog.get(routeParam(req.params.id));
   if (!p) return res.status(404).json({ error: 'post not found' });
   return res.status(200).json(p);
 });
@@ -208,7 +208,7 @@ blogRouter.patch('/posts/:id', (req: Request, res: Response) => {
   if (body.title !== undefined) patch.title = String(body.title);
   if (body.body !== undefined) patch.body = String(body.body);
   try {
-    return res.status(200).json(blog.update(req.params.id, patch));
+    return res.status(200).json(blog.update(routeParam(req.params.id), patch));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'could not update';
     return res.status(message === 'post not found' ? 404 : 400).json({ error: message });
@@ -219,7 +219,7 @@ blogRouter.patch('/posts/:id', (req: Request, res: Response) => {
 blogRouter.patch('/posts/:id/status', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { status?: unknown };
   try {
-    return res.status(200).json(blog.setStatus(req.params.id, String(body.status ?? '') as 'draft'));
+    return res.status(200).json(blog.setStatus(routeParam(req.params.id), String(body.status ?? '') as 'draft'));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'could not update';
     if (message === 'post not found') return res.status(404).json({ error: message });
@@ -240,6 +240,7 @@ and the public feed returns **published posts only**. Files:
 
 \`\`\`ts
 import { blogRouter } from './server/blog/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api', blogRouter);
 \`\`\`
 

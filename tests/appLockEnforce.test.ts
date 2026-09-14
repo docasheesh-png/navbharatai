@@ -151,14 +151,18 @@ describe('🔒 the wiring: which routes ask, and which must NEVER ask', () => {
   const payment = read('src/server/routes/payment.ts');
 
   it('the three money routes call the check', () => {
-    expect(wallet).toContain("appLockBlocks(req, req.params.userId, 'hosting-plan-purchase')");
-    expect(wallet).toContain("appLockBlocks(req, req.params.userId, 'hosting-plan-auto-renew')");
+    // ⚠️ MATCHED WITHOUT PINNING HOW THE ID IS SPELLED. The Express 5 migration wrapped every route
+    // parameter in `routeParam(...)` (see lib/expressCompat), so a literal `req.params.userId` here
+    // would fail for a change that altered nothing about this guard. What must hold is the guard
+    // itself: this call, on THIS user, for THIS purpose — so that is what is asserted.
+    expect(wallet).toMatch(/appLockBlocks\(req, [^,]*req\.params\.userId[^,]*, 'hosting-plan-purchase'\)/);
+    expect(wallet).toMatch(/appLockBlocks\(req, [^,]*req\.params\.userId[^,]*, 'hosting-plan-auto-renew'\)/);
     expect(payment).toContain("appLockBlocks(req, userId, isProfessionalPass ? 'professional-pass' : 'wallet-recharge')");
   });
 
   it('the check runs BEFORE anything is charged on the plan purchase', () => {
     // A check after `purchaseHostingPlan` would refuse a purchase that had already debited the wallet.
-    const at = wallet.indexOf("appLockBlocks(req, req.params.userId, 'hosting-plan-purchase')");
+    const at = wallet.search(/appLockBlocks\(req, [^,]*req\.params\.userId[^,]*, 'hosting-plan-purchase'\)/);
     const charge = wallet.indexOf('await purchaseHostingPlan(');
     expect(at).toBeGreaterThan(-1);
     expect(charge).toBeGreaterThan(at);

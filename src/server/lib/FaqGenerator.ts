@@ -172,7 +172,7 @@ faqRouter.get('/admin', (_req: Request, res: Response) => {
 
 // One entry.
 faqRouter.get('/:id', (req: Request, res: Response) => {
-  const entry = faq.get(req.params.id);
+  const entry = faq.get(routeParam(req.params.id));
   if (!entry) return res.status(404).json({ error: 'entry not found' });
   return res.status(200).json(entry);
 });
@@ -196,7 +196,7 @@ faqRouter.post('/', (req: Request, res: Response) => {
 faqRouter.patch('/:id', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { question?: unknown; answer?: unknown; category?: unknown };
   try {
-    return res.status(200).json(faq.update(req.params.id, {
+    return res.status(200).json(faq.update(routeParam(req.params.id), {
       question: body.question === undefined ? undefined : String(body.question),
       answer: body.answer === undefined ? undefined : String(body.answer),
       category: body.category === undefined ? undefined : String(body.category),
@@ -211,7 +211,7 @@ faqRouter.patch('/:id', (req: Request, res: Response) => {
 faqRouter.patch('/:id/publish', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { published?: unknown };
   try {
-    return res.status(200).json(faq.setPublished(req.params.id, Boolean(body.published)));
+    return res.status(200).json(faq.setPublished(routeParam(req.params.id), Boolean(body.published)));
   } catch (err) {
     return res.status(404).json({ error: err instanceof Error ? err.message : 'entry not found' });
   }
@@ -221,14 +221,14 @@ faqRouter.patch('/:id/publish', (req: Request, res: Response) => {
 faqRouter.post('/:id/vote', (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { helpful?: unknown };
   try {
-    return res.status(200).json(faq.vote(req.params.id, Boolean(body.helpful)));
+    return res.status(200).json(faq.vote(routeParam(req.params.id), Boolean(body.helpful)));
   } catch (err) {
     return res.status(404).json({ error: err instanceof Error ? err.message : 'entry not found' });
   }
 });
 
 faqRouter.delete('/:id', (req: Request, res: Response) => {
-  if (!faq.remove(req.params.id)) return res.status(404).json({ error: 'entry not found' });
+  if (!faq.remove(routeParam(req.params.id))) return res.status(404).json({ error: 'entry not found' });
   return res.status(204).send();
 });
 `;
@@ -246,6 +246,7 @@ helpful / not-helpful vote counts. Files:
 
 \`\`\`ts
 import { faqRouter } from './server/faq/routes';
+import { routeParam, routeParams } from './expressCompat';
 app.use('/api/faq', faqRouter);
 \`\`\`
 

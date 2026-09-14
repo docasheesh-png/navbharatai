@@ -169,15 +169,17 @@ const selectStyle: React.CSSProperties = {
   padding: '10px 12px',
   fontSize: 13,
   width: '100%',
-  // 16px would be ideal to stop iOS zooming on focus, but 13px matches the surrounding tools; the
-  // viewport is locked with maximum-scale in index.html, so focus does not zoom here.
+  // 16px would be ideal to stop iOS zooming on focus, but 13px matches the surrounding tools.
   //
-  // ⚠️ THIS COMMENT WAS FALSE UNTIL 2026-08-24, and is worth a line because of how it read. It said
-  // the viewport "is already locked with maximum-scale" — and index.html's viewport was
-  // `width=device-width, initial-scale=1.0, viewport-fit=cover`, with no maximum-scale anywhere. So a
-  // real decision (use 13px, accept the focus-zoom risk) rested on a protection that did not exist,
-  // and anyone auditing focus-zoom would have read this and moved on. The lock is genuinely there
-  // now, which is the only reason the sentence above can stay.
+  // ⚠️ CORRECTED 2026-09-14 — the previous version of this comment said focus-zoom was prevented by
+  // `maximum-scale` in index.html's viewport meta tag. That tag no longer hardcodes `maximum-scale`
+  // at all (it is added by JS only inside the native app; see index.html and src/lib/zoomLock.ts —
+  // the admin's original "no pinch-zoom" ask was about the app, and it had reached the plain website
+  // too). The REAL protection, on both web and native, is index.css's touch-device rule —
+  // `@media (hover: none) and (pointer: coarse) { input, textarea, select { font-size: 16px !important
+  // } }` — which overrides this 13px via `!important` beating a non-important inline style. That rule
+  // was always what actually prevented focus-zoom here; the viewport-meta explanation was never the
+  // true cause, on web or native.
   outline: 'none',
   appearance: 'none',
 };

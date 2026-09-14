@@ -55248,3 +55248,52 @@ only on `provenBroken` — we opened the app and saw it broken. A repair turn th
 **still rendering but functionally worse** (a button that stops working, a feature quietly dropped) is
 not caught by that test, and nothing else catches it either. Prevention above is what covers this case
 today; a real fix needs a behavioural check, not a render check. **Recorded as an open root cause.**
+
+## 2026-09-14 — The website lost pinch-zoom, and swiping the footer dragged the whole app up
+
+Admin screenshot of the WEBSITE (navbharatai.com, mobile Safari — explicitly not the packaged app):
+*"footer par press kar ke up swipe kiya jaye to puri app upar chali jati hai... niche white screen
+hai"* + *"mobile app me off karne ko kaha tha, apne website par bhi pinch zoom band kar di!"*
+
+**Root-caused as one systemic mistake, not two unrelated bugs:** the 2026-08-24 "no pinch-zoom" fix
+(admin ask: "do unglio se jaise webpage zoom karte hai woh zoom app me nahi hona chahiye" — about the
+APP) was implemented across three layers (`installZoomLock` in `main.tsx`, the viewport meta tag's
+`user-scalable=no`/`maximum-scale=1`, `index.css`'s universal `touch-action: pan-x pan-y`) and every
+layer was applied **unconditionally**, reasoned at the time as "consistency" with the CSS/meta layers
+already being global. That reasoning was the bug: it silently took pinch-zoom — a real accessibility
+aid, WCAG 1.4.4 — off the plain website for every visitor who never asked for app behaviour.
+
+**Fix (PR #2937):** all three layers now gate on the codebase's existing synchronous
+`isNativeShell(window)` check (`src/lib/apiBase.ts`) — `main.tsx` only installs the JS gesture blocker
+inside the native shell; `index.css` scopes `touch-action: pan-x pan-y` to `.nb-native-shell *` instead
+of the bare universal selector; `index.html`'s static viewport tag no longer hardcodes the restriction,
+and a pre-paint inline script (same pattern as the existing theme-flash-prevention script) adds both the
+`nb-native-shell` class and the tightened viewport content, but only when `window.Capacitor` is present.
+
+**The footer-swipe bug was a genuinely separate root cause**, found while investigating: the app shell's
+`vh`/`dvh` sizing was already correct everywhere (confirmed by an Explore pass — this is NOT the same
+class as `tests/mobileScrollGeometry.test.ts`, which is about scroll containers taller than the visible
+viewport). Two things were missing instead: `<html>` (the real `document.scrollingElement`, not
+`<body>`) had no `overflow: hidden` of its own, so iOS Safari's address-bar collapse/expand animation
+could transiently scroll it independently of `body`'s already-hidden overflow; and the fixed bottom nav
+(Home/AI/Preview/Studio/More) inherited the app-wide `pan-x pan-y` rule needed for ordinary scroll
+views, but has no scrollable content of its own — a real native tab bar never pans under a swipe.
+Fixed with `overflow: hidden` on `html` and `touchAction: 'none'` on the nav specifically.
+
+**Sibling correction, found in the same area (rule 3):** `AppTargetPicker.tsx` carried a comment
+crediting focus-zoom prevention on a 13px `<select>` to the viewport meta tag's `maximum-scale`. The
+real mechanism was always `index.css`'s touch-device rule — `font-size: 16px !important` on
+`input/textarea/select`, which overrides a non-important inline style regardless of the viewport tag —
+so removing the viewport-level lock for the website introduces no new focus-zoom regression there;
+the comment was corrected so a future session doesn't reason from the wrong cause.
+
+Regression-locked: `tests/zoomLock.test.ts` rewritten for the native-gated wiring across all three
+layers (and asserts the bare `*` selector does NOT carry touch-action); `tests/footerSwipeFix.test.ts`
+(new) for the html-overflow and nav-touch-action fixes.
+
+Verification gate: typecheck, noUnusedImports, typecheck:server, build, test:bundle, boot:check, and
+the full `npx vitest run` — **1658 files / 23187 tests passed / 1 skipped / 0 FAIL**. Checked open PRs
+first (#2935, #2934, #2933, #2932, #2900) — none touch this area. Branched fresh off `main` rather than
+this session's other open PR (#2933, an unrelated AgentV3 fix) to keep the two changes independently
+reviewable. PR #2937 opened; per the standing merge-hold rule, driven to green CI but not merged
+without the admin's explicit go-ahead.

@@ -144,3 +144,53 @@ describe('every API-only scaffold warns, not just the one that was reported', ()
     },
   );
 });
+
+/**
+ * 🔴 A VERDICT FROM A PARTIAL VIEW — build 70115adf (2026-09-13).
+ *
+ * This module told a user their app had "no index.html and no frontend build tool in any
+ * package.json", while the SAME report's own `ls -la` listed `index.html`, `vite.config.ts` and
+ * `package.json`, and `PROD_BUILD_OK` said the production build had succeeded.
+ *
+ * Nothing was wrong with the three rules. The CALLER hands this function the durable store, which
+ * holds only the files the AI wrote — the scaffold lives in the sandbox and is never persisted. The
+ * view was one file long, and two of the three rules "passed" by looking at nothing.
+ *
+ * The guard is exact rather than a trade-off: UI source cannot exist in a runnable project without a
+ * package.json, so its TOTAL absence proves we are seeing a fragment, never that a builder is missing.
+ */
+describe('it refuses to judge a project it cannot see in full', () => {
+  it('says nothing when the view is one AI-written file — the real false positive', () => {
+    const v = uiWithoutBuildVerdict({ paths: ['src/App.tsx'], packageJsonFiles: [] });
+    expect(v.stranded).toBe(false);
+    expect(v.message).toBe('');
+  });
+
+  it('says nothing for a whole folder of components with no package.json in view', () => {
+    const v = uiWithoutBuildVerdict({
+      paths: ['src/App.tsx', 'src/components/Gallery.tsx', 'src/components/Upload.tsx', 'src/main.tsx'],
+      packageJsonFiles: [],
+    });
+    expect(v.stranded).toBe(false);
+  });
+
+  it('🔒 but STILL catches the real thing the moment a package.json is visible', () => {
+    // Identical paths to the case above, plus the manifest — now the absence of a builder is a fact.
+    const v = uiWithoutBuildVerdict({
+      paths: ['package.json', 'src/index.ts', 'src/App.tsx', 'src/components/Gallery.tsx'],
+      packageJsonFiles: [EXPRESS_PKG],
+    });
+    expect(v.stranded).toBe(true);
+    expect(v.message).toMatch(/no index\.html and no frontend build/);
+  });
+
+  it('an UNREADABLE package.json is still a view — it is evidence we saw the project', () => {
+    // hasFrontendBuilder already treats unparseable JSON as "not evidence of absence"; the view guard
+    // must not turn that into silence, or a corrupted manifest would hide a genuine finding.
+    const v = uiWithoutBuildVerdict({
+      paths: ['package.json', 'src/App.tsx'],
+      packageJsonFiles: ['{ this is not json'],
+    });
+    expect(v.stranded).toBe(true);
+  });
+});

@@ -17,6 +17,7 @@ import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 import { pacerEnabled, getSharedPacer } from '../RateLimitPacer';
 import { parseEnvFlag } from '../../lib/envFlag';
 import { isModelUnavailableError } from '../providerErrorClass';
+import { isBudgetEndedError } from '../turnDeadline';
 
 export interface NamedRunner {
   /** Bench/identity name, e.g. 'GROK', 'CLAUDE'. UNIQUE per rung — the timeout/429 bench keys on it,
@@ -601,6 +602,23 @@ export function makeMultiProviderTurnRunner(
           lastError = err;
           fellBackFrom.push(reportName);
           opts.onProviderError?.(reportName, err);
+          // 🔴 OUR CLOCK ENDED, NOT THEIR SERVICE — abort the whole chain, do not walk it.
+          //
+          // The refusal is thrown at the TOP of each runner, before any network call, so without this
+          // the chain sprints through every remaining rung in milliseconds and records each one as a
+          // provider failure. Report 70115adf did exactly that: 153 `Provider GLM failed` entries for
+          // a provider that was never called, and a final error string naming 54 providers.
+          //
+          // It belongs here beside `isHopelesslyOversizedError` because it is the same KIND of fact:
+          // a condition no later rung can change. A bigger context window cannot fix a prompt too
+          // large for every provider, and no provider on earth can give us back time we have spent.
+          //
+          // ⚠️ The message deliberately does NOT say "all providers failed". They did not. Naming our
+          // own budget is what lets the next reader see the real cause instead of hunting a vendor.
+          if (isBudgetEndedError(err)) {
+            const reason1 = err instanceof Error ? err.message : String(err);
+            throw new Error(`This build's time budget ended before the step could finish (${reason1}). No provider failed — the work was stopped by our own deadline.`);
+          }
           if (isFatalProviderError(err) || isModelUnavailableError(err)) {
             // A MODEL-NOT-FOUND is as deterministic as a revoked key and was, until this report, the one
             // permanent failure with no memory anywhere in the chain: it is neither a timeout nor a 429,

@@ -54340,3 +54340,123 @@ both are 24-hour now.
 typecheck · noUnusedImports · typecheck:server · build · test:bundle · boot:check — all green on the
 final state; **1642 files / 22,879 tests passed / 1 skipped / 0 FAIL**. 121 tests touched or added
 across nine suites; the `live`-channel, audit-severity and window-snapshot rules are each locked.
+
+---
+
+## 2026-09-14 — Autopsy `d11ad529`: *"Text to image generator app banao asli ."* — a working app, 12 minutes, and an ETA that could not measure
+
+Free/weak tier (`noClaude: true`, delivered by KIMI `kimi-k2.6`), **12m02s**, `ok: false`, `billedInr: 0`.
+The app itself was fine: `tsc --noEmit` exit 0, `npm run build` exit 0, dev server up, preview published,
+**opened in a real browser and seen rendering**, `PROD_BUILD_OK`, `GREEN_GUARD_SAVE`, accessibility
+100/100, architecture invariants held. The user was told *"1 thing is still broken, so it is NOT ready
+to use yet."*
+
+### The five-bucket ledger
+
+| | count | what |
+|---|---|---|
+| ✅ self-healed | **2** | the one-shot lane was skipped with a correct reason (the previous lane had just timed out on the same engine, so a bigger call to it was a worse bet, not an untried one) · the preview copy was saved, verified against the persisted files and confirmed current |
+| 🔀 worked around | **8** | every one a provider fallback — and **158 of the 159 chain rungs were never actually called** (see below) |
+| ⏭️ skipped | **4** | the page-render check (needs a live app) · the user journey (*"no page components were found"* — on an app whose entire purpose is a prompt box and a button) · the Playwright suite we had just written into the project (`@playwright/test` not installed) · peak memory (*"no cgroup accounting exposed"* — the instrument shipped on 2026-09-11 produced nothing on the real machine) |
+| ❌ still broken | **5 unresolved**, gate counted **1** | the blocker — **already fixed, see below**. Rest: design consistency 60/100 (grade C, 22 colours, 14 off-grid spacings) with no heal recorded although `AGENTV3_DESIGN_GATE` is on · 2 medium security findings · "no tests at all" |
+| 🥵 struggled | **4 places** | **95 s on a fast lane that produced nothing** · a plan call that outlived its lane by 18 s · **12 minutes against an ETA of "~2–4 min"** · sandbox **93% idle** (12.6 min up, 0.9 min of our operations) |
+
+### 🟢 Two of the three headline items were ALREADY fixed this morning — by other sessions, hours after this build ran
+
+Recorded first, and deliberately NOT re-fixed (safeguard #6). **This report predates both fixes.**
+
+| item | fixed by | merged | build ran |
+|---|---|---|---|
+| 153 `Provider GLM failed` rungs + the RED gate they caused | **#2913** `isBudgetEndedError` | 2026-09-14 **04:19 UTC** | 2026-09-13 **17:19 UTC** |
+| `postmessage-wildcard-origin @ index.html:9` — **our own injected preview bridge**, reported to the user as a defect in their app | **c3f7695** `withoutPreviewBridge` | 2026-09-14 **06:55 UTC** | same |
+| `Model call failed (claude-sonnet-4-6)` on a build where `enforceNoClaude` had stripped Claude — a stall pinned on a third party never contacted | **#2931** (open) `fastLaneCallIdentity` | — | same |
+
+`turnDeadline.ts`'s own doc comment describes this build's numbers exactly (153 rungs, "1 build-breaking
+blocker", 54 providers in one error string). **Reading the code before re-deriving the finding is what
+saved a third duplicate of it** — and there is already one duplicate in flight: **#2929 and #2931 are two
+sessions' independent fixes of the same `1ef27cd7` blocker**, `recoverAfterRejudge` and
+`recordReadinessRecovery`, same three call sites.
+
+### 🔴 THE ROOT CAUSE NOBODY HAD FOUND: the measured ETA cannot run on the path that needs it
+
+Three consecutive autopsies (#2929, #2931, this one) have recorded the ETA lying — *"~2–4 min"* against
+12, 26.6 and 26.6 real minutes. Both open PRs list it under *"still open"*; neither claims it. The reason
+it survived three reports is that **the fix for it already exists and is unreachable**.
+
+`progressEta.ts` (2026-08-23) replaced the prompt-word guess with a real measurement. It needs one input,
+`plannedFiles`, and in the entire route that number has exactly **two producers**:
+
+1. **The simple lane's `onPlanned`** — which fires only when that lane's plan call SUCCEEDS. In this build
+   it hit its 90 s cap and the lane handed off, so nothing was ever reported. ⚠️ **Note the shape: a lane
+   that finishes quickly produces a build too short to need an ETA at all.** The measurement was wired to
+   the case where it is least useful and absent from the case where the user sits and watches.
+2. **The blueprint step** — gated on `deep` depth AND not being simple-lane-eligible AND `AGENTV3_BLUEPRINT`.
+   An ordinary one-shot app misses it on the first two conditions alone.
+
+So the build ran twelve minutes with `plannedFiles` at **0**, `measuredRemainingMs` returning null on every
+tick, and the user reading the heuristic this module's own header calls *"exactly backwards"*. Every line
+they saw was the fallback:
+
+```
+0.1s   ~2–4 min — "I'll replace it with a real figure as soon as I know how big it is"
+2min   ~53s to go
+4min   bigger than expected — about 3 min more to go      (8 minutes actually remained)
+6/10/12min   bigger than estimated, still working
+```
+
+⚠️ **`liveEtaTick` is not the bug and must not be "fixed".** It behaved exactly as designed — two revised
+promises, then honest no-number lines. The defect is upstream of it: it should never have owned the line.
+
+🔴 **And the first line made a promise that path CANNOT keep, by construction.** *"I'll replace it with a
+real figure as soon as I know how big it is"* — on the full-builder path there is no code that could ever
+have made that true.
+
+**THE FIX — measure over the signal the full builder actually has.** It does not know a file count up
+front, and asking it to guess one is the very thing `progressEta.ts` refuses. But it keeps the architect's
+OWN plan: the todo list, whose done-count `PlanProgress.computePlanProgress` already derives from **real
+file writes** and already paints as ticks on the user's screen. `measuredRemainingFromSteps` extrapolates
+from that with the identical discipline — null in every case where it would be guessing. So *"5 of 8 steps
+done"* is not a new claim invented for the ETA; it is the state the user can already see, given a clock.
+
+🔒 **The file measurement stays FIRST.** A file manifest is an exact count of what will be written; a plan
+step is a unit of the architect's own choosing. Where both exist the file count is better evidence — which
+also makes this change a byte-for-byte no-op for the lane that already worked.
+
+⚠️ **`stepsDone` is not clamped to the plan** (it counts real completions and can run past a plan that
+under-counted the work). That case returns **null, never zero** — *"the plan was too small"* and *"there is
+no time left"* are different facts, and a zero would print *"~0s to go"* on a build with minutes left.
+
+**Test-locked** in `tests/etaMeasuresTheFullBuilder.test.ts` (13 tests), including the reported build's own
+shape. ⚠️ Every line of this wiring **fails nothing if dropped** — that is precisely how the 2026-08-23 fix
+sat unreachable for three weeks with no test anywhere going red — so the wiring itself is asserted, and the
+guard is **proven by reversion**: deleting the one producer call fails the suite.
+
+### 🔴 STILL OPEN — named, not implied fixed
+
+- **The fast lane cost 95 seconds and produced nothing, and that is where the whole cascade started.** Its
+  plan call exceeded the 90 s cap; the abandoned call then outlived the lane by 18 s and recorded the
+  failure that turned the gate RED. #2894 stopped such a call SPENDING past its lane and #2913 stopped it
+  INDICTING anyone — **neither stops the 90 seconds being spent.** The admin's own bar names *"time spent
+  on an abandoned lane"* as a ledger item in its own right. Genuinely provider-side: the honest fix needs a
+  stall signal (no tokens for N seconds), not a smaller constant, because lowering the cap kills a slow-but-
+  working plan. Both #2929 and #2931 reached the same conclusion independently.
+- **The tail is under-allowed.** `FINISH_ALLOWANCE_MS` is 60 s; this build spent **~3.5 minutes** after its
+  last file on typecheck, dev server, production build and the final summary. Every measured estimate is
+  therefore systematically short by about that much. Deliberately NOT retuned here — one report is not a
+  distribution, and replacing a wrong constant with a differently-wrong one is what `progressEta.ts`'s own
+  header warns against. It needs the real spread of post-file tails, which nobody has measured.
+- **The user journey found "no page components"** on an app that is a prompt box, a style picker and a
+  generate button — and the release gate then told the user *"this app has no data-entry flow"*, which is
+  false. Journey derivation appears to look for a `pages/` shape; this app keeps its UI in `components/`.
+- **Four statements about tests, mutually inconsistent, in one report**: readiness says *"No tests at all"*;
+  `E2E_SCAFFOLDED` says a Playwright suite was just written into the project; `TEST_SUITE_UNVERIFIED` says
+  it could not run because `@playwright/test` is not installed; the release gate says *"the app has no test
+  suite that could be run here"*. **We write a suite and never install the one dev dependency needed to run
+  it** — then hold its absence against the app. Another witness for the missing **evidence ledger** (open
+  since `697b38ee`).
+- **`SANDBOX_PEAK_MEMORY` produced nothing** — *"not available on this machine (no cgroup accounting
+  exposed)"*. The instrument shipped 2026-09-11 to gate the template-RAM decision does not work on the real
+  E2B machine, so that decision still has no measurement behind it.
+- **Design consistency 60/100 shipped unhealed** although `AGENTV3_DESIGN_GATE` is on in Cloud Run; no
+  `DESIGN_HEALED` or `DESIGN_PARTIALLY_HEALED` was recorded. Not investigated here.
+- **Sandbox 93% idle** — 12.6 minutes billed for 0.9 minutes of our operations.

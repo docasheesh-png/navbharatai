@@ -165,7 +165,7 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
                   <span>
                     Active until {new Date(status.plan!.expiresAt).toLocaleDateString()} — badge-free publishing,
                     {' '}{status.tier ? `${status.tier.domains} domain${status.tier.domains === 1 ? '' : 's'}` : 'your own domain'} and
-                    {' '}{status.tier ? `${status.tier.includedTransferGb} GB` : 'included'} of traffic each month.
+                    {' '}{status.tier ? `${status.tier.includedFrontendGb} GB` : 'included'} of visitor traffic each month.
                     {typeof status.renewalPriceInr === 'number' ? ` Renews at ₹${status.renewalPriceInr}.` : ''}
                   </span>
                 </p>
@@ -266,8 +266,9 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
                     Removing it would be dishonest; leading with it is what made the plan read as a
                     double charge. */}
                 <p className="text-[9.5px] text-[#8b949e] leading-relaxed border-t border-white/5 pt-2">
-                  Past {tier.includedTransferGb} GB, extra traffic is ₹{HOSTING_OVERAGE_INR_PER_GB}/GB. You
-                  see your usage before anything extra is charged.
+                  Past {tier.includedFrontendGb} GB of visitor traffic — or {tier.includedBackendGb} GB on your
+                  server apps — extra traffic is ₹{HOSTING_OVERAGE_INR_PER_GB}/GB. You see your usage before
+                  anything extra is charged.
                 </p>
 
                 {held ? (

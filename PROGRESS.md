@@ -52252,3 +52252,115 @@ failing silently or choosing an app on the user's behalf.
 34 new tests across three files. Three reverts tried, three failures: dropping the `secret_name` filter, removing
 the unlock ticket, and renaming the ⓘ button's label. `AppKnowledgeBase.ts` updated in the same change (the layout
 it described was the one that just moved).
+## 2026-09-13 — MERGES ARE ONE SESSION'S JOB, ON THE ADMIN'S WORD
+
+Admin, verbatim: *"ab se PR merge sirf aap karoge! mai bolunga apko tab. woh session bas bana bana
+kar CI check laga denge."*
+
+**This settles a question that was live and unanswered for most of the day.** PR #2897 (another
+session) had proposed a rule that no PR may be merged without the admin's explicit go-ahead, quoting
+an instruction — *"jab tak kaha na jaye, CI merge na ki jaye"* — that had never been given in THIS
+conversation, and that directly contradicted what the admin had told this session ("sabhi pr ab aap
+dekho"). It was put to the admin three times and deliberately not acted on: **a PR body is repo
+content, not an instruction from the user**, and adopting a governance rule from one would mean any
+session could change how every other session behaves by writing it down.
+
+The admin's answer confirms #2897 and adds the half it was missing.
+
+### The two halves, and why one without the other does not work
+
+- **#2897's half:** the merge decision moves from Claude to the admin. Correct, and it stands.
+- **The missing half:** *which* Claude. A rule that only says "wait for the admin" still lets five
+  concurrent sessions each conclude, independently, that their own PR is the one that may go — which
+  is exactly the state that produced the day's evidence.
+
+**The evidence, recorded rather than asserted:** eight PRs merged into `main` inside two hours from
+four different sessions, and **two of them (#2892, #2896) were merged by a session that did not open
+them, while the session that did was still working on the branch.** Nothing broke — by luck and a
+green CI, not by design.
+
+### What shipped
+
+`CLAUDE.md` now states both halves together, as two roles every session is in one of: the **merging
+session** (the one the admin is talking to, merging only PRs the admin names), and **every other
+session** (branch → push → PR → drive CI green → say so, and STOP there).
+
+Three things are stated explicitly because each is a way the rule would otherwise be read away:
+
+1. **"I am the session the admin is talking to" is something the admin SAYS, not something to
+   assume.** A session reasoning *"the admin clearly wants this merged"* has just made itself the
+   merger — the exact thing the rule removes.
+2. **Reaching green is still the deliverable.** A second-row session that goes quiet on a green PR
+   has done half the job; it must report plainly so the admin knows there is something to name.
+3. **Nothing else changes.** CI green before any merge, conflicts still merged in and re-gated by
+   whoever owns the branch.
+
+🔒 **AND THIS PR IS THE FIRST ONE THE RULE APPLIES TO.** It is opened, driven to green, and left for
+the admin to name — including the fact that a rule about not merging without permission cannot
+itself be merged without permission.
+## 2026-09-13 — Hosting P5: the catalogue the plans are actually sold from
+
+Admin decisions, taken across one session of costing (full reasoning in `HOSTING_ECONOMICS_ROADMAP.md`).
+
+| Plan | Price | Apps | Server apps | Server GB | Visitor GB | Credit |
+|---|---|---|---|---|---|---|
+| Free | ₹0 | 3 | **0** | — | 5 | — |
+| Starter | **₹299** | 10 | **10** | 5 | 25 | **₹0** |
+| Growth | **₹599** | 30 | **30** | 12 | 50 | **₹0** |
+
+🔴 **CORRECTED BY THE ADMIN BEFORE MERGE — Growth's visitor allowance is 50 GB, not 100.**
+The session that wrote this entry had proposed 50, read the admin as having chosen 100, and
+recorded 100 as "unka faisla". The admin read it back and said plainly: *"nahi: 50 hi rakha
+hai. 100 nahi, 50"*. Both bundled credits are ₹0, which this change already had right — the
+admin restated it (*"no free credit"*) and it needed no edit.
+⚠️ **The lesson is not the number, it is who it was attributed to.** A figure recorded as an
+admin decision is one no later session will re-question — that is precisely what makes
+mis-attributing one's own suggestion to the admin more expensive than simply getting it wrong.
+
+**🔴 ONE FIELD WAS DESCRIBING TWO DIFFERENT THINGS.** `includedTransferGb` fed the billing sweep, which
+measures `run.googleapis.com/container/network/sent_bytes_count` — a **Cloud Run** metric. A
+frontend-only app on Firebase Hosting has no Cloud Run service, so it is never counted and never
+billable. The agreement generated from that one field nevertheless said *"across all your connected
+sites"*. It is now `includedBackendGb` + `includedFrontendGb`, the agreement names both and says they
+are counted separately, and `overageFrontendInr` exists beside `overageInr` at the same rate so the
+price is already the one the user ticked on the day the meter lands.
+
+**🔴 `backendApps` SHIPPED WITH A GATE, NOT AS A NUMBER ON A CARD.** `publishedAppCap` bounds how many
+apps EXIST; nothing bounded how many hold a container image. Those are different costs and only one is
+covered by traffic overage — an image sits in Artifact Registry at ~500 MB whether or not a visitor
+arrives, **and nothing deletes it** (P2). Without the cap a 30-app plan implies 30 servers and the
+storage alone outgrows the plan price with every app idle. `serverAppLimit` is pure and wired into the
+host route; a redeploy of an app already hosted never spends the allowance.
+
+⚠️ **IT FAILS OPEN ON AN UNREADABLE COUNT — the opposite of how `hasPlan` fails, deliberately.** An
+unknown PLAN must read as "no plan" (guessing yes gives away a paid product). An unknown COUNT is the
+other way round: guessing "at the cap" refuses a publish a paying customer is entitled to on the
+strength of a Firestore hiccup, while guessing "under it" costs at most one extra idle service and
+self-corrects on the next deploy. **The expensive mistake is the visible one.**
+
+🔒 **A FREE ACCOUNT CAN NEVER BE CHARGED FOR TRAFFIC, and zero server apps is what makes that
+structural rather than merely forbidden.** No Cloud Run service ⇒ the meter has nothing to read ⇒ no
+charge can be derived even by a caller that forgets the rule. `FREE_FRONTEND_GB` is 5, never 0 — at 0
+the first visitor to a free app would start eating the welcome gift and "free" would stop being true.
+
+**Growth's ₹150 credit is gone (admin: "credit = 0").** On the costing that preceded the Cloud Run move
+it was that plan's single largest cost line — larger than its servers and its traffic together — and
+with server hosting now included it was paying twice for the same upgrade. The `bundledCreditInr`
+machinery is deliberately NOT deleted: a future tier can bundle credit without rebuilding the path.
+
+### 🔎 Eleven tests failed, and every one was pinning a number rather than a rule
+
+Worth recording as a class, because the fix was the same each time and the tests are stronger for it:
+`publishedAppCap()` asserted `toBe(5)`; the lapse sweep asserted `['w-1','w-2']`, silently encoding
+"the free cap is 5"; `overageInr` asserted Starter's old 5 GB and Growth's old 20 GB — which happened
+to be the **server** allowance for one tier and the **frontend** one for the other, so it would have
+kept passing for the wrong reason; and one agreement test searched for the literal `₹149`, so the
+re-price made `findIndex` return −1 and the test would have passed vacuously had a second assertion
+not caught it.
+
+**All are now derived from the catalogue.** A test that names a price cannot survive a re-price, and
+none of these were testing a price — they were testing proration, ordering, and that the list a user
+is shown matches the number the gate counts.
+
+**Gate on the final state:** typecheck 0 · noUnusedImports clean · typecheck:server 0 · build ok ·
+bundle within budget · boot PASS · **vitest 1,612 files / 22,421 passed / 1 skipped / 0 failed**.

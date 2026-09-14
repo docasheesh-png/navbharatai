@@ -14,7 +14,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   OWN_WEBSITE_ID, OWN_APP_ID, cannotCollideWithAppId, isPageView, looksLikeCrawler, isAppOpen,
-  websiteCountDecision, audienceView,
+  websiteCountDecision, audienceView, peopleAudience, startOfDayUtc, PEOPLE_LIST_CAP,
 } from '../src/server/lib/ownAudience';
 
 describe('the reserved ids cannot be mistaken for a user’s app', () => {
@@ -149,5 +149,77 @@ describe('🔴 a counter that could not be read is NEVER a zero', () => {
     const v = audienceView(quiet, { views: 5000, lastSeenMs: null });
     expect(v.today).toEqual({ views: 0, people: 0 });
     expect(v.unavailable).toBeUndefined();
+  });
+});
+
+describe('WHO came — the only half that can name anybody', () => {
+  const DAY = Date.UTC(2026, 8, 14);          // 2026-09-14T00:00:00Z
+  const now = DAY + 10 * 3600_000;             // 10:00 UTC that day
+  const yesterday = DAY - 3600_000;
+
+  const person = (over: Partial<Parameters<typeof peopleAudience>[0][number]>) => ({
+    userId: 'u', name: 'A', email: 'a@b.c', joinedMs: yesterday, lastActiveMs: yesterday, ...over,
+  });
+
+  it('midnight UTC is the day boundary', () => {
+    expect(startOfDayUtc(now)).toBe(DAY);
+    expect(startOfDayUtc(DAY)).toBe(DAY);
+  });
+
+  it('counts who signed in today, and names them newest first', () => {
+    const r = peopleAudience([
+      person({ userId: '1', name: 'Early', lastActiveMs: DAY + 1000 }),
+      person({ userId: '2', name: 'Late', lastActiveMs: DAY + 9 * 3600_000 }),
+      person({ userId: '3', name: 'Old', lastActiveMs: yesterday }),
+    ], now);
+    expect(r.registered).toBe(3);
+    expect(r.activeToday).toBe(2);
+    expect(r.today.map((u) => u.name)).toEqual(['Late', 'Early']);
+  });
+
+  it('counts accounts created today separately from visits', () => {
+    const r = peopleAudience([
+      person({ userId: '1', joinedMs: DAY + 60_000, lastActiveMs: yesterday }),
+      person({ userId: '2', joinedMs: yesterday, lastActiveMs: yesterday }),
+    ], now);
+    expect(r.joinedToday).toBe(1);
+    expect(r.activeToday).toBe(0);
+  });
+
+  it('🔴 an UNKNOWN last-active is counted as unknown, never as "did not come"', () => {
+    // Firebase Auth holds "last signed in" and can be unreachable or capped. Folding an unknown into
+    // "not today" would render an outage as a quiet day — the same lie in a different costume.
+    const r = peopleAudience([
+      person({ userId: '1', lastActiveMs: null }),
+      person({ userId: '2', lastActiveMs: null }),
+      person({ userId: '3', lastActiveMs: DAY + 1000 }),
+    ], now);
+    expect(r.lastActiveUnknown).toBe(2);
+    expect(r.activeToday).toBe(1);
+    expect(r.registered).toBe(3);
+  });
+
+  it('the COUNT stays exact even when the named list is capped', () => {
+    const many = Array.from({ length: PEOPLE_LIST_CAP + 7 }, (_, i) =>
+      person({ userId: String(i), name: `U${i}`, lastActiveMs: DAY + i * 1000 }));
+    const r = peopleAudience(many, now);
+    expect(r.activeToday).toBe(PEOPLE_LIST_CAP + 7);   // the number is never cut
+    expect(r.today).toHaveLength(PEOPLE_LIST_CAP);     // only the list is
+    expect(r.todayTruncated).toBe(true);
+  });
+
+  it('does not claim truncation when everybody fits', () => {
+    const r = peopleAudience([person({ lastActiveMs: DAY + 1 })], now);
+    expect(r.todayTruncated).toBe(false);
+  });
+
+  it('a nameless account still gets a readable row rather than a blank', () => {
+    const r = peopleAudience([person({ name: '', email: '', lastActiveMs: DAY + 1 })], now);
+    expect(r.today[0]).toMatchObject({ name: 'NavBharat User', email: '\u2014' });
+  });
+
+  it('no users at all is a real zero, not a failure', () => {
+    const r = peopleAudience([], now);
+    expect(r).toMatchObject({ registered: 0, activeToday: 0, joinedToday: 0, lastActiveUnknown: 0, todayTruncated: false });
   });
 });

@@ -6,7 +6,7 @@ import {
 } from '../lib/appleDomainAssociation';
 import { diagnoseAppleSignIn, type AppleSelfFetch } from '../lib/appleSignInDiagnosis';
 import { siteAnalyticsStore } from '../lib/siteAnalyticsStore';
-import { OWN_WEBSITE_ID, OWN_APP_ID, lifetimeViews, audienceView } from '../lib/ownAudience';
+import { OWN_WEBSITE_ID, OWN_APP_ID, lifetimeViews, audienceView, peopleAudience } from '../lib/ownAudience';
 import { APPLE_SERVICE_ID, APPLE_WEB_RETURN_URL } from '../../components/socialSignInPolicy';
 import { needsRealServer, builtAServer, tallyServerNecessity, necessityHeadline } from '../AgentV3/serverNecessity';
 import type { Express, Request, Response, NextFunction } from 'express';
@@ -368,15 +368,39 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
    */
   app.get('/api/admin/audience', verifyAdminToken, async (_req: Request, res: Response) => {
     const days = 30;
-    const [webDays, appDays, webLife, appLife] = await Promise.all([
+    const [webDays, appDays, webLife, appLife, people] = await Promise.all([
       siteAnalyticsStore.summary(OWN_WEBSITE_ID, days).catch(() => null),
       siteAnalyticsStore.summary(OWN_APP_ID, days).catch(() => null),
       lifetimeViews(OWN_WEBSITE_ID).catch(() => null),
       lifetimeViews(OWN_APP_ID).catch(() => null),
+      // WHO came — the only half of this question that can name anybody, because these people signed
+      // in. Read LAZILY: the panel asks for this route only when the admin opens the card, so the
+      // wallet scan and the Firebase Auth lookups below never run on a routine tab switch.
+      (async () => {
+        try {
+          const wallets = await getDocs(collection(getDb() as any, 'user_token_wallets'));
+          const rows = wallets.docs.map((d: any) => ({ id: d.id, ...d.data() })) as any[];
+          const meta = await fetchAuthMetadata(rows.map((u: any) => u.userId || u.id), await firebaseAuthBatch());
+          return peopleAudience(rows.map((u: any) => {
+            const uid = u.userId || u.id;
+            const m = meta.get(uid) ?? null;
+            return {
+              userId: uid,
+              name: u.userName || 'NavBharat User',
+              email: u.userEmail || '—',
+              joinedMs: resolveJoinedAt(m, u.createdAt).atMs ?? null,
+              lastActiveMs: resolveLastActiveAt(m, { walletUpdatedAt: u.updatedAt }).atMs ?? null,
+            };
+          }), Date.now());
+        } catch {
+          return null; // never a fabricated zero — the screen says it could not be read
+        }
+      })(),
     ]);
     res.json({
       website: audienceView(webDays, webLife),
       app: audienceView(appDays, appLife),
+      people,
       // Stated in the payload so the screen cannot drift from the truth by being edited on its own.
       notes: {
         appOpensAreNotInstalls:
@@ -385,6 +409,10 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
           'All-time visits are a running total. All-time PEOPLE cannot be counted: the visitor code rotates every day so the same person is not recognisable tomorrow — that is deliberate, not a gap.',
         crawlersExcluded:
           'Requests that declare themselves as bots are not counted. A crawler that pretends to be a browser is counted, so treat these as close, not exact.',
+        dayIsUtc:
+          'A day here runs midnight to midnight UTC (5:30 AM IST). Both halves of this card use the same day, so they never disagree about what "today" means.',
+        onlySignedInCanBeNamed:
+          'Only people who signed in can be named. A visitor who never signed in is counted but cannot be identified — the visit counter has no way to know who they were.',
       },
     });
   });

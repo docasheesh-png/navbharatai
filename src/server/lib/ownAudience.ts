@@ -253,3 +253,87 @@ export function audienceView(
         : 'The lifetime total could not be read.' }),
   };
 }
+
+// ── WHO came, not just how many ──────────────────────────────────────────────
+
+export interface PersonRow {
+  userId: string;
+  name: string;
+  email: string;
+  /** When the account was created, or null when neither Auth nor the wallet could say. */
+  joinedMs: number | null;
+  /** Last sign-in / token refresh, or null when it could not be determined. */
+  lastActiveMs: number | null;
+}
+
+export interface PeopleAudience {
+  /** Everyone who has ever registered. */
+  registered: number;
+  /** Signed in (or refreshed a session) since midnight UTC. */
+  activeToday: number;
+  /** Accounts created since midnight UTC. */
+  joinedToday: number;
+  /**
+   * 🔒 THE FIGURE THAT KEEPS THE OTHER TWO HONEST. Firebase Auth is where "last signed in" really
+   * lives, and it can be unreachable — in which case a user's last-active is UNKNOWN, not "not today".
+   * Without this, an Auth outage would render as "0 people came today", which is a lie of exactly the
+   * shape this whole card exists to refuse.
+   */
+  lastActiveUnknown: number;
+  /** The people who were here today, newest first. Capped — see PEOPLE_LIST_CAP. */
+  today: Array<{ name: string; email: string; atMs: number }>;
+  /** True when `today` was cut short, so the screen can say "and N more" instead of implying that is all. */
+  todayTruncated: boolean;
+}
+
+/** A list nobody scrolls past. The COUNT is always exact; only the named list is cut. */
+export const PEOPLE_LIST_CAP = 25;
+
+/** PURE. Midnight UTC for the day containing `nowMs`. */
+export function startOfDayUtc(nowMs: number): number {
+  const d = new Date(nowMs);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+/**
+ * PURE. Fold the admin's user rows into "who came today" and "how many in total".
+ *
+ * ⚠️ THE DAY IS UTC, deliberately and consistently. The visit counter's day-documents are keyed in UTC
+ * (`siteAnalytics.dayKey`), and that store is shared with every user's published-app analytics, so
+ * inventing a second, India-local day here would make the two halves of one card disagree about what
+ * "today" means. The card says which day it is counting instead of quietly picking one.
+ */
+export function peopleAudience(rows: PersonRow[], nowMs: number): PeopleAudience {
+  const dayStart = startOfDayUtc(nowMs);
+  const list = Array.isArray(rows) ? rows : [];
+
+  let activeToday = 0;
+  let joinedToday = 0;
+  let lastActiveUnknown = 0;
+  const today: Array<{ name: string; email: string; atMs: number }> = [];
+
+  for (const r of list) {
+    const last = typeof r?.lastActiveMs === 'number' && Number.isFinite(r.lastActiveMs) ? r.lastActiveMs : null;
+    if (last === null) lastActiveUnknown += 1;
+    else if (last >= dayStart) {
+      activeToday += 1;
+      today.push({
+        name: String(r.name ?? '').trim() || 'NavBharat User',
+        email: String(r.email ?? '').trim() || '—',
+        atMs: last,
+      });
+    }
+    const joined = typeof r?.joinedMs === 'number' && Number.isFinite(r.joinedMs) ? r.joinedMs : null;
+    if (joined !== null && joined >= dayStart) joinedToday += 1;
+  }
+
+  today.sort((a, b) => b.atMs - a.atMs);
+  return {
+    registered: list.length,
+    activeToday,
+    joinedToday,
+    lastActiveUnknown,
+    today: today.slice(0, PEOPLE_LIST_CAP),
+    todayTruncated: today.length > PEOPLE_LIST_CAP,
+  };
+}

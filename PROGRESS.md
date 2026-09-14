@@ -54105,3 +54105,47 @@ both are 24-hour now.
 typecheck · noUnusedImports · typecheck:server · build · test:bundle · boot:check — all green on the
 final state; **1642 files / 22,879 tests passed / 1 skipped / 0 FAIL**. 121 tests touched or added
 across nine suites; the `live`-channel, audit-severity and window-snapshot rules are each locked.
+
+---
+
+## 2026-09-14 (cont.) — "Kon aya" completed, and the whole thing folded into one button
+
+**Admin:** *"jo bana sakte ho, woh bana do! aur aise bana ki sab kuch button ke andar ho, screen par
+bheed na dikhe."*
+
+### The half that was still missing: WHO
+
+Counting how many came was the easy half. The admin also asked **who** — and that question has exactly
+one honest answer: **the people who signed in.** Firebase Auth already holds each account's
+`lastSignInTime` / `lastRefreshTime` and `creationTime`, and `adminUserActivity.ts` already reads them
+for the Users tab, so `peopleAudience()` folds those rows into: registered (all time), signed in today,
+new accounts today, and the names of today's arrivals, newest first.
+
+🔴 **The figure that keeps the other two honest: `lastActiveUnknown`.** "Last signed in" lives in
+Firebase Auth, which can be unreachable and is batched under a cap. Folding an unknown into "did not
+come today" would render an **outage as a quiet day** — the same lie as a zero standing in for an
+unread counter. So an account whose last-active could not be determined is counted separately, and the
+card says *"signed in today is at least N, not exactly."*
+
+The named list is capped at 25, and **the COUNT is never capped** — only the list is, with the screen
+saying so rather than implying that is everybody.
+
+### One button, and it is not only tidiness
+
+The card is **collapsed until pressed**, and the data is fetched **on open**. That matters beyond the
+admin's instruction: the "who came" half scans every wallet and asks Firebase Auth about every
+account. Loading that because somebody merely opened the Monitor tab is real work nobody asked for.
+The instruction and the cost pointed the same way, which is why this is a button and not a smaller
+font — pinned by a test that fails if the eager load returns.
+
+### The day boundary, decided rather than defaulted
+
+A day here is **midnight to midnight UTC**, and the card says so (5:30 AM IST). The visit counter's
+day-documents are keyed in UTC by a store shared with every user's published-app analytics, so
+inventing a second India-local day for the people half would make the two halves of one card disagree
+about what "today" means. Stating the boundary is honest; quietly picking a different one per section
+is not.
+
+### Verification
+
+56 tests across two files. Bite-checked by removing the on-open fetch — the wiring test fails.

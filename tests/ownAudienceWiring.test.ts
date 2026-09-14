@@ -28,6 +28,7 @@ const health = strip(read('src/server/routes/health.ts'));
 const banner = strip(read('src/components/UpdateBanner.tsx'));
 const admin = strip(read('src/server/routes/admin.ts'));
 const dash = strip(read('src/components/AdminDashboard.tsx'));
+const card = strip(read('src/components/admin/AudienceCard.tsx'));
 const policy = read('src/content/legal/privacyPolicy.ts');
 
 describe('website visits are counted where every page view passes', () => {
@@ -78,8 +79,7 @@ describe('the admin can actually see it', () => {
 
   it('the panel fetches it and renders the card', () => {
     expect(dash).toContain("fetch('/api/admin/audience'");
-    expect(dash).toContain('<AudienceCard data={audience} />');
-    expect(dash).toMatch(/void fetchAudience\(\);/);
+    expect(dash).toMatch(/<AudienceCard data=\{audience\}/);
   });
 });
 
@@ -96,5 +96,55 @@ describe('🔒 the policy discloses what we now count about our OWN visitors', (
 
   it('says plainly that an all-time list of people cannot be produced', () => {
     expect(policy).toMatch(/never produce an all-time list of people/i);
+  });
+});
+
+describe('🔘 everything lives inside ONE button, and the screen stays quiet', () => {
+  it('the card is collapsed until it is pressed', () => {
+    // Admin 2026-09-14: "sab kuch button ke andar ho, screen par bheed na dikhe".
+    expect(card).toMatch(/useState\(false\)/);
+    expect(card).toMatch(/aria-expanded=\{open\}/);
+    expect(card).toMatch(/\{open && \(/);
+  });
+
+  it('🔒 the data is asked for on OPEN, not on a tab switch', () => {
+    // The "who came" half scans the wallets and asks Firebase Auth about every account. Loading that
+    // when somebody merely opened Monitor is real work nobody asked for — so the button is not only
+    // tidiness, it is what makes the cost opt-in.
+    expect(card).toMatch(/if \(next && !data\) onOpen\?\.\(\);/);
+    expect(dash).toMatch(/onOpen=\{\(\) => void fetchAudience\(\)\}/);
+  });
+
+  it('and the Monitor tab no longer loads it eagerly', () => {
+    const eff = dash.slice(dash.indexOf("if (activeTab === 'monitor')"), dash.indexOf("if (activeTab === 'monitor')") + 260);
+    expect(eff).not.toContain('fetchAudience');
+  });
+
+  it('a failed read inside the card says so instead of showing nothing', () => {
+    expect(card).toMatch(/does not mean nobody came/i);
+  });
+});
+
+describe('WHO came is reported honestly', () => {
+  it('the route returns the people section', () => {
+    const route = admin.slice(admin.indexOf("'/api/admin/audience'"));
+    expect(route).toContain('peopleAudience(');
+    expect(route).toMatch(/people,/);
+  });
+
+  it('an unreadable people read is null, never an invented zero', () => {
+    const route = admin.slice(admin.indexOf("'/api/admin/audience'"));
+    expect(route).toMatch(/return null;/);
+  });
+
+  it('the card surfaces the accounts it could not check', () => {
+    expect(card).toContain('lastActiveUnknown');
+    expect(card).toMatch(/at least/);
+  });
+
+  it('the route states that only signed-in people can be named', () => {
+    const route = admin.slice(admin.indexOf("'/api/admin/audience'"));
+    expect(route).toContain('onlySignedInCanBeNamed');
+    expect(route).toContain('dayIsUtc');
   });
 });

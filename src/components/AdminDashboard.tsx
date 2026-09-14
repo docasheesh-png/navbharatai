@@ -123,8 +123,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
    *  whole picture in front of the admin rather than from a complaint alone. */
   const [account, setAccount] = useState<any>(null);
   const [analytics, setAnalytics] = useState<any>(null);
-  /** Who came to NavBharatAI itself — website visits and app opens. See /api/admin/audience. */
+  /**
+   * Who came to NavBharatAI itself — website visits, app opens and the people who signed in.
+   *
+   * 🔒 LOADED ON DEMAND, never on a tab switch. The "who came" half scans the wallets and asks Firebase
+   * Auth about every account, which is real work nobody asked for when they merely opened Monitor. The
+   * admin's instruction ("sab kuch button ke andar ho") and the cost point the same way.
+   */
   const [audience, setAudience] = useState<any>(null);
+  const [audienceLoading, setAudienceLoading] = useState(false);
   const [users, setUsers] = useState<any[]>([]);
   const [promos, setPromos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -937,6 +944,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   }, [adminToken]);
 
   const fetchAudience = useCallback(async () => {
+    setAudienceLoading(true);
     try {
       const r = await fetch('/api/admin/audience', { headers });
       const d = await r.json();
@@ -944,6 +952,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     } catch (e) {
       console.error(e);
       setAudience(null);
+    } finally {
+      setAudienceLoading(false);
     }
   }, [adminToken]);
 
@@ -991,7 +1001,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   }, [adminToken, insightQuestion]);
 
   useEffect(() => { fetchAnalytics(); }, [fetchAnalytics]);
-  useEffect(() => { if (activeTab === 'monitor') { fetchHealthScore(); fetchInsights(); fetchChannels(); void fetchAudience(); } }, [activeTab, fetchHealthScore, fetchInsights, fetchChannels, fetchAudience]);
+  useEffect(() => { if (activeTab === 'monitor') { fetchHealthScore(); fetchInsights(); fetchChannels(); } }, [activeTab, fetchHealthScore, fetchInsights, fetchChannels]);
   const fetchFeatureSpend = useCallback(async () => {
     setFeatureSpendLoading(true);
     try {
@@ -1217,7 +1227,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               <MonitorPanels adminToken={adminToken} />
 
               {/* WHO CAME — NavBharatAI's own website and app (admin 2026-09-14). */}
-              <AudienceCard data={audience} />
+              <AudienceCard data={audience} onOpen={() => void fetchAudience()} loading={audienceLoading} />
 
               <div className="pt-1">
                 <h2 className="text-[11px] font-black text-white uppercase tracking-widest">Business</h2>

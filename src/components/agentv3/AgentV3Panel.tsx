@@ -3948,7 +3948,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             // Attached + streaming here → Stop.
             <button
               onClick={stop}
-              title="Stop the running build"
+              title="Stop the running build — your files so far are saved, and you are charged only for the work already done (never for a full build)"
               className="ml-auto flex items-center gap-1 text-xs text-white bg-red-600 hover:bg-red-500 rounded px-2 py-1"
             >
               <Square className="w-3.5 h-3.5" /> Stop
@@ -3965,7 +3965,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               </button>
               <button
                 onClick={stop}
-                title="Stop the running build"
+                title="Stop the running build — your files so far are saved, and you are charged only for the work already done (never for a full build)"
                 className="flex items-center gap-1 text-xs text-red-200 border border-red-700 hover:bg-red-950 rounded px-2 py-1"
               >
                 <Square className="w-3.5 h-3.5" /> Stop
@@ -5344,7 +5344,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   // revert, never silent — which is the trade this switch is for. Do not delete the
                   // branch to tidy up; it is what the gate returns to.
                   <>
-                    <button onClick={stop} title="Stop the build" className={`absolute right-9 ${composerBtnY} h-6 w-6 flex items-center justify-center rounded-lg text-red-400 hover:text-white hover:bg-red-600/80`}>
+                    <button onClick={stop} title="Stop the running build — your files so far are saved, and you are charged only for the work already done (never for a full build)" className={`absolute right-9 ${composerBtnY} h-6 w-6 flex items-center justify-center rounded-lg text-red-400 hover:text-white hover:bg-red-600/80`}>
                       <Square className="w-4 h-4" />
                     </button>
                     <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-gradient-to-br from-indigo-500 to-fuchsia-600 hover:from-indigo-400 hover:to-fuchsia-500 disabled:opacity-40 rounded-lg text-white shadow-[0_0_12px_rgba(129,80,255,0.45)]`}>

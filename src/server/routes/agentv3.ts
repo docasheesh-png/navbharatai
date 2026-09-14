@@ -288,6 +288,7 @@ import { nextReviewAction, selectReviewer, cheapBounceCap } from '../AgentV3/Che
 import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
 import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState } from '../AgentV3/ProjectContext';
 import { computePlanProgress } from '../AgentV3/PlanProgress';
+import { decideCancelledBuildBill } from '../AgentV3/cancelledBuildBilling';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectModeEnabled, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
@@ -461,7 +462,7 @@ import { terminalDailyLimitSeconds, decideTerminalAccess, type TerminalAccess } 
 import { createMeterRegistry, attachStream, accrueFor, detachStream } from '../AgentV3/terminalMeter';
 import { terminalUsageStore } from '../AgentV3/TerminalUsageStore';
 import { lintBuiltApp, designLintSummary, a11yLintSummary } from '../AgentV3/buildQualityLint';
-import { abortBuild } from '../AgentV3/buildAbortCause';
+import { abortBuild, abortCauseOf } from '../AgentV3/buildAbortCause';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints, setCheckpointLabel, normalizeCheckpointLabel, CHECKPOINT_LABEL_MAX } from '../AgentV3/CheckpointStore';
@@ -18555,10 +18556,44 @@ async function noteBuildOutcome(
       // 2026-07-27: condition widened from `expectsArtifacts && !result.ok` to just `!ok` — see
       // zeroBillForFailedBuild. An import/survey turn has expectsArtifacts=false, so a FAILED one
       // (syntax error + 29-min timeout) was billed ₹19.08 while telling the user it was free.
-      if (zeroBillForFailedBuild(result.ok) && effectiveBilledUsd > 0) {
+      // 🔴 A BUILD THE USER STOPPED IS NOT A BUILD THAT FAILED (admin 2026-09-14: "user ki galti hai,
+      // isme hamari nahi"). `zeroBillForFailedBuild` could not tell our own failure from the user
+      // changing their mind, so a build cancelled at 90% — real tokens, real sandbox minutes, real
+      // files the user KEEPS and can resume from — was free. See cancelledBuildBilling.ts for the
+      // four safety rules, and in particular why the charge is the REAL COST already computed rather
+      // than a percentage of a full build (a percentage would over-charge a user who stopped early by
+      // an order of magnitude). Kill switch: AGENTV3_BILL_CANCELLED=off restores today's behaviour.
+      const cancelBill = (process.env.AGENTV3_BILL_CANCELLED ?? '').trim().toLowerCase() !== 'off'
+        ? decideCancelledBuildBill({
+          abortCause: abortCauseOf(abort.signal),
+          filesWritten: writtenFiles.size,
+          appRendered: buildObs.previewRendered === true,
+          decidedBilledUsd: effectiveBilledUsd,
+        })
+        : null;
+      if (cancelBill?.applies && cancelBill.billedUsd > 0) {
+        // Only ever REDUCES: `decideCancelledBuildBill` starts from the number already decided above
+        // and can never exceed it, so cancelling can never cost more than finishing.
+        effectiveBilledUsd = cancelBill.billedUsd;
+        zeroBillReason = undefined;
+        buildDiag.record({
+          phase: 'build', severity: 'info', code: 'CANCELLED_BUILD_CHARGED',
+          message: `${cancelBill.reason} (discount ${cancelBill.discountPct}%, delivery: ${cancelBill.delivery}).`,
+          autoResolved: true,
+        });
+        if (cancelBill.userMessage) events.emit({ type: 'narration', agent: 'architect', text: `🧾 ${cancelBill.userMessage}`, ts: Date.now() });
+      } else if (zeroBillForFailedBuild(result.ok) && effectiveBilledUsd > 0) {
         effectiveBilledUsd = 0;
-        zeroBillReason = 'build did not succeed — "working app or free", so no charge';
-        events.emit({ type: 'narration', agent: 'architect', text: '🛡️ This build did not fully succeed, so it is FREE — no charge. Send a follow-up and I will fix it.', ts: Date.now() });
+        zeroBillReason = cancelBill?.applies
+          ? cancelBill.reason
+          : 'build did not succeed — "working app or free", so no charge';
+        events.emit({
+          type: 'narration', agent: 'architect',
+          text: cancelBill?.applies
+            ? '🛡️ You stopped this build before anything was produced, so it is FREE — no charge. Your workspace is exactly as it was.'
+            : '🛡️ This build did not fully succeed, so it is FREE — no charge. Send a follow-up and I will fix it.',
+          ts: Date.now(),
+        });
       }
       if (userId && result.ok && effectiveBilledUsd > 0 && freeOnboardingLimit() > 0) {
         const isFree = await onboardingCreditStore

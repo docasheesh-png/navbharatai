@@ -55053,3 +55053,89 @@ only on `provenBroken` — we opened the app and saw it broken. A repair turn th
 **still rendering but functionally worse** (a button that stops working, a feature quietly dropped) is
 not caught by that test, and nothing else catches it either. Prevention above is what covers this case
 today; a real fix needs a behavioural check, not a render check. **Recorded as an open root cause.**
+
+---
+
+## 2026-09-14 — A build the USER stopped is not a build that failed. Charging for it, honestly.
+
+Admin: *"kabhi kabhi app 90% tab ban jati hai, aur user … build cancel kar deta hai. to bhi woh build
+fail me jati hai, aise case me bhi charge 0 aata hai. **isko bhi fix karo! user ki galti hai, isme
+hamari nahi!**"* — then, importantly: *"mai non technical hu … aap **specialist ke tarah socho**, aur
+isko aise fix karo ki **dono ka nuksan na ho, na mera (admin) na user ka**."*
+
+**The gap is real.** `zeroBillForFailedBuild` makes every `ok:false` build free and cannot tell two
+completely different things apart:
+
+- **WE failed** — our engine broke, or a wrong verdict called a working app broken. → Free, always.
+  That is the "working app or free" law and nothing here touches it.
+- **THE USER stopped it** — we spent real provider tokens and real sandbox minutes, produced real
+  files, and the user **keeps** them (a stopped build is saved and resumable). → Free is wrong.
+  Nobody failed; the user changed their mind.
+
+### 🔴 Where I disagreed with the admin's own numbers — and it protects HIM, not the user
+
+He proposed a percentage table: cancel with the app built ⇒ **100%**; cancel with nothing built ⇒
+**50%**. The first half is exactly right and is implemented. **The second would over-charge by an
+order of magnitude**, because NavBharatAI does not price builds at a flat rate — since Fix 65 the bill
+IS the real measured provider cost × the tiered markup:
+
+- cancel at **90%** → the real cost is already ~90% of a full build → **the bill is already ~90%**.
+  His "100% charge" is achieved by simply not zeroing it. **No table needed.**
+- cancel at **5%** → the real cost is ~5% → a 50% charge would bill **ten times what the work cost**,
+  for an app the user cannot use. That takes money for work never done, breaks this repo's own billing
+  law (*never invent a cost*), and is the single most refund- and review-destroying thing a builder
+  can do.
+
+So the percentages are not the mechanism — the real cost already is. The tiers decide a **discount on
+that honest number**, across exactly the 0%–50% band the admin asked for, applied where each end of it
+is defensible:
+
+| What the user holds when they stop | Discount | Why |
+|---|---|---|
+| A **working app** — we opened it and watched it render | **0%** | they have the product |
+| Files saved and resumable, never seen running | **50%** | real code, not an app |
+| **Nothing** | **100% (free)** | charging for nothing is indefensible — and costs us almost nothing anyway |
+
+### 🔒 The four safety rules, which matter far more than the numbers
+
+Charging for our **own** failure would be worse than never charging at all — it is the one outcome
+that cannot be apologised away.
+
+1. **Only an explicit `user-stop`.** `buildAbortCause.ts` already exists for exactly this honesty
+   problem (*"maine nahi roki, khud ruki hai bhai"* — a watchdog stop reported as the user's). The six
+   other causes — watchdog, advisory-cap, reaper, deploy-drain, lock-reclaimed, cost-cap — stay FREE.
+2. **`'unknown'` is never the user.** That module's header already says an abort we cannot explain must
+   never be attributed to something the user did. An unknown cause bills nothing.
+3. **Never more than the build already cost.** Every branch starts from the number the normal billing
+   model already decided, so this can only ever REDUCE — cancelling can never cost more than finishing.
+4. **We charge only for what the user KEEPS.** Zero files is zero rupees, whatever we spent.
+
+⚠️ **AND ONE THING THE ADMIN ASSUMED THAT THE CODE DOES NOT DO — stated so nobody "fixes" it.**
+*"user app band kar deta hai"* does **not** cancel a build. `req.on('close')` only drops the event
+subscriber; the build runs to completion on the server and bills normally. A user on a train who loses
+signal is not cancelling anything and can never be touched by this module. **Only the Stop button
+reaches it.**
+
+### Transparency, because a surprise charge is its own kind of loss
+
+The Stop button now says so **before** it is pressed: *"your files so far are saved, and you are
+charged only for the work already done (never for a full build)."* After the stop, the user is told
+what they were charged and why, in NavBharatAI's own words — test-locked against the White-Label Law,
+so no vendor or model name can ever appear in it.
+
+**Kill switch:** `AGENTV3_BILL_CANCELLED=off` restores today's behaviour instantly, without a deploy —
+the convention every money-moving flag in this file follows. Admin report code:
+`CANCELLED_BUILD_CHARGED`, carrying the delivery tier and the discount, so a charged cancel always
+explains itself. Test-locked in `tests/cancelledBuildBilling.test.ts` (20), including that the decision
+runs **before** the blanket zero — after it there would be nothing left to charge.
+
+### 🔴 Still open
+
+- **The OTHER zero charge — a wrongly-failed build — is still free, and that is deliberate.** Fixing it
+  means fixing the **verdict**, not the billing: under "working app or free" a build marked not-ok must
+  never be charged, and charging one would be the worse bug. That money returns when the verdict is
+  right (#2913, #2929, #2931 merged; the admin reports it still happens ~10–12%).
+- **A user who stops because the build is going badly still pays the 50% tier** if files were written.
+  The `appRendered` test keeps them off the full tier, and zero files keeps them free, but there is no
+  signal today for *"they stopped because we were flailing"*. Naming it rather than pretending the
+  three tiers cover every case.

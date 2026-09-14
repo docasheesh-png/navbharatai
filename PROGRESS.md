@@ -52179,6 +52179,250 @@ from my summary of the report instead of from the report.** The remaining `54197
 unchanged: the cheap-floor latency ceiling, and in-flight provider-call cancellation (owned by PR
 #2889's session, not this one).
 
+## 2026-09-13 — P3: a container publish had NO size ceiling at all (and my first premise for this task was wrong)
+
+**The premise I started with was wrong, and correcting it is what makes this a real finding rather
+than a duplicate.** I set out to stop "a user publishing a 500 MB video". That is already impossible:
+`maxDeployMb()` caps a publish at **50 MB** and has shipped ON since 2026-08-21. Had I not checked, I
+would have built a second ceiling beside a working one and reported a fix for a bug that does not
+exist.
+
+**What is actually uncapped is a different path.** `enforceHostingQuota` bounds a publish — but only
+for a FIRST-PARTY provider, and `FIRST_PARTY_PROVIDERS` is `['firebase', 'cloudflare']`. NavBharat
+Cloud publishes under `navbharat-cloud`, so that function returns ALLOW on its **first branch** and
+nothing downstream measures anything. Verified, not reasoned about: a test in
+`tests/hostedSourceCap.test.ts` asserts `FIRST_PARTY_PROVIDERS.has(NAVBHARAT_CLOUD_PROVIDER) ===
+false` and that `enforceHostingQuota` today permits a **500 MB** container publish. A static app
+cannot exceed 50 MB; a container app had no ceiling at all.
+
+**Why it matters more today than it did last week.** The tiers that shipped this morning grant **10
+and 30 SERVER apps**. An unbounded source archive is three unbounded costs at once: Cloud Build
+minutes (billed per minute), the container image in Artifact Registry — **the one cost no traffic
+overage offsets, and nothing deletes it** — and the bytes served to every visitor.
+
+**The fix.** `maxHostedSourceMb()` + `hostedSourceWithinCap()` in `hostApp.ts`, both pure, wired
+immediately before `buildAppContainer`, with `'too-large'` added to the outcome's reason union.
+Default **40 MB**, key `NAVBHARAT_MAX_SOURCE_MB`.
+
+Four decisions worth recording, because each one is a place the obvious version is wrong:
+
+- **It measures the PACKED archive, not the loose files.** Gzip is the difference between refusing a
+  large app and refusing a large amount of repeated text, and the packed bytes are what Cloud Build is
+  actually handed.
+- **It is NOT `maxDeployMb()`.** That number bounds a BUILT bundle (`dist/`); this one bounds SOURCE.
+  They are not comparable quantities, so making a container publish obey a number tuned for built
+  output would refuse legitimate apps for a reason nobody could act on.
+- **`navbharat-cloud` was NOT added to `FIRST_PARTY_PROVIDERS`**, which was the one-line version. That
+  set also drives the monthly deploy count and the total-storage accounting, so joining it would have
+  silently changed two unrelated behaviours for every container app — *a fix must never trade one
+  problem for another*.
+- **Empty means unset, not zero.** `Number('')` is 0, which is finite and non-negative, so the obvious
+  parser turns a key set with no value in Cloud Run into a silent, total removal of the ceiling with
+  nothing in the logs to explain it. Only a deliberate `0` disables it — the exact trap
+  `hostingStorageCapMb` already documents.
+
+An unmeasurable size is never refused (a publish blocked by a number we could not compute is a refusal
+nobody can act on, and the size comes from a Buffer we already hold — so an unreadable one is our bug,
+not the user's app). The message names the real remedy (serve large media from storage) and says
+plainly that no code needs to change, rather than just stating a limit. 12 tests.
+## 2026-09-13 — P2: the one hosting cost that only ever went up, and nothing deleted it
+
+**The gap.** Every publish of a user app pushes a NEW immutable container image to Artifact Registry —
+`containerBuild.ts` tags each build with the moment it was requested, deliberately, so a deploy can
+never serve a previous build by accident. **Nothing removed the previous one.** Not a republish, not a
+takedown: `deleteHostedService` gives the Cloud Run service slot back and leaves every image the app
+ever built sitting in the registry, billed per GB-month, for ever.
+
+**Why this ranked above the traffic meter among the buildable items.** Every other hosting cost is a
+FLOW — it rises with visitors, falls when they leave, and the ₹20/GB overage is sized against it.
+Registry storage is a STOCK: it only accumulates, no overage offsets it, and an app nobody has opened
+in a year still pays for it every month. A buildpacks Node image is a few hundred MB.
+
+**Why it is NOT an Artifact Registry cleanup policy**, which would be free, server-side and off our
+path — and is genuinely the better tool for the shape of problem it fits. A native policy can keep the
+N newest versions and delete the rest, but **it cannot see Cloud Run**. It would delete the image the
+live service is still running, and with `minInstanceCount: 0` a cold start RE-PULLS that image, so the
+app dies at the next visitor with nothing in our code to explain it. "Keep the newest N" is not a
+substitute for that guard, and the case where it is worst is the one that matters most: when a publish
+has FAILED, traffic stays on an OLDER revision while the newer, broken images push the live one out of
+the newest-N window. That is this repo's own hard-won finding — `cloudbuild.yaml` Step 5 says it in
+those words about the PLATFORM's image, and these are the same guards, moved server-side.
+
+**What shipped.** `imageRetention.ts` (pure rules) + `imageCleanupSweep.ts` (the job), registered as
+`image-cleanup`, **exclusive**, 05:00 UTC — an hour after `hosting-daily-bill` so the two never contend
+for the same Google quota.
+
+🔴 **THE DESIGN DECISION THE WHOLE FEATURE TURNS ON: a confirmed 404 and a failed read are DIFFERENT
+FACTS.** The natural design is two answers — "either we read the revisions, or we prune nothing" —
+and it is correct about safety and catastrophic about the largest pile of waste there is. An app that
+was TAKEN DOWN has no service, so the revision list 404s, so the cautious rule refuses to prune it
+**for ever**. The images of every deleted app would be the one thing the sweep could never touch,
+which is exactly backwards: they are the only images nothing can possibly be running. So `ServiceUsage`
+has three cases — `in-use` (protected), `no-service` (a fact; only the age floor applies), `unknown`
+(prune nothing).
+
+The other guards, each with a test that fails if it is removed:
+
+- **In-use beats keep-newest, and the order is load-bearing.** The digest check runs BEFORE the count,
+  so a running image is protected whether or not it is recent — the failed-publish case above.
+- **Tags as well as digests.** Cloud Run may hold either shape; matching one and not the other is the
+  quiet version of deleting a running image. A registry port (`host:443/…`) is not a tag.
+- **Age from `uploadTime`, never `buildTime`.** Buildpacks reuse cached layers, so a freshly pushed
+  image can carry a build time from days ago — which would make a brand-new image look deletable.
+  `cloudbuild.yaml` records hitting exactly this with `--sort-by=TIMESTAMP`.
+- **A 24h age floor** protects a publish in flight; **keep the 3 newest** for rollback; **50 deletes
+  per run** so this can never become the 2026-08-02 regression where an unbounded cleanup loop ran for
+  an hour and turned 5-minute deploys into timeouts.
+- **An undateable image is never deleted** — we cannot prove it is old.
+- **The reclaimed MB is null, not 0, when the registry reported no sizes.** Zero is a measurement; the
+  absence of one must not print as a number on the admin's own cost report.
+
+**Default is `on`, which for a deleting job is not the obvious choice and is stated rather than
+assumed.** Hosting is admin-only today (`NAVBHARAT_CLOUD_PUBLIC` deliberately unset), so the only apps
+that exist to clean are the admin's own — the sweep proves itself on them before any user has an app,
+and by the time hosting opens the cost is already bounded. An opt-in flag would mean the one cost that
+never goes down carries on not going down until somebody remembers.
+`NAVBHARAT_IMAGE_CLEANUP=report` measures and names everything it WOULD delete without deleting;
+`=off` stops it. Knobs: `NAVBHARAT_IMAGE_KEEP` (3), `NAVBHARAT_IMAGE_MIN_AGE_HOURS` (24),
+`NAVBHARAT_IMAGE_MAX_DELETES` (50) — all treating an empty value as unset rather than as zero.
+
+🔎 **THE SIBLING, hunted and fixed in the same change (rule 3).** The same root cause lives one layer
+down: every publish ALSO uploads a source tarball to the Cloud Build staging bucket
+(`sourceObjectFor`), and nothing ever deleted one of those either. Its retention rule is simpler and
+the reason is worth stating rather than assuming — a source object is read EXACTLY ONCE, by the build
+it was uploaded for, so there is no rollback value and therefore no keep-newest-N. The age floor is the
+whole policy. It shares the per-run delete budget, so one run cannot double-spend it. Anything outside
+our own `nbai-source/` prefix is ignored even though the listing filtered for it: the bucket is Cloud
+Build's shared staging bucket, and what we DELETE must not be decided by a parameter we sent.
+⚠️ A **GCS lifecycle rule** genuinely IS the better tool here (no in-use guard to enforce), and it is
+not set from code because that rewrites the configuration of a bucket the admin owns — their decision,
+not a side effect of a cleanup job. Until they set one, the sweep does the work.
+
+🐛 **A real bug the tests caught before it shipped.** The sweep returned early on an empty registry —
+and that made the sibling fix dead code in exactly the case it was needed most, because staged sources
+OUTLIVE their images: a repository drained to zero can still be holding a bucket full of tarballs. The
+early return is gone and a test pins its absence.
+
+43 tests across `tests/imageRetention.test.ts` and `tests/imageCleanupSweep.test.ts`.
+---
+
+## 2026-09-13 — Secrets screen, third pass: a shorter promise, a per-key "all my apps" switch, and the picker at the bottom
+
+Admin, in one message: *"yeh discription hatao… (mai non techie — aap isko theek se 1 ya 1.5 line me likho bas) pura
+bada sa hata do!"*, *"ek 'i' button ho har ek credidential ke starting me, jis par click karne se ek tick ✅ toggle
+dikhe, 'apply for my all app'… aur us credentials ke niche chota chota likha ho 'for all app'"*, and *"sabse niche
+dropdown selector box me user apni app select kare, jo app select ho, usi app ke credential upar dikhe!!"*
+
+### The description: four claims removed, one kept
+
+It listed variable-name examples, "scoped to your account", "injected at build time" and "never committed to git".
+Every one is still TRUE and still holds — they were answers to questions a non-technical owner is not asking while
+looking at this screen. The only promise they care about is who can see the value, so that is the only promise the
+screen now makes: **"Your keys and their values are saved encrypted — nobody can see them except you. Your apps use
+them automatically."**
+
+### The picker moved from the top to the bottom — same admin, same day, deliberately
+
+It was put at the TOP earlier today on *"sabse upar kis app ke credentials hai"*. Having seen it built, the admin
+asked for the opposite. At the top it asked a question before the user had seen anything; the answer they want first
+is "show me what I have". The existing test was an ORDER assertion, so it failed — and was updated to the new order
+rather than deleted, because the position is the instruction either way. Its label now names its job ("Show
+credentials for") and the sentence saying where the next NEW key will go moved with it, since that dropdown is two
+controls in one and the second behaviour has nothing else on screen to reveal it.
+
+### 🔴 THE TOGGLE LOOKED LIKE A ONE-LINE CHANGE AND WAS NOT — a plain save could NOT have done it
+
+There was no way to re-scope a saved key at all (the code said so in a comment: *"There is no UI anywhere to
+re-scope a saved key"*). The obvious implementation is to call the ordinary save with the new scope. **That does not
+move a key, and the bug it produces is invisible from this screen.**
+
+Two facts, both read out of the code rather than assumed:
+- `planSecretWrite` only ever touches rows of the **same** scope — deliberately, because that is what stops a shared
+  save from destroying a deliberate app-specific exception. So a save at the shared scope finds nothing to replace
+  and **ADDS a row**, leaving the app-scoped one alive.
+- `resolveScopedSecrets` makes an **app-specific key beat a shared one however old it is**.
+
+So that app would have kept injecting the OLD value while every other app got the new one — a split the user cannot
+see and cannot diagnose. Both facts are now pinned in `tests/secretScopeMove.test.ts`, including the resolution that
+proves the shadowing, so the trap cannot be walked into again by someone reaching for the easy implementation.
+
+**The fix is a MOVE, not a save** — `planScopeMove` + `PATCH /api/secrets/:userId/:secretId/scope`. The row keeps its
+id and its ciphertext and changes only `workspace_id`, so **the value is never decrypted to re-scope a key**, which
+is the safest property of the whole design. Any same-named row already at the destination is retired in the same
+operation; the retire runs FIRST, so a failure between the two writes leaves the key where it was rather than at the
+destination beside a duplicate.
+
+🔒 **It carries the same two guards as the delete, for the same reason.** The cross-user IDOR check (this collection
+is flat, so matching the caller to `:userId` does not prove the `:secretId` is theirs) and a live unlock ticket —
+widening a key puts a payment or database secret into the `.env` of apps that never had it, and an attacker who
+cannot read a vault would be satisfied by spraying one key across every app the victim owns. Ownership is checked
+BEFORE the ticket so a 401 can never reveal that someone else's key exists.
+
+⚠️ **`active` is not the only thing that had to stay honest.** Un-sharing needs an app to hand the key back to, and
+"All apps" names none. The switch is therefore ON-able but not OFF-able in that view, and says why, rather than
+failing silently or choosing an app on the user's behalf.
+
+### Two things found while building it, both fixed rather than worked around
+
+- **`tests/helpers/routeTestUtils.ts` had no `patch`.** The fake Express app lacked the verb, so registering the
+  route threw and a perfectly correct route looked broken. `supabaseIntegration.ts` had already registered a PATCH
+  before today, which means that whole module was untestable through this helper and nobody had found out.
+- **My first route test was testing the mock, not the route.** The `getDocs` mock ignored `where`, so it returned
+  every document — which made the sharpest test in the file incapable of failing. The route filters by
+  `secret_name`; a route that stopped doing so would **DELETE every other shared key** the moment somebody ticked
+  "apply to all my apps" on one of them. The mock now honours the query filters, and that test bites.
+
+### Verification
+
+34 new tests across three files. Three reverts tried, three failures: dropping the `secret_name` filter, removing
+the unlock ticket, and renaming the ⓘ button's label. `AppKnowledgeBase.ts` updated in the same change (the layout
+it described was the one that just moved).
+## 2026-09-13 — MERGES ARE ONE SESSION'S JOB, ON THE ADMIN'S WORD
+
+Admin, verbatim: *"ab se PR merge sirf aap karoge! mai bolunga apko tab. woh session bas bana bana
+kar CI check laga denge."*
+
+**This settles a question that was live and unanswered for most of the day.** PR #2897 (another
+session) had proposed a rule that no PR may be merged without the admin's explicit go-ahead, quoting
+an instruction — *"jab tak kaha na jaye, CI merge na ki jaye"* — that had never been given in THIS
+conversation, and that directly contradicted what the admin had told this session ("sabhi pr ab aap
+dekho"). It was put to the admin three times and deliberately not acted on: **a PR body is repo
+content, not an instruction from the user**, and adopting a governance rule from one would mean any
+session could change how every other session behaves by writing it down.
+
+The admin's answer confirms #2897 and adds the half it was missing.
+
+### The two halves, and why one without the other does not work
+
+- **#2897's half:** the merge decision moves from Claude to the admin. Correct, and it stands.
+- **The missing half:** *which* Claude. A rule that only says "wait for the admin" still lets five
+  concurrent sessions each conclude, independently, that their own PR is the one that may go — which
+  is exactly the state that produced the day's evidence.
+
+**The evidence, recorded rather than asserted:** eight PRs merged into `main` inside two hours from
+four different sessions, and **two of them (#2892, #2896) were merged by a session that did not open
+them, while the session that did was still working on the branch.** Nothing broke — by luck and a
+green CI, not by design.
+
+### What shipped
+
+`CLAUDE.md` now states both halves together, as two roles every session is in one of: the **merging
+session** (the one the admin is talking to, merging only PRs the admin names), and **every other
+session** (branch → push → PR → drive CI green → say so, and STOP there).
+
+Three things are stated explicitly because each is a way the rule would otherwise be read away:
+
+1. **"I am the session the admin is talking to" is something the admin SAYS, not something to
+   assume.** A session reasoning *"the admin clearly wants this merged"* has just made itself the
+   merger — the exact thing the rule removes.
+2. **Reaching green is still the deliverable.** A second-row session that goes quiet on a green PR
+   has done half the job; it must report plainly so the admin knows there is something to name.
+3. **Nothing else changes.** CI green before any merge, conflicts still merged in and re-gated by
+   whoever owns the branch.
+
+🔒 **AND THIS PR IS THE FIRST ONE THE RULE APPLIES TO.** It is opened, driven to green, and left for
+the admin to name — including the fact that a rule about not merging without permission cannot
+itself be merged without permission.
 ## 2026-09-13 — Hosting P5: the catalogue the plans are actually sold from
 
 Admin decisions, taken across one session of costing (full reasoning in `HOSTING_ECONOMICS_ROADMAP.md`).

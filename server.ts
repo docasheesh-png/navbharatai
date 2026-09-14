@@ -893,6 +893,40 @@ setInterval(() => {
             },
           });
           /**
+           * THE DAILY IMAGE CLEANUP (ROADMAP §11, the cost line no overage offsets).
+           *
+           * Every publish pushes a new immutable container image and nothing ever removed the
+           * previous one — not a republish, not a takedown. Registry storage is the only hosting cost
+           * that is a STOCK rather than a flow: it never falls on its own, and an app nobody has
+           * opened in a year still pays for it every month.
+           *
+           * 🔒 `exclusive`, because this DELETES. Two instances racing the same digest would have one
+           * of them read a 404 and report a failure for work that actually succeeded — and the
+           * cheaper reason still stands on its own: the same deletes do not need doing twice.
+           *
+           * 05:00 UTC, an hour after the hosting bill, so the two never contend for the same Google
+           * quota and a slow billing run cannot delay the cleanup (or the reverse).
+           *
+           * Set NAVBHARAT_IMAGE_CLEANUP=report to see what it WOULD delete without deleting, or =off
+           * to stop it entirely.
+           */
+          scheduler.register({
+            id: 'image-cleanup',
+            exclusive: true,
+            schedule: { kind: 'dailyAtUtc', hour: 5, minute: 0 },
+            handler: async () => {
+              await import('./src/server/AgentV3/imageCleanupSweep')
+                .then(({ runImageCleanupSweep }) => runImageCleanupSweep())
+                .then((r) => {
+                  if (r.scanned > 0 || r.notes.length > 0) {
+                    console.log(`[image-cleanup] mode ${r.mode}: ${r.apps} app(s), ${r.scanned} image(s), deleted ${r.deleted}/${r.eligible}${r.reclaimedMb === null ? '' : ` (~${r.reclaimedMb} MB)`}, staged sources ${r.sourcesDeleted}${r.sourcesReclaimedMb === null ? '' : ` (~${r.sourcesReclaimedMb} MB)`}${r.complete ? '' : ' ⚠️ registry read INCOMPLETE'}`);
+                    for (const n of r.notes) console.log(`[image-cleanup] ${n}`);
+                  }
+                })
+                .catch(() => { /* cleanup must never affect the server; cleaning less is the safe side */ });
+            },
+          });
+          /**
            * LIVE USD→INR — the rate every build's bill is converted at.
            *
            * 🔴 THE BUG THIS CLOSES (revenue audit 2026-09-10). `refreshUsdInrRate()` has existed, and

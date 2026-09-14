@@ -89,8 +89,36 @@ describe('the server keeps the value on exactly one route', () => {
     expect(occurrences).toBe(1);
   });
 
-  it('both the reveal and the delete demand a ticket', () => {
-    expect(src.split('ticketFor(req, userId)').length - 1).toBe(2);
+  /**
+   * WHICH ROUTES DEMAND A TICKET — named, not counted.
+   *
+   * This was `expect(count).toBe(2)`, which had the wrong shape in both directions: it failed on a
+   * legitimate third ticketed route (the 2026-09-13 scope move), and it could NOT have caught the thing
+   * actually worth catching — a new route added WITHOUT a ticket leaves the count untouched.
+   *
+   * ⚠️ It is deliberately NOT "every write needs a ticket": SAVING a key does not, and that asymmetry is
+   * intentional — adding a credential is not destructive, while revealing, deleting, or widening one to
+   * every app all are. So the set is stated explicitly, and adding a fourth entry has to be a decision
+   * somebody wrote down rather than a count that quietly moved.
+   */
+  it('the reveal, the delete and the scope move each demand a ticket — and nothing else claims to', () => {
+    // Split the file into route bodies, so "does THIS route check the ticket?" is answered per route
+    // instead of over the whole file.
+    const marks = [...src.matchAll(/app\.(get|post|put|patch|delete)\('([^']+)'/g)];
+    expect(marks.length, 'no routes found — the matcher drifted from the file').toBeGreaterThan(0);
+    const ticketed = marks
+      .filter((m, i) => {
+        const body = src.slice(m.index!, i + 1 < marks.length ? marks[i + 1].index! : src.length);
+        return body.includes('ticketFor(req, userId)');
+      })
+      .map((m) => `${m[1].toUpperCase()} ${m[2]}`)
+      .sort();
+
+    expect(ticketed).toEqual([
+      'DELETE /api/secrets/:userId/:secretId',
+      'PATCH /api/secrets/:userId/:secretId/scope',
+      'POST /api/secrets/:userId/reveal',
+    ]);
   });
 
   it('the delete is a real document removal, not a flag', () => {

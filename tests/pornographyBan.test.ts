@@ -162,7 +162,20 @@ describe('the wiring — both surfaces, and no upsell after a refusal', () => {
   });
 
   it('🔒 the free-tier upsell can never follow a refusal', () => {
-    expect(route).toContain('freeTierBuildActive && !looksLikeRefusal(result.summary)');
+    // Asserted against the SHAPE rather than one source string. Three sessions landed three
+    // independent suppression reasons in this single guard on the same day — a refusal, our own
+    // provider outage, and a prompt with nothing to build from — and the literal that used to sit
+    // here could only ever describe one of them, so it would have had to be deleted (losing the
+    // guard) or kept (blocking the other two). What must hold is the intent: the model's own answer
+    // is read, and NOTHING is said to the user when that answer was no.
+    const start = route.indexOf("zeroBillReason = 'empty build (0 files produced) — never charged'");
+    expect(start).toBeGreaterThan(0);
+    const block = route.slice(start, start + 4500);
+    expect(block).toContain('const refused = looksLikeRefusal(result.summary);');
+    // The narration — the upsell OR the degraded notice — is reachable only when there was no refusal.
+    expect(block).toMatch(/if \(!refused\) \{[\s\S]*freeTierUpsellMessage\(/);
+    // …and a suppressed upsell is recorded, so the admin sees the check fire rather than inferring it.
+    expect(block).toContain('UPSELL_SUPPRESSED');
   });
 
   it('the escalation guard reads the model\'s own answer', () => {

@@ -131,9 +131,14 @@ describe('computePlanPurchase', () => {
 describe('the two tiers (admin 2026-09-10: "do tier banao, credit bundle karo, 20 GB theek hai")', () => {
   const GROWTH = HOSTING_TIERS[1];
 
-  it('the catalogue is exactly Starter ₹149 and Growth ₹499 — and Business is deliberately not buyable', () => {
-    expect(HOSTING_TIERS.map((t) => [t.id, t.priceInr, t.includedTransferGb, t.domains, t.bundledCreditInr]))
-      .toEqual([['starter', 149, 5, 1, 0], ['growth', 499, 20, 3, 150]]);
+  it('the catalogue is exactly Starter ₹299 and Growth ₹599 — and Business is deliberately not buyable', () => {
+    // 🔴 RE-PRICED 2026-09-13 with the move from Render to Cloud Run. What the price now buys is a
+    // different product: 10 and 30 apps that can run a REAL SERVER, where the old tiers bought static
+    // hosting only. Both bundled credits are ₹0 (admin: "credit = 0") — on Growth the ₹150 had been
+    // the plan's single largest cost line, larger than its servers and its traffic together, and with
+    // server hosting now included it was paying twice for the same upgrade.
+    expect(HOSTING_TIERS.map((t) => [t.id, t.priceInr, t.includedBackendGb, t.includedFrontendGb, t.backendApps, t.domains, t.bundledCreditInr]))
+      .toEqual([['starter', 299, 5, 15, 10, 1, 0], ['growth', 599, 12, 50, 30, 3, 0]]);
     // A ₹2,999 tier with no customers would be a promise about capacity and support that no code
     // keeps. It is "talk to us" until a real customer defines it.
     expect(HOSTING_TIERS.find((t) => t.priceInr > 999)).toBeUndefined();
@@ -149,36 +154,43 @@ describe('the two tiers (admin 2026-09-10: "do tier banao, credit bundle karo, 2
     expect(r.reason).toBe('agreement_required');
   });
 
-  it('the agreement says the limit, the overage rate, AND what keeps the app running', () => {
+  it('the agreement says BOTH limits, the overage rate, AND what keeps the app running', () => {
     const terms = hostingAgreementTerms(GROWTH).join(' ');
-    expect(terms).toContain('20 GB');
+    // Two allowances now, counted separately: visitors to static apps, and traffic on server apps.
+    // One combined number would have to be enforced by a meter that does not exist.
+    expect(terms).toContain(`${GROWTH.includedFrontendGb} GB`);
+    expect(terms).toContain(`${GROWTH.includedBackendGb} GB`);
     expect(terms).toContain('₹20 per GB');
     // The unconditional "KEEP RUNNING" promise was replaced 2026-09-13 by the conditional one the
     // admin approved — it keeps running while the wallet has balance. See tests/hostingTiers.test.ts.
     expect(terms).toContain('keep running');
     expect(terms).toContain('while your wallet has balance');
-    expect(terms).toContain('₹499');
-    expect(terms).toContain('₹150');
+    expect(terms).toContain(`₹${GROWTH.priceInr}`);
     // The terms are generated FROM the tier, so a price change cannot leave the agreement quoting
     // the old one. Proven by asserting Starter's differ in exactly the tier-derived places.
-    expect(hostingAgreementTerms(STARTER).join(' ')).toContain('5 GB');
-    expect(hostingAgreementTerms(STARTER).join(' ')).not.toContain('₹150');
+    expect(hostingAgreementTerms(STARTER).join(' ')).toContain(`₹${STARTER.priceInr}`);
+    expect(hostingAgreementTerms(STARTER).join(' ')).not.toContain(`₹${GROWTH.priceInr}`);
   });
 
-  it('Growth grants its ₹150 bundled credit at purchase — and again on each renewal', () => {
+  it('no tier bundles credit any more, so a purchase returns nothing to the wallet', () => {
+    // ⚠️ THIS TEST INVERTED ON 2026-09-13 (admin: "credit = 0"), and the machinery it used to prove
+    // is deliberately NOT deleted: `bundledCreditInr` is still honoured end to end, so a future tier
+    // can bundle credit again without rebuilding the path. What changed is the catalogue, not the
+    // capability — which is why the assertion is driven by the tier's own field.
     const start = wallet(GROWTH.priceInr * TOKENS_PER_RUPEE);
     const r = computePlanPurchase(start, NOW, GROWTH.id, AGREED);
     if (!r.ok) throw new Error('expected ok');
-    expect(r.bundledCreditInr).toBe(150);
-    // Paid ₹499, received ₹150 back as ordinary credit.
-    expect(r.wallet.tokenBalance).toBe(150 * TOKENS_PER_RUPEE);
-    expect(r.wallet.walletLedger.at(-1).description).toContain('₹150 build credit included');
+    expect(GROWTH.bundledCreditInr).toBe(0);
+    expect(r.bundledCreditInr).toBe(0);
+    // Paid the full price, received nothing back — the whole fee buys the plan.
+    expect(r.wallet.tokenBalance).toBe(0);
+    expect(String(r.wallet.walletLedger.at(-1).description)).not.toContain('build credit included');
 
     const expired = { ...r.plan, expiresAt: new Date(NOW_MS - DAY).toISOString() };
     const topped = { ...r.wallet, hostingPlan: expired, tokenBalance: GROWTH.priceInr * TOKENS_PER_RUPEE };
     const renewed = computeLazyRenewal(topped, NOW);
     expect(renewed.renewed).toBe(true);
-    expect(renewed.wallet.tokenBalance).toBe(150 * TOKENS_PER_RUPEE);
+    expect(renewed.wallet.tokenBalance).toBe(0);
   });
 
   it('a replayed purchase grants NO second month of credit for one payment', () => {
@@ -199,8 +211,9 @@ describe('the two tiers (admin 2026-09-10: "do tier banao, credit bundle karo, 2
     const day3 = new Date(NOW_MS + 3 * DAY).toISOString();
     const up = computePlanPurchase(bought.wallet, day3, GROWTH.id, AGREED);
     if (!up.ok) throw new Error('expected ok');
-    // 27 of 30 Starter days left, at ₹149/30 per day.
-    expect(up.creditedInr).toBeCloseTo((27 * 149) / 30, 1);
+    // 27 of 30 Starter days left, at the Starter day rate. Asked by field, not by literal: a
+    // re-price must not fail a test about proration.
+    expect(up.creditedInr).toBeCloseTo((27 * STARTER.priceInr) / STARTER.days, 1);
     expect(up.plan.id).toBe(GROWTH.id);
     // A full new period from TODAY — the old one was paid back, so it is not extended.
     expect(Date.parse(up.plan.expiresAt)).toBe(Date.parse(day3) + GROWTH.days * DAY);
@@ -214,11 +227,17 @@ describe('the two tiers (admin 2026-09-10: "do tier banao, credit bundle karo, 2
     expect(down.ok).toBe(false);
   });
 
-  it('overage is charged only past the allowance, and by the part-GB', () => {
-    expect(overageInr(5, STARTER)).toBe(0);
-    expect(overageInr(5.5, STARTER)).toBe(10);      // 0.5 GB × ₹20
-    expect(overageInr(25, GROWTH)).toBe(100);       // 5 GB × ₹20
-    expect(overageInr(NaN, STARTER)).toBe(0);
+  it('overage is charged only past the SERVER allowance, and by the part-GB', () => {
+    // ⚠️ `overageInr` spends `includedBackendGb`, not one combined figure. Its literals were Starter's
+    // old 5 GB and Growth's old 20 GB — which happened to be the server allowance for one tier and
+    // the frontend one for the other, so the test would have kept passing for the wrong reason. Asked
+    // by field now: the rule is "zero at the line, part-GB above it", at whatever the line is.
+    for (const t of [STARTER, GROWTH]) {
+      expect(overageInr(t.includedBackendGb, t)).toBe(0);
+      expect(overageInr(t.includedBackendGb + 0.5, t)).toBe(10);   // 0.5 GB × ₹20
+      expect(overageInr(t.includedBackendGb + 5, t)).toBe(100);    // 5 GB × ₹20
+      expect(overageInr(NaN, t)).toBe(0);
+    }
   });
 });
 

@@ -13,8 +13,10 @@ import { join } from 'path';
  *      sab hata do … phone unlock etc sab hata do"* — one door, a PIN, and nothing else.
  *   2. *"cloud run ke jaise ui … 2-2 colom … sath me ek 🗑️ … sabse last me ek button ho, "+ add new
  *      credentials" aur sabse last me — "save and sync" button."* — including the ORDER of those two.
- *   3. *"sabse upar kis app ke credentials hai, woh select karne ka option bhi ho!"* — the app picker at
- *      the TOP, above the rows it filters.
+ *   3. The app picker's POSITION. First asked for at the top (*"sabse upar kis app ke credentials
+ *      hai"*), then moved the same day to the bottom (*"sabse niche dropdown selector box me user apni
+ *      app select kare, jo app select ho, usi app ke credential upar dikhe"*) — list first, filter under
+ *      it. Pinned as an order either way.
  *
  * The lock's own rules are proven in `vaultPin.test.ts` and `vaultPinRoutes.test.ts`. This file pins the
  * screen.
@@ -89,11 +91,23 @@ describe('the Cloud Run layout: two columns, a bin, then the two buttons', () =>
     expect(panel).toContain('aria-label="Remove this new row"');
   });
 
-  it('🔝 the app picker is ABOVE the credential rows', () => {
+  /**
+   * ⬇️ MOVED 2026-09-13, same admin, same day, and the reversal is deliberate rather than a regression.
+   *
+   * The original ask was *"sabse upar kis app ke credentials hai, woh select karne ka option bhi ho!"*
+   * and this test pinned the picker ABOVE the rows. The admin then looked at the built screen and said
+   * *"sabse niche dropdown selector box me user apni app select kare, jo app select ho, usi app ke
+   * credential upar dikhe!!"* — list first, filter under it.
+   *
+   * Kept as an ORDER assertion rather than deleted: the position is the instruction either way, and a
+   * test that only checked the picker still exists would not have caught the first arrangement breaking.
+   */
+  it('⬇️ the app picker is BELOW the credential rows it filters', () => {
     const pickerAt = panel.indexOf("id=\"secret-scope\"");
     const tableAt = panel.indexOf('<CredentialTable');
     expect(pickerAt, 'the app picker is gone').toBeGreaterThan(-1);
-    expect(pickerAt, 'the picker dropped below the rows it filters').toBeLessThan(tableAt);
+    expect(tableAt, 'the credential table is gone').toBeGreaterThan(-1);
+    expect(pickerAt, 'the picker climbed back above the rows').toBeGreaterThan(tableAt);
   });
 
   it('"+ Add new credentials" comes LAST but one, and "Save and sync" comes LAST', () => {

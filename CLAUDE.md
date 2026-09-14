@@ -2,11 +2,19 @@
 
 This file is auto-loaded at the start of every Claude Code session in this
 repo. It exists because **more than one Claude account/session works on this
-project, sequentially (never at the same time)** — credits run out on one,
-work continues later from another account/session. These rules exist to stop
-that handoff from breaking the app or wasting work. They rarely change; the
-living, constantly-updated status (current phase, exact resume point, what's
-done) lives in `PROGRESS.md`, not here.
+project — and, since 2026-09-13, SEVERAL AT THE SAME TIME, deliberately.**
+These rules exist to stop that from breaking the app or wasting work. They
+rarely change; the living, constantly-updated status (current phase, exact
+resume point, what's done) lives in `PROGRESS.md`, not here.
+
+🔴 **CORRECTED 2026-09-13 — this paragraph said "sequentially (never at the
+same time)" and that is FALSE.** The admin confirmed, asked directly, that the
+concurrent sessions are intentional. The old wording was not a stale detail: it
+was the PREMISE the 7 safeguards were written on, so a session reading it would
+reason that `main` only moves BETWEEN its turns and that nothing else is being
+built right now. Both are wrong, and both produce exactly the duplicated work
+safeguard #6 exists to prevent. See **"Working alongside other live sessions"**
+below for what actually changes.
 
 ## THE AIM (admin-mandated, 2026-07-17)
 
@@ -328,6 +336,42 @@ An autopsy that ends at "fixed the reported bug" WITHOUT this forward-looking la
 AIM. The reactive five steps keep the app from breaking; this sixth, proactive step is how it becomes the
 best. Both layers — reactive autopsy AND proactive world-best suggestions — with every single report.
 
+## Working alongside other live sessions (admin-confirmed 2026-09-13)
+
+**Several Claude sessions run on this repo at the same time, on purpose.** On the day this was
+written, five were live within one hour — PRs #2886, #2887, #2888, #2889, #2890 and #2891, from four
+different sessions, all touching the build engine. That is the normal condition now, not an incident.
+
+**What it changes, concretely. Four things, and none of them is optional.**
+
+1. **`git log` is not the state of the work — OPEN PRs are.** A session's work in progress is
+   invisible in `main` until it merges, so a redundant-work check (safeguard #6) that reads only the
+   committed tree is answering a question nobody asked. **Before starting anything, list the open
+   PRs and read their titles and their "still open / open root cause" sections.** That takes one call
+   and is the only place another session's in-flight work exists.
+
+2. **🔴 ANOTHER SESSION'S "OPEN ROOT CAUSE" IS A CLAIM ON THAT WORK — treat it as taken.** This is
+   the new half of safeguard #2's phase lock, and it was learned the same day: I announced in-flight
+   provider-call cancellation as my next task, then found PR #2889 already carried it, in its own
+   words — *"the real fix threads the lane's remaining budget down into the provider chain… is the
+   next thing to take."* Building it would have been PR #1 and PR #4 a third time. If a PR names a
+   root cause as its next step, it owns it; pick something else or say so and ask.
+
+3. **A merge conflict is expected, not a mistake.** `main` moves DURING a change now, not only
+   before it. So safeguard #1's fresh-state check is no longer a once-at-startup ritual: re-fetch
+   before opening a PR and again before merging. When `main` has moved, merge it in and **re-run the
+   FULL gate on the merged state** — this is why safeguard #5 insists the gate runs last, on the
+   final state; with concurrent sessions a gate run before the merge proves nothing at all.
+
+4. **Do not "fix" another session's file while it is mid-flight.** Two sessions editing the same
+   region produce a conflict whoever is right. If their change is wrong, say so to the admin rather
+   than racing them to the file.
+
+⚠️ **What has NOT changed:** everything else in this file. The absolute rules, the verification gate
+and the branch → PR → CI green → merge cycle are what make concurrency survivable in the first place
+— a green CI on a merged state is the only thing standing between five parallel sessions and a
+broken `main`. Concurrency is a reason to hold those tighter, never looser.
+
 ## The 7 safeguards (mandatory, every session)
 
 1. **Fresh-state check before trusting any doc.** At the start of every
@@ -338,7 +382,10 @@ best. Both layers — reactive autopsy AND proactive world-best suggestions — 
    stale picture of `main`). Treat the actual git state as ground truth;
    treat the doc as a hint.
 
-2. **Phase-level lock + exact resume point.** Don't start, redo, or
+2. **Phase-level lock + exact resume point.** ⚠️ Since 2026-09-13 "another
+   session" usually means one running RIGHT NOW, not one that finished — so the
+   lock signal is an OPEN PR as much as a `PROGRESS.md` entry (see "Working
+   alongside other live sessions" above). Don't start, redo, or
    "improve" a phase another session is actively working on or has already
    completed — find the exact next un-done item and continue from there, not
    from a clean slate. A lock is only released when a phase is marked
@@ -404,6 +451,13 @@ best. Both layers — reactive autopsy AND proactive world-best suggestions — 
    new feature or fix, grep/search the current `main` to confirm it doesn't
    already exist. This is not optional housekeeping — it is what would have
    prevented PR #1 and PR #4 from being built at all.
+
+   ⚠️ **AND SEARCHING `main` IS NO LONGER ENOUGH (2026-09-13).** With sessions
+   running concurrently, the work most likely to be duplicated is the work that
+   has not merged yet — it is in an OPEN PR and therefore in no tree you can
+   grep. **List the open PRs first**, and read their "still open / open root
+   cause" sections: a root cause another PR names as its next step is taken. See
+   "Working alongside other live sessions" above.
 
    🔴 **"MY SEARCH FOUND NOTHING" IS NOT "IT DOES NOT EXIST." IT USUALLY MEANS
    I GUESSED THE WRONG WORD.** This is the single most expensive mistake in this
@@ -2050,6 +2104,10 @@ Do NOT sit and watch any single CI run. The rule, every time you push:
 This applies to the deep-test autopsy loop too: after pushing a root-cause fix, don't watch its CI —
 start the next autopsy / next fix, and let the background timer bring you back to merge when it's green.
 
+⚠️ Every "merge it" / "merge when green" instruction above is superseded by the 2026-09-13 correction
+after the cycle below: the background timer still brings you back on green, but what it does on
+arrival is now tell the admin and wait, not merge — see that correction for the exact rule.
+
 **The cycle (repeat for every phase):**
 
 1. **Complete the next phase** — real, fully-wired work (the two absolute rules apply:
@@ -2073,6 +2131,49 @@ each phase, you make the PR, you wait for green, you merge, you move on — over
 **Only stop the cycle when:** the admin explicitly says stop/pause, there is no next phase
 left, or you hit real doubt/ambiguity/breakage risk (safeguard #3 — then ask the admin).
 A transient CI failure is NOT a stop: diagnose, fix, re-push, wait for green, merge, continue.
+
+🔴 **CORRECTION 2026-09-13 (admin-mandated, verbatim: "jab tak kaha na jaye, CI merge na ki
+jaye") — THIS SUPERSEDES STEP 6 ABOVE, UNTIL THE ADMIN SAYS OTHERWISE.** After any edit, the
+cycle still runs through branch → commit → push → open the PR → wait for CI to go green
+(steps 1–5 are unchanged). But the merge itself is no longer Claude's to decide on green: once
+CI is green, STOP at that PR, tell the admin it is open and green, and wait — do not merge
+until the admin explicitly says to merge THAT PR. This applies to every PR, including small or
+documentation-only ones, and holds until the admin lifts it. Nothing else about the gate
+changes: CI still must be green before a merge ever happens, and a red or pending PR is still
+worked to green in the background exactly as before — only the final "merge it" decision moved
+from Claude to the admin.
+
+🔴 **AND THE MERGE IS ONE SESSION'S JOB, NOT EVERY SESSION'S (admin-mandated 2026-09-13, verbatim:
+"ab se PR merge sirf aap karoge! mai bolunga apko tab. woh session bas bana bana kar CI check laga
+denge").** This is the second half of the correction above, and without it that one is unenforceable:
+a rule that says "wait for the admin" still lets five sessions each decide, independently, that their
+own PR is the one that may go.
+
+**So there are now exactly two roles, and every session is in one of them.**
+
+| | What it does | Where it STOPS |
+|---|---|---|
+| **The merging session** — the ONE the admin is talking to | merges, and only when the admin names the PR | — |
+| **Every other session** | branch → commit → push → open the PR → drive CI to GREEN → say so | **at green. It does not merge, ever.** |
+
+⚠️ **"I am the session the admin is talking to" is not something to assume — it is something the
+admin SAYS.** If you have not been told in your own conversation that merging is yours, you are in
+the second row, whatever your PR's state. A session that reasons "the admin clearly wants this
+merged" has just made itself the merger, which is the exact thing this rule removes.
+
+🔴 **WHY, AND IT IS NOT HOUSEKEEPING.** On the day this was written, **eight PRs merged into `main`
+inside two hours from four different sessions**, and two of them (#2892, #2896) were merged by a
+session that did not open them, while the session that did was still working on the branch. Nothing
+broke — by luck and a green CI, not by design. With concurrent sessions the merge is the ONE step
+where an independent decision compounds: a conflict-resolution another session has not seen, a
+half-landed pair, a `main` that moves under three branches at once. One merger makes the order
+deliberate instead of incidental.
+
+⚠️ **NOTHING ELSE CHANGES, and a session in the second row must not go quiet.** CI must still be
+green before any merge, a red or conflicted PR is still driven to green in the background, and a
+merge conflict is still merged in and re-gated by whoever owns the branch. **Reaching green is the
+deliverable — report it plainly** ("#NNNN is open and green") so the admin knows there is something
+to name. Going idle on a green PR is not obedience to this rule; it is half the job.
 
 ### The 60-second auto-answer rule (admin-mandated, 2026-07-06 — keeps the cycle from stalling)
 

@@ -58,6 +58,7 @@ interface Pending {
   appId: string;
   day: string;
   views: number;
+  bytes: number;
   paths: Map<string, number>;
   refs: Map<string, number>;
   uniq: Set<string>;
@@ -99,13 +100,36 @@ class SiteAnalyticsStore {
     const id = hitDocId(hit.appId, day, shard);
     let p = this.pending.get(id);
     if (!p) {
-      p = { appId: hit.appId, day, views: 0, paths: new Map(), refs: new Map(), uniq: new Set() };
+      p = { appId: hit.appId, day, views: 0, bytes: 0, paths: new Map(), refs: new Map(), uniq: new Set() };
       this.pending.set(id, p);
     }
     p.views += 1;
     bump(p.paths, fieldKey(hit.path));
     if (hit.ref) bump(p.refs, fieldKey(hit.ref));
     p.uniq.add(hash);
+    this.arm(env);
+  }
+
+  /**
+   * Buffer one bytes report. Same shard as the visitor's hit, so a day's documents stay the same set
+   * and nothing new has to be read to summarise them.
+   *
+   * 🔒 IT DOES NOT TOUCH `views` OR `uniq`. The bytes report is a SECOND beacon from a visitor whose
+   * hit was already counted, so adding to either would double-count a real visitor — and dropping the
+   * report instead would lose the only egress figure there is. Separate counters, one document.
+   */
+  recordBytes(input: { appId: string; bytes: number; ip: string; userAgent: string; nowMs: number }, env: NodeJS.ProcessEnv = process.env): void {
+    if (!(input.bytes > 0)) return;
+    const day = dayKey(input.nowMs);
+    const hash = visitorHash(input.ip, input.userAgent, day, hashSecret(env));
+    const shard = shardForVisitor(hash, shardCountFor(env));
+    const id = hitDocId(input.appId, day, shard);
+    let p = this.pending.get(id);
+    if (!p) {
+      p = { appId: input.appId, day, views: 0, bytes: 0, paths: new Map(), refs: new Map(), uniq: new Set() };
+      this.pending.set(id, p);
+    }
+    p.bytes += input.bytes;
     this.arm(env);
   }
 
@@ -128,7 +152,7 @@ class SiteAnalyticsStore {
       const inc = admin.firestore.FieldValue.increment;
       await Promise.all([...batch.entries()].map(([id, p]) => {
         const update: Record<string, unknown> = {
-          appId: p.appId, day: p.day, views: inc(p.views),
+          appId: p.appId, day: p.day, views: inc(p.views), bytes: inc(p.bytes),
           updatedAt: Date.now(),
         };
         for (const [k, v] of p.paths) update[`paths.${k}`] = inc(v);
@@ -142,6 +166,7 @@ class SiteAnalyticsStore {
         const cur = this.pending.get(id);
         if (!cur) { this.pending.set(id, p); continue; }
         cur.views += p.views;
+        cur.bytes += p.bytes;
         for (const [k, v] of p.paths) bump(cur.paths, k, v);
         for (const [k, v] of p.refs) bump(cur.refs, k, v);
         for (const h of p.uniq) cur.uniq.add(h);
@@ -171,6 +196,37 @@ class SiteAnalyticsStore {
     } catch (err) {
       console.warn('[siteAnalytics] summary read failed:', (err as Error)?.message ?? err);
       return { available: false, reason: 'store-unavailable' };
+    }
+  }
+
+  /**
+   * Bytes one app served on ONE named day — the figure the hosting sweep bills a period against.
+   *
+   * 🔒 NULL, NOT ZERO, WHEN IT CANNOT BE READ. `summary()` can answer `available: false` because it
+   * describes a window; a single day's total has no such wrapper, so the absence of a number must be
+   * expressed as `null` or the sweep would count an unreadable app as an app nobody visited. That is
+   * the distinction `sumTimeSeries` exists to preserve, applied to the same problem one store over.
+   *
+   * A day with no documents at all IS a real zero: the shard ids are deterministic, so "we looked and
+   * they are not there" is an answer, not a failure.
+   */
+  async bytesForDay(appId: string, day: string, env: NodeJS.ProcessEnv = process.env): Promise<number | null> {
+    const db = this.getDb();
+    if (!db) return null;
+    const shards = shardCountFor(env);
+    const refs = Array.from({ length: shards }, (_, i) =>
+      db.collection(SITE_ANALYTICS_COLLECTION).doc(hitDocId(appId, day, i)));
+    try {
+      const snaps = await db.getAll(...refs);
+      let total = 0;
+      for (const snap of snaps) {
+        if (!snap.exists) continue;
+        const n = Number((snap.data() as Partial<ShardDoc> | undefined)?.bytes);
+        if (Number.isFinite(n) && n > 0) total += n;
+      }
+      return total;
+    } catch {
+      return null;
     }
   }
 

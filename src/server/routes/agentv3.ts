@@ -2,7 +2,7 @@ import type { Express, Request, Response } from 'express';
 import { copyName, copyStatus } from '../AgentV3/duplicateApp';
 import { buildRateLimiter, rateLimiter, workspaceRateLimiter, workspacePollRateLimiter, deployOpsRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
 import express from 'express';
-import { HIT_PATH, parseHit, requestOptsOut, siteAnalyticsEnabled } from '../lib/siteAnalytics';
+import { HIT_PATH, parseHit, parseBytesReport, requestOptsOut, siteAnalyticsEnabled } from '../lib/siteAnalytics';
 import { siteAnalyticsStore } from '../lib/siteAnalyticsStore';
 import { siteIdForWorkspace } from '../lib/firebaseCustomDomain';
 import { validateSiteConfig, DEFAULT_SITE_CONFIG, MAX_REDIRECTS } from '../AgentV3/siteConfig';
@@ -232,7 +232,8 @@ import { analyzeApiWiring, buildEnvForSplit, buildEnvForWhole, mergeEnvFile } fr
 import { repoAvailableForDeploy, resolveDeployRepo, ownRepoMemoryPatch, renameStorageRepoPatch } from '../AgentV3/deployRepoMemory';
 import { githubGateVerdict, githubGateMessage, githubGateCode, GITHUB_GATE_CODE } from '../../lib/publishGithubGate';
 import { decidePushBranch } from '../AgentV3/pushAppTarget';
-import { hostingAvailability, hostAppOnNavBharatCloud } from '../AgentV3/hostApp';
+import { hostingAvailability, serverAppLimit, hostAppOnNavBharatCloud } from '../AgentV3/hostApp';
+import { NAVBHARAT_CLOUD_PROVIDER } from '../AgentV3/hostedDeploymentRecord';
 import { appsProject, appsRegion, serviceNameFor, deleteHostedService } from '../AgentV3/cloudRunHosting';
 import { readHostingUsage, usageGapNote } from '../AgentV3/hostingUsage';
 import {
@@ -247,7 +248,7 @@ import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { prepareSandboxForBuild } from '../AgentV3/sandboxSeed';
 import { summarizeRestore, type SandboxRestoreOutcome } from '../AgentV3/sandboxRestore';
-import { publishedAppCap, publishedAppCapForTier } from '../lib/HostingQuota';
+import { publishedAppCap, publishedAppCapForTier, readHostingTierForQuota } from '../lib/HostingQuota';
 import { hostingPlansEnabled, hostingPlanPriceInr, readHostingPlanStatus } from '../lib/hostingPlan';
 import { bundlerFallbackCommand, composeBuildFailureDetail, TYPECHECK_SKIPPED_WARNING } from '../AgentV3/publishBuild';
 import {
@@ -273,6 +274,7 @@ import {
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { auditConnectedProject } from '../AgentV3/ConnectAudit';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, oneShotStillViable, oneShotSkipReason, parseFileBlocks } from '../AgentV3/OneShotBuilder';
+import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/laneFailure';
 import { shouldContinue, continuationPrompt, joinContinuation, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
@@ -325,7 +327,7 @@ import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective, classifyFailure } from '../lib/BuildRetrospectiveEngine';
 import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
-import { outcomeCodeOf } from '../AgentV3/BuildDiagnostics';
+import { outcomeCodeOf, providerFailuresLookDegraded } from '../AgentV3/BuildDiagnostics';
 import { estimateBuildTime, complexityFromPrompt, liveEtaTick } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
@@ -3141,6 +3143,27 @@ async function probeFreeProviders(): Promise<Array<{ name: string; ok: boolean; 
 /** Throttle the public live-probe so it can't be abused for cost (one per 30s). */
 let lastDiagProbeTs = 0;
 
+/**
+ * The workspaces that already run a SERVER for this owner, for `serverAppLimit`.
+ *
+ * Returns `null` when the registry could not be read — NOT an empty array. The two mean opposite
+ * things to the cap ("nobody is hosting" would spend the allowance from zero), and this file has
+ * already paid for that confusion once: `null` and `0` are kept distinct for the identical reason in
+ * the hosting usage meter.
+ */
+async function liveServerWorkspaceIdsFor(userId: string): Promise<string[] | null> {
+  if (!userId || userId === 'anon') return [];
+  try {
+    const records = await deploymentStore.listByUser(userId, 200);
+    return records
+      .filter((r) => String(r.providerId ?? '') === NAVBHARAT_CLOUD_PROVIDER && (r.status ?? 'active') === 'active')
+      .map((r) => String(r.workspaceId ?? ''))
+      .filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+
 export function registerAgentV3Routes(app: Express): void {
   // WHY WAS THIS SANDBOX STARTED? One zone per request, opened before every route below, so a create
   // or resume deep inside any handler can name its cause (sandboxSessionZone.ts). Decides nothing.
@@ -4568,6 +4591,18 @@ async function noteBuildOutcome(
     const hostPlan = await probeHostingPlan(userId).catch(() => ({ active: false, known: false }));
     const gate = hostingAvailability({ isAdmin: isReportAdmin(email), hasPlan: hostPlan.active === true });
     if (!gate.available) { res.status(503).json({ ok: false, reason: 'unavailable', error: gate.message }); return; }
+
+    // …and how many servers the plan actually bought. `publishedAppCap` bounds how many apps EXIST;
+    // this bounds how many hold a container image, which is the cost no traffic overage offsets.
+    const serverGate = serverAppLimit({
+      isAdmin: isReportAdmin(email),
+      liveServerWorkspaceIds: await liveServerWorkspaceIdsFor(userId ?? ''),
+      workspaceId,
+      // The SAME plain read the publish quota uses, so "which tier does this user hold" has one answer
+      // on both hot paths rather than two that can disagree.
+      cap: (await readHostingTierForQuota(userId).catch(() => null))?.backendApps ?? null,
+    });
+    if (!serverGate.available) { res.status(403).json({ ok: false, reason: 'server_app_limit', error: serverGate.message }); return; }
 
     try {
       const files = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
@@ -7564,14 +7599,18 @@ async function noteBuildOutcome(
     hitCors(res);
     res.status(204).end();
     if (!siteAnalyticsEnabled() || requestOptsOut(req.headers as Record<string, unknown>)) return;
+    const ip = req.ip || '';
+    const userAgent = String(req.headers['user-agent'] || '');
     const hit = parseHit(req.body);
-    if (!hit) return;
-    siteAnalyticsStore.record({
-      ...hit,
-      ip: req.ip || '',
-      userAgent: String(req.headers['user-agent'] || ''),
-      nowMs: Date.now(),
-    });
+    if (hit) {
+      siteAnalyticsStore.record({ ...hit, ip, userAgent, nowMs: Date.now() });
+      return;
+    }
+    // The SECOND beacon: how many bytes this app actually served, as the delivering browser measured
+    // it. The two shapes are disjoint (`parseBytesReport` refuses anything carrying a path), so one
+    // report can never be counted as both a page view and an egress total.
+    const bytes = parseBytesReport(req.body);
+    if (bytes) siteAnalyticsStore.recordBytes({ ...bytes, ip, userAgent, nowMs: Date.now() });
   });
 
   /**
@@ -13906,7 +13945,7 @@ async function noteBuildOutcome(
         // ONE fast-lane model round trip. Returns the provider's stop reason alongside the text so the
         // continuation wrapper below can tell "the model finished" from "the model ran out of budget"
         // — a distinction the lane previously threw away, which is how a truncated app shipped as done.
-        const fastGenerateOnce = async (system: string, user: string): Promise<{ text: string; stopReason: string | null }> => {
+        const fastGenerateOnce = async (system: string, user: string, deadlineAt?: number): Promise<{ text: string; stopReason: string | null }> => {
           // #2 — capture this fast-lane model call's I/O into the diagnosis bundle. The fast lane
           // (Simple Builder / OneShot) does NOT go through AgentRunner, so its model calls were a
           // blind spot — a truncated (max_tokens) per-file generation is exactly what produces broken
@@ -13937,6 +13976,10 @@ async function noteBuildOutcome(
               // force their own ladder, so this is the model billed/recorded only when Claude delivers.
               model: fbModel, system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000,
               thinking,
+              // The lane's own remaining budget, carried into the provider chain so the call cannot
+              // outlive the wait (turnDeadline.ts). Undefined for every caller that does not set one,
+              // which is every lane except the fast lane's plan and contract calls today.
+              deadlineAt,
               onThinking: (delta: string) =>
                 events.emit({ type: 'stream_delta', agent: 'architect', id: fastTurnId, kind: 'thinking', delta, ts: Date.now() }),
             });
@@ -13967,8 +14010,8 @@ async function noteBuildOutcome(
         // on text we discarded. Continuing is provider-cap-agnostic (raising max_tokens only moves the
         // ceiling and can 400 on a provider whose real cap is lower), bounded to MAX_CONTINUATIONS, and
         // a continuation that FAILS never loses the work already produced — we keep what we have.
-        const fastGenerate = async (system: string, user: string): Promise<string> => {
-          const first = await fastGenerateOnce(system, user);
+        const fastGenerate = async (system: string, user: string, genOpts?: { deadlineAt?: number }): Promise<string> => {
+          const first = await fastGenerateOnce(system, user, genOpts?.deadlineAt);
           let text = first.text;
           let stopReason = first.stopReason;
           let attempts = 0;
@@ -13977,7 +14020,10 @@ async function noteBuildOutcome(
             events.emit({ type: 'narration', agent: 'architect', text: `✍️ That file list was longer than one response allows — continuing it (${attempts}/${MAX_CONTINUATIONS}) so nothing is left half-written…`, ts: Date.now() });
             let next: { text: string; stopReason: string | null };
             try {
-              next = await fastGenerateOnce(system, continuationPrompt(text));
+              // A CONTINUATION FACES THE SAME DEADLINE AS THE CALL IT CONTINUES. It is a fresh provider
+              // call, so without this the budget would bound only the first one and the continuation
+              // ladder would walk straight past it — the same gap the Claude retry loop had.
+              next = await fastGenerateOnce(system, continuationPrompt(text), genOpts?.deadlineAt);
             } catch (err) {
               // A failed continuation must never discard the complete files we already have.
               buildDiag.record({ phase: 'build', severity: 'warning', code: 'FASTLANE_CONTINUATION_FAILED', message: `A continuation of a truncated generation failed after ${attempts - 1} successful continuation(s) — keeping the files produced so far.`, autoResolved: false, detail: err instanceof Error ? err.message : String(err) });
@@ -14308,12 +14354,21 @@ async function noteBuildOutcome(
         if (!sb.ok && classifyForOneShot(analysis?.startTier) && !oneShotStillViable(sb)) {
           buildDiag.record({ phase: 'build', severity: 'info', code: 'ONESHOT_SKIPPED', message: oneShotSkipReason(sb) ?? 'Skipped the one-shot fast lane — going straight to the full builder.', autoResolved: true });
         }
+        // 🔴 THE SECOND WAY THIS LANE WAS WASTED, and the one the file-count gate above cannot see
+        // (admin report 2026-09-13). There the simple lane's PLAN CALL timed out, so it measured
+        // nothing — `plannedFiles` stayed 0, which reads as "never measured" and leaves the one-shot
+        // viable. It then ran for 150 seconds on the SAME degraded provider chain that had just
+        // failed three times, and failed the same way. Re-running a lane against a provider that is
+        // timing out is not a retry; it is the identical failure at full price.
+        else if (!sb.ok && classifyForOneShot(analysis?.startTier) && !anotherLaneWorthTrying(sb.reason)) {
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'ONESHOT_SKIPPED', message: 'Skipped the one-shot fast lane: the previous lane failed because the engine did not respond in time, not because of the app — a second lane on the same engine would fail the same way. Going straight to the full builder.', autoResolved: true, detail: sb.reason });
+        }
         if (sb.ok) {
           if (sb.typecheckRan === false) {
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'VERIFY_DID_NOT_RUN', message: 'The fast-lane type-check could not execute in the sandbox (after one retry) — the app shipped unverified; the agentic readiness gate stays ON.', autoResolved: false });
           }
           fastResult(sb.summary, sb.filesWritten, sb.typecheckRan !== false);
-        } else if (classifyForOneShot(analysis?.startTier) && oneShotStillViable(sb)) {
+        } else if (classifyForOneShot(analysis?.startTier) && oneShotStillViable(sb) && anotherLaneWorthTrying(sb.reason)) {
           // 2) ONE-SHOT (secondary) — a single call still suits a TRIVIAL one-file app the manifest
           //    skips. Gated to the simple tiers only: a sonnet-tier (complex) prompt can never fit in
           //    one 8k-token call — it falls straight through to the agentic loop instead.
@@ -18149,25 +18204,57 @@ async function noteBuildOutcome(
         // FREE-TIER: a cheap-only free build that produced nothing is NOT rescued on Claude (that would
         // spend the very budget free-tier protects). Instead, honestly invite the user to add credits
         // and finish on the strongest engine — converting the user to paid without shipping a broken app.
-        // 🔴 NEVER SELL A REFUSAL (report 03997004, 2026-09-11). The user asked for a pornography
-        // site; the models refused eight times; and this line then told them *"Your app needs our
-        // strongest engine to finish cleanly. Add credits and I will complete it on the best engine."*
-        // Read plainly, NavBharatAI asked a person who wanted a porn site for money and promised to
-        // build it on a better one. No model said that — our own plumbing did, because "zero files"
-        // was read as an engine limit when it was a moral answer.
-        //
-        // TWO GUARDS HERE, ANSWERING DIFFERENT QUESTIONS, AND BOTH ARE NEEDED. This one asks "did we
-        // REFUSE?" — in which case there is nothing to sell at any price, so no message at all. The
-        // `emptyCause` below asks "could the user's own input have been built from?" (report 541979d2,
-        // a bare Drive link) — there the honest answer is to ask for words rather than money. A build
-        // the engine genuinely could not FINISH is the only case left that may mention credits.
-        if (freeTierBuildActive && !looksLikeRefusal(result.summary)) {
-          // WHY it was empty decides what we may honestly say. A prompt with nothing to build from is
-          // not an engine limit, and asking such a user for money would be an upsell attached to our
-          // own gap. (The diversion above catches this case before a build starts; this covers the
-          // paths that still reach here — an edit turn, or an attachment that carried no instruction.)
-          const emptyCause = assessBuildInput(prompt).buildable ? 'engine' : 'no-instruction';
-          events.emit({ type: 'narration', agent: 'architect', text: freeTierUpsellMessage(emptyCause), ts: Date.now() });
+        if (freeTierBuildActive) {
+          // 🔴 THREE INDEPENDENT REASONS NOT TO ASK FOR MONEY, AND THEY COMPOSE. Three sessions each
+          // found one of them on the same day, in this one guard; a merge that kept only one would
+          // silently restore the other two bugs, so the order below is the whole resolution.
+          //
+          // (a) THE MODELS REFUSED (report 03997004). The user asked for a pornography site; the
+          // models refused eight times; this line then said *"Your app needs our strongest engine…
+          // Add credits and I will complete it on the best engine."* NavBharatAI asked a person who
+          // wanted a porn site for money and promised to build it on a better one. No model said
+          // that — our own plumbing did, because "zero files" was read as an engine limit when it
+          // was a moral answer.
+          //
+          // (b) OUR OWN OUTAGE (admin report 2026-09-13). The message used to fire on EVERY free
+          // build that produced nothing, without asking why. In that report the engine was never the
+          // problem — the plan was correct and arrived 178s late because the providers were degraded
+          // (3 timeouts on one, 7 rate-limits out of 8 on the other) — so the user was invited to pay
+          // for OUR slowness. The evidence had been recorded since 2026-09-01; nothing ever asked.
+          //
+          // (c) NOTHING TO BUILD FROM (#2887, report 541979d2 — a bare Drive link). A prompt carrying
+          // no instruction is not an engine limit either, so `freeTierUpsellMessage` takes the cause
+          // and asks for words rather than money. (The diversion earlier in this route catches that
+          // case before a build starts; this covers the paths that still reach here — an edit turn,
+          // or an attachment that carried no instruction.)
+          //
+          // WHY THIS ORDER. A refusal is tested FIRST because it is the only one of the three that is
+          // POSITIVE evidence: a model answered, and what it said was no. That rules out (b) for the
+          // same call — a provider that refused was plainly not down — and it settles (c), since the
+          // engine's objection was to the content, not the wording. Nothing is said at all in that
+          // case: an upsell sells a refusal, and "our providers were slow" would be a lie about why.
+          // Degraded is then tested before (c) for the reason its own author gives: when our
+          // providers are down we do not know whether the prompt was buildable, and blaming the
+          // user's wording for our outage is the same mistake in a politer sentence.
+          const refused = looksLikeRefusal(result.summary);
+          const degraded = !refused && providerFailuresLookDegraded(buildDiag.providerFailureBreakdown());
+          if (!refused) {
+            const emptyCause = assessBuildInput(prompt).buildable ? 'engine' : 'no-instruction';
+            events.emit({
+              type: 'narration',
+              agent: 'architect',
+              text: degraded ? providerDegradedMessage() : freeTierUpsellMessage(emptyCause),
+              ts: Date.now(),
+            });
+          }
+          if (refused || degraded) {
+            buildDiag.record({
+              phase: 'build', severity: 'warning', code: 'UPSELL_SUPPRESSED', autoResolved: false,
+              message: refused
+                ? 'Did not ask this user to add credits: the engine REFUSED this request on policy grounds. A refusal is an answer, not a capability limit — selling a stronger engine after one offers to do the very thing we just declined to do.'
+                : 'Did not ask this user to add credits: the build failed because the engine did not respond, not because the app needed a stronger one. Charging for our own slowness is what this check exists to prevent.',
+            });
+          }
         }
       }
       // Admin rule (2026-07-07): the server's own eyes saw the preview NOT render after the heal

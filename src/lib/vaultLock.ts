@@ -62,3 +62,29 @@ export function revealSecrets(userId: string, ticket: string): Promise<RevealedS
 export async function deleteSecretLocked(userId: string, secretId: string, ticket: string): Promise<void> {
   await ticketed<unknown>(`/api/secrets/${userId}/${secretId}`, { method: 'DELETE' }, ticket, 'Could not delete the key.');
 }
+
+/**
+ * Change WHICH APPS a saved key reaches, without ever moving its value.
+ *
+ * `workspaceId: null` = every app the user has; an app id = that app only. The server moves the row in
+ * place (it keeps its id and its ciphertext) and retires any same-named key already sitting at the
+ * destination — see `planScopeMove`. Ticketed like the delete, because widening a key to every app puts
+ * a payment or database secret into the `.env` of apps that never had it.
+ */
+export function setSecretScope(
+  userId: string,
+  secretId: string,
+  ticket: string,
+  workspaceId: string | null,
+): Promise<{ success: boolean; moved: boolean; duplicatesRetired: number }> {
+  return ticketed(
+    `/api/secrets/${userId}/${secretId}/scope`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace_id: workspaceId }),
+    },
+    ticket,
+    'Could not change where this key applies.',
+  );
+}

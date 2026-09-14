@@ -2,7 +2,7 @@ import type { Express, Request, Response } from 'express';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Reads/writes user_secrets (owner-only).
 import { doc, getDoc, updateDoc, deleteDoc, setDoc, collection, addDoc, getDocs, query, where, getServerDb as getDb } from '../lib/serverDb';
 import { encrypt, decrypt, loadUserVaultSecrets, secretCreatedAtMs } from '../lib/secrets';
-import { planSecretWrite } from '../lib/secretScope';
+import { planSecretWrite, planScopeMove } from '../lib/secretScope';
 import { requireUserMatch, trackDevice } from '../lib/authMiddleware';
 import { ticketFor } from '../lib/vaultTicketHttp';
 import { auditVault } from '../lib/vaultAudit';
@@ -168,6 +168,90 @@ export function registerSecretsRoutes(app: Express): void {
       console.error('Error verifying secrets:', err);
       // A verification that fails is never a verdict on the user's keys.
       res.status(500).json({ error: 'Could not check your keys just now. They are saved as you entered them.' });
+    }
+  });
+
+  /**
+   * MOVE ONE KEY BETWEEN SCOPES — "apply this to all my apps", and back again (admin 2026-09-13).
+   *
+   * There was no way to re-scope a saved key at all: the only cure was to delete it and retype it in
+   * the other scope, and a typo there silently creates a second key no build reads.
+   *
+   * 🔒 IT IS A MOVE, NOT A SAVE, AND THAT IS THE WHOLE DESIGN. The row keeps its id and its ciphertext
+   * and changes only `workspace_id`, so the plaintext is never decrypted to re-scope a key. Doing it as
+   * a save at the new scope would have left the old row alive (`planSecretWrite` only touches rows of
+   * the same scope) and `resolveScopedSecrets` makes an app-specific key beat a shared one — so the
+   * app would have kept injecting the old value while every other app got the new one. See
+   * `planScopeMove`.
+   */
+  app.patch('/api/secrets/:userId/:secretId/scope', requireUserMatch('userId'), async (req: Request, res: Response) => {
+    const db = getDb() as any;
+    try {
+      const { userId, secretId } = req.params;
+      const ref = doc(db, 'user_secrets', secretId);
+      const snap = await getDoc(ref);
+      // Same IDOR guard as the delete route, for the same reason: this collection is FLAT, so matching
+      // the caller to :userId does not prove the :secretId belongs to them. 404, never 403 — a 403
+      // would confirm the id exists.
+      if (!snap.exists() || (snap.data() as { user_id?: string } | undefined)?.user_id !== userId) {
+        res.status(404).json({ error: 'Secret not found' });
+        return;
+      }
+
+      // 🔒 THE SAME PROOF AS DELETING. Widening a key to every app is not a cosmetic setting — it puts a
+      // payment or database secret into the `.env` of apps that never had it. An attacker who cannot
+      // read a vault would be satisfied by spraying one key across every app the victim owns.
+      const unlock = ticketFor(req, userId);
+      if (!unlock) {
+        res.status(401).json({ error: 'Unlock the vault before changing where a key applies.', needsUnlock: true });
+        return;
+      }
+
+      const raw = (req.body ?? {}).workspace_id;
+      const target = typeof raw === 'string' && raw.trim() ? raw.trim() : null;
+      const name = (snap.data() as { secret_name?: string } | undefined)?.secret_name ?? '';
+
+      const existing = await getDocs(query(
+        collection(db, 'user_secrets'),
+        where('user_id', '==', userId),
+        where('secret_name', '==', name),
+      ));
+      const plan = planScopeMove(
+        existing.docs.map((d: any) => ({
+          id: d.id,
+          workspaceId: d.data()?.workspace_id ?? null,
+          createdAt: secretCreatedAtMs(d.data()?.created_at),
+          deleted: !!d.data()?.deleted,
+        })),
+        secretId,
+        target,
+      );
+
+      if (plan.alreadyThere) {
+        // Not an error and not a write: the key is already where the user is asking for it to be.
+        res.json({ success: true, moved: false, duplicatesRetired: 0 });
+        return;
+      }
+      if (!plan.move) {
+        res.status(404).json({ error: 'Secret not found' });
+        return;
+      }
+
+      // Retire FIRST, so a failure between the two writes leaves the key exactly where it was rather
+      // than at the destination beside a duplicate it was meant to replace.
+      for (const id of plan.retire) await deleteDoc(doc(db, 'user_secrets', id));
+      await updateDoc(ref, {
+        workspace_id: target,
+        // `created_at` is what "newest wins" reads. A moved key must win against anything already
+        // sitting at the destination, exactly as a freshly saved value does.
+        created_at: new Date(),
+      });
+
+      auditVault(userId, 'scope', { secretId, name, scope: target ?? 'all-apps', retired: plan.retire.length });
+      res.json({ success: true, moved: true, duplicatesRetired: plan.retire.length });
+    } catch (err) {
+      console.error('Error re-scoping secret:', err);
+      res.status(500).json({ error: 'Could not change where this key applies.' });
     }
   });
 

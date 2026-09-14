@@ -1,9 +1,13 @@
 /**
  * Plans card in the wallet (admin 2026-08-06: "wallet me sara hisab hona chahiye — hosting plan,
  * db plan, coding pay and use"). ONE card, three honest lines:
- *   • Hosting — TWO tiers since 2026-09-10 ("do tier banao"): Starter ₹149 and Growth ₹499, each
- *     removing the "Made with NavBharatAI" badge and unlocking the user's own domain. Bought from
- *     the SAME wallet balance; renewal too.
+ *   • Hosting — TWO tiers since 2026-09-10 ("do tier banao"), RE-PRICED 2026-09-13 with the move to
+ *     Cloud Run: Starter ₹299 and Growth ₹599 (they were ₹149 / ₹499 for STATIC hosting; the price
+ *     now buys 10 and 30 apps that can run a REAL SERVER). Each removes the "Made with NavBharatAI"
+ *     badge and unlocks the user's own domain. Bought from the SAME wallet balance; renewal too.
+ *     ⚠️ NEITHER BUNDLES WALLET CREDIT any more (admin: "no free credit") — Growth's ₹150/month is
+ *     gone, and `bundledCreditInr` is 0 on both. Every figure this card RENDERS comes from
+ *     `HOSTING_TIERS`, so it followed the re-price on its own; only this comment had to be told.
  *   • Database — Free, always (runs on the user's own account — the standing rule).
  *   • Coding — pay-per-use from the wallet (already live; shown here so the full account story
  *     reads in one place).
@@ -21,9 +25,9 @@
  * a new frontend build.
  */
 import { useState, useEffect, useCallback } from 'react';
-import { Globe, Database, Cpu, BadgeCheck, RefreshCw, Check } from 'lucide-react';
+import { Globe, Database, Cpu, BadgeCheck, RefreshCw, Check , ChevronDown} from 'lucide-react';
 import { authHeaders } from '../../lib/authedFetch';
-import { HOSTING_TIERS, hostingAgreementTerms, type HostingTier, HOSTING_OVERAGE_INR_PER_GB } from '../../lib/hostingTiers';
+import { HOSTING_TIERS, hostingAgreementTerms, type HostingTier, HOSTING_OVERAGE_INR_PER_GB, FREE_PUBLISHED_APPS } from '../../lib/hostingTiers';
 import { unlockHeaders } from '../../lib/appLock';
 
 interface PlanStatus {
@@ -58,6 +62,11 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
    * is that it is now VISIBLE and changeable at the moment of paying, not hidden until after.
    */
   const [autoRenew, setAutoRenew] = useState(true);
+  // WEB HOSTING IS ONE BUTTON (admin 2026-09-13: "ek button banao, web hosting naam ka, uske andar
+  // free, starter and growth 3 plan rakhoge"). Collapsed by default so the wallet screen opens as a
+  // short list rather than two full price tables — the button itself names the active plan, so a
+  // paying user can see where they stand without opening it.
+  const [hostingOpen, setHostingOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -160,7 +169,7 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
                   <span>
                     Active until {new Date(status.plan!.expiresAt).toLocaleDateString()} — badge-free publishing,
                     {' '}{status.tier ? `${status.tier.domains} domain${status.tier.domains === 1 ? '' : 's'}` : 'your own domain'} and
-                    {' '}{status.tier ? `${status.tier.includedTransferGb} GB` : 'included'} of traffic each month.
+                    {' '}{status.tier ? `${status.tier.includedFrontendGb} GB` : 'included'} of visitor traffic each month.
                     {typeof status.renewalPriceInr === 'number' ? ` Renews at ₹${status.renewalPriceInr}.` : ''}
                   </span>
                 </p>
@@ -183,7 +192,51 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
           )}
         </div>
 
-        {/* The tiers. Shown when there is no plan, and also while one is active so an upgrade is
+        <button
+          type="button"
+          onClick={() => setHostingOpen((v) => !v)}
+          aria-expanded={hostingOpen}
+          className="w-full flex items-center justify-between gap-2 rounded-lg border border-white/10 bg-[#21262d] px-3 py-2.5 text-left hover:border-indigo-500/40 transition-colors"
+        >
+          <span className="flex items-center gap-2 min-w-0">
+            <Globe className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+            <span className="text-[11.5px] font-black text-white uppercase tracking-wider">Web Hosting</span>
+            <span className="text-[10px] text-[#8b949e] font-semibold truncate">
+              {active && status.tier ? `On ${status.tier.name}` : 'Free · Starter · Growth'}
+            </span>
+          </span>
+          <ChevronDown className={`w-3.5 h-3.5 text-[#8b949e] shrink-0 transition-transform ${hostingOpen ? 'rotate-180' : ''}`} />
+        </button>
+
+        {hostingOpen && (<>
+        {/* FREE is listed beside the paid tiers because it is a real plan, not the absence of one —
+            every account already has it, and a buyer comparing prices is owed the row they are
+            leaving. Its numbers come from the same constant the server enforces. */}
+        <div className="rounded-xl border border-white/10 bg-[#21262d] px-3 py-3 space-y-2">
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="text-[12px] font-black text-white">Free</p>
+            <p className="text-[12px] font-black text-emerald-400 font-mono">₹0<span className="text-[9px] text-[#8b949e] font-bold">/always</span></p>
+          </div>
+          <p className="text-[10px] text-[#8b949e] font-semibold">Publish and share — no card, no expiry.</p>
+          <p className="text-[9px] font-black uppercase tracking-wider text-emerald-400">Included — no extra charge</p>
+          <ul className="space-y-1">
+            {[
+              `Keep up to ${FREE_PUBLISHED_APPS} apps published`,
+              'A permanent NavBharatAI link for each one',
+              'Visitor counts for every published app',
+            ].map((line) => (
+              <li key={line} className="text-[10px] text-[#c9d1d9] flex items-start gap-1.5">
+                <Check className="w-3 h-3 text-emerald-400 shrink-0 mt-0.5" />
+                <span>{line}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-[9.5px] text-[#8b949e] leading-relaxed border-t border-white/5 pt-2">
+            Your site shows a small “Made with NavBharatAI” badge, and apps that need a server need a plan.
+          </p>
+        </div>
+
+        {/* The paid tiers. Shown when there is no plan, and also while one is active so an upgrade is
             one tap away — the server refuses a downgrade mid-period and says why. */}
         <div className="grid gap-3 sm:grid-cols-2">
           {tiers.map((tier) => {
@@ -192,7 +245,7 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
             return (
               <div
                 key={tier.id}
-                className={`rounded-xl border px-3 py-3 space-y-2 ${held ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-white/10 bg-black/20'}`}
+                className={`rounded-xl border px-3 py-3 space-y-2 ${held ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-white/10 bg-[#21262d]'}`}
               >
                 <div className="flex items-baseline justify-between gap-2">
                   <p className="text-[12px] font-black text-white">{tier.name}</p>
@@ -217,8 +270,9 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
                     Removing it would be dishonest; leading with it is what made the plan read as a
                     double charge. */}
                 <p className="text-[9.5px] text-[#8b949e] leading-relaxed border-t border-white/5 pt-2">
-                  Past {tier.includedTransferGb} GB, extra traffic is ₹{HOSTING_OVERAGE_INR_PER_GB}/GB. You
-                  see your usage before anything extra is charged.
+                  Past {tier.includedFrontendGb} GB of visitor traffic — or {tier.includedBackendGb} GB on your
+                  server apps — extra traffic is ₹{HOSTING_OVERAGE_INR_PER_GB}/GB. You see your usage before
+                  anything extra is charged.
                 </p>
 
                 {held ? (
@@ -286,6 +340,7 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
           Need more than this — many sites, heavy traffic, or a dedicated setup? Write to us and we
           will build the plan around what you actually need, instead of selling you a bigger box.
         </p>
+        </>)}
       </div>
 
       {/* Database */}

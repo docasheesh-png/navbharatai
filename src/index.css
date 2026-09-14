@@ -92,6 +92,19 @@ button, [role='button'], nav, header, footer {
     --text-faint: #484f58;     /* placeholder / faint       */
     --border-soft: rgba(255, 255, 255, 0.1);
     --accent: #818cf8;
+    /* BRAND TEXT ON A SURFACE (added 2026-09-13). Tailwind's light brand shades are foreground
+       colours ~1,459 places in this app, and the compat layer deliberately leaves brand colours
+       alone — correct for a white label on a solid indigo button, and WRONG for indigo text on a
+       card, which on a light theme becomes light-on-light and unreadable. These are the readable
+       equivalents per theme. On dark they are the original Tailwind values, so it is a no-op. */
+    --brand-accent-text: #a5b4fc;
+    --brand-accent-strong: #818cf8;
+    --brand-success-text: #34d399;
+    --brand-success-strong: #6ee7b7;
+    --brand-warn-text: #fcd34d;
+    --brand-warn-strong: #fbbf24;
+    --brand-danger-text: #f87171;
+    --brand-info-text: #7dd3fc;
   }
   html[data-theme="light"] {
     --surface-base: #f8fafc;
@@ -103,6 +116,16 @@ button, [role='button'], nav, header, footer {
     --text-faint: #64748b;
     --border-soft: #e2e8f0;
     --accent: #4f46e5;
+    /* LIGHT — the theme the admin reported unreadable on 2026-09-13. Each is the 700 shade, which
+       clears WCAG AA against both --surface-card (#ffffff) and --surface-raised (#eef2f7). */
+    --brand-accent-text: #4338ca;
+    --brand-accent-strong: #4338ca;
+    --brand-success-text: #047857;
+    --brand-success-strong: #047857;
+    --brand-warn-text: #92400e;
+    --brand-warn-strong: #92400e;
+    --brand-danger-text: #b91c1c;
+    --brand-info-text: #0369a1;
   }
   html[data-theme="dim"] {
     --surface-base: #15202b;
@@ -114,6 +137,15 @@ button, [role='button'], nav, header, footer {
     --text-faint: #5b7083;
     --border-soft: #38444d;
     --accent: #1d9bf0;
+    /* DIM is a dark theme, so the original light Tailwind shades already read correctly. */
+    --brand-accent-text: #a5b4fc;
+    --brand-accent-strong: #818cf8;
+    --brand-success-text: #34d399;
+    --brand-success-strong: #6ee7b7;
+    --brand-warn-text: #fcd34d;
+    --brand-warn-strong: #fbbf24;
+    --brand-danger-text: #f87171;
+    --brand-info-text: #7dd3fc;
   }
   html[data-theme="comfort"] {
     /* Solarized-light — warm, low-eye-strain cream (now actually visible app-wide). */
@@ -126,6 +158,15 @@ button, [role='button'], nav, header, footer {
     --text-faint: #93a1a1;
     --border-soft: #dfd9c6;
     --accent: #268bd2;
+    /* COMFORT is a light cream, so it needs the dark shades for the same reason LIGHT does. */
+    --brand-accent-text: #4338ca;
+    --brand-accent-strong: #4338ca;
+    --brand-success-text: #065f46;
+    --brand-success-strong: #065f46;
+    --brand-warn-text: #92400e;
+    --brand-warn-strong: #92400e;
+    --brand-danger-text: #b91c1c;
+    --brand-info-text: #075985;
   }
   html[data-theme="contrast"] {
     /* Maximum accessibility: every surface black, every text light → text OPPOSITE background,
@@ -134,6 +175,14 @@ button, [role='button'], nav, header, footer {
     --surface-card: #000000;
     --surface-raised: #000000;
     --text-primary: #ffff00;
+    --brand-accent-text: #ffff00;
+    --brand-accent-strong: #ffff00;
+    --brand-success-text: #ffff00;
+    --brand-success-strong: #ffff00;
+    --brand-warn-text: #ffff00;
+    --brand-warn-strong: #ffff00;
+    --brand-danger-text: #ffff00;
+    --brand-info-text: #ffff00;
     --text-body: #ffffff;
     --text-muted: #ffffff;
     --text-faint: #ffff00;

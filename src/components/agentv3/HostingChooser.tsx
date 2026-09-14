@@ -189,12 +189,34 @@ interface DatabaseReadiness {
 
 /** The client's view of the server's summary — declared here, not imported: the server module
  *  pulls in node:crypto, which must never reach the frontend build (see PR #2778's lesson). */
+/**
+ * Traffic, in the unit a person reads rather than the unit we store.
+ *
+ * GB is deliberately shown to two decimals: a plan allowance is stated in whole GB, so "0.04 GB"
+ * against "25 GB included" is legible in a way "42.3 MB" is not.
+ */
+export function formatTraffic(bytes: number): string {
+  const b = Number(bytes);
+  if (!Number.isFinite(b) || b <= 0) return '0 MB';
+  const mb = b / (1024 * 1024);
+  if (mb < 1000) return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
+  return `${(mb / 1024).toFixed(2)} GB`;
+}
+
 export interface SiteAnalyticsView {
   available: boolean;
   reason?: string;
-  days?: Array<{ day: string; views: number; uniques: number }>;
+  days?: Array<{ day: string; views: number; uniques: number; bytes?: number }>;
   totalViews?: number;
   totalUniques?: number;
+  /**
+   * Bytes served across the window, as visitors' own browsers measured it.
+   *
+   * A FLOOR, never an over-count: a caller that runs no JavaScript is invisible to it. Shown because
+   * the plan agreement promises "you can see your usage in the app at any time" — a promise with no
+   * screen behind it is not a promise.
+   */
+  totalBytes?: number;
   todayViews?: number;
   topPaths?: Array<{ path: string; views: number }>;
   topReferrers?: Array<{ host: string; views: number }>;
@@ -1331,6 +1353,11 @@ export function HostingChooser({
                       <span className="text-lg font-black text-white leading-none">{siteAnalytics.totalUniques ?? 0}</span>
                       <span className="text-[10.5px] text-zinc-400">people · {siteAnalytics.totalViews ?? 0} views · today {siteAnalytics.todayViews ?? 0}</span>
                     </div>
+                    {(siteAnalytics.totalBytes ?? 0) > 0 && (
+                      <p className="text-[10.5px] text-zinc-400">
+                        <span className="text-zinc-200 font-semibold">{formatTraffic(siteAnalytics.totalBytes ?? 0)}</span> of traffic in this period
+                      </p>
+                    )}
                     {/* One bar per day, height by that day's views against the window's max. */}
                     <div className="flex items-end gap-[2px] h-7" aria-hidden="true">
                       {(siteAnalytics.days ?? []).map((p) => {

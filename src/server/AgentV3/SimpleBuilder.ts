@@ -14,6 +14,7 @@
 // fully unit-testable without a sandbox.
 
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
+import { deadlineFromBudget } from './turnDeadline';
 import { judgeRepair } from './repairAcceptance';
 import { scaffoldRestores, protectBoilerplateInRepair, isScaffoldBoilerplate, SCAFFOLD_BOILERPLATE } from './scaffoldBoilerplate';
 import { parseFileBlocks, type OneShotFile } from './OneShotBuilder';
@@ -518,8 +519,15 @@ export interface SimpleBuildDeps {
   prompt: string;
   framework: string;
   scaffoldPaths: string[];
-  /** ONE cheap text-generation call (Haiku/etc). Returns the raw model text. */
-  generate: (system: string, user: string) => Promise<string>;
+  /**
+   * ONE cheap text-generation call (Haiku/etc). Returns the raw model text.
+   *
+   * `opts.deadlineAt` is an ABSOLUTE epoch-ms instant after which this lane stops waiting, forwarded
+   * to the provider chain so the call it starts can no longer outlive the lane that asked for it. It
+   * is optional on purpose: a caller (and every test) that omits it gets exactly today's behaviour.
+   * See turnDeadline.ts for the report that produced it.
+   */
+  generate: (system: string, user: string, opts?: { deadlineAt?: number }) => Promise<string>;
   /** Write the generated files (single batch). Throws on a hard failure. */
   writeFiles: (files: OneShotFile[]) => Promise<void>;
   /** Start the dev server + publish the preview. Best-effort. */
@@ -685,9 +693,19 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       const configuredPlanCap = deps.planTimeoutMs ?? 90_000;
       const overallMs = deps.overallTimeoutMs ?? 240_000;
       const laneStartedAt = Date.now();
+      const planCap = preambleCapMs(overallMs, 0, configuredPlanCap);
+      // 🔴 THE INVERSION THIS CLOSES. `withTimeout` only RACES: the lane stopped waiting at this cap while
+      // the Kimi rung kept running to its own 120 s client timeout, so a build could — and did — log
+      // provider events 148 s after it had ended, on a sandbox still being billed. Handing the same cap
+      // DOWN as an absolute deadline means the call it starts cannot outlive the wait. The race stays:
+      // it is what makes the lane bail promptly; the deadline is what stops the abandoned call.
       const manifestText = await withTimeout(
-        deps.generate(manifestSystemPrompt(deps.framework), manifestUserPrompt(deps.prompt, deps.scaffoldPaths)),
-        preambleCapMs(overallMs, 0, configuredPlanCap), 'simple-plan');
+        deps.generate(
+          manifestSystemPrompt(deps.framework),
+          manifestUserPrompt(deps.prompt, deps.scaffoldPaths),
+          { deadlineAt: deadlineFromBudget(planCap, laneStartedAt) },
+        ),
+        planCap, 'simple-plan');
       // The plan call is a REAL model call on this build's REAL provider chain, and it is the only
       // latency measurement that exists before a single file is generated. See canFinishAfterPreamble.
       const planCallMs = Date.now() - laneStartedAt;
@@ -721,7 +739,14 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       if (shareContract && contractCap > 0) {
         deps.log?.('Designing the shared types & component contract…');
         try {
-          contract = (await withTimeout(deps.generate(contractSystemPrompt(deps.framework), contractUserPrompt(deps.prompt, manifest)), contractCap, 'simple-contract') || '').trim();
+          contract = (await withTimeout(
+            deps.generate(
+              contractSystemPrompt(deps.framework),
+              contractUserPrompt(deps.prompt, manifest),
+              // SIBLING of the plan call above (rule 3): same race, same abandoned call, same bill.
+              { deadlineAt: deadlineFromBudget(contractCap) },
+            ),
+            contractCap, 'simple-contract') || '').trim();
         } catch { contract = ''; }
       } else if (shareContract) {
         deps.log?.('⏭️ Skipping the shared-contract pass — planning used the time it needed, so the remaining budget goes to writing your files.');

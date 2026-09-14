@@ -11,7 +11,8 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   HOSTING_TIERS, HOSTING_OVERAGE_INR_PER_GB, LEGACY_HOSTING_PLAN_ID, FREE_PUBLISHED_APPS,
-  hostingAgreementTerms, isKnownPlanId, overageInr, purchasableTier, tierForPlanId, tierRank,
+  hostingAgreementTerms, isKnownPlanId, overageInr, overageFrontendInr, purchasableTier, tierForPlanId, tierRank,
+  FREE_FRONTEND_GB, FREE_BACKEND_APPS,
 } from '../src/lib/hostingTiers';
 import { appsToPauseOnLapse } from '../src/server/lib/hostingPlan';
 import { publishedAppCap, publishedAppCapForTier } from '../src/server/lib/HostingQuota';
@@ -24,7 +25,11 @@ describe('the catalogue', () => {
       expect(t.priceInr).toBeGreaterThan(0);
       expect(t.days).toBeGreaterThan(0);
       expect(t.domains).toBeGreaterThan(0);
-      expect(t.includedTransferGb).toBeGreaterThan(0);
+      // BOTH allowances, and the server-app count — a tier that names one and forgets the other is
+      // exactly the half-defined plan this test exists to refuse.
+      expect(t.includedBackendGb).toBeGreaterThan(0);
+      expect(t.includedFrontendGb).toBeGreaterThan(0);
+      expect(t.backendApps).toBeGreaterThan(0);
       expect(t.bundledCreditInr).toBeGreaterThanOrEqual(0);
       expect(t.includes.length).toBeGreaterThan(2);
       expect(t.tagline.length).toBeGreaterThan(0);
@@ -36,7 +41,9 @@ describe('the catalogue', () => {
       const lo = HOSTING_TIERS[i - 1], hi = HOSTING_TIERS[i];
       expect(hi.priceInr).toBeGreaterThan(lo.priceInr);
       expect(hi.domains).toBeGreaterThanOrEqual(lo.domains);
-      expect(hi.includedTransferGb).toBeGreaterThan(lo.includedTransferGb);
+      expect(hi.includedBackendGb).toBeGreaterThan(lo.includedBackendGb);
+      expect(hi.includedFrontendGb).toBeGreaterThan(lo.includedFrontendGb);
+      expect(hi.backendApps).toBeGreaterThan(lo.backendApps);
       expect(hi.bundledCreditInr).toBeGreaterThanOrEqual(lo.bundledCreditInr);
       expect(tierRank(hi.id)).toBeGreaterThan(tierRank(lo.id));
     }
@@ -60,7 +67,9 @@ describe('the agreement the user ticks', () => {
     for (const t of HOSTING_TIERS) {
       const text = hostingAgreementTerms(t).join(' ');
       expect(text).toContain(`₹${t.priceInr}`);
-      expect(text).toContain(`${t.includedTransferGb} GB`);
+      expect(text).toContain(`${t.includedFrontendGb} GB`);
+      expect(text).toContain(`${t.includedBackendGb} GB`);
+      expect(text).toContain(`${t.backendApps} of your published apps can run a real server`);
       expect(text).toContain(`₹${HOSTING_OVERAGE_INR_PER_GB} per GB`);
       expect(text).toContain(`${t.days} days`);
       if (t.bundledCreditInr > 0) expect(text).toContain(`₹${t.bundledCreditInr}`);
@@ -191,8 +200,8 @@ describe('the lapse demotion — which apps survive, and why', () => {
 describe('overage', () => {
   it('is zero at and below the allowance, and priced above our own cost per GB', () => {
     const starter = HOSTING_TIERS[0];
-    expect(overageInr(starter.includedTransferGb, starter)).toBe(0);
-    expect(overageInr(starter.includedTransferGb + 1, starter)).toBe(HOSTING_OVERAGE_INR_PER_GB);
+    expect(overageInr(starter.includedBackendGb, starter)).toBe(0);
+    expect(overageInr(starter.includedBackendGb + 1, starter)).toBe(HOSTING_OVERAGE_INR_PER_GB);
     // Measured all-in cost is roughly ₹14/GB. An overage rate at or under cost turns a popular app
     // into a loss that grows with its success, so the rate must sit clearly above it.
     expect(HOSTING_OVERAGE_INR_PER_GB).toBeGreaterThan(14);
@@ -392,9 +401,13 @@ describe('the agreement quotes the grace window the sweep actually applies', () 
 // The admin's objection, encoded: the buyer must read what the price COVERS before they read what
 // can cost extra. A future edit that moves the traffic charge back to the top fails here.
 describe('the agreement states the inclusion before the exception', () => {
-  it('names what ₹149 includes first, and the per-GB charge only after it', () => {
+  it('names what the price includes first, and the per-GB charge only after it', () => {
     const terms = hostingAgreementTerms(HOSTING_TIERS[0]);
-    const included = terms.findIndex((t) => t.includes('is included in the ₹149'));
+    // ⚠️ ASKED BY PRICE FIELD, NOT BY A LITERAL. It was `₹149`, so the ₹299 re-price on 2026-09-13
+    // made this test pass vacuously-not-at-all: findIndex returned -1 and the assertion below caught
+    // it only because it also checks for >= 0. A test that names a price cannot survive a re-price,
+    // and the thing being tested is the ORDER, not the number.
+    const included = terms.findIndex((t) => t.includes(`is included in the ₹${HOSTING_TIERS[0].priceInr}`));
     const charged = terms.findIndex((t) => t.includes('per GB from your wallet'));
     expect(included).toBeGreaterThanOrEqual(0);
     expect(charged).toBeGreaterThan(included);
@@ -403,5 +416,89 @@ describe('the agreement states the inclusion before the exception', () => {
   it('tells the buyer the welcome gift cannot buy a plan, before they pay', () => {
     const terms = hostingAgreementTerms(HOSTING_TIERS[0]).join(' ');
     expect(terms).toContain('welcome gift is for building apps, not for buying a plan');
+  });
+});
+
+
+describe('the two allowances are genuinely two (2026-09-13)', () => {
+  /**
+   * WHY THIS BLOCK EXISTS. `hostingBillingSweep` measures
+   * `run.googleapis.com/container/network/sent_bytes_count` — a CLOUD RUN metric. A frontend-only app
+   * on Firebase Hosting has no Cloud Run service, so it is never counted and never billable. One
+   * field named "transfer" hid that, and the agreement generated from it said "across all your
+   * connected sites" while the meter saw one kind of site. These tests pin the split so the two
+   * cannot quietly collapse back into one.
+   */
+  it('the server overage spends the BACKEND allowance, and the visitor overage the FRONTEND one', () => {
+    for (const t of HOSTING_TIERS) {
+      expect(overageInr(t.includedBackendGb, t)).toBe(0);
+      expect(overageInr(t.includedBackendGb + 1, t)).toBe(HOSTING_OVERAGE_INR_PER_GB);
+      expect(overageFrontendInr(t.includedFrontendGb, t)).toBe(0);
+      expect(overageFrontendInr(t.includedFrontendGb + 1, t)).toBe(HOSTING_OVERAGE_INR_PER_GB);
+    }
+  });
+
+  it('they are NOT the same number, so a caller cannot use one for the other by luck', () => {
+    // If the two allowances ever coincided, every test above would still pass while the code confused
+    // them — the failure would surface only on a real bill. Kept distinct on purpose.
+    for (const t of HOSTING_TIERS) expect(t.includedFrontendGb).not.toBe(t.includedBackendGb);
+  });
+
+  it('one GB over the FRONTEND line does not touch the server allowance, and the reverse', () => {
+    const g = HOSTING_TIERS[1];
+    expect(overageInr(g.includedFrontendGb, g)).toBe(
+      (g.includedFrontendGb - g.includedBackendGb) * HOSTING_OVERAGE_INR_PER_GB);
+    expect(overageFrontendInr(g.includedBackendGb, g)).toBe(0);
+  });
+
+  it('the agreement says they are counted separately, in those words', () => {
+    for (const t of HOSTING_TIERS) {
+      expect(hostingAgreementTerms(t).join(' ')).toContain('counted separately, not added together');
+    }
+  });
+});
+
+describe('a FREE account can never be charged for traffic (2026-09-13)', () => {
+  /**
+   * 🔒 THE RULE, AND WHY IT IS STRUCTURAL RATHER THAN A CHECK SOMEWHERE. A free user holds gifted
+   * credit. Metering them at zero GB would mean the first visitor to a free app began eating that
+   * gift, and "free" would stop being true. Zero SERVER apps is what makes it impossible rather than
+   * merely forbidden: no Cloud Run service exists, so the meter has nothing to read and no charge can
+   * be derived even by a caller that forgets the rule.
+   */
+  it('free accounts get no server apps at all', () => {
+    expect(FREE_BACKEND_APPS).toBe(0);
+  });
+
+  it('free visitor traffic is a real allowance, never zero — zero would bill the first visitor', () => {
+    expect(FREE_FRONTEND_GB).toBeGreaterThan(0);
+  });
+
+  it('every paid tier gives strictly more than free, on both counts', () => {
+    for (const t of HOSTING_TIERS) {
+      expect(t.backendApps).toBeGreaterThan(FREE_BACKEND_APPS);
+      expect(t.includedFrontendGb).toBeGreaterThan(FREE_FRONTEND_GB);
+    }
+  });
+
+  it('the agreement tells the buyer that free accounts cannot run a server — before they pay', () => {
+    for (const t of HOSTING_TIERS) {
+      expect(hostingAgreementTerms(t).join(' ')).toContain('free account cannot run a server');
+    }
+  });
+});
+
+describe('the wallet credit is ₹0 on every tier (admin 2026-09-13)', () => {
+  it('no tier bundles credit', () => {
+    // Growth bundled ₹150, which on the costing that preceded the Cloud Run move was its single
+    // largest cost line — larger than its servers and its traffic together. With the plan now
+    // granting real server hosting, the credit was paying twice for the same upgrade.
+    for (const t of HOSTING_TIERS) expect(t.bundledCreditInr).toBe(0);
+  });
+
+  it('and the agreement therefore does not promise any', () => {
+    for (const t of HOSTING_TIERS) {
+      expect(hostingAgreementTerms(t).join(' ')).not.toContain('of build credit is added to your wallet');
+    }
   });
 });

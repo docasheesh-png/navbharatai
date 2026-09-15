@@ -289,13 +289,25 @@ export async function resolveVerifiedName(uid: string): Promise<string | null> {
  * caller reports honestly rather than treating as an empty address.
  */
 export interface ContactLookupAuth {
-  getUser(uid: string): Promise<{ email?: string | null; emailVerified?: boolean; phoneNumber?: string | null }>;
+  getUser(uid: string): Promise<{
+    email?: string | null; emailVerified?: boolean; phoneNumber?: string | null;
+    /** Firebase's record of HOW this account can sign in — 'google.com', 'github.com', 'phone', … */
+    providerData?: Array<{ providerId?: string | null }> | null;
+  }>;
 }
 
 export interface AccountContact {
   email: string | null;
   emailVerified: boolean;
   phone: string | null;
+  /**
+   * The sign-in providers linked to this account, lower-cased.
+   *
+   * Added 2026-09-15 for the referral GitHub step: "connected GitHub" is not a thing the CLIENT can
+   * be trusted to assert — it is a fact Firebase already holds, and reading it here is what makes
+   * that step provable rather than claimable.
+   */
+  providers: string[];
 }
 
 /** Testable CORE — the provider is injected, so every branch can be exercised without firebase-admin. */
@@ -303,7 +315,7 @@ export async function resolveAccountContactWith(
   uid: string,
   getAuth: () => Promise<ContactLookupAuth | null>,
 ): Promise<AccountContact> {
-  const none: AccountContact = { email: null, emailVerified: false, phone: null };
+  const none: AccountContact = { email: null, emailVerified: false, phone: null, providers: [] };
   if (!uid) return none;
   try {
     const auth = await getAuth();
@@ -311,14 +323,19 @@ export async function resolveAccountContactWith(
     const user = await auth.getUser(uid);
     const email = typeof user.email === 'string' && user.email.trim() ? user.email.trim() : null;
     const phone = typeof user.phoneNumber === 'string' && user.phoneNumber.trim() ? user.phoneNumber.trim() : null;
-    return { email, emailVerified: user.emailVerified !== false, phone };
+    const providers = (Array.isArray(user.providerData) ? user.providerData : [])
+      .map((p) => String(p?.providerId ?? '').trim().toLowerCase())
+      .filter(Boolean);
+    return { email, emailVerified: user.emailVerified !== false, phone, providers };
   } catch {
+    // Every failure is "we could not find out", never "yes". The referral steps read this to decide
+    // whether money moves, so an unreadable account must prove nothing.
     return none;
   }
 }
 
 export async function resolveAccountContact(uid: string): Promise<AccountContact> {
-  if (process.env.VITEST || !uid) return { email: null, emailVerified: false, phone: null };
+  if (process.env.VITEST || !uid) return { email: null, emailVerified: false, phone: null, providers: [] };
   return resolveAccountContactWith(uid, getAdminAuth as unknown as () => Promise<ContactLookupAuth | null>);
 }
 

@@ -13,6 +13,7 @@ import {
   authErrorDetail,
   appleTokenExchangeFault,
   condenseProviderDetail,
+  shouldOfferAppleSignIn,
   type MinimalAuthLike,
 } from './socialSignInPolicy';
 
@@ -432,5 +433,29 @@ describe('appleTokenExchangeFault only claims to know when Apple is talking', ()
   it('will not read invalid_client out of a non-Apple reason', () => {
     expect(appleTokenExchangeFault('some google thing invalid_client')).toBe('unknown');
     expect(appleTokenExchangeFault(null)).toBe('unknown');
+  });
+});
+
+describe('Apple sign-in is not offered on Android (admin 2026-09-15)', () => {
+  it('is hidden on the Android app and nowhere else', () => {
+    expect(shouldOfferAppleSignIn('android')).toBe(false);
+    expect(shouldOfferAppleSignIn('ANDROID')).toBe(false);
+    expect(shouldOfferAppleSignIn(' android ')).toBe(false);
+  });
+
+  it('🔒 STAYS ON iOS — App Store review requires it beside the other social logins', () => {
+    // Guideline 4.8. Removing it there would trade an Android tidy-up for a rejected release, which
+    // is the kind of fix that creates a worse problem than the one it solves.
+    expect(shouldOfferAppleSignIn('ios')).toBe(true);
+  });
+
+  it('stays on the web, where a visitor may have an Apple ID and nothing else', () => {
+    expect(shouldOfferAppleSignIn('web')).toBe(true);
+  });
+
+  it('an UNKNOWN platform offers it — a wrong default must never remove somebody’s only way in', () => {
+    for (const p of ['', '  ', null, undefined, 'electron', 'unknown']) {
+      expect(shouldOfferAppleSignIn(p), String(p)).toBe(true);
+    }
   });
 });

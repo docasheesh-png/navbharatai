@@ -32,6 +32,7 @@ import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
 import { listEqNewestFirst } from './firestoreIndexSafe';
 import { TOKENS_PER_RUPEE } from './payments';
+import { ledgerPatch } from './walletStatement';
 import { debitWalletForBuild } from './walletDebit';
 
 /**
@@ -234,8 +235,19 @@ export async function settleRemixPurchase(input: {
       const tokens = Math.round(creatorInr * TOKENS_PER_RUPEE);
       w.tokenBalance = (typeof w.tokenBalance === 'number' ? w.tokenBalance : 0) + tokens;
       w.remaining_balance = Math.round(((typeof w.remaining_balance === 'number' ? w.remaining_balance : 0) + creatorInr) * 100) / 100;
-      ledger.push({ type: 'credit', ref, amountInr: creatorInr, tokens, description: `Nav App Store — your app "${appName}" was remixed`, at: new Date().toISOString() });
-      w.walletLedger = ledger.slice(-500);
+      // 🔴 THIS ROW USED TO BE INVISIBLE TO THE STATEMENT, which is worse than the unbounded trim
+      // beside it. It moved `tokenBalance` but recorded the amount as `tokens` / `amountInr`, while
+      // every reader — and the reconciler — sums `amountCoinsOrTokens`. So a creator's remix
+      // earnings raised their balance and appeared in NO total, and their statement would have
+      // reported a mismatch it could not explain. The extra fields are kept for the rows already
+      // written in the old shape; the standard field is what makes it count.
+      const row = {
+        type: 'credit', ref, amountCoinsOrTokens: tokens, amountInr: creatorInr, tokens,
+        timestamp: new Date().toISOString(), at: new Date().toISOString(),
+        description: `Nav App Store — your app "${appName}" was remixed`,
+      };
+      // Through the shared appender: bounded, and whatever rolls off moves the opening balance.
+      Object.assign(w, ledgerPatch(w, row));
       t.set(creatorRef, w);
     });
     return { charged: true, creatorCredited: true };

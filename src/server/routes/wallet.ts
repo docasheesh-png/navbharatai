@@ -17,6 +17,7 @@ import { HOSTING_TIERS } from '../../lib/hostingTiers';
 import { registerHostingPlanSweep, reattachSuspendedDomains } from '../lib/hostingPlanSweep';
 import { sendSafeError } from '../lib/httpError';
 import { userSafeUsageLog } from '../lib/usageLogPublic';
+import { buildWalletStatement, ledgerPatch } from '../lib/walletStatement';
 import { routeParam, routeParams } from '../lib/expressCompat';
 
 /** Resolve a login uid to its canonical wallet id (follows `mergedInto`). No-op unless
@@ -450,16 +451,15 @@ export function registerWalletRoutes(app: Express): void {
           phoneVerifiedGift: true,
           // A wallet that claims its phone bonus is on the new plan from here: no weekly ladder.
           giftPlan: 'v2',
-          walletLedger: [
-            ...(Array.isArray(w.walletLedger) ? w.walletLedger : []),
-            {
-              type: 'purchase',
-              amountCoinsOrTokens: claim.tokens,
-              moneySpent: 0,
-              timestamp: nowIso,
-              description: `Phone verified: ₹${creditInr.toLocaleString('en-IN')} bonus added`,
-            },
-          ],
+          // 🔒 Through the shared appender — see walletStatement.ts. A direct `[...ledger, entry]`
+          // here is what breaks "opening + Σ rows = balance", the invariant the statement rests on.
+          ...ledgerPatch(w, {
+            type: 'purchase',
+            amountCoinsOrTokens: claim.tokens,
+            moneySpent: 0,
+            timestamp: nowIso,
+            description: `Phone verified: ₹${creditInr.toLocaleString('en-IN')} bonus added`,
+          }),
           updatedAt: nowIso,
         });
         // Spend the NUMBER in the same transaction as the money.
@@ -559,6 +559,34 @@ export function registerWalletRoutes(app: Express): void {
     const ok = await setHostingPlanAutoRenew(getDb() as any, routeParam(req.params.userId), autoRenew);
     if (!ok) return res.status(404).json({ error: 'No hosting plan found on this account yet.' });
     return res.json({ ok: true, autoRenew });
+  });
+
+  /**
+   * THE STATEMENT — every credit and every debit, with a running balance, reconciled against the
+   * wallet's own figure (admin 2026-09-15: *"ek ek paise ka sahi sahi hisab"*).
+   *
+   * 🔒 IT REPORTS, IT NEVER CORRECTS. If the entries do not add up to the balance it says so, in
+   * rupees, rather than quietly adjusting either number — a reconciler that made its own arithmetic
+   * work would be the most dangerous route in this file. And an account whose oldest rows rolled off
+   * before opening balances were recorded is reported as UNKNOWN, never as a mismatch: that is
+   * missing history, not a discrepancy, and crying wolf on every old account is how a real one gets
+   * ignored.
+   */
+  app.get('/api/wallet/:userId/statement', requireUserMatch('userId'), async (req: Request, res: Response) => {
+    const db = getDb() as any;
+    try {
+      const userId = await canonicalWalletId(db, routeParam(req.params.userId));
+      const snap = await getDoc(doc(db, 'user_token_wallets', userId));
+      if (!snap.exists()) {
+        // An account with no wallet has never been credited or charged. Saying so beats an empty
+        // statement that looks like a wallet whose history was lost.
+        return res.json({ ok: true, exists: false, rows: [], verdict: 'balanced', notes: [] });
+      }
+      const statement = buildWalletStatement(snap.data() as Record<string, unknown>);
+      return res.json({ ok: true, exists: true, ...statement });
+    } catch (e) {
+      return sendSafeError(res, 500, 'Could not build your statement.', e, 'wallet:statement');
+    }
   });
 
   app.get('/api/wallet/:userId/logs', requireUserMatch('userId'), async (req: Request, res: Response) => {

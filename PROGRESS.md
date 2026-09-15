@@ -56239,6 +56239,269 @@ that has not streamed a token in 20 s is far more likely to time out than to ans
 instead of 60 s turns the worst case from minutes into seconds. Not built here — it changes provider
 timeouts across every lane and deserves its own measured change.
 
+## 2026-09-15 — The referral system: a decorative feature removed, and a real one built behind a device check
+
+The admin asked to plan a referral system and, while gathering the facts, the honest answer to
+"what free gift do we give?" turned up something else: **NavBharatAI already had a referral feature
+on screen, and none of it existed.**
+
+### What was live, and why it is the second absolute rule's exact shape
+
+The Billing panel carried a code, a share button, a reward promise and an earnings table:
+
+- **Two different codes for one person.** The balance card printed `NB-<random>` minted by
+  `Math.random()` into localStorage; the Promo tab printed `NAV-<mailbox>-REF` computed inline from
+  the email — which also **published the mailbox of anyone who shared their code**.
+- **A promise of money**: *"Earn 10% Free Tokens for every referral."* No attribution, no credit
+  path, no endpoint. Nobody could ever have earned ₹1.
+- **Invented earnings, hardcoded**: `amit_sharma2026@gmail.com ₹50 CLAIMED` and
+  `priya.rastogi@navbharat.ai ₹25 ACTIVE`, seeded into localStorage on first render — so **every
+  user was shown the same two strangers as their own referral income**.
+- A coupon placeholder naming `WELCOME100` and `NAVBHARAT50`, both **deleted** in the 2026-09-10
+  revenue audit: two guaranteed failures, advertised.
+
+Removed (#2953). The guard that replaces it, `tests/noInventedRewardUi.test.ts`, does **not** forbid
+the word "referral" — it forbids the four things that make a reward surface fake: a code minted in
+the browser, reward state seeded from a literal, a named earning promise with no server behind it,
+and example codes the server is known to refuse. A real screen reads a server-minted code and a
+server-held list, so it passes all four by construction.
+
+⚠️ **One of those assertions was wrong on its first writing**, and the lesson is worth more than the
+test: it required `Math.random` and the word "referral" on the SAME LINE, while in the real code they
+were five lines apart — so it **passed against the exact bug it was written for**. It surfaced only
+because each guard was proven by re-injecting the deleted code rather than by reading it.
+
+### The plan the admin approved, and what each rule is for
+
+| | |
+|---|---|
+| **B** (new user) | code ₹100 · email ₹100 · mobile ₹100 · github ₹100 = **₹400** |
+| **A** (referrer) | ₹25 × B's **three verifications** = **₹75** |
+| **One referred user** | **₹475** — below today's flat ₹500 |
+| Organic app user | ₹300 · **Website: ₹0** |
+| **Referrer lifetime cap** | **₹1,500** |
+
+Four rules, each closing a specific leak:
+
+1. **Android only, device-verified — every rupee**, including email and github. A free mailbox and a
+   free GitHub account take three minutes, so ₹200 reachable from a laptop would be an unlimited,
+   scriptable printer that never meets the device check. *Half a gate is no gate.*
+2. **The referrer is paid for verifications, never for a redemption.** Paying on redemption is what
+   makes a CHAIN: one mother account farming a throwaway per cycle, earnings concentrating in one
+   usable wallet.
+3. **Nothing releases until the friend's mobile is verified.** A device id resets on a factory reset
+   (~18 min, ₹0 cash); a phone number does not. The device bounds how many accounts exist at once;
+   only the phone bounds how often the same person returns.
+4. **₹1,500 lifetime cap** — *bounded*, not merely unprofitable, for when the reasoning behind 2 and
+   3 turns out to be wrong about somebody's patience. It counts what was EVER PAID, never what is
+   held: a cap measured against a balance is refunded on every spend, the mistake `weeklyTopUp.ts`
+   already records.
+
+### 🔴 Two real defects found by the work itself
+
+**A ₹400 hole in the claim route.** It proved WHO was asking (the device) and WHETHER anything was
+owed (the paid-steps list) — and **never asked whether the step had been done**. Any caller on a
+genuine Android phone could POST `email`, `github` and `mobile` having verified none of them and
+collect the full ₹400, per device. The device gate made the fraud slower; it did nothing about this.
+The lesson is the store-purchase audit's, in a new place: **a claim is a request, not a fact.**
+`stepIsProven` now reads Firebase's own record (emailVerified, a verified phone, `github.com` among
+the linked providers) and our store for the referrer — never the request body. Removing it fails 8
+tests. `AccountContact` gained `providers` for the same reason: "connected GitHub" is not something a
+client can be trusted to assert.
+
+**A blank env value meant zero.** `Number('')` is **0**, not NaN, so a key present-but-empty in Cloud
+Run — a cleared field, a dropped paste — would have read as a deliberate zero. On the ₹1,500 cap that
+is *no referrer ever earns anything, for ever*, with the console showing the key as configured and
+nothing failing anywhere. Caught by a test before it shipped.
+
+And a third, smaller: `googleAccessToken` took an injected env for its CHECK and read `process.env`
+for the CREDENTIAL — two sources of truth that agree right up until they do not. Found because four
+tests failed; `env` is now threaded, defaulted, so every existing caller is unchanged.
+
+### The dead-code guard learned to clean up after itself
+
+The new modules had no callers, and the guard said so correctly. Rather than only take the exemption,
+the gap its own comment implies was closed: the list says it *"is meant to shrink"*, but the staleness
+test only checked that the FILE still exists — so an exemption granted while a module was being built
+would survive for ever once it was wired, leaving a permanent blind spot exactly where the suite is
+meant to look. **An allowlisted file that has become reachable now fails.** It removed its own three
+entries across the following two commits, twice, without anyone remembering to.
+
+### Also shipped
+
+- **Apple sign-in is not offered on Android** (admin's ask). Kept on iOS — App Store Guideline 4.8
+  requires it beside other social logins — and on the web. An unknown platform still offers it, so a
+  wrong default never removes somebody's only way in. ⚠️ **An existing Apple-on-Android user loses
+  that door in the app** but keeps it on navbharatai.com; the account is untouched.
+- **Privacy Policy §3.2** discloses the device identifier, which is a precondition for shipping it
+  rather than paperwork — the same shape as the 2026-09-02 incident where the policy said "we never
+  share your data with advertisers" while the Meta pixel was being built.
+- The testing-notice popup carries the reward checklist, and **its three-second countdown never
+  starts while money is unclaimed**: a notice that shows somebody ₹100 and removes it before they
+  can reach it, with no way back until the next cold start, is worse than not showing it.
+
+### 🔴 OPEN — not done, and needed before this can be switched on
+
+1. **Play Integrity API enabled** in `gen-lang-client-0866594388`, and the `playintegrity` scope
+   granted to the existing `GOOGLE_PLAY_SA_JSON` service account. Admin-only.
+2. **`PLAY_INTEGRITY_CLOUD_PROJECT`** set as a GitHub repo secret (the project NUMBER, not the id).
+3. **A `.aab` carrying `DeviceIntegrityPlugin`** live on Play — release 91 and earlier do not have it.
+4. **Play Console → Data safety** updated for the device identifier. A declaration that contradicts
+   the policy is a violation, not a mismatch.
+5. **The admin-facing referral view** (spend vs revenue, and an alert on the pattern of one code,
+   many accounts, no phone, never pays) is **NOT built**. Recorded as an open item rather than
+   quietly dropped: the money is bounded by the ₹1,500 cap without it, but nobody can currently SEE
+   what referrals cost.
+6. **Nothing here has met a real handset or a real Play Console.** 111 tests cover every judgement
+   and every failure path against an injected Google; what they cannot cover is whether the API is
+   enabled and the account granted. The first genuine token is the first real test — and every
+   failure mode is honest and visible rather than silent.
+
+Gate on the final state: `typecheck` · `noUnusedImports` · `typecheck:server` · full suite **23,506
+passed** · `build` · `test:bundle` · `boot:check`. ⚠️ Three failures in `tests/esmMirror.test.ts`
+reproduce identically on clean `origin/main` with the change stashed — pre-existing, verified rather
+than assumed, and reported rather than left silent.
+
+### Correction, same day — open item 5 is closed
+
+The entry above records *"the admin-facing referral view is NOT built"*. It is now: a bounded,
+read-only `GET /api/admin/referral/summary` and a **Referral cost** card on the admin Reports tab —
+what was paid to new users, what was paid to referrers, how many accounts were referred, and the
+busiest referrers with a **"worth a look"** marker.
+
+Recorded as a correction rather than by editing the line above, per this file's append-only rule: the
+original said what was true when it was written, and a reader needs to see both.
+
+🔒 **The marker is a QUESTION, not a verdict, and there is deliberately no action behind it.** It
+means one referrer has several friends and none of them verified a mobile — the shape a factory-reset
+farm leaves. Each of those facts is individually innocent (a popular referrer has many friends; a new
+user has not verified their phone *yet*), so the response is a sorted list for a human to read: no
+block, no clawback, no flag written back to an account. The cost of being wrong about a real
+enthusiastic user is taking money they earned; the cost of being slow about a farm is bounded at
+₹1,500 by the cap. Those are not the same size, so the smaller risk gets a report rather than an
+automation. A test asserts the summary object has no field that could do anything.
+
+⚠️ The scan is bounded (2,000 rows), and past that ceiling the card says every figure is a **lower
+bound** rather than presenting a total that is quietly wrong. An unbounded read would be honest for a
+year and then not.
+
+## 2026-09-15 — Every paisa accounted for: the wallet statement, and the invariant that could not hold
+
+Admin: *"user wallet me token balance me ek ek paise ka sahi sahi hisab hona chahiye. ₹ / token
+credit kab kaise, ₹ / token deducted kab kaha kaise, aur user ke current balance se match hona
+chahiye."*
+
+The invariant that answers all of it is one line of bookkeeping:
+
+> **opening balance + Σ (every ledger row) = tokenBalance**
+
+And the wallet was already built to satisfy it — every writer that moves `tokenBalance` also appends
+or updates a ledger row for the same tokens. A build writes its own row; a chat turn accumulates into
+a daily bucket row that always carries the bucket's RUNNING total, so the sum stays right either way.
+
+### 🔴 Except it could not hold, and nobody had written down why
+
+The ledger is capped at **500 entries** — it must be, because an unbounded array eventually meets
+Firestore's 1 MiB document limit. All **four** trim sites did `[...ledger, entry].slice(-500)`,
+dropping the oldest rows with **nothing recorded about them**. From the 501st entry onward, the sum
+of a user's visible history was simply less than their balance by an amount nobody could name. A
+statement would have had to show a number that did not add up, or invent one.
+
+**The fix is the oldest one in accounting: a statement does not begin at the beginning of time, it
+begins at an OPENING BALANCE.** `appendLedgerEntry` folds whatever rolls off into
+`ledgerOpeningTokens`, so the invariant survives trimming exactly and for ever — the history a user
+can SEE is bounded, the arithmetic is not. All four sites now go through that one helper; trimming
+anywhere else is what re-opens this.
+
+Proven, not asserted: 600 real debits through `computeDebitedWallet`, 700 mixed credits and debits,
+50 chat turns into one rollup bucket, and 600 daily buckets — every one ends with the books
+balancing. Restoring the old `slice(-500)` fails two of them.
+
+### A second defect found on the way
+
+`payments.ts` appended to the ledger **without trimming at all**, while every debit path trimmed at
+500 — so purchase rows could grow unbounded toward the document limit, and the two halves of one
+ledger disagreed about whether it had a size. Now bounded like the rest.
+
+And an import **cycle** I created myself and then removed: `walletDebit` imported the appender while
+the appender imported `MAX_WALLET_LEDGER_ENTRIES` back from it. It typechecked and would very
+probably have worked — the constant is only read inside a function body — but a cycle on the money
+path breaks one day on a bundler change for reasons nobody can see. The constants moved down to
+`walletStatement.ts`, which is where the trim is enforced; `walletDebit` re-exports them so every
+existing importer is untouched.
+
+### What the user now sees
+
+Wallet & Billing → the balance card → **Statement**: every credit and charge, oldest to newest, with
+the date, what it was for, the rupees, and **the balance after that line**. It ends in a verdict:
+
+- **Everything adds up** — opening + credits − charges equals the balance, exactly.
+- **These entries do not match your balance** — with the difference in rupees, and an ask to report
+  it. 🔒 It shows this rather than hiding it: a statement that could only ever say "balanced" is
+  decoration, and decoration on a money screen is what stops anyone looking.
+- **Part of this history is older than our records** — the honest third state, for an account whose
+  oldest rows rolled off before opening balances existed. Calling that a mismatch would frighten
+  people whose money is fine and teach the admin to ignore the one that matters; calling it balanced
+  would be a lie.
+
+Two things that explain most real questions are stated on the screen rather than left to support: a
+charge under ₹0.01 is **carried** to the next charge instead of being rounded up, and a day's small
+assistant charges are **grouped** into one line so a wall of ₹0.02 rows never pushes the purchase
+history off the end.
+
+🔒 **The reconciler only ever REPORTS.** It never adjusts a balance to make its own arithmetic work —
+a test asserts it does not modify the document it is handed. And it reports, rather than reconciles
+away, a legitimate difference between the two stored views (`tokenBalance` and `remaining_balance`):
+a Pass buyer's views differ by the Pass price, permanently and by design, and an assignment there is
+exactly the bug `walletMirror.ts` was written to end.
+
+⚠️ **What this does NOT do, said plainly:** it cannot recover history already lost. An account that
+was past 500 entries before this shipped keeps its `unknown` verdict for ever — the rows are gone.
+From here on, every account stays reconcilable.
+
+Gate on the final state: `typecheck` · `noUnusedImports` · `typecheck:server` · full suite **23,532
+passed** · `build` · `test:bundle` · `boot:check`. The three `esmMirror` failures reproduce on clean
+`origin/main`.
+
+### The same day — the invariant was only half true, and one of the offenders was mine
+
+The entry above fixed the four TRIM sites. An audit of every writer then found the other half: **eight**
+places appended to `walletLedger` by hand, `[...(w.walletLedger || []), entry]`, bounded by nothing
+and moving no opening balance — the phone bonus, the admin adjustment, the hosting refund, the plan
+credit, the remix credit, and **both referral credits, which I had written myself minutes after
+fixing the defect everywhere else.**
+
+That last one is the argument for the test rather than the convention: the author who had just
+root-caused the bug reintroduced it while the fix was still uncommitted. `ledgerPatch(wallet, entry)`
+now returns the ledger AND both bookkeeping fields together, so a caller cannot take one and forget
+the others, and `tests/ledgerWritersUseAppender.test.ts` fails CI on a hand-rolled write or a trim
+outside the appender. Guilty until allowlisted; three files are listed, each with the reason.
+
+🔴 **And the guard found a worse one than the trim.** The Nav App Store remix credit recorded its
+amount as `tokens` / `amountInr` while every reader — and the reconciler — sums
+`amountCoinsOrTokens`. So a creator's remix earnings RAISED THEIR BALANCE AND APPEARED IN NO TOTAL,
+and their statement would have reported a mismatch nobody could explain. It now writes the standard
+field and keeps the old ones, so rows already written in the old shape still read.
+
+Gate: full suite **23,536 passed**; the three `esmMirror` failures reproduce on clean `origin/main`.
+
+### And the allowlist was hiding one more
+
+`accountMerge.ts` was allowlisted out of the ledger-writer guard with the reason *"it is the one place
+the OPENING balances of both wallets must be added together too"* — a claim written from intent rather
+than from the code. **It was false.** The merge inherited `into`'s opening and dropped `other`'s
+entirely, so every merged wallet's books were off by the sum of the other wallet's rows: a mismatch
+shown to a user whose money was perfectly correct.
+
+The merge now RE-STRIKES the opening balance — `balance − Σ(visible rows)`, struck once at the merge,
+with every later movement checked against it exactly as before — and a test pins it. The allowlist
+entry carries the corrected reason and a note that the original was wrong, rather than being quietly
+rewritten.
+
+🔒 **The lesson is about allowlists, not about merging: an exemption whose reason nobody verified is
+an exemption that hides a bug.** This is the third defect in two days found by writing down a reason
+and then checking it (the others: a guard that passed against the bug it was written for, and an
+`env` threaded for a check but not for the credential).
 
 ### 2026-09-15 — 🔴 "BUILDER NE EK BHI FILE KYU NAHI BANAYI?" — answered, and it was arithmetic
 

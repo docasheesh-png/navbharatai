@@ -89,6 +89,14 @@ const KNOWN_UNREACHABLE = new Set([
   // (The unused UI kit that sat here — Badge, Card, Tabs, Tooltip, Drawer, BottomSheet and the
   // barrel — was removed on 2026-08-24 once its two tests were trimmed of the dead cases. The
   // allowlist is meant to shrink; the staleness test below is what keeps it honest.)
+  //
+  // (The referral reward ledger and the server's device check sat here for exactly two commits,
+  // between being written and being wired into routes/referral.ts. The check below is what removed
+  // them — it failed the moment the import graph reached them, which is the behaviour it was added
+  // for and the first time it has been exercised on real work.)
+  //
+  // (The native device bridge sat here for one commit, until the Refer-a-Friend screen imported it.
+  // Removed by the same check, which is now the second time it has cleaned up after itself.)
 ]);
 
 describe('dead-code guard — every source file must be reachable from a real entry point', () => {
@@ -134,5 +142,25 @@ describe('dead-code guard — every source file must be reachable from a real en
     for (const p of KNOWN_UNREACHABLE) {
       expect(existsSync(join(ROOT, p)), `${p} is allowlisted but does not exist — drop the entry`).toBe(true);
     }
+  });
+
+  it('an allowlisted file that has become REACHABLE is dropped from the allowlist', () => {
+    /**
+     * The other half of staleness, added 2026-09-15 — and the half that was missing.
+     *
+     * The list's own comment says it "is meant to shrink", but nothing made it shrink: the check
+     * above only asks whether the FILE still exists, so an exemption granted while a module was
+     * being built survives for ever once the module is wired up. From then on it is a permanent
+     * blind spot — that file could later lose its last caller and become genuinely dead with this
+     * guard silent, which is precisely the accumulation the whole suite exists to prevent.
+     *
+     * An exemption should last exactly as long as its reason does.
+     */
+    const nowReachable = [...KNOWN_UNREACHABLE].filter((p) => live.has(p));
+    expect(
+      nowReachable,
+      'These files are allowlisted as unreachable but the import graph now reaches them. ' +
+      'The exemption has served its purpose — delete the entry so the guard covers them again.',
+    ).toEqual([]);
   });
 });

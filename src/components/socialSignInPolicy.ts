@@ -386,3 +386,29 @@ export function appleSignInFailureMessage(): string {
     + `Admin: add ${APPLE_WEB_RETURN_URL} to the Return URLs of Service ID ${APPLE_SERVICE_ID} `
     + 'in the Apple Developer portal (Certificates, Identifiers & Profiles → Identifiers → Services IDs).';
 }
+
+/**
+ * Should "Sign in with Apple" be offered on this platform? (admin 2026-09-15: *"android mobile se
+ * iphone login hatana hai"*.)
+ *
+ * • **iOS — YES, and it is not optional.** App Store Review Guideline 4.8 requires an equivalent
+ *   login option wherever a third-party social login is offered, and Apple has rejected apps over
+ *   exactly this. Removing it there would trade an Android tidy-up for a rejected release.
+ * • **Web — YES.** A desktop visitor may genuinely have an Apple ID and no Google account, and the
+ *   web flow is the one that works everywhere. Nothing about the admin's ask concerns the website.
+ * • **Android — NO.** Apple has no platform presence there, Google does not require it, and it sits
+ *   between a user and the two buttons they actually came for.
+ *
+ * ⚠️ WHAT THIS COSTS, said plainly rather than discovered later: anyone who ALREADY created their
+ * account with Apple on an Android phone loses that door in the app. They are not locked out of the
+ * account — the same Apple login still works on navbharatai.com, and the account, its apps and its
+ * wallet are untouched — but the app itself will no longer offer them a way in. That is a real
+ * trade, it is the admin's to make, and it was made. It is NOT reversible for a user who has no
+ * other sign-in method and no browser, which is why it is written here rather than in a commit
+ * message nobody re-reads.
+ *
+ * PURE.
+ */
+export function shouldOfferAppleSignIn(platform: string | null | undefined): boolean {
+  return String(platform ?? '').trim().toLowerCase() !== 'android';
+}

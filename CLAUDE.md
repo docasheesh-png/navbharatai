@@ -1363,6 +1363,65 @@ the code (it is actually read somewhere) on 2026-07-11.
   🔴 **STILL OPEN:** an abandoned provider call is not cancelled by this stop — the loop ends between
   turns, so a call already in flight runs to completion on the provider's side and is paid for.
 
+- **The referral welcome gift — four earned steps (built 2026-09-15, NOT live yet):**
+  `REFERRAL_REWARDS` (the master switch — ⚠️ **UNSET, and unset means today's behaviour exactly**:
+  no code is minted, no money moves, and not one document is written). Tunables, all with working
+  code defaults: `REFERRAL_STEP_TOKENS` (**₹100** per step for the new user), `REFERRER_STEP_TOKENS`
+  (**₹25** per verification for the referrer) and `REFERRER_LIFETIME_CAP_TOKENS` (**₹1,500**, the
+  most one referrer may EVER earn — admin-mandated). Read by `src/server/lib/referralRewards.ts`;
+  the routes are `GET/POST /api/referral/...` (`routes/referral.ts`).
+  **THE PLAN, and the totals are the point:** a new user earns ₹100 each for applying a referral
+  code, verifying email, verifying mobile and connecting GitHub (**₹400**); the referrer earns ₹25
+  for each of that friend's THREE verifications (**₹75**). One referred user costs **₹475** —
+  *below* today's flat ₹500 welcome gift — and an organic app user with no code costs ₹300. This
+  REPLACES `giftPlan.ts`'s flat grant for accounts on it; the two must never both pay, which is what
+  the master switch is for.
+  🔒 **WEBSITE: ₹0, AND THAT IS THE WHOLE DESIGN** (admin: *"websites par kuch bhi nahi dena"*).
+  Every rupee is claimed inside the Android app behind a device check. A free mailbox and a free
+  GitHub account cost nothing and take three minutes, so ₹200 reachable from a laptop would be an
+  unlimited, scriptable printer that never meets the device check. **Half a gate is no gate.** A code
+  can still be SHARED from the website — only claiming is Android-only.
+  🔒 **THE REFERRER IS PAID FOR VERIFICATIONS, NEVER FOR A REDEMPTION, and nothing releases until the
+  friend's MOBILE is verified.** Paying on redemption is what would make a CHAIN — one "mother"
+  account farming a throwaway per cycle, earnings concentrating in one usable wallet. A device id
+  resets on a factory reset (~18 minutes, ₹0 cash); a phone number does not. The device bounds how
+  many accounts exist at once; only the phone bounds how often the same person returns.
+  ⚠️ **A MALFORMED tunable falls back to its default, and a BLANK one means UNSET — not zero.**
+  `Number('')` is **0**, not NaN, so without that check a key present-but-empty in Cloud Run (a
+  cleared field, a dropped paste) would have read as a deliberate zero. On the lifetime cap that is
+  "no referrer ever earns anything, for ever", with the console showing the key as configured and
+  nothing failing anywhere. An explicit `0` is still honoured — nobody types a zero by accident.
+  🔴 **A CLAIM IS A REQUEST, NOT A FACT.** The first version of the claim route proved WHO was asking
+  (the device) and WHETHER anything was owed (the paid-steps list) and never asked whether the step
+  had been DONE — so any caller on a genuine Android phone could POST all four and collect ₹400 per
+  device. `stepIsProven` now reads Firebase's own account record (emailVerified, a verified phone,
+  `github.com` among the linked providers) and our store for the referrer, never the request body.
+  **Do not add a step without a proof rule**; `stepIsProven` is deliberately total rather than
+  defaulting, so a fifth step is unpayable until someone decides how it is proven.
+- **Play Integrity — the device check (built 2026-09-15). ⚠️ NOT a Cloud Run key:**
+  **`PLAY_INTEGRITY_CLOUD_PROJECT`** is a **GitHub REPO SECRET** read at BUILD time by
+  `android/app/build.gradle`, because it is baked into the `.aab`. It is the Google Cloud project
+  **NUMBER** that owns the Play Integrity API — ⚠️ **the digits, not the project id**
+  (`gen-lang-client-0866594388` is the id; the number is beside it on the console home). A
+  non-numeric value parses to 0 and reads as "not configured", which is the safe direction.
+  Recorded here anyway so nobody searches Cloud Run for it and concludes it is missing.
+  **Three things must ALL be true before a bonus can be paid**, and each failure is honest and
+  visible rather than silent: (1) the **Play Integrity API is ENABLED** in
+  `gen-lang-client-0866594388`; (2) the SAME service account already used for Play billing
+  (`GOOGLE_PLAY_SA_JSON`, a Cloud Run key) also holds the **`playintegrity`** scope — one account,
+  two scopes, and a token minted for a scope the account lacks is issued happily and then refused at
+  the call; (3) a `.aab` carrying `DeviceIntegrityPlugin` is live on Play (release 91 and earlier do
+  NOT have it). Until then every check is `unavailable`, which pays **₹0** — the gate FAILS CLOSED,
+  deliberately unlike `jobLease.ts` and the web-risk budget, because there is no later gate to catch
+  a wrong "yes".
+  ⚠️ `buildFeatures { buildConfig true }` is required alongside it: AGP has generated `BuildConfig`
+  only on request since 8.0 and this project is on 8.13, so without that line the failure is a
+  missing-symbol compile error naming nothing useful.
+  🔒 **Play Data safety must be updated before the next rollout.** Privacy Policy **§3.2** already
+  discloses the device identifier (`tests/privacyPolicyTruth.test.ts` guards the policy), but a Play
+  declaration that contradicts the policy is a violation, not a mismatch — and this is the same shape
+  as the 2026-09-02 incident where the policy said "we never share your data with advertisers" while
+  the Meta pixel was being built.
 - **Visitor analytics for published apps (shipped 2026-09-10, ROADMAP §13 item 1.1):**
   `AGENTV3_SITE_ANALYTICS` (kill switch — **default ON**; `off` stops the beacon being stamped at
   publish and the hit route recording; apps already published keep their script until republished,

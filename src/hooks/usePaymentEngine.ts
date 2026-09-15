@@ -9,7 +9,6 @@ import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { triggerCashfreeCheckout } from '../services/paymentService';
-import { safeLocalJson } from '../lib/safeLocalJson';
 import { authedHeaders } from '../lib/authHeaders';
 import { trackEvent } from '../lib/analytics';
 import { decideReportOnce } from '../lib/conversionOnce';
@@ -29,7 +28,7 @@ export interface UsePaymentEngineDeps {
 }
 
 /**
- * Owns the wallet/billing/credits/referral state + actions. Returns the exact same identifiers the
+ * Owns the wallet/billing/credits/promo-code state + actions. Returns the exact same identifiers the
  * App.tsx render tree already references, so the extraction is a pure relocation (no behavior change).
  */
 export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
@@ -59,14 +58,11 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
   }, []);
   const isFreeLimitReached = !user && dailyUsage.date === new Date().toDateString() && dailyUsage.count >= FREE_DAILY_MESSAGES;
 
-  // 11.4 — Referral code (generated per user, stored in localStorage)
-  const [myReferralCode] = useState<string>(() => {
-    const saved = localStorage.getItem('navbharat_my_referral');
-    if (saved) return saved;
-    const code = 'NB-' + Math.random().toString(36).slice(2, 8).toUpperCase();
-    localStorage.setItem('navbharat_my_referral', code);
-    return code;
-  });
+  // 🔴 THE INVENTED REFERRAL CODE IS GONE (admin 2026-09-15). This minted `NB-XXXXXX` from
+  // Math.random() into localStorage and the Billing panel printed it as "My Referral Code" — while
+  // the Promo tab printed a SECOND, different invented code for the same person. Neither was ever
+  // sent to the server, no route could resolve one, and the fake earnings listed beside them were
+  // hardcoded. A real, server-minted code arrives with the referral system now being built.
   /**
    * GOOGLE PLAY BILLING (admin 2026-09-06). `storeConfig` is the server's honest answer about
    * whether the Play rail can work at all; `playPluginReady` is whether THIS installed shell has the
@@ -122,12 +118,7 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
   const [limitError, setLimitError] = useState<string | null>(null);
   const [limitSuccess, setLimitSuccess] = useState<string | null>(null);
   const [dismissedReminderWarning, setDismissedReminderWarning] = useState<boolean>(false);
-  const [copiedReferral, setCopiedReferral] = useState<boolean>(false);
   const [buyAmountInput, setBuyAmountInput] = useState<string>('500');
-  const [referralHistory, setReferralHistory] = useState<any[]>(() => safeLocalJson<any[]>('navbharat_referral_history', [
-    { email: 'amit_sharma2026@gmail.com', status: 'CLAIMED', creditsEarned: 50.00, timestamp: '2026-05-18T14:20:00Z' },
-    { email: 'priya.rastogi@navbharat.ai', status: 'ACTIVE', creditsEarned: 25.00, timestamp: '2026-05-19T09:12:00Z' },
-  ]));
 
   useEffect(() => {
     localStorage.setItem('navbharat_reminder_limit', reminderLimit.toString());
@@ -136,10 +127,6 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
   useEffect(() => {
     localStorage.setItem('navbharat_budget_limit', budgetLimit.toString());
   }, [budgetLimit]);
-
-  useEffect(() => {
-    localStorage.setItem('navbharat_referral_history', JSON.stringify(referralHistory));
-  }, [referralHistory]);
 
   const fetchWallet = async () => {
     if (!user) return;
@@ -550,7 +537,6 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     // wallet + usage
     wallet, setWallet,
     dailyUsage, setDailyUsage, incrementDailyUsage, isFreeLimitReached,
-    myReferralCode,
     // billing data
     billingLogs, setBillingLogs,
     billingTransactions, setBillingTransactions,
@@ -576,9 +562,7 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     limitError, setLimitError,
     limitSuccess, setLimitSuccess,
     dismissedReminderWarning, setDismissedReminderWarning,
-    copiedReferral, setCopiedReferral,
     buyAmountInput, setBuyAmountInput,
-    referralHistory, setReferralHistory,
     // actions
     fetchWallet,
     createBillingOrder,

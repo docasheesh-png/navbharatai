@@ -251,7 +251,6 @@ export default function App() {
     FREE_DAILY_MESSAGES,
     wallet, setWallet,
     dailyUsage, setDailyUsage, incrementDailyUsage, isFreeLimitReached,
-    myReferralCode,
     billingLogs, setBillingLogs,
     billingTransactions, setBillingTransactions,
     loadingWallet, setLoadingWallet,
@@ -274,9 +273,7 @@ export default function App() {
     limitError, setLimitError,
     limitSuccess, setLimitSuccess,
     dismissedReminderWarning, setDismissedReminderWarning,
-    copiedReferral, setCopiedReferral,
     buyAmountInput, setBuyAmountInput,
-    referralHistory, setReferralHistory,
     fetchWallet,
     createBillingOrder,
     storeRail, storeConfig, platformFeePct, buyStorePack, buyingProductId, storePurchaseNotice,
@@ -3648,10 +3645,8 @@ export default function App() {
               wallet={wallet}
               loadingWallet={loadingWallet}
               dailyUsage={dailyUsage}
-              myReferralCode={myReferralCode}
               billingTransactions={billingTransactions}
               billingLogs={billingLogs}
-              referralHistory={referralHistory}
               activeBillingDetailTab={activeBillingDetailTab}
               reminderLimit={reminderLimit}
               budgetLimit={budgetLimit}
@@ -3660,7 +3655,6 @@ export default function App() {
               isRedeemingCoupon={isRedeemingCoupon}
               couponError={couponError}
               couponSuccess={couponSuccess}
-              copiedReferral={copiedReferral}
               buyAmountInput={buyAmountInput}
               isRecharging={isRecharging}
               storeRail={storeRail}
@@ -3681,7 +3675,6 @@ export default function App() {
               onSetDismissedReminderWarning={setDismissedReminderWarning}
               onSetCouponCodeInput={setCouponCodeInput}
               onRedeemPromoCoupon={redeemPromoCoupon}
-              onSetCopiedReferral={setCopiedReferral}
               onSetBuyAmountInput={setBuyAmountInput}
               onCreateBillingOrder={createBillingOrder}
               onSetTempReminderLimit={setTempReminderLimit}

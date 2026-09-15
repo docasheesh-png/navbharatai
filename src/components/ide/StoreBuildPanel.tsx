@@ -20,12 +20,18 @@ import { signingNotReadyMessage } from '../../lib/signingReadiness';
 //                      build, watch it, and hand back the finished file. All of that is automatic.
 //   GitHub does      : the compiling and signing, on its own runners. Linux for Android; macOS for
 //                      iOS, because Apple allows no other kind of machine.
-//   The user does    : adds their own signing key as a GitHub secret, once.
+//   The user does    : keeps their signing key, and their Apple credentials.
 //
-// That last step is not a gap we failed to close — it is the point. A signing key IS the app's
-// permanent identity on the Play Store. If NavBharatAI generated one and held it, every user's app
-// would depend on us never losing it; if we generated one and threw it away, they could never publish
-// an update again. So it stays theirs, we never see it, and this panel walks them through it.
+// ⚠️ THAT LAST LINE CHANGED ON 2026-09-15, and the paragraph it replaces is worth keeping in view
+// because its reasoning was right for years. It read: "If NavBharatAI generated [a signing key] and
+// held it, every user's app would depend on us never losing it; if we generated one and threw it away,
+// they could never publish an update again." True of the APP SIGNING key — and this is not that key.
+// Every new app on Play uses Play App Signing (required for the .aab format): Google holds the app
+// signing key, and the developer holds an UPLOAD key, which Google can RESET if it is lost.
+//
+// So NavBharatAI can now CREATE the upload key on request — one press instead of a JDK, six keytool
+// flags, a base64 step and four pasted secrets. It still never HOLDS one: the key is sealed into the
+// user's own GitHub repository and handed to their browser once to save. We keep no copy anywhere.
 
 type Phase = 'idle' | 'preparing' | 'ready' | 'building' | 'built' | 'failed';
 
@@ -150,6 +156,12 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
   const [run, setRun] = useState<RunInfo | null>(null);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [error, setError] = useState('');
+  // The pre-flight found no signing key on the repository — which names are missing, so the offer to
+  // create one appears exactly where the refusal did, instead of in a settings screen nobody opens.
+  const [signingGap, setSigningGap] = useState<string[] | null>(null);
+  const [makingKey, setMakingKey] = useState(false);
+  /** Shown ONCE, right after creation: this is the only moment the key exists outside the repository. */
+  const [newKey, setNewKey] = useState<{ fingerprint: string; password: string; alias: string } | null>(null);
   // What the user actually watches while everything else happens by itself.
   const [progress, setProgress] = useState(0);
   const [progressNote, setProgressNote] = useState('');
@@ -275,6 +287,50 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
    * problem. It never loops forever, because a repair that changes nothing is reported as unfixable by
    * the server rather than committed and retried.
    */
+  /**
+   * Create the user's upload key and put it on their repository (admin 2026-09-15, the "auto" half).
+   *
+   * 🔒 The file is downloaded IMMEDIATELY and before anything else is shown: this response is the only
+   * moment the key exists outside their repository, so a user who closes the panel here must still end
+   * up with it. A 409 (a key is already there) is never overridden from this button — replacing a key
+   * an app was published with would make its next update unpublishable, so that path needs a decision,
+   * not a press.
+   */
+  const createSigningKey = useCallback(async () => {
+    if (!setup || makingKey) return;
+    setMakingKey(true);
+    try {
+      const r = await fetch('/api/mobile-ship/signing-setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await ghHeaders()) },
+        body: JSON.stringify({ owner: setup.owner, repo: setup.repo, appName: setup.repo }),
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok || !d?.ok) {
+        setError(d?.hint ? `${d.error} ${d.hint}` : (d?.error || 'The signing key could not be created.'));
+        return;
+      }
+      try {
+        const bytes = Uint8Array.from(atob(String(d.keystoreBase64)), (c) => c.charCodeAt(0));
+        const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${setup.repo}-upload.keystore`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } catch { /* the key is on the repository either way; the panel still shows the password */ }
+      setNewKey({ fingerprint: String(d.sha256Fingerprint || ''), password: String(d.storePassword || ''), alias: String(d.keyAlias || '') });
+      setSigningGap(null);
+      setError('');
+    } catch {
+      setError('The signing key could not be created just now. Please try again in a moment.');
+    } finally {
+      setMakingKey(false);
+    }
+  }, [setup, ghHeaders, makingKey]);
+
   const runCycle = useCallback(async (kind: BuildKind) => {
     if (!setup) return;
     const workflow = workflowFor(kind);
@@ -295,6 +351,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
         );
         const d = await r.json().catch(() => null);
         if (r.ok && d?.verdict === 'missing') {
+          setSigningGap(Array.isArray(d.missing) ? d.missing : []);
           setError(signingNotReadyMessage(Array.isArray(d.missing) ? d.missing : []));
           setPhase('ready');
           return;
@@ -649,6 +706,43 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
              style={{ background: 'rgba(245,158,11,0.1)' }}>
           <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />
           <span className="break-words">{error}</span>
+        </div>
+      )}
+
+      {/* THE OFFER SITS WHERE THE REFUSAL IS. Until now the answer to "you need a signing key" was a
+          guide: install a JDK, run keytool with six flags, base64 the file, paste four secrets. */}
+      {signingGap && !newKey && (
+        <div className="mx-4 sm:mx-5 mb-4 px-3 py-3 rounded-lg text-xs leading-relaxed text-white/80 border border-white/10"
+             style={{ background: 'rgba(99,102,241,0.08)' }}>
+          <p className="font-bold text-white mb-1">NavBharatAI can create it for you</p>
+          <p className="mb-2.5">
+            One press makes your signing key and saves it to your own GitHub repository, encrypted. You
+            get the file to keep, and the Play Store build works from then on.
+          </p>
+          <button
+            onClick={() => void createSigningKey()}
+            disabled={makingKey}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-white"
+          >
+            {makingKey ? <Loader2 size={15} className="animate-spin" /> : <Key size={15} />}
+            {makingKey ? 'Creating your signing key…' : 'Create my signing key'}
+          </button>
+        </div>
+      )}
+
+      {/* SHOWN ONCE, AND SAID PLAINLY. This is the only moment the key exists outside the repository —
+          NavBharatAI keeps no copy, so "save it" here is a real instruction, not boilerplate. */}
+      {newKey && (
+        <div className="mx-4 sm:mx-5 mb-4 px-3 py-3 rounded-lg text-xs leading-relaxed text-emerald-200 border border-emerald-500/25"
+             style={{ background: 'rgba(16,185,129,0.08)' }}>
+          <p className="font-bold text-emerald-100 mb-1">Your signing key is ready</p>
+          <p className="mb-2">
+            It is saved in your GitHub repository, so builds can use it. The file has been downloaded to
+            this device — keep it somewhere safe. NavBharatAI does not keep a copy.
+          </p>
+          <p className="text-[11px] text-white/60 break-all">Password: <span className="text-white">{newKey.password}</span></p>
+          <p className="text-[11px] text-white/60 break-all">Alias: <span className="text-white">{newKey.alias}</span></p>
+          <p className="text-[11px] text-white/60 break-all mt-1">SHA-256: {newKey.fingerprint}</p>
         </div>
       )}
 

@@ -56682,6 +56682,72 @@ guard that could not have caught a real rename would have been decoration.
 **Test-locked** in `tests/signingReadiness.test.ts` (11 tests). `AppKnowledgeBase` updated, so every AI
 in the app can tell a user this check exists. **Next: the auto half** — NavBharatAI generating the
 upload key and writing the four secrets itself, so the Play bundle is one press too.
+
+---
+
+## 2026-09-15 — NavBharatAI makes the user's Android upload key, so a Play bundle is one press
+
+**The second half of the admin's option 3.** The warning half stops a build that could not have
+succeeded; this half removes the reason it could not. Until today a Play Store bundle required the user
+to install a JDK, run `keytool` with six flags, base64 the file, and paste four secrets into GitHub —
+the wall where most people stop, and the same wall every competitor has.
+
+### 🔴 The objection that stood for years, and why it no longer holds
+
+`mobileSetup.ts` states it in writing: *"A signing key IS the app's permanent identity — if we held it
+and lost it, their app could never be updated again."* **That is true of the APP SIGNING key and false
+of this one.** Every new app on Play uses Play App Signing (mandatory for the `.aab` format): Google
+holds the app signing key, and what the developer holds is an **upload key**, which Google can **reset**
+if it is lost. The worst case is a support request, not a dead app.
+
+🔒 **And we still do not hold it.** The key is sealed into the user's OWN repository as GitHub Actions
+secrets and handed to their browser once to save. No vault row, no Firestore document, no log line — a
+test asserts the route contains no `encrypt(`, no store call and no `console.log`. Both old comments
+were corrected in place rather than deleted, so the original reasoning stays visible beside the reason
+it changed.
+
+### ✅ Verified with Java's own tooling, not assumed
+
+This sandbox has a JDK, so the generated PKCS#12 was read back by the real `keytool` rather than
+reasoned about:
+- `keytool -list -v` → *"Keystore type: PKCS12 · Alias name: upload · Entry type: PrivateKeyEntry ·
+  SHA256withRSA · 2048-bit RSA · valid until 2056"*, and the printed SHA-256 matched
+  `sha256Fingerprint` byte for byte.
+- `keytool -importkeystore` → **exit 0**, which only succeeds if the private key genuinely unlocks with
+  the password we generated.
+
+A hostile app name (`Shiv Medical Store, "Ltd" <test>`) came back as a valid distinguished name — a
+comma or a quote inside an X.509 DN is a syntax error, not a character.
+
+### The decisions that are not obvious
+
+- **PKCS#12, one password, two secrets.** A PKCS#12 keystore protects its key entry with the STORE
+  password, so `ANDROID_KEY_PASSWORD` must EQUAL `ANDROID_KEYSTORE_PASSWORD`. Different values produce
+  "Cannot recover key" at build time — the exact failure `mobileBuildRepair` already classifies.
+- **30-year validity.** Play rejects an upload certificate that expires before 22 Oct 2033, and by the
+  time that error appears the key is already in the user's repository — fixing it then is a key reset,
+  not an edit.
+- **RSA keygen on Node's NATIVE crypto**, not node-forge's pure-JS one, which would block the event
+  loop for seconds inside a request. forge does only the certificate and the PKCS#12 wrapper.
+- 🔴 **It will NEVER replace a key that is already there** without `replace: true` said explicitly. A
+  user who has published once is tied to that upload key; replacing it silently makes their next update
+  unpublishable, and no amount of convenience is worth that.
+- 🔒 **A repository we could not READ is never written to.** The key we cannot see is exactly the one at
+  risk, so a failed listing returns before a key is generated — test-locked by ordering, not by comment.
+- ⚠️ **A partial write is named, never swallowed.** Four secrets go up one at a time; if the third
+  fails the user is told which landed. It does **not** roll back — deleting what it managed to set could
+  delete a secret that was already there and correct.
+
+**Two new dependencies**, both verified through the repo's own gates (`audit:gate` ✅ 0 high/critical,
+`license:gate` ✅ no un-allowlisted copyleft): `node-forge` for the X.509 certificate and PKCS#12
+container, `libsodium-wrappers` for the `crypto_box_seal` that GitHub requires before a secret may be
+posted. There is no dependency-free route: Node has X25519 but neither XSalsa20-Poly1305 nor blake2b at
+the digest length a sealed box needs, and hand-rolling PKCS#12 ASN.1 would be the fragile choice.
+
+**Test-locked** in `tests/androidKeystore.test.ts` (10) and `tests/githubSecretWrite.test.ts` (10) —
+including that a sealed value really decrypts back with the matching secret key, that two seals of one
+value differ, and that a GitHub error body is never echoed to the screen. `AppKnowledgeBase` updated so
+every AI can explain the new button, what it will not do, and that a lost key is recoverable.
 ## 2026-09-15 — A PROVIDER KEY WAS A FEATURE SWITCH: `OPENAI_API_KEY` alone started an unmetered, never-read embedding spend
 
 **How it was found.** The admin bought an OpenAI key and asked one question: *"claude run me kis naam se

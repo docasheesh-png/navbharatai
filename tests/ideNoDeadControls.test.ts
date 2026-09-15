@@ -426,3 +426,44 @@ describe('Code Studio → Upload ZIP', () => {
     expect(studio).toContain('zipInputRef.current.value = \'\'');
   });
 });
+
+describe('the empty workspace offers ONE way to reach the AI, and it is the real one', () => {
+  /**
+   * Admin 2026-09-15: *"'ask ai' button ko hata do (note: ask ai button sirf empty ide me dikhega)"*.
+   *
+   * The empty workspace used to carry its own "Ask AI" button beside New File, and it ran
+   * `handleScreenChange('ai')` — the in-IDE MINI chat, which opens in the side panel. So the screen
+   * had two AI entry points that went to two different places: this one to the side panel, and the
+   * header's "AI" button to the full NavBharatAI Pro. That split is exactly what the admin reported
+   * as *"wahi side me navbharatai pro open ho jata hai, jo theek nahi hai"* — they pressed the button
+   * next to New File and got the side chat instead of Pro.
+   *
+   * The fix is removal, not rewiring: the header's AI button already does the real thing from the same
+   * screen, so a second button is a second answer to one question.
+   */
+  it('renders no "Ask AI" button in the empty-workspace state', () => {
+    // Comments stripped: the removal's own note names the button it removed, and a test that reads
+    // comments would pass on the explanation instead of on the UI.
+    expect(stripComments(studio)).not.toContain('Ask AI');
+  });
+
+  it('still offers New File there — removing one button must not empty the screen', () => {
+    const bare = stripComments(studio);
+    const i = bare.indexOf('Empty workspace');
+    expect(i).toBeGreaterThan(-1);
+    const block = bare.slice(i, i + 900);
+    expect(block).toContain('New File');
+    expect(block).toContain('handleCreateFile(name)');
+  });
+
+  it("the header's AI button remains the real way in — full Pro, in its own tab", () => {
+    // It must keep delegating to the parent's onSocialChatTrigger, which ViewPanels wires to
+    // toggleTab('nbi_pro_chat') — a separate NavBharatAI Pro window, not the in-IDE side chat.
+    expect(studio).toContain('onSocialChatTrigger()');
+    const panels = read('src/components/panels/ViewPanels.tsx');
+    expect(panels).toContain("onSocialChatTrigger={() => toggleTab('nbi_pro_chat')}");
+    // And it must NOT close Code Studio on the way: the admin asked for Pro in its own window,
+    // alongside the IDE (reverted 2026-09-15).
+    expect(panels).not.toContain("closeTab(undefined, 'studio')");
+  });
+});

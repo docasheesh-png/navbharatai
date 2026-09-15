@@ -90,21 +90,15 @@ const KNOWN_UNREACHABLE = new Set([
   // barrel — was removed on 2026-08-24 once its two tests were trimmed of the dead cases. The
   // allowlist is meant to shrink; the staleness test below is what keeps it honest.)
   //
-  // The referral reward ledger (2026-09-15): the rules for the four-step welcome gift and the
-  // referrer's ₹75, pure and fully tested, shipped AHEAD of the Android device check and the routes
-  // that will call it — because the money rules are the part worth getting wrong in a small PR
-  // rather than a large one. It is inert either way: `REFERRAL_REWARDS` is unset, and every
-  // decision in it pays zero while that is true.
-  // ⏳ REMOVE THIS ENTRY the moment anything under src/ imports it. That is not left to memory —
-  //    'the allowlist does not outlive its entries' below now FAILS on an allowlisted file that has
-  //    become reachable.
-  'src/server/lib/referralRewards.ts',
-  // The device check (2026-09-15), both halves of it: the server's judgement of a Play Integrity
-  // token and the native bridge that collects one. Same reason and same lifetime as the ledger
-  // above — the security rules are the part worth reviewing in a small PR, and both are inert until
-  // the routes that call them exist. The Android plugin they wrap IS registered
-  // (MainActivity.java), so the native side is live even while its TypeScript caller is not.
-  'src/server/lib/deviceIntegrity.ts',
+  // (The referral reward ledger and the server's device check sat here for exactly two commits,
+  // between being written and being wired into routes/referral.ts. The check below is what removed
+  // them — it failed the moment the import graph reached them, which is the behaviour it was added
+  // for and the first time it has been exercised on real work.)
+  //
+  // The NATIVE half of the device check: the bridge to DeviceIntegrityPlugin.java. Its Android
+  // plugin is registered and live (MainActivity.java); what has no caller yet is the TypeScript
+  // side, because the screen that collects a device check is the next slice. Unreachable, inert,
+  // and self-removing on the same rule as the two above.
   'src/lib/deviceIntegrityNative.ts',
 ]);
 

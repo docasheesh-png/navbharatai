@@ -56700,3 +56700,60 @@ test go red, then restoring it.
   router has no OpenAI provider. So the key, once set, changes no build. `RATE_GPT_IN` / `_OUT` /
   `_CACHE` remain unknown and bounded at the Sonnet line — margin-safe, but the admin's cost view
   would over-state GPT until the real prices are set.
+
+## 2026-09-15 (later) — the admin read the code and said GPT was on the weak tier. He was right about the TEXT and the table was right about the BEHAVIOUR
+
+**What happened.** Told that "no tier ladder names OPENAI", the admin replied *"wapas se dekho weak mode
+me hai."* Both statements were true, which is the defect:
+
+| Source | Claim | Truth |
+|---|---|---|
+| `tierLadder.ts` `TIER_LADDERS` (what `buildTurnRunner` maps) | weak = GLM `glm-5.3-flash` → KIMI `kimi-k2.6` → GLM `glm-5.3` → Haiku. `OPENAI` count **0** | ✅ this is what runs |
+| `providerRates.ts:77` | *"OpenAI (GPT) — the last rung of the WEAK ladder"* | ❌ stale |
+| `routes/agentv3.test.ts:1916, 1938` | *"the admin's weak ladder puts GPT-5.4 after Haiku"* | ❌ stale |
+| `routes/agentv3.ts:2936` | same | ❌ stale |
+
+The claim was true of the admin's FIRST list on 2026-09-14 and was superseded the SAME DAY once the real
+GLM prices were known (`CLAUDE.md`: *"gpt-5.4 is OUT of every ladder … Nothing to buy from OpenAI"*). The
+table was updated; four comments were not.
+
+🔴 **Nothing could have caught it.** `tsc` and `vitest` cannot read a comment, so the code was correct and
+self-contradicting for a day, and the only reader who noticed was a human being.
+
+**THE CLASS FIX — do not restate another module's fact; point at the module that owns it.** A sentence
+that asserts nothing cannot go stale. `providerRates.ts` now carries only the PRICE (its own business) and
+points at `tierLadder.ts` for the rung. `tests/ladderClaimsMatchTheTable.test.ts` **derives** the
+invariant from `TIER_LADDERS`, so the day GPT is genuinely added the guard stops complaining by itself —
+it encodes the invariant, never the current answer. Proven by reversion: re-inserting the exact shipped
+sentence fails it; a comment that merely points at the table does not.
+
+⚠️ `routes/agentv3.ts:2936` carries the same stale sentence and is **deliberately NOT fixed** — PR #2957
+(another live session) is editing that very chain-assembly region, and racing it to a comment produces a
+conflict whoever is right. It is named in the guard's `OWNED_BY_ANOTHER_PR` set with that reason; remove
+the entry when #2957 lands.
+
+### The admin then set `OPENAI_API_KEY` in Cloud Run — and it woke TWO things, not one
+
+My earlier answer to him named only the first. Recorded as a correction, not quietly amended:
+
+1. **`EmbeddingSearch`** — as documented in this file's previous entry. **Measured** rather than asserted:
+   `buildEmbedText` is hard-capped (path + ≤10 export names + 300 chars = **451 chars ≈ 113 tokens**), so
+   at ~60 calls per build and ~1,260 builds/month it is **≈ $0.85 ≈ ₹74/month**, plus ~75,600 Firestore
+   writes ≈ $0.14. **The earlier entry was right about the class and silent about the magnitude** — it is
+   ~₹86/month, not a large leak, and the admin makes decisions on numbers. Still buys nothing: `search()`
+   has no live caller.
+2. 🔴 **`/api/build`'s legacy fallback chain, rung 6.** `routes/build.ts:130` lists
+   `{ name: 'openai', run: () => callOpenAI(...) }`; `callOpenAI` runs **`gpt-4o-mini`** and
+   `resolveApiKey('openai')` falls through to the generic `process.env['OPENAI_API_KEY']` branch
+   (`aiClients.ts:67`). Registered live at `server.ts:739` → `/api/build` and `/api/build-stream`.
+   **That rung threw "OpenAI API Key not available" and fell through until today; it is now a real
+   billable call on NavBharatAI's account.** It is rung SIX (claude → grok → aiRouter → gemini → groq →
+   openai), so it is rare — but it is a provider the Model Routing Policy never approved, and its cost is
+   recorded from `estimateTokens`, not from the real-cost ledger.
+   **Deliberately NOT changed here.** `CLAUDE.md` marks the routing policy *"⚠️ CONFIRM WITH ADMIN BEFORE
+   CHANGING"*, and "should a new provider be allowed to serve a build?" is exactly that question. Put to
+   the admin rather than decided.
+
+🔴 **STILL OPEN — the flag is not live.** PR #2958 gates `EmbeddingSearch`, and it is green but **not
+merged**, so on production `main` the key is currently ungated and item 1 is spending now. The remedy is
+the admin merging #2958 (or unsetting the key); it is his call under the standing merge-hold rule.

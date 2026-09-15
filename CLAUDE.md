@@ -2676,8 +2676,29 @@ known-weak 4.7-flash.
   and scores better; the swap is free TODAY only because nothing is stored yet — once vectors exist,
   changing the model silently mixes incompatible embeddings at the same 1536 dimensions, which
   `cosineSimilarity`'s length check cannot catch.
-- ⚠️ **Not yet done, said plainly:** the OpenAI rung is untested against a real response (no key); the
+- ⚠️ **Not yet done, said plainly:** the OpenAI rung is untested against a real response; the
   chat router (`AIRouterManager`) has no OpenAI provider — that is slice 3, only if GPT should serve chat.
+- 🔴 **`OPENAI_API_KEY` IS SET IN CLOUD RUN (admin, 2026-09-15) — AND IT WOKE A PATH OUTSIDE THIS POLICY.**
+  The three ladders are unchanged (no tier names OPENAI, so no build routes to GPT). But
+  `src/server/routes/build.ts:130` — the LEGACY `/api/build` chain, live at `server.ts:739` — carries
+  `{ name: 'openai', run: () => callOpenAI(...) }` as **rung 6** (claude → grok → aiRouter → gemini →
+  groq → **openai** → deepseek → openrouter). `callOpenAI` runs **`gpt-4o-mini`**, and
+  `resolveApiKey('openai')` falls through to the generic `process.env['OPENAI_API_KEY']` branch
+  (`aiClients.ts:67`). **That rung threw "OpenAI API Key not available" and fell through until the key
+  was set; it is now a real billable call on NavBharatAI's account**, from a provider this policy never
+  approved, costed by `estimateTokens` rather than the real-cost ledger. Rare (five rungs must fail
+  first) and it does add genuine resilience — which is exactly why it is recorded as an ADMIN DECISION
+  here rather than silently gated or silently left. ⚠️ Anyone auditing "what does this key switch on?"
+  must check BOTH the ladders AND this legacy chain; reasoning that stops at `tierLadder.ts` misses it.
+- ⚠️ **FOUR COMMENTS SAID GPT WAS ON THE WEAK LADDER, AND THE ADMIN CAUGHT IT BY READING THE CODE
+  (2026-09-15).** They were true of the admin's FIRST list on 2026-09-14 and stale within the same day.
+  The table was updated; `providerRates.ts`, `routes/agentv3.test.ts` (×2) and `routes/agentv3.ts` were
+  not. **`tsc` and `vitest` cannot read a comment**, so nothing failed. **THE RULE: do not restate
+  another module's fact — point at the module that owns it.** `TIER_LADDERS` is the only place a rung
+  exists. Pinned by `tests/ladderClaimsMatchTheTable.test.ts`, which DERIVES the invariant from the table
+  (so adding GPT for real silences it automatically) and is proven by reversion. `routes/agentv3.ts` is
+  listed in its `OWNED_BY_ANOTHER_PR` set because PR #2957 was live in that region — remove that entry
+  once #2957 lands.
 
 **THE AGENT × TIER TABLE (admin-approved 2026-09-14, aims verbatim: "user ki app best of best bane — 1 try
 me" · "mera kharcha kam se kam ho").** Test-locked in `tests/agentRolesPerTier.test.ts`.

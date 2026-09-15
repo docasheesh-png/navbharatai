@@ -12,6 +12,7 @@ import { summarizeFailurePatterns, summarizeBuildTimes } from '../lib/buildRepor
 import { firstPassHeadline, FIRST_PASS_TARGET, type FirstPassMetaStats } from '../lib/firstPassQuality';
 import { type ExposureRow } from '../lib/licenceExposure';
 import { copyTextToClipboard } from '../lib/copyText';
+import { apkReportFilename, apkReportsArchiveFilename } from '../lib/apkReportFile';
 import { reportParts, partJson, partsSummary, ordinal } from './adminReportParts';
 import { MonitorPanels } from './admin/MonitorPanels';
 import { LoadBoard } from './admin/LoadBoard';
@@ -648,6 +649,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     } catch { toast('Could not clear the APK reports.'); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken, apkReports.length]);
+
+  /**
+   * DOWNLOAD ONE REPORT (admin 2026-09-15: "apk build report download ka option hi nahi banaya
+   * aapne?"). The record already in hand IS the whole stored report — the same fields the screen
+   * renders — so this hands over exactly what was read, with nothing re-fetched that could differ.
+   * The on-screen log excerpt lives in a scrolling box; the file is the way to keep all of it.
+   */
+  const downloadApkReport = (rec: any) => {
+    if (!rec || rec.loading || rec.error) { toast('Open a report first — there is nothing to download yet.'); return; }
+    saveJsonFile(JSON.stringify(rec, null, 2), apkReportFilename(rec));
+  };
+
+  const copyApkReport = (rec: any) => {
+    if (!rec || rec.loading || rec.error) { toast('Open a report first — there is nothing to copy yet.'); return; }
+    void copyJson(JSON.stringify(rec, null, 2), 'APK build report');
+  };
+
+  /** The whole inbox in one file. The list route returns full records, so this is not a summary. */
+  const downloadAllApkReports = () => {
+    if (apkReports.length === 0) { toast('Nothing to download — the inbox is empty.'); return; }
+    saveJsonFile(JSON.stringify(apkReports, null, 2), apkReportsArchiveFilename(new Date()));
+  };
 
   /** One person's whole account. Every section says whether it was READ — see the route. */
   const openAccount = useCallback(async (uid: string) => {
@@ -2847,6 +2870,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     <RefreshCw size={14} className={apkReportsLoading ? 'animate-spin' : ''} />
                   </button>
                   <button
+                    onClick={downloadAllApkReports}
+                    disabled={apkReports.length === 0}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-white/5 hover:bg-white/10 text-white/60 disabled:opacity-40 disabled:cursor-not-allowed"
+                  ><Download size={12} /> Download all</button>
+                  <button
                     onClick={() => void clearApkReports()}
                     disabled={apkReports.length === 0}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-white/5 hover:bg-white/10 text-white/60 disabled:opacity-40 disabled:cursor-not-allowed"
@@ -2857,6 +2885,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 Sent automatically the moment a user's own Android/iOS store build fails on their GitHub —
                 no button, no user action. Every row carries the classified cause, the log excerpt and a
                 link to the full run on GitHub, so a fix never needs the user asked for more detail.
+                Open a report to Download or Copy it as JSON; “Download all” takes the whole inbox in one file.
               </p>
 
               {apkReportsLoading && apkReports.length === 0 ? (
@@ -2921,10 +2950,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         </div>
 
                         {openApkReport.runUrl && (
-                          <a
-                            href={openApkReport.runUrl} target="_blank" rel="noopener noreferrer"
-                            className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-bold text-indigo-300 hover:text-indigo-200 underline decoration-indigo-300/30"
-                          ><ExternalLink size={12} /> Open the full run on GitHub</a>
+                          <div className="mt-3">
+                            <a
+                              href={openApkReport.runUrl} target="_blank" rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 text-[11px] font-bold text-indigo-300 hover:text-indigo-200 underline decoration-indigo-300/30"
+                            ><ExternalLink size={12} /> Open the full run on GitHub</a>
+                            {/* HONEST ABOUT WHO OWNS THAT RUN: the build ran in the USER's own GitHub
+                                account (mobileShip takes owner/repo from their connected account), so
+                                this link opens only if that repository is public or shared with you.
+                                Everything below is stored here and needs no GitHub access at all. */}
+                            <p className="text-[10px] text-white/35 mt-1">
+                              That run lives in the user's own GitHub account — the link opens only if the
+                              repository is public or shared with you. Everything below is stored here.
+                            </p>
+                          </div>
                         )}
 
                         {openApkReport.steps?.length > 0 && (
@@ -2962,7 +3001,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
                         {openApkReport.failure?.logExcerpt?.length > 0 && (
                           <div className="mt-4">
-                            <p className="text-white/40 uppercase tracking-widest text-[9px] font-black mb-1">Log excerpt (failed step)</p>
+                            <p className="text-white/40 uppercase tracking-widest text-[9px] font-black mb-1">
+                              Log excerpt (failed step) · {openApkReport.failure.logExcerpt.length} lines — the complete log is on GitHub
+                            </p>
                             <pre className="text-[10px] text-white/70 bg-black/50 rounded-xl p-3 overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap break-all">
 {openApkReport.failure.logExcerpt.join('\n')}
                             </pre>
@@ -2975,6 +3016,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                           ) : (
                             <button onClick={() => void markApkReport(openApkReport.id, true)} className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white">Mark fixed</button>
                           )}
+                          {/* The whole stored report as a file — the log excerpt on screen scrolls,
+                              so this is how the cause leaves this page intact. */}
+                          <button onClick={() => downloadApkReport(openApkReport)} className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-bold text-white inline-flex items-center gap-1.5"><Download size={12} /> Download</button>
+                          <button onClick={() => copyApkReport(openApkReport)} className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-bold text-white">Copy</button>
                           <button onClick={() => void deleteApkReportRow(openApkReport.id)} className="ml-auto px-3 py-2 rounded-lg bg-rose-600/80 hover:bg-rose-500 text-xs font-bold text-white inline-flex items-center gap-1.5"><Trash2 size={12} /> Delete</button>
                         </div>
                       </>

@@ -928,7 +928,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
           {(() => {
             // In SDA the USER is the 'doctor' sender; 'sda' is the assistant.
             const lastUser = [...messages].reverse().find(m => m.sender === 'doctor');
-            return lastUser ? <AppUpdateChatNotice userText={lastUser.text} /> : null;
+            return lastUser ? <AppUpdateChatNotice /> : null;
           })()}
           {filterMessages(messages as any, chatSearchQuery).map((msg: any) => (
             <div key={msg.id} className={cn("flex", msg.sender === 'doctor' ? "justify-end" : "justify-start")}>

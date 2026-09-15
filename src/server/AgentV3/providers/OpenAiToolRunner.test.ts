@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { floorMaxTokensForTimeout } from '../floorBudget';
 import { OpenAiToolRunner, type OpenAiChatClient } from './OpenAiToolRunner';
 import type { ClaudeToolDef, RunTurnParams } from '../ClaudeClient';
 
@@ -97,13 +98,40 @@ describe('OpenAiToolRunner', () => {
     expect(create.mock.calls[0][0].thinking).toBeUndefined();
   });
 
-  it('uses the turn maxTokens, else the option default', async () => {
+  it('uses the turn maxTokens, else the option default — when the clock can carry it', async () => {
     const { client, create } = clientReturning({ choices: [{ message: { role: 'assistant', content: 'x' }, finish_reason: 'stop' }] });
-    const runner = new OpenAiToolRunner(client, { defaultMaxTokens: 4096 });
+    // A generous clock, so neither ask is clamped and this still tests what it always tested.
+    const runner = new OpenAiToolRunner(client, { defaultMaxTokens: 4096, timeoutMs: 600_000 });
     await runner.runTurn(baseParams({ maxTokens: 1234 }));
     expect(create.mock.calls[0][0].max_tokens).toBe(1234);
     await runner.runTurn(baseParams({ maxTokens: undefined }));
     expect(create.mock.calls[1][0].max_tokens).toBe(4096);
+  });
+
+  /**
+   * 🔴 THE ASK IS CLAMPED TO THE CLOCK (autopsy 4efab9d7, 2026-09-15 — see floorBudget.ts).
+   *
+   * The build loop authorises 32,000 output tokens a turn; this rung had 60 seconds, which carries
+   * about 1,830 at the rate that build measured. So the one turn that writes files could not fit on
+   * any key, and a ten-minute build produced nothing. Asking for what the clock can actually give
+   * turns the overflow from a timeout (nothing returns) into a truncation (the files so far return,
+   * and the guard below names the one that was cut).
+   */
+  it('🔴 clamps an ask the clock cannot carry — 32,000 tokens in 60 seconds', async () => {
+    const { client, create } = clientReturning({ choices: [{ message: { role: 'assistant', content: 'x' }, finish_reason: 'stop' }] });
+    const runner = new OpenAiToolRunner(client, { timeoutMs: 60_000 });
+    await runner.runTurn(baseParams({ maxTokens: 32_000 }));
+    const asked = create.mock.calls[0][0].max_tokens as number;
+    expect(asked).toBe(floorMaxTokensForTimeout(60_000));
+    expect(asked).toBeLessThan(2_000);
+  });
+
+  it('🔒 a lane almost out of budget cannot authorise a huge answer either', async () => {
+    const { client, create } = clientReturning({ choices: [{ message: { role: 'assistant', content: 'x' }, finish_reason: 'stop' }] });
+    const runner = new OpenAiToolRunner(client, { timeoutMs: 600_000 });
+    // turnDeadline hands the runner the REMAINING lane budget — 30s here, not the configured 600s.
+    await runner.runTurn(baseParams({ maxTokens: 32_000, deadlineAt: Date.now() + 30_000 }));
+    expect(create.mock.calls[0][0].max_tokens as number).toBeLessThan(1_000);
   });
 
   // A HUNG GLM/KIMI CALL CANNOT BLOCK THE BUILD ANYMORE (autopsy of build a487e019, 2026-08-18). This

@@ -54,6 +54,39 @@ export const MOBILE_NAV_TOTAL_HEIGHT = `calc(${MOBILE_NAV_CONTENT_HEIGHT} + env(
 export const MOBILE_NAV_HEIGHT_VAR = '--nb-bottom-nav';
 
 /**
+ * The device inset a BOTTOM-ANCHORED element must add FOR ITSELF — which is zero whenever the tab bar
+ * is on screen, because the page has already reserved the whole bar (inset included) above it.
+ *
+ * 🔴 THE FIFTH DRIFT, AND THE FIRST ONE THAT ADDED SPACE RATHER THAN LOSING IT (admin, 2026-09-14,
+ * screenshot with the dead strip drawn in red: "footer aur input box ke bich me yeh itna sara space
+ * khali kyu rakha hai?"). Three layers each solved "clear the home indicator", and none knew the
+ * others had:
+ *
+ *   1. `body { padding-bottom: env(safe-area-inset-bottom) }`  (App.tsx's inline sheet)
+ *   2. the app root's `paddingBottom: MOBILE_NAV_TOTAL_HEIGHT`  (= 3.5rem + the SAME inset)
+ *   3. the composer's own `pb-[env(safe-area-inset-bottom)]`
+ *
+ * ⚠️ Layer 1 is DEAD CSS and it is worth writing down, because it looks load-bearing and is the
+ * reason this was hard to reason about: `body, #root { height: 100dvh; overflow: hidden }`, so #root
+ * is a full-viewport child laid out from the TOP of body's content box. A bottom padding never moves
+ * a box that starts at the top, and overflow clips at the PADDING box — so that rule neither shifts
+ * #root nor crops it. It does nothing at all, which is also why `mobileNav.ts` found a page reserving
+ * a bare `pb-14` still hidden by exactly one inset: layer 1 was never helping.
+ *
+ * That leaves layers 2 and 3, and layer 2 is already exactly the bar. **Layer 3 is pure surplus** —
+ * one inset of empty, unusable strip sitting between the composer and the bar, on every phone with a
+ * home indicator or gesture bar.
+ *
+ * 🔒 Published from the SAME call and the SAME boolean as the height above, for the reason this whole
+ * module exists: the two facts are opposite sides of one question ("who owns the inset?"), and any
+ * arrangement where they can be set separately is an arrangement where they will disagree.
+ */
+export const MOBILE_SAFE_BELOW_VAR = '--nb-safe-below';
+
+/** What a bottom-anchored element must add when the bar is NOT there and nothing else reserved it. */
+export const DEVICE_SAFE_BOTTOM = 'env(safe-area-inset-bottom, 0px)';
+
+/**
  * Publish the bar's height to CSS so everything that has to clear it reads ONE number.
  *
  * `visible === false` writes `0px`, and every rule that consumes the variable is written as a
@@ -70,5 +103,9 @@ export function publishMobileNavHeight(visible: boolean, root?: HTMLElement | nu
   if (!el) return; // no DOM (SSR, tests) — the CSS fallback of 0px is already correct
   try {
     el.style.setProperty(MOBILE_NAV_HEIGHT_VAR, visible ? MOBILE_NAV_TOTAL_HEIGHT : '0px');
+    // The mirror image of the line above: when the bar IS there the page already reserved the inset
+    // inside MOBILE_NAV_TOTAL_HEIGHT, so a composer that adds it again is adding dead space. When the
+    // bar is NOT there nothing else reserves it, so the composer must.
+    el.style.setProperty(MOBILE_SAFE_BELOW_VAR, visible ? '0px' : DEVICE_SAFE_BOTTOM);
   } catch { /* style unavailable — the stylesheet's own 0px default stands */ }
 }

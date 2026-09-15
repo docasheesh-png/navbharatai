@@ -20,6 +20,17 @@ export const PUBLIC_LEGAL_ROUTES: Readonly<Record<string, string>> = {
    * checker that does not run JavaScript. Served with the officer's real details (see routes/legal).
    */
   '/grievance': 'legal_grievance',
+  /**
+   * The DPA and the Security page lost their Settings tiles (admin 2026-09-14) and gained these URLs
+   * in the same change — deliberately, and it is a net INCREASE in reach rather than a hiding.
+   *
+   * A tile could only ever be opened by somebody already signed into the app. The people who want
+   * these two documents are a business customer's lawyer and a security researcher, neither of whom
+   * has an account. A URL is what they can be sent, and what the Privacy Policy can link to from the
+   * exact section where a reader is already asking the question.
+   */
+  '/dpa': 'legal_dpa',
+  '/security': 'legal_security',
 };
 
 /**

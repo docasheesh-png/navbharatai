@@ -3,6 +3,7 @@ import { LayoutGrid, ArrowLeft } from 'lucide-react';
 import { ThemeMode, getThemeClasses } from '../../lib/theme';
 import { cn } from '../../lib/utils';
 import { HOME_TOOL_GROUPS } from './homeToolGroups';
+import { isComingSoonTool, COMING_SOON_LABEL } from '../../lib/comingSoonTools';
 
 interface OtherAIViewProps {
   /** Open a builder tool by its workspace-tab id. */
@@ -63,14 +64,48 @@ export function OtherAIView({ onOpenTool, onBack, theme }: OtherAIViewProps) {
                 <div className="grid grid-cols-2 gap-2.5">
                   {group.items.map((item) => {
                     const ToolIcon = item.icon;
+                    // HELD BACK until the admin has tested it (2026-09-15) — see lib/comingSoonTools.ts.
+                    // The tile STAYS VISIBLE on purpose: the admin asked for "coming soon likh do", not
+                    // for the tools to vanish, so a user can see what is on the way. It is a real
+                    // `disabled` button, not a click that quietly does nothing — the same reason the
+                    // dead-control sweep exists. `toggleTab` refuses these ids too, so a tile that
+                    // somehow fired could still not open the tool.
+                    const soon = isComingSoonTool(item.id);
                     return (
                       <button
                         key={item.id}
-                        onClick={() => onOpenTool(item.id)}
-                        className="flex items-center gap-2 p-3 min-h-[52px] bg-[#0d1117] border border-white/5 rounded-xl hover:border-indigo-500/30 hover:bg-indigo-600/10 active:bg-indigo-600/20 transition-all group text-left"
+                        onClick={soon ? undefined : () => onOpenTool(item.id)}
+                        disabled={soon}
+                        aria-disabled={soon}
+                        title={soon ? `${item.label} — ${COMING_SOON_LABEL}` : undefined}
+                        className={cn(
+                          'flex items-center gap-2 p-3 min-h-[52px] bg-[#0d1117] border border-white/5 rounded-xl transition-all group text-left',
+                          soon
+                            ? 'opacity-55 cursor-not-allowed'
+                            : 'hover:border-indigo-500/30 hover:bg-indigo-600/10 active:bg-indigo-600/20',
+                        )}
                       >
-                        <ToolIcon className="w-4 h-4 text-[#8b949e] group-hover:text-indigo-400 transition-colors flex-shrink-0" />
-                        <span className="text-[11px] font-bold text-[#8b949e] group-hover:text-white transition-colors leading-tight">{item.label}</span>
+                        <ToolIcon
+                          className={cn(
+                            'w-4 h-4 text-[#8b949e] flex-shrink-0',
+                            !soon && 'group-hover:text-indigo-400 transition-colors',
+                          )}
+                        />
+                        <span className="flex flex-col min-w-0">
+                          <span
+                            className={cn(
+                              'text-[11px] font-bold text-[#8b949e] leading-tight',
+                              !soon && 'group-hover:text-white transition-colors',
+                            )}
+                          >
+                            {item.label}
+                          </span>
+                          {soon && (
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-amber-400/80 leading-tight mt-0.5">
+                              {COMING_SOON_LABEL}
+                            </span>
+                          )}
+                        </span>
                       </button>
                     );
                   })}

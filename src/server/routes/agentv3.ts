@@ -484,6 +484,9 @@ import { sandboxCost, sandboxBillableUsd, sandboxBillingNote } from '../AgentV3/
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
 import { renderRescueEligible, renderRescueConfirmsSuccess } from '../AgentV3/renderRescue';
+import { shouldAttemptPlatformPreview, platformPreviewBudgetMs, platformPreviewPort } from '../AgentV3/deliveryProof';
+import { floorTimeoutForTokens } from '../AgentV3/floorBudget';
+import { parseDevServerHealthLine } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { analyzeDesignCoverage, designRepairInstruction, designCoverageSummary } from '../AgentV3/DesignCoverage';
 import { auditRlsInSql, rlsAuditSummary } from '../AppMakerLab/generator/RlsPolicy';
@@ -2345,7 +2348,14 @@ export function balanceFloorLead(runners: NamedRunner[], kimiFirst: boolean): Na
  *   • Prompt-size skip default 0 = no skip (admin 2026-07-11: "1st try for every file glm/kimi").
  */
 export function floorTuning(): { floorTimeoutMs: number; floorMaxPromptChars: number; kimiTimeoutMs: number } {
-  const floorTimeoutMs = Number(process.env.AGENTV3_CHEAP_FLOOR_TIMEOUT_MS) || 60_000;
+  // 🔴 THE DEFAULT IS DERIVED FROM WHAT WE ASK FOR, not typed in (autopsy 4efab9d7 — floorBudget.ts).
+  //
+  // It was 60_000 while `buildMaxTokensPerTurn()` authorised 32,000 output tokens — about seventeen
+  // times what 60 seconds can carry at the rate that build measured. The turn that writes the files is
+  // exactly the turn that uses the budget, so it could not fit, and a ten-minute build wrote nothing.
+  // Deriving it means the two numbers can never drift apart again: change the token ask and the clock
+  // follows. The explicit env still wins, for an admin who has measured something better.
+  const floorTimeoutMs = Number(process.env.AGENTV3_CHEAP_FLOOR_TIMEOUT_MS) || floorTimeoutForTokens(buildMaxTokensPerTurn());
   const floorMaxRaw = (process.env.AGENTV3_CHEAP_FLOOR_MAX_PROMPT_CHARS ?? '').trim();
   const floorMaxPromptChars = floorMaxRaw !== '' && Number.isFinite(Number(floorMaxRaw)) ? Number(floorMaxRaw) : 0;
   const kimiTimeoutMs = Math.max(floorTimeoutMs, Number(process.env.AGENTV3_KIMI_TIMEOUT_MS) || 120_000);
@@ -2374,7 +2384,12 @@ export function openAiCompatRunners(
     keys.forEach((apiKey, k) => {
       try {
         const client = new OpenAI({ apiKey, baseURL, timeout: timeoutMs, maxRetries: 0 });
-        const runner = pacedRunner(sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts }), floorMaxPromptChars), name);
+        // ONE bound, both places. The SDK's `timeout` is what actually aborts the request; the runner's
+        // `timeoutMs` is what it reconciles against the lane's deadline and what it sizes the token ask
+        // from. They used to disagree — SDK 60 s, runner's default 120 s — so the runner authorised an
+        // answer for a clock that was not the one running, and the report's error text ("Request timed
+        // out.") is the SDK's, never the runner's. Passing the same number makes the pair honest.
+        const runner = pacedRunner(sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts, timeoutMs }), floorMaxPromptChars), name);
         out.push(k === 0
           ? { name, runner, modelId: model }
           : { name: `${name}#${k + 1}`, runner, reportAs: name, modelId: model });
@@ -2997,7 +3012,7 @@ function unavailableTierRunner(level: PowerLevel, ladderText: string, missingKey
  * build when the floor was off, which is exactly what the rule forbids. A 429-storm on rung 1 now costs
  * one failed call per cooldown window (the shared bench still sidelines the rung), not a reorder.
  */
-export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void; onChain?: (chain: ChainRung[]) => void }): TurnRunner {
+export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void }): TurnRunner {
   const level = toPowerLevel(opts.tier as PowerLevel | boolean | string | undefined | null);
   const parsed = tierLadder(level);
   if (parsed.rejected) console.warn(`[AGENTV3] ${parsed.rejected}`);
@@ -3029,6 +3044,7 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
       opts.onProviderError?.(name, err);
     },
     ...(opts.onTurnComplete ? { onTurnComplete: opts.onTurnComplete } : {}),
+    ...(opts.onProviderBenched ? { onProviderBenched: opts.onProviderBenched } : {}),
   });
 }
 
@@ -11804,6 +11820,15 @@ async function noteBuildOutcome(
           ].filter(Boolean).join(' '),
         });
       } catch { /* diagnostics are best-effort — never blocks a build */ }
+      // The bench is a FACT ABOUT THE ENGINE and must appear in the timeline as one — otherwise the only
+      // trace of "KIMI was reached" is the absence of further GLM lines, which nobody can read.
+      const recordProviderBenched = (family: string, reason: string): void => {
+        buildDiag.record({
+          phase: 'provider', severity: 'info', code: 'PROVIDER_BENCHED',
+          message: `${family} benched for the rest of this build: ${reason}`,
+          autoResolved: true,
+        });
+      };
       const recordProviderFallback = (name: string, err: unknown): void => {
         // Structured per-provider failure TALLY (admin 2026-07-11: "kaun se providers fail hue,
         // kitni baar") + the existing per-event timeline entry (carries the message).
@@ -11830,6 +11855,7 @@ async function noteBuildOutcome(
         // what makes the fast-lane billing question answerable without answering it by accident.
         onTurnComplete: captureShadowUsage,
         onProviderError: recordProviderFallback,
+        onProviderBenched: recordProviderBenched,
       });
       const client = buildTurnRunner({
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
@@ -11837,6 +11863,7 @@ async function noteBuildOutcome(
         onProviderUsed: captureProvider,
         onTurnComplete: captureTurnUsage,
         onProviderError: recordProviderFallback,
+        onProviderBenched: recordProviderBenched,
         // Autopsy f04421ef — see runnerChainSummary.ts. Recorded once (record() collapses an identical
         // repeat), admin-only like every other provider name.
         onChain: (chain) => {
@@ -16362,6 +16389,83 @@ async function noteBuildOutcome(
       // but was never confirmed to render, so nothing here was proven to RUN" — 1.4 seconds after the
       // same build had watched it render. Nothing failed, nothing logged; the report simply lied.
       let previewVerifiedRendered = false;
+
+      // ── 🔴 DELIVERY PROOF: THE PLATFORM BRINGS THE PREVIEW UP ITSELF (autopsy 4efab9d7, 2026-09-15) ──
+      //
+      // Every proof below is gated on `lastPreviewUrl`, and until today the ONLY thing that ever set it
+      // was the agent calling update_preview. A build whose model timed out before running the dev
+      // server therefore had a compiled bundle, a saved snapshot, a dashboard rendering on the admin's
+      // phone — and no proof, because nothing ever looked. See deliveryProof.ts for the whole story.
+      // Deterministic, no model call, no code change, bounded, and never a gate: a server that will not
+      // come up leaves the build exactly as unproven as it was.
+      try {
+        const remainingForProof = effectiveBuildSeconds > 0
+          ? effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt)
+          : null;
+        const presentFiles = (!lastPreviewUrl && !abort.signal.aborted && expectsArtifacts && !isImportTurn)
+          ? await withTimeout(actuator.listFiles(workspaceId), 15_000, 'platform-preview-list').catch(() => [] as string[])
+          : [];
+        const proofDecision = shouldAttemptPlatformPreview({
+          expectsArtifacts,
+          hasPreviewUrl: Boolean(lastPreviewUrl),
+          aborted: abort.signal.aborted,
+          isImportTurn,
+          appFiles: presentFiles.length,
+          hasPackageJson: presentFiles.some((f) => /(^|\/)package\.json$/.test(String(f))),
+          remainingMs: remainingForProof,
+        });
+        if (proofDecision.attempt) {
+          const budget = platformPreviewBudgetMs(remainingForProof, previewWakeBudgetMs());
+          const rec = await raceTimeout(sandboxStore.getRecord(workspaceId), 3_000, 'platform-preview-record').catch(() => null);
+          const recipe = await raceTimeout(sandboxStore.getRecipe(workspaceId), 3_000, 'platform-preview-recipe').catch(() => null);
+          const port = platformPreviewPort(recipe?.port, rec?.declaredPort, oneShotDevPort(framework));
+          events.emit({ type: 'narration', agent: 'architect', text: '🔎 Starting your app to check that it runs…', ts: Date.now() });
+          const startedAt = Date.now();
+          // The health-check wrapper in devServerHost recognises this command, installs stale deps and
+          // waits for the port — the same single call the revive path below trusts.
+          const started = await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), budget, 'platform-preview-start')
+            .catch((e) => ({ stdout: '', stderr: e instanceof Error ? e.message : String(e), exitCode: -1 }));
+          const health = parseDevServerHealthLine(`${started.stdout}\n${started.stderr}`);
+          const servingPort = health?.up && health.port ? health.port : port;
+          // EARN IT — the same probe the preview-health route runs: follow redirects, keep the body, and
+          // judge the body with the tested analyzer. A 404 shell is not a live app whatever the status.
+          const probe = await raceTimeout(
+            actuator.runCommand(workspaceId, `curl -sL --max-time 5 -w "\\n__STATUS__%{http_code}" http://127.0.0.1:${servingPort} 2>/dev/null || echo "__STATUS__000"`),
+            10_000, 'platform-preview-probe',
+          ).catch(() => ({ stdout: '__STATUS__000', stderr: '', exitCode: -1 }));
+          const rawProbe = probe.stdout || '';
+          const statusMatch = /__STATUS__(\d{3})\s*$/.exec(rawProbe.trim());
+          const statusCode = statusMatch ? Number(statusMatch[1]) : 0;
+          const probeBody = statusMatch ? rawProbe.slice(0, rawProbe.lastIndexOf('__STATUS__')) : rawProbe;
+          const portUp = statusCode >= 200 && statusCode < 400;
+          const pageVerdict = portUp ? analyzePreviewHtml(probeBody) : null;
+          if (portUp && pageVerdict && !pageVerdict.serverDown) {
+            const rawUrl = await withTimeout(actuator.getPortUrl(workspaceId, servingPort), 10_000, 'platform-preview-url');
+            const url = applyPreviewDomain(rawUrl);
+            lastPreviewUrl = url;
+            events.emit({ type: 'preview', url, ts: Date.now() });
+            try { await sandboxStore.saveDeclaredPort(workspaceId, servingPort); } catch { /* memory for the door — never this build's problem */ }
+            buildDiag.record({
+              phase: 'preview', severity: 'info', code: 'PLATFORM_PREVIEW_UP',
+              message: `No preview had been published, so the platform started the app itself: port ${servingPort} is serving (HTTP ${statusCode}) after ${Math.round((Date.now() - startedAt) / 1000)}s. The runtime checks below now have something to look at.`,
+              autoResolved: true,
+            });
+          } else {
+            buildDiag.record({
+              phase: 'preview', severity: 'warning', code: 'PLATFORM_PREVIEW_NOT_UP',
+              message: `No preview had been published, so the platform tried to start the app itself — nothing served on port ${servingPort} within ${Math.round((Date.now() - startedAt) / 1000)}s (HTTP ${statusCode || 'none'}). ${(started.stderr || '').slice(0, 200)}`.trim(),
+              autoResolved: false,
+            });
+          }
+        } else if (!lastPreviewUrl && expectsArtifacts && !isImportTurn && !abort.signal.aborted) {
+          buildDiag.record({
+            phase: 'preview', severity: 'info', code: 'PLATFORM_PREVIEW_SKIPPED',
+            message: `The platform did not try to start the app itself: ${proofDecision.reason}.`,
+            autoResolved: true,
+          });
+        }
+      } catch { /* proof is best-effort — a failure here leaves the build exactly as unproven as before */ }
+
       if (
         process.env.AGENTV3_RENDER_RESCUE !== 'off'
         && renderRescueEligible({ ok: result.ok, expectsArtifacts, filesWritten: writtenFiles.size })

@@ -19,6 +19,7 @@ import { securityHeadersConfig } from './src/server/lib/securityHeaders';
 import { responseCompression } from './src/server/lib/responseCompression';
 import { setDb as setSharedDb } from './src/server/lib/db';
 import { registerWalletRoutes } from './src/server/routes/wallet';
+import { registerReferralRoutes } from './src/server/routes/referral';
 import { registerSecretsRoutes } from './src/server/routes/secrets';
 import { registerAppLockRoutes } from './src/server/routes/appLock';
 import { registerPushRoutes } from './src/server/routes/push';
@@ -663,6 +664,7 @@ setInterval(() => {
 
   // Wallet / sync / payment / admin / secrets / anthropic / zip routes (Phase 1 extractions).
   registerWalletRoutes(app);
+  registerReferralRoutes(app);
   registerSyncRoutes(app);
   registerPaymentRoutes(app, paymentLimiter);
   registerAdminRoutes(app, adminLimiter);

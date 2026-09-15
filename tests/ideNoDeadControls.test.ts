@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 
 /**
@@ -139,13 +139,15 @@ describe('every screen you can navigate to actually renders', () => {
 
 describe('nothing in the IDE invites a tap and then swallows it', () => {
   it('Tag Mode and Fix Bug reach the AI panel — they used to be dead ends', () => {
-    // PreviewPanel is mounted ONLY by Code Studio, and Code Studio did not pass `onEditWithAI`. Tag
-    // Mode was gated on `generatedCode` alone, so you could switch it on, see a badge on every
-    // element, tap one — and `onEditWithAI?.(hint)` was undefined. Worse than an inert button, because
-    // it invites the interaction first. Same for the error overlay's Fix Bug button.
-    const i = studio.indexOf('<PreviewPanel');
-    const mount = studio.slice(i, i + 1200);
-    expect(mount).toContain('onEditWithAI=');
+    // CORRECTED 2026-09-14: PreviewPanel (and its onEditWithAI prop) is gone — Code Studio's preview
+    // is now unconditionally PreviewSurface (see the "ONE PREVIEW EVERYWHERE" test below), which has
+    // its OWN built-in equivalents: onFixError (the error overlay's Fix Bug button) and
+    // onAskAiAboutElement (Tag Mode — tap an element). Both must be wired, or exactly the old dead-end
+    // defect returns: a badge/button appears, you tap it, and the optional callback is undefined.
+    const i = studio.indexOf('<PreviewSurface');
+    const mount = studio.slice(i, i + 1400);
+    expect(mount).toContain('onFixError=');
+    expect(mount).toContain('onAskAiAboutElement=');
     expect(mount).toContain("setActiveScreen('ai')");
     // The hint must actually reach the chat box.
     expect(studio).toContain('prefill={aiPrefill}');
@@ -257,14 +259,24 @@ describe('no inert icons in the editor toolbar', () => {
  * THAT SESSION ever populated, so two views of one running app disagreed with each other.
  */
 describe('Code Studio shows the SAME app the rest of the product does', () => {
-  it('renders the v5 PreviewSurface — not the retired generatedCode panel — when a workspace exists', () => {
+  // CORRECTED 2026-09-14 (admin: "jo navbharatai pro me preview open hota hai, wahi preview open hona
+  // chahiye — kuch aur nahi"): the retired generatedCode panel (PreviewPanel.tsx) is deleted outright
+  // — Code Studio's preview screen renders PreviewSurface UNCONDITIONALLY now, exactly like the
+  // slide-menu Preview view (ViewPanels.tsx), instead of falling back to the old panel with no
+  // workspace yet.
+  it('renders the v5 PreviewSurface unconditionally — the retired generatedCode panel no longer exists at all', () => {
     expect(studio).toContain("import { PreviewSurface }");
-    const i = studio.indexOf('v3Preview?.workspaceId || v3Preview?.previewUrl');
+    expect(studio).not.toContain("from './PreviewPanel'");
+    expect(studio).not.toContain('<PreviewPanel');
+    expect(readdirSync(join(__dirname, '..', 'src/components/ide'))).not.toContain('PreviewPanel.tsx');
+    const i = studio.indexOf("activeScreen === 'preview' ? (");
     expect(i).toBeGreaterThan(-1);
-    const block = studio.slice(i, i + 700);
+    const block = studio.slice(i, i + 1400);
     expect(block).toContain('<PreviewSurface');
     expect(block).toContain('url={v3Preview?.previewUrl}');
     expect(block).toContain('workspaceId={v3Preview?.workspaceId}');
+    // No fallback branch left — a ternary here would mean the old panel (or a new one) is back.
+    expect(block).not.toContain(' : (');
   });
 
   it('is handed the same preview state the slide-menu Preview renders from', () => {
@@ -412,5 +424,96 @@ describe('Code Studio → Upload ZIP', () => {
     // Without clearing the input, re-picking the SAME archive fires no change event and the button
     // looks broken.
     expect(studio).toContain('zipInputRef.current.value = \'\'');
+  });
+});
+
+describe('the empty workspace offers ONE way to reach the AI, and it is the real one', () => {
+  /**
+   * Admin 2026-09-15: *"'ask ai' button ko hata do (note: ask ai button sirf empty ide me dikhega)"*.
+   *
+   * The empty workspace used to carry its own "Ask AI" button beside New File, and it ran
+   * `handleScreenChange('ai')` — the in-IDE MINI chat, which opens in the side panel. So the screen
+   * had two AI entry points that went to two different places: this one to the side panel, and the
+   * header's "AI" button to the full NavBharatAI Pro. That split is exactly what the admin reported
+   * as *"wahi side me navbharatai pro open ho jata hai, jo theek nahi hai"* — they pressed the button
+   * next to New File and got the side chat instead of Pro.
+   *
+   * The fix is removal, not rewiring: the header's AI button already does the real thing from the same
+   * screen, so a second button is a second answer to one question.
+   */
+  it('renders no "Ask AI" button in the empty-workspace state', () => {
+    // Comments stripped: the removal's own note names the button it removed, and a test that reads
+    // comments would pass on the explanation instead of on the UI.
+    expect(stripComments(studio)).not.toContain('Ask AI');
+  });
+
+  it('still offers New File there — removing one button must not empty the screen', () => {
+    const bare = stripComments(studio);
+    const i = bare.indexOf('Empty workspace');
+    expect(i).toBeGreaterThan(-1);
+    const block = bare.slice(i, i + 900);
+    expect(block).toContain('New File');
+    expect(block).toContain('handleCreateFile(name)');
+  });
+
+  it("the header's AI button remains the real way in — full Pro, in its own tab", () => {
+    // It must keep delegating to the parent's onSocialChatTrigger, which ViewPanels wires to
+    // toggleTab('nbi_pro_chat') — a separate NavBharatAI Pro window, not the in-IDE side chat.
+    expect(studio).toContain('onSocialChatTrigger()');
+    const panels = read('src/components/panels/ViewPanels.tsx');
+    expect(panels).toContain("onSocialChatTrigger={() => toggleTab('nbi_pro_chat')}");
+    // And it must NOT close Code Studio on the way: the admin asked for Pro in its own window,
+    // alongside the IDE (reverted 2026-09-15).
+    expect(panels).not.toContain("closeTab(undefined, 'studio')");
+  });
+});
+
+describe("Code Studio's Preview button opens NavBharatAI Pro's Preview page", () => {
+  /**
+   * Admin 2026-09-15: *"aise hi preview ko bhi karo. ide me koi user preview press kare to navbharatai
+   * pro, open hi preview wala page, jo maine screenshot bheji hai woh."*
+   *
+   * It used to run `handleScreenChange('preview')` — Code Studio's OWN preview screen, a third preview
+   * surface beside Pro's and the standalone 'preview' tab. Now it does exactly what the AI button beside
+   * it does: the parent opens NavBharatAI Pro in its own window, plus a nonce telling the Pro panel to
+   * land on its Preview surface instead of the chat.
+   *
+   * The nonce is load-bearing and easy to drop by mistake: Pro's `tab` already defaults to 'preview', but
+   * `showWorkspace` defaults to FALSE — so opening the tab alone shows the full-width chat, and the user
+   * who pressed "Preview" sees no preview at all.
+   */
+  it('delegates to the parent, with the in-IDE screen only as a fallback', () => {
+    const i = studio.indexOf('title="Open Preview"');
+    expect(i).toBeGreaterThan(-1);
+    const btn = studio.slice(Math.max(0, i - 1200), i);
+    expect(btn).toContain('if (onPreviewClick) onPreviewClick(); else handleScreenChange(\'preview\')');
+  });
+
+  it('the parent opens the Pro window AND asks for its Preview surface', () => {
+    const app = read('src/App.tsx');
+    expect(app).toContain("onOpenProPreview={() => { setV3OpenPreviewNonce(Date.now()); toggleTab('nbi_pro_chat'); }}");
+    // The nonce has to actually reach the panel, or the tab opens on the chat.
+    expect(app).toContain('openPreviewNonce={v3OpenPreviewNonce}');
+    const panels = read('src/components/panels/ViewPanels.tsx');
+    expect(panels).toContain('onPreviewClick={onOpenProPreview}');
+  });
+
+  it('the Pro panel lands on the preview surface — tab AND workspace, not just tab', () => {
+    const panel = read('src/components/agentv3/AgentV3Panel.tsx');
+    const i = panel.indexOf('if (!openPreviewNonce) return;');
+    expect(i).toBeGreaterThan(-1);
+    const effect = panel.slice(i, i + 260);
+    expect(effect).toContain("setTab('preview')");
+    // showWorkspace defaults to false; without this the preview stays hidden behind the chat.
+    expect(effect).toContain('setShowWorkspace(true)');
+    // Threaded through the wrapper, or the prop never arrives.
+    expect(read('src/components/agentv3/ProV3Surface.tsx')).toContain('openPreviewNonce={openPreviewNonce}');
+  });
+
+  it('the standalone Preview view is not stranded — the menu and bottom nav still reach it', () => {
+    // Repointing the IDE button must not leave a view nothing can open.
+    const app = read('src/App.tsx');
+    expect(app).toContain("{ id: 'preview',      label: 'Preview',");
+    expect(app).toContain("{ id: 'preview' as ViewType,");
   });
 });

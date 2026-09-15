@@ -66,13 +66,15 @@ describe('bundle-budget (P-TQA.5)', () => {
     }
   });
 
-  it('excludes lazy opt-in chunks (web-llm) from the budget, but nothing else', () => {
+  it('excludes lazy opt-in chunks from the budget, but nothing else', () => {
     // The on-device LLM chunk is fetched only when the Offline-Thinking beta is enabled, so it must not
     // count against the main-app budget.
-    expect(isBudgetExcludedJs('webllm-DT0Ab8E6.js')).toBe(true);
+    // The exclusion LIST is empty today (its only entry, `webllm`, left with the Offline AI on
+    // 2026-09-14). The mechanism is still tested: a prefix in the list is excluded, anything else is not.
+    expect(isBudgetExcludedJs('webllm-DT0Ab8E6.js', ['webllm'])).toBe(true);
     // Everything that IS part of the main app load stays budgeted.
     expect(isBudgetExcludedJs('index-abc123.js')).toBe(false);
-    expect(isBudgetExcludedJs('OfflineAI-xyz.js')).toBe(false);
+    expect(isBudgetExcludedJs('SomeLazyView-xyz.js', ['webllm'])).toBe(false);
     expect(isBudgetExcludedJs('CodeStudio-abc.js')).toBe(false);
   });
 });
@@ -82,7 +84,7 @@ describe('bundle-budget (P-TQA.5)', () => {
  *
  * `largestChunkGzipKB` was reasoned about throughout bundleBudget.mjs as "the entry EVERY user
  * downloads". That was true on 2026-08-24, when the entry WAS the largest chunk. By 2026-09-10 the
- * largest chunk was OfflineAI-*.js — a LAZY chunk first paint never fetches — while the real
+ * largest chunk was a lazy view chunk first paint never fetches — while the real
  * first-paint cost (entry + both modulepreloads) was 495.8 KB, roughly double the 250.3 the gate
  * reported, with firebase-vendor's 188.9 KB guarded by nothing tighter than the 1720 KB total.
  *
@@ -113,7 +115,7 @@ describe('first-paint JS — what every visitor downloads before anything render
   it('🔒 a lazily-imported route contributes NOTHING — that is the whole point of the metric', () => {
     // Vite emits no preload link for a dynamic import, so a `lazy()` route cannot appear here. If it
     // ever did, splitting a route would stop reducing the number it exists to reduce.
-    expect(firstPaintJsFiles(HTML)).not.toContain('OfflineAI-CPsdJdsN.js');
+    expect(firstPaintJsFiles(HTML)).not.toContain('LazyView-CPsdJdsN.js');
   });
 
   it('is empty for HTML with no module script, so the caller can refuse to guess', () => {

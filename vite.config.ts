@@ -29,11 +29,6 @@ export default defineConfig(({mode}) => {
     build: {
       rollupOptions: {
         output: {
-          // Give the on-device LLM (web-llm) its OWN named chunk. It is a LAZY, OPT-IN dependency —
-          // fetched only when a user turns on the Offline-Thinking beta, never part of the main app
-          // load — so naming it lets the bundle-size budget exclude it (see scripts/bundleBudget.mjs)
-          // instead of counting a ~2 MB beta-only chunk against the main-app ceiling.
-          //
           // REACT VENDOR SPLIT (admin 2026-08-16, "app ki speed badhao"). React + react-dom + scheduler +
           // the router are ALWAYS on the first-paint path and change the LEAST between deploys, yet they
           // were welded into the main entry chunk — so every app UPDATE forced the user to re-download
@@ -49,7 +44,6 @@ export default defineConfig(({mode}) => {
           // about: "split first, measure"). React is the one extraction that is provably eager already,
           // so relocating it cannot regress first paint — it only makes it cacheable.
           manualChunks(id: string) {
-            if (id.includes('@mlc-ai/web-llm')) return 'webllm';
             if (/[\\/]node_modules[\\/](react|react-dom|scheduler|react-router|react-router-dom)[\\/]/.test(id)) {
               return 'react-vendor';
             }

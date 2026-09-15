@@ -120,7 +120,7 @@ const V3_EXT_COLOR: Record<string, string> = {
 // stale (never-cleared) `resume` prop re-apply an old chat on each reopen. See the resume effect below.
 let lastAppliedResumeNonce = 0;
 
-export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number; autoSend?: boolean } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
+export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPreviewNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; openPreviewNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number; autoSend?: boolean } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
   const { state, running, error, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
@@ -3511,6 +3511,22 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingDeploy?.nonce]);
 
+  // OPEN STRAIGHT ONTO THE PREVIEW SURFACE (admin 2026-09-15: "ide me koi user preview press kare to
+  // navbharatai pro, open hi preview wala page").
+  //
+  // Code Studio's Preview button opens the Pro tab and asks for THIS surface. Opening the tab alone is
+  // not enough: `tab` already defaults to 'preview', but `showWorkspace` defaults to FALSE — so a fresh
+  // Pro lands on the full-width chat and the preview the user pressed for is nowhere in sight. This is
+  // the same explicit open the footer's Preview item performs (setTab + setShowWorkspace(true), never
+  // openTab's re-tap collapse), driven by a nonce so a second press re-opens it after the user has
+  // wandered off to Pro Chat. 0/undefined = nobody asked, exactly like freshOpenNonce.
+  useEffect(() => {
+    if (!openPreviewNonce) return;
+    setTab('preview');
+    setShowWorkspace(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openPreviewNonce]);
+
   // Load the file contents when the Files tab is opened (and not already loaded), so each file
   // row can show its line count — without the user having to click into a file first.
   useEffect(() => {
@@ -4094,7 +4110,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           <div ref={scrollRef} className="flex-1 overflow-auto px-2 py-2 space-y-2.5 min-h-0">
             {(() => {
               const lastUser = [...convo].reverse().find((m) => m.role === 'user');
-              return lastUser ? <AppUpdateChatNotice userText={lastUser.text} /> : null;
+              return lastUser ? <AppUpdateChatNotice /> : null;
             })()}
             {coldStartVisible && (
               <div className="text-sm text-zinc-500 mt-6 text-center">
@@ -4697,9 +4713,21 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               In focus mode (header hidden) the composer's outer frame — the solid bg-zinc-950
               block + the top border line — is dropped so the input/attach/filter read as a clean
               floating popup touching the lower edge. The inner elements keep their own borders,
-              and pb-[env(safe-area-inset-bottom)] always stays so the composer never hides behind
-              the phone browser's bottom search/address bar. Normal mode is unchanged. */}
-          <div className={`shrink-0 sticky bottom-0 pb-[env(safe-area-inset-bottom)] ${focusMode ? '' : 'bg-zinc-950 border-t border-zinc-800'}`}>
+              and the device inset always stays so the composer never hides behind the phone browser's
+              bottom search/address bar. Normal mode is unchanged.
+
+              🔴 THE INSET IS NO LONGER ADDED BLINDLY (admin 2026-09-14, screenshot with the dead strip
+              drawn in red). This was a hard-coded `pb-[env(safe-area-inset-bottom)]`, which is right
+              only when nothing else reserved it. Whenever the global tab bar is on screen the app root
+              has ALREADY reserved `3.5rem + the same inset`, so this line added one entire inset of
+              empty, untouchable strip between the composer and the bar. `--nb-safe-below` is published
+              from the very boolean that renders the bar (lib/mobileNav.ts), so the two can never
+              disagree about who owns the inset; the literal stays as the fallback, which is exactly
+              today's behaviour for SSR, tests and the first paint. */}
+          <div
+            className={`shrink-0 sticky bottom-0 ${focusMode ? '' : 'bg-zinc-950 border-t border-zinc-800'}`}
+            style={{ paddingBottom: 'var(--nb-safe-below, env(safe-area-inset-bottom, 0px))' }}
+          >
             {/* FIX #6 — the 3-role model (Build = builder; Plan/Advise = read-only lanes) now lives in a
                 COMPACT dropdown down in the input row (near the settings/attach icons) so it doesn't eat
                 a whole row, and stays active during a build for multitasking. Only the command-queue chip

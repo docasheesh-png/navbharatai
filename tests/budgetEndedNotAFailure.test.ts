@@ -64,13 +64,26 @@ describe('the report stops accusing a provider and stops blocking the app', () =
     expect(d.shippingIssueCount('error')).toBe(0);
   });
 
-  it('an ordinary failed call IS still a blocker — the fix must not blind the gate', () => {
+  it('🔴 SUPERSEDED 2026-09-15 — an ordinary failed call is on the timeline but is NOT a blocker of the APP', () => {
+    // This test used to assert the opposite ("an ordinary failed call IS still a blocker"), and that
+    // premise is exactly what let the class recur two days later: build 4efab9d7 timed out on a
+    // provider, the error was counted as an app blocker, the gate went RED, and a rendering app was
+    // declared not ready and made free. A fact about a provider call is never a fact about the app
+    // (isAppFinding). The gate is NOT blind — an app-phase error still blocks (below); it simply no
+    // longer reads the engine's struggle ledger as the app's defect list.
     const d = diag();
     d.recordLlmCall({
       ts: 2, model: 'kimi-k2.6', provider: 'moonshot', ok: false,
       error: '500 internal server error',
       promptChars: 1, responseChars: 0, toolCalls: 0, latencyMs: 900,
     } as never);
+    expect(d.report().issues.some((i) => i.code === 'LLM_CALL_FAILED' && i.severity === 'error')).toBe(true);
+    expect(d.shippingIssueCount('error')).toBe(0);
+  });
+
+  it('an APP-phase error IS still a blocker — the gate is not blind, it reads the right ledger', () => {
+    const d = diag();
+    d.record({ phase: 'readiness', severity: 'error', code: 'READINESS_BLOCKER', message: 'src/App.tsx imports ./missing which does not exist', autoResolved: false });
     expect(d.shippingIssueCount('error')).toBe(1);
   });
 

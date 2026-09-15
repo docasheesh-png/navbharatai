@@ -236,7 +236,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
       <div className="flex-1 overflow-y-auto custom-scrollbar px-4 py-4 space-y-4">
         {(() => {
           const lastUser = [...messages].reverse().find((m) => m.role === 'user');
-          return lastUser ? <AppUpdateChatNotice userText={lastUser.content} /> : null;
+          return lastUser ? <AppUpdateChatNotice /> : null;
         })()}
         {filterMessages(messages as any, chatSearchQuery).map((m: any, i: number) => (
           <div key={i} className={`group/msg ${m.role === 'user' ? 'flex flex-col items-end' : 'flex flex-col items-start'}`}>

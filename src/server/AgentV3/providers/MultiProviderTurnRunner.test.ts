@@ -817,3 +817,74 @@ describe('a model that can never answer is retired after ONE attempt (report faa
     expect((await runner.runTurn(PARAMS)).text).toBe('recovered');
   });
 });
+
+describe('🔴 the timeout bench is keyed by provider FAMILY (autopsy 4efab9d7, 2026-09-15)', () => {
+  // Build 4efab9d7: a ~50-key GLM pool, GLM slow that night, a 60 s timeout per key, a 480 s turn.
+  // Eight keys timed out back to back and the turn died without ever reaching KIMI — one rung away
+  // the whole time — because the in-run streak was per KEY and every key's streak started at zero.
+  const pool = (n: number, fail: () => TurnRunner): NamedRunner[] =>
+    Array.from({ length: n }, (_, k) => (k === 0
+      ? { name: 'GLM', runner: fail(), modelId: 'glm-5.3-flash' }
+      : { name: `GLM#${k + 1}`, runner: fail(), reportAs: 'GLM', modelId: 'glm-5.3-flash' }));
+
+  it('a 50-key pool that keeps timing out reaches the NEXT VENDOR after two timeouts, not fifty', async () => {
+    // The shared cooldown is DISABLED here on purpose: the bench must hold on its own, because a
+    // bench that depends on a second, env-tunable mechanism being configured is not a bench.
+    const cooldowns = createRateLimitCooldowns(0, 2);
+    let clock = 1_000_000;
+    const now = () => clock;
+    const glm = pool(50, () => ({ runTurn: vi.fn(async () => { clock += 60_000; throw new Error('Request timed out.'); }) }));
+    const kimi = runnerOk('kimi carried it');
+    const benched: string[] = [];
+    const runner = makeMultiProviderTurnRunner([...glm, { name: 'KIMI', runner: kimi, modelId: 'kimi-k2.6' }], {
+      cooldowns, now, onProviderBenched: (f, why) => benched.push(`${f}: ${why}`),
+    });
+    const res = await runner.runTurn(PARAMS);
+    expect(res.text).toBe('kimi carried it');
+    const attempted = glm.filter((r) => (r.runner.runTurn as ReturnType<typeof vi.fn>).mock.calls.length > 0).length;
+    expect(attempted).toBe(2);
+    expect(benched).toHaveLength(1);
+    expect(benched[0]).toMatch(/^GLM: 2 consecutive timeouts/);
+  });
+
+  it('the bench holds for the REST OF THE RUN — the next turn goes straight to the next vendor', async () => {
+    const cooldowns = createRateLimitCooldowns(0, 2);
+    const glm = pool(5, () => runnerFail('Request timed out.'));
+    const runner = makeMultiProviderTurnRunner([...glm, { name: 'KIMI', runner: runnerOk('k') }], { cooldowns, now: () => 1 });
+    await runner.runTurn(PARAMS);
+    await runner.runTurn(PARAMS);
+    const attempts = glm.map((r) => (r.runner.runTurn as ReturnType<typeof vi.fn>).mock.calls.length);
+    expect(attempts).toEqual([1, 1, 0, 0, 0]);
+  });
+
+  it('a success RESETS the family streak, so one slow minute does not retire a healthy provider', async () => {
+    const cooldowns = createRateLimitCooldowns(0, 2);
+    const slowOnce = { runTurn: vi.fn().mockRejectedValueOnce(new Error('Request timed out.')).mockResolvedValue(ok('glm ok')) };
+    const chain: NamedRunner[] = [
+      { name: 'GLM', runner: slowOnce },
+      { name: 'GLM#2', runner: runnerOk('key2'), reportAs: 'GLM' },
+      { name: 'KIMI', runner: runnerOk('k') },
+    ];
+    const runner = makeMultiProviderTurnRunner(chain, { cooldowns, now: () => 1 });
+    expect((await runner.runTurn(PARAMS)).text).toBe('key2'); // key1 timed out once, key2 answered → streak reset
+    expect((await runner.runTurn(PARAMS)).text).toBe('glm ok'); // key1 is still tried — the family was never benched
+  });
+
+  it('🔒 the 429 bench stays PER KEY — a throttled key must not sideline its siblings', async () => {
+    const key1 = runnerFail('429 Rate limit reached for requests');
+    const key2 = runnerOk('key2 ok');
+    const runner = makeMultiProviderTurnRunner(
+      [{ name: 'GLM', runner: key1 }, { name: 'GLM#2', runner: key2, reportAs: 'GLM' }],
+      { cooldowns: createRateLimitCooldowns(0, 2), now: () => 1 },
+    );
+    await runner.runTurn(PARAMS); await runner.runTurn(PARAMS); await runner.runTurn(PARAMS);
+    expect((key2.runTurn as ReturnType<typeof vi.fn>).mock.calls.length).toBe(3);
+  });
+
+  it('a non-pool rung is its own family — nothing changes for a single-key provider', async () => {
+    const claude = runnerFail('timed out after 120000ms');
+    const runner = makeMultiProviderTurnRunner([{ name: 'CLAUDE', runner: claude }, { name: 'CLAUDE_HAIKU', runner: runnerOk('h') }], { cooldowns: createRateLimitCooldowns(0, 2), now: () => 1 });
+    await runner.runTurn(PARAMS); await runner.runTurn(PARAMS); await runner.runTurn(PARAMS);
+    expect((claude.runTurn as ReturnType<typeof vi.fn>).mock.calls.length).toBe(2); // benched after 2, as before
+  });
+});

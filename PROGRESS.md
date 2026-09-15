@@ -56024,3 +56024,683 @@ strengthened**: it now requires *both* predicates, so a future edit cannot drop 
 **Proven by reversion:** removing the version guard fails 3; the continuation guard fails 1; the
 misconfiguration buckets fail 2. Full gate green on the final state: **1675 files · 23,465 passed ·
 0 FAIL**.
+---
+
+## 2026-09-14 — Offline AI removed permanently ("koi trace na bache")
+
+Admin: *"offline ai ko hamesha ke liye parmanent delete karo, koi tress na bache."* Done — but three
+things that merely SHARE the word "offline" were deliberately kept, and finding them is most of what
+this change was.
+
+### What was deleted (17 files + a dependency)
+
+`src/components/offline/OfflineAI.tsx`, and `src/lib/`: `offlineAssistant`, `offlineChat`,
+`offlineChatStore`, `offlineDeviceTier`, `offlineBeta`, `offlineLlmEngine`, `offlineMemory`,
+`deviceKnowledgeBase` (orphaned — nothing else imported it), each with its test;
+`tests/offlineModelDelete.test.ts`; the `@mlc-ai/web-llm` dependency, its vite `manualChunks` entry and
+its bundle-budget exclusion. The App.tsx lazy import, the sidebar entry, the render block, the
+`'offline_ai'` view id and the knowledge-base entry are gone. **Verified from the built output: no
+`webllm-*` or `OfflineAI-*` chunk is emitted.**
+
+### 🔴 What was KEPT, and why a blind delete would have broken the app
+
+- **`offlineQueue.ts` is not part of this feature.** `main.tsx` uses it to post client error logs
+  (`postWithFallback('/api/logs/error')`). Deleting every `offline*` file — the obvious reading of the
+  request — would have silently removed error reporting.
+- **`neonatalDosing.ts` stays, and so does the medical capability.** `answerOffline` merely *called
+  into* it; the calculator is its own module, used by the 💊 Dose Calculator (mounted in `SDAChat`),
+  `customMedicines` and `erCalcs`. Newborn dosing is untouched. `vialMemory.ts` likewise.
+- **`autoGrowTextarea.ts` stays** — `ProfessionalChat` also uses it.
+
+### The data that would have been thrown away
+
+`offlineAssistant` carried `CURATED_NAV`, a map of feature id → in-app view that made "Open →" work.
+Its own comment said a feature's KB `nav` field *"always WINS… this map is only the fallback"* — so
+the six targets the tests actually guard (`voice_to_app`, `ai_debugger`, `ai_image_gen`,
+`bot_builder`, `ide_terminal`, `settings_logs`) were **moved into their knowledge-base entries**,
+which is where that comment said they belong. The guarantee "asking for the terminal still navigates
+somewhere real" survives, now reading from the single source of truth.
+
+### Eight test files repaired rather than deleted
+
+Three awareness locks (`botBuilder`, `codeVersioning`, `apiTester`) asserted discoverability across
+**Free · Pro · Offline**; the offline third went, the online two-thirds — which is what they actually
+guard — stayed. `neonatalDosing.test.ts` lost its offline wiring block and kept both the calculator
+tests and the ONLINE wiring block that proves every AI gets a *computed* dose rather than a remembered
+one, which was always the safety-critical half. `aiToolsReal`, `settingsShellNav`, `settingsScreenReachable`,
+`autoGrowTextarea`, `polishCoreAiChat` and `bundleBudget` were rewired to the surviving sources.
+
+### The honesty fixes nobody would have noticed
+
+The knowledge base's Dose-Calculator entry claimed *"works with no internet in the Offline AI"*, *"the
+Offline AI remembers each drug's vial"* and *"the same answer online and offline"* — all false the
+moment the feature left. Every AI in the app answers from that entry, so leaving it would have made
+each of them confidently wrong. Corrected to name the 💊 Dose Calculator, which does compute on-device.
+
+### The guard
+
+`polishCoreAiChat.test.ts` gains **"the Offline AI is GONE"** — no menu entry, no `offline_ai` string,
+no module files — *and* asserts that `offlineQueue.ts` and `neonatalDosing.ts` still exist, so a future
+cleanup cannot mistake them for leftovers. Proven by reversion: recreating
+`src/components/offline/OfflineAI.tsx` fails it.
+
+**Gate:** typecheck · typecheck:server · noUnusedImports · vitest (1665 files, 23334 passed, 0 FAIL) ·
+### 2026-09-14 — 🔴 UI TEXT WAS IN DEVANAGARI ON SEVEN SURFACES. English only, and CI now enforces it.
+
+The admin, from his own phone, with a screenshot of the voice-chat consent popup rendered entirely in
+Hindi: *"maine apko bola tha, aur claude.md me bhi likha hai — ui me professional language (english
+only) honi chahiye. apne fir bhi devnagri likh di? **south india wale kaise padhenge isko??** batao"*
+
+**That question is the whole argument, and it is not about style.** NavBharatAI is a national product
+and Devanagari is not a national script: a Tamil, Telugu, Kannada or Malayalam speaker cannot read a
+Hindi string at all. "Show it in the user's language" had quietly become "show it in one region's
+language" — and on the surface he caught, the string was a **price the user was about to be charged**.
+
+🔎 **THE SHAPE OF THE BUG IS THE FINDING, and it is why an edit was not the fix.** This was never one
+careless string. **Six modules had independently grown the same `lang === 'hi' ? … : …` branch**, each
+from a different change, each believing it served Indian users — and three of them cited an admin
+instruction as justification (2026-07-20 *"language wahi ho jo user likh raha ho"*, 2026-08-05
+*"warning user ki language me aye"*, 2026-08-10 *"user ki language me ek popup aaye"*). A seventh had
+Hindi hard-coded straight into JSX, and the donation defaults in `src/config/defaultContent.ts` were
+Hindi too. **CLAUDE.md forbade all of it the entire time.** A rule that lives only in a document is a
+rule a new session may miss; this one was missed seven times.
+
+🔴 **THE OLDER INSTRUCTIONS ARE SUPERSEDED, and that is stated rather than quietly reversed.** The
+admin did ask for user-language warnings on 2026-07-20, 2026-08-05 and 2026-08-10. Those asks and this
+one cannot both be kept. This is his own correction after seeing the result, so it wins — and each
+module now carries the supersession in its header, so nobody re-derives the old behaviour from the old
+quote.
+
+**Fixed (branch `claude/ui-english-only`):** `voiceChatBilling.ts` (the screenshot),
+`zipReplaceWarning.ts`, `updateNoticeI18n.ts` → `updateNotice.ts`, `chatToolbar.ts`,
+`apkChargeNotice.ts`, `chatMessageActions.ts`, `DonationPanel.tsx`, `defaultContent.ts`.
+
+**The 50/50 half — the wrong branch is now IMPOSSIBLE, not merely unused.** The `VoiceLang`,
+`ChatToolbarLang`, `ChargeLang` and `NoticeLang` types are deleted, `resolveVoiceLang` is deleted, and
+so is `detectNoticeLang` with its whole Hinglish token list — a chooser with one choice is dead
+machinery that invites the second choice back. `AppUpdateChatNotice`'s `userText` prop went with it
+(six call sites), because it existed only to infer a language.
+⚠️ Three of the six branches were already DORMANT — no caller passed `'hi'` — so they shipped nothing
+to a user and would have fired the day someone did. They were removed on the same rule.
+
+🔒 **`tests/uiLanguageEnglishOnly.test.ts` is the half that lasts.** It walks every client file
+(`src/**` minus `src/server/**`), strips comments, and fails on Devanagari in real code. **Proven by
+injection, not assumed**: a Hindi string added to `chatToolbar.ts` fails it, and a Hindi quote in a
+comment does not. A file is **guilty until listed**, same discipline as
+`tests/whiteLabelClientSurfaces.test.ts`, and a stale allowlist entry fails too.
+
+**Deliberately ALLOWED, each with its reason in the test** — these are not UI strings: greeting
+DETECTION patterns fed to a model (`apnapanEngine.ts`); the localisation editor for the USER's own app,
+where a language picker must print each language in its own script (`LocalizationManager.tsx`); build-
+prompt content for a generated app (`TemplatesPanel.tsx`); parsing of what the user typed
+(`useChatEngine.ts`); a negative code example inside an AI prompt (`appUtils.ts`).
+
+**Scope stated honestly:** comments are NOT rewritten, in client or server. CLAUDE.md asks for English
+there too, but the Hindi in them is the admin's own verbatim words kept as evidence, and destroying
+that trail to satisfy a lint would cost more than it buys. Server prompts written TO models are also
+out of scope — they are not UI.
+---
+
+## 2026-09-14 — The dead strip under the Pro composer: one device inset, reserved three times
+
+Admin, with the band drawn in red on a phone screenshot of NavBharatAI Pro: *"footer aur input box ke
+bich me yeh itna sara space khali kyu rakha hai? … input box ko niche sarka do, jisse yeh space use ho
+jayega aur chating area ki visibility aur badh jayegi."*
+
+**Three layers each solved "clear the home indicator", and none of them knew the others had:**
+
+| | where | what it adds |
+|---|---|---|
+| 1 | `body { padding-bottom: env(safe-area-inset-bottom) }` (App.tsx's inline `<style>`) | the inset |
+| 2 | the app root's `paddingBottom: MOBILE_NAV_TOTAL_HEIGHT` | `3.5rem` + the SAME inset |
+| 3 | the composer's own `pb-[env(safe-area-inset-bottom)]` | the inset again |
+
+⚠️ **Layer 1 is DEAD CSS, and saying so is the part that made this tractable** — it looks load-bearing.
+`body, #root { height: 100dvh; overflow: hidden }`, so `#root` is a full-viewport child laid out from
+the **top** of body's content box. A bottom padding never moves a box that starts at the top, and
+overflow clips at the **padding** box, not the content box — so that rule neither shifts `#root` nor
+crops it. It does nothing at all. That also explains a puzzle in `mobileNav.ts`'s own history: a page
+reserving a bare `pb-14` was still hidden by exactly one inset, because layer 1 was never helping.
+
+Layer 2 is already **exactly** the bar. So **layer 3 was pure surplus** — one whole inset of empty,
+untouchable strip between the composer and the tab bar, on every phone with a home indicator or gesture
+bar. It is `fixed`-positioned chrome, so none of that space could ever be scrolled into or tapped.
+
+**The fix — one owner, published from one boolean.** `--nb-safe-below` is set in the SAME call and from
+the SAME `showsGlobalMobileNav` that renders the bar (`publishMobileNavHeight`): `0px` while the bar is
+on screen (the page has already reserved it, inset included), the real inset when it is not. It is the
+exact mirror of `--nb-bottom-nav`, and their defaults are deliberately opposite — that one defaults to
+`0px` ("reserve nothing until told the bar exists"), this one to the inset ("keep clearing it until
+told the page has") — because in both cases the untold state must behave exactly as it did before the
+variable existed. Both composers (Pro and Offline AI, the same hard-coded pattern) now read it, with
+the literal kept as the CSS fallback for SSR, tests and the first paint.
+
+### 🔴 An existing guard caught me making the bug I was fixing
+
+I first added `--nb-safe-below` to `.nb-sheet-over-nav` as well, reasoning that a sheet painting OVER
+the bar must clear the home indicator itself. `sheetOverlayGeometry.test.ts` failed — *"the opt-out
+works by zeroing the variable, not by re-declaring the padding"* — and **it was right**. Sheets have
+owned that inset since they were written, through `--nb-safe-bottom`, and
+`max(var(--nb-safe-bottom), var(--nb-bottom-nav))` already answers both cases. My line would have made
+a **fourth owner of one inset** — precisely the defect this change exists to remove. Reverted, and the
+reasoning is now a test of its own so the next reader does not re-derive it.
+
+**Tests:** `src/lib/mobileNav.test.ts` +6. Every line of this wiring **fails nothing if dropped** — the
+strip simply comes back — so the wiring itself is asserted, and the guard is **proven by reversion**:
+deleting the one publisher line fails the suite. ⚠️ The composer guard strips comments first, because
+both files now quote the old value while explaining why it went, and a guard that cannot tell a comment
+from code would fail on its own documentation.
+
+**Gate on the final state:** typecheck · typecheck:server · noUnusedImports · **1673 files, 23,435
+passed, 1 skipped, 0 failed** · build · bundle budget · boot check — all green.
+
+### Still open — named, not implied fixed
+
+- **Layer 1 is still there.** `body { padding-bottom: env(safe-area-inset-bottom) }` does nothing today,
+  but it is not removed here: it is global, and a change that touches every view to delete a no-op is a
+  blast radius this fix does not need. Recorded so the next reader knows it is inert rather than load-
+  bearing, which is the only thing that made it dangerous.
+- **Not verified on a real device.** The reasoning is from the layout rules and is checkable by reading
+  them, but `env(safe-area-inset-bottom)` is 0 in every environment available here, so the strip cannot
+  be measured from this session. The admin's screenshot is the before; the after needs one look on the
+  same phone.
+## 2026-09-14 — Legal & Trust: six tiles became two, the NDA was retired, and nothing became unreachable
+
+The admin looked at Settings → Legal & Trust and asked the right question: *"mujhe nahi lagta ki sach me
+inki need hai… agar ham yeh hide kar den — grievance redressal, DPA, security documents aur NDA — to kya
+app me koi future problem ayega? kya Claude, ChatGPT, Gemini etc me yeh hote hai?"*
+
+### The honest answer, which is not the same for all four
+
+🔴 **Grievance Redressal could NOT be hidden, and the reason is in our own source.** The Privacy Policy
+links to `/grievance` **three times** (lines 55, 163, 207) and the Terms **once** (line 50), and the
+policy's own words describe it as the page that *"names the officer responsible and the timelines we
+must answer within under the IT Rules, 2021."* Removing the page would have left **four broken links
+inside our published legal documents** — worse than never having had it, because a regulator reading
+"we have a grievance page" and finding nothing is a stronger finding than an omission.
+
+It is also a real obligation: the IT (Intermediary Guidelines) Rules, 2021 require an intermediary to
+publish the Grievance Officer's name and contact, and NavBharatAI **is** an intermediary — the Nav App
+Store and published apps host user content. The repo already treated it as required: the admin Monitor
+carries an `officerIsNamed` warning.
+
+**DPA / Security: no legal requirement to publish for a consumer app**, one reference each to fix.
+**NDA: no requirement, no references, and publishing a blank mutual NDA is not what comparable AI
+platforms do either** — those are negotiated per deal, not posted. Retired.
+
+### What was actually done
+
+- **NDA deleted** — `nda.ts`, its registry entry, its id in the union, its tests.
+- **Settings grid: two tiles** (Privacy Policy, Terms of Service), driven by a new `settingsTile` flag
+  on `LegalMeta` rather than by deleting registry entries. The documents still exist.
+- **The three untiled documents are now reachable in MORE places, not fewer.** Grievance already had a
+  public URL; **`/dpa` and `/security` are new public URLs**, and both are linked from inside the
+  Privacy Policy (at the AI-processing and Security sections — where the reader is already asking the
+  question) and from the Terms.
+  🔒 That is a net increase in reach, not a hiding: a tile could only ever be opened by somebody
+  already signed in, and the people who want these two are a business customer's lawyer and a security
+  researcher, neither of whom has an account.
+- **`AppKnowledgeBase` updated in the same change**, per the standing rule — every AI in the app
+  answers "where is the DPA?" from it, so leaving it describing five tiles and an NDA would have made
+  every assistant wrong about the app.
+
+### The guard that matters
+
+`tests/legalDocs.test.ts` gains **"every HIDDEN document is still reachable"**: for each document with
+`settingsTile: false` it asserts a public URL exists AND that the Privacy Policy or the Terms links to
+it. So a future tile removal cannot quietly orphan a compliance page — which is the only way this
+change could have gone wrong.
+
+⚠️ Verified rather than assumed: `spaFallbackShouldDefer('/dpa')` and `('/security')` both return
+**true**, so the new URLs reach the server-rendered page instead of the SPA shell. That deferral is
+derived from `ALL_PUBLIC_LEGAL_PATHS`, so it needed no second edit — exactly what that module was
+written for.
+
+**Gate:** typecheck · typecheck:server · noUnusedImports · vitest (1673 files, 23427 passed, 0 FAIL) ·
+build · test:bundle · boot:check.
+
+
+### 2026-09-15 — 🔴 AUTOPSY 4efab9d7: a rendering app was called "NOT ready" and made FREE. The class was two days old.
+
+Admin, with the SaaS dashboard rendering on his phone beside *"This build did not fully succeed, so it is
+FREE — no charge"*: *"yaar apko -100,000 bar bola hai. app ban jaye to 'app not build' dikha kar free (₹0)
+charge nahi karna hai! … app bani = preview chala. agar preview chala gaya to ₹0 charge karoge to aise to
+mai barbad ho jaunga."* Branch `claude/delivery-proof`.
+
+**THE LEDGER (fifth rule, all five buckets, from the whole report):**
+- ✅ **Self-healed: 1** — `REQUIREMENT_GAPS` filled sensible defaults (info, not a heal of anything broken).
+- 🔀 **Worked around: 8** — eight `PROVIDER_FALLBACK` lines, "Provider GLM failed — Request timed out.",
+  one every 60 s. Each "fallback" went to ANOTHER GLM KEY, never to the next vendor. Debt, not resilience.
+- ⏭️ **Skipped: 5** — route smoke check, page-render check, user journey, E2E scaffold, and the whole
+  browser verify loop: all gated on a preview URL that was never published, so all skipped at once.
+- ❌ **Still broken / shipped imperfect: 5** — (1) verdict NOT ok on a rendering app → ₹0 [the admin's
+  complaint]; (2) `Model call failed (claude-sonnet-4-6)` printed on the USER's build-health card — a
+  vendor id, on a weak build that never called that vendor (White-Label breach); (3) a provider timeout
+  counted as an APP blocker; (4) the ladder structurally unable to reach KIMI (a ~50-key GLM pool × 60 s
+  per key vs a 480 s turn); (5) the platform never tried to bring the preview up although `PROD_BUILD_OK`
+  and a saved snapshot said there was an app to look at.
+- 🥵 **Struggle: 3** — 8 minutes of timeouts for ONE turn; 42 s time-to-first-call with a 24 s silence
+  (the golden-scaffold seeding, unrecorded until it finished); a 10-minute sandbox 96% idle. **The model
+  wrote zero files.** Two read calls, then the timeouts. The app on screen was the pre-seeded template.
+
+**THE MISSING SUBSYSTEM (Step 2):** a verdict that reads the APP's evidence and only the app's. Two
+readers — the release gate and the user's health card — both counted "unresolved errors" from a timeline
+that mixes the engine's struggle ledger with the app's defect list, and both were wrong the same way.
+And the proof they needed (a preview) existed only if the AGENT chose to publish one: `lastPreviewUrl`
+was set by nothing else. This is the CLAUDE.md "no shared EVIDENCE LEDGER" open root cause showing up a
+third time: the facts to contradict the verdict were in the same report (`PROD_BUILD_OK`,
+`PREVIEW_SNAPSHOT_SAVED`) and nothing read them.
+
+🔴 **THE SAME CLASS WAS ROOT-CAUSED TWO DAYS EARLIER (report 70115adf, 2026-09-13).** That fix taught
+`recordLlmCall` to file a *budget-ended* call as info (`isBudgetEndedError`). A *timed-out* call — thrown
+by the very next code path, `model turn N timed out after Xms` — still landed as an unresolved error and
+was still counted. The comment above that fix even says *"`shippingIssueCount` counts exactly those, so
+the release gate reported '1 build-breaking blocker'"*. The instance was fixed; the class was not
+(a38c6fef, again, 48 hours later).
+
+**DNA-level fixes (Step 3), each test-locked:**
+1. **`isAppFinding(issue)`** (`BuildDiagnostics.ts`) — ONE predicate: every `provider`-phase issue is
+   excluded BY PHASE, plus the process-only codes. `shippingIssueCount` (the gate) and
+   `buildHealthFromDiagnostics` (the user's card) both read it, so they cannot disagree. A code added next
+   month in the provider phase is excluded the day it is written. `tests/engineEventsNeverBlock.test.ts`
+   pins the exact record from this report. ⚠️ `tests/budgetEndedNotAFailure.test.ts` carried the OLD
+   premise as an assertion ("an ordinary failed call IS still a blocker") — superseded in place, with the
+   reason, and a sibling test proves the gate still blocks on an APP-phase error.
+2. **The user's health card redacts every line by construction** (`redactProvidersText`) and lists only
+   app findings. The card can no longer print a vendor id whatever the timeline says.
+3. **The in-run timeout bench is keyed by provider FAMILY** (`reportAs ?? name`,
+   `MultiProviderTurnRunner.ts`). Two consecutive timeouts across ANY keys of one provider skip every
+   remaining key of that provider for the rest of the run — independent of the env-tunable shared
+   cooldown, which did not fire in this build (`AGENTV3_RATE_LIMIT_COOLDOWN_MS` may be off in Cloud Run;
+   unverifiable from here, so the bench no longer depends on it). The 429 bench stays per KEY on purpose.
+   `PROVIDER_BENCHED` is recorded so "KIMI was reached" is a line, not an inference. Reproduced in
+   `MultiProviderTurnRunner.test.ts` with a 50-key pool, cooldowns DISABLED and a MOVING clock (the
+   existing pool test used a frozen clock, under which the bench trivially holds): 2 attempts, then KIMI.
+4. **A turn that timed out with nothing received says so:** *"A model turn timed out with no provider
+   answering"*, planned model id in the detail — not "Model call failed (claude-sonnet-4-6)".
+5. **🔒 DELIVERY PROOF — the platform brings the preview up ITSELF** (`deliveryProof.ts` + the block
+   above the render rescue in `routes/agentv3.ts`). After a build meant to produce an app, if no preview
+   URL was ever published: start the dev server deterministically (`npm run dev` — the revive path's own
+   call, no model, no code change), probe the port we know (recipe → declared → framework default), judge
+   the body with `analyzePreviewHtml`, and if a page serves, PUBLISH the URL the same way the agent does.
+   From there the render rescue, the verify loop, the gate and billing run exactly as for an agent-published
+   preview. Bounded (≤ 4 min, never past the wall-clock margin), never a gate, kill switch
+   `AGENTV3_PLATFORM_PREVIEW=off`. Report codes: `PLATFORM_PREVIEW_UP` / `_NOT_UP` / `_SKIPPED` (with the
+   reason). `tests/deliveryProof.test.ts` pins the decision table; the wiring test pins the ORDER.
+
+**What this build would look like now:** no blocker (gate UNKNOWN or, with the platform preview, YELLOW
+"runs and renders"), verdict ok, the health card says READY with the design/accessibility caveats, and the
+bill is the REAL cost (≈ ₹11: ₹0.5 of tokens + ₹2.3 of sandbox × the markup). On the admin's free-list
+account it would still be ₹0 — that is the free list, not the verdict.
+
+**The 50/50 half — why did the problem arise at all, and what makes the wrong branch impossible:**
+- The engine's struggle ledger and the app's defect list were ONE list, read by severity. Now the
+  predicate separates them by PHASE, at the only place both readers consult.
+- Proof depended on the agent's cooperation. Now the platform proves the app whether or not the model
+  ever ran the dev server.
+- A pool bench that needed a second mechanism configured was not a bench. Now it holds on its own.
+
+**Said plainly (rule 3), because the admin's rule cuts both ways:** the model wrote zero files here; the
+app that rendered was the pre-seeded golden template. Under the admin's rule a rendered app is billed at
+real cost, and the honest "not built" notice still names the features the prompt asked for (RBAC, settings,
+billing) and did not get. If the admin wants a ZERO-WRITE turn to be free even when the template renders,
+that is a separate decision — it is not what "app bani = preview chala" says, so it was not built.
+
+**OPEN, recorded honestly (rule 6):**
+- 🔴 The shared cross-instance cooldown did not bench GLM in this build. The code path is correct in
+  tests; the likely cause is `AGENTV3_RATE_LIMIT_COOLDOWN_MS=off` in Cloud Run or a lost `reportAs` on a
+  wrapped chain. The in-run family bench above makes the build correct either way; confirming the env is
+  one look at the console.
+- 🔴 A ~50-key GLM pool with a 60 s timeout per key is a ladder that can spend 50 minutes in one vendor
+  if every bench is off. The pool SIZE is the admin's; the code now bounds the damage to two windows.
+- 🔴 The turn-level timeout (480 s) does not cancel the in-flight provider call (already open, 2026-09-13).
+- The `EVIDENCE LEDGER` root cause stays open — this is its third appearance.
+
+**PROACTIVE (Step 6, the one lever):** the biggest first-try loss here was not the verdict — it was that
+GLM was slow for ten minutes and the build wrote nothing. The family bench makes the next such night cost
+~2 minutes instead of 8 before KIMI takes over. The next lever is a **first-token watchdog**: a provider
+that has not streamed a token in 20 s is far more likely to time out than to answer, and moving on at 20 s
+instead of 60 s turns the worst case from minutes into seconds. Not built here — it changes provider
+timeouts across every lane and deserves its own measured change.
+
+## 2026-09-15 — The referral system: a decorative feature removed, and a real one built behind a device check
+
+The admin asked to plan a referral system and, while gathering the facts, the honest answer to
+"what free gift do we give?" turned up something else: **NavBharatAI already had a referral feature
+on screen, and none of it existed.**
+
+### What was live, and why it is the second absolute rule's exact shape
+
+The Billing panel carried a code, a share button, a reward promise and an earnings table:
+
+- **Two different codes for one person.** The balance card printed `NB-<random>` minted by
+  `Math.random()` into localStorage; the Promo tab printed `NAV-<mailbox>-REF` computed inline from
+  the email — which also **published the mailbox of anyone who shared their code**.
+- **A promise of money**: *"Earn 10% Free Tokens for every referral."* No attribution, no credit
+  path, no endpoint. Nobody could ever have earned ₹1.
+- **Invented earnings, hardcoded**: `amit_sharma2026@gmail.com ₹50 CLAIMED` and
+  `priya.rastogi@navbharat.ai ₹25 ACTIVE`, seeded into localStorage on first render — so **every
+  user was shown the same two strangers as their own referral income**.
+- A coupon placeholder naming `WELCOME100` and `NAVBHARAT50`, both **deleted** in the 2026-09-10
+  revenue audit: two guaranteed failures, advertised.
+
+Removed (#2953). The guard that replaces it, `tests/noInventedRewardUi.test.ts`, does **not** forbid
+the word "referral" — it forbids the four things that make a reward surface fake: a code minted in
+the browser, reward state seeded from a literal, a named earning promise with no server behind it,
+and example codes the server is known to refuse. A real screen reads a server-minted code and a
+server-held list, so it passes all four by construction.
+
+⚠️ **One of those assertions was wrong on its first writing**, and the lesson is worth more than the
+test: it required `Math.random` and the word "referral" on the SAME LINE, while in the real code they
+were five lines apart — so it **passed against the exact bug it was written for**. It surfaced only
+because each guard was proven by re-injecting the deleted code rather than by reading it.
+
+### The plan the admin approved, and what each rule is for
+
+| | |
+|---|---|
+| **B** (new user) | code ₹100 · email ₹100 · mobile ₹100 · github ₹100 = **₹400** |
+| **A** (referrer) | ₹25 × B's **three verifications** = **₹75** |
+| **One referred user** | **₹475** — below today's flat ₹500 |
+| Organic app user | ₹300 · **Website: ₹0** |
+| **Referrer lifetime cap** | **₹1,500** |
+
+Four rules, each closing a specific leak:
+
+1. **Android only, device-verified — every rupee**, including email and github. A free mailbox and a
+   free GitHub account take three minutes, so ₹200 reachable from a laptop would be an unlimited,
+   scriptable printer that never meets the device check. *Half a gate is no gate.*
+2. **The referrer is paid for verifications, never for a redemption.** Paying on redemption is what
+   makes a CHAIN: one mother account farming a throwaway per cycle, earnings concentrating in one
+   usable wallet.
+3. **Nothing releases until the friend's mobile is verified.** A device id resets on a factory reset
+   (~18 min, ₹0 cash); a phone number does not. The device bounds how many accounts exist at once;
+   only the phone bounds how often the same person returns.
+4. **₹1,500 lifetime cap** — *bounded*, not merely unprofitable, for when the reasoning behind 2 and
+   3 turns out to be wrong about somebody's patience. It counts what was EVER PAID, never what is
+   held: a cap measured against a balance is refunded on every spend, the mistake `weeklyTopUp.ts`
+   already records.
+
+### 🔴 Two real defects found by the work itself
+
+**A ₹400 hole in the claim route.** It proved WHO was asking (the device) and WHETHER anything was
+owed (the paid-steps list) — and **never asked whether the step had been done**. Any caller on a
+genuine Android phone could POST `email`, `github` and `mobile` having verified none of them and
+collect the full ₹400, per device. The device gate made the fraud slower; it did nothing about this.
+The lesson is the store-purchase audit's, in a new place: **a claim is a request, not a fact.**
+`stepIsProven` now reads Firebase's own record (emailVerified, a verified phone, `github.com` among
+the linked providers) and our store for the referrer — never the request body. Removing it fails 8
+tests. `AccountContact` gained `providers` for the same reason: "connected GitHub" is not something a
+client can be trusted to assert.
+
+**A blank env value meant zero.** `Number('')` is **0**, not NaN, so a key present-but-empty in Cloud
+Run — a cleared field, a dropped paste — would have read as a deliberate zero. On the ₹1,500 cap that
+is *no referrer ever earns anything, for ever*, with the console showing the key as configured and
+nothing failing anywhere. Caught by a test before it shipped.
+
+And a third, smaller: `googleAccessToken` took an injected env for its CHECK and read `process.env`
+for the CREDENTIAL — two sources of truth that agree right up until they do not. Found because four
+tests failed; `env` is now threaded, defaulted, so every existing caller is unchanged.
+
+### The dead-code guard learned to clean up after itself
+
+The new modules had no callers, and the guard said so correctly. Rather than only take the exemption,
+the gap its own comment implies was closed: the list says it *"is meant to shrink"*, but the staleness
+test only checked that the FILE still exists — so an exemption granted while a module was being built
+would survive for ever once it was wired, leaving a permanent blind spot exactly where the suite is
+meant to look. **An allowlisted file that has become reachable now fails.** It removed its own three
+entries across the following two commits, twice, without anyone remembering to.
+
+### Also shipped
+
+- **Apple sign-in is not offered on Android** (admin's ask). Kept on iOS — App Store Guideline 4.8
+  requires it beside other social logins — and on the web. An unknown platform still offers it, so a
+  wrong default never removes somebody's only way in. ⚠️ **An existing Apple-on-Android user loses
+  that door in the app** but keeps it on navbharatai.com; the account is untouched.
+- **Privacy Policy §3.2** discloses the device identifier, which is a precondition for shipping it
+  rather than paperwork — the same shape as the 2026-09-02 incident where the policy said "we never
+  share your data with advertisers" while the Meta pixel was being built.
+- The testing-notice popup carries the reward checklist, and **its three-second countdown never
+  starts while money is unclaimed**: a notice that shows somebody ₹100 and removes it before they
+  can reach it, with no way back until the next cold start, is worse than not showing it.
+
+### 🔴 OPEN — not done, and needed before this can be switched on
+
+1. **Play Integrity API enabled** in `gen-lang-client-0866594388`, and the `playintegrity` scope
+   granted to the existing `GOOGLE_PLAY_SA_JSON` service account. Admin-only.
+2. **`PLAY_INTEGRITY_CLOUD_PROJECT`** set as a GitHub repo secret (the project NUMBER, not the id).
+3. **A `.aab` carrying `DeviceIntegrityPlugin`** live on Play — release 91 and earlier do not have it.
+4. **Play Console → Data safety** updated for the device identifier. A declaration that contradicts
+   the policy is a violation, not a mismatch.
+5. **The admin-facing referral view** (spend vs revenue, and an alert on the pattern of one code,
+   many accounts, no phone, never pays) is **NOT built**. Recorded as an open item rather than
+   quietly dropped: the money is bounded by the ₹1,500 cap without it, but nobody can currently SEE
+   what referrals cost.
+6. **Nothing here has met a real handset or a real Play Console.** 111 tests cover every judgement
+   and every failure path against an injected Google; what they cannot cover is whether the API is
+   enabled and the account granted. The first genuine token is the first real test — and every
+   failure mode is honest and visible rather than silent.
+
+Gate on the final state: `typecheck` · `noUnusedImports` · `typecheck:server` · full suite **23,506
+passed** · `build` · `test:bundle` · `boot:check`. ⚠️ Three failures in `tests/esmMirror.test.ts`
+reproduce identically on clean `origin/main` with the change stashed — pre-existing, verified rather
+than assumed, and reported rather than left silent.
+
+### Correction, same day — open item 5 is closed
+
+The entry above records *"the admin-facing referral view is NOT built"*. It is now: a bounded,
+read-only `GET /api/admin/referral/summary` and a **Referral cost** card on the admin Reports tab —
+what was paid to new users, what was paid to referrers, how many accounts were referred, and the
+busiest referrers with a **"worth a look"** marker.
+
+Recorded as a correction rather than by editing the line above, per this file's append-only rule: the
+original said what was true when it was written, and a reader needs to see both.
+
+🔒 **The marker is a QUESTION, not a verdict, and there is deliberately no action behind it.** It
+means one referrer has several friends and none of them verified a mobile — the shape a factory-reset
+farm leaves. Each of those facts is individually innocent (a popular referrer has many friends; a new
+user has not verified their phone *yet*), so the response is a sorted list for a human to read: no
+block, no clawback, no flag written back to an account. The cost of being wrong about a real
+enthusiastic user is taking money they earned; the cost of being slow about a farm is bounded at
+₹1,500 by the cap. Those are not the same size, so the smaller risk gets a report rather than an
+automation. A test asserts the summary object has no field that could do anything.
+
+⚠️ The scan is bounded (2,000 rows), and past that ceiling the card says every figure is a **lower
+bound** rather than presenting a total that is quietly wrong. An unbounded read would be honest for a
+year and then not.
+
+## 2026-09-15 — Every paisa accounted for: the wallet statement, and the invariant that could not hold
+
+Admin: *"user wallet me token balance me ek ek paise ka sahi sahi hisab hona chahiye. ₹ / token
+credit kab kaise, ₹ / token deducted kab kaha kaise, aur user ke current balance se match hona
+chahiye."*
+
+The invariant that answers all of it is one line of bookkeeping:
+
+> **opening balance + Σ (every ledger row) = tokenBalance**
+
+And the wallet was already built to satisfy it — every writer that moves `tokenBalance` also appends
+or updates a ledger row for the same tokens. A build writes its own row; a chat turn accumulates into
+a daily bucket row that always carries the bucket's RUNNING total, so the sum stays right either way.
+
+### 🔴 Except it could not hold, and nobody had written down why
+
+The ledger is capped at **500 entries** — it must be, because an unbounded array eventually meets
+Firestore's 1 MiB document limit. All **four** trim sites did `[...ledger, entry].slice(-500)`,
+dropping the oldest rows with **nothing recorded about them**. From the 501st entry onward, the sum
+of a user's visible history was simply less than their balance by an amount nobody could name. A
+statement would have had to show a number that did not add up, or invent one.
+
+**The fix is the oldest one in accounting: a statement does not begin at the beginning of time, it
+begins at an OPENING BALANCE.** `appendLedgerEntry` folds whatever rolls off into
+`ledgerOpeningTokens`, so the invariant survives trimming exactly and for ever — the history a user
+can SEE is bounded, the arithmetic is not. All four sites now go through that one helper; trimming
+anywhere else is what re-opens this.
+
+Proven, not asserted: 600 real debits through `computeDebitedWallet`, 700 mixed credits and debits,
+50 chat turns into one rollup bucket, and 600 daily buckets — every one ends with the books
+balancing. Restoring the old `slice(-500)` fails two of them.
+
+### A second defect found on the way
+
+`payments.ts` appended to the ledger **without trimming at all**, while every debit path trimmed at
+500 — so purchase rows could grow unbounded toward the document limit, and the two halves of one
+ledger disagreed about whether it had a size. Now bounded like the rest.
+
+And an import **cycle** I created myself and then removed: `walletDebit` imported the appender while
+the appender imported `MAX_WALLET_LEDGER_ENTRIES` back from it. It typechecked and would very
+probably have worked — the constant is only read inside a function body — but a cycle on the money
+path breaks one day on a bundler change for reasons nobody can see. The constants moved down to
+`walletStatement.ts`, which is where the trim is enforced; `walletDebit` re-exports them so every
+existing importer is untouched.
+
+### What the user now sees
+
+Wallet & Billing → the balance card → **Statement**: every credit and charge, oldest to newest, with
+the date, what it was for, the rupees, and **the balance after that line**. It ends in a verdict:
+
+- **Everything adds up** — opening + credits − charges equals the balance, exactly.
+- **These entries do not match your balance** — with the difference in rupees, and an ask to report
+  it. 🔒 It shows this rather than hiding it: a statement that could only ever say "balanced" is
+  decoration, and decoration on a money screen is what stops anyone looking.
+- **Part of this history is older than our records** — the honest third state, for an account whose
+  oldest rows rolled off before opening balances existed. Calling that a mismatch would frighten
+  people whose money is fine and teach the admin to ignore the one that matters; calling it balanced
+  would be a lie.
+
+Two things that explain most real questions are stated on the screen rather than left to support: a
+charge under ₹0.01 is **carried** to the next charge instead of being rounded up, and a day's small
+assistant charges are **grouped** into one line so a wall of ₹0.02 rows never pushes the purchase
+history off the end.
+
+🔒 **The reconciler only ever REPORTS.** It never adjusts a balance to make its own arithmetic work —
+a test asserts it does not modify the document it is handed. And it reports, rather than reconciles
+away, a legitimate difference between the two stored views (`tokenBalance` and `remaining_balance`):
+a Pass buyer's views differ by the Pass price, permanently and by design, and an assignment there is
+exactly the bug `walletMirror.ts` was written to end.
+
+⚠️ **What this does NOT do, said plainly:** it cannot recover history already lost. An account that
+was past 500 entries before this shipped keeps its `unknown` verdict for ever — the rows are gone.
+From here on, every account stays reconcilable.
+
+Gate on the final state: `typecheck` · `noUnusedImports` · `typecheck:server` · full suite **23,532
+passed** · `build` · `test:bundle` · `boot:check`. The three `esmMirror` failures reproduce on clean
+`origin/main`.
+
+### The same day — the invariant was only half true, and one of the offenders was mine
+
+The entry above fixed the four TRIM sites. An audit of every writer then found the other half: **eight**
+places appended to `walletLedger` by hand, `[...(w.walletLedger || []), entry]`, bounded by nothing
+and moving no opening balance — the phone bonus, the admin adjustment, the hosting refund, the plan
+credit, the remix credit, and **both referral credits, which I had written myself minutes after
+fixing the defect everywhere else.**
+
+That last one is the argument for the test rather than the convention: the author who had just
+root-caused the bug reintroduced it while the fix was still uncommitted. `ledgerPatch(wallet, entry)`
+now returns the ledger AND both bookkeeping fields together, so a caller cannot take one and forget
+the others, and `tests/ledgerWritersUseAppender.test.ts` fails CI on a hand-rolled write or a trim
+outside the appender. Guilty until allowlisted; three files are listed, each with the reason.
+
+🔴 **And the guard found a worse one than the trim.** The Nav App Store remix credit recorded its
+amount as `tokens` / `amountInr` while every reader — and the reconciler — sums
+`amountCoinsOrTokens`. So a creator's remix earnings RAISED THEIR BALANCE AND APPEARED IN NO TOTAL,
+and their statement would have reported a mismatch nobody could explain. It now writes the standard
+field and keeps the old ones, so rows already written in the old shape still read.
+
+Gate: full suite **23,536 passed**; the three `esmMirror` failures reproduce on clean `origin/main`.
+
+### And the allowlist was hiding one more
+
+`accountMerge.ts` was allowlisted out of the ledger-writer guard with the reason *"it is the one place
+the OPENING balances of both wallets must be added together too"* — a claim written from intent rather
+than from the code. **It was false.** The merge inherited `into`'s opening and dropped `other`'s
+entirely, so every merged wallet's books were off by the sum of the other wallet's rows: a mismatch
+shown to a user whose money was perfectly correct.
+
+The merge now RE-STRIKES the opening balance — `balance − Σ(visible rows)`, struck once at the merge,
+with every later movement checked against it exactly as before — and a test pins it. The allowlist
+entry carries the corrected reason and a note that the original was wrong, rather than being quietly
+rewritten.
+
+🔒 **The lesson is about allowlists, not about merging: an exemption whose reason nobody verified is
+an exemption that hides a bug.** This is the third defect in two days found by writing down a reason
+and then checking it (the others: a guard that passed against the bug it was written for, and an
+`env` threaded for a check but not for the credential).
+
+### 2026-09-15 — 🔴 "BUILDER NE EK BHI FILE KYU NAHI BANAYI?" — answered, and it was arithmetic
+
+The admin read the previous autopsy and asked the one question it had not answered: *"autopsy me sab fix
+kar diya? builder ne ek bhi file kyu nahi banayi? fix nahi hua to karo."* **It had not been fixed.** PR
+#2951 fixed the VERDICT (a rendering app called not-built and made free) and the ladder's inability to
+reach the next vendor. It never explained why the model wrote nothing. Branch `claude/floor-budget`.
+
+**THE ANSWER, from the report's own numbers:**
+
+| | |
+|---|---|
+| What the loop AUTHORISED per turn | **32,000 output tokens** (`buildMaxTokensPerTurn`) |
+| What the floor rung ALLOWED | **60 seconds** (`AGENTV3_CHEAP_FLOOR_TIMEOUT_MS`, default 60_000) |
+| What 60 s could carry, at that build's own measured rate | **≈ 1,830 tokens** |
+| What 32,000 tokens would have taken | **≈ 16 minutes** |
+
+The rate is not an estimate — it is a two-point fit on that build's OWN successful turns, same model,
+same night: 111 tokens → 7,466 ms and 182 tokens → 9,631 ms, i.e. ≈ 4.1 s overhead + **30.5 ms/token**.
+
+**So the engine was authorising seventeen times more output than its own clock could carry.** Turns 1
+and 2 passed because they emitted 111 and 182 tokens — tool calls with no content. Turn 3 was THE TURN
+THAT WRITES THE FILES, the only turn that ever uses the budget, and it could not fit on any key.
+
+🔎 **AND IT WAS OUR CLOCK, NOT THE PROVIDER.** The eight GLM failures are spaced 60,006 / 60,010 /
+60,007 / 60,005 / 60,003 / 60,004 / 60,004 ms apart — a **seven-millisecond spread across seven gaps**.
+A provider failing does not fail on a metronome. That is `new OpenAI({ timeout: 60_000 })` firing eight
+times, and the turn then hit its own 480 s ceiling (480,039 ms elapsed) having learned nothing.
+**The build was structurally incapable of writing a file whenever the floor was slow — not unlucky.**
+
+**THE INVARIANT (`src/server/AgentV3/floorBudget.ts`): never authorise more output than the clock can
+carry.** When the two disagree the ASK is clamped to the CLOCK, and that choice is the whole point,
+because the two failure modes are not equally bad:
+- **TRUNCATION** (`finish_reason: 'length'`) — the files written so far COME BACK, and the existing
+  truncation guard names the one file that was cut.
+- **TIMEOUT** — nothing comes back. Ten minutes, zero files.
+
+A turn that asks for more than it can deliver converts a recoverable partial success into a total loss.
+
+**What changed, all derived from one module so the pair can never drift apart again:**
+1. `floorTuning().floorTimeoutMs` is **derived from the loop's own token ask** —
+   `floorTimeoutForTokens(buildMaxTokensPerTurn())`, capped at 150 s — instead of a hand-typed 60_000.
+   Change the token ask and the clock follows. An explicit env still wins.
+2. `OpenAiToolRunner` clamps `max_tokens` with `reconcileFloorBudget(ask, bound.timeoutMs)` — the
+   EFFECTIVE clock after `turnDeadline`, so a lane with 30 s left cannot authorise a 32,000-token
+   answer either.
+3. The SDK bound and the runner bound are now **one number**. They disagreed — `new OpenAI({ timeout:
+   60_000 })` against the runner's own 120 s default — which is why the report's error text is the
+   SDK's *"Request timed out."* and never the runner's own message. The runner was sizing its answer
+   for a clock that was not the one running.
+
+**The cap is sized, not picked:** a build turn gets 480 s and PR #2951 benches a provider FAMILY after
+2 consecutive timeouts, so the worst case a healthy ladder absorbs is 2 × 150 s = 300 s, leaving 180 s
+for the vendor behind it. A test asserts that sum, so raising the cap without re-checking it fails CI.
+
+**NET EFFECT, and it is better on both of the admin's aims at once:**
+| | before | after |
+|---|---|---|
+| tokens the floor can actually deliver | ~1,833 | **~4,833** (2.64×) |
+| what happens on overflow | timeout → **nothing returns** | truncation → **files so far return** |
+
+**The 50/50 half — why the condition existed at all:** two numbers owned by different modules, set years
+apart, that nobody ever compared. Neither was wrong alone. Deriving one from the other is what makes the
+mismatch impossible rather than merely fixed today.
+
+⚠️ **Honest limit, stated rather than glossed:** I cannot prove those eight calls WOULD have succeeded at
+150 s — we killed them at 60 s and never found out. What is proven is the structural defect (17× more
+authorised than deliverable) and that the clamp makes the overflow recoverable. The real answer to
+"slow versus dead" is **streaming with a first-token watchdog** — a provider that has streamed no token
+in 20 s is dead and should be dropped at 20 s, while one still producing should never be killed. That is
+the next lever, deliberately NOT built here: it changes the GLM/Kimi call from non-streaming to streaming
+on the path that carries every build, and it deserves its own measured change rather than a ride on this
+one. Recorded as an OPEN root cause.
+
+**Test-locked** in `tests/floorBudget.test.ts` (15 tests, including the report's own arithmetic pinned so
+the reasoning cannot rot) and `OpenAiToolRunner.test.ts`. ⚠️ `'uses the turn maxTokens, else the option
+default'` encoded the OLD contract (the ask always passes through) — updated to the new rule with a
+generous clock, and two new tests prove the clamp fires on the exact 4efab9d7 pair.

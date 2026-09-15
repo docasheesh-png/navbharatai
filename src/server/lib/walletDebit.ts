@@ -31,9 +31,16 @@ import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletRes
 
 import type { WalletFeature } from './walletFeature';
 import { clampChargeToFloor, overdraftFloorInr, DEFAULT_OVERDRAFT_FLOOR_INR } from './walletFloor';
+import {
+  appendLedgerEntry, LEDGER_OPENING_FIELD, LEDGER_OPENING_AT_FIELD, LEDGER_DROPPED_FIELD,
+  MAX_WALLET_LEDGER_ENTRIES, TOKEN_CARRY_FIELD,
+} from './walletStatement';
 
-/** Oldest ledger entries roll off past this bound (doc-size protection; totals are unaffected). */
-export const MAX_WALLET_LEDGER_ENTRIES = 500;
+/**
+ * Re-exported from `walletStatement.ts`, which owns them now — see the note there. Kept exported
+ * from here so every existing importer is unchanged.
+ */
+export { MAX_WALLET_LEDGER_ENTRIES, TOKEN_CARRY_FIELD } from './walletStatement';
 
 export interface WalletDebitTx {
   /**
@@ -82,9 +89,6 @@ export interface DebitedWallet {
    */
   applied: boolean;
 }
-
-/** Field on the wallet doc holding the unbilled remainder, always 0 ≤ carry < 1 token. */
-export const TOKEN_CARRY_FIELD = 'tokenCarry';
 
 /**
  * PURE debit computation: given the CURRENT wallet doc and a build's billed ₹, return the FULL
@@ -164,7 +168,11 @@ export function computeDebitedWallet(
     // Our own loss, on the row that caused it — never folded into the user's number.
     ...(floored.absorbedInr > 0 ? { absorbedInr: floored.absorbedInr } : {}),
   };
-  const nextLedger = [...ledger, ledgerEntry].slice(-MAX_WALLET_LEDGER_ENTRIES);
+  // 🔒 THROUGH THE SHARED APPENDER, so whatever rolls off the 500-entry cap lands in the opening
+  // balance instead of vanishing. Before this, `[...ledger, entry].slice(-500)` silently broke the
+  // one invariant the statement rests on — opening + Σ rows = balance — from the 501st entry onward.
+  const appended = appendLedgerEntry(w, ledgerEntry);
+  const nextLedger = appended.ledger;
 
   const nextBalance = n(w.tokenBalance) - tokens;
   // WHOSE MONEY LEFT THE WALLET. Ordinary spending eats the gift first; a plan may not touch it. The
@@ -182,6 +190,9 @@ export function computeDebitedWallet(
     [TOKEN_CARRY_FIELD]: carryOut,
     giftTokensRemaining: nextGift,
     walletLedger: nextLedger,
+    [LEDGER_OPENING_FIELD]: appended.openingTokens,
+    [LEDGER_DROPPED_FIELD]: appended.droppedCount,
+    ...(appended.droppedCount > n(w[LEDGER_DROPPED_FIELD]) ? { [LEDGER_OPENING_AT_FIELD]: now } : {}),
     updatedAt: now,
   };
   return { wallet, tokensDebited: tokens, applied: true };
@@ -256,10 +267,11 @@ export function computeRolledUpDebit(
   };
 
   // The updated row moves to the END so the ledger stays in time order and the ledger cap trims the
-  // genuinely oldest activity — a bucket still being added to is not old.
-  const nextLedger = existingIndex >= 0
-    ? [...ledger.slice(0, existingIndex), ...ledger.slice(existingIndex + 1), row].slice(-MAX_WALLET_LEDGER_ENTRIES)
-    : [...ledger, row].slice(-MAX_WALLET_LEDGER_ENTRIES);
+  // genuinely oldest activity — a bucket still being added to is not old. The shared appender does
+  // the replace-and-trim, folding anything that rolls off into the opening balance; the bucket row
+  // carries its RUNNING total, so replacing rather than appending is what stops it summing twice.
+  const rolled = appendLedgerEntry(w, row, { replaceRollupRef: tx.rollupRef });
+  const nextLedger = rolled.ledger;
 
   const rollupBalance = n(w.tokenBalance) - tokens;
   const wallet: Record<string, any> = {
@@ -272,6 +284,9 @@ export function computeRolledUpDebit(
     // `paid-only` option here: a rollup can only ever be assistant usage, never a plan.
     giftTokensRemaining: Math.max(0, Math.min(giftAfterSpend(w, tokens), rollupBalance)),
     walletLedger: nextLedger,
+    [LEDGER_OPENING_FIELD]: rolled.openingTokens,
+    [LEDGER_DROPPED_FIELD]: rolled.droppedCount,
+    ...(rolled.droppedCount > n(w[LEDGER_DROPPED_FIELD]) ? { [LEDGER_OPENING_AT_FIELD]: now } : {}),
     updatedAt: now,
   };
   return { wallet, tokensDebited: tokens, applied: true };

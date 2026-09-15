@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { APP_KNOWLEDGE_BASE } from '../src/server/AppContext/AppKnowledgeBase';
+import { existsSync } from 'node:fs';
 
 /**
  * Polish campaign — Core AI Chat cluster, rock-solid verification.
@@ -21,7 +22,7 @@ const kb = (id: string) => APP_KNOWLEDGE_BASE.find((f) => f.id === id);
 
 // The 10 Core AI Chat features in the roadmap.
 const CLUSTER = [
-  'offline_ai', 'freelance_ai', 'pro_chat', 'pro_chat_file_upload', 'free_chat',
+  'freelance_ai', 'pro_chat', 'pro_chat_file_upload', 'free_chat',
   'free_chat_file_analysis', 'pro_chat_extended_thinking', 'pro_chat_planner',
   'pro_chat_session_memory', 'pro_chat_design_to_code',
 ];
@@ -40,9 +41,24 @@ describe('Core AI Chat — real navigation labels exist in code', () => {
     expect(app).toContain("{ id: 'nbi_pro_chat', label: 'NavBharatAI Pro', icon: Bot }");
     expect(read('src/components/panels/SidebarNav.tsx')).not.toContain("toggleTab('engine_builder')");
   });
-  it('Offline AI + Freelancing gates exist', () => {
-    expect(app).toContain("label: 'Offline AI'");
+  it('the Freelancing gate exists', () => {
+    // The Offline AI half of this assertion went with that feature on 2026-09-14 (admin: "offline ai
+    // ko hamesha ke liye parmanent delete karo"). Its absence is now itself pinned, below.
     expect(professionals).toContain('Freelancing & Online-Income');
+  });
+
+  it('🔒 the Offline AI is GONE — no menu entry, no view, no module', () => {
+    // "koi trace na bache". A half-removed feature is the worst outcome: a menu item that opens
+    // nothing, or a dead module the bundler still ships. This asserts the removal stayed complete.
+    expect(app).not.toContain("label: 'Offline AI'");
+    expect(app).not.toContain('offline_ai');
+    expect(existsSync(join(process.cwd(), 'src/components/offline'))).toBe(false);
+    expect(existsSync(join(process.cwd(), 'src/lib/offlineAssistant.ts'))).toBe(false);
+    expect(existsSync(join(process.cwd(), 'src/lib/offlineLlmEngine.ts'))).toBe(false);
+    // …while the things that merely SHARE the word "offline" must survive: the error-log queue is
+    // used by main.tsx and has nothing to do with the removed feature.
+    expect(existsSync(join(process.cwd(), 'src/lib/offlineQueue.ts'))).toBe(true);
+    expect(existsSync(join(process.cwd(), 'src/lib/neonatalDosing.ts'))).toBe(true);
   });
 });
 
@@ -72,9 +88,6 @@ describe('Core AI Chat — no KB entry points at a retired control', () => {
 });
 
 describe('Core AI Chat — offline & freelancing paths are accurate', () => {
-  it('offline_ai path names the real "Offline AI" menu item', () => {
-    expect(kb('offline_ai')!.path).toMatch(/Offline AI/);
-  });
   it('freelance_ai path names the real Professionals entry', () => {
     expect(kb('freelance_ai')!.path).toMatch(/Freelancing & Online-Income/);
   });

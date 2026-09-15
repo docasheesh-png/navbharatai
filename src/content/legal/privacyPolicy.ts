@@ -101,6 +101,19 @@ We do not buy data about you from data brokers.
 
 **What we do NOT do:** we do not sell your personal data; we do not show third-party advertising **inside** NavBharatAI (we do advertise NavBharatAI itself on other platforms and measure whether those ads work — Section 3.1 sets out exactly what that shares); we do not use the private content of your chats, your uploaded documents or your built apps to train any AI model of our own or of any third party; and we do not read your projects out of curiosity — access by our team is restricted to what is needed to run the service, fix a defect you reported, or meet a legal duty.
 
+### 3.2 Device check for the referral bonus (Android app only)
+
+If you claim one of the free-credit bonuses in our Android app — for verifying your email, your mobile number, connecting GitHub, or applying a friend's referral code — the app checks, at that moment, that it is running on a genuine Android device.
+
+**What that involves, precisely:**
+
+- The app reads **Android's own per-app device identifier** (its technical name is ANDROID_ID). It is specific to NavBharatAI on your handset, no other app can see it, and it changes if you factory-reset the device. We store it only to record that **this device has claimed its bonus**, so the same phone cannot claim it repeatedly.
+- The app asks **Google's Play Integrity service** for a signed statement that this is a real device running our genuine app installed from the Play Store. That statement goes to Google and comes back to our server; **it does not tell us who you are**, and we do not keep it.
+
+**Why:** the bonus is real money, and without this check one person could claim it endlessly from a laptop using free email addresses. We would rather protect it this way than reduce what we give you.
+
+**What this is NOT:** it is not advertising, it is not shared with Meta or any advertising platform, it is not used to track you between apps or across the web, and it is never used to build a profile of you. Nothing here happens on the website, and nothing happens in the app until you actually claim a bonus.
+
 ### 3.1 Advertising measurement (Meta / Facebook and Instagram)
 
 We advertise NavBharatAI on Facebook and Instagram so people can find it. To know which of those ads actually bring people — rather than guessing and wasting money — we share a **small, fixed set of events** with Meta.
@@ -137,7 +150,7 @@ NavBharatAI's intelligence is delivered by **NavBharatAI's engine**, which runs 
 - Your prompts, relevant project files and conversation context are processed by AI infrastructure providers acting as our processors, **only to generate the reply or build you asked for**.
 - We contractually require that this data is **not used to train** those providers' models.
 - AI output can be wrong. Verify important results — and see the specific medical disclaimer in Section 5.
-- Provider-level processing details are available to business customers under our Data Processing Agreement (see the DPA page), including a sub-processor description by category.
+- Provider-level processing details are available to business customers under our [Data Processing Agreement](/dpa), including a sub-processor description by category.
 
 ---
 
@@ -190,7 +203,7 @@ We do not sell your personal data and we never share it with data brokers. The o
 - Automatic **redaction of secrets and personal identifiers** (API-key shapes, emails, phone numbers, Indian identifiers such as PAN/Aadhaar patterns) from logs, tool output shown on screen, and the anonymous learning system.
 - Strict access control inside the team: production access is limited, logged, and need-based.
 - Every app uploaded to the Nav App Store is signature-checked and malware-scanned, and **nothing publishes without passing review** — a failed or unavailable scan blocks publication rather than being skipped.
-- Independent security research is welcome — see the Security page for our vulnerability disclosure process.
+- Independent security research is welcome — see [Security at NavBharatAI](/security) for the full detail: encryption, access control, incident response, and our vulnerability disclosure process.
 
 No system on the internet is perfectly secure. If a breach affecting your personal data occurs, we will notify the affected users and the authorities as the DPDP Act requires, without undue delay.
 

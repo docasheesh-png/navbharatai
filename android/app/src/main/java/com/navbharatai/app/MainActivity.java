@@ -11,6 +11,7 @@ public class MainActivity extends BridgeActivity {
         // afterwards is not visible to the web layer.
         registerPlugin(MetaConsentPlugin.class);
         registerPlugin(PlayBillingPlugin.class);
+        registerPlugin(DeviceIntegrityPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

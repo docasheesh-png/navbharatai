@@ -1012,7 +1012,7 @@ export const AIChat: React.FC<AIChatProps> = ({
             update available). See AppUpdateChatNotice; renders nothing otherwise. */}
         {(() => {
           const lastUser = [...messages].reverse().find((m: any) => m?.sender === 'user');
-          return lastUser ? <AppUpdateChatNotice userText={String(lastUser.text ?? '')} /> : null;
+          return lastUser ? <AppUpdateChatNotice /> : null;
         })()}
         {/* AgentProgress removed here to only be rendered dynamically in messages if needed */}
         {restoredMessages && restoredMessages.length > 0 && (

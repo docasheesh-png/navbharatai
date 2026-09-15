@@ -139,7 +139,7 @@ export function DonationPanel({
           <div className="max-w-2xl mx-auto text-left space-y-6">
             <div className="relative group/edit">
               <div className="text-[#c9d1d9] text-base leading-relaxed font-medium">
-                नमस्कार भारतीय भाइयों और बहनों,
+                Namaskar, friends across India,
                 <br /><br />
                 {isDonationEditing ? (
                   <div className="space-y-4">
@@ -151,7 +151,7 @@ export function DonationPanel({
                   </div>
                 ) : (
                   <div className="flex items-start gap-4">
-                    <span>मैं <span className="text-white font-bold underline decoration-indigo-500 decoration-2 underline-offset-4">{donationData.name}</span> हूँ। {donationData.missionStatement}</span>
+                    <span>I am <span className="text-white font-bold underline decoration-indigo-500 decoration-2 underline-offset-4">{donationData.name}</span>. {donationData.missionStatement}</span>
                     {isAdmin && (
                       <button onClick={onStartEditing} className="p-1 px-2 mt-1 bg-white/5 hover:bg-white/10 rounded-lg text-indigo-400 opacity-0 group-hover/edit:opacity-100 transition-all border border-white/10 shadow-lg flex items-center gap-1 shrink-0">
                         <Edit2 className="w-3 h-3" />
@@ -179,7 +179,7 @@ export function DonationPanel({
             </div>
 
             <p className="text-[#8b949e] text-sm leading-relaxed">
-              मैं चाहता हूँ कि भारत भी AI की दुनिया में अपनी एक अलग पहचान बनाए — एक ऐसा AI जो भारतीय लोगों की भाषा, सोच, संस्कृति और जरूरतों को वास्तव में समझे।
+              I want India to have its own identity in the world of AI — an AI that genuinely understands the languages, thinking, culture and needs of Indian people.
             </p>
 
             <div className="space-y-4">
@@ -218,7 +218,7 @@ export function DonationPanel({
             <div className="absolute top-4 right-4 opacity-10 group-hover:opacity-20 transition-opacity">
               <QrCode className="w-12 h-12 text-white" />
             </div>
-            <h4 className="text-sm font-black text-white uppercase tracking-widest mb-6">स्कैन करके सहयोग करें</h4>
+            <h4 className="text-sm font-black text-white uppercase tracking-widest mb-6">Scan to contribute</h4>
             <div className="relative group/edit">
               <div className="w-48 h-48 bg-white p-3 rounded-2xl shadow-inner relative flex items-center justify-center">
                 <img
@@ -287,16 +287,16 @@ export function DonationPanel({
               <div className="relative z-10">
                 <h4 className="text-xl font-black text-white mb-2 flex items-center gap-3">
                   <Heart className="w-6 h-6 fill-rose-400 text-rose-400 animate-pulse" />
-                  दिल से Donate करें
+                  Donate from the heart
                 </h4>
                 <p className="text-xs text-indigo-100 font-medium leading-relaxed mb-6">
-                  आपका सहयोग भारत के अपने AI को दुनिया के सबसे शानदार प्लेटफॉर्म्स में से एक बनाएगा। 🇮🇳
+                  Your contribution will help make India’s own AI one of the finest platforms in the world. 🇮🇳
                 </p>
                 <button
                   onClick={() => window.open(`upi://pay?pa=${donationData.upiId}&pn=${encodeURIComponent(donationData.name)}&cu=INR`, '_blank')}
                   className="w-full bg-white text-indigo-600 font-black py-4 rounded-2xl text-xs uppercase tracking-widest shadow-xl hover:bg-indigo-50 transition-all active:scale-95 flex items-center justify-center gap-2"
                 >
-                  अंकदान / Donation (UPI)
+                  Donation (UPI)
                   <ExternalLink className="w-4 h-4" />
                 </button>
               </div>
@@ -306,7 +306,7 @@ export function DonationPanel({
 
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-8 text-center border-t border-white/5">
           <p className="text-xs text-[#484f58] italic font-medium max-w-xl mx-auto leading-relaxed">
-            "मैं वादा करता हूँ — एक दिन आपके सहयोग से नवभारत AI दुनिया के सबसे शानदार AI प्लेटफॉर्म्स में गिना जाएगा।" 🇮🇳
+            “I promise — one day, with your support, NavBharat AI will be counted among the finest AI platforms in the world.” 🇮🇳
           </p>
         </motion.div>
       </div>

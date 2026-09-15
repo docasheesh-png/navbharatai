@@ -1,26 +1,25 @@
 import { useState } from 'react';
 import { Download, X, Sparkles } from 'lucide-react';
 import { useAppUpdateNotice } from '../lib/appUpdateNotice';
-import { updateNoticeFor } from '../lib/updateNoticeI18n';
+import { updateNoticeText } from '../lib/updateNotice';
 import { TirangaLoader } from './ui/TirangaLoader';
 
 /**
  * The "app update available" chat notice (admin 2026-07-20). Rendered as the FIRST message at the
  * top of any AI chat thread once the user has started chatting inside the installed mobile app AND
  * the admin has published a newer version to Play / App Store. It looks like a NavBharatAI message
- * bubble, speaks the language the user is typing (`userText`), and its button deep-links straight to
- * the store. Dismiss it (Update or ✕) and it hides across every AI for the session — the rest of the
+ * bubble, and its button deep-links straight to the store. Dismiss it (Update or ✕) and it hides across every AI for the session — the rest of the
  * chat stays completely normal ("bas 1st message update ka aaye").
  *
  * Renders nothing on web or on an up-to-date install (the hook returns show=false), so it adds zero
  * surface unless there is genuinely an update to offer.
  */
-export function AppUpdateChatNotice({ userText }: { userText?: string }) {
+export function AppUpdateChatNotice() {
   const { show, dismiss, openStore } = useAppUpdateNotice();
   const [busy, setBusy] = useState(false);
   if (!show) return null;
 
-  const t = updateNoticeFor(userText);
+  const t = updateNoticeText();
 
   const onUpdate = async (): Promise<void> => {
     setBusy(true);

@@ -26,7 +26,11 @@
 // The debit is keyed to the artifact, so re-downloading or re-checking a finished build never adds a
 // second charge. PURE — no React, no network, so the sentences are unit-testable.
 
-export type ChargeLang = 'en' | 'hi';
+// 🔴 ENGLISH ONLY (admin 2026-09-14): "ui me professional language (english only) honi chahiye …
+// south india wale kaise padhenge isko??" A Tamil, Telugu, Kannada or Malayalam speaker cannot read
+// Devanagari, so a Hindi-only string is not "the user's language" — it is one region's language shown
+// to a national audience. English is the script every user of this app shares. See CLAUDE.md's
+// language standard, and tests/uiLanguageEnglishOnly.test.ts, which now fails CI on any new one.
 
 /**
  * The price the CLIENT shows before the click. It mirrors the server's `APK_CHARGE_INR` default of 1;
@@ -41,16 +45,14 @@ export const APK_PRICE_INR = 1;
  * "₹1" on a button that takes nothing would be the billing law's own complaint in reverse — a number
  * shown to somebody who is not being charged is as dishonest as a charge shown to nobody. PURE.
  */
-export function chargeButtonLabel(_priceInr: number, lang: ChargeLang = 'en'): string {
-  return lang === 'hi' ? 'डाउनलोड' : 'Download';
+export function chargeButtonLabel(_priceInr: number): string {
+  return 'Download';
 }
 
 /** The tooltip/subtitle that explains WHY it is not charged again. PURE. */
-export function chargeHint(priceInr: number, lang: ChargeLang = 'en'): string {
+export function chargeHint(priceInr: number): string {
   if (!(priceInr > 0)) return '';
-  return lang === 'hi'
-    ? `ऐप बनाने के ₹${priceInr} — बन जाने के बाद डाउनलोड करना मुफ़्त है, चाहे जितनी बार करें।`
-    : `₹${priceInr} to build your app — once it is built, downloading it is free, however many times.`;
+  return `₹${priceInr} to build your app — once it is built, downloading it is free, however many times.`;
 }
 
 /**
@@ -59,15 +61,12 @@ export function chargeHint(priceInr: number, lang: ChargeLang = 'en'): string {
  * honestly instead of printing a number nobody paid. PURE.
  */
 export function chargeReceipt(
-  opts: { priceInr: number; applied: boolean; lang?: ChargeLang },
+  opts: { priceInr: number; applied: boolean },
 ): string {
-  const lang = opts.lang ?? 'en';
   if (!opts.applied || !(opts.priceInr > 0)) {
-    return lang === 'hi' ? 'फ़ाइल तैयार है — इसका कोई शुल्क नहीं लगा।' : 'Your file is ready — no charge for this one.';
+    return 'Your file is ready — no charge for this one.';
   }
-  return lang === 'hi'
-    ? `ऐप बन गया · ₹${opts.priceInr} आपके बैलेंस से लिए गए। इसे डाउनलोड करना मुफ़्त है।`
-    : `Your app is built · ₹${opts.priceInr} was taken from your balance. Downloading it is free.`;
+  return `Your app is built · ₹${opts.priceInr} was taken from your balance. Downloading it is free.`;
 }
 
 /** Response headers the download uses to report its own price honestly. */

@@ -55961,4 +55961,176 @@ cleanup cannot mistake them for leftovers. Proven by reversion: recreating
 `src/components/offline/OfflineAI.tsx` fails it.
 
 **Gate:** typecheck · typecheck:server · noUnusedImports · vitest (1665 files, 23334 passed, 0 FAIL) ·
+### 2026-09-14 — 🔴 UI TEXT WAS IN DEVANAGARI ON SEVEN SURFACES. English only, and CI now enforces it.
+
+The admin, from his own phone, with a screenshot of the voice-chat consent popup rendered entirely in
+Hindi: *"maine apko bola tha, aur claude.md me bhi likha hai — ui me professional language (english
+only) honi chahiye. apne fir bhi devnagri likh di? **south india wale kaise padhenge isko??** batao"*
+
+**That question is the whole argument, and it is not about style.** NavBharatAI is a national product
+and Devanagari is not a national script: a Tamil, Telugu, Kannada or Malayalam speaker cannot read a
+Hindi string at all. "Show it in the user's language" had quietly become "show it in one region's
+language" — and on the surface he caught, the string was a **price the user was about to be charged**.
+
+🔎 **THE SHAPE OF THE BUG IS THE FINDING, and it is why an edit was not the fix.** This was never one
+careless string. **Six modules had independently grown the same `lang === 'hi' ? … : …` branch**, each
+from a different change, each believing it served Indian users — and three of them cited an admin
+instruction as justification (2026-07-20 *"language wahi ho jo user likh raha ho"*, 2026-08-05
+*"warning user ki language me aye"*, 2026-08-10 *"user ki language me ek popup aaye"*). A seventh had
+Hindi hard-coded straight into JSX, and the donation defaults in `src/config/defaultContent.ts` were
+Hindi too. **CLAUDE.md forbade all of it the entire time.** A rule that lives only in a document is a
+rule a new session may miss; this one was missed seven times.
+
+🔴 **THE OLDER INSTRUCTIONS ARE SUPERSEDED, and that is stated rather than quietly reversed.** The
+admin did ask for user-language warnings on 2026-07-20, 2026-08-05 and 2026-08-10. Those asks and this
+one cannot both be kept. This is his own correction after seeing the result, so it wins — and each
+module now carries the supersession in its header, so nobody re-derives the old behaviour from the old
+quote.
+
+**Fixed (branch `claude/ui-english-only`):** `voiceChatBilling.ts` (the screenshot),
+`zipReplaceWarning.ts`, `updateNoticeI18n.ts` → `updateNotice.ts`, `chatToolbar.ts`,
+`apkChargeNotice.ts`, `chatMessageActions.ts`, `DonationPanel.tsx`, `defaultContent.ts`.
+
+**The 50/50 half — the wrong branch is now IMPOSSIBLE, not merely unused.** The `VoiceLang`,
+`ChatToolbarLang`, `ChargeLang` and `NoticeLang` types are deleted, `resolveVoiceLang` is deleted, and
+so is `detectNoticeLang` with its whole Hinglish token list — a chooser with one choice is dead
+machinery that invites the second choice back. `AppUpdateChatNotice`'s `userText` prop went with it
+(six call sites), because it existed only to infer a language.
+⚠️ Three of the six branches were already DORMANT — no caller passed `'hi'` — so they shipped nothing
+to a user and would have fired the day someone did. They were removed on the same rule.
+
+🔒 **`tests/uiLanguageEnglishOnly.test.ts` is the half that lasts.** It walks every client file
+(`src/**` minus `src/server/**`), strips comments, and fails on Devanagari in real code. **Proven by
+injection, not assumed**: a Hindi string added to `chatToolbar.ts` fails it, and a Hindi quote in a
+comment does not. A file is **guilty until listed**, same discipline as
+`tests/whiteLabelClientSurfaces.test.ts`, and a stale allowlist entry fails too.
+
+**Deliberately ALLOWED, each with its reason in the test** — these are not UI strings: greeting
+DETECTION patterns fed to a model (`apnapanEngine.ts`); the localisation editor for the USER's own app,
+where a language picker must print each language in its own script (`LocalizationManager.tsx`); build-
+prompt content for a generated app (`TemplatesPanel.tsx`); parsing of what the user typed
+(`useChatEngine.ts`); a negative code example inside an AI prompt (`appUtils.ts`).
+
+**Scope stated honestly:** comments are NOT rewritten, in client or server. CLAUDE.md asks for English
+there too, but the Hindi in them is the admin's own verbatim words kept as evidence, and destroying
+that trail to satisfy a lint would cost more than it buys. Server prompts written TO models are also
+out of scope — they are not UI.
+---
+
+## 2026-09-14 — The dead strip under the Pro composer: one device inset, reserved three times
+
+Admin, with the band drawn in red on a phone screenshot of NavBharatAI Pro: *"footer aur input box ke
+bich me yeh itna sara space khali kyu rakha hai? … input box ko niche sarka do, jisse yeh space use ho
+jayega aur chating area ki visibility aur badh jayegi."*
+
+**Three layers each solved "clear the home indicator", and none of them knew the others had:**
+
+| | where | what it adds |
+|---|---|---|
+| 1 | `body { padding-bottom: env(safe-area-inset-bottom) }` (App.tsx's inline `<style>`) | the inset |
+| 2 | the app root's `paddingBottom: MOBILE_NAV_TOTAL_HEIGHT` | `3.5rem` + the SAME inset |
+| 3 | the composer's own `pb-[env(safe-area-inset-bottom)]` | the inset again |
+
+⚠️ **Layer 1 is DEAD CSS, and saying so is the part that made this tractable** — it looks load-bearing.
+`body, #root { height: 100dvh; overflow: hidden }`, so `#root` is a full-viewport child laid out from
+the **top** of body's content box. A bottom padding never moves a box that starts at the top, and
+overflow clips at the **padding** box, not the content box — so that rule neither shifts `#root` nor
+crops it. It does nothing at all. That also explains a puzzle in `mobileNav.ts`'s own history: a page
+reserving a bare `pb-14` was still hidden by exactly one inset, because layer 1 was never helping.
+
+Layer 2 is already **exactly** the bar. So **layer 3 was pure surplus** — one whole inset of empty,
+untouchable strip between the composer and the tab bar, on every phone with a home indicator or gesture
+bar. It is `fixed`-positioned chrome, so none of that space could ever be scrolled into or tapped.
+
+**The fix — one owner, published from one boolean.** `--nb-safe-below` is set in the SAME call and from
+the SAME `showsGlobalMobileNav` that renders the bar (`publishMobileNavHeight`): `0px` while the bar is
+on screen (the page has already reserved it, inset included), the real inset when it is not. It is the
+exact mirror of `--nb-bottom-nav`, and their defaults are deliberately opposite — that one defaults to
+`0px` ("reserve nothing until told the bar exists"), this one to the inset ("keep clearing it until
+told the page has") — because in both cases the untold state must behave exactly as it did before the
+variable existed. Both composers (Pro and Offline AI, the same hard-coded pattern) now read it, with
+the literal kept as the CSS fallback for SSR, tests and the first paint.
+
+### 🔴 An existing guard caught me making the bug I was fixing
+
+I first added `--nb-safe-below` to `.nb-sheet-over-nav` as well, reasoning that a sheet painting OVER
+the bar must clear the home indicator itself. `sheetOverlayGeometry.test.ts` failed — *"the opt-out
+works by zeroing the variable, not by re-declaring the padding"* — and **it was right**. Sheets have
+owned that inset since they were written, through `--nb-safe-bottom`, and
+`max(var(--nb-safe-bottom), var(--nb-bottom-nav))` already answers both cases. My line would have made
+a **fourth owner of one inset** — precisely the defect this change exists to remove. Reverted, and the
+reasoning is now a test of its own so the next reader does not re-derive it.
+
+**Tests:** `src/lib/mobileNav.test.ts` +6. Every line of this wiring **fails nothing if dropped** — the
+strip simply comes back — so the wiring itself is asserted, and the guard is **proven by reversion**:
+deleting the one publisher line fails the suite. ⚠️ The composer guard strips comments first, because
+both files now quote the old value while explaining why it went, and a guard that cannot tell a comment
+from code would fail on its own documentation.
+
+**Gate on the final state:** typecheck · typecheck:server · noUnusedImports · **1673 files, 23,435
+passed, 1 skipped, 0 failed** · build · bundle budget · boot check — all green.
+
+### Still open — named, not implied fixed
+
+- **Layer 1 is still there.** `body { padding-bottom: env(safe-area-inset-bottom) }` does nothing today,
+  but it is not removed here: it is global, and a change that touches every view to delete a no-op is a
+  blast radius this fix does not need. Recorded so the next reader knows it is inert rather than load-
+  bearing, which is the only thing that made it dangerous.
+- **Not verified on a real device.** The reasoning is from the layout rules and is checkable by reading
+  them, but `env(safe-area-inset-bottom)` is 0 in every environment available here, so the strip cannot
+  be measured from this session. The admin's screenshot is the before; the after needs one look on the
+  same phone.
+## 2026-09-14 — Legal & Trust: six tiles became two, the NDA was retired, and nothing became unreachable
+
+The admin looked at Settings → Legal & Trust and asked the right question: *"mujhe nahi lagta ki sach me
+inki need hai… agar ham yeh hide kar den — grievance redressal, DPA, security documents aur NDA — to kya
+app me koi future problem ayega? kya Claude, ChatGPT, Gemini etc me yeh hote hai?"*
+
+### The honest answer, which is not the same for all four
+
+🔴 **Grievance Redressal could NOT be hidden, and the reason is in our own source.** The Privacy Policy
+links to `/grievance` **three times** (lines 55, 163, 207) and the Terms **once** (line 50), and the
+policy's own words describe it as the page that *"names the officer responsible and the timelines we
+must answer within under the IT Rules, 2021."* Removing the page would have left **four broken links
+inside our published legal documents** — worse than never having had it, because a regulator reading
+"we have a grievance page" and finding nothing is a stronger finding than an omission.
+
+It is also a real obligation: the IT (Intermediary Guidelines) Rules, 2021 require an intermediary to
+publish the Grievance Officer's name and contact, and NavBharatAI **is** an intermediary — the Nav App
+Store and published apps host user content. The repo already treated it as required: the admin Monitor
+carries an `officerIsNamed` warning.
+
+**DPA / Security: no legal requirement to publish for a consumer app**, one reference each to fix.
+**NDA: no requirement, no references, and publishing a blank mutual NDA is not what comparable AI
+platforms do either** — those are negotiated per deal, not posted. Retired.
+
+### What was actually done
+
+- **NDA deleted** — `nda.ts`, its registry entry, its id in the union, its tests.
+- **Settings grid: two tiles** (Privacy Policy, Terms of Service), driven by a new `settingsTile` flag
+  on `LegalMeta` rather than by deleting registry entries. The documents still exist.
+- **The three untiled documents are now reachable in MORE places, not fewer.** Grievance already had a
+  public URL; **`/dpa` and `/security` are new public URLs**, and both are linked from inside the
+  Privacy Policy (at the AI-processing and Security sections — where the reader is already asking the
+  question) and from the Terms.
+  🔒 That is a net increase in reach, not a hiding: a tile could only ever be opened by somebody
+  already signed in, and the people who want these two are a business customer's lawyer and a security
+  researcher, neither of whom has an account.
+- **`AppKnowledgeBase` updated in the same change**, per the standing rule — every AI in the app
+  answers "where is the DPA?" from it, so leaving it describing five tiles and an NDA would have made
+  every assistant wrong about the app.
+
+### The guard that matters
+
+`tests/legalDocs.test.ts` gains **"every HIDDEN document is still reachable"**: for each document with
+`settingsTile: false` it asserts a public URL exists AND that the Privacy Policy or the Terms links to
+it. So a future tile removal cannot quietly orphan a compliance page — which is the only way this
+change could have gone wrong.
+
+⚠️ Verified rather than assumed: `spaFallbackShouldDefer('/dpa')` and `('/security')` both return
+**true**, so the new URLs reach the server-rendered page instead of the SPA shell. That deferral is
+derived from `ALL_PUBLIC_LEGAL_PATHS`, so it needed no second edit — exactly what that module was
+written for.
+
+**Gate:** typecheck · typecheck:server · noUnusedImports · vitest (1673 files, 23427 passed, 0 FAIL) ·
 build · test:bundle · boot:check.

@@ -70,7 +70,8 @@ describe('EDIT — rewind to that point, because the user wants a different ANSW
   it('the edit is MARKED — the history never pretends the original was never sent', () => {
     expect(editMessage(msgs(), 'u1', 'something else').messages[0].edited).toBe(true);
     expect(editedLabel('en')).toBe('edited');
-    expect(editedLabel('hi')).toBe('बदला गया');
+    // ENGLISH ONLY (admin 2026-09-14) — the Hindi label was removed.
+    expect(editedLabel()).toBe('edited');
   });
 
   it('changing NOTHING is a no-op — opening the editor must not cost the conversation', () => {
@@ -121,21 +122,18 @@ describe('VOICE — the money, and what the user reads before spending any of it
   });
 
   it('the popup says the same rate the wallet will actually charge', () => {
-    for (const lang of ['en', 'hi'] as const) {
-      const c = voiceConsent(lang);
-      expect(c.body).toContain(String(VOICE_PAISE_PER_SECOND));
-      expect(c.title.length).toBeGreaterThan(5);
-      expect(c.confirm.length).toBeGreaterThan(2);
-      expect(c.cancel.length).toBeGreaterThan(2);
-    }
+    const c = voiceConsent();
+    expect(c.body).toContain(String(VOICE_PAISE_PER_SECOND));
+    expect(c.title.length).toBeGreaterThan(5);
+    expect(c.confirm.length).toBeGreaterThan(2);
+    expect(c.cancel.length).toBeGreaterThan(2);
   });
 
   it('🔴 the price is GENERATED, never typed — a hardcoded rate becomes a lie the day it changes', () => {
     // This matters more now that the body is a single number shown in red: there is nothing else on
     // the card for a reader to cross-check it against.
-    expect(voiceConsent('en', 7).body).toContain('7');
-    expect(voiceConsent('en', 7).body).not.toContain(String(VOICE_PAISE_PER_SECOND));
-    expect(voiceConsent('hi', 7).body).toContain('7');
+    expect(voiceConsent(7).body).toContain('7');
+    expect(voiceConsent(7).body).not.toContain(String(VOICE_PAISE_PER_SECOND));
   });
 
   it('🔴 the body is ONE SHORT LINE, because the long one was not being read', () => {
@@ -145,20 +143,18 @@ describe('VOICE — the money, and what the user reads before spending any of it
      * worse consent than one line everybody reads — so this pins the shortness itself, and a future
      * edit that quietly grows the card back has to delete this test to do it.
      */
-    for (const lang of ['en', 'hi'] as const) {
-      const body = voiceConsent(lang).body;
-      expect(body.length, lang).toBeLessThanOrEqual(40);
-      expect(body, lang).not.toContain('.');   // not a sentence — a price
-    }
+    const body = voiceConsent().body;
+    expect(body.length).toBeLessThanOrEqual(40);
+    expect(body).not.toContain('.');   // not a sentence — a price
   });
 
-  it('Hindi is WRITTEN, not transliterated English (the admin asked for exactly that)', () => {
-    const hi = voiceConsent('hi');
-    expect(hi.title).toMatch(/[ऀ-ॿ]/);
-    expect(hi.body).toMatch(/[ऀ-ॿ]/);
-    expect(hi.confirm).toMatch(/[ऀ-ॿ]/);
-    // …and it is not the English string with Devanagari letters bolted on.
-    expect(hi.body).not.toContain('paise per second');
+  it('🔴 the card is ENGLISH — the admin caught it in Devanagari on his own phone (2026-09-14)', () => {
+    // "ui me professional language (english only) honi chahiye … south india wale kaise padhenge
+    // isko??" This SUPERSEDES the 2026-08-10 "user ki language me ek popup aaye": the card states a
+    // PRICE, and a price a Tamil or Telugu speaker cannot read is not consent.
+    const c = voiceConsent();
+    expect(JSON.stringify(c)).not.toMatch(/[\u0900-\u097F]/);
+    expect(c.body).toMatch(/paise per second/);
   });
 
   it('WHEN charging starts and stops is shown by the LIVE METER, not by the card', () => {
@@ -169,28 +165,24 @@ describe('VOICE — the money, and what the user reads before spending any of it
      * sentences were the reason nobody read the price either.
      *
      * So the claim is re-pointed at where the information actually lands now. It is not weakened:
-     * the meter must still show BOTH the time and the money, in the user's own language.
+     * the meter must still show BOTH the time and the money.
      */
     expect(voiceRunningCostLabel(30)).toContain('₹');
     expect(voiceRunningCostLabel(30)).toMatch(/sec|min/);
-    expect(voiceRunningCostLabel(30, 'hi')).toContain('₹');
-    expect(voiceRunningCostLabel(30, 'hi')).toMatch(/[ऀ-ॿ]/);
+    // ENGLISH ONLY (admin 2026-09-14) — the meter had a Hindi form too.
+    expect(voiceRunningCostLabel(30)).not.toMatch(/[\u0900-\u097F]/);
     // And the title still tells the user, before anything starts, that this costs money.
-    expect(voiceConsent('en').title.toLowerCase()).toContain('paid');
-    expect(voiceConsent('hi').title).toContain('सशुल्क');
+    expect(voiceConsent().title.toLowerCase()).toContain('paid');
   });
 
   it('names no vendor — a consent popup is the most user-facing surface there is', () => {
-    for (const lang of ['en', 'hi'] as const) {
-      const c = voiceConsent(lang);
-      const all = `${c.title} ${c.body} ${c.confirm} ${c.cancel}`;
-      expect(all).not.toMatch(/\b(sonic|nova|amazon|aws|bedrock|openai|gemini|claude|anthropic|elevenlabs)\b/i);
-    }
+    const c = voiceConsent();
+    const all = `${c.title} ${c.body} ${c.confirm} ${c.cancel}`;
+    expect(all).not.toMatch(/\b(sonic|nova|amazon|aws|bedrock|openai|gemini|claude|anthropic|elevenlabs)\b/i);
   });
 
   it('the live meter shows BOTH time and money — a number alone tells the user nothing', () => {
     expect(voiceRunningCostLabel(90)).toBe('1 min 30 sec · ₹1.80');
-    expect(voiceRunningCostLabel(90, 'hi')).toBe('1 मिनट 30 सेकंड · ₹1.80');
     expect(formatVoiceDuration(45)).toBe('45 sec');
     expect(formatVoiceDuration(120)).toBe('2 min');
     expect(formatVoiceDuration(0)).toBe('0 sec');

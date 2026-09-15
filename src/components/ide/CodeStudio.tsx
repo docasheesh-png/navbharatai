@@ -11,10 +11,9 @@ import { loadBreakpoints, serializeBreakpoints, toggleBreakpoint as toggleBpInMa
 import { CommandPalette } from './CommandPalette';
 import { ExtensionMarket } from './ExtensionMarket';
 import { GitPanel } from './GitPanel';
-import { PreviewPanel } from './PreviewPanel';
 import { PreviewSurface } from '../agentv3/PreviewSurface';
 import { uploadZipProject } from '../../lib/zipProjectUpload';
-import { zipReplaceWarningFor } from '../../lib/zipReplaceWarning';
+import { zipReplaceWarning } from '../../lib/zipReplaceWarning';
 import { zipAccept, acceptZipPick, notZipMessage } from '../../lib/zipPicker';
 import { auth } from '../../lib/firebase';
 import { AgentV3MiniChat } from './AgentV3MiniChat';
@@ -176,13 +175,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   const [zipProgress, setZipProgress] = useState('');
   const [zipError, setZipError] = useState('');
   const zipInputRef = React.useRef<HTMLInputElement | null>(null);
-  /**
-   * The warning speaks the language the USER is writing in, taken from their own most recent words.
-   * Consent to delete a project is not real consent if the sentence cannot be read.
-   */
-  const zipText = zipReplaceWarningFor(
-    [...messages].reverse().find((m) => m.sender === 'user')?.text || chatInput,
-  );
+  /** The replace warning. English only — see zipReplaceWarning.ts for why. */
+  const zipText = zipReplaceWarning();
   const [splitTabs, setSplitTabs] = useState<Tab[]>([]);
   const [splitActive, setSplitActive] = useState<string>('');
   const splitOpen = splitTabs.length > 0;   // desktop-only; see handleSplitEditor
@@ -1517,40 +1511,32 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
         {/* Dynamic Main Workspace */}
         <div className="flex-1 flex flex-col min-w-0 bg-[#1e1e1e] relative">
           {activeScreen === 'preview' ? (
-             /* THE one preview. When a v5.0 workspace exists we render the very same PreviewSurface
-                the slide-menu Preview uses, so Code Studio, the sidebar and v5.0 are literally one
-                preview of one running app — not three views that can disagree. The legacy
-                generatedCode panel below remains ONLY for flows with no v5 workspace at all (there is
-                nothing else to show there); with a workspace it never renders again. */
-             v3Preview?.workspaceId || v3Preview?.previewUrl ? (
-               <PreviewSurface
-                 url={v3Preview?.previewUrl}
-                 workspaceId={v3Preview?.workspaceId}
-                 userId={v3UserId}
-                 email={v3Email}
-                 framework={v3Preview?.framework}
-                 // Always true here by construction: this mount sits inside `activeScreen === 'preview'`,
-                 // so it UNMOUNTS when the user switches screens and its timers stop with it.
-                 paneVisible
-                 autoResume={!v3Preview?.running}
-                 onFileEdited={(path, content) => onFilesChange({ ...files, [path]: content })}
-               />
-             ) : (
-             <PreviewPanel
-               files={files}
-               generatedCode={generatedCode}
-               onRun={() => onRun(files)}
-               /* Tag Mode and the error overlay's Fix Bug button both call this. Without it they were
-                  DEAD ENDS here — badges appeared on every element, you tapped one, and the handler
-                  was undefined. Worse than an inert button, because it invites the interaction first.
-                  Now the tap opens the AI panel with the element reference already in the box. */
-               onEditWithAI={(hint) => {
-                 if (hint) setAiPrefill({ text: hint, nonce: Date.now() });
-                 setActiveScreen('ai');
-                 setIsSidebarOpen(true);
-               }}
+             /* ONE PREVIEW EVERYWHERE (admin 2026-09-14: "jo navbharatai pro me preview open hota hai,
+                wahi preview open hona chahiye — kuch aur nahi"). This mirrors ViewPanels.tsx's global
+                Preview view exactly: every entry point renders the SAME v5.0 PreviewSurface, so Code
+                Studio, the sidebar and v5.0 are literally one preview of one running app. The retired
+                v2.0 PreviewPanel branch (generatedCode, which the v3 engine never writes) is REMOVED —
+                with no v3 workspace yet, PreviewSurface shows its own honest "it appears the moment the
+                agent starts the app" state instead of the old "Welcome to Navbharat AI Sandbox" iframe
+                the admin's screenshot showed. PreviewPanel.tsx itself is deleted; nothing else imports it. */
+             <PreviewSurface
+               url={v3Preview?.previewUrl}
+               workspaceId={v3Preview?.workspaceId}
+               userId={v3UserId}
+               email={v3Email}
+               framework={v3Preview?.framework}
+               // Always true here by construction: this mount sits inside `activeScreen === 'preview'`,
+               // so it UNMOUNTS when the user switches screens and its timers stop with it.
+               paneVisible
+               autoResume={!v3Preview?.running}
+               onFileEdited={(path, content) => onFilesChange({ ...files, [path]: content })}
+               /* Tag Mode (tap an element) and the error overlay's Fix Bug button both call these —
+                  PreviewSurface's own built-in equivalents of the retired PreviewPanel's onEditWithAI.
+                  Without them these controls were DEAD ENDS: badges/buttons appeared, you tapped one,
+                  and nothing happened. Opens the AI panel with the reference already in the box. */
+               onFixError={(hint) => { if (hint) setAiPrefill({ text: hint, nonce: Date.now() }); setActiveScreen('ai'); setIsSidebarOpen(true); }}
+               onAskAiAboutElement={(hint) => { if (hint) setAiPrefill({ text: hint, nonce: Date.now() }); setActiveScreen('ai'); setIsSidebarOpen(true); }}
              />
-             )
           ) : activeScreen === 'security' ? (
              <SecurityScan files={files} />
           ) : Object.keys(files).length === 0 ? (

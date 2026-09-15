@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 
 /**
@@ -139,13 +139,15 @@ describe('every screen you can navigate to actually renders', () => {
 
 describe('nothing in the IDE invites a tap and then swallows it', () => {
   it('Tag Mode and Fix Bug reach the AI panel — they used to be dead ends', () => {
-    // PreviewPanel is mounted ONLY by Code Studio, and Code Studio did not pass `onEditWithAI`. Tag
-    // Mode was gated on `generatedCode` alone, so you could switch it on, see a badge on every
-    // element, tap one — and `onEditWithAI?.(hint)` was undefined. Worse than an inert button, because
-    // it invites the interaction first. Same for the error overlay's Fix Bug button.
-    const i = studio.indexOf('<PreviewPanel');
-    const mount = studio.slice(i, i + 1200);
-    expect(mount).toContain('onEditWithAI=');
+    // CORRECTED 2026-09-14: PreviewPanel (and its onEditWithAI prop) is gone — Code Studio's preview
+    // is now unconditionally PreviewSurface (see the "ONE PREVIEW EVERYWHERE" test below), which has
+    // its OWN built-in equivalents: onFixError (the error overlay's Fix Bug button) and
+    // onAskAiAboutElement (Tag Mode — tap an element). Both must be wired, or exactly the old dead-end
+    // defect returns: a badge/button appears, you tap it, and the optional callback is undefined.
+    const i = studio.indexOf('<PreviewSurface');
+    const mount = studio.slice(i, i + 1400);
+    expect(mount).toContain('onFixError=');
+    expect(mount).toContain('onAskAiAboutElement=');
     expect(mount).toContain("setActiveScreen('ai')");
     // The hint must actually reach the chat box.
     expect(studio).toContain('prefill={aiPrefill}');
@@ -257,14 +259,24 @@ describe('no inert icons in the editor toolbar', () => {
  * THAT SESSION ever populated, so two views of one running app disagreed with each other.
  */
 describe('Code Studio shows the SAME app the rest of the product does', () => {
-  it('renders the v5 PreviewSurface — not the retired generatedCode panel — when a workspace exists', () => {
+  // CORRECTED 2026-09-14 (admin: "jo navbharatai pro me preview open hota hai, wahi preview open hona
+  // chahiye — kuch aur nahi"): the retired generatedCode panel (PreviewPanel.tsx) is deleted outright
+  // — Code Studio's preview screen renders PreviewSurface UNCONDITIONALLY now, exactly like the
+  // slide-menu Preview view (ViewPanels.tsx), instead of falling back to the old panel with no
+  // workspace yet.
+  it('renders the v5 PreviewSurface unconditionally — the retired generatedCode panel no longer exists at all', () => {
     expect(studio).toContain("import { PreviewSurface }");
-    const i = studio.indexOf('v3Preview?.workspaceId || v3Preview?.previewUrl');
+    expect(studio).not.toContain("from './PreviewPanel'");
+    expect(studio).not.toContain('<PreviewPanel');
+    expect(readdirSync(join(__dirname, '..', 'src/components/ide'))).not.toContain('PreviewPanel.tsx');
+    const i = studio.indexOf("activeScreen === 'preview' ? (");
     expect(i).toBeGreaterThan(-1);
-    const block = studio.slice(i, i + 700);
+    const block = studio.slice(i, i + 1400);
     expect(block).toContain('<PreviewSurface');
     expect(block).toContain('url={v3Preview?.previewUrl}');
     expect(block).toContain('workspaceId={v3Preview?.workspaceId}');
+    // No fallback branch left — a ternary here would mean the old panel (or a new one) is back.
+    expect(block).not.toContain(' : (');
   });
 
   it('is handed the same preview state the slide-menu Preview renders from', () => {

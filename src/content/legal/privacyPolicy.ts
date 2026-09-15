@@ -137,7 +137,7 @@ NavBharatAI's intelligence is delivered by **NavBharatAI's engine**, which runs 
 - Your prompts, relevant project files and conversation context are processed by AI infrastructure providers acting as our processors, **only to generate the reply or build you asked for**.
 - We contractually require that this data is **not used to train** those providers' models.
 - AI output can be wrong. Verify important results — and see the specific medical disclaimer in Section 5.
-- Provider-level processing details are available to business customers under our Data Processing Agreement (see the DPA page), including a sub-processor description by category.
+- Provider-level processing details are available to business customers under our [Data Processing Agreement](/dpa), including a sub-processor description by category.
 
 ---
 
@@ -190,7 +190,7 @@ We do not sell your personal data and we never share it with data brokers. The o
 - Automatic **redaction of secrets and personal identifiers** (API-key shapes, emails, phone numbers, Indian identifiers such as PAN/Aadhaar patterns) from logs, tool output shown on screen, and the anonymous learning system.
 - Strict access control inside the team: production access is limited, logged, and need-based.
 - Every app uploaded to the Nav App Store is signature-checked and malware-scanned, and **nothing publishes without passing review** — a failed or unavailable scan blocks publication rather than being skipped.
-- Independent security research is welcome — see the Security page for our vulnerability disclosure process.
+- Independent security research is welcome — see [Security at NavBharatAI](/security) for the full detail: encryption, access control, incident response, and our vulnerability disclosure process.
 
 No system on the internet is perfectly secure. If a breach affecting your personal data occurs, we will notify the affected users and the authorities as the DPDP Act requires, without undue delay.
 

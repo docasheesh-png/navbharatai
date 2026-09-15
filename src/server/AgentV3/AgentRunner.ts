@@ -21,6 +21,7 @@ import { missingFeatureNotice } from './missingFeatureNotice';
 import { describeContextUsage, shouldEmitContextUsage, type ContextUsage } from './contextUsage';
 import { abortCauseOf, abortSummary } from './buildAbortCause';
 import { budgetSteer, type BudgetStage } from './buildBudgetSteer';
+import { turnStarvedItsBudget } from './floorBudget';
 
 /**
  * AgentRunner — the native tool-use loop (RC-1), the heart of P1.
@@ -644,10 +645,30 @@ export class AgentRunner {
           events.emit({ type: 'narration', agent: agentRole, text: turn.text, ts: Date.now(), id: turnId });
         }
 
+        // 🔴 THE MODEL NEVER GOT TO ANSWER — do not treat silence as a reply (autopsy ee20478d,
+        // 2026-09-15; the arithmetic is in floorBudget.ts).
+        //
+        // A turn whose whole output ceiling was spent before any text or tool call existed carries
+        // NOTHING: `rawContent` is an empty array. Appending it grew the transcript by an empty
+        // assistant message, and the nudge below then told a model that had described nothing to
+        // "stop describing and act" — which made the very next prompt LONGER, and so even less
+        // likely to fit. That build ran the identical doomed call three times, ~97 s each, and
+        // finished with "the model replied without building". It never replied.
+        //
+        // The runners now throw on this (OpenAiToolRunner) so the ladder falls to a rung that fits;
+        // this is the loop's own net, for any runner that does not, and the one place that decides
+        // what the user is TOLD. Ending the turn honestly is strictly better than nudging: there is
+        // no partial answer to extend and no plan to act on.
+        const starvedTurn = turnStarvedItsBudget(turn);
+
         // Record the assistant turn verbatim so tool_use ids resolve next turn. Its creation time
         // is NOW — before its tools run — which is what keeps the reopened order faithful.
-        messages.push({ role: 'assistant', content: turn.rawContent });
-        messageTs.push(Date.now());
+        // An empty turn is skipped: there are no tool_use ids to resolve and some providers reject a
+        // content-free assistant message on the next call.
+        if (!starvedTurn) {
+          messages.push({ role: 'assistant', content: turn.rawContent });
+          messageTs.push(Date.now());
+        }
 
         // No tools requested → the model has finished its turn.
         if (turn.toolUses.length === 0) {
@@ -656,7 +677,7 @@ export class AgentRunner {
           // not actually built anything — but the model usually intends to act on the NEXT turn.
           // Terminating here is the "model replied without building" failure (even Opus does it).
           // So instead of giving up, push the model to ACT and give it another turn (capped).
-          if (expectsArtifacts && totalToolUses === 0 && noBuildNudges < MAX_BUILD_NUDGES) {
+          if (!starvedTurn && expectsArtifacts && totalToolUses === 0 && noBuildNudges < MAX_BUILD_NUDGES) {
             noBuildNudges++;
             messages.push({
               role: 'user',
@@ -675,10 +696,16 @@ export class AgentRunner {
           // Only treat a no-tool turn as success for chat, or when real work already happened.
           const builtNothing = expectsArtifacts && totalToolUses === 0;
           let ok = !builtNothing;
+          // WHITE-LABEL LAW: the honest sentence names OUR limit, never a vendor, a model or a ceiling
+          // the user cannot act on. "The model replied without building" was false here in the one way
+          // that matters — nothing replied — and it is the sentence that sent the user to buy credits.
           let summary = builtNothing
-            ? (turn.text.trim()
-                ? `${turn.text.trim()}\n\n(No files were created — the build did not run. Retrying with a stronger model…)`
-                : 'The build did not produce any files — the model replied without building.')
+            ? (starvedTurn
+                ? 'The build could not start writing files: NavBharatAI\u2019s engine ran out of room to answer before it began. '
+                  + 'This is our limit, not your app \u2014 nothing you asked for was wrong and nothing is lost. Please try again.'
+                : turn.text.trim()
+                  ? `${turn.text.trim()}\n\n(No files were created — the build did not run. Retrying with a stronger model…)`
+                  : 'The build did not produce any files — the model replied without building.')
             : (turn.text.trim() || 'Build complete.');
 
           // R2 §1.1 — MANDATORY readiness gate (top-level build only). Before reporting a

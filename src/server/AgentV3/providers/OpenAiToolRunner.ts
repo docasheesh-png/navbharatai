@@ -14,7 +14,7 @@
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 import { turnDeadline, BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE } from '../turnDeadline';
 import { glmThinkingParam } from './glmThinking';
-import { reconcileFloorBudget } from '../floorBudget';
+import { reconcileFloorBudget, turnStarvedItsBudget, starvedBudgetError } from '../floorBudget';
 import {
   toolDefsToOpenAI,
   transcriptToOpenAI,
@@ -154,6 +154,22 @@ export class OpenAiToolRunner implements TurnRunner {
     );
 
     const result = parseOpenAiCompletion(completion);
+
+    // 🔴 A TURN THAT COULD NOT BEGIN AN ANSWER IS A FAILURE OF THIS RUNG, NOT AN ANSWER FROM IT
+    // (autopsy ee20478d, 2026-09-15 — see floorBudget.ts for the arithmetic).
+    //
+    // The clamp above authorises at most 4,833 output tokens, and a reasoning model's thinking is
+    // billed to that same ceiling and emitted BEFORE any content. So this rung can return HTTP 200,
+    // `finish_reason: 'length'`, no text and no tool call — 4,833 tokens of thinking and nothing to
+    // salvage. Returning it as a result made three things go wrong at once: the loop appended an
+    // EMPTY assistant turn and nudged the model to "stop describing and act" (it had described
+    // nothing), the identical doomed call was repeated twice more at ~97 s each, and the failure
+    // never entered the provider-failure ledger — so every honesty check that reads that ledger was
+    // blind and the user was asked to pay for a stronger engine.
+    //
+    // Throwing puts it where it belongs: the chain falls to the NEXT rung, which is a different
+    // vendor and usually not a forced-thinking one, and the build proceeds instead of ending empty.
+    if (turnStarvedItsBudget(result)) throw starvedBudgetError(budget.maxTokens, budget.requested);
 
     // Stream the visible text to the caller in one shot if a callback was provided
     // (this runner is non-streaming; the loop's onText contract still gets the text).

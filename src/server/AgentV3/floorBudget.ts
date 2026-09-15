@@ -108,3 +108,89 @@ export function reconcileFloorBudget(requestedMaxTokens: number, timeoutMs: numb
   if (requested <= affordable) return { maxTokens: requested, clamped: false, requested };
   return { maxTokens: affordable, clamped: true, requested };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE OTHER HALF OF THE CLAMP: a budget small enough to be spent on NOTHING.
+//
+// 🔴 THE DEFECT THIS SECTION EXISTS FOR (autopsy ee20478d, 2026-09-15). The clamp above converts a
+// TIMEOUT into a TRUNCATION, and justifies itself on the grounds that a truncation "returns the files
+// written so far". That is true of a model that emits its tool calls as it goes. **It is false of a
+// REASONING model, whose thinking is billed to the very same `max_tokens` and is emitted BEFORE any
+// content exists.** Give such a model a budget smaller than its thinking and it returns
+// `finish_reason: 'length'` with no text, no tool call and nothing to salvage — the total loss the
+// clamp was written to prevent, arrived at by the clamp.
+//
+// The arithmetic, which is what makes this a fact rather than a reading: FLOOR_TIMEOUT_CAP_MS (150_000)
+// − FLOOR_CALL_OVERHEAD_MS (5_000) = 145_000 ms ÷ 30 ms/token = **4,833**. That is a CONSTANT — the
+// most any floor rung can ever be authorised, whatever it asks for. It is why report 58fe8254 shows
+// `outputTokens: 4833` three times on Kimi and report ee20478d shows `outputTokens: 4833` three times
+// on GLM, on different models, on different nights. Two vendors cannot independently stop at the same
+// number. It was ours.
+//
+// In ee20478d all three calls returned `ok: true`, so not one of them appeared in the provider-failure
+// ledger, and every honesty check the platform owns reads that ledger. The build wrote zero files in
+// five minutes, reported "the model replied without building" — it never replied — and asked the user
+// to buy a stronger engine for an arithmetic error of ours.
+//
+// 🔑 THE RULE: a turn that could not BEGIN an answer is a failure of that rung, never an answer from
+// it. Naming it here, next to the clamp that causes it, so the two can never again be reasoned about
+// separately.
+
+/**
+ * The marker a starved turn is reported under.
+ *
+ * ⚠️ WORDED TO SURVIVE THE CLASSIFIERS, and each omission is deliberate. It must NOT match
+ * `isTimeoutProviderError` (/timed? ?out|timeout/) or the provider would be benched for our budgeting;
+ * nor `classifyProviderFailure`'s `context-length` test (/max tokens|token limit|too long/), which
+ * would blame the prompt's size for a cap on the answer; nor `isModelUnavailableError`
+ * (/model.{0,20}(?:unavailable|deprecated|retired)/), which would retire a perfectly reachable rung as
+ * dead for ever. Changing this string means re-reading all three.
+ */
+export const STARVED_BUDGET_MESSAGE = 'the output budget ran out before the answer began';
+
+/** The shape a starved turn is recognised by — a subset of TurnResult, so this stays pure. */
+export interface StarvableTurn {
+  text?: string;
+  toolUses?: unknown[];
+  /** finish_reason was 'length' — the answer was cut at the authorised ceiling. */
+  truncated?: boolean;
+  /** The provider returned reasoning and nothing else (OpenAI-compatible `reasoning_content`). */
+  reasoningOnly?: boolean;
+}
+
+/**
+ * Did this turn spend its whole budget without producing anything a caller can use? PURE.
+ *
+ * Deliberately provider-INDEPENDENT: it asks only "was anything produced, and was the answer cut", so
+ * it is true for a vendor that reports `reasoning_content` and equally true for one that reports
+ * nothing but a `length` stop. A vendor-specific field as the only signal is how this class hid for
+ * two nights across two vendors.
+ *
+ * ⚠️ It is FALSE the moment ANY text or ANY tool call came back — a genuinely truncated tool call is a
+ * partial success the truncation guard already salvages, and must keep flowing to the loop.
+ */
+export function turnStarvedItsBudget(turn: StarvableTurn | null | undefined): boolean {
+  if (!turn) return false;
+  const producedText = typeof turn.text === 'string' && turn.text.trim() !== '';
+  const producedTools = Array.isArray(turn.toolUses) && turn.toolUses.length > 0;
+  if (producedText || producedTools) return false;
+  return Boolean(turn.truncated) || Boolean(turn.reasoningOnly);
+}
+
+/** Recognise the starved-budget failure by its marker, wherever it surfaced. PURE. */
+export function isStarvedBudgetError(error: unknown): boolean {
+  const text = error instanceof Error ? error.message : String(error ?? '');
+  return text.includes(STARVED_BUDGET_MESSAGE);
+}
+
+/**
+ * The line a starved rung throws — the marker first (the failure classifier reads the first line),
+ * then the arithmetic, so the admin report carries the numbers instead of an adjective. PURE.
+ */
+export function starvedBudgetError(granted: number, requested: number): Error {
+  const asked = requested > 0 && requested !== granted ? `, cut down from ${requested}` : '';
+  return new Error(
+    `${STARVED_BUDGET_MESSAGE} — this rung was authorised ${granted} output tokens${asked} `
+    + 'and spent every one of them without producing text or a tool call. Our own ceiling, not this provider.',
+  );
+}

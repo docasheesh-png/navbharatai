@@ -56704,3 +56704,115 @@ one. Recorded as an OPEN root cause.
 the reasoning cannot rot) and `OpenAiToolRunner.test.ts`. ⚠️ `'uses the turn maxTokens, else the option
 default'` encoded the OLD contract (the ask always passes through) — updated to the new rule with a
 generous clock, and two new tests prove the clamp fires on the exact 4efab9d7 pair.
+
+## 2026-09-15 — AUTOPSY `ee20478d`: 4,833 was never a model's number. It was ours.
+
+**Prompt:** *"Make the whole app fully responsive and comfortable to use on a mobile phone
+(touch-friendly, no horizontal scroll)."* — an EDIT of an existing 1-source-file app, on the Weak
+ladder. **Result: 0 files, RELEASE_GATE RED, ~5 minutes, and the user was asked to buy credits.**
+
+### The finding, and it is arithmetic
+
+Three model calls, all `ok: true`, all HTTP 200, all inside their clock:
+
+| | outputTokens | responseChars | toolCalls | finishReason | latency |
+|---|---|---|---|---|---|
+| call 1 | **4833** | 0 | 0 | max_tokens | 97,369 ms |
+| call 2 | **4833** | 0 | 0 | max_tokens | 95,776 ms |
+| call 3 | **4833** | 0 | 0 | max_tokens | 104,488 ms |
+
+`outputTokens: 4833` also appears **three times on KIMI** in report `58fe8254`, the night before, on a
+different model. Two vendors cannot independently stop at the same number.
+
+`FLOOR_TIMEOUT_CAP_MS` (150,000) − `FLOOR_CALL_OVERHEAD_MS` (5,000) = 145,000 ms ÷ 30 ms/token =
+**4,833**. It is a CONSTANT — the most any floor rung can ever be authorised, on every build, whatever
+it asks for. The build loop asks for 32,000; the clamp cuts ~85% of it away on every single call.
+
+**Why that is fatal rather than merely small:** `floorBudget.ts` justifies the clamp in writing —
+*"TRUNCATION: the files written so far COME BACK"*. That is true of a model that emits tool calls as it
+goes. It is **false of a reasoning model**, whose thinking is billed to the same `max_tokens` and
+emitted BEFORE any content. `glm-5.3-flash` — the first rung of the Weak AND Normal ladders since
+2026-09-14, and the plan rung for all three tiers — is exactly that, proved by the 400 in the previous
+autopsy (*"This model always engages in thinking and cannot be disabled"*). So the clamp produced the
+total loss it was written to prevent, by the mechanism it was written to use.
+
+### 🔴 THE MISSING SUBSYSTEM, named: nothing anywhere asks "did this call produce anything?"
+
+Every honesty gate the platform owns reads the **provider-FAILURE** ledger. These three calls succeeded.
+So they were in no ledger, no bucket, no predicate — `providerFailuresLookDegraded` false,
+`providerFailuresLookMisconfigured` false, `providerFailures` key absent from the report entirely — and
+the free-tier upsell fired. **A fuller wallet would have changed nothing: the ceiling is a constant of
+ours, identical on every tier we sell.**
+
+The platform DID see it, three times, and hedged: `LLM_TRUNCATED — "output may be truncated"`. The
+record carrying that warning also carries `responseChars: 0` and `toolCalls: 0`. It described a total
+loss as a possible trim, and nothing downstream was told anything had gone wrong.
+
+### The five buckets
+
+- ✅ **Self-healed: 0.** The report's own `autoResolved` count for the failure is 0. Correct, for once.
+- 🔀 **Worked around: 0** — and that is the defect. There WAS a working rung one step down
+  (`KIMI kimi-k2.6`, not a forced-thinking model) and the ladder never reached it.
+- ⏭️ **Skipped: 4.** 3 × `LLM_TRUNCATED` seen and not acted on; 1 × the empty turn appended to the
+  transcript and nudged as if it had been a reply.
+- ❌ **Still broken: 3.** Zero files; `"the model replied without building"` (it never replied); the
+  upsell.
+- 🥵 **Struggle: ~5 minutes**, of which ~4.9 were three identical doomed calls. `SANDBOX_SESSION`:
+  7.7 min up, **7.3 idle (95%)**.
+
+### DNA-level fixes (all shipped in this change)
+
+1. **`floorBudget.ts` — `turnStarvedItsBudget` / `starvedBudgetError` / `STARVED_BUDGET_MESSAGE`.**
+   A turn that produced no text and no tool call and was cut at the ceiling is a **failure of that
+   rung**, never an answer from it. Deliberately provider-INDEPENDENT (truncated OR reasoning-only),
+   because keying it on GLM's `reasoning_content` is how the class hid across two vendors.
+2. **`OpenAiToolRunner` THROWS it** instead of returning a turn nobody can use, so the chain falls to
+   the next rung — a different vendor, usually not forced-thinking — and the build proceeds.
+3. **`MultiProviderTurnRunner` retires the starved rung for the run**, keyed on the MODEL (like
+   model-unavailable), never on the provider. First occurrence is enough and the argument is not
+   "probably": the budget is a constant for the run and an agentic transcript only GROWS, so a rung
+   that could not begin an answer on turn 1 has strictly less room on turn 2. ⚠️ It is explicitly NOT
+   a timeout — benching a healthy vendor for our own arithmetic would be the wrong repair.
+4. **New failure bucket `output-budget`** + `OUTPUT_BUDGET_STARVED` (raised on FIRST sight, once per
+   provider) + `buildStarvedItsOutputBudget`. This is what puts an HTTP-200-that-produced-nothing into
+   the ledger every honesty check already reads.
+5. **The upsell is suppressed** (reason **(e)**), with a suppression note that says the true thing —
+   *"every rung ANSWERED and produced nothing… a fuller wallet buys a different model, not a different
+   ceiling"* — rather than the existing "the engine did not respond", which would send the next reader
+   to a provider status page.
+6. **`AgentRunner` stops nudging a model that never got to answer**, stops appending the empty turn
+   (which made the next prompt LONGER and so even less likely to fit), and tells the user the truth:
+   *"our engine ran out of room to answer before it began. This is our limit, not your app."*
+7. **`LLM_TRUNCATED` says what happened** when nothing was produced, instead of "may be truncated".
+
+### Step 5 — the 50/50 law: why it could arise at all
+
+`tests/floorBudget.test.ts` had a round-trip test asserting the clock derived from an ask can carry
+that ask — guarded by **`if (clock < FLOOR_TIMEOUT_CAP_MS)`**. That `if` excludes every ask big enough
+to reach the cap, and the loop's real ask (32,000) reaches it by a factor of six. **The pair was proven
+self-consistent on five sizes the engine never asks for, and the one size it asks for on every single
+build went unmeasured.** Replaced with a test that states the production number out loud — clamped,
+4,833, an 85% cut — so a retune of either constant has to be looked at.
+
+The same shape bit `tests/laneFailure.test.ts`, whose proximity window went 900 → 1800 and was about to
+need a third widening. It was measuring **comment volume**, not code distance: each autopsy adds a
+paragraph above the call site. It now measures the stripped CODE, where the real distance is small and
+constant. Verified to still bite (removing the check fails it).
+
+### ⚠️ OPEN ROOT CAUSES — recorded honestly, not patched
+
+1. **The floor can never emit a large answer in one turn, and no fix here changes that.** 32,000 tokens
+   at 30 ms/token is 16 minutes; a build turn has 480 s. `FLOOR_TIMEOUT_CAP_MS` is deliberately 150 s
+   so that two consecutive timeouts (300 s) still leave 180 s for the next vendor — raising it without
+   re-checking that sum is how a slow provider eats a whole turn. **Not touched.**
+2. **`AGENTV3_FLOOR_MS_PER_TOKEN = 30` is ~50% conservative against this very report.** 4,833 tokens in
+   (97,369 − 5,000) ms is **19.1 ms/token**. At 20 the same 150 s clock would afford ~7,250 tokens.
+   Deliberately NOT changed: the 30 was measured on a visibly degraded night and is documented as "the
+   rate we are still willing to WAIT for" — lowering it converts truncations back into timeouts, which
+   is the failure mode that returns nothing. It is a real lever and it is the admin's call.
+3. **`glm-5.3-flash` leads the Weak and Normal ladders and is the plan rung for all three tiers**, and
+   it cannot disable thinking. The ladder is admin-mandated policy (2026-09-14) and was NOT changed —
+   the fixes above make the ladder work as written by falling to the rung behind it. But two consecutive
+   autopsies, two nights, have now ended at zero files on this rung. Flagged for the admin.
+4. **Gemini's runner does not set `truncated`**, so the AgentRunner net would not fire for it. Out of
+   scope here: Gemini is not a BUILD rung on any tier ladder since 2026-09-14.

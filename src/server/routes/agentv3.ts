@@ -330,7 +330,7 @@ import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective, classifyFailure } from '../lib/BuildRetrospectiveEngine';
 import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
-import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMisconfigured } from '../AgentV3/BuildDiagnostics';
+import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMisconfigured, buildStarvedItsOutputBudget } from '../AgentV3/BuildDiagnostics';
 import { estimateBuildTime, complexityFromPrompt, liveEtaTick } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
@@ -18765,8 +18765,17 @@ async function noteBuildOutcome(
           // both — when providers really were flaky, saying so is the more useful of the two truths.
           const misconfigured = !refused && !degraded
             && providerFailuresLookMisconfigured(buildDiag.providerFailureBreakdown());
+          // (e) OUR OWN OUTPUT CEILING (build report ee20478d, 2026-09-15). The rungs ANSWERED — three
+          // times, inside their clock, HTTP 200 every time — and produced nothing, because the ceiling
+          // we authorise is spent on a reasoning model's thinking before any content exists. The user
+          // was told "the model replied without building" and asked to buy a stronger engine. A fuller
+          // wallet would have changed nothing: the ceiling is a constant of ours, identical on every
+          // tier. Grouped with (d) because it is the same KIND of fact — our configuration, not their
+          // service — and tested last only because the readings above are strictly more specific.
+          const starved = !refused && !degraded && !misconfigured
+            && buildStarvedItsOutputBudget(buildDiag.providerFailureBreakdown());
           if (!refused) {
-            const emptyCause = misconfigured
+            const emptyCause = misconfigured || starved
               ? 'our-configuration'
               : assessBuildInput(prompt).buildable ? 'engine' : 'no-instruction';
             events.emit({
@@ -18776,12 +18785,17 @@ async function noteBuildOutcome(
               ts: Date.now(),
             });
           }
-          if (refused || degraded || misconfigured) {
+          if (refused || degraded || misconfigured || starved) {
             buildDiag.record({
               phase: 'build', severity: 'warning', code: 'UPSELL_SUPPRESSED', autoResolved: false,
               message: refused
                 ? 'Did not ask this user to add credits: the engine REFUSED this request on policy grounds. A refusal is an answer, not a capability limit — selling a stronger engine after one offers to do the very thing we just declined to do.'
-                : 'Did not ask this user to add credits: the build failed because the engine did not respond, not because the app needed a stronger one. Charging for our own slowness is what this check exists to prevent.',
+                : starved
+                  // Deliberately NOT the "did not respond" wording below: it responded, inside its clock,
+                  // every time. Saying otherwise would send the next reader to a provider status page
+                  // when the number to change is ours (see floorBudget.ts).
+                  ? 'Did not ask this user to add credits: every rung ANSWERED and produced nothing, because our own output ceiling was spent before the answer began. A fuller wallet buys a different model, not a different ceiling — this build would have failed identically on the strongest engine we have.'
+                  : 'Did not ask this user to add credits: the build failed because the engine did not respond, not because the app needed a stronger one. Charging for our own slowness is what this check exists to prevent.',
             });
           }
         }

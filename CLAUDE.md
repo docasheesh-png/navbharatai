@@ -2647,7 +2647,10 @@ known-weak 4.7-flash.
   full-GPT bound, but on NO ladder: the admin's own brief says Nano is for classification/extraction,
   never an app-generation engine); `RATE_GPT_IN` / `_OUT` / `_CACHE` for the FULL gpt-5.4 — ⚠️ **still
   unknown, still the Sonnet-line bound** until the admin has its price. `AGENTV3_CHEAP_FLOOR=off`
-  is still the GLM/KIMI kill switch.
+  is still the GLM/KIMI kill switch. **Now inert for the build chain:** `AGENTV3_BUILD_CLAUDE_FIRST`,
+  `AGENTV3_BUILD_ALLOW_GEMINI`, `AGENTV3_VERTEX_PEER`, `AGENTV3_FLOOR_BALANCE`, `AGENTV3_FREE_KIMI_LEAD`,
+  `AGENTV3_WEAK_FLAGSHIP_HEAL`, `GLM_MODEL` / `KIMI_MODEL` / `AGENTV3_FREE_*_MODEL` (the ladders name their
+  models; those envs still feed the legacy `cheapBuildFloorRunners`, which only tests call now).
 - **🔴 `AGENTV3_FILE_EMBEDDINGS` — the flag that stops a PROVIDER KEY being a FEATURE SWITCH (shipped
   2026-09-15). ⚠️ NOT set, and unset means exactly today's behaviour: zero calls, zero cost.**
   `EmbeddingSearch` (AgentV3's per-file vector index) used to have NO flag at all — its only gate was
@@ -2672,10 +2675,7 @@ known-weak 4.7-flash.
   ⚠️ **If it is ever turned on, price it first.** `text-embedding-3-small` is ~5× cheaper than ada-002
   and scores better; the swap is free TODAY only because nothing is stored yet — once vectors exist,
   changing the model silently mixes incompatible embeddings at the same 1536 dimensions, which
-  `cosineSimilarity`'s length check cannot catch. **Now inert for the build chain:** `AGENTV3_BUILD_CLAUDE_FIRST`,
-  `AGENTV3_BUILD_ALLOW_GEMINI`, `AGENTV3_VERTEX_PEER`, `AGENTV3_FLOOR_BALANCE`, `AGENTV3_FREE_KIMI_LEAD`,
-  `AGENTV3_WEAK_FLAGSHIP_HEAL`, `GLM_MODEL` / `KIMI_MODEL` / `AGENTV3_FREE_*_MODEL` (the ladders name their
-  models; those envs still feed the legacy `cheapBuildFloorRunners`, which only tests call now).
+  `cosineSimilarity`'s length check cannot catch.
 - ⚠️ **Not yet done, said plainly:** the OpenAI rung is untested against a real response (no key); the
   chat router (`AIRouterManager`) has no OpenAI provider — that is slice 3, only if GPT should serve chat.
 

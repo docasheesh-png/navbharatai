@@ -43,7 +43,8 @@ describe('the Enter preference — one key, every AI', () => {
     expect(sendToggleTitle(true)).toMatch(/Enter sends/i);
     expect(sendToggleTitle(true)).toMatch(/new line/i);
     expect(sendToggleTitle(false)).toMatch(/Shift\+Enter sends/i);
-    expect(sendToggleTitle(true, 'hi')).toMatch(/[ऀ-ॿ]/);
+    // ENGLISH ONLY (admin 2026-09-14) — the Hindi variant of this tooltip was removed.
+    expect(sendToggleTitle(true)).not.toMatch(/[\u0900-\u097F]/);
   });
 });
 
@@ -96,7 +97,7 @@ describe('what the row shows, and what Clear asks first', () => {
     expect(t).toMatch(/cannot be brought back/i);
     expect(clearConfirmText(1)).toContain('1 message');   // not "1 messages"
     expect(clearConfirmText(2)).toContain('2 messages');
-    expect(clearConfirmText(3, 'hi')).toMatch(/[ऀ-ॿ]/);
+    expect(clearConfirmText(3)).not.toMatch(/[\u0900-\u097F]/);   // English only, admin 2026-09-14
   });
 });
 
@@ -133,7 +134,7 @@ describe('search — a "where did I say that?" tool', () => {
   it('says "no matches" instead of leaving a blank screen looking broken', () => {
     expect(searchResultLabel(0, 40)).toMatch(/no matches/i);
     expect(searchResultLabel(3, 41)).toBe('3 of 41');
-    expect(searchResultLabel(0, 40, 'hi')).toMatch(/[ऀ-ॿ]/);
+    expect(searchResultLabel(0, 40)).not.toMatch(/[\u0900-\u097F]/);   // English only, admin 2026-09-14
   });
 });
 

@@ -1,50 +1,38 @@
 import { describe, it, expect } from 'vitest';
-import { zipReplaceWarning, zipReplaceWarningFor, looksLikeZip } from './zipReplaceWarning';
+import { zipReplaceWarning, looksLikeZip } from './zipReplaceWarning';
 
 /**
  * The ZIP-replace warning is the sentence a user's consent rests on: saying yes DELETES the project
- * currently in the workspace. An English-only warning in front of a Hindi-speaking user is consent
- * theatre, so these lock the language behaviour rather than the exact wording.
+ * currently in the workspace. These lock what makes it real consent — that it states the
+ * CONSEQUENCE, that the confirm button names the action, and that it is in English.
+ *
+ * 🔴 The Hindi and Hinglish variants were REMOVED on 2026-09-14 (admin: "ui me professional language
+ * (english only) honi chahiye … south india wale kaise padhenge isko??"). Devanagari is not a
+ * national script, so "the user's language" was really one region's language.
  */
 describe('zipReplaceWarning', () => {
-  it('speaks the language the user is writing in', () => {
-    expect(zipReplaceWarningFor('zip upload karna hai').title).toBe(zipReplaceWarning('hinglish').title);
-    expect(zipReplaceWarningFor('क्या यह हो सकता है').title).toBe(zipReplaceWarning('hi').title);
-    expect(zipReplaceWarningFor('can you replace this project').title).toBe(zipReplaceWarning('en').title);
-  });
-
-  it('falls back to English rather than guessing', () => {
-    // No text, or a script we do not ship a translation for — we never invent one.
-    expect(zipReplaceWarningFor('').title).toBe(zipReplaceWarning('en').title);
-    expect(zipReplaceWarningFor(null).title).toBe(zipReplaceWarning('en').title);
-    expect(zipReplaceWarningFor(undefined).title).toBe(zipReplaceWarning('en').title);
-  });
-
-  it('every language states the CONSEQUENCE, not just "are you sure?"', () => {
-    // "Are you sure?" is not informed consent. Each body must say the current files go away.
-    expect(zipReplaceWarning('en').body).toMatch(/delet|replac/i);
-    expect(zipReplaceWarning('hi').body).toMatch(/हट जाएँगी|वापस नहीं/);
-    expect(zipReplaceWarning('hinglish').body).toMatch(/hat jaayengi|wapas nahi/i);
+  it('states the CONSEQUENCE, not just "are you sure?"', () => {
+    // "Are you sure?" is not informed consent. The body must say the current files go away.
+    expect(zipReplaceWarning().body).toMatch(/delet|replac/i);
   });
 
   it('the confirm button names the ACTION, never a bare OK', () => {
     // A destructive button labelled "OK" is how people delete things they meant to keep.
-    for (const lang of ['en', 'hi', 'hinglish'] as const) {
-      const t = zipReplaceWarning(lang);
-      expect(t.confirm.toLowerCase()).not.toBe('ok');
-      expect(t.confirm.length).toBeGreaterThan(2);
-      expect(t.cancel).toBeTruthy();
-      expect(t.confirm).not.toBe(t.cancel);
+    const t = zipReplaceWarning();
+    expect(t.confirm.toLowerCase()).not.toBe('ok');
+    expect(t.confirm.length).toBeGreaterThan(2);
+    expect(t.cancel).toBeTruthy();
+    expect(t.confirm).not.toBe(t.cancel);
+  });
+
+  it('ships a complete set — no half-filled dialog', () => {
+    for (const [k, v] of Object.entries(zipReplaceWarning())) {
+      expect(`${k}=${v}`.length, k).toBeGreaterThan(`${k}=`.length);
     }
   });
 
-  it('every language ships a complete set — no half-translated dialog', () => {
-    for (const lang of ['en', 'hi', 'hinglish'] as const) {
-      const t = zipReplaceWarning(lang);
-      for (const [k, v] of Object.entries(t)) {
-        expect(`${lang}.${k}=${v}`.length).toBeGreaterThan(`${lang}.${k}=`.length);
-      }
-    }
+  it('🔒 carries no Devanagari — the rule this dialog broke', () => {
+    expect(JSON.stringify(zipReplaceWarning())).not.toMatch(/[\u0900-\u097F]/);
   });
 });
 

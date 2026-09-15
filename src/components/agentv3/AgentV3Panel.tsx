@@ -4094,7 +4094,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           <div ref={scrollRef} className="flex-1 overflow-auto px-2 py-2 space-y-2.5 min-h-0">
             {(() => {
               const lastUser = [...convo].reverse().find((m) => m.role === 'user');
-              return lastUser ? <AppUpdateChatNotice userText={lastUser.text} /> : null;
+              return lastUser ? <AppUpdateChatNotice /> : null;
             })()}
             {coldStartVisible && (
               <div className="text-sm text-zinc-500 mt-6 text-center">

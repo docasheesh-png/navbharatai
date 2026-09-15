@@ -3876,6 +3876,7 @@ export default function App() {
               v3ResumeInFlightRef.current = true;
             }}
             problems={problems}
+            closeTab={closeTab}
             activeView={activeView}
             generatedCode={generatedCode}
             setGeneratedCode={setGeneratedCode}

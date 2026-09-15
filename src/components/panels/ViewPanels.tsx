@@ -96,6 +96,10 @@ export interface ViewPanelsProps {
   activeIntent: string;
   handleSendForTab: (tabId: ViewType, overrideMessage?: string) => void;
   toggleTab: (view: ViewType) => void;
+  /** Closes a tab (and its recorded children/companions) the same way its header ✕ does — used
+   *  programmatically by Code Studio's "AI" button so opening NavBharatAI Pro REPLACES the Code
+   *  Studio tab instead of stacking a second pill beside it (admin 2026-09-14). */
+  closeTab: (e: React.MouseEvent | undefined, view: ViewType) => void;
   updatePreview: (files: any) => void;
   addLog: (msg: string, level: string) => void;
   addToast: (msg: string, type: string) => void;
@@ -155,7 +159,7 @@ export function ViewPanels({
   hasGeneratedCode, setIsAppBuilt, setHasGeneratedCode,
   user, activeAgent, mode, setMode, isAppBuilt, theme, setTheme,
   messages, input, setInput, setProInput, isLoading, activeIntent,
-  handleSendForTab, toggleTab, updatePreview, addLog, addToast,
+  handleSendForTab, toggleTab, closeTab, updatePreview, addLog, addToast,
   handleAgentChange, githubToken, githubUser, githubRepoContext, isGHSyncing,
   pendingGHEdit, handleGHConfirmPush, isPushing, connectGitHub, disconnectGitHub,
   pushToRepo, firebaseToken, firebaseUser, connectFirebase, disconnectFirebase,
@@ -230,7 +234,12 @@ export function ViewPanels({
             onPreviewClick={() => toggleTab('preview')}
             // IDE top-bar "AI" button → open the FULL NavBharatAI Pro (same session/workspace/memory,
             // so it is 100% in sync with what's open in the IDE), not the in-IDE mini chat (admin 2026-07-31).
-            onSocialChatTrigger={() => toggleTab('nbi_pro_chat')}
+            // Closes the Code Studio tab first (admin 2026-09-14: "bas navbharatai pro open ho jaye,
+            // jaise normal user home page par direct navbharatai pro open karta hai") — a normal user's
+            // Home page isn't a tab pill, so opening Pro from there shows Pro alone. Leaving Code Studio's
+            // own tab open behind it was exactly the "multiple windows open up in the header" complaint;
+            // this makes the two entry points feel identical instead of Code Studio stacking on top of Pro.
+            onSocialChatTrigger={() => { closeTab(undefined, 'studio'); toggleTab('nbi_pro_chat'); }}
             theme={theme}
             onThemeChange={setTheme}
             pendingGHEdit={pendingGHEdit}

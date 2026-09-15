@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { appendLedgerEntry, LEDGER_OPENING_FIELD, LEDGER_DROPPED_FIELD } from './walletStatement';
 // ADMIN-SDK binding (security-rules-bypassing) — see serverDb.ts. Credits user_token_wallets /
 // payment_transactions / promo_redemptions, all server-only under navbharat-prod's rules.
 import { doc, getDoc, updateDoc, runTransaction, getServerDb as getDb } from './serverDb';
@@ -185,7 +186,16 @@ export function computeCreditedWallet(
     // their history is a disclosure; one they can only infer from a smaller number is not.
     description: `Wallet recharge: ₹${amountPaid}${platformFee > 0 ? ` (₹${platformFee.toFixed(2)} platform fee)` : ''} (${creditedTokens.toLocaleString()} tokens added)${promoApplied ? ' — promo credit' : ''}`,
   };
-  update.walletLedger = [...(w.walletLedger || []), ledgerEntry];
+  // 🔴 THIS APPEND USED TO BE UNBOUNDED while every DEBIT path trimmed at 500 — so a wallet's
+  // purchase rows could grow without limit toward Firestore's 1 MiB document cap, and the two halves
+  // of one ledger disagreed about whether it had a size at all. Through the shared appender it is
+  // bounded like the rest, and whatever rolls off lands in the opening balance rather than vanishing.
+  {
+    const appended = appendLedgerEntry(w, ledgerEntry);
+    update.walletLedger = appended.ledger;
+    update[LEDGER_OPENING_FIELD] = appended.openingTokens;
+    update[LEDGER_DROPPED_FIELD] = appended.droppedCount;
+  }
   // NET here, and it must stay net: this is the ₹ view of the same balance `tokenBalance` holds, so
   // crediting gross on one and net on the other is how the wallet's two views drift apart.
   update.remaining_balance = n(w.remaining_balance) + balanceAdded;

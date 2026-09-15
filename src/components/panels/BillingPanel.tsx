@@ -12,6 +12,7 @@ import { cn } from '../../lib/utils';
 import { FreeGiftBanner } from './FreeGiftBanner';
 import { HostingPlanCard } from './HostingPlanCard';
 import { ReferralPanel } from './ReferralPanel';
+import { WalletStatementPanel } from './WalletStatementPanel';
 import type { ReferralProgress } from '../../hooks/useReferralProgress';
 import { AppLockGate } from '../AppLockGate';
 import {
@@ -596,6 +597,13 @@ export function BillingPanel(props: BillingPanelProps) {
                     </div>
                   </div>
                 </div>
+
+                {/* THE STATEMENT — every credit and every charge, with a running balance, reconciled
+                    against the wallet's own figure (admin 2026-09-15: "ek ek paise ka sahi sahi
+                    hisab … user ke current balance se match hona chahiye"). It lives under the token
+                    audit because that is what it is: the audit, shown to the person whose money it
+                    is. It reports an honest mismatch rather than hiding one — see the panel. */}
+                <WalletStatementPanel userId={user.uid} />
               </div>
             )}
 

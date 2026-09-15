@@ -56384,3 +56384,81 @@ automation. A test asserts the summary object has no field that could do anythin
 ⚠️ The scan is bounded (2,000 rows), and past that ceiling the card says every figure is a **lower
 bound** rather than presenting a total that is quietly wrong. An unbounded read would be honest for a
 year and then not.
+
+## 2026-09-15 — Every paisa accounted for: the wallet statement, and the invariant that could not hold
+
+Admin: *"user wallet me token balance me ek ek paise ka sahi sahi hisab hona chahiye. ₹ / token
+credit kab kaise, ₹ / token deducted kab kaha kaise, aur user ke current balance se match hona
+chahiye."*
+
+The invariant that answers all of it is one line of bookkeeping:
+
+> **opening balance + Σ (every ledger row) = tokenBalance**
+
+And the wallet was already built to satisfy it — every writer that moves `tokenBalance` also appends
+or updates a ledger row for the same tokens. A build writes its own row; a chat turn accumulates into
+a daily bucket row that always carries the bucket's RUNNING total, so the sum stays right either way.
+
+### 🔴 Except it could not hold, and nobody had written down why
+
+The ledger is capped at **500 entries** — it must be, because an unbounded array eventually meets
+Firestore's 1 MiB document limit. All **four** trim sites did `[...ledger, entry].slice(-500)`,
+dropping the oldest rows with **nothing recorded about them**. From the 501st entry onward, the sum
+of a user's visible history was simply less than their balance by an amount nobody could name. A
+statement would have had to show a number that did not add up, or invent one.
+
+**The fix is the oldest one in accounting: a statement does not begin at the beginning of time, it
+begins at an OPENING BALANCE.** `appendLedgerEntry` folds whatever rolls off into
+`ledgerOpeningTokens`, so the invariant survives trimming exactly and for ever — the history a user
+can SEE is bounded, the arithmetic is not. All four sites now go through that one helper; trimming
+anywhere else is what re-opens this.
+
+Proven, not asserted: 600 real debits through `computeDebitedWallet`, 700 mixed credits and debits,
+50 chat turns into one rollup bucket, and 600 daily buckets — every one ends with the books
+balancing. Restoring the old `slice(-500)` fails two of them.
+
+### A second defect found on the way
+
+`payments.ts` appended to the ledger **without trimming at all**, while every debit path trimmed at
+500 — so purchase rows could grow unbounded toward the document limit, and the two halves of one
+ledger disagreed about whether it had a size. Now bounded like the rest.
+
+And an import **cycle** I created myself and then removed: `walletDebit` imported the appender while
+the appender imported `MAX_WALLET_LEDGER_ENTRIES` back from it. It typechecked and would very
+probably have worked — the constant is only read inside a function body — but a cycle on the money
+path breaks one day on a bundler change for reasons nobody can see. The constants moved down to
+`walletStatement.ts`, which is where the trim is enforced; `walletDebit` re-exports them so every
+existing importer is untouched.
+
+### What the user now sees
+
+Wallet & Billing → the balance card → **Statement**: every credit and charge, oldest to newest, with
+the date, what it was for, the rupees, and **the balance after that line**. It ends in a verdict:
+
+- **Everything adds up** — opening + credits − charges equals the balance, exactly.
+- **These entries do not match your balance** — with the difference in rupees, and an ask to report
+  it. 🔒 It shows this rather than hiding it: a statement that could only ever say "balanced" is
+  decoration, and decoration on a money screen is what stops anyone looking.
+- **Part of this history is older than our records** — the honest third state, for an account whose
+  oldest rows rolled off before opening balances existed. Calling that a mismatch would frighten
+  people whose money is fine and teach the admin to ignore the one that matters; calling it balanced
+  would be a lie.
+
+Two things that explain most real questions are stated on the screen rather than left to support: a
+charge under ₹0.01 is **carried** to the next charge instead of being rounded up, and a day's small
+assistant charges are **grouped** into one line so a wall of ₹0.02 rows never pushes the purchase
+history off the end.
+
+🔒 **The reconciler only ever REPORTS.** It never adjusts a balance to make its own arithmetic work —
+a test asserts it does not modify the document it is handed. And it reports, rather than reconciles
+away, a legitimate difference between the two stored views (`tokenBalance` and `remaining_balance`):
+a Pass buyer's views differ by the Pass price, permanently and by design, and an assignment there is
+exactly the bug `walletMirror.ts` was written to end.
+
+⚠️ **What this does NOT do, said plainly:** it cannot recover history already lost. An account that
+was past 500 entries before this shipped keeps its `unknown` verdict for ever — the rows are gone.
+From here on, every account stays reconcilable.
+
+Gate on the final state: `typecheck` · `noUnusedImports` · `typecheck:server` · full suite **23,532
+passed** · `build` · `test:bundle` · `boot:check`. The three `esmMirror` failures reproduce on clean
+`origin/main`.

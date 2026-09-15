@@ -144,8 +144,15 @@ describe('🔒 the guards that stop this coming back', () => {
       .filter((at) => !/^import /.test(ROUTE_SRC.slice(ROUTE_SRC.lastIndexOf('\n', at) + 1, at)));
     expect(sites.length).toBeGreaterThan(0);
     for (const at of sites) {
-      const around = ROUTE_SRC.slice(Math.max(0, at - 900), at + 200);
+      // ⚠️ The window is 1800, not 900, because the decision above the call site grew a fourth reason
+      // and its rationale (2026-09-15). A window is a proxy for "next to it"; when the real distance
+      // outgrows the proxy the honest move is to re-measure it, not to delete the assertion.
+      const around = ROUTE_SRC.slice(Math.max(0, at - 1800), at + 200);
       expect(around, 'an upsell with no degraded-provider check next to it').toContain('providerFailuresLookDegraded');
+      // 🔴 THE SECOND WAY WE CAN BE THE PROBLEM (build report 58fe8254): a rung that rejects every call
+      // with the same PERMANENT error. `degraded` is deliberately false for it — it is not transient —
+      // so before this predicate existed 279 identical bad-requests still ended in "Add credits".
+      expect(around, 'an upsell with no our-configuration check next to it').toContain('providerFailuresLookMisconfigured');
     }
   });
 

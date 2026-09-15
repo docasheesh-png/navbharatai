@@ -13,6 +13,7 @@
 
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 import { turnDeadline, BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE } from '../turnDeadline';
+import { glmThinkingParam } from './glmThinking';
 import {
   toolDefsToOpenAI,
   transcriptToOpenAI,
@@ -101,8 +102,15 @@ export class OpenAiToolRunner implements TurnRunner {
 
     // GLM rung only: forward the user's thinking toggle to GLM's reasoning switch, so
     // the one app-level thinking setting controls this module too — not just Claude.
-    const thinking = this.opts.thinkingControl && typeof params.thinking === 'boolean'
-      ? { thinking: { type: params.thinking ? 'enabled' as const : 'disabled' as const } }
+    //
+    // 🔴 THE MODEL DECIDES WHETHER "OFF" IS EVEN SAYABLE (build report 58fe8254, 2026-09-15). This line
+    // used to send `{ type: 'disabled' }` to whatever model the rung named, and `glm-5.3-flash` — the
+    // FIRST rung of the Weak and Normal ladders since 2026-09-14 — rejects that with a hard 400
+    // ("This model always engages in thinking and cannot be disabled"). One build logged **280** of
+    // them. `glmThinkingParam` omits the field where it cannot be honoured; see that module for why
+    // the same class had already been fixed on the Claude side and not here.
+    const thinking = this.opts.thinkingControl
+      ? glmThinkingParam(this.opts.model || params.model, params.thinking)
       : {};
 
     // The caller's remaining budget, if it gave us one, reconciled with this runner's own bound. With

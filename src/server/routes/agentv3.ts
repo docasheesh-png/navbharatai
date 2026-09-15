@@ -330,7 +330,7 @@ import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective, classifyFailure } from '../lib/BuildRetrospectiveEngine';
 import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
-import { outcomeCodeOf, providerFailuresLookDegraded } from '../AgentV3/BuildDiagnostics';
+import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMisconfigured } from '../AgentV3/BuildDiagnostics';
 import { estimateBuildTime, complexityFromPrompt, liveEtaTick } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
@@ -14354,7 +14354,9 @@ async function noteBuildOutcome(
           let text = first.text;
           let stopReason = first.stopReason;
           let attempts = 0;
-          while (shouldContinue(stopReason, attempts)) {
+          // The THIRD argument is what stops a reasoning-only response being "continued" three times
+          // into the same nothing — see shouldContinue's docblock (report 58fe8254).
+          while (shouldContinue(stopReason, attempts, text)) {
             attempts += 1;
             events.emit({ type: 'narration', agent: 'architect', text: `✍️ That file list was longer than one response allows — continuing it (${attempts}/${MAX_CONTINUATIONS}) so nothing is left half-written…`, ts: Date.now() });
             let next: { text: string; stopReason: string | null };
@@ -18649,8 +18651,20 @@ async function noteBuildOutcome(
           // genuinely DID fail, that is a new decision with its own evidence — not this one restated.
           const refused = looksLikeRefusal(result.summary);
           const degraded = !refused && providerFailuresLookDegraded(buildDiag.providerFailureBreakdown());
+          // (d) OUR OWN CONFIGURATION (build report 58fe8254, 2026-09-15). A rung that rejects every
+          // call with the same PERMANENT error is neither an engine limit nor an outage to ride out —
+          // it is our request or our ladder being wrong, and it will still be wrong tomorrow. That
+          // build logged `GLM: 279 bad-request` and the user was asked to buy credits; not one of
+          // those calls would have gone differently with a fuller wallet.
+          //
+          // Tested AFTER `degraded` because degraded is the transient reading and a build can carry
+          // both — when providers really were flaky, saying so is the more useful of the two truths.
+          const misconfigured = !refused && !degraded
+            && providerFailuresLookMisconfigured(buildDiag.providerFailureBreakdown());
           if (!refused) {
-            const emptyCause = assessBuildInput(prompt).buildable ? 'engine' : 'no-instruction';
+            const emptyCause = misconfigured
+              ? 'our-configuration'
+              : assessBuildInput(prompt).buildable ? 'engine' : 'no-instruction';
             events.emit({
               type: 'narration',
               agent: 'architect',
@@ -18658,7 +18672,7 @@ async function noteBuildOutcome(
               ts: Date.now(),
             });
           }
-          if (refused || degraded) {
+          if (refused || degraded || misconfigured) {
             buildDiag.record({
               phase: 'build', severity: 'warning', code: 'UPSELL_SUPPRESSED', autoResolved: false,
               message: refused

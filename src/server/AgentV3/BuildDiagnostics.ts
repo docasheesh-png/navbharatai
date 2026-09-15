@@ -1949,6 +1949,49 @@ export function classifyProviderFailure(reason: unknown): string {
 const DEGRADED_BUCKETS = new Set(['timeout', 'rate-limit', 'server-error', 'network']);
 
 /**
+ * Buckets that mean OUR OWN REQUEST OR LADDER IS WRONG — they never come right on a retry.
+ *
+ * 🔴 THE COMMENT ABOVE PROMISED THESE "their own, louder treatment", AND FOR THE USER THERE WAS NONE
+ * (build report 58fe8254, 2026-09-15). One free build recorded `GLM: 279 bad-request` — every call to
+ * the first rung of its ladder rejected with the same hard 400, because we asked a model that always
+ * reasons to stop reasoning. `providerFailuresLookDegraded` correctly said "not degraded" (it is not
+ * transient), `deadLadderRung` matches only `model-unavailable` so it said nothing — and the user was
+ * shown **"Your app needs our strongest engine to finish cleanly. Add credits."**
+ *
+ * We asked someone for money because our own request was malformed. That is worse than the 2026-09-13
+ * outage case this file already fixed, not better: an outage at least might have passed on a retry.
+ *
+ * `auth` is here for the same reason and had the identical hole; `model-unavailable` had an ADMIN line
+ * and still reached the upsell. One predicate now covers all three.
+ */
+const OUR_CONFIGURATION_BUCKETS = new Set(['model-unavailable', 'auth', 'bad-request']);
+
+/**
+ * Did this build fail because of OUR configuration rather than the engine's ability or the app's
+ * difficulty? Reads the SAME recorded buckets the admin's report shows, so the two cannot disagree.
+ *
+ * ⚠️ Requires a REPEAT (≥ `minCount`), deliberately. A single 400 can be one odd prompt hitting one
+ * rung's schema, and suppressing an honest outcome on one stray failure would be its own dishonesty.
+ * A bucket that repeats is a rung that cannot work — which is the thing worth being loud about. PURE.
+ */
+export function providerFailuresLookMisconfigured(
+  reasons: Record<string, string> | null | undefined,
+  minCount = 3,
+): boolean {
+  const rows = Object.values(reasons ?? {});
+  if (!rows.length) return false;
+  return rows.some((row) => String(row)
+    .split(',')
+    .some((part) => {
+      // Each part reads like " 279 bad-request" — the count and the bucket name.
+      const m = /^\s*(\d+)\s+(.+?)\s*$/.exec(part);
+      if (!m) return false;
+      const n = Number(m[1]);
+      return Number.isFinite(n) && n >= minCount && OUR_CONFIGURATION_BUCKETS.has(m[2]);
+    }));
+}
+
+/**
  * Codes that mean "we went around it", not "we fixed it". See the tally in `report()`.
  *
  * ⚠️ Keep this list in sync with any NEW fallback code. The counting reads the code rather than a

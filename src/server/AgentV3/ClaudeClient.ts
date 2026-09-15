@@ -85,6 +85,18 @@ export interface TurnResult {
    * runners that don't report it leave it undefined and billing falls back to the provider-label rate.
    */
   model?: string;
+  /**
+   * TRUE when the provider produced ONLY reasoning this turn — it spent its output budget thinking and
+   * never began the answer, so `text` and `toolUses` are both empty while `usage.outputTokens` is large.
+   *
+   * 🔴 WHY THIS IS ITS OWN FACT (build report 58fe8254, 2026-09-15). Three Kimi calls each returned
+   * `outputTokens: 4833, responseChars: 0, finish=max_tokens`, and the loop read each one as "a
+   * truncated answer" and spent ~160 s CONTINUING it — three times, identically, because there was
+   * nothing to continue from. An empty answer and an unstarted answer are different states, and only
+   * one of them is worth paying to resume. Optional: a provider that does not report reasoning leaves
+   * it undefined, which is unchanged behaviour.
+   */
+  reasoningOnly?: boolean;
 }
 
 export interface RunTurnParams {

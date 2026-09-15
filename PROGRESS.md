@@ -55936,3 +55936,91 @@ measurement instead. Branch `claude/build-cost-card`.
 first rows will mostly be re-priced from call logs, and the ones at the cap will read as lower bounds.
 The card gets exact from the first build after deploy. Sandbox cost is shown as its own column and is
 ₹0 unless `AGENTV3_BILL_SANDBOX` + `E2B_USD_PER_HOUR` are set — it is not folded into the token cost.
+
+## 2026-09-15 — AUTOPSY `58fe8254`: the first rung of every ladder could not succeed
+
+**Prompt:** *"Continue the build from where it left off and finish the remaining steps."*
+**Outcome:** 0 files · `RELEASE_GATE: RED` · `providerFailures: { GLM: 280 }` · billed ₹0 (absorbed).
+
+### The five-bucket ledger (45 entries)
+
+| | n | |
+|---|---|---|
+| ✅ self-healed | **0** | `autoResolved: 0`. Nothing was fixed |
+| 🔀 worked around | **10** | every one a fallback around a rung that could never work |
+| ⏭️ skipped | **5** | page-render · user journey · typecheck · test suite · preview (all "no live preview") |
+| ❌ still broken | **6 unresolved** | 4× `LLM_TRUNCATED`, `FASTLANE_CONTINUATION_FAILED`, `RELEASE_GATE` RED |
+| 🥵 struggled | **4** | **280 GLM failures** · 3 identical continuations (~160 s each) · 81 s first call · **11.3 min sandbox, 97% idle** |
+
+### 🔴 1 · `glm-5.3-flash` rejected every call — and it leads two ladders. FIXED.
+
+Every one of the 280 failures was the same hard 400:
+
+> *"This model always engages in thinking and cannot be disabled; please use low, high, or max"*
+
+`OpenAiToolRunner` sent `thinking: { type: 'disabled' }` whenever the app-level toggle was off. The
+**2026-09-14 ladder change** made `glm-5.3-flash` the first rung of Weak and Normal, `glm-5.3` the
+first of Strong, and GLM the **plan rung of all three** — so since that day **every build on every tier
+opened on a rung that could not answer**, and fell through it `GLM → GLM#2 → … and 80 more`.
+
+🔎 **The class was already root-caused here, for the other vendor, and the sibling was never hunted.**
+`models.ts`'s `modelSupportsAdaptiveThinking` exists because of the *identical* failure on Anthropic
+(2026-07-05, a Haiku turn sending `thinking: {type:'adaptive'}` that "burned the ENTIRE
+provider-fallback chain"). Its docblock already states the cure: *"a MISSING thinking/effort param
+never 400s … whereas an UNSUPPORTED one is a fatal request error."* The guard went on the Claude
+client and not on the OpenAI-compatible one. Note too that `ClaudeClient` only ever sends the param to
+turn thinking **on** — it never asks a model to turn it off. The GLM path did.
+
+`glmThinking.ts` applies the same rule, **default-deny on an unknown id**, with a numeric version test
+so `glm-5.4` and later are covered before they exist. A test sweeps every GLM rung of every ladder
+**and the plan rung**, read from `tierLadder.ts` itself.
+
+### 🔴 2 · Kimi thought for 4,833 tokens and returned 0 characters — three times. FIXED.
+
+`outputTokens: 4833, responseChars: 0, finish=max_tokens`, identically, three times. `parseOpenAiCompletion`
+read only `message.content`, so a reasoning model that spends its whole budget thinking was
+**indistinguishable from one that said nothing**. The adapter now reads `reasoning_content` and reports
+`reasoningOnly` — and **never puts reasoning in the transcript**; it is evidence, not the answer.
+
+**The money was burned one layer up:** `shouldContinue(stopReason, attempts)` saw a truncated stop and
+continued — from an empty string, so `continuationPrompt('')` re-issued *the same call*, three times,
+~160 s each. A truncation is worth resuming because a **partial** answer exists; nothing is partial
+about zero characters. That is the retry-loop-around-a-deterministic-failure the fourth absolute rule
+forbids. The third argument is opt-in, so no unread lane changes silently.
+
+### 🔴 3 · We asked the user for money for our own misconfiguration. FIXED.
+
+After 279 bad-requests **we caused**, the user was shown *"Your app needs our strongest engine to
+finish cleanly. Add credits."* Not one of those calls would have gone differently with a fuller wallet.
+
+The guard existed and could not see it. `DEGRADED_BUCKETS`' own comment promises that
+`model-unavailable` and `auth` get *"their own, louder treatment"* — **and for the user there was
+none**: `providerFailuresLookDegraded` correctly excludes them (they are not transient),
+`deadLadderRung` writes an **admin** line only, and the upsell fired anyway. So all three of
+`model-unavailable`, `auth` and `bad-request` reached "add credits".
+
+`providerFailuresLookMisconfigured` closes the class for all three, requiring a **repeat** (≥3) so one
+stray 400 cannot suppress an honest outcome. The message blames neither the user's wallet nor their
+wording, and names no vendor (white-label §2).
+
+⚠️ **The existing guard in `laneFailure.test.ts` caught my own change** — it requires the evidence
+check beside the upsell and my comment pushed it out of its 900-char window. Re-measured to 1800 **and
+strengthened**: it now requires *both* predicates, so a future edit cannot drop either.
+
+### Recorded as open, not fixed
+
+- 🔴 **The summary said *"Stopped, as you asked"*** to a user whose prompt was *"Continue the build"*.
+  Nobody stopped it; the budget ran out. Not traced to its source in this change.
+- 🔴 **Provider traffic continued 5.5 minutes past `endedAt`** (issues to `…789369`, build ended
+  `…460124`) — the abandoned-in-flight-call root cause already open from the cost-ceiling work.
+- 🔴 **`AGENT_STEP` claimed "1/5 file(s) unchanged (0 changed, 4 new)"** on a build that produced
+  **zero** files — the evidence-ledger class from `697b38ee`, a fourth witness.
+- 🟡 **97% sandbox idle** (11.3 min up, 0.3 min working). Fourth report running.
+- 🟡 **ETA "~2–4 min"** at `confidence 0.4` against a build that ran ~10 min. Fifth report running.
+
+### Verification
+
+`tests/thinkingParamAndReasoningOnly.test.ts` — **26 tests** built from the report's real numbers.
+**Proven by reversion:** removing the version guard fails 3; the continuation guard fails 1; the
+misconfiguration buckets fail 2. Full gate green on the final state: **1675 files · 23,465 passed ·
+0 FAIL**.

@@ -19,7 +19,9 @@ import { githubTokenFromRequest } from '../lib/mobileShipAuth';
 // ONE declaration of which workflows exist — this module used to hold its own hand-written list, which
 // never learned about the APK workflow, so "Build my APK now" was rejected with 400 before it could run.
 import { SHIP_WORKFLOW_FILES, isShipWorkflow, workflowPath, type ShipWorkflowFile } from '../../lib/shipWorkflows';
-import { missingSigningSecrets, signingVerdict } from '../../lib/signingReadiness';
+import { missingSigningSecrets, signingVerdict, ANDROID_SIGNING_SECRETS } from '../../lib/signingReadiness';
+import { generateUploadKeystore } from '../lib/androidKeystore';
+import { listRepoSecretNames, putRepoSecrets, describeGhError } from '../lib/githubSecrets';
 import { classifyBuildFailure, failedStepSection, normalizeLog, repairFiles } from '../lib/mobileBuildRepair';
 // Tier 2 of the self-healing loop: when the deterministic rules cannot name or fix the failure, the AI
 // pass reads the failing step and the files involved and writes the fix itself — the same loop Claude
@@ -131,6 +133,73 @@ export function registerMobileShipRoutes(app: Express): void {
       // Includes the ordinary case of a token that may not read secrets — honestly unknown, not missing.
       return res.json({ verdict: 'unknown', missing: [] });
     }
+  });
+
+  /**
+   * CREATE THE USER'S UPLOAD KEY AND PUT IT ON THEIR REPOSITORY — one press instead of a JDK, six
+   * keytool flags, a base64 step and four pasted secrets (admin 2026-09-15, "pehle warning, phir auto").
+   *
+   * 🔴 IT WILL NOT REPLACE AN EXISTING KEY UNLESS ASKED IN SO MANY WORDS. A user who has published once
+   * is tied to that upload key; replacing it silently makes their next update unpublishable, and no
+   * amount of convenience is worth that. Any of the four already present ⇒ 409 naming what is there.
+   *
+   * 🔒 NavBharatAI KEEPS NO COPY. The key goes into the user's own repository as sealed GitHub secrets
+   * and comes back to their browser once so they can save it. It is not written to the vault, to
+   * Firestore or to a log — this response is the only time it exists outside their repository, and
+   * `androidKeystore.ts` explains why losing it is recoverable (Play resets an UPLOAD key).
+   */
+  app.post('/api/mobile-ship/signing-setup', async (req: Request, res: Response) => {
+    const token = githubToken(req);
+    if (!token) return res.status(401).json({ error: 'Connect GitHub first — no access token was sent.' });
+    const { owner, repo, appName, replace } = (req.body || {}) as Record<string, unknown>;
+    if (!isValidRepoRef(owner, repo)) return res.status(400).json({ error: 'A valid GitHub owner and repository name are required.' });
+
+    const headers = githubApiHeaders(token);
+    let existing: string[];
+    try {
+      existing = await listRepoSecretNames(headers, String(owner), String(repo));
+    } catch (err) {
+      // We could not read the repository, so we must not write to it: creating a key beside one we
+      // simply failed to see is the single outcome this route exists to prevent.
+      return res.status(502).json({ error: describeGhError(err) });
+    }
+
+    const already = ANDROID_SIGNING_SECRETS.filter((n) => existing.includes(n));
+    if (already.length > 0 && replace !== true) {
+      return res.status(409).json({
+        error: 'This repository already has a signing key set up.',
+        present: already,
+        hint: 'If you have already published this app, keep that key — a new one cannot update it. '
+          + 'Replace it only if the app has never been on the Play Store.',
+      });
+    }
+
+    const key = generateUploadKeystore(typeof appName === 'string' ? appName : String(repo));
+    const outcome = await putRepoSecrets(headers, String(owner), String(repo), [
+      ['ANDROID_KEYSTORE_BASE64', key.base64],
+      ['ANDROID_KEYSTORE_PASSWORD', key.storePassword],
+      ['ANDROID_KEY_ALIAS', key.keyAlias],
+      ['ANDROID_KEY_PASSWORD', key.keyPassword],
+    ]);
+
+    if (outcome.failedAt) {
+      // A repository holding two of four is the "half-configured key" case signingReadiness names, and
+      // the user is told exactly which landed rather than discovering it at build time.
+      return res.status(502).json({
+        error: outcome.error || 'The signing key could not be saved to your repository.',
+        written: outcome.written,
+        failedAt: outcome.failedAt,
+      });
+    }
+
+    return res.json({
+      ok: true,
+      keystoreBase64: key.base64,
+      storePassword: key.storePassword,
+      keyAlias: key.keyAlias,
+      sha256Fingerprint: key.sha256Fingerprint,
+      validUntil: key.validUntil,
+    });
   });
 
   app.get('/api/mobile-ship/runs', async (req: Request, res: Response) => {

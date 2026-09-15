@@ -6,9 +6,32 @@
 // verbatim in file names.
 //
 // Uses OpenAI text-embedding-ada-002 (the `openai` npm package is already in
-// the project's dependencies). Requires OPENAI_API_KEY in the environment.
-// Gracefully degrades to empty results when the key is absent — the rest of the
-// engine is completely unaffected.
+// the project's dependencies). Gracefully degrades to empty results when it is
+// switched off — the rest of the engine is completely unaffected.
+//
+// 🔴 IT TAKES **TWO** THINGS TO SPEND HERE: `AGENTV3_FILE_EMBEDDINGS` on, AND an
+// `OPENAI_API_KEY`. The key ALONE is deliberately not enough, and that is the whole
+// point of the flag (found 2026-09-15, the day the admin bought an OpenAI key and
+// asked only what to name it).
+//
+// WHAT THE KEY ALONE USED TO DO, and none of it was visible anywhere:
+//   • `ToolDispatcher` calls `addFile()` on EVERY write, EVERY batched file and EVERY
+//     edit, so a normal build fired dozens of embedding calls — on every tier, free
+//     included, on NavBharatAI's own OpenAI account.
+//   • Those calls are made with the OpenAI SDK directly, so they never pass through
+//     `captureTurnUsage`. They are in no build ledger, in no rate card, invisible to
+//     `AGENTV3_BUILD_COST_CEILING_USD`, and are never billed to the user. Unmetered
+//     spend is exactly what the money audit (CLAUDE.md, 2026-09-12) named as a class.
+//   • And `search()` — the only thing that READS the index — is called from no live
+//     code path at all. So the spend bought precisely nothing: embed, persist, never
+//     read. This is recorded rather than quietly fixed because "wire the search up"
+//     is a separate, deliberate decision with its own cost.
+//
+// THE RULE IT RESTORES (CLAUDE.md, repeatedly): a key that is set must not be the
+// single input that changes behaviour, and "unset means today's behaviour exactly".
+// A PROVIDER CREDENTIAL IS NOT A FEATURE SWITCH. Turning this on is now a second,
+// deliberate decision — and honest either way: switched off it costs zero and returns
+// nothing, rather than pretending to index.
 //
 // In-memory store (no external vector DB). Embeddings are computed once per file
 // and cached in the EmbeddingStore for the process lifetime. On server restart
@@ -28,6 +51,16 @@ async function loadOpenAI(): Promise<any> {
 }
 
 import { saveEmbedding, removeEmbedding, loadEmbeddings, hashContent, needsReembed } from './EmbeddingStore';
+import { envFlag } from '../lib/envFlag';
+
+/**
+ * Is file embedding switched on? OFF unless `AGENTV3_FILE_EMBEDDINGS` says otherwise —
+ * opt-in, because every call it makes is real money that no ledger records (see the
+ * header). Read at CALL time, never at import, so the switch bites without a restart.
+ */
+export function fileEmbeddingsEnabled(): boolean {
+  return envFlag('AGENTV3_FILE_EMBEDDINGS', false);
+}
 
 export interface EmbeddingEntry {
   id: string;
@@ -86,6 +119,9 @@ export class EmbeddingStore {
 
   private async getClient(): Promise<any> {
     if (this.client) return this.client;
+    // BOTH gates, every time — never cached past the flag, so switching it off in Cloud
+    // Run stops the spend on the next call rather than on the next deploy.
+    if (!fileEmbeddingsEnabled()) return null;
     if (!this.apiKey) return null;
     const Cls = await loadOpenAI();
     if (!Cls) return null;

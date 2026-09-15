@@ -2,6 +2,7 @@ import { AnthropicProvider } from './Router/providers/AnthropicProvider';
 import { GeminiProvider } from './Router/providers/GeminiProvider';
 import { VertexProvider } from './Router/providers/VertexProvider';
 import { GrokProvider } from './Router/providers/GrokProvider';
+import { OpenAiChatProvider } from './Router/providers/OpenAiChatProvider';
 import { allowedOnFreeTier, chatCostIndex, freeTierCeiling } from './freeTierCostCeiling';
 import { GlmProvider } from './Router/providers/GlmProvider';
 import { AIProvider } from './Router/ProviderTypes';
@@ -114,22 +115,41 @@ export class AIRouterManager {
       try { router.registerProvider(slot(prov, priority, model)); } catch {}
     };
 
+    // ── THE LADDER (admin-decided 2026-09-15) ────────────────────────────────────────────────────
+    //   0. GLM glm-4.7-flash             index 0.00   ₹0 leader (registered above)
+    //   1. Vertex gemini-2.5-flash-lite  index 1.20
+    //   2. OpenAI gpt-5-nano             index 2.85   the THIRD VENDOR
+    //   3. Vertex gemini-2.5-flash       index 4.90
+    //
+    // WHAT CHANGED. The Gemini-DIRECT door and the glm-4.7 last rung are gone, and OpenAI is new.
+    // The gain is not the rung count — it is VENDOR COUNT. The old ladder spent six registrations on
+    // TWO vendors (GLM and Google), so the "fallback" was mostly Google falling back to itself, and
+    // its one non-Google rung was glm-4.7, which shares a KEY with the free leader and therefore dies
+    // in the same 429 storm that killed it. Three genuinely independent vendors answer now.
+    //
+    // ⚠️ THE ADMIN APPROVED Nano AT POSITION 1, AND THIS SHIPS IT AT 2. Said out loud because it is a
+    // change to a stated decision, not a detail: they chose Nano-before-lite while our own rate card
+    // still mis-priced flash-lite at the FLASH line (index 4.90). The invoice-verified fix in THIS
+    // SAME change drops flash-lite to 1.20 — cheaper than Nano — so the order they approved was
+    // built on a number this commit proves wrong. Their standing instruction is "kharcha kam se kam";
+    // cheapest-first serves it, and `freeChainCost.test.ts` enforces it as an invariant, so shipping
+    // the approved order would ALSO have meant weakening a guard that exists to protect the bill.
+    // Swapping priorities 1 and 2 is the whole edit if they want it back.
+    //
+    // 🔒 EVERY RUNG IS A LITERAL, ON PURPOSE. `freeChainCost.test.ts` reads these registrations out of
+    // the source to price them, and its own comment warns that a shape it cannot parse is "silently
+    // exempt from the ceiling". The first draft of this block passed the model as
+    // `OpenAiChatProvider.model()` — invisible to that parser, so the new rung would have been exempt
+    // from both the ceiling and the ordering guard with nothing failing to say so.
+    const openai = new OpenAiChatProvider();
     const vertex = new VertexProvider();
-    const gemini = new GeminiProvider();
     ([
       [vertex, 'gemini-2.5-flash-lite', 1],
-      [vertex, 'gemini-2.5-flash',      2],
-      [gemini, 'gemini-2.5-flash-lite', 3],
-      [gemini, 'gemini-2.5-flash',      4],
+      [vertex, 'gemini-2.5-flash',      3],
     ] as const).forEach(([prov, m, p]) => registerFree(prov, p, m, 'VERTEX'));
-
-    // GLM's cheap coder as the final rung — under the ceiling, and the only rung left that is not
-    // Google, so a Google-wide outage still has somewhere to go.
-    // ⚠️ HONEST CAVEAT: it shares ONE key with the flash leader. When the leader failed because that
-    // KEY was rate-limited, this rung will usually fail too — it earns its place on a model-specific
-    // failure, not on a 429 storm. It costs nothing to keep, and it is not a substitute for a second
-    // provider; a genuinely independent rung (Kimi) has no chat provider in this repo yet.
-    registerFree(new GlmProvider(), 5, 'glm-4.7', 'GLM');
+    ([
+      [openai, 'gpt-5-nano', 2],
+    ] as const).forEach(([prov, m, p]) => registerFree(prov, p, m, 'OPENAI'));
 
     return router;
   }

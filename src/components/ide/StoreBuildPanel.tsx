@@ -8,6 +8,7 @@ import { authedHeaders } from '../../lib/authHeaders';
 // Hand-written copies here and on the server are exactly why "Build my APK now" did nothing: this file
 // asked for android-apk.yml while the server's own list had never heard of it.
 import { SHIP_WORKFLOWS, needsUserSecrets, type ShipWorkflowFile } from '../../lib/shipWorkflows';
+import { signingNotReadyMessage } from '../../lib/signingReadiness';
 
 // "Build my app and give me the file" — the real pipeline, end to end, inside NavBharatAI.
 //
@@ -278,6 +279,28 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
     if (!setup) return;
     const workflow = workflowFor(kind);
     const { owner, repo } = setup;
+
+    // PRE-FLIGHT: a Play bundle cannot be signed without the user's key, so ask GitHub BEFORE spending a
+    // run (admin 2026-09-15). Until today this was only ever learned from a failed build a minute later.
+    // Only the Play path can hit it — the .apk needs no key, so this never runs there.
+    //
+    // 🔒 ONLY A VERDICT BLOCKS. `unknown` (GitHub unreachable, a token that cannot list secrets) falls
+    // through to the build exactly as before: our inability to check is not evidence about their repo,
+    // and the workflow's own pre-flight is still there to catch it honestly.
+    if (needsUserSecrets(workflow)) {
+      try {
+        const r = await fetch(
+          `/api/mobile-ship/signing-status?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`,
+          { headers: await ghHeaders() },
+        );
+        const d = await r.json().catch(() => null);
+        if (r.ok && d?.verdict === 'missing') {
+          setError(signingNotReadyMessage(Array.isArray(d.missing) ? d.missing : []));
+          setPhase('ready');
+          return;
+        }
+      } catch { /* unknown — never block a build on our own failed lookup */ }
+    }
     // Runs that already existed before this press — so we watch OUR run, never an older one whose
     // result would be reported as if it were this build.
     let seen = new Set<number>();

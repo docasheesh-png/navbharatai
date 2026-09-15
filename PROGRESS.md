@@ -56647,6 +56647,41 @@ apps belonging to real users, and the site's own `default` channel is never coun
 Reclaiming the 28 takes usage from 36/50 to 8/50 with nothing lost. Removing the 8 is a takedown, is a
 different decision, and was put back to the admin with the list offered first.
 
+---
+
+## 2026-09-15 — A Play bundle build that could not have succeeded now says so before it starts
+
+**From the same failure report.** A user pressed "Google Play bundle"; the run died in about a minute
+with `Missing signing secret(s): ANDROID_KEYSTORE_BASE64 …`, and that was the first they heard of it.
+
+**Nothing was broken, and that is the point.** The generated workflow's own pre-flight did exactly the
+right thing, and refusing to hand back an unsigned bundle is correct — Play rejects one anyway. What was
+wrong is that the press **could not have succeeded**, and only GitHub knew. `.apk` (debug-signed, zero
+setup) works on the first press for everyone; `.aab` cannot work for anybody until they install Java,
+run `keytool`, base64 the file and paste four secrets into GitHub.
+
+**What shipped:** `GET /api/mobile-ship/signing-status` asks GitHub which secret NAMES the repository
+has — the API never returns values, which is exactly what makes it safe to ask on the user's behalf —
+and `StoreBuildPanel` checks it BEFORE dispatching, but only for the workflow that needs a key.
+
+🔒 **ONLY A VERDICT BLOCKS.** A failed lookup is `unknown`, never `missing`: our own inability to check
+is not evidence about the user's repository, and a check that blocked the build on a GitHub hiccup would
+be a worse failure than the one it exists to prevent. The asymmetry sets every default here — a wrong
+"your key is missing" costs one press; a build that cannot succeed costs a run, several minutes, and the
+belief that the app builder is broken.
+
+⚠️ **A half-configured key is named exactly** (`ANDROID_KEY_ALIAS is still missing`) — that is the case
+nobody can debug from a generic message. And the refusal always names what works right now: a message
+that only says "no" leaves someone who wanted to try their app with nothing to press.
+
+**The drift guard that earned its place immediately:** a test asserts this module's four names against
+the names `mobileShipKit` really generates into the workflow — and it failed on its first run, because
+my own regex `ANDROID_[A-Z_]+` stopped at `ANDROID_KEYSTORE_BASE`, digits being outside the class. A
+guard that could not have caught a real rename would have been decoration.
+
+**Test-locked** in `tests/signingReadiness.test.ts` (11 tests). `AppKnowledgeBase` updated, so every AI
+in the app can tell a user this check exists. **Next: the auto half** — NavBharatAI generating the
+upload key and writing the four secrets itself, so the Play bundle is one press too.
 ## 2026-09-15 — A PROVIDER KEY WAS A FEATURE SWITCH: `OPENAI_API_KEY` alone started an unmetered, never-read embedding spend
 
 **How it was found.** The admin bought an OpenAI key and asked one question: *"claude run me kis naam se

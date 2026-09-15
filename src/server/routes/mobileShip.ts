@@ -19,6 +19,7 @@ import { githubTokenFromRequest } from '../lib/mobileShipAuth';
 // ONE declaration of which workflows exist — this module used to hold its own hand-written list, which
 // never learned about the APK workflow, so "Build my APK now" was rejected with 400 before it could run.
 import { SHIP_WORKFLOW_FILES, isShipWorkflow, workflowPath, type ShipWorkflowFile } from '../../lib/shipWorkflows';
+import { missingSigningSecrets, signingVerdict } from '../../lib/signingReadiness';
 import { classifyBuildFailure, failedStepSection, normalizeLog, repairFiles } from '../lib/mobileBuildRepair';
 // Tier 2 of the self-healing loop: when the deterministic rules cannot name or fix the failure, the AI
 // pass reads the failing step and the files involved and writes the fix itself — the same loop Claude
@@ -101,6 +102,37 @@ export function registerMobileShipRoutes(app: Express): void {
    * Recent builds for a generated workflow, so the user sees progress inside NavBharatAI instead of
    * being sent off to hunt through GitHub's Actions tab.
    */
+  /**
+   * IS THIS REPOSITORY READY TO SIGN A PLAY BUNDLE? — asked before the press, so a user never burns a
+   * run learning that it could not have worked (admin 2026-09-15, from a real failure report).
+   *
+   * GitHub's API returns a repository's secret NAMES and never their values, which is exactly what
+   * makes this safe to ask on the user's behalf: we learn whether they put their key here, and nothing
+   * about the key itself. A name present with a WRONG value still fails at build time, and
+   * `mobileBuildRepair` already classifies that case separately.
+   *
+   * 🔒 A FAILED LOOKUP IS `unknown`, NEVER `missing`. Our own inability to check is not evidence about
+   * the user's repository, and a verdict that blocked the build on a GitHub hiccup would be a worse
+   * failure than the one this exists to prevent. The caller treats `unknown` as "go ahead".
+   */
+  app.get('/api/mobile-ship/signing-status', async (req: Request, res: Response) => {
+    const token = githubToken(req);
+    if (!token) return res.status(401).json({ error: 'Connect GitHub first — no access token was sent.' });
+    const { owner, repo } = req.query as Record<string, string>;
+    if (!isValidRepoRef(owner, repo)) return res.status(400).json({ error: 'A valid GitHub owner and repository name are required.' });
+    try {
+      const r = await axios.get(
+        `https://api.github.com/repos/${owner}/${repo}/actions/secrets?per_page=100`,
+        { headers: githubApiHeaders(token) },
+      );
+      const names = (r.data?.secrets || []).map((s: { name?: unknown }) => String(s?.name ?? ''));
+      return res.json({ verdict: signingVerdict(names), missing: missingSigningSecrets(names) });
+    } catch {
+      // Includes the ordinary case of a token that may not read secrets — honestly unknown, not missing.
+      return res.json({ verdict: 'unknown', missing: [] });
+    }
+  });
+
   app.get('/api/mobile-ship/runs', async (req: Request, res: Response) => {
     const token = githubToken(req);
     if (!token) return res.status(401).json({ error: 'Connect GitHub first — no access token was sent.' });

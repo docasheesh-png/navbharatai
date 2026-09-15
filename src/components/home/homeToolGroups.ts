@@ -7,6 +7,11 @@
 //
 // Account & Profile and App Settings (General/Secrets/Database/Terminal/Logs) stay in Settings — those
 // are genuine settings, not builder tools.
+//
+// ⚠️ WHICH OF THESE ARE ACTUALLY LIVE IS NOT DECIDED HERE (admin 2026-09-15). Most tools below are
+// currently held back as "Coming soon" until the admin has tested them one by one — that list is
+// `src/lib/comingSoonTools.ts`, and it is the ONLY place to edit when one is re-enabled. This file
+// stays the catalogue of what exists; that file says what is switched on.
 
 import type { ComponentType } from 'react';
 import { Bot, MessageSquare, Wand2, Bug, Code, TestTube, Globe, GitBranch, Gauge, Minimize2, Palette, Layout, Puzzle, LayoutTemplate, Moon, Rocket, Smartphone, Search, Package, IndianRupee, Users2, TrendingUp, Share2, Database, Languages, FlaskConical } from 'lucide-react';

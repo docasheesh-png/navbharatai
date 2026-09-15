@@ -238,3 +238,38 @@ describe('🔒 a real wallet is sound from birth', () => {
     expect(s.verdict).toBe('balanced');
   });
 });
+
+describe('🔴 a MERGED wallet still reconciles', () => {
+  it('re-strikes the opening balance, so a merge does not invent a mismatch', async () => {
+    /**
+     * Found because accountMerge.ts was allowlisted out of the ledger-writer guard with a comment
+     * claiming it already added both wallets' opening balances. It did not: it inherited `into`'s
+     * and dropped `other`'s, so a merged wallet's books were off by the sum of the other wallet's
+     * rows — a mismatch shown to a user whose money was perfectly correct.
+     *
+     * The allowlist entry was hiding a real bug, which is what an entry with an unverified reason
+     * always risks doing.
+     */
+    const { mergeWallets } = await import('../src/server/lib/accountMerge');
+    const now = '2026-09-15T00:00:00Z';
+
+    const into = {
+      userId: 'keep', tokenBalance: 30_000, remaining_balance: 300,
+      totalTokensPurchased: 50_000, totalTokensUsed: 20_000,
+      walletLedger: [credit(50_000, 'Welcome Bonus'), debit(20_000, 'Build')],
+      [LEDGER_OPENING_FIELD]: 0,
+    };
+    const other = {
+      userId: 'merge', tokenBalance: 15_000, remaining_balance: 150,
+      totalTokensPurchased: 25_000, totalTokensUsed: 10_000,
+      walletLedger: [credit(25_000, 'Welcome Bonus'), debit(10_000, 'Build')],
+      [LEDGER_OPENING_FIELD]: 0,
+    };
+
+    const { wallet } = mergeWallets(into as never, other as never, now);
+    const s = buildWalletStatement(wallet as Record<string, unknown>);
+    expect(s.verdict, 'a merged wallet must reconcile, or it reports a fault that is not there').toBe('balanced');
+    expect(s.differenceTokens).toBe(0);
+    expect(s.actualTokens).toBe(Number(wallet.tokenBalance));
+  });
+});

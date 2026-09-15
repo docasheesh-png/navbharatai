@@ -52,9 +52,14 @@ const ALLOWED: Record<string, string> = {
   // writes is the opening balance itself.
   'src/server/lib/welcomeBonus.ts': 'constructs the initial wallet; its single row IS the opening balance',
   // Merges two wallets into one. It concatenates two whole ledgers and applies the cap itself, which
-  // is a different operation from appending one row — and it is the one place the OPENING balances
-  // of both wallets must be added together too.
-  'src/server/lib/accountMerge.ts': 'merges two ledgers; a different operation from appending a row',
+  // is a genuinely different operation from appending one row.
+  // ⚠️ THIS ENTRY'S ORIGINAL REASON WAS FALSE and is corrected here rather than quietly rewritten:
+  // it claimed the file "adds both opening balances together too". It did not — it inherited
+  // `into`'s opening and dropped `other`'s entirely, so every merged wallet would have reported a
+  // mismatch equal to the sum of the other wallet's rows. The allowlist was hiding a real bug, which
+  // is exactly what an allowlist entry with an unverified reason does. It now RE-STRIKES the opening
+  // balance (`accountMergeReconciles` in walletStatement.test.ts pins it).
+  'src/server/lib/accountMerge.ts': 're-strikes the opening balance after gluing two ledgers together',
 };
 
 describe('🔒 every wallet-ledger write goes through the shared appender', () => {

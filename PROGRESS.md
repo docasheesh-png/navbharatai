@@ -56484,3 +56484,21 @@ and their statement would have reported a mismatch nobody could explain. It now 
 field and keeps the old ones, so rows already written in the old shape still read.
 
 Gate: full suite **23,536 passed**; the three `esmMirror` failures reproduce on clean `origin/main`.
+
+### And the allowlist was hiding one more
+
+`accountMerge.ts` was allowlisted out of the ledger-writer guard with the reason *"it is the one place
+the OPENING balances of both wallets must be added together too"* — a claim written from intent rather
+than from the code. **It was false.** The merge inherited `into`'s opening and dropped `other`'s
+entirely, so every merged wallet's books were off by the sum of the other wallet's rows: a mismatch
+shown to a user whose money was perfectly correct.
+
+The merge now RE-STRIKES the opening balance — `balance − Σ(visible rows)`, struck once at the merge,
+with every later movement checked against it exactly as before — and a test pins it. The allowlist
+entry carries the corrected reason and a note that the original was wrong, rather than being quietly
+rewritten.
+
+🔒 **The lesson is about allowlists, not about merging: an exemption whose reason nobody verified is
+an exemption that hides a bug.** This is the third defect in two days found by writing down a reason
+and then checking it (the others: a guard that passed against the bug it was written for, and an
+`env` threaded for a check but not for the credential).

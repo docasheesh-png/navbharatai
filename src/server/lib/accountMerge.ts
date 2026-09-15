@@ -101,8 +101,29 @@ export function mergeWallets(into: Wallet, other: Wallet, nowIso: string): Merge
     ...(Array.isArray(other.walletLedger) ? other.walletLedger : []),
   ].slice(0, MAX_WALLET_LEDGER_ENTRIES);
 
+  // 🔴 THE OPENING BALANCE MUST BE RE-STRUCK, or a merged wallet reports a mismatch it did not
+  // have. The final ledger is TWO histories glued together plus the reconciling entry above, so the
+  // inherited `ledgerOpeningTokens` (which belonged to `into` alone) no longer describes it: the
+  // other wallet's rows are now movements with no opening of their own, and rows past the cap are
+  // dropped from the middle rather than the end. Found because this file was allowlisted out of the
+  // ledger-writer guard with a comment claiming it already did this. It did not.
+  //
+  // Opening is, by definition, `balance − Σ(visible rows)`. Computing it here is not circular: it is
+  // struck ONCE, at the merge, and every later movement is checked against it exactly as before.
+  const mergedOpeningTokens = mergedTokenBalance - ledger.reduce(
+    (sum, e) => sum + (typeof e?.amountCoinsOrTokens === 'number' && Number.isFinite(e.amountCoinsOrTokens) ? e.amountCoinsOrTokens : 0),
+    0,
+  );
+
   const wallet: Wallet = {
     ...into,
+    ledgerOpeningTokens: mergedOpeningTokens,
+    // Both wallets' dropped counts, plus whatever this merge itself dropped from the combined list.
+    ledgerDroppedCount:
+      num((into as Record<string, unknown>).ledgerDroppedCount)
+      + num((other as Record<string, unknown>).ledgerDroppedCount)
+      + Math.max(0, (Array.isArray(into.walletLedger) ? into.walletLedger.length : 0)
+        + (Array.isArray(other.walletLedger) ? other.walletLedger.length : 0) + 1 - ledger.length),
     tokenBalance: mergedTokenBalance,
     remaining_balance: mergedRemainingInr,
     total_balance: mergedRemainingInr,

@@ -13,7 +13,7 @@ import { ExtensionMarket } from './ExtensionMarket';
 import { GitPanel } from './GitPanel';
 import { PreviewSurface } from '../agentv3/PreviewSurface';
 import { uploadZipProject } from '../../lib/zipProjectUpload';
-import { zipReplaceWarningFor } from '../../lib/zipReplaceWarning';
+import { zipReplaceWarning } from '../../lib/zipReplaceWarning';
 import { zipAccept, acceptZipPick, notZipMessage } from '../../lib/zipPicker';
 import { auth } from '../../lib/firebase';
 import { AgentV3MiniChat } from './AgentV3MiniChat';
@@ -175,13 +175,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   const [zipProgress, setZipProgress] = useState('');
   const [zipError, setZipError] = useState('');
   const zipInputRef = React.useRef<HTMLInputElement | null>(null);
-  /**
-   * The warning speaks the language the USER is writing in, taken from their own most recent words.
-   * Consent to delete a project is not real consent if the sentence cannot be read.
-   */
-  const zipText = zipReplaceWarningFor(
-    [...messages].reverse().find((m) => m.sender === 'user')?.text || chatInput,
-  );
+  /** The replace warning. English only — see zipReplaceWarning.ts for why. */
+  const zipText = zipReplaceWarning();
   const [splitTabs, setSplitTabs] = useState<Tab[]>([]);
   const [splitActive, setSplitActive] = useState<string>('');
   const splitOpen = splitTabs.length > 0;   // desktop-only; see handleSplitEditor

@@ -2306,6 +2306,22 @@ Do not rewrite existing Hindi/mixed-language strings as part of unrelated work �
 that introduces unneeded diffs. All **new** code written in any session must
 follow this standard from the start.
 
+🔴 **THIS RULE WAS BROKEN SEVEN TIMES BEFORE IT WAS ENFORCED (admin 2026-09-14).** The admin caught
+the voice-chat consent popup — a **price** — rendered entirely in Devanagari, and asked the question
+that settles the whole matter: *"south india wale kaise padhenge isko??"* Devanagari is not a national
+script, so "the user's language" had quietly become one region's language shown to a national
+audience. Six separate modules had each grown the same `lang === 'hi' ? … : …` branch, and three cited
+an earlier admin instruction (2026-07-20, 2026-08-05, 2026-08-10) as justification. **Those three are
+SUPERSEDED** — the admin's own correction after seeing the result — and each module records that in
+its header so nobody re-derives the old behaviour from the old quote.
+
+🔒 **`tests/uiLanguageEnglishOnly.test.ts` now enforces it in CI**: any Devanagari in client code
+(`src/**` minus `src/server/**`, comments stripped) fails the build. A file is **guilty until
+listed**, and the allowlist entries — greeting detection fed to a model, the localisation editor for
+the USER's own app, build-prompt content, input parsing — each carry the reason they are not UI
+strings. **Comments are deliberately NOT swept**: the Hindi in them is the admin's own verbatim words
+kept as evidence, and destroying that trail to satisfy a lint would cost more than it buys.
+
 ## Engineer AI — permanent constraints (never change without admin sign-off)
 
 - **AI Model (multi-provider fallback — Phase 2, admin-approved):**

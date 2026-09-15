@@ -87,12 +87,12 @@ export const DEFAULT_ABOUT_DATA: AboutData = {
 };
 
 export const DEFAULT_DONATION_DATA: DonationData = {
-  headline: '🇮🇳 नवभारत AI के लिए आपका सहयोग',
+  headline: '🇮🇳 Support NavBharat AI',
   subHeadline: 'Empowering Bharat with Intelligence',
   upiId: 'doc.asheesh@oksbi',
   name: 'Dr. Asheesh',
-  missionStatement: 'मैंने अकेले मेहनत करके नवbharat AI बनाने की शुरुआत की है।',
-  dreamStatement: 'मेरा सपना है कि एक दिन "नवभारत AI" भारत का ही नहीं, बल्कि दुनिया का सबसे शक्तिशाली, सबसे बुद्धिमान और सबसे उपयोगी AI बने।',
+  missionStatement: 'I began building NavBharat AI on my own, through sheer hard work.',
+  dreamStatement: 'My dream is that one day NavBharat AI becomes the most powerful, most intelligent and most useful AI — not only in India, but in the world.',
   qrUrl: '',
   logoUrl: '',
 };

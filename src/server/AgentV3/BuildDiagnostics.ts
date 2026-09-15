@@ -27,6 +27,47 @@ export type IssuePhase =
 export type IssueSeverity = 'info' | 'warning' | 'error';
 
 /**
+ * Findings that measure OUR OWN PROCESS rather than the user's app. Recorded at warning severity so
+ * a human notices them; never a reason to hesitate before shipping the app.
+ */
+const PROCESS_ONLY_CODES = new Set([
+  'GROUNDING_COST', 'POST_ANSWER_TIMING', 'SERVICE_GRAPH_MULTI', 'SERVICE_GRAPH_SINGLE',
+  'JOURNEY_NOT_DERIVED', 'RELEASE_GATE',
+]);
+
+/**
+ * 🔴 IS THIS FINDING ABOUT THE APP, OR ABOUT THE ENGINE THAT BUILT IT? (autopsy 4efab9d7, 2026-09-15)
+ *
+ * The one predicate the release gate, the user's build-health card and every "is it shippable?"
+ * count read from. It exists because the answer was being given in two places and both were wrong
+ * in the same way: an ERROR recorded in the **provider** phase — a model call that timed out — was
+ * counted as a "build-breaking blocker" of the APP. The gate went RED, the verdict was flipped to
+ * NOT ok, and a build whose production bundle had compiled and whose dashboard was rendering on the
+ * admin's own phone was declared not ready and made FREE. The admin's words: *"app ban jaye to
+ * 'app not build' dikha kar free (₹0) charge nahi karna hai."*
+ *
+ * ⚠️ THE SAME CLASS HAD BEEN ROOT-CAUSED TWO DAYS EARLIER (report 70115adf, 2026-09-13) — for ONE
+ * error message. `isBudgetEndedError` taught the recorder to file a *budget-ended* call as info; a
+ * *timed-out* call, thrown by the very next code path, still landed as an unresolved error and was
+ * still counted. Fixing the instance and not the class is what this repo's a38c6fef entry warns
+ * about, and it recurred in 48 hours.
+ *
+ * THE RULE, stated once: **a fact about a provider call can never be a fact about the app.** A
+ * timeout, a fallback, a rate limit, a benched key — these are the engine's struggle ledger, which
+ * the admin reads and the fifth absolute rule mines. Whether the app works is decided by the app's
+ * own evidence: does it typecheck, does it build, does it render, does a journey hold. So every
+ * issue in the `provider` phase is excluded here BY PHASE, not by code — a new provider-phase code
+ * added next month is excluded on the day it is written, which is the only way this stays fixed.
+ *
+ * Pure. Never throws.
+ */
+export function isAppFinding(issue: Pick<BuildIssue, 'phase' | 'code'>): boolean {
+  if (!issue) return false;
+  if (issue.phase === 'provider') return false;
+  return !PROCESS_ONLY_CODES.has(issue.code);
+}
+
+/**
  * How recently a build must have recorded something to count as STILL RUNNING rather than ended.
  *
  * Two heartbeat intervals (the heartbeat is once a minute), so a single missed beat cannot make a live
@@ -961,15 +1002,24 @@ export class BuildDiagnostics {
         detail: rec.provider ? `provider=${rec.provider}` : undefined,
       });
     } else if (!rec.ok || truncated) {
+      // A TURN that timed out with nothing received is not "<model> failed" — no single provider
+      // answered at all, and the `model` on the record is the PLANNED id the runner was constructed
+      // with (App #5 lesson below: the nominal label is not the delivering provider). Report 4efab9d7
+      // printed "Model call failed (claude-sonnet-4-6)" for a weak build on which no Claude call was
+      // ever made; the chain had spent the whole turn timing out on one vendor's key pool. Say what
+      // is actually known, and keep the planned id where it belongs — in the detail.
+      const turnTimedOutUnanswered = !rec.ok && /timed out after/.test(rec.error ?? '') && !(rec.inputTokens || 0) && !rec.provider;
       this.record({
         phase: 'provider',
         severity: rec.ok ? 'warning' : 'error',
         code: rec.ok ? 'LLM_TRUNCATED' : 'LLM_CALL_FAILED',
         message: rec.ok
           ? `Model response hit the token limit (${rec.model ?? 'model'}, finish=${rec.finishReason}) — output may be truncated.`
-          : `Model call failed (${rec.model ?? 'model'}): ${rec.error ?? 'unknown error'}`.slice(0, 400),
+          : turnTimedOutUnanswered
+            ? `A model turn timed out with no provider answering (${rec.error})`.slice(0, 400)
+            : `Model call failed (${rec.model ?? 'model'}): ${rec.error ?? 'unknown error'}`.slice(0, 400),
         autoResolved: false,
-        detail: rec.provider ? `provider=${rec.provider}` : undefined,
+        detail: rec.provider ? `provider=${rec.provider}` : turnTimedOutUnanswered ? `planned model=${rec.model ?? 'unknown'} — the label, not a provider that ran` : undefined,
       });
     }
   }
@@ -1540,12 +1590,8 @@ export class BuildDiagnostics {
    * practice, which is the same as not having it. Anything already resolved is likewise not a caveat.
    */
   shippingIssueCount(severity: IssueSeverity): number {
-    const PROCESS_ONLY = new Set([
-      'GROUNDING_COST', 'POST_ANSWER_TIMING', 'SERVICE_GRAPH_MULTI', 'SERVICE_GRAPH_SINGLE',
-      'JOURNEY_NOT_DERIVED', 'RELEASE_GATE',
-    ]);
     return this.issues.filter(
-      (i) => i.severity === severity && !i.autoResolved && !PROCESS_ONLY.has(i.code),
+      (i) => i.severity === severity && !i.autoResolved && isAppFinding(i),
     ).length;
   }
 

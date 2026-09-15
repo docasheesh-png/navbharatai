@@ -56361,3 +56361,26 @@ Gate on the final state: `typecheck` · `noUnusedImports` · `typecheck:server` 
 passed** · `build` · `test:bundle` · `boot:check`. ⚠️ Three failures in `tests/esmMirror.test.ts`
 reproduce identically on clean `origin/main` with the change stashed — pre-existing, verified rather
 than assumed, and reported rather than left silent.
+
+### Correction, same day — open item 5 is closed
+
+The entry above records *"the admin-facing referral view is NOT built"*. It is now: a bounded,
+read-only `GET /api/admin/referral/summary` and a **Referral cost** card on the admin Reports tab —
+what was paid to new users, what was paid to referrers, how many accounts were referred, and the
+busiest referrers with a **"worth a look"** marker.
+
+Recorded as a correction rather than by editing the line above, per this file's append-only rule: the
+original said what was true when it was written, and a reader needs to see both.
+
+🔒 **The marker is a QUESTION, not a verdict, and there is deliberately no action behind it.** It
+means one referrer has several friends and none of them verified a mobile — the shape a factory-reset
+farm leaves. Each of those facts is individually innocent (a popular referrer has many friends; a new
+user has not verified their phone *yet*), so the response is a sorted list for a human to read: no
+block, no clawback, no flag written back to an account. The cost of being wrong about a real
+enthusiastic user is taking money they earned; the cost of being slow about a farm is bounded at
+₹1,500 by the cap. Those are not the same size, so the smaller risk gets a report rather than an
+automation. A test asserts the summary object has no field that could do anything.
+
+⚠️ The scan is bounded (2,000 rows), and past that ceiling the card says every figure is a **lower
+bound** rather than presenting a total that is quietly wrong. An unbounded read would be honest for a
+year and then not.

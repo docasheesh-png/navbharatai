@@ -14,6 +14,8 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Admin panel reads/writes admin_mfa +
 // aggregates user_token_wallets / ai_usage_logs / payment_transactions (all server-side).
 import { doc, getDoc, setDoc, updateDoc, collection, getDocs, runTransaction, getServerDb as getDb } from '../lib/serverDb';
+import { summarizeReferrals, selfPayoutTokens } from '../lib/referralAdminSummary';
+import { stepRewardTokens, referrerLifetimeCapTokens, referralRewardsEnabled } from '../lib/referralRewards';
 import { mirroredCreditPatch } from '../lib/walletMirror';
 import { audit } from '../lib/audit';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
@@ -2081,6 +2083,42 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
    * this route the first evidence of a wrong step is a 403 inside a Cloud Build log on a user's
    * publish. With it, the admin gets the exact missing step while they are still in the console.
    */
+  /**
+   * WHAT REFERRALS COST, AND WHO LOOKS LIKE A FARM.
+   *
+   * 🔒 READ-ONLY, and bounded. It reads at most MAX rows of `user_referrals` — a scan of a growing
+   * collection is exactly the kind of admin panel that becomes a Firestore bill — and when it hits
+   * that ceiling it says so, so every figure is presented as a LOWER BOUND rather than a total that
+   * is quietly wrong. The alternative, an unbounded read, would be honest for a year and then not.
+   */
+  app.get('/api/admin/referral/summary', verifyAdminToken, async (_req: Request, res: Response) => {
+    const MAX = 2000;
+    try {
+      const db = getDb() as any;
+      if (!db) return res.json({ ok: false, reason: 'store-unavailable' });
+      const snap = await getDocs(collection(db, 'user_referrals') as any);
+      const all = (snap.docs || []).map((d: any) => ({ userId: String(d.id), ...(d.data() || {}) }));
+      const rows = all.slice(0, MAX);
+      const summary = summarizeReferrals(rows, all.length > MAX);
+      const perStep = stepRewardTokens();
+      const self = selfPayoutTokens(rows, perStep);
+      return res.json({
+        ok: true,
+        enabled: referralRewardsEnabled(),
+        ...summary,
+        selfTokens: self,
+        totalTokens: self + summary.referrerTokens,
+        perStepTokens: perStep,
+        capTokens: referrerLifetimeCapTokens(),
+        // Only the busiest handful are worth a human's attention; the rest is noise on a screen.
+        topReferrers: summary.topReferrers.slice(0, 20),
+      });
+    } catch (e) {
+      // A panel that 500s tells the admin nothing. Report the failure AS the answer.
+      return res.json({ ok: false, reason: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
   app.get('/api/admin/hosting/preflight', verifyAdminToken, async (_req: Request, res: Response) => {
     try {
       // The SAME scope the hosting engine itself uses, so a permission this check passes is genuinely

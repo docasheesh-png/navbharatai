@@ -52,9 +52,16 @@ vi.mock('../src/server/lib/serverDb', () => {
   };
 });
 
+/**
+ * What FIREBASE says about the account. The claim route asks this — never the request body — so
+ * these values are what decide whether a step is genuinely done.
+ */
+let account = { email: 'u@example.com', emailVerified: true, phone: '+919876543210', providers: ['google.com', 'github.com'] };
+
 vi.mock('../src/server/lib/authMiddleware', () => ({
   requireUserMatch: () => (_req: any, _res: any, next: any) => next?.(),
   verifiedPhoneNumber: async () => null,
+  resolveAccountContact: async () => account,
 }));
 
 vi.mock('../src/server/lib/deviceIntegrity', async (orig) => {
@@ -100,6 +107,7 @@ const ENV = { ...process.env };
 beforeEach(() => {
   for (const k of Object.keys(DOCS)) delete DOCS[k];
   deviceAnswer = { verdict: 'verified', deviceId: 'a1b2c3d4e5f60718', detail: 'ok' };
+  account = { email: 'u@example.com', emailVerified: true, phone: '+919876543210', providers: ['google.com', 'github.com'] };
   process.env.REFERRAL_REWARDS = 'on';
 });
 afterEach(() => { process.env = { ...ENV }; vi.resetModules(); });
@@ -194,11 +202,13 @@ describe('the new user earns ₹400', () => {
   });
 
   it('refuses the referral-code step to somebody who never redeemed one', async () => {
+    // Now refused by the PROOF check before the transaction, with an actionable message rather than
+    // a silent `granted: 0` — the earlier behaviour told the user nothing about what to do next.
     const r = await claim('B', 'email');
     expect(r.body.granted).toBe(10_000);
     const c = await claim('B', 'referral-code');
-    expect(c.body.granted).toBe(0);
-    expect(c.body.reason).toBe('not-referred');
+    expect(c.statusCode).toBe(409);
+    expect(c.body.message).toMatch(/referral code first/i);
     expect(tokensOf('B')).toBe(10_000);
   });
 
@@ -214,6 +224,64 @@ describe('the new user earns ₹400', () => {
     const res = mockRes();
     await (await POST_CLAIM())(mockReq({ params: { userId: 'B' }, body: { step: 'free-money' } }), res);
     expect(res.statusCode).toBe(400);
+    expect(tokensOf('B')).toBe(0);
+  });
+});
+
+describe('🔴 A CLAIM IS A REQUEST, NOT A FACT — the ₹400 hole, closed', () => {
+  /**
+   * The first version of the claim route proved WHO was asking (the device) and WHETHER anything was
+   * owed (the paid-steps list) — and never asked whether the step had been done at all. Any caller
+   * on a genuine Android phone could POST all four steps having verified nothing and collect ₹400
+   * per device. Each case below is that attack, one step at a time.
+   */
+  it('refuses the EMAIL step when Firebase says the mailbox is not verified', async () => {
+    account = { ...account, emailVerified: false };
+    const r = await claim('B', 'email');
+    expect(r.statusCode).toBe(409);
+    expect(r.body.message).toMatch(/verify your email/i);
+    expect(tokensOf('B')).toBe(0);
+  });
+
+  it('refuses the EMAIL step when there is no mailbox at all', async () => {
+    account = { ...account, email: '', emailVerified: true };
+    expect((await claim('B', 'email')).statusCode).toBe(409);
+    expect(tokensOf('B')).toBe(0);
+  });
+
+  it('refuses the MOBILE step when Firebase holds no verified number', async () => {
+    account = { ...account, phone: '' };
+    const r = await claim('B', 'mobile');
+    expect(r.statusCode).toBe(409);
+    expect(r.body.message).toMatch(/verify your mobile/i);
+    expect(tokensOf('B')).toBe(0);
+  });
+
+  it('refuses the GITHUB step when github.com is not among the linked providers', async () => {
+    account = { ...account, providers: ['google.com'] };
+    const r = await claim('B', 'github');
+    expect(r.statusCode).toBe(409);
+    expect(r.body.message).toMatch(/connect your github/i);
+    expect(tokensOf('B')).toBe(0);
+  });
+
+  it('refuses the REFERRAL-CODE step when no code was ever applied', async () => {
+    const r = await claim('B', 'referral-code');
+    expect(r.statusCode).toBe(409);
+    expect(tokensOf('B')).toBe(0);
+  });
+
+  it('THE WHOLE ATTACK: a real device, nothing verified, claims all four — and gets ₹0', async () => {
+    account = { email: '', emailVerified: false, phone: '', providers: [] };
+    for (const step of ['referral-code', 'email', 'github', 'mobile']) await claim('B', step);
+    expect(tokensOf('B')).toBe(0);
+    expect(stepsOf('B')).toEqual([]);
+  });
+
+  it('an UNREADABLE account proves nothing — it never reads as "yes"', async () => {
+    // resolveAccountContact returns an empty contact on every failure, by design.
+    account = { email: null as any, emailVerified: false, phone: null as any, providers: [] };
+    expect((await claim('B', 'email')).statusCode).toBe(409);
     expect(tokensOf('B')).toBe(0);
   });
 });

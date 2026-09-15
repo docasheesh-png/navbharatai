@@ -11,6 +11,8 @@
 import { cn } from '../../lib/utils';
 import { FreeGiftBanner } from './FreeGiftBanner';
 import { HostingPlanCard } from './HostingPlanCard';
+import { ReferralPanel } from './ReferralPanel';
+import type { ReferralProgress } from '../../hooks/useReferralProgress';
 import { AppLockGate } from '../AppLockGate';
 import {
   Wallet, Zap, RefreshCw, AlertCircle, Sparkles, Gift, CreditCard,
@@ -70,6 +72,9 @@ export interface BillingPanelProps {
   onSetBudgetLimit: (v: number) => void;
   onSetDismissedReminderWarning: (v: boolean) => void;
   onSetCouponCodeInput: (v: string) => void;
+  /** The referral state for this account — see useReferralProgress. Empty off Android. */
+  referral: ReferralProgress;
+  onRefreshReferral: () => void;
   onRedeemPromoCoupon: (code: string) => void;
   onSetBuyAmountInput: (v: string) => void;
   onCreateBillingOrder: (amount: number) => void;
@@ -95,7 +100,7 @@ export function BillingPanel(props: BillingPanelProps) {
     limitError, limitSuccess,
     onShowAuth, onFetchWallet, onSetActiveBillingDetailTab, onSetReminderLimit,
     onSetBudgetLimit, onSetDismissedReminderWarning, onSetCouponCodeInput,
-    onRedeemPromoCoupon, onSetBuyAmountInput,
+    onRedeemPromoCoupon, onSetBuyAmountInput, referral, onRefreshReferral,
     onCreateBillingOrder, onSetTempReminderLimit, onSetTempBudgetLimit,
     onSetLimitError, onSetLimitSuccess, onToast,
   } = props;
@@ -623,6 +628,25 @@ export function BillingPanel(props: BillingPanelProps) {
                   </span>
                   <h3 className="text-xl font-black text-white uppercase tracking-tight mt-3">Redeem a Promotional Code</h3>
                 </div>
+
+                {/* REFER A FRIEND — the four earned steps and the code. Replaces the decorative
+                    referral surface deleted on 2026-09-15; every number in it is the server's. */}
+                <ReferralPanel
+                  userId={user.uid}
+                  enabled={referral.enabled}
+                  code={referral.code}
+                  shareMessage={referral.shareMessage}
+                  rows={referral.rows}
+                  earnedRupees={referral.earnedRupees}
+                  capRupees={referral.capRupees}
+                  capReached={referral.capReached}
+                  referred={referral.referred}
+                  emailVerified={referral.emailVerified}
+                  phoneVerified={referral.phoneVerified}
+                  githubLinked={referral.githubLinked}
+                  onRefresh={onRefreshReferral}
+                  onToast={onToast}
+                />
 
                 <div className="max-w-2xl">
                   {/* Voucher redeem panel */}

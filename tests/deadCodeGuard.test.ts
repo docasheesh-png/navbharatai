@@ -95,11 +95,8 @@ const KNOWN_UNREACHABLE = new Set([
   // them — it failed the moment the import graph reached them, which is the behaviour it was added
   // for and the first time it has been exercised on real work.)
   //
-  // The NATIVE half of the device check: the bridge to DeviceIntegrityPlugin.java. Its Android
-  // plugin is registered and live (MainActivity.java); what has no caller yet is the TypeScript
-  // side, because the screen that collects a device check is the next slice. Unreachable, inert,
-  // and self-removing on the same rule as the two above.
-  'src/lib/deviceIntegrityNative.ts',
+  // (The native device bridge sat here for one commit, until the Refer-a-Friend screen imported it.
+  // Removed by the same check, which is now the second time it has cleaned up after itself.)
 ]);
 
 describe('dead-code guard — every source file must be reachable from a real entry point', () => {

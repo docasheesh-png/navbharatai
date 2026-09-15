@@ -335,3 +335,62 @@ export function attributionRefusalMessage(reason: AttributionReason): string {
       return 'Referral codes are not available right now.';
   }
 }
+
+// ── Is the step actually DONE? ───────────────────────────────────────────────────────────────────
+//
+// 🔴 THIS SECTION EXISTS BECAUSE THE FIRST VERSION OF THE CLAIM ROUTE DID NOT HAVE IT, and the gap
+// was a ₹400 hole. `/claim` proved WHO was asking (the device) and WHETHER anything was owed (the
+// paid-steps list) — and never asked whether the step had been completed at all. So any caller on a
+// genuine Android phone could POST `step: "email"`, `step: "github"` and `step: "mobile"` without
+// verifying a single one of them and collect the full ₹400 per device.
+//
+// The lesson, written down because it is the same one the store-purchase audit produced: **a claim
+// is a request, not a fact.** The client is asking to be paid for something; only the server's own
+// record of that something can settle it. Every proof below is read from FIREBASE's account record
+// or from our own store — never from the request body, which is why none of these take one.
+
+/** What the server independently knows about an account. Every field is a fact it looked up. */
+export interface StepProof {
+  /** Firebase says this mailbox is verified (a Google or GitHub sign-in implies it). */
+  emailVerified: boolean;
+  /** Firebase holds a verified phone number for this account. */
+  phoneVerified: boolean;
+  /** `github.com` is among the account's linked sign-in providers. */
+  githubLinked: boolean;
+  /** Our own store says a referral code was applied to this account. */
+  hasReferrer: boolean;
+}
+
+/**
+ * May this step be paid for at all?
+ *
+ * PURE, and deliberately total over the four steps rather than defaulting: a step with no proof rule
+ * would otherwise be payable the moment somebody adds a fifth one, which is exactly how the original
+ * hole would come back.
+ */
+export function stepIsProven(step: RewardStep, proof: StepProof): boolean {
+  switch (step) {
+    case 'email': return proof.emailVerified === true;
+    case 'mobile': return proof.phoneVerified === true;
+    case 'github': return proof.githubLinked === true;
+    case 'referral-code': return proof.hasReferrer === true;
+    default: return false;
+  }
+}
+
+/** What the user is told when a step is not yet done. Actionable, never an accusation. */
+export function stepNotDoneMessage(step: RewardStep): string {
+  switch (step) {
+    case 'email': return 'Verify your email address first, then claim this bonus.';
+    case 'mobile': return 'Verify your mobile number first, then claim this bonus.';
+    case 'github': return 'Connect your GitHub account first, then claim this bonus.';
+    case 'referral-code': return 'Apply a friend’s referral code first, then claim this bonus.';
+    default: return 'Complete this step first, then claim the bonus.';
+  }
+}
+
+/** Is `github.com` linked? Kept here so the provider string is written down exactly once. */
+export function githubIsLinked(providers: unknown): boolean {
+  return Array.isArray(providers)
+    && providers.some((p) => String(p ?? '').trim().toLowerCase() === 'github.com');
+}

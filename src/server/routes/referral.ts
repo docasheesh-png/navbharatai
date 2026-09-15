@@ -22,7 +22,7 @@
 import type { Express, Request, Response } from 'express';
 import { randomBytes } from 'crypto';
 import { doc, getDoc, setDoc, runTransaction, getServerDb as getDb } from '../lib/serverDb';
-import { requireUserMatch } from '../lib/authMiddleware';
+import { requireUserMatch, resolveAccountContact } from '../lib/authMiddleware';
 import { sendSafeError } from '../lib/httpError';
 import { routeParam } from '../lib/expressCompat';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
@@ -32,7 +32,8 @@ import { checkDeviceIntegrity, deviceRefusalMessage, type DeviceCheck } from '..
 import {
   decideSelfReward, decideReferrerReward, decideAttribution, attributionRefusalMessage,
   selfProgress, readSteps, referralRewardsEnabled, referrerLifetimeCapTokens,
-  ALL_STEPS, type RewardStep,
+  stepIsProven, stepNotDoneMessage, githubIsLinked,
+  ALL_STEPS, type RewardStep, type StepProof,
 } from '../lib/referralRewards';
 
 /** One person's referral record. Absent until they first open the screen or redeem a code. */
@@ -133,12 +134,18 @@ export function registerReferralRoutes(app: Express): void {
       const db = getDb() as any;
       const userId = routeParam(req.params.userId);
       const code = await ensureCode(db, userId);
-      const rec = await readReferral(db, userId);
+      const [rec, contact] = await Promise.all([readReferral(db, userId), resolveAccountContact(userId)]);
       const earned = num(rec.earnedTokens);
       return res.json({
         ok: true,
         enabled: true,
         code,
+        // What the account has ACTUALLY done. The screen uses it to say what is missing instead of
+        // offering a Claim button that the proof gate would refuse — a button that cannot work is
+        // the half-built state the second absolute rule forbids.
+        emailVerified: contact.emailVerified && Boolean(contact.email),
+        phoneVerified: Boolean(contact.phone),
+        githubLinked: githubIsLinked(contact.providers),
         shareMessage: referralShareMessage(code),
         steps: selfProgress(rec.paidSteps).map((s) => ({
           step: s.step,
@@ -246,6 +253,21 @@ export function registerReferralRoutes(app: Express): void {
       }
       const deviceId = device.deviceId as string;
 
+      // 🔴 IS THE STEP ACTUALLY DONE? Asked of FIREBASE and of our own store, never of the request
+      // body. Without this the device check alone would let any caller on a real Android phone POST
+      // all four steps and collect ₹400 having verified nothing — a claim is a request, not a fact.
+      const contact = await resolveAccountContact(userId);
+      const existing = await readReferral(db, userId);
+      const proof: StepProof = {
+        emailVerified: contact.emailVerified && Boolean(contact.email),
+        phoneVerified: Boolean(contact.phone),
+        githubLinked: githubIsLinked(contact.providers),
+        hasReferrer: Boolean(existing.referrerUserId),
+      };
+      if (!stepIsProven(step, proof)) {
+        return res.status(409).json({ ok: false, granted: 0, message: stepNotDoneMessage(step) });
+      }
+
       const nowIso = new Date().toISOString();
       const selfRef = doc(db, REFERRALS, userId);
       const walletRef = doc(db, 'user_token_wallets', userId);
@@ -264,8 +286,10 @@ export function registerReferralRoutes(app: Express): void {
         });
         if (reward.tokens <= 0 || !reward.recordStep) return { granted: 0, reason: reward.reason };
 
-        // A REFERRAL-CODE step can only be claimed by someone who actually redeemed one. Without
-        // this, every user could claim ₹100 for a code they never entered.
+        // The referrer check again, INSIDE the transaction. `stepIsProven` above already asked it,
+        // but that read happened before this transaction opened; only an in-transaction read is
+        // safe against a redemption being undone in between. Cheap, and it is the one proof whose
+        // source is our own store rather than Firebase.
         if (step === 'referral-code' && !rec.referrerUserId) return { granted: 0, reason: 'not-referred' as const };
 
         const wallet = (walletSnap.exists() ? walletSnap.data() : {}) as Record<string, unknown>;

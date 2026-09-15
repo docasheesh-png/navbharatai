@@ -10,7 +10,7 @@
 // • UPPERCASE, AND MATCHED CASE-INSENSITIVELY. A phone keyboard autocapitalises; a person typing
 //   into a form does whatever they like. Refusing `nb4k7pq` when `NB4K7PQ` was meant is a support
 //   ticket for nothing.
-// • SIX CHARACTERS. 26^6 ≈ 309 million with this alphabet — far beyond any plausible user count,
+// • SIX CHARACTERS. 31^6 ≈ 887 million with this alphabet — far beyond any plausible user count,
 //   while still short enough to say out loud.
 //
 // 🔒 IT IS AN IDENTIFIER, NOT A SECRET, and nothing here should ever pretend otherwise. Knowing
@@ -26,7 +26,7 @@
 //
 // PURE — the caller supplies the randomness and owns the uniqueness check.
 
-/** No 0/O and no 1/I/L: 26 symbols that survive a screenshot, a phone call and a bad font. */
+/** No 0/O and no 1/I/L: 31 symbols that survive a screenshot, a phone call and a bad font. */
 export const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ2345678 9'.replace(/\s/g, '');
 
 export const CODE_LENGTH = 6;
@@ -41,7 +41,7 @@ export function mintReferralCode(randomBytes: (n: number) => Uint8Array): string
   const bytes = randomBytes(CODE_LENGTH);
   let out = '';
   for (let i = 0; i < CODE_LENGTH; i++) {
-    // Modulo bias is real here and deliberately accepted: 256 % 26 leaves the first four symbols
+    // Modulo bias is real here and deliberately accepted: 256 % 31 leaves the first eleven symbols
     // very slightly more likely. That matters for a secret and not at all for an identifier whose
     // uniqueness is enforced by the store — and rejection sampling would make this function able to
     // consume an unbounded amount of randomness, which is a worse property for something on a

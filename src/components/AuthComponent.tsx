@@ -24,6 +24,10 @@ import { normalizePhone } from '../lib/phoneNumber';
 import { motion } from 'motion/react';
 import { X, AlertCircle, Users } from 'lucide-react';
 import { Github } from './ui/BrandIcons';
+import {
+  shouldOfferReferralBox, referralBoxAlreadyOffered, markReferralBoxOffered, holdReferralCode,
+} from '../lib/pendingReferralCode';
+import { normalizeReferralCodeClient } from '../lib/referralCodeClient';
 import { TirangaLoader } from './ui/TirangaLoader';
 import { cn } from '../lib/utils';
 import { firebaseConfig } from '../config/firebase';
@@ -193,6 +197,34 @@ function captureGithubToken(result: UserCredential): void {
 
 export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser: any, onClose: () => void }) => {
   const [authMethod, setAuthMethod] = useState<'email' | 'phone'>('email');
+  // The one-time referral box. `offerReferralBox` is decided ONCE on mount and then marked as
+  // offered, so it cannot reappear on a re-render, a failed sign-in attempt or the next launch.
+  const [referralCodeInput, setReferralCodeInput] = useState('');
+  const [offerReferralBox, setOfferReferralBox] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      let platform = 'web';
+      try {
+        const { Capacitor } = await import('@capacitor/core');
+        platform = Capacitor.getPlatform();
+      } catch { /* web */ }
+      if (!alive) return;
+      const show = shouldOfferReferralBox({
+        platform,
+        alreadyOffered: referralBoxAlreadyOffered(),
+        // This component only renders when nobody is signed in, which is the condition itself.
+        signedIn: false,
+      });
+      if (show) {
+        setOfferReferralBox(true);
+        // Marked the moment it is SHOWN, not when it is used — a user who skips it has still been
+        // offered it, and asking again on every launch is the nagging reading of "bas 1 baar".
+        markReferralBoxOffered();
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -929,6 +961,41 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
               >
                 OTP Access
               </button>
+            </div>
+          )}
+
+          {/* HAVE A FRIEND'S CODE? — offered ONCE, on the first open of the Android app (admin
+              2026-09-15: "login page par rafreal code dalne ka option aye, bas 1 bad 1st time
+              (optional)").
+
+              🔒 IT IS OPTIONAL AND IT NEVER BLOCKS SIGN-IN. Nothing is validated here beyond the
+              shape, nothing is credited here, and leaving it empty costs the user nothing — a
+              referral is worth ₹100 and an account is worth everything, so this must never stand
+              between somebody and their app. The code is HELD and applied the moment sign-in
+              completes (useHeldReferralCode), because a referral belongs to a user and there is not
+              one yet on this screen.
+
+              🔒 ANDROID ONLY. The website has no way to claim any of it, and offering a box there
+              would be a form with nothing behind it. */}
+          {offerReferralBox && (
+            <div className="mb-4 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
+              <label className="ml-1 text-[10px] font-black uppercase tracking-widest text-amber-400">
+                Referral code (optional)
+              </label>
+              <input
+                type="text"
+                value={referralCodeInput}
+                onChange={(e) => {
+                  setReferralCodeInput(e.target.value);
+                  const clean = normalizeReferralCodeClient(e.target.value);
+                  if (clean) holdReferralCode(clean);
+                }}
+                placeholder="Enter your friend's code"
+                className="mt-1.5 w-full rounded-xl border border-white/10 bg-[#0d1117] px-4 py-3 font-mono text-xs font-bold uppercase tracking-widest text-white transition-colors focus:border-amber-500 focus:outline-none"
+              />
+              <p className="mt-2 text-[10px] font-semibold text-amber-200/60">
+                Applied automatically after you sign in. You can also add it later in Wallet &rarr; Promo.
+              </p>
             </div>
           )}
 

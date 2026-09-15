@@ -44,6 +44,8 @@ import { isModeSurface, FREE_MODE_ID, NEW_FREE_MODE_ID } from './components/chat
 import { ReportSheet } from './components/ReportSheet';
 import { TestingNotice } from './components/TestingNotice';
 import { shouldShowTestingNotice, testingNoticeAlreadyShown } from './lib/testingNotice';
+import { useReferralProgress } from './hooks/useReferralProgress';
+import { useHeldReferralCode } from './hooks/useHeldReferralCode';
 import { useShakeToReport } from './hooks/useShakeToReport';
 // EngineerAIChat retired — replaced by NavBharatAI Pro (ProV3Surface).
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -1370,6 +1372,12 @@ export default function App() {
    * Read once, in the initialiser, so a re-render can never resurrect a notice the user dismissed.
    */
   const [testingNoticeOpen, setTestingNoticeOpen] = useState(() => !testingNoticeAlreadyShown());
+  // The four welcome-gift steps, for the notice's checklist. Returns empty without a request on the
+  // website and for a signed-out visitor, so nothing here costs anything outside the Android app.
+  const referralProgress = useReferralProgress(user?.uid ?? null);
+  // A code typed on the sign-in screen is applied here, once, the moment there is an account for it.
+  // Returns a message either way; it can never throw into the screen the user just signed in to.
+  useHeldReferralCode(user?.uid ?? null, referralProgress.refresh);
   useShakeToReport(useCallback(() => setReportOpen(true), []));
 
   // Persist ONLY the v5.0 view so a reload lands back in Pro v5.0 (see activeView init). Any other
@@ -3053,6 +3061,10 @@ export default function App() {
               theme={theme}
               onReport={() => setReportOpen(true)}
               onDone={() => setTestingNoticeOpen(false)}
+              // Empty everywhere but a signed-in Android app with something unclaimed, so the notice
+              // behaves exactly as it did before for everyone else. See lib/referralChecklist.ts.
+              rewardRows={referralProgress.rows}
+              onOpenRewards={() => { setActiveView('billing'); setActiveBillingDetailTab('gift'); }}
             />
           )}
 
@@ -3675,6 +3687,8 @@ export default function App() {
               onSetDismissedReminderWarning={setDismissedReminderWarning}
               onSetCouponCodeInput={setCouponCodeInput}
               onRedeemPromoCoupon={redeemPromoCoupon}
+              referral={referralProgress}
+              onRefreshReferral={referralProgress.refresh}
               onSetBuyAmountInput={setBuyAmountInput}
               onCreateBillingOrder={createBillingOrder}
               onSetTempReminderLimit={setTempReminderLimit}

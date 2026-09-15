@@ -1438,7 +1438,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
               <span className="text-[10px] font-bold">AI</span>
             </button>
             <button
-              onClick={() => handleScreenChange('preview')}
+              // Same shape as the AI button to its left (admin 2026-09-15: "aise hi preview ko bhi karo").
+              // The parent opens NavBharatAI Pro in its own window, on Pro's Preview page — ONE preview,
+              // the one the rest of the product shows. The in-IDE screen stays only as the fallback for a
+              // parent that does not wire this (and for the command palette's markdown.showPreview).
+              onClick={() => { if (onPreviewClick) onPreviewClick(); else handleScreenChange('preview'); }}
               className={cn(
                 "w-20 h-7 rounded-r-lg flex items-center justify-center text-white shadow-lg shadow-indigo-500/20 active:scale-90 transition-all border-y border-r border-l border-indigo-400/20",
                 activeScreen === 'preview' ? "bg-indigo-700" : "bg-indigo-600 hover:bg-indigo-700"
@@ -1546,18 +1550,18 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                 </div>
                 <h3 className="text-white font-bold text-sm mb-1">Empty workspace</h3>
                 <p className="text-[#8b949e] text-xs mb-5 max-w-xs leading-relaxed">No files yet. Create one to start coding, or ask the AI to build your app.</p>
+                {/* REMOVED 2026-09-15 (admin): the "Ask AI" button that stood beside New File. It ran
+                    handleScreenChange('ai') — the in-IDE mini chat that opens in the SIDE panel, not
+                    NavBharatAI Pro — which is exactly the "wahi side me open ho jata hai" the admin
+                    reported. The header's own "AI" button is the one real way in, and it opens the full
+                    NavBharatAI Pro in its own window. Two buttons for one job, one of them going
+                    somewhere else, is the confusion; do not re-add it here. */}
                 <div className="flex items-center gap-2">
                    <button
                       onClick={() => { const name = (window.prompt('New file name (e.g. index.html)') || '').trim(); if (name) handleCreateFile(name); }}
                       className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5"
                    >
                       <Plus className="w-3.5 h-3.5" /> New File
-                   </button>
-                   <button
-                      onClick={() => handleScreenChange('ai')}
-                      className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/80 text-xs font-bold flex items-center gap-1.5"
-                   >
-                      <Bot className="w-3.5 h-3.5" /> Ask AI
                    </button>
                 </div>
              </div>

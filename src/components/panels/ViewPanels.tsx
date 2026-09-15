@@ -96,10 +96,6 @@ export interface ViewPanelsProps {
   activeIntent: string;
   handleSendForTab: (tabId: ViewType, overrideMessage?: string) => void;
   toggleTab: (view: ViewType) => void;
-  /** Closes a tab (and its recorded children/companions) the same way its header ✕ does — used
-   *  programmatically by Code Studio's "AI" button so opening NavBharatAI Pro REPLACES the Code
-   *  Studio tab instead of stacking a second pill beside it (admin 2026-09-14). */
-  closeTab: (e: React.MouseEvent | undefined, view: ViewType) => void;
   updatePreview: (files: any) => void;
   addLog: (msg: string, level: string) => void;
   addToast: (msg: string, type: string) => void;
@@ -151,6 +147,10 @@ export interface ViewPanelsProps {
   onSwitchApp?: (sessionId: string) => void;
   /** Real compile-error problems from the live preview bundle, surfaced in Code Studio's Problems panel. */
   problems?: PreviewProblem[];
+  /** Code Studio's "Preview" button: open NavBharatAI Pro in its own window, ON its Preview surface
+   *  (admin 2026-09-15). App owns it because only App can both switch the tab and hand the Pro panel
+   *  the nonce that tells it which surface to land on. */
+  onOpenProPreview: () => void;
 }
 
 export function ViewPanels({
@@ -159,14 +159,14 @@ export function ViewPanels({
   hasGeneratedCode, setIsAppBuilt, setHasGeneratedCode,
   user, activeAgent, mode, setMode, isAppBuilt, theme, setTheme,
   messages, input, setInput, setProInput, isLoading, activeIntent,
-  handleSendForTab, toggleTab, closeTab, updatePreview, addLog, addToast,
+  handleSendForTab, toggleTab, updatePreview, addLog, addToast,
   handleAgentChange, githubToken, githubUser, githubRepoContext, isGHSyncing,
   pendingGHEdit, handleGHConfirmPush, isPushing, connectGitHub, disconnectGitHub,
   pushToRepo, firebaseToken, firebaseUser, connectFirebase, disconnectFirebase,
   sessions, currentSessionId, togglePin, currentProSessionId,
   previewHistory, fileUploadConflict, resolveFileConflict, handleFilesUpload,
   downloadAppZip, setActiveFile, wallet, setShowAuth,
-  zipSizeModal, setZipSizeModal, v3Preview, previousFiles, onV3FixError, onBuildViaV5Prompt, onAutoFixInV5, onSwitchApp, problems = [],
+  zipSizeModal, setZipSizeModal, v3Preview, previousFiles, onV3FixError, onBuildViaV5Prompt, onAutoFixInV5, onSwitchApp, onOpenProPreview, problems = [],
 }: ViewPanelsProps) {
   return (
     <>
@@ -231,15 +231,15 @@ export function ViewPanels({
             mode={mode}
             onModeChange={setMode}
             isAppBuilt={isAppBuilt}
-            onPreviewClick={() => toggleTab('preview')}
+            // IDE top-bar "Preview" button → the SAME NavBharatAI Pro window the AI button opens, landing
+            // on Pro's own Preview page (admin 2026-09-15: "ide me koi user preview press kare to
+            // navbharatai pro, open hi preview wala page"). It used to open the standalone 'preview' tab
+            // — a third preview surface beside Pro's. That tab still exists and is still reachable from
+            // the slide menu and the default bottom nav; it is simply no longer what the IDE shows you.
+            onPreviewClick={onOpenProPreview}
             // IDE top-bar "AI" button → open the FULL NavBharatAI Pro (same session/workspace/memory,
             // so it is 100% in sync with what's open in the IDE), not the in-IDE mini chat (admin 2026-07-31).
-            // Closes the Code Studio tab first (admin 2026-09-14: "bas navbharatai pro open ho jaye,
-            // jaise normal user home page par direct navbharatai pro open karta hai") — a normal user's
-            // Home page isn't a tab pill, so opening Pro from there shows Pro alone. Leaving Code Studio's
-            // own tab open behind it was exactly the "multiple windows open up in the header" complaint;
-            // this makes the two entry points feel identical instead of Code Studio stacking on top of Pro.
-            onSocialChatTrigger={() => { closeTab(undefined, 'studio'); toggleTab('nbi_pro_chat'); }}
+            onSocialChatTrigger={() => toggleTab('nbi_pro_chat')}
             theme={theme}
             onThemeChange={setTheme}
             pendingGHEdit={pendingGHEdit}

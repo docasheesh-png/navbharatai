@@ -2269,6 +2269,10 @@ export default function App() {
   // A deploy requested from the Git panel for a specific real provider → v5.0 runs its real
   // build+deploy pipeline for it (see AgentV3Panel pendingDeploy).
   const [v3DeployRequest, setV3DeployRequest] = useState<{ provider: string; nonce: number } | null>(null);
+  // Code Studio's Preview button asks NavBharatAI Pro to open ON its Preview surface (admin 2026-09-15).
+  // A nonce, not a boolean, for the same reason freshOpenNonce is one: a second press must re-open the
+  // preview even after the user has switched to Pro Chat inside the panel. 0 = nobody asked.
+  const [v3OpenPreviewNonce, setV3OpenPreviewNonce] = useState(0);
   // Snapshot of the workspace files taken right BEFORE each v5.0 build (admin autopsy 2026-07-21) —
   // the Diff Viewer's "previous version" so it shows exactly what the last build changed.
   const [previousFiles, setPreviousFiles] = useState<Record<string, string>>({});
@@ -3073,6 +3077,7 @@ export default function App() {
               email={user?.email}
               resume={v3Resume}
               freshOpenNonce={v3OpenNonce}
+              openPreviewNonce={v3OpenPreviewNonce}
               /* In focus mode (header hidden) the v5.0 composer drops its outer frame so the
                  input reads as a clean floating popup — see AgentV3Panel's footer. */
               focusMode={focusMode}
@@ -3844,6 +3849,11 @@ export default function App() {
             previousFiles={previousFiles}
             onV3FixError={(errText) => setV3PendingFix({ text: `The in-browser preview failed to build with this error:\n\n${errText}\n\nPlease find the cause in the project files and fix it so the app builds and runs.`, nonce: Date.now() })}
             onBuildViaV5Prompt={(text) => { setV3PendingFix({ text, nonce: Date.now() }); toggleTab('nbi_pro_chat'); }}
+            /* Code Studio's "Preview" button (admin 2026-09-15: "ide me koi user preview press kare to
+               navbharatai pro, open hi preview wala page"). Same shape as the AI button beside it —
+               NavBharatAI Pro opens in its OWN window, alongside Code Studio — with the nonce telling the
+               panel to land on its Preview surface rather than the chat. */
+            onOpenProPreview={() => { setV3OpenPreviewNonce(Date.now()); toggleTab('nbi_pro_chat'); }}
             onAutoFixInV5={(workspaceId, text) => {
               // Open the SCANNED Pro v5 app's session (so v5 fixes THAT app's files) with the fix
               // prompt prefilled — a fresh fix conversation in the v5 page (admin 2026-07-24).
@@ -3865,7 +3875,6 @@ export default function App() {
               v3ResumeInFlightRef.current = true;
             }}
             problems={problems}
-            closeTab={closeTab}
             activeView={activeView}
             generatedCode={generatedCode}
             setGeneratedCode={setGeneratedCode}

@@ -19,7 +19,7 @@ const byId = Object.fromEntries(LEGAL_DOCS.map((d) => [d.id, d.body]));
 describe('the registry — the documents, stable ids, real content', () => {
   it('has exactly the documents it should, each with a title, subtitle, date and a long body', () => {
     expect(LEGAL_DOCS.map((d) => d.id)).toEqual([
-      'legal_privacy', 'legal_terms', 'legal_grievance', 'legal_dpa', 'legal_security', 'legal_nda',
+      'legal_privacy', 'legal_terms', 'legal_grievance', 'legal_dpa', 'legal_security',
     ]);
     for (const d of LEGAL_DOCS) {
       expect(d.title.length).toBeGreaterThan(3);
@@ -126,20 +126,10 @@ describe('Security Documents — claims must match the product', () => {
   });
 });
 
-describe('NDA — a usable mutual template', () => {
-  const n = byId.legal_nda;
-  it('is mutual, with the standard exceptions, survival, return-or-destroy and injunctive relief', () => {
-    expect(n).toMatch(/Mutual Non-Disclosure/i);
-    expect(n).toMatch(/independently developed/i);
-    expect(n).toMatch(/survive/i);
-    expect(n).toMatch(/return or securely destroy/i);
-    expect(n).toMatch(/injunctive/i);
-  });
-  it('is honestly a TEMPLATE — blanks are declared as intentional, nothing pretends to be executed', () => {
-    expect(n).toMatch(/blanks \(____\) are intentional/i);
-    expect(n).toMatch(/nothing is agreed until a filled copy is signed/i);
-  });
-});
+// The NDA template was REMOVED on 2026-09-14 (admin: "NDA. hata do!"). It was never a legal
+// requirement and — unlike a privacy policy, terms, or a grievance page — publishing a blank mutual
+// NDA is not what comparable AI platforms do either; those are negotiated per deal, not posted.
+// Nothing referenced it outside the registry, so removing it broke no link.
 
 describe('THE WHITE-LABEL LAW — no AI vendor or model name on any legal page', () => {
   const FORBIDDEN = /\b(anthropic|claude|openai|gpt-?[0-9]|gemini|vertex ai|glm|z\.ai|kimi|moonshot|grok|xai|bedrock|deepseek|sonnet|opus|haiku)\b/i;
@@ -155,7 +145,7 @@ describe('THE WHITE-LABEL LAW — no AI vendor or model name on any legal page',
 });
 
 describe('every document carries the lawyer-review honesty note in its source', () => {
-  for (const f of ['privacyPolicy', 'termsOfService', 'dpa', 'securityDocs', 'nda']) {
+  for (const f of ['privacyPolicy', 'termsOfService', 'dpa', 'securityDocs']) {
     it(`${f}.ts declares NOT LEGAL ADVICE`, () => {
       expect(readFileSync(join(process.cwd(), `src/content/legal/${f}.ts`), 'utf8')).toMatch(/NOT LEGAL ADVICE/);
     });
@@ -169,7 +159,30 @@ describe('wiring — registry drives Settings; a doc cannot exist without a butt
 
   it('the Legal & Trust group builds its tiles FROM the registry metadata (no hand-typed second list)', () => {
     expect(settings).toContain("title: 'Legal & Trust'");
-    expect(settings).toContain('LEGAL_META.map');
+    // ⚠️ THE GRID IS NOW A FILTERED VIEW, NOT THE WHOLE REGISTRY (admin 2026-09-14). What must not
+    // regress is that it is still DERIVED — a hand-typed second list is how the tiles and the
+    // documents drift apart, which is the failure this assertion was written for in the first place.
+    expect(settings).toContain('LEGAL_META.filter((d) => d.settingsTile).map');
+  });
+
+  it('🔒 every HIDDEN document is still reachable — a tile removed is not a document deleted', async () => {
+    // Hiding Grievance Redressal would be a legal problem (IT Rules, 2021) and would leave four
+    // broken links inside our own Privacy Policy and Terms. So each untiled document must keep BOTH
+    // a public URL and a link from the two documents that remain visible.
+    const { LEGAL_META } = await import('../src/content/legal/meta');
+    const { PUBLIC_LEGAL_ROUTES } = await import('../src/server/lib/legalPaths');
+    const privacy = byId.legal_privacy;
+    const terms = byId.legal_terms;
+    const hidden = LEGAL_META.filter((m) => !m.settingsTile);
+    expect(hidden.length).toBeGreaterThan(0);
+    for (const m of hidden) {
+      const path = Object.entries(PUBLIC_LEGAL_ROUTES).find(([, id]) => id === m.id)?.[0];
+      expect(path, `${m.id} has no public URL`).toBeTruthy();
+      expect(
+        privacy.includes(`(${path})`) || terms.includes(`(${path})`),
+        `${m.id} (${path}) is linked from neither the Privacy Policy nor the Terms`,
+      ).toBe(true);
+    }
   });
 
   it('BUNDLE DISCIPLINE: the heavy bodies never enter the main chunk', () => {

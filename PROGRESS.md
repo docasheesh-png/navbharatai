@@ -56238,3 +56238,82 @@ GLM was slow for ten minutes and the build wrote nothing. The family bench makes
 that has not streamed a token in 20 s is far more likely to time out than to answer, and moving on at 20 s
 instead of 60 s turns the worst case from minutes into seconds. Not built here — it changes provider
 timeouts across every lane and deserves its own measured change.
+
+
+### 2026-09-15 — 🔴 "BUILDER NE EK BHI FILE KYU NAHI BANAYI?" — answered, and it was arithmetic
+
+The admin read the previous autopsy and asked the one question it had not answered: *"autopsy me sab fix
+kar diya? builder ne ek bhi file kyu nahi banayi? fix nahi hua to karo."* **It had not been fixed.** PR
+#2951 fixed the VERDICT (a rendering app called not-built and made free) and the ladder's inability to
+reach the next vendor. It never explained why the model wrote nothing. Branch `claude/floor-budget`.
+
+**THE ANSWER, from the report's own numbers:**
+
+| | |
+|---|---|
+| What the loop AUTHORISED per turn | **32,000 output tokens** (`buildMaxTokensPerTurn`) |
+| What the floor rung ALLOWED | **60 seconds** (`AGENTV3_CHEAP_FLOOR_TIMEOUT_MS`, default 60_000) |
+| What 60 s could carry, at that build's own measured rate | **≈ 1,830 tokens** |
+| What 32,000 tokens would have taken | **≈ 16 minutes** |
+
+The rate is not an estimate — it is a two-point fit on that build's OWN successful turns, same model,
+same night: 111 tokens → 7,466 ms and 182 tokens → 9,631 ms, i.e. ≈ 4.1 s overhead + **30.5 ms/token**.
+
+**So the engine was authorising seventeen times more output than its own clock could carry.** Turns 1
+and 2 passed because they emitted 111 and 182 tokens — tool calls with no content. Turn 3 was THE TURN
+THAT WRITES THE FILES, the only turn that ever uses the budget, and it could not fit on any key.
+
+🔎 **AND IT WAS OUR CLOCK, NOT THE PROVIDER.** The eight GLM failures are spaced 60,006 / 60,010 /
+60,007 / 60,005 / 60,003 / 60,004 / 60,004 ms apart — a **seven-millisecond spread across seven gaps**.
+A provider failing does not fail on a metronome. That is `new OpenAI({ timeout: 60_000 })` firing eight
+times, and the turn then hit its own 480 s ceiling (480,039 ms elapsed) having learned nothing.
+**The build was structurally incapable of writing a file whenever the floor was slow — not unlucky.**
+
+**THE INVARIANT (`src/server/AgentV3/floorBudget.ts`): never authorise more output than the clock can
+carry.** When the two disagree the ASK is clamped to the CLOCK, and that choice is the whole point,
+because the two failure modes are not equally bad:
+- **TRUNCATION** (`finish_reason: 'length'`) — the files written so far COME BACK, and the existing
+  truncation guard names the one file that was cut.
+- **TIMEOUT** — nothing comes back. Ten minutes, zero files.
+
+A turn that asks for more than it can deliver converts a recoverable partial success into a total loss.
+
+**What changed, all derived from one module so the pair can never drift apart again:**
+1. `floorTuning().floorTimeoutMs` is **derived from the loop's own token ask** —
+   `floorTimeoutForTokens(buildMaxTokensPerTurn())`, capped at 150 s — instead of a hand-typed 60_000.
+   Change the token ask and the clock follows. An explicit env still wins.
+2. `OpenAiToolRunner` clamps `max_tokens` with `reconcileFloorBudget(ask, bound.timeoutMs)` — the
+   EFFECTIVE clock after `turnDeadline`, so a lane with 30 s left cannot authorise a 32,000-token
+   answer either.
+3. The SDK bound and the runner bound are now **one number**. They disagreed — `new OpenAI({ timeout:
+   60_000 })` against the runner's own 120 s default — which is why the report's error text is the
+   SDK's *"Request timed out."* and never the runner's own message. The runner was sizing its answer
+   for a clock that was not the one running.
+
+**The cap is sized, not picked:** a build turn gets 480 s and PR #2951 benches a provider FAMILY after
+2 consecutive timeouts, so the worst case a healthy ladder absorbs is 2 × 150 s = 300 s, leaving 180 s
+for the vendor behind it. A test asserts that sum, so raising the cap without re-checking it fails CI.
+
+**NET EFFECT, and it is better on both of the admin's aims at once:**
+| | before | after |
+|---|---|---|
+| tokens the floor can actually deliver | ~1,833 | **~4,833** (2.64×) |
+| what happens on overflow | timeout → **nothing returns** | truncation → **files so far return** |
+
+**The 50/50 half — why the condition existed at all:** two numbers owned by different modules, set years
+apart, that nobody ever compared. Neither was wrong alone. Deriving one from the other is what makes the
+mismatch impossible rather than merely fixed today.
+
+⚠️ **Honest limit, stated rather than glossed:** I cannot prove those eight calls WOULD have succeeded at
+150 s — we killed them at 60 s and never found out. What is proven is the structural defect (17× more
+authorised than deliverable) and that the clamp makes the overflow recoverable. The real answer to
+"slow versus dead" is **streaming with a first-token watchdog** — a provider that has streamed no token
+in 20 s is dead and should be dropped at 20 s, while one still producing should never be killed. That is
+the next lever, deliberately NOT built here: it changes the GLM/Kimi call from non-streaming to streaming
+on the path that carries every build, and it deserves its own measured change rather than a ride on this
+one. Recorded as an OPEN root cause.
+
+**Test-locked** in `tests/floorBudget.test.ts` (15 tests, including the report's own arithmetic pinned so
+the reasoning cannot rot) and `OpenAiToolRunner.test.ts`. ⚠️ `'uses the turn maxTokens, else the option
+default'` encoded the OLD contract (the ask always passes through) — updated to the new rule with a
+generous clock, and two new tests prove the clamp fires on the exact 4efab9d7 pair.

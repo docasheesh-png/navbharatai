@@ -485,6 +485,7 @@ import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnos
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
 import { renderRescueEligible, renderRescueConfirmsSuccess } from '../AgentV3/renderRescue';
 import { shouldAttemptPlatformPreview, platformPreviewBudgetMs, platformPreviewPort } from '../AgentV3/deliveryProof';
+import { floorTimeoutForTokens } from '../AgentV3/floorBudget';
 import { parseDevServerHealthLine } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { analyzeDesignCoverage, designRepairInstruction, designCoverageSummary } from '../AgentV3/DesignCoverage';
@@ -2347,7 +2348,14 @@ export function balanceFloorLead(runners: NamedRunner[], kimiFirst: boolean): Na
  *   • Prompt-size skip default 0 = no skip (admin 2026-07-11: "1st try for every file glm/kimi").
  */
 export function floorTuning(): { floorTimeoutMs: number; floorMaxPromptChars: number; kimiTimeoutMs: number } {
-  const floorTimeoutMs = Number(process.env.AGENTV3_CHEAP_FLOOR_TIMEOUT_MS) || 60_000;
+  // 🔴 THE DEFAULT IS DERIVED FROM WHAT WE ASK FOR, not typed in (autopsy 4efab9d7 — floorBudget.ts).
+  //
+  // It was 60_000 while `buildMaxTokensPerTurn()` authorised 32,000 output tokens — about seventeen
+  // times what 60 seconds can carry at the rate that build measured. The turn that writes the files is
+  // exactly the turn that uses the budget, so it could not fit, and a ten-minute build wrote nothing.
+  // Deriving it means the two numbers can never drift apart again: change the token ask and the clock
+  // follows. The explicit env still wins, for an admin who has measured something better.
+  const floorTimeoutMs = Number(process.env.AGENTV3_CHEAP_FLOOR_TIMEOUT_MS) || floorTimeoutForTokens(buildMaxTokensPerTurn());
   const floorMaxRaw = (process.env.AGENTV3_CHEAP_FLOOR_MAX_PROMPT_CHARS ?? '').trim();
   const floorMaxPromptChars = floorMaxRaw !== '' && Number.isFinite(Number(floorMaxRaw)) ? Number(floorMaxRaw) : 0;
   const kimiTimeoutMs = Math.max(floorTimeoutMs, Number(process.env.AGENTV3_KIMI_TIMEOUT_MS) || 120_000);
@@ -2376,7 +2384,12 @@ export function openAiCompatRunners(
     keys.forEach((apiKey, k) => {
       try {
         const client = new OpenAI({ apiKey, baseURL, timeout: timeoutMs, maxRetries: 0 });
-        const runner = pacedRunner(sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts }), floorMaxPromptChars), name);
+        // ONE bound, both places. The SDK's `timeout` is what actually aborts the request; the runner's
+        // `timeoutMs` is what it reconciles against the lane's deadline and what it sizes the token ask
+        // from. They used to disagree — SDK 60 s, runner's default 120 s — so the runner authorised an
+        // answer for a clock that was not the one running, and the report's error text ("Request timed
+        // out.") is the SDK's, never the runner's. Passing the same number makes the pair honest.
+        const runner = pacedRunner(sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts, timeoutMs }), floorMaxPromptChars), name);
         out.push(k === 0
           ? { name, runner, modelId: model }
           : { name: `${name}#${k + 1}`, runner, reportAs: name, modelId: model });

@@ -17,7 +17,7 @@ import { HOSTING_TIERS } from '../../lib/hostingTiers';
 import { registerHostingPlanSweep, reattachSuspendedDomains } from '../lib/hostingPlanSweep';
 import { sendSafeError } from '../lib/httpError';
 import { userSafeUsageLog } from '../lib/usageLogPublic';
-import { buildWalletStatement } from '../lib/walletStatement';
+import { buildWalletStatement, ledgerPatch } from '../lib/walletStatement';
 import { routeParam, routeParams } from '../lib/expressCompat';
 
 /** Resolve a login uid to its canonical wallet id (follows `mergedInto`). No-op unless
@@ -451,16 +451,15 @@ export function registerWalletRoutes(app: Express): void {
           phoneVerifiedGift: true,
           // A wallet that claims its phone bonus is on the new plan from here: no weekly ladder.
           giftPlan: 'v2',
-          walletLedger: [
-            ...(Array.isArray(w.walletLedger) ? w.walletLedger : []),
-            {
-              type: 'purchase',
-              amountCoinsOrTokens: claim.tokens,
-              moneySpent: 0,
-              timestamp: nowIso,
-              description: `Phone verified: ₹${creditInr.toLocaleString('en-IN')} bonus added`,
-            },
-          ],
+          // 🔒 Through the shared appender — see walletStatement.ts. A direct `[...ledger, entry]`
+          // here is what breaks "opening + Σ rows = balance", the invariant the statement rests on.
+          ...ledgerPatch(w, {
+            type: 'purchase',
+            amountCoinsOrTokens: claim.tokens,
+            moneySpent: 0,
+            timestamp: nowIso,
+            description: `Phone verified: ₹${creditInr.toLocaleString('en-IN')} bonus added`,
+          }),
           updatedAt: nowIso,
         });
         // Spend the NUMBER in the same transaction as the money.

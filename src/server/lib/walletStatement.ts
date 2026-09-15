@@ -66,6 +66,16 @@ export const LEDGER_OPENING_AT_FIELD = 'ledgerOpeningAt';
 /** How many rows have ever rolled off. Lets the statement say "and N earlier entries". */
 export const LEDGER_DROPPED_FIELD = 'ledgerDroppedCount';
 
+/**
+ * One ledger row.
+ *
+ * The named fields are the CORE every reader depends on — `amountCoinsOrTokens` above all, because
+ * the whole invariant is its sum. The index signature is there because a row is untyped JSON that
+ * different writers decorate differently (`planRef` on a plan credit, `reason` on an admin
+ * adjustment), and a closed type would have forced those callers to cast — which is how a money
+ * write ends up bypassing the helper that keeps it bounded. Extra fields are carried through
+ * untouched and ignored by the arithmetic.
+ */
 export interface LedgerRow {
   type?: unknown;
   amountCoinsOrTokens?: unknown;
@@ -76,6 +86,7 @@ export interface LedgerRow {
   buildRef?: unknown;
   rollupRef?: unknown;
   absorbedInr?: unknown;
+  [extra: string]: unknown;
 }
 
 function num(v: unknown): number {
@@ -289,5 +300,31 @@ export function buildWalletStatement(wallet: Record<string, unknown> | null | un
     rupeeViewTokens,
     rupeeViewAgrees,
     notes,
+  };
+}
+
+/**
+ * The append, as a PATCH ready to spread into a wallet write.
+ *
+ * 🔒 THIS EXISTS BECAUSE THE RAW APPENDER WAS TOO EASY TO USE WRONGLY. Seven call sites wrote
+ * `walletLedger: [...(w.walletLedger || []), entry]` directly — each of them bounded by nothing and
+ * each of them silently breaking the one invariant the user's statement rests on. A helper that
+ * returns the ledger AND both bookkeeping fields together means a caller cannot take the first and
+ * forget the other two, which is exactly how the original four trim sites came to be wrong.
+ *
+ *     tx.set(ref, { ...otherFields, ...ledgerPatch(w, entry), updatedAt: now }, { merge: true })
+ *
+ * PURE.
+ */
+export function ledgerPatch(
+  wallet: Record<string, unknown> | null | undefined,
+  entry: LedgerRow,
+  opts?: { replaceRollupRef?: string },
+): Record<string, unknown> {
+  const r = appendLedgerEntry(wallet, entry, opts);
+  return {
+    walletLedger: r.ledger,
+    [LEDGER_OPENING_FIELD]: r.openingTokens,
+    [LEDGER_DROPPED_FIELD]: r.droppedCount,
   };
 }

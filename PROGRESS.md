@@ -56462,3 +56462,25 @@ From here on, every account stays reconcilable.
 Gate on the final state: `typecheck` · `noUnusedImports` · `typecheck:server` · full suite **23,532
 passed** · `build` · `test:bundle` · `boot:check`. The three `esmMirror` failures reproduce on clean
 `origin/main`.
+
+### The same day — the invariant was only half true, and one of the offenders was mine
+
+The entry above fixed the four TRIM sites. An audit of every writer then found the other half: **eight**
+places appended to `walletLedger` by hand, `[...(w.walletLedger || []), entry]`, bounded by nothing
+and moving no opening balance — the phone bonus, the admin adjustment, the hosting refund, the plan
+credit, the remix credit, and **both referral credits, which I had written myself minutes after
+fixing the defect everywhere else.**
+
+That last one is the argument for the test rather than the convention: the author who had just
+root-caused the bug reintroduced it while the fix was still uncommitted. `ledgerPatch(wallet, entry)`
+now returns the ledger AND both bookkeeping fields together, so a caller cannot take one and forget
+the others, and `tests/ledgerWritersUseAppender.test.ts` fails CI on a hand-rolled write or a trim
+outside the appender. Guilty until allowlisted; three files are listed, each with the reason.
+
+🔴 **And the guard found a worse one than the trim.** The Nav App Store remix credit recorded its
+amount as `tokens` / `amountInr` while every reader — and the reconciler — sums
+`amountCoinsOrTokens`. So a creator's remix earnings RAISED THEIR BALANCE AND APPEARED IN NO TOTAL,
+and their statement would have reported a mismatch nobody could explain. It now writes the standard
+field and keeps the old ones, so rows already written in the old shape still read.
+
+Gate: full suite **23,536 passed**; the three `esmMirror` failures reproduce on clean `origin/main`.

@@ -27,6 +27,7 @@ import { sendSafeError } from '../lib/httpError';
 import { routeParam } from '../lib/expressCompat';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
 import { mirroredCreditPatch } from '../lib/walletMirror';
+import { ledgerPatch } from '../lib/walletStatement';
 import { mintReferralCode, normalizeReferralCode, referralShareMessage } from '../lib/referralCode';
 import { checkDeviceIntegrity, deviceRefusalMessage, type DeviceCheck } from '../lib/deviceIntegrity';
 import {
@@ -302,16 +303,17 @@ export function registerReferralRoutes(app: Express): void {
           ...patch,
           freeGiftedTokens: num(wallet.freeGiftedTokens) + reward.tokens,
           totalTokensPurchased: num(wallet.totalTokensPurchased) + reward.tokens,
-          walletLedger: [
-            ...(Array.isArray(wallet.walletLedger) ? wallet.walletLedger : []),
-            {
-              type: 'purchase',
-              amountCoinsOrTokens: reward.tokens,
-              moneySpent: 0,
-              timestamp: nowIso,
-              description: `Referral bonus: ₹${rupees.toLocaleString('en-IN')} credited`,
-            },
-          ],
+          // 🔒 Through the shared appender — see walletStatement.ts. This credit is bounded like
+          // every other ledger write, and whatever rolls off lands in the opening balance so the
+          // user's statement still reconciles. Written directly, it would have been the eighth
+          // instance of the very defect the statement work had just fixed.
+          ...ledgerPatch(wallet, {
+            type: 'purchase',
+            amountCoinsOrTokens: reward.tokens,
+            moneySpent: 0,
+            timestamp: nowIso,
+            description: `Referral bonus: ₹${rupees.toLocaleString('en-IN')} credited`,
+          }),
           updatedAt: nowIso,
         }, { merge: true });
 
@@ -382,17 +384,15 @@ async function payReferrer(db: any, referrerId: string, friendId: string, nowIso
       ...patch,
       freeGiftedTokens: num(wallet.freeGiftedTokens) + reward.tokens,
       totalTokensPurchased: num(wallet.totalTokensPurchased) + reward.tokens,
-      walletLedger: [
-        ...(Array.isArray(wallet.walletLedger) ? wallet.walletLedger : []),
-        {
-          type: 'purchase',
-          amountCoinsOrTokens: reward.tokens,
-          moneySpent: 0,
-          timestamp: nowIso,
-          // Never names the friend: who took up an invitation is their business, not the referrer's.
-          description: `Referral reward: ₹${rupees.toLocaleString('en-IN')} credited`,
-        },
-      ],
+      // 🔒 Through the shared appender — see walletStatement.ts.
+      ...ledgerPatch(wallet, {
+        type: 'purchase',
+        amountCoinsOrTokens: reward.tokens,
+        moneySpent: 0,
+        timestamp: nowIso,
+        // Never names the friend: who took up an invitation is their business, not the referrer's.
+        description: `Referral reward: ₹${rupees.toLocaleString('en-IN')} credited`,
+      }),
       updatedAt: nowIso,
     }, { merge: true });
 

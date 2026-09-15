@@ -15,6 +15,7 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 // aggregates user_token_wallets / ai_usage_logs / payment_transactions (all server-side).
 import { doc, getDoc, setDoc, updateDoc, collection, getDocs, runTransaction, getServerDb as getDb } from '../lib/serverDb';
 import { summarizeReferrals, selfPayoutTokens } from '../lib/referralAdminSummary';
+import { ledgerPatch } from '../lib/walletStatement';
 import { stepRewardTokens, referrerLifetimeCapTokens, referralRewardsEnabled } from '../lib/referralRewards';
 import { mirroredCreditPatch } from '../lib/walletMirror';
 import { audit } from '../lib/audit';
@@ -1877,7 +1878,14 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         const patch = mirroredCreditPatch(w, delta, 'gift');
         tx.update(walletRef, {
           ...patch,
-          walletLedger: [...(w.walletLedger || []), { type: 'admin_adjustment', amountCoinsOrTokens: delta, reason: reason || 'Admin adjustment', timestamp: new Date().toISOString() }],
+          // 🔒 Through the shared appender — see walletStatement.ts.
+          ...ledgerPatch(w, {
+            type: 'admin_adjustment',
+            amountCoinsOrTokens: delta,
+            description: reason || 'Admin adjustment',
+            reason: reason || 'Admin adjustment',
+            timestamp: new Date().toISOString(),
+          }),
           updatedAt: new Date().toISOString(),
         });
         return patch.tokenBalance;

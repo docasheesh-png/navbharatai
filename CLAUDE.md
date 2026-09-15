@@ -2635,8 +2635,11 @@ known-weak 4.7-flash.
   Opus rate inside that. A stored 'medium'/'max' maps UP to 'mini' (never down to Normal).
 - **Env keys (names only):** `AGENTV3_LADDER_WEAK` / `_NORMAL` / `_STRONG` (override one tier's ladder,
   `PROVIDER:model,…`, applied whole or refused with the reason in the `TIER_LADDER` report line);
-  `OPENAI_API_KEY` (⚠️ **NOT set** — the admin said they will buy it; until then the gpt-5.4 rung yields
-  nothing and changes no build) and `OPENAI_BASE_URL`, `AGENTV3_OPENAI_TIMEOUT_MS`; `RATE_GLM53_FLASH_IN`
+  `OPENAI_API_KEY` (the admin **bought a key on 2026-09-15** and asked what to name it; whether it is
+  yet set in Cloud Run is unconfirmed here. ⚠️ **On its own it still changes NO build** — no tier
+  ladder names OPENAI, so the rung yields nothing. **READ THE `AGENTV3_FILE_EMBEDDINGS` ENTRY BELOW
+  BEFORE SETTING IT**: until 2026-09-15 that key alone silently switched on an unmetered,
+  never-read embedding spend on every build) and `OPENAI_BASE_URL`, `AGENTV3_OPENAI_TIMEOUT_MS`; `RATE_GLM53_FLASH_IN`
   / `_OUT` / `_CACHE` (**code default now the admin's real price, 2026-09-14: $0.15 / $0.50, cache
   $0.0375** — an earlier placeholder priced it at the glm-5 line, ~10× too high, for a few hours, on
   no user's bill); non-flash **GLM-5.3 is $1.40 / $4.40 = the existing glm-5 line**, no new row;
@@ -2644,7 +2647,32 @@ known-weak 4.7-flash.
   full-GPT bound, but on NO ladder: the admin's own brief says Nano is for classification/extraction,
   never an app-generation engine); `RATE_GPT_IN` / `_OUT` / `_CACHE` for the FULL gpt-5.4 — ⚠️ **still
   unknown, still the Sonnet-line bound** until the admin has its price. `AGENTV3_CHEAP_FLOOR=off`
-  is still the GLM/KIMI kill switch. **Now inert for the build chain:** `AGENTV3_BUILD_CLAUDE_FIRST`,
+  is still the GLM/KIMI kill switch.
+- **🔴 `AGENTV3_FILE_EMBEDDINGS` — the flag that stops a PROVIDER KEY being a FEATURE SWITCH (shipped
+  2026-09-15). ⚠️ NOT set, and unset means exactly today's behaviour: zero calls, zero cost.**
+  `EmbeddingSearch` (AgentV3's per-file vector index) used to have NO flag at all — its only gate was
+  the PRESENCE of `OPENAI_API_KEY`. Found on the day the admin bought an OpenAI key and asked only
+  what to name it, so nothing had been spent.
+  **What the key alone would have started, none of it visible:** `ToolDispatcher` calls `addFile()` on
+  EVERY write, EVERY batched file and EVERY edit (three call sites), so an ordinary build fires dozens
+  of `text-embedding-ada-002` calls — on every tier, **free included**, on NavBharatAI's own account.
+  They are made with the OpenAI SDK directly, so they never pass `captureTurnUsage`: **in no build
+  ledger, in no rate card (`providerRates.ts` prices no embedding model), invisible to
+  `AGENTV3_BUILD_COST_CEILING_USD`, and never billed to the user.** That is the money audit's own
+  class — a paid call with no governance — reached through a credential rather than a ladder.
+  🔴 **AND IT BOUGHT NOTHING: `search()` — the only reader of the index — is called from no live code
+  path.** Embed, persist to Firestore, never read. Recorded as an **OPEN root cause** rather than
+  quietly wired up, because "make semantic retrieval real" is a separate decision with its own cost
+  (`ContextReranker.ts` has described the path as dormant all along).
+  🔒 **BOTH are required now, flag FIRST:** `getClient()` returns null unless the flag is on AND a key
+  exists, checked at call time so switching it off in Cloud Run bites without a deploy. An unreadable
+  value means OFF, never ON. Test-locked in `tests/fileEmbeddingsAreOptIn.test.ts`, whose last case is
+  a **reversion guard** asserting the ORDER out of the source (comments stripped) — proven to fail when
+  the flag line is deleted, because the behavioural tests alone would not.
+  ⚠️ **If it is ever turned on, price it first.** `text-embedding-3-small` is ~5× cheaper than ada-002
+  and scores better; the swap is free TODAY only because nothing is stored yet — once vectors exist,
+  changing the model silently mixes incompatible embeddings at the same 1536 dimensions, which
+  `cosineSimilarity`'s length check cannot catch. **Now inert for the build chain:** `AGENTV3_BUILD_CLAUDE_FIRST`,
   `AGENTV3_BUILD_ALLOW_GEMINI`, `AGENTV3_VERTEX_PEER`, `AGENTV3_FLOOR_BALANCE`, `AGENTV3_FREE_KIMI_LEAD`,
   `AGENTV3_WEAK_FLAGSHIP_HEAL`, `GLM_MODEL` / `KIMI_MODEL` / `AGENTV3_FREE_*_MODEL` (the ladders name their
   models; those envs still feed the legacy `cheapBuildFloorRunners`, which only tests call now).

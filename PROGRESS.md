@@ -56646,3 +56646,57 @@ than obeyed.** Of the 36, **28** are waste (`stale` + `unknown`) and reclaimable
 apps belonging to real users, and the site's own `default` channel is never counted or deletable.
 Reclaiming the 28 takes usage from 36/50 to 8/50 with nothing lost. Removing the 8 is a takedown, is a
 different decision, and was put back to the admin with the list offered first.
+
+## 2026-09-15 — A PROVIDER KEY WAS A FEATURE SWITCH: `OPENAI_API_KEY` alone started an unmetered, never-read embedding spend
+
+**How it was found.** The admin bought an OpenAI key and asked one question: *"claude run me kis naam se
+save karu?"* Answering it meant verifying the name against live code rather than against `CLAUDE.md`
+(safeguard #1 applied to a doc claim), and the grep for `OPENAI_API_KEY` returned more than the tier
+ladder. Nothing had been spent yet — the key was not set.
+
+**The name is `OPENAI_API_KEY`**, verified at `src/server/AgentV3/tierLadder.ts:238`
+(`case 'OPENAI': return 'OPENAI_API_KEY';`) and consumed at `src/server/routes/agentv3.ts:2951`.
+Companions: `OPENAI_BASE_URL`, `AGENTV3_OPENAI_TIMEOUT_MS`.
+
+**What the same grep exposed, and it is the real finding.** `src/server/AgentV3/EmbeddingSearch.ts` had
+**no flag of any kind** — its only gate was `this.apiKey = apiKey ?? process.env.OPENAI_API_KEY ?? ''`.
+Three consequences, each verified from code rather than reasoned about:
+
+1. **It runs on every build, on every tier.** `ToolDispatcher` calls `getEmbeddingStore(...).addFile()`
+   at three sites — single write (2416), batched write (2568), edit (2636). A normal build fires dozens
+   of `text-embedding-ada-002` calls, free tier included, on NavBharatAI's own account.
+2. **It is unmetered by construction.** The calls go through the OpenAI SDK directly, never through
+   `captureTurnUsage`. So they are in no build ledger, in no rate card (`providerRates.ts` prices no
+   embedding model at all), invisible to `AGENTV3_BUILD_COST_CEILING_USD`, and never billed to the
+   user. This is precisely the class the 2026-09-12 money audit named — a paid call with nothing
+   governing it — reached through a credential instead of through a ladder.
+3. 🔴 **And it bought nothing.** `EmbeddingStore.search()` — the only thing that READS the index — is
+   called from no live code path. `getEmbeddingStore` is imported in exactly one module
+   (`ToolDispatcher`) and only ever for `addFile`. Embed, persist to Firestore, never read.
+
+**The fix is the class, not the instance (fourth absolute rule, step 2).** The bug is not "embeddings
+are expensive"; it is that **a provider credential was doing the job of a feature switch**, which
+breaks this repo's own repeated law that a key must not be the single input that changes behaviour and
+that unset means today's behaviour exactly. `AGENTV3_FILE_EMBEDDINGS` (default OFF) now gates it:
+`getClient()` returns null unless the flag is on **and** a key exists, the flag is read at call time so
+Cloud Run bites without a deploy, and an unreadable value means OFF rather than ON.
+
+**Test-locked** in `tests/fileEmbeddingsAreOptIn.test.ts` (9 cases). The last one is a **reversion
+guard**: the behavioural tests alone would still pass with the flag line deleted, because a real call
+with a fake key fails and is caught, returning null either way — so the ORDER (flag before key) is
+asserted out of the source with comments stripped. Proven by deleting the line and watching only that
+test go red, then restoring it.
+
+**STILL OPEN, deliberately not closed here:**
+- **Semantic retrieval is dormant and is not being woken by this change.** Wiring `search()` into the
+  build is a separate decision with its own cost, and doing it inside a change whose purpose is to
+  STOP an ungoverned spend would be the widening the rules forbid. `ContextReranker.ts` has said the
+  path is dormant all along; it still is.
+- **If embeddings are ever switched on, price them first.** `text-embedding-3-small` is ~5× cheaper
+  than ada-002 and benchmarks better. The swap is free only while nothing is stored — once vectors
+  exist, changing the model mixes incompatible embeddings at the same 1536 dimensions, which
+  `cosineSimilarity`'s length check cannot detect.
+- **GPT is still on no tier ladder** (`TIER_LADDERS` names GLM / KIMI / CLAUDE only), and the chat
+  router has no OpenAI provider. So the key, once set, changes no build. `RATE_GPT_IN` / `_OUT` /
+  `_CACHE` remain unknown and bounded at the Sonnet line — margin-safe, but the admin's cost view
+  would over-state GPT until the real prices are set.

@@ -56816,3 +56816,179 @@ constant. Verified to still bite (removing the check fails it).
    autopsies, two nights, have now ended at zero files on this rung. Flagged for the admin.
 4. **Gemini's runner does not set `truncated`**, so the AgentRunner net would not fire for it. Out of
    scope here: Gemini is not a BUILD rung on any tier ladder since 2026-09-14.
+---
+
+## 2026-09-15 — THE PUBLISH CEILING FIX WAS BUILT, MERGED AND SWITCHED OFF BY ONE EMPTY STRING
+
+**The report.** The admin's notification panel read: *"Hosting channels are filling up: 36 of about 50
+in use, 14 left. 28 can be reclaimed right now."* They forwarded a ChatGPT prompt asking for an audit
+of ~33 hosting providers, a provider pool and a resell model. Per the external-suggestion rule that was
+treated as raw material, not an order — and the real codebase answered the question before the research
+would have started.
+
+**What the audit found: nothing was missing.** `bucketPublish.ts` (mirror every publish into Cloud
+Storage), `bucketOnlyPublish.ts` (skip Firebase entirely — the thing that actually removes the ceiling)
+and `infra/cloudflare/mitrify-apps-worker.js` (serve from the bucket, fall back to Firebase) had all
+shipped green weeks earlier. The bucket `navbharatai-published-apps` had existed in
+`gen-lang-client-0866594388` since 2026-08-23 with `allUsers → Storage Object Viewer` already granted,
+and `mitrify.in`'s wildcard DNS was already live and proxied through Cloudflare (verified by resolving
+`test.mitrify.in` and `v3-abc.mitrify.in`, not assumed).
+
+**The whole ceiling was held open by `const APPS_BUCKET = '';` on line 66 of the Worker.** With it
+empty, `if (APPS_BUCKET && cacheable)` is never true and the entire bucket origin below it is
+unreachable code. No provider is needed, no architecture change, no new spend.
+
+🔴 **AND A TEST WAS HOLDING IT EMPTY.** `bucketPublish.test.ts` asserted
+`expect(worker).toMatch(/const APPS_BUCKET = '';/)` under the heading *"ships with the bucket origin
+EMPTY, so behaviour is unchanged until it is set"*. That was correct when written — a pre-filled name
+would have switched the origin the moment the Worker was redeployed, **before the bucket existed**. Once
+the bucket existed and was public, the same assertion stopped protecting anything and started enforcing
+the off state, while the capacity card climbed toward a cap that stops publishing for **every user at
+once**. Nothing failed the whole time, which is exactly why it went unnoticed.
+
+**The class, named so it is recognised again: a guard that encodes a PRECONDITION rather than an
+INVARIANT becomes a lock the day the precondition is met.** "Not activated yet" is a state, not a
+property of the code — and a test is the wrong place to keep a state, because a state has no way to
+notice that it changed. The two are distinguishable by asking what would have to be true for the
+assertion to be wrong: for a real invariant, nothing.
+
+**Fixed.** `APPS_BUCKET = 'navbharatai-published-apps'`; the stale assertion is REMOVED with the reason
+recorded in place rather than silently flipped; and the invariant now runs the other way in
+`tests/workerBucketOrigin.test.ts`, which owns it alone so the two files cannot disagree about its
+direction. It asserts the name is set and bucket-shaped, that the Worker's `APP_PREFIX` equals the
+server's exported one (two files, two languages, no import between them — a mismatch would 404 every app
+at the edge and fall through to Firebase, looking like "the bucket path just isn't working" rather than
+a typo), that the Firebase fallback survives (every app published before the bucket must keep working),
+and that the SPA deep-link rewrite survives. Verified to bite by emptying the constant and watching it
+fail.
+
+**STILL OPEN — the ceiling is not removed until three Cloud Run keys are set, and the ORDER is not a
+preference.** The remaining work is admin console work, and the admin asked to be guided through it
+rather than have it assumed:
+
+1. `PUBLISHED_APPS_BUCKET = navbharatai-published-apps` and `PUBLISHED_APP_DOMAIN = mitrify.in`
+2. the Worker redeployed from this file (Cloudflare dashboard paste — this file is the only record of
+   what is running, which is why the value belongs here and not only in the console)
+3. a real publish confirmed loading at `https://<sub>.mitrify.in`
+4. **only then** `PUBLISHED_APPS_BUCKET_ONLY=on`
+
+`bucketOnlyPublishEnabled()` ANDs all three and never warns, so any missing precondition disables the
+path silently and correctly — but setting the flag with a Worker that is not serving hands users dead
+links. Until step 4, a publish still consumes a channel.
+
+⚠️ **Recorded honestly: "delete all 36" is not what the panel offers, and the admin was told so rather
+than obeyed.** Of the 36, **28** are waste (`stale` + `unknown`) and reclaimable; the other 8 are LIVE
+apps belonging to real users, and the site's own `default` channel is never counted or deletable.
+Reclaiming the 28 takes usage from 36/50 to 8/50 with nothing lost. Removing the 8 is a takedown, is a
+different decision, and was put back to the admin with the list offered first.
+
+## 2026-09-15 — A PROVIDER KEY WAS A FEATURE SWITCH: `OPENAI_API_KEY` alone started an unmetered, never-read embedding spend
+
+**How it was found.** The admin bought an OpenAI key and asked one question: *"claude run me kis naam se
+save karu?"* Answering it meant verifying the name against live code rather than against `CLAUDE.md`
+(safeguard #1 applied to a doc claim), and the grep for `OPENAI_API_KEY` returned more than the tier
+ladder. Nothing had been spent yet — the key was not set.
+
+**The name is `OPENAI_API_KEY`**, verified at `src/server/AgentV3/tierLadder.ts:238`
+(`case 'OPENAI': return 'OPENAI_API_KEY';`) and consumed at `src/server/routes/agentv3.ts:2951`.
+Companions: `OPENAI_BASE_URL`, `AGENTV3_OPENAI_TIMEOUT_MS`.
+
+**What the same grep exposed, and it is the real finding.** `src/server/AgentV3/EmbeddingSearch.ts` had
+**no flag of any kind** — its only gate was `this.apiKey = apiKey ?? process.env.OPENAI_API_KEY ?? ''`.
+Three consequences, each verified from code rather than reasoned about:
+
+1. **It runs on every build, on every tier.** `ToolDispatcher` calls `getEmbeddingStore(...).addFile()`
+   at three sites — single write (2416), batched write (2568), edit (2636). A normal build fires dozens
+   of `text-embedding-ada-002` calls, free tier included, on NavBharatAI's own account.
+2. **It is unmetered by construction.** The calls go through the OpenAI SDK directly, never through
+   `captureTurnUsage`. So they are in no build ledger, in no rate card (`providerRates.ts` prices no
+   embedding model at all), invisible to `AGENTV3_BUILD_COST_CEILING_USD`, and never billed to the
+   user. This is precisely the class the 2026-09-12 money audit named — a paid call with nothing
+   governing it — reached through a credential instead of through a ladder.
+3. 🔴 **And it bought nothing.** `EmbeddingStore.search()` — the only thing that READS the index — is
+   called from no live code path. `getEmbeddingStore` is imported in exactly one module
+   (`ToolDispatcher`) and only ever for `addFile`. Embed, persist to Firestore, never read.
+
+**The fix is the class, not the instance (fourth absolute rule, step 2).** The bug is not "embeddings
+are expensive"; it is that **a provider credential was doing the job of a feature switch**, which
+breaks this repo's own repeated law that a key must not be the single input that changes behaviour and
+that unset means today's behaviour exactly. `AGENTV3_FILE_EMBEDDINGS` (default OFF) now gates it:
+`getClient()` returns null unless the flag is on **and** a key exists, the flag is read at call time so
+Cloud Run bites without a deploy, and an unreadable value means OFF rather than ON.
+
+**Test-locked** in `tests/fileEmbeddingsAreOptIn.test.ts` (9 cases). The last one is a **reversion
+guard**: the behavioural tests alone would still pass with the flag line deleted, because a real call
+with a fake key fails and is caught, returning null either way — so the ORDER (flag before key) is
+asserted out of the source with comments stripped. Proven by deleting the line and watching only that
+test go red, then restoring it.
+
+**STILL OPEN, deliberately not closed here:**
+- **Semantic retrieval is dormant and is not being woken by this change.** Wiring `search()` into the
+  build is a separate decision with its own cost, and doing it inside a change whose purpose is to
+  STOP an ungoverned spend would be the widening the rules forbid. `ContextReranker.ts` has said the
+  path is dormant all along; it still is.
+- **If embeddings are ever switched on, price them first.** `text-embedding-3-small` is ~5× cheaper
+  than ada-002 and benchmarks better. The swap is free only while nothing is stored — once vectors
+  exist, changing the model mixes incompatible embeddings at the same 1536 dimensions, which
+  `cosineSimilarity`'s length check cannot detect.
+- **GPT is still on no tier ladder** (`TIER_LADDERS` names GLM / KIMI / CLAUDE only), and the chat
+  router has no OpenAI provider. So the key, once set, changes no build. `RATE_GPT_IN` / `_OUT` /
+  `_CACHE` remain unknown and bounded at the Sonnet line — margin-safe, but the admin's cost view
+  would over-state GPT until the real prices are set.
+
+## 2026-09-15 (later) — the admin read the code and said GPT was on the weak tier. He was right about the TEXT and the table was right about the BEHAVIOUR
+
+**What happened.** Told that "no tier ladder names OPENAI", the admin replied *"wapas se dekho weak mode
+me hai."* Both statements were true, which is the defect:
+
+| Source | Claim | Truth |
+|---|---|---|
+| `tierLadder.ts` `TIER_LADDERS` (what `buildTurnRunner` maps) | weak = GLM `glm-5.3-flash` → KIMI `kimi-k2.6` → GLM `glm-5.3` → Haiku. `OPENAI` count **0** | ✅ this is what runs |
+| `providerRates.ts:77` | *"OpenAI (GPT) — the last rung of the WEAK ladder"* | ❌ stale |
+| `routes/agentv3.test.ts:1916, 1938` | *"the admin's weak ladder puts GPT-5.4 after Haiku"* | ❌ stale |
+| `routes/agentv3.ts:2936` | same | ❌ stale |
+
+The claim was true of the admin's FIRST list on 2026-09-14 and was superseded the SAME DAY once the real
+GLM prices were known (`CLAUDE.md`: *"gpt-5.4 is OUT of every ladder … Nothing to buy from OpenAI"*). The
+table was updated; four comments were not.
+
+🔴 **Nothing could have caught it.** `tsc` and `vitest` cannot read a comment, so the code was correct and
+self-contradicting for a day, and the only reader who noticed was a human being.
+
+**THE CLASS FIX — do not restate another module's fact; point at the module that owns it.** A sentence
+that asserts nothing cannot go stale. `providerRates.ts` now carries only the PRICE (its own business) and
+points at `tierLadder.ts` for the rung. `tests/ladderClaimsMatchTheTable.test.ts` **derives** the
+invariant from `TIER_LADDERS`, so the day GPT is genuinely added the guard stops complaining by itself —
+it encodes the invariant, never the current answer. Proven by reversion: re-inserting the exact shipped
+sentence fails it; a comment that merely points at the table does not.
+
+⚠️ `routes/agentv3.ts:2936` carries the same stale sentence and is **deliberately NOT fixed** — PR #2957
+(another live session) is editing that very chain-assembly region, and racing it to a comment produces a
+conflict whoever is right. It is named in the guard's `OWNED_BY_ANOTHER_PR` set with that reason; remove
+the entry when #2957 lands.
+
+### The admin then set `OPENAI_API_KEY` in Cloud Run — and it woke TWO things, not one
+
+My earlier answer to him named only the first. Recorded as a correction, not quietly amended:
+
+1. **`EmbeddingSearch`** — as documented in this file's previous entry. **Measured** rather than asserted:
+   `buildEmbedText` is hard-capped (path + ≤10 export names + 300 chars = **451 chars ≈ 113 tokens**), so
+   at ~60 calls per build and ~1,260 builds/month it is **≈ $0.85 ≈ ₹74/month**, plus ~75,600 Firestore
+   writes ≈ $0.14. **The earlier entry was right about the class and silent about the magnitude** — it is
+   ~₹86/month, not a large leak, and the admin makes decisions on numbers. Still buys nothing: `search()`
+   has no live caller.
+2. 🔴 **`/api/build`'s legacy fallback chain, rung 6.** `routes/build.ts:130` lists
+   `{ name: 'openai', run: () => callOpenAI(...) }`; `callOpenAI` runs **`gpt-4o-mini`** and
+   `resolveApiKey('openai')` falls through to the generic `process.env['OPENAI_API_KEY']` branch
+   (`aiClients.ts:67`). Registered live at `server.ts:739` → `/api/build` and `/api/build-stream`.
+   **That rung threw "OpenAI API Key not available" and fell through until today; it is now a real
+   billable call on NavBharatAI's account.** It is rung SIX (claude → grok → aiRouter → gemini → groq →
+   openai), so it is rare — but it is a provider the Model Routing Policy never approved, and its cost is
+   recorded from `estimateTokens`, not from the real-cost ledger.
+   **Deliberately NOT changed here.** `CLAUDE.md` marks the routing policy *"⚠️ CONFIRM WITH ADMIN BEFORE
+   CHANGING"*, and "should a new provider be allowed to serve a build?" is exactly that question. Put to
+   the admin rather than decided.
+
+🔴 **STILL OPEN — the flag is not live.** PR #2958 gates `EmbeddingSearch`, and it is green but **not
+merged**, so on production `main` the key is currently ungated and item 1 is spending now. The remedy is
+the admin merging #2958 (or unsetting the key); it is his call under the standing merge-hold rule.

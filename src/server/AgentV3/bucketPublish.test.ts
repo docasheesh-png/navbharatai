@@ -182,11 +182,19 @@ describe('the publish path stays safe (locked)', () => {
 describe('the Cloudflare Worker (locked)', () => {
   const worker = readFileSync(resolve(__dirname, '../../../infra/cloudflare/mitrify-apps-worker.js'), 'utf8');
 
-  it('ships with the bucket origin EMPTY, so behaviour is unchanged until it is set', () => {
-    // The revert is one empty string. Shipping it pre-filled would switch the origin the moment the
-    // Worker is redeployed, before the bucket exists.
-    expect(worker).toMatch(/const APPS_BUCKET = '';/);
-  });
+  // ⚠️ THIS ASSERTION IS GONE ON PURPOSE (2026-09-15), and inverting it is the point.
+  //
+  // It used to require `const APPS_BUCKET = ''`, for a reason that was correct at the time: a
+  // pre-filled name would switch the origin the moment the Worker was redeployed, BEFORE the bucket
+  // existed. That precondition has since been met — the bucket exists in the project and grants
+  // `allUsers → Storage Object Viewer` — so the same assertion had stopped protecting anything and
+  // started holding the ceiling fix switched off while the Publish Capacity card climbed to 36 of
+  // about 50 channels.
+  //
+  // The invariant now runs the other way (the bucket name must be SET and must match the server's
+  // prefix) and lives in `tests/workerBucketOrigin.test.ts`, which owns it alone so the two files
+  // cannot disagree about which way it points. The revert is still one empty string — it is simply
+  // no longer the state we ship in.
 
   it('falls back to Firebase, so apps published before the mirror keep working', () => {
     expect(worker).toContain('fall through to Firebase');

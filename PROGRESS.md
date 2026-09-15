@@ -56580,3 +56580,69 @@ one. Recorded as an OPEN root cause.
 the reasoning cannot rot) and `OpenAiToolRunner.test.ts`. ⚠️ `'uses the turn maxTokens, else the option
 default'` encoded the OLD contract (the ask always passes through) — updated to the new rule with a
 generous clock, and two new tests prove the clamp fires on the exact 4efab9d7 pair.
+
+---
+
+## 2026-09-15 — THE PUBLISH CEILING FIX WAS BUILT, MERGED AND SWITCHED OFF BY ONE EMPTY STRING
+
+**The report.** The admin's notification panel read: *"Hosting channels are filling up: 36 of about 50
+in use, 14 left. 28 can be reclaimed right now."* They forwarded a ChatGPT prompt asking for an audit
+of ~33 hosting providers, a provider pool and a resell model. Per the external-suggestion rule that was
+treated as raw material, not an order — and the real codebase answered the question before the research
+would have started.
+
+**What the audit found: nothing was missing.** `bucketPublish.ts` (mirror every publish into Cloud
+Storage), `bucketOnlyPublish.ts` (skip Firebase entirely — the thing that actually removes the ceiling)
+and `infra/cloudflare/mitrify-apps-worker.js` (serve from the bucket, fall back to Firebase) had all
+shipped green weeks earlier. The bucket `navbharatai-published-apps` had existed in
+`gen-lang-client-0866594388` since 2026-08-23 with `allUsers → Storage Object Viewer` already granted,
+and `mitrify.in`'s wildcard DNS was already live and proxied through Cloudflare (verified by resolving
+`test.mitrify.in` and `v3-abc.mitrify.in`, not assumed).
+
+**The whole ceiling was held open by `const APPS_BUCKET = '';` on line 66 of the Worker.** With it
+empty, `if (APPS_BUCKET && cacheable)` is never true and the entire bucket origin below it is
+unreachable code. No provider is needed, no architecture change, no new spend.
+
+🔴 **AND A TEST WAS HOLDING IT EMPTY.** `bucketPublish.test.ts` asserted
+`expect(worker).toMatch(/const APPS_BUCKET = '';/)` under the heading *"ships with the bucket origin
+EMPTY, so behaviour is unchanged until it is set"*. That was correct when written — a pre-filled name
+would have switched the origin the moment the Worker was redeployed, **before the bucket existed**. Once
+the bucket existed and was public, the same assertion stopped protecting anything and started enforcing
+the off state, while the capacity card climbed toward a cap that stops publishing for **every user at
+once**. Nothing failed the whole time, which is exactly why it went unnoticed.
+
+**The class, named so it is recognised again: a guard that encodes a PRECONDITION rather than an
+INVARIANT becomes a lock the day the precondition is met.** "Not activated yet" is a state, not a
+property of the code — and a test is the wrong place to keep a state, because a state has no way to
+notice that it changed. The two are distinguishable by asking what would have to be true for the
+assertion to be wrong: for a real invariant, nothing.
+
+**Fixed.** `APPS_BUCKET = 'navbharatai-published-apps'`; the stale assertion is REMOVED with the reason
+recorded in place rather than silently flipped; and the invariant now runs the other way in
+`tests/workerBucketOrigin.test.ts`, which owns it alone so the two files cannot disagree about its
+direction. It asserts the name is set and bucket-shaped, that the Worker's `APP_PREFIX` equals the
+server's exported one (two files, two languages, no import between them — a mismatch would 404 every app
+at the edge and fall through to Firebase, looking like "the bucket path just isn't working" rather than
+a typo), that the Firebase fallback survives (every app published before the bucket must keep working),
+and that the SPA deep-link rewrite survives. Verified to bite by emptying the constant and watching it
+fail.
+
+**STILL OPEN — the ceiling is not removed until three Cloud Run keys are set, and the ORDER is not a
+preference.** The remaining work is admin console work, and the admin asked to be guided through it
+rather than have it assumed:
+
+1. `PUBLISHED_APPS_BUCKET = navbharatai-published-apps` and `PUBLISHED_APP_DOMAIN = mitrify.in`
+2. the Worker redeployed from this file (Cloudflare dashboard paste — this file is the only record of
+   what is running, which is why the value belongs here and not only in the console)
+3. a real publish confirmed loading at `https://<sub>.mitrify.in`
+4. **only then** `PUBLISHED_APPS_BUCKET_ONLY=on`
+
+`bucketOnlyPublishEnabled()` ANDs all three and never warns, so any missing precondition disables the
+path silently and correctly — but setting the flag with a Worker that is not serving hands users dead
+links. Until step 4, a publish still consumes a channel.
+
+⚠️ **Recorded honestly: "delete all 36" is not what the panel offers, and the admin was told so rather
+than obeyed.** Of the 36, **28** are waste (`stale` + `unknown`) and reclaimable; the other 8 are LIVE
+apps belonging to real users, and the site's own `default` channel is never counted or deletable.
+Reclaiming the 28 takes usage from 36/50 to 8/50 with nothing lost. Removing the 8 is a takedown, is a
+different decision, and was put back to the admin with the list offered first.

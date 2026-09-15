@@ -586,7 +586,14 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
       </div>
 
       {/* Composer */}
-      <div className="shrink-0 border-t border-white/5 bg-[#0d1117] px-3 py-2.5 pb-[env(safe-area-inset-bottom)]">
+      {/* The device inset comes from `--nb-safe-below`, not a hard-coded `env()` — the same sibling
+          fix as the Pro composer (admin 2026-09-14). While the global tab bar is on screen the app
+          root has already reserved the bar AND its inset, so adding the inset here again produced a
+          dead strip between this composer and the bar. See lib/mobileNav.ts. */}
+      <div
+        className="shrink-0 border-t border-white/5 bg-[#0d1117] px-3 py-2.5"
+        style={{ paddingBottom: 'var(--nb-safe-below, env(safe-area-inset-bottom, 0px))' }}
+      >
         <form onSubmit={(e) => { e.preventDefault(); send(); }} className="max-w-2xl mx-auto">
           <div className="relative group">
             <div className="pointer-events-none absolute -inset-px rounded-2xl bg-gradient-to-r from-indigo-500/0 to-violet-500/0 group-focus-within:from-indigo-500/40 group-focus-within:to-violet-500/40 transition-all duration-300 blur-[2px]" />

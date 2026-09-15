@@ -55956,6 +55956,69 @@ that trail to satisfy a lint would cost more than it buys. Server prompts writte
 out of scope — they are not UI.
 ---
 
+## 2026-09-14 — The dead strip under the Pro composer: one device inset, reserved three times
+
+Admin, with the band drawn in red on a phone screenshot of NavBharatAI Pro: *"footer aur input box ke
+bich me yeh itna sara space khali kyu rakha hai? … input box ko niche sarka do, jisse yeh space use ho
+jayega aur chating area ki visibility aur badh jayegi."*
+
+**Three layers each solved "clear the home indicator", and none of them knew the others had:**
+
+| | where | what it adds |
+|---|---|---|
+| 1 | `body { padding-bottom: env(safe-area-inset-bottom) }` (App.tsx's inline `<style>`) | the inset |
+| 2 | the app root's `paddingBottom: MOBILE_NAV_TOTAL_HEIGHT` | `3.5rem` + the SAME inset |
+| 3 | the composer's own `pb-[env(safe-area-inset-bottom)]` | the inset again |
+
+⚠️ **Layer 1 is DEAD CSS, and saying so is the part that made this tractable** — it looks load-bearing.
+`body, #root { height: 100dvh; overflow: hidden }`, so `#root` is a full-viewport child laid out from
+the **top** of body's content box. A bottom padding never moves a box that starts at the top, and
+overflow clips at the **padding** box, not the content box — so that rule neither shifts `#root` nor
+crops it. It does nothing at all. That also explains a puzzle in `mobileNav.ts`'s own history: a page
+reserving a bare `pb-14` was still hidden by exactly one inset, because layer 1 was never helping.
+
+Layer 2 is already **exactly** the bar. So **layer 3 was pure surplus** — one whole inset of empty,
+untouchable strip between the composer and the tab bar, on every phone with a home indicator or gesture
+bar. It is `fixed`-positioned chrome, so none of that space could ever be scrolled into or tapped.
+
+**The fix — one owner, published from one boolean.** `--nb-safe-below` is set in the SAME call and from
+the SAME `showsGlobalMobileNav` that renders the bar (`publishMobileNavHeight`): `0px` while the bar is
+on screen (the page has already reserved it, inset included), the real inset when it is not. It is the
+exact mirror of `--nb-bottom-nav`, and their defaults are deliberately opposite — that one defaults to
+`0px` ("reserve nothing until told the bar exists"), this one to the inset ("keep clearing it until
+told the page has") — because in both cases the untold state must behave exactly as it did before the
+variable existed. Both composers (Pro and Offline AI, the same hard-coded pattern) now read it, with
+the literal kept as the CSS fallback for SSR, tests and the first paint.
+
+### 🔴 An existing guard caught me making the bug I was fixing
+
+I first added `--nb-safe-below` to `.nb-sheet-over-nav` as well, reasoning that a sheet painting OVER
+the bar must clear the home indicator itself. `sheetOverlayGeometry.test.ts` failed — *"the opt-out
+works by zeroing the variable, not by re-declaring the padding"* — and **it was right**. Sheets have
+owned that inset since they were written, through `--nb-safe-bottom`, and
+`max(var(--nb-safe-bottom), var(--nb-bottom-nav))` already answers both cases. My line would have made
+a **fourth owner of one inset** — precisely the defect this change exists to remove. Reverted, and the
+reasoning is now a test of its own so the next reader does not re-derive it.
+
+**Tests:** `src/lib/mobileNav.test.ts` +6. Every line of this wiring **fails nothing if dropped** — the
+strip simply comes back — so the wiring itself is asserted, and the guard is **proven by reversion**:
+deleting the one publisher line fails the suite. ⚠️ The composer guard strips comments first, because
+both files now quote the old value while explaining why it went, and a guard that cannot tell a comment
+from code would fail on its own documentation.
+
+**Gate on the final state:** typecheck · typecheck:server · noUnusedImports · **1673 files, 23,435
+passed, 1 skipped, 0 failed** · build · bundle budget · boot check — all green.
+
+### Still open — named, not implied fixed
+
+- **Layer 1 is still there.** `body { padding-bottom: env(safe-area-inset-bottom) }` does nothing today,
+  but it is not removed here: it is global, and a change that touches every view to delete a no-op is a
+  blast radius this fix does not need. Recorded so the next reader knows it is inert rather than load-
+  bearing, which is the only thing that made it dangerous.
+- **Not verified on a real device.** The reasoning is from the layout rules and is checkable by reading
+  them, but `env(safe-area-inset-bottom)` is 0 in every environment available here, so the strip cannot
+  be measured from this session. The admin's screenshot is the before; the after needs one look on the
+  same phone.
 ## 2026-09-14 — Legal & Trust: six tiles became two, the NDA was retired, and nothing became unreachable
 
 The admin looked at Settings → Legal & Trust and asked the right question: *"mujhe nahi lagta ki sach me

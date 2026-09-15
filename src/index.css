@@ -235,6 +235,13 @@ button, [role='button'], nav, header, footer {
        been told otherwise — desktop, SSR, a test, the first paint before the effect runs — behaves
        exactly as it did before this variable existed. */
     --nb-bottom-nav: 0px;
+
+    /* The inset a bottom-anchored element must add FOR ITSELF — see lib/mobileNav.ts. Published by
+       the same call as `--nb-bottom-nav`: `0px` while the tab bar is on screen (the page has already
+       reserved the bar, inset included), the real inset when it is not. The DEFAULT is the inset
+       rather than 0, so anything that has not been told otherwise — SSR, a test, the first paint
+       before the effect runs — keeps exactly the behaviour it had before this variable existed. */
+    --nb-safe-below: env(safe-area-inset-bottom, 0px);
   }
 
   /* P-DESIGN.3 — user font-scaling (Settings → General → Text Size). `--nb-font-scale` is set on

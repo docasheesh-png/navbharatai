@@ -11,7 +11,6 @@ import { PRIVACY_POLICY } from './privacyPolicy';
 import { TERMS_OF_SERVICE } from './termsOfService';
 import { DPA } from './dpa';
 import { SECURITY_DOCS } from './securityDocs';
-import { NDA } from './nda';
 import { grievanceDoc, grievanceOfficerFrom } from './grievance';
 
 export interface LegalDoc extends LegalMeta {
@@ -33,7 +32,6 @@ const BODIES: Record<LegalMeta['id'], string> = {
   legal_grievance: grievanceDoc(grievanceOfficerFrom(null)),
   legal_dpa: DPA,
   legal_security: SECURITY_DOCS,
-  legal_nda: NDA,
 };
 
 export const LEGAL_DOCS: LegalDoc[] = LEGAL_META.map((m) => ({ ...m, body: BODIES[m.id] }));

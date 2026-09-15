@@ -74,12 +74,20 @@ export function realRateCard(): Record<string, TokenRate> {
     // ── Anthropic (Claude) ────────────────────────────────────────────────────────────────────────
     'haiku': { inputPerMTok: envRate('RATE_HAIKU_IN', 1), outputPerMTok: envRate('RATE_HAIKU_OUT', 5) },
     'sonnet': sonnetRate(),
-    // ── OpenAI (GPT) — the last rung of the WEAK ladder (admin 2026-09-14) ──────────────────────
-    // No key exists yet and the price is not known here, so the default is this function's own
-    // "conservative upper bound" for an unknown model: the Sonnet rate. ⚠️ SET `RATE_GPT_IN`/`_OUT`
-    // (and `_CACHE` if the plan has a cache line) to the real published rate when the key is bought.
-    // Every WEAK build is paid by NavBharatAI, so an over-stated rate here inflates our own cost
-    // report, never a user's bill — the safe direction, but a wrong number all the same.
+    // ── OpenAI (GPT) ──────────────────────────────────────────────────────────────────────────────
+    // ⚠️ THIS COMMENT USED TO PLACE GPT ON THE WEAK TIER, AND THAT WAS STALE FOR A DAY, in the most
+    // misleading way available: it was true of the admin's FIRST list
+    // that morning, and the plan was revised the SAME DAY once the real GLM prices were known — GPT
+    // came off every ladder. The table never had an OPENAI rung; only this sentence said otherwise,
+    // and a reader who trusted it concluded weak builds were running GPT. tsc and vitest cannot see
+    // a wrong comment, so nothing failed for a day.
+    // THE RULE THAT REPLACES IT: do not restate another module's fact — point at the module that owns
+    // it. `tierLadder.ts`'s TIER_LADDERS is the only place a rung exists, and a sentence that asserts
+    // nothing can never go stale. What belongs HERE is the PRICE, which is this file's own business.
+    // The price is not known, so the default is this function's "conservative upper bound" for an
+    // unknown model: the Sonnet rate. ⚠️ SET `RATE_GPT_IN`/`_OUT` (and `_CACHE` if the plan has a
+    // cache line) to the real published rate before GPT is ever put on a ladder. An over-stated rate
+    // inflates OUR OWN cost report, never a user's bill — the safe direction, but wrong all the same.
     'gpt': { inputPerMTok: envRate('RATE_GPT_IN', sonnetRate().inputPerMTok), outputPerMTok: envRate('RATE_GPT_OUT', sonnetRate().outputPerMTok), cacheReadPerMTok: envRate('RATE_GPT_CACHE', sonnetRate().inputPerMTok) },
     // gpt-*-nano (admin 2026-09-14): GPT-5.4 Nano $0.20 / $1.25 per MTok. NOT on any ladder today —
     // the admin's own brief says Nano is for classification/extraction, never an app-generation

@@ -122,8 +122,8 @@ export async function verifyApplePurchase(transactionId: string): Promise<StoreV
  * token. The service-account JSON is the admin's one-time download; only `client_email` and
  * `private_key` are used, and neither is ever logged.
  */
-function googleServiceAccount(): { clientEmail: string; privateKey: string } | null {
-  const raw = (process.env.GOOGLE_PLAY_SA_JSON || '').trim();
+function googleServiceAccount(env: NodeJS.ProcessEnv = process.env): { clientEmail: string; privateKey: string } | null {
+  const raw = (env.GOOGLE_PLAY_SA_JSON || '').trim();
   if (!raw) return null;
   try {
     const sa = JSON.parse(raw) as { client_email?: string; private_key?: string };
@@ -134,15 +134,44 @@ function googleServiceAccount(): { clientEmail: string; privateKey: string } | n
   }
 }
 
-/** Exchange the service-account JWT for a Play Developer API access token. Null on any failure. */
-export async function googleAccessToken(now = Math.floor(Date.now() / 1000)): Promise<string | null> {
-  const sa = googleServiceAccount();
+/** The Play Developer API scope — purchases. The default, and what every existing caller wants. */
+export const PLAY_DEVELOPER_SCOPE = 'https://www.googleapis.com/auth/androidpublisher';
+/** The Play Integrity scope — decoding a device-integrity token. A DIFFERENT scope, same account. */
+export const PLAY_INTEGRITY_SCOPE = 'https://www.googleapis.com/auth/playintegrity';
+
+/**
+ * Exchange the service-account JWT for a Google access token. Null on any failure.
+ *
+ * `scope` was added 2026-09-15 for the referral system's device check, which calls Play Integrity
+ * rather than the Developer API. It is a PARAMETER rather than a second copy of this function on
+ * purpose: the JWT minting, the key parsing, the `\n` unescaping and the never-log rule are the
+ * parts that are easy to get subtly wrong, and this repo has already paid for one family of drifted
+ * duplicates (four copies of safeRelPath). It DEFAULTS to the Developer API scope, so every existing
+ * caller is byte-identical.
+ *
+ * ⚠️ One service account, two scopes — which means the account must be granted BOTH in Google Cloud.
+ * A token minted for a scope the account does not hold is issued happily and then refused by the
+ * API, so the failure shows up at the call, not here.
+ *
+ * 🔴 `env` IS THREADED FOR A REASON, not for tidiness. A caller that takes an injected env, checks
+ * it, and then calls a money-path function that quietly reads `process.env` instead has two sources
+ * of truth that agree right up until they do not — the caller's own "is this configured?" answer
+ * would be about one environment and the credential about another. It surfaced the first time a
+ * caller passed its own env (the referral device check) and every call silently came back
+ * unconfigured. Defaulted, so every existing caller is unchanged.
+ */
+export async function googleAccessToken(
+  now = Math.floor(Date.now() / 1000),
+  scope: string = PLAY_DEVELOPER_SCOPE,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string | null> {
+  const sa = googleServiceAccount(env);
   if (!sa) return null;
   const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
   const header = b64({ alg: 'RS256', typ: 'JWT' });
   const payload = b64({
     iss: sa.clientEmail,
-    scope: 'https://www.googleapis.com/auth/androidpublisher',
+    scope,
     aud: 'https://oauth2.googleapis.com/token',
     iat: now,
     exp: now + 3600,

@@ -3,6 +3,13 @@ apply plugin: 'com.android.application'
 android {
     namespace = "com.navbharatai.app"
     compileSdk = rootProject.ext.compileSdkVersion
+    // REQUIRED for the buildConfigField below. AGP has generated BuildConfig only on request since
+    // 8.0, and this project is on 8.13 — without this line `buildConfigField` is accepted by Gradle
+    // and the class it writes into is never generated, so the failure is a Java compile error about
+    // a missing symbol rather than anything naming the real cause.
+    buildFeatures {
+        buildConfig true
+    }
     defaultConfig {
         // Play Store package name (PERMANENT once published) — admin-registered the Play Console app
         // as com.navbharat.ai (2026-07-09), so the .aab's applicationId must match it. The `namespace`
@@ -35,6 +42,28 @@ android {
         // ⚠️ WHEN YOU DO SET THEM: the SDK collects the advertising ID and app events, which MUST be
         // declared in Play Console → App content → Data safety before that build is rolled out.
         // Shipping the collection without the declaration is a policy violation, not a detail.
+        // ── PLAY INTEGRITY — the device check behind the referral welcome gift ────────────────
+        // The referral plan pays real credit to a new user and to whoever brought them, and every
+        // rupee of it rests on one idea: a physical Android handset is scarce, a free email address
+        // is not. Play Integrity is the only thing that can tell a genuine Play-installed app on a
+        // genuine device from an emulator farm or a patched APK, because it is attested by hardware
+        // we do not own and signed by a key we do not hold.
+        //
+        // Google requires the CLOUD PROJECT NUMBER that owns the Play Integrity API. It is a build
+        // input rather than something typed into Java because it differs per environment and a wrong
+        // one fails at the REQUEST — so it belongs beside the Meta credentials above, not in source.
+        //
+        // 🔒 ABSENT ⇒ THE APP IS UNCHANGED. The plugin reports "not-configured", requests no token,
+        // and the server refuses to pay — which is the same outcome as any other failure here. There
+        // is no path where a missing number quietly becomes a verified device.
+        //
+        // ⚠️ IT IS A NUMBER, NOT THE PROJECT ID. `gen-lang-client-0866594388` is the id; the number
+        // is the digits beside it on the Google Cloud console home. A non-numeric value parses to 0
+        // and reads as not-configured, which is the safe direction and is why the parse is lenient.
+        def playIntegrityProject = (System.getenv("PLAY_INTEGRITY_CLOUD_PROJECT") ?: "").trim()
+        buildConfigField "String", "PLAY_INTEGRITY_CLOUD_PROJECT",
+                "\"" + (playIntegrityProject ==~ /\d+/ ? playIntegrityProject : "0") + "\""
+
         def fbAppId = (System.getenv("FACEBOOK_APP_ID") ?: "").trim()
         def fbClientToken = (System.getenv("FACEBOOK_CLIENT_TOKEN") ?: "").trim()
         // BOTH are required: an app id with no client token cannot initialise, and half-configured is
@@ -111,6 +140,12 @@ dependencies {
     // shape (QueryProductDetailsResult, not a bare List<ProductDetails> — a real, checked breaking
     // change from v7), so a downgrade below 8.0.0 would not compile, which is the failure mode wanted.
     implementation 'com.android.billingclient:billing:9.1.0'
+
+    // Play Integrity — the device check behind the referral welcome gift. UNCONDITIONAL, unlike the
+    // Meta SDK below: the plugin imports it directly, so a build without it would not COMPILE, and a
+    // reflection dance to make it optional would buy nothing. It collects nothing by itself — it is
+    // an API the app calls, and only when a referral step is actually being claimed.
+    implementation 'com.google.android.play:integrity:1.4.0'
 
     // Meta app events — added ONLY when both credentials are configured (see defaultConfig above).
     // `facebook-core` is the minimal artifact: install + app-event reporting, WITHOUT Facebook Login,

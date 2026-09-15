@@ -99,6 +99,13 @@ const KNOWN_UNREACHABLE = new Set([
   //    'the allowlist does not outlive its entries' below now FAILS on an allowlisted file that has
   //    become reachable.
   'src/server/lib/referralRewards.ts',
+  // The device check (2026-09-15), both halves of it: the server's judgement of a Play Integrity
+  // token and the native bridge that collects one. Same reason and same lifetime as the ledger
+  // above — the security rules are the part worth reviewing in a small PR, and both are inert until
+  // the routes that call them exist. The Android plugin they wrap IS registered
+  // (MainActivity.java), so the native side is live even while its TypeScript caller is not.
+  'src/server/lib/deviceIntegrity.ts',
+  'src/lib/deviceIntegrityNative.ts',
 ]);
 
 describe('dead-code guard — every source file must be reachable from a real entry point', () => {

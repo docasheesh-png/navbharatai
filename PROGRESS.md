@@ -56134,3 +56134,107 @@ written for.
 
 **Gate:** typecheck · typecheck:server · noUnusedImports · vitest (1673 files, 23427 passed, 0 FAIL) ·
 build · test:bundle · boot:check.
+
+
+### 2026-09-15 — 🔴 AUTOPSY 4efab9d7: a rendering app was called "NOT ready" and made FREE. The class was two days old.
+
+Admin, with the SaaS dashboard rendering on his phone beside *"This build did not fully succeed, so it is
+FREE — no charge"*: *"yaar apko -100,000 bar bola hai. app ban jaye to 'app not build' dikha kar free (₹0)
+charge nahi karna hai! … app bani = preview chala. agar preview chala gaya to ₹0 charge karoge to aise to
+mai barbad ho jaunga."* Branch `claude/delivery-proof`.
+
+**THE LEDGER (fifth rule, all five buckets, from the whole report):**
+- ✅ **Self-healed: 1** — `REQUIREMENT_GAPS` filled sensible defaults (info, not a heal of anything broken).
+- 🔀 **Worked around: 8** — eight `PROVIDER_FALLBACK` lines, "Provider GLM failed — Request timed out.",
+  one every 60 s. Each "fallback" went to ANOTHER GLM KEY, never to the next vendor. Debt, not resilience.
+- ⏭️ **Skipped: 5** — route smoke check, page-render check, user journey, E2E scaffold, and the whole
+  browser verify loop: all gated on a preview URL that was never published, so all skipped at once.
+- ❌ **Still broken / shipped imperfect: 5** — (1) verdict NOT ok on a rendering app → ₹0 [the admin's
+  complaint]; (2) `Model call failed (claude-sonnet-4-6)` printed on the USER's build-health card — a
+  vendor id, on a weak build that never called that vendor (White-Label breach); (3) a provider timeout
+  counted as an APP blocker; (4) the ladder structurally unable to reach KIMI (a ~50-key GLM pool × 60 s
+  per key vs a 480 s turn); (5) the platform never tried to bring the preview up although `PROD_BUILD_OK`
+  and a saved snapshot said there was an app to look at.
+- 🥵 **Struggle: 3** — 8 minutes of timeouts for ONE turn; 42 s time-to-first-call with a 24 s silence
+  (the golden-scaffold seeding, unrecorded until it finished); a 10-minute sandbox 96% idle. **The model
+  wrote zero files.** Two read calls, then the timeouts. The app on screen was the pre-seeded template.
+
+**THE MISSING SUBSYSTEM (Step 2):** a verdict that reads the APP's evidence and only the app's. Two
+readers — the release gate and the user's health card — both counted "unresolved errors" from a timeline
+that mixes the engine's struggle ledger with the app's defect list, and both were wrong the same way.
+And the proof they needed (a preview) existed only if the AGENT chose to publish one: `lastPreviewUrl`
+was set by nothing else. This is the CLAUDE.md "no shared EVIDENCE LEDGER" open root cause showing up a
+third time: the facts to contradict the verdict were in the same report (`PROD_BUILD_OK`,
+`PREVIEW_SNAPSHOT_SAVED`) and nothing read them.
+
+🔴 **THE SAME CLASS WAS ROOT-CAUSED TWO DAYS EARLIER (report 70115adf, 2026-09-13).** That fix taught
+`recordLlmCall` to file a *budget-ended* call as info (`isBudgetEndedError`). A *timed-out* call — thrown
+by the very next code path, `model turn N timed out after Xms` — still landed as an unresolved error and
+was still counted. The comment above that fix even says *"`shippingIssueCount` counts exactly those, so
+the release gate reported '1 build-breaking blocker'"*. The instance was fixed; the class was not
+(a38c6fef, again, 48 hours later).
+
+**DNA-level fixes (Step 3), each test-locked:**
+1. **`isAppFinding(issue)`** (`BuildDiagnostics.ts`) — ONE predicate: every `provider`-phase issue is
+   excluded BY PHASE, plus the process-only codes. `shippingIssueCount` (the gate) and
+   `buildHealthFromDiagnostics` (the user's card) both read it, so they cannot disagree. A code added next
+   month in the provider phase is excluded the day it is written. `tests/engineEventsNeverBlock.test.ts`
+   pins the exact record from this report. ⚠️ `tests/budgetEndedNotAFailure.test.ts` carried the OLD
+   premise as an assertion ("an ordinary failed call IS still a blocker") — superseded in place, with the
+   reason, and a sibling test proves the gate still blocks on an APP-phase error.
+2. **The user's health card redacts every line by construction** (`redactProvidersText`) and lists only
+   app findings. The card can no longer print a vendor id whatever the timeline says.
+3. **The in-run timeout bench is keyed by provider FAMILY** (`reportAs ?? name`,
+   `MultiProviderTurnRunner.ts`). Two consecutive timeouts across ANY keys of one provider skip every
+   remaining key of that provider for the rest of the run — independent of the env-tunable shared
+   cooldown, which did not fire in this build (`AGENTV3_RATE_LIMIT_COOLDOWN_MS` may be off in Cloud Run;
+   unverifiable from here, so the bench no longer depends on it). The 429 bench stays per KEY on purpose.
+   `PROVIDER_BENCHED` is recorded so "KIMI was reached" is a line, not an inference. Reproduced in
+   `MultiProviderTurnRunner.test.ts` with a 50-key pool, cooldowns DISABLED and a MOVING clock (the
+   existing pool test used a frozen clock, under which the bench trivially holds): 2 attempts, then KIMI.
+4. **A turn that timed out with nothing received says so:** *"A model turn timed out with no provider
+   answering"*, planned model id in the detail — not "Model call failed (claude-sonnet-4-6)".
+5. **🔒 DELIVERY PROOF — the platform brings the preview up ITSELF** (`deliveryProof.ts` + the block
+   above the render rescue in `routes/agentv3.ts`). After a build meant to produce an app, if no preview
+   URL was ever published: start the dev server deterministically (`npm run dev` — the revive path's own
+   call, no model, no code change), probe the port we know (recipe → declared → framework default), judge
+   the body with `analyzePreviewHtml`, and if a page serves, PUBLISH the URL the same way the agent does.
+   From there the render rescue, the verify loop, the gate and billing run exactly as for an agent-published
+   preview. Bounded (≤ 4 min, never past the wall-clock margin), never a gate, kill switch
+   `AGENTV3_PLATFORM_PREVIEW=off`. Report codes: `PLATFORM_PREVIEW_UP` / `_NOT_UP` / `_SKIPPED` (with the
+   reason). `tests/deliveryProof.test.ts` pins the decision table; the wiring test pins the ORDER.
+
+**What this build would look like now:** no blocker (gate UNKNOWN or, with the platform preview, YELLOW
+"runs and renders"), verdict ok, the health card says READY with the design/accessibility caveats, and the
+bill is the REAL cost (≈ ₹11: ₹0.5 of tokens + ₹2.3 of sandbox × the markup). On the admin's free-list
+account it would still be ₹0 — that is the free list, not the verdict.
+
+**The 50/50 half — why did the problem arise at all, and what makes the wrong branch impossible:**
+- The engine's struggle ledger and the app's defect list were ONE list, read by severity. Now the
+  predicate separates them by PHASE, at the only place both readers consult.
+- Proof depended on the agent's cooperation. Now the platform proves the app whether or not the model
+  ever ran the dev server.
+- A pool bench that needed a second mechanism configured was not a bench. Now it holds on its own.
+
+**Said plainly (rule 3), because the admin's rule cuts both ways:** the model wrote zero files here; the
+app that rendered was the pre-seeded golden template. Under the admin's rule a rendered app is billed at
+real cost, and the honest "not built" notice still names the features the prompt asked for (RBAC, settings,
+billing) and did not get. If the admin wants a ZERO-WRITE turn to be free even when the template renders,
+that is a separate decision — it is not what "app bani = preview chala" says, so it was not built.
+
+**OPEN, recorded honestly (rule 6):**
+- 🔴 The shared cross-instance cooldown did not bench GLM in this build. The code path is correct in
+  tests; the likely cause is `AGENTV3_RATE_LIMIT_COOLDOWN_MS=off` in Cloud Run or a lost `reportAs` on a
+  wrapped chain. The in-run family bench above makes the build correct either way; confirming the env is
+  one look at the console.
+- 🔴 A ~50-key GLM pool with a 60 s timeout per key is a ladder that can spend 50 minutes in one vendor
+  if every bench is off. The pool SIZE is the admin's; the code now bounds the damage to two windows.
+- 🔴 The turn-level timeout (480 s) does not cancel the in-flight provider call (already open, 2026-09-13).
+- The `EVIDENCE LEDGER` root cause stays open — this is its third appearance.
+
+**PROACTIVE (Step 6, the one lever):** the biggest first-try loss here was not the verdict — it was that
+GLM was slow for ten minutes and the build wrote nothing. The family bench makes the next such night cost
+~2 minutes instead of 8 before KIMI takes over. The next lever is a **first-token watchdog**: a provider
+that has not streamed a token in 20 s is far more likely to time out than to answer, and moving on at 20 s
+instead of 60 s turns the worst case from minutes into seconds. Not built here — it changes provider
+timeouts across every lane and deserves its own measured change.

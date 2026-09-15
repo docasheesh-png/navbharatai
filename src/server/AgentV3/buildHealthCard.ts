@@ -9,16 +9,23 @@
 // PURE: reads the finished BuildDiagnosticsReport + the honest ok verdict. No I/O.
 
 import type { BuildHealth } from './types';
-import type { BuildDiagnosticsReport, BuildIssue } from './BuildDiagnostics';
+import { isAppFinding, type BuildDiagnosticsReport, type BuildIssue } from './BuildDiagnostics';
+import { redactProvidersText } from '../lib/providerRedaction';
 
 const MAX_LISTED = 6;
 
 /** Dedupe issue messages (keeping order) and cap the list so the card stays readable. */
+/**
+ * 🔒 EVERY LINE ON THIS CARD IS USER-FACING, so it passes the White-Label redactor BY CONSTRUCTION.
+ * Report 4efab9d7 (2026-09-15) put "✗ Model call failed (claude-sonnet-4-6)" on a user's screen —
+ * a vendor id in the first line of the card, on a build that never even called that vendor. The
+ * diagnostics timeline is allowed to name providers (admin-only); this card is not.
+ */
 function messages(issues: BuildIssue[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const i of issues) {
-    const m = (i.message || i.code || '').trim();
+    const m = redactProvidersText((i.message || i.code || '').trim());
     if (m && !seen.has(m)) { seen.add(m); out.push(m); if (out.length >= MAX_LISTED) break; }
   }
   return out;
@@ -37,8 +44,11 @@ const clamp = (n: number): number => Math.max(0, Math.min(100, Math.round(n)));
  */
 export function buildHealthFromDiagnostics(report: BuildDiagnosticsReport | undefined, ok: boolean): BuildHealth {
   const problems = report?.problems ?? [];
-  const blockers = messages(problems.filter(p => p.severity === 'error' && !p.autoResolved));
-  const warnings = messages(problems.filter(p => p.severity === 'warning' && !p.autoResolved));
+  // ONLY findings about the APP (isAppFinding) — a provider timeout is the engine's struggle, never a
+  // reason to tell the user their app is not ready. Same predicate the release gate counts with, so
+  // the card and the gate cannot disagree about what is blocking.
+  const blockers = messages(problems.filter(p => p.severity === 'error' && !p.autoResolved && isAppFinding(p)));
+  const warnings = messages(problems.filter(p => p.severity === 'warning' && !p.autoResolved && isAppFinding(p)));
   // A build the engine reported as not-ok is never "ready", even if no single blocker was captured.
   const ready = ok && blockers.length === 0;
 

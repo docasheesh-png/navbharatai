@@ -51,6 +51,12 @@ export interface MultiProviderOptions {
   /** Called when a provider throws before the next is tried (greppable diagnostics). */
   onProviderError?: (name: string, error: unknown) => void;
   /**
+   * Called ONCE when a provider FAMILY is benched for the rest of this run (2 consecutive timeouts
+   * across any of its keys). Lets the build report say "GLM benched after 2 timeouts — the ladder
+   * moved on" instead of leaving the reader to infer it from the rungs that were NOT called.
+   */
+  onProviderBenched?: (family: string, reason: string) => void;
+  /**
    * Billing Phase 3 — called when a turn succeeds, with the provider that answered, its measured
    * token usage, AND the exact model id that answered (TurnResult.model — used by REAL-cost billing
    * to price a GLM-flash turn as free and a glm-5.2 turn at the flagship rate). Feeds the
@@ -520,7 +526,28 @@ export function makeMultiProviderTurnRunner(
    */
   const deadKeyFor = (entry: NamedRunner, err: unknown): string =>
     (isModelUnavailableError(err) && entry.modelId) ? `${entry.name}::${entry.modelId}` : entry.name;
-  const timeoutStreak = new Map<string, number>(); // name → consecutive timeout count
+  /**
+   * 🔴 THE TIMEOUT STREAK IS KEYED BY PROVIDER FAMILY, NOT BY KEY (autopsy 4efab9d7, 2026-09-15).
+   *
+   * It used to be keyed by `name`, and every key in a pool has a DISTINCT name ('GLM', 'GLM#2', …) —
+   * deliberately, so a 429 on one key never sidelines its siblings. But a TIMEOUT is not a property
+   * of a key: it is the provider's service being slow, and every key of that service sees the same
+   * slowness. Keyed by name, "2 consecutive timeouts" could never accumulate across a pool: each
+   * key started its own streak at zero, and a ~50-key GLM pool burned the whole 480-second turn
+   * budget eight 60-second timeouts deep without ever reaching KIMI, which was next on the ladder
+   * and one rung away the entire time. The build wrote nothing in ten minutes.
+   *
+   * The shared cross-instance cooldown (`pool:<family>` below) was meant to cover this and did not
+   * fire in that build — it is env-tunable and can be OFF, and a bench that depends on a second
+   * mechanism being configured is not a bench. This in-run streak needs nothing: after
+   * TIMEOUT_BENCH_AFTER consecutive timeouts on ANY keys of one family, every remaining key of that
+   * family is skipped for the rest of this run, so the ladder reaches the next vendor at most two
+   * timeout windows in. A non-pool rung's family is its own name, so nothing else changes.
+   *
+   * The 429 streak stays per KEY on purpose — a per-key quota genuinely differs between keys.
+   */
+  const timeoutStreak = new Map<string, number>(); // provider FAMILY (reportAs ?? name) → consecutive timeout count
+  const benchedFamilies = new Set<string>();
   const rateLimitStreak = new Map<string, number>(); // name → consecutive 429 count
   const TIMEOUT_BENCH_AFTER = 2;
   const RATE_LIMIT_BENCH_AFTER = 2; // 2 consecutive 429s → stop hammering a throttled provider this run
@@ -549,8 +576,8 @@ export function makeMultiProviderTurnRunner(
       for (let i = 0; i < chain.length; i++) {
         const { name, runner } = chain[i];
         const reportName = chain[i].reportAs ?? name; // normalized label for telemetry/delivery (key-pool)
-        if ((timeoutStreak.get(name) ?? 0) >= TIMEOUT_BENCH_AFTER) {
-          fellBackFrom.push(name); // benched — skip without spending its timeout again this run
+        if ((timeoutStreak.get(reportName) ?? 0) >= TIMEOUT_BENCH_AFTER) {
+          fellBackFrom.push(name); // the FAMILY is benched — skip every remaining key without spending another timeout window
           continue;
         }
         if ((rateLimitStreak.get(name) ?? 0) >= RATE_LIMIT_BENCH_AFTER) {
@@ -584,7 +611,7 @@ export function makeMultiProviderTurnRunner(
         const attemptStartedAt = now();
         try {
           const result = await runner.runTurn(params);
-          timeoutStreak.delete(name); // a success resets the consecutive-timeout streak
+          timeoutStreak.delete(reportName); // a success resets the family's consecutive-timeout streak
           rateLimitStreak.delete(name); // …and the consecutive-429 streak (the provider recovered)
           cooldowns.clear(name); // …and the SHARED cooldown — the provider is back for everyone
           if (isPoolMember(chain[i])) cooldowns.clear(`pool:${reportName}`); // …and the POOL cooldown (service recovered)
@@ -631,7 +658,12 @@ export function makeMultiProviderTurnRunner(
             // still ends at the honest "all providers unavailable" throw below rather than silently.
             deadForRun.set(deadKeyFor(chain[i], err), err instanceof Error ? err.message : String(err));
           } else if (isTimeoutProviderError(err)) {
-            timeoutStreak.set(name, (timeoutStreak.get(name) ?? 0) + 1); // bench after 2 in a row
+            const familyStreak = (timeoutStreak.get(reportName) ?? 0) + 1;
+            timeoutStreak.set(reportName, familyStreak); // bench the FAMILY after 2 in a row, across any of its keys
+            if (familyStreak >= TIMEOUT_BENCH_AFTER && !benchedFamilies.has(reportName)) {
+              benchedFamilies.add(reportName);
+              try { opts.onProviderBenched?.(reportName, `${familyStreak} consecutive timeouts — every remaining ${reportName} key is skipped for the rest of this run so the ladder can reach the next provider`); } catch { /* telemetry only */ }
+            }
             // TaskFlow autopsy 2026-07-17: 212 GLM TIMEOUTS in one build — the same cross-instance
             // blindness the 429 cooldown fixed, in the other transient class. A timeout wastes far
             // MORE wall-clock than a 429 (the full timeout window burns before the fallback), so the

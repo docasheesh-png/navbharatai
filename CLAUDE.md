@@ -271,6 +271,39 @@ not finish."* **Every clause was false, and the app on screen was working while 
   **Until one ledger exists that any actor writes a proven fact into and every verdict reads from, this
   class returns** — it is an OPEN root cause in `PROGRESS.md`, not a closed item.
 
+### 🔴 A FACT ABOUT A PROVIDER CALL IS NEVER A FACT ABOUT THE APP — and the platform proves the preview ITSELF (autopsy 4efab9d7, 2026-09-15)
+
+Admin, with the dashboard rendering on his phone beside "This build did not fully succeed, so it is
+FREE": *"app ban jaye to 'app not build' dikha kar free (₹0) charge nahi karna hai! … app bani =
+preview chala. agar preview chala gaya to ₹0 charge karoge to aise to mai barbad ho jaunga."*
+
+- **What happened:** GLM was slow; a ~50-key pool timed out eight times at 60 s inside one 480 s turn
+  (the in-run timeout bench was per KEY, so a pool could never reach two consecutive strikes; KIMI sat
+  one rung away the whole time). The turn timeout was recorded as an unresolved provider ERROR labelled
+  with the PLANNED model id (`claude-sonnet-4-6`, on a weak build that never called Claude).
+  `shippingIssueCount` counted that ENGINE error as an APP blocker → release gate RED → verdict flipped
+  to NOT ok → "working app or free" → ₹0. The user's build-health card printed the vendor id.
+- 🔴 **THE SAME CLASS WAS ROOT-CAUSED TWO DAYS EARLIER (70115adf, 2026-09-13) for ONE error string** —
+  budget-ended — and the timeout sibling was never hunted. The instance was fixed; the class was not.
+- **Fixed at the class:** `isAppFinding` (`BuildDiagnostics.ts`) excludes every `provider`-phase issue
+  BY PHASE from the release gate AND the user's health card (one predicate, both readers); the health
+  card redacts every line by construction; the in-run timeout bench is keyed by provider FAMILY
+  (`reportAs ?? name`) so two timeouts across ANY keys bench the pool for the run, independent of the
+  env-tunable shared cooldown; a turn that times out with nothing received says "no provider answered"
+  and keeps the planned id in the detail.
+- 🔒 **DELIVERY PROOF (`deliveryProof.ts`):** every runtime proof is gated on a preview URL that only
+  the AGENT used to publish. Now, after a build that was meant to produce an app, if no URL was ever
+  published the platform starts the dev server itself (`npm run dev`, the revive path's own call),
+  probes the port it knows (recipe → declared → framework default), judges the body with the same
+  analyzer the health route uses, and PUBLISHES the URL — so the render rescue, the verify loop and
+  the gate see the app exactly as they would an agent-published one. `PLATFORM_PREVIEW_UP` /
+  `_NOT_UP` / `_SKIPPED` say what happened; kill switch `AGENTV3_PLATFORM_PREVIEW=off`.
+- ⚠️ **Stated plainly, because the admin's rule cuts both ways:** the model wrote ZERO files in that
+  build; the rendering app was the pre-seeded golden template. Under real-cost billing a rendered
+  template costs the user what it cost us (about ₹11 there), and the honest "not built" notice still
+  lists the features the prompt asked for and did not get. That is the admin's rule applied, not a
+  loophole — and a zero-write turn that renders is billed by it.
+
 **Step 1 — Read the WHOLE report and build an itemized ledger (every flaw, however small).**
 Read the report end to end — never a truncated tail. Enumerate EVERY issue, imperfection,
 warning, retry, and rough edge, no matter how tiny, and classify each into exactly one bucket,

@@ -35,6 +35,7 @@ import { cn } from './lib/utils';
 // native shell so the Play Console health declarations stay truthful. Web is untouched.
 import { isNativeApp } from './lib/mobileNative';
 import { medicalViewBlocked, medicalFeaturesHidden } from './lib/playCompliance';
+import { isComingSoonTool } from './lib/comingSoonTools';
 // SDAChat kept eager — used immediately on tab open
 import { PROFESSIONAL_CHATS } from './components/professionals/professionalConfigs';
 import { endProfessionalChat, browserStore as professionalStore } from './lib/professionalChatStore';
@@ -1278,6 +1279,11 @@ export default function App() {
     // the render guards below) means a medical view cannot open in the native shell no matter which
     // button, deep link, or restored state asked for it.
     if (medicalViewBlocked(view, isNativeApp())) return;
+    // HELD-BACK TOOLS (admin 2026-09-15): the Other page already renders these tiles disabled, but the
+    // gate belongs HERE too, for the same reason the medical one does — this is the single path every
+    // tab-open takes, so a tool the admin has not tested cannot be reached by any button, deep link or
+    // future doorway that forgets to ask. Re-enabling is one line in lib/comingSoonTools.ts.
+    if (isComingSoonTool(view)) return;
     // Pre-warm server when user opens chat tabs (fire-and-forget)
     if (view === 'nbi_chat' || view === 'nbi_pro_chat') {
       fetch('/api/health', { method: 'GET' }).catch(() => {});

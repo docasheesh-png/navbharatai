@@ -13,6 +13,7 @@
 
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 import { turnDeadline, BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE } from '../turnDeadline';
+import { reconcileFloorBudget } from '../floorBudget';
 import {
   toolDefsToOpenAI,
   transcriptToOpenAI,
@@ -113,6 +114,17 @@ export class OpenAiToolRunner implements TurnRunner {
     // the 148 seconds of post-mortem provider traffic in the report that produced this contract.
     if (bound.expired) throw new Error(BUDGET_EXHAUSTED_MESSAGE);
     const timeoutMs = bound.timeoutMs;
+    // 🔴 NEVER AUTHORISE MORE OUTPUT THAN THE CLOCK CAN CARRY (autopsy 4efab9d7 — see floorBudget.ts).
+    //
+    // The build loop asks for 32,000 tokens a turn; this rung had 60 seconds, which at the rate that
+    // build itself measured is about 1,830. So the ONE turn that writes files — the only turn that
+    // ever uses the budget — could not fit, on any key, and the report said the app was not built.
+    //
+    // Clamping converts the failure mode: a turn that runs long now ends TRUNCATED, which returns the
+    // files it already wrote and names the one that was cut, instead of TIMED OUT, which returns
+    // nothing at all. `bound.timeoutMs` (not the configured one) is used deliberately — a lane with
+    // thirty seconds left must not authorise a 32,000-token answer either.
+    const budget = reconcileFloorBudget(params.maxTokens ?? this.opts.defaultMaxTokens ?? 8000, timeoutMs);
     const completion = await withTimeout(
       this.client.chat.completions.create({
         // The OpenAI-compatible provider has its own model ids, so an explicit option
@@ -120,7 +132,7 @@ export class OpenAiToolRunner implements TurnRunner {
         model: this.opts.model || params.model,
         messages,
         ...(tools.length ? { tools, tool_choice: 'auto' as const } : {}),
-        max_tokens: params.maxTokens ?? this.opts.defaultMaxTokens ?? 8000,
+        max_tokens: budget.maxTokens,
         ...thinking,
       }),
       timeoutMs,

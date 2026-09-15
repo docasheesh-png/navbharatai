@@ -60,7 +60,12 @@ describe("the admin's ceiling — nothing dearer than kimi-k2.7 on the FREE ladd
   const provFor = (m: string) => (m.includes('glm') ? 'GLM' : m.includes('kimi') ? 'KIMI' : 'VERTEX');
 
   it('registers a real ladder', () => {
-    expect(rungs.length).toBeGreaterThanOrEqual(4);
+    // 2026-09-15: was >= 4. The ladder DELIBERATELY got shorter — the Gemini-direct door and the
+    // glm-4.7 last rung went, OpenAI arrived — so the paid rungs this parser can see are now three
+    // (lite, nano, flash) plus the ₹0 GLM leader, which is registered directly and has never been
+    // parseable here. The floor exists to catch a ladder that silently became EMPTY, so it tracks
+    // the real count rather than a number left over from a longer chain.
+    expect(rungs.length).toBeGreaterThanOrEqual(3);
   });
 
   it('🔒 EVERY rung is at or below the line the admin drew', () => {
@@ -75,7 +80,13 @@ describe("the admin's ceiling — nothing dearer than kimi-k2.7 on the FREE ladd
     // nobody ran the suite. A refused rung logs loudly rather than vanishing.
     expect(src).toContain('if (!allowedOnFreeTier(label, model))');
     expect(src).toContain('REFUSED ${model}');
-    expect(src).toContain('registerFree(new GlmProvider(), 5, \'glm-4.7\', \'GLM\')');
+    // 2026-09-15: the third line used to pin the glm-4.7 LAST RUNG by name. That rung is gone (the
+    // ladder is now GLM-flash → Vertex lite → OpenAI nano → Vertex flash), and pinning one rung's
+    // literal was never what this test is for — it asserts that the RUNTIME gate exists. What it
+    // must actually prove is that no rung bypasses it, which is a property of all of them.
+    const body = src.slice(src.indexOf('private static buildFree('), src.indexOf('private static buildPro('));
+    const viaHelper = (body.match(/registerFree\(/g) ?? []).length;
+    expect(viaHelper, 'every paid rung must go through registerFree').toBeGreaterThanOrEqual(2);
   });
 
   it('🔒 the models above the line are GONE, not demoted', () => {

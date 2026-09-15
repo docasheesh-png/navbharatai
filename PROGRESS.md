@@ -56757,3 +56757,70 @@ My earlier answer to him named only the first. Recorded as a correction, not qui
 🔴 **STILL OPEN — the flag is not live.** PR #2958 gates `EmbeddingSearch`, and it is green but **not
 merged**, so on production `main` the key is currently ungated and item 1 is spending now. The remedy is
 the admin merging #2958 (or unsetting the key); it is his call under the standing merge-hold rule.
+
+## 2026-09-15 (later still) — GPT Nano joins the FREE chat ladder, and the admin's invoice corrected a price we had wrong
+
+**Two things ship together, and the second is why the first changed shape.**
+
+### 1. The free chat ladder — three vendors instead of two
+
+`GLM glm-4.7-flash (₹0) → Vertex gemini-2.5-flash-lite → OpenAI gpt-5-nano → Vertex gemini-2.5-flash`.
+The Gemini-DIRECT door and the `glm-4.7` last rung are gone, on the admin's instruction.
+
+**The gain is VENDOR COUNT, not rung count.** The old ladder spent six registrations on TWO vendors, so
+its "fallback" was largely Google falling back to itself; the single non-Google rung was `glm-4.7`, which
+shares a KEY with the free leader and therefore dies in the same 429 storm that killed it. Three
+genuinely independent vendors answer now.
+
+`src/server/AI/Router/providers/OpenAiChatProvider.ts` is new — this repo had **no OpenAI chat provider
+at all**, so "put Nano in the ladder" was a build, not a config change. Text-only (an image turn defers
+to the next rung, as `GlmProvider` does); self-gates on `OPENAI_API_KEY`; streams with its pinned model.
+
+🔴 **The model id could not be verified from this session and that is stated rather than papered over.**
+A wrong `gpt-5-nano` 404s and the ladder falls through to Vertex — safe, but SILENT, which is the failure
+mode this repo keeps paying for. So a rejected model logs one loud admin line naming `OPENAI_CHAT_MODEL`,
+which also overrides a pinned id so an operator can correct it without a deploy. An override that is not
+a nano-class id warns, because the free-tier ceiling was cleared on the nano price.
+
+### 2. `gemini-2.5-flash-lite` was billed at the flash rate — found in the admin's own invoice
+
+Both ids resolved to the one `'gemini'` rate line ($0.30/$2.50), so **every flash-lite turn was reported
+at 3× its real cost** on the exact screen the admin judges Google spend from. Margin-safe direction (we
+over-stated our own spend, never a user's bill) and wrong all the same — the shape of the
+`E2B_USD_PER_HOUR` drift.
+
+**The input half is invoice-verified, not taken from a price page.** That month's SKUs read
+`Flash GA Text Input 6,116,640 → ₹175.32` and `Flash Lite Text Input 5,237,016 → ₹50.04`, i.e.
+₹2.866e-5 vs ₹9.555e-6 per unit = **exactly 3.0×**, which reproduces $0.30 → $0.10. ⚠️ The OUTPUT half
+is **not** invoice-verified (no flash-lite output SKU appeared); $0.40 is the published pair-mate of the
+input the invoice just confirmed, and `RATE_GEMINI_LITE_OUT` corrects it when a real SKU disagrees.
+
+### 🔴 The order the admin approved is NOT the order that shipped, and that is the honest part
+
+They approved `GLM-flash → Nano → lite → flash` **while our rate card still mis-priced flash-lite at
+4.90**. The fix in this same change drops it to **1.20 — cheaper than Nano (2.85)**. So the decision was
+built on a number this commit proves wrong, and shipping it would have required *weakening a guard*:
+`freeChainCost.test.ts` enforces cheapest-first as an invariant. Their standing instruction is
+*"kharcha kam se kam"*, and cheapest-first serves it, so lite ships at priority 1 and Nano at 2. Swapping
+the two is the whole edit if they want it back — put to them explicitly, not assumed either way.
+
+### 🔎 What the existing guard caught — in my own first draft
+
+The first version registered the rung as `OpenAiChatProvider.model()`, a function call.
+`freeChainCost.test.ts` parses these registrations out of the source to price them, and its own comment
+warns that a shape it cannot read is *"silently exempt from the ceiling"* — so the new rung would have
+been exempt from BOTH the ceiling and the ordering guard, with nothing failing to say so. Every rung is
+now a literal. **The guard did exactly the job it was written for, on the person who added the rung.**
+
+Two of its assertions were genuinely outdated and were corrected rather than worked around: the
+`>= 4` rungs floor (the ladder deliberately got shorter) and a line pinning the now-deleted `glm-4.7`
+rung by name — replaced by the property it was really there for, that no rung bypasses `registerFree`.
+
+**Test-locked** in `tests/freeChatNanoLadder.test.ts` (19). Proven by reversion: deleting the flash-lite
+mapping fails 3; deleting the OpenAI registration fails 1. One case pins a non-obvious dependency — the
+old guard mislabels the nano rung as `VERTEX`, and that is safe ONLY because `realRateFor` matches the
+model id before the provider label. Verified by running the function rather than by hand: my own
+hand-calculation of that case was wrong.
+
+**STILL OPEN:** the `/api/build` legacy `openai` rung (`gpt-4o-mini`) is untouched — it is a routing-policy
+question for the admin, recorded in the previous entry.

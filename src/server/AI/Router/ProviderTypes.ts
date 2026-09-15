@@ -53,7 +53,7 @@ export interface ProviderTelemetry {
 }
 
 export interface AIProvider {
-  name: 'VERTEX' | 'GEMINI' | 'ANTHROPIC' | 'GROK' | 'PRO' | 'GLM';
+  name: 'VERTEX' | 'GEMINI' | 'ANTHROPIC' | 'GROK' | 'PRO' | 'GLM' | 'OPENAI';
   priority: number;
   /**
    * When true, this provider is a LAST-RESORT fallback: in a raced router

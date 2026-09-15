@@ -616,8 +616,13 @@ export function SettingsPanel({
                     title: 'Legal & Trust',
                     color: 'text-amber-400',
                     icon: Scale as any,
-                    desc: 'Privacy, terms, data processing, security and our NDA template',
-                    items: LEGAL_META.map((d) => ({ id: d.id, label: d.title.replace(' (DPA)', '').replace('Security at NavBharatAI', 'Security Documents').replace(' (NDA)', ''), icon: FileText as any })),
+                    desc: 'How we handle your data, and the rules of using NavBharatAI',
+                    // TWO tiles, not six (admin 2026-09-14: "Grievance Redressal, dpa, Security/Trust
+                    // page ko Privacy Policy, Terms me ghusa do"). The other documents are NOT gone —
+                    // each has a public URL and is linked from inside these two, at the section where
+                    // the reader is already asking the question. `settingsTile` is the one place that
+                    // decides, so the grid can never drift from the registry's own intent.
+                    items: LEGAL_META.filter((d) => d.settingsTile).map((d) => ({ id: d.id, label: d.title, icon: FileText as any })),
                   },
                   // The 5 builder-tool groups (AI Tools, Developer Tools, Design & Build, Publish &
                   // Deploy, Monetization & Team) were MOVED to the home page's "Other AI" card

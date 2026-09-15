@@ -55954,3 +55954,59 @@ prompt content for a generated app (`TemplatesPanel.tsx`); parsing of what the u
 there too, but the Hindi in them is the admin's own verbatim words kept as evidence, and destroying
 that trail to satisfy a lint would cost more than it buys. Server prompts written TO models are also
 out of scope — they are not UI.
+---
+
+## 2026-09-14 — Legal & Trust: six tiles became two, the NDA was retired, and nothing became unreachable
+
+The admin looked at Settings → Legal & Trust and asked the right question: *"mujhe nahi lagta ki sach me
+inki need hai… agar ham yeh hide kar den — grievance redressal, DPA, security documents aur NDA — to kya
+app me koi future problem ayega? kya Claude, ChatGPT, Gemini etc me yeh hote hai?"*
+
+### The honest answer, which is not the same for all four
+
+🔴 **Grievance Redressal could NOT be hidden, and the reason is in our own source.** The Privacy Policy
+links to `/grievance` **three times** (lines 55, 163, 207) and the Terms **once** (line 50), and the
+policy's own words describe it as the page that *"names the officer responsible and the timelines we
+must answer within under the IT Rules, 2021."* Removing the page would have left **four broken links
+inside our published legal documents** — worse than never having had it, because a regulator reading
+"we have a grievance page" and finding nothing is a stronger finding than an omission.
+
+It is also a real obligation: the IT (Intermediary Guidelines) Rules, 2021 require an intermediary to
+publish the Grievance Officer's name and contact, and NavBharatAI **is** an intermediary — the Nav App
+Store and published apps host user content. The repo already treated it as required: the admin Monitor
+carries an `officerIsNamed` warning.
+
+**DPA / Security: no legal requirement to publish for a consumer app**, one reference each to fix.
+**NDA: no requirement, no references, and publishing a blank mutual NDA is not what comparable AI
+platforms do either** — those are negotiated per deal, not posted. Retired.
+
+### What was actually done
+
+- **NDA deleted** — `nda.ts`, its registry entry, its id in the union, its tests.
+- **Settings grid: two tiles** (Privacy Policy, Terms of Service), driven by a new `settingsTile` flag
+  on `LegalMeta` rather than by deleting registry entries. The documents still exist.
+- **The three untiled documents are now reachable in MORE places, not fewer.** Grievance already had a
+  public URL; **`/dpa` and `/security` are new public URLs**, and both are linked from inside the
+  Privacy Policy (at the AI-processing and Security sections — where the reader is already asking the
+  question) and from the Terms.
+  🔒 That is a net increase in reach, not a hiding: a tile could only ever be opened by somebody
+  already signed in, and the people who want these two are a business customer's lawyer and a security
+  researcher, neither of whom has an account.
+- **`AppKnowledgeBase` updated in the same change**, per the standing rule — every AI in the app
+  answers "where is the DPA?" from it, so leaving it describing five tiles and an NDA would have made
+  every assistant wrong about the app.
+
+### The guard that matters
+
+`tests/legalDocs.test.ts` gains **"every HIDDEN document is still reachable"**: for each document with
+`settingsTile: false` it asserts a public URL exists AND that the Privacy Policy or the Terms links to
+it. So a future tile removal cannot quietly orphan a compliance page — which is the only way this
+change could have gone wrong.
+
+⚠️ Verified rather than assumed: `spaFallbackShouldDefer('/dpa')` and `('/security')` both return
+**true**, so the new URLs reach the server-rendered page instead of the SPA shell. That deferral is
+derived from `ALL_PUBLIC_LEGAL_PATHS`, so it needed no second edit — exactly what that module was
+written for.
+
+**Gate:** typecheck · typecheck:server · noUnusedImports · vitest (1673 files, 23427 passed, 0 FAIL) ·
+build · test:bundle · boot:check.

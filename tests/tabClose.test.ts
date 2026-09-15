@@ -145,3 +145,42 @@ describe('the Settings panel ✕ runs a REAL close', () => {
     expect(app).toContain('const closeTab = useCallback((e: React.MouseEvent | undefined, view: ViewType)');
   });
 });
+
+describe("Code Studio's AI button REPLACES Code Studio with NavBharatAI Pro, not stack beside it", () => {
+  /**
+   * Admin 2026-09-14, screenshots: "khali ide me 'ask ai' button se navbharatai pro window open nahi
+   * hoti, wahi side me navbharatai pro open ho jata hai... navbharatai ke andar hi multiple window open
+   * ho jate hai, header me." Clarified: "bas navbharatai pro open ho jaye, jaise normal user home page
+   * par direct navbharatai pro open karta hai."
+   *
+   * Home isn't a tab pill (TopNav filters it out), so a normal user opening Pro from Home always sees
+   * Pro alone. Opening Pro from Code Studio via toggleTab() ALONE left Code Studio's own pill sitting
+   * in the header beside Pro's — exactly the "multiple windows in the header" complaint. Closing the
+   * Code Studio tab (the SAME real close computeTabClose above already proves) before opening Pro makes
+   * the two entry points land on the identical state: only 'nbi_pro_chat' open.
+   */
+  const read = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
+
+  it('ViewPanels closes the studio tab before opening the Pro tab', () => {
+    const src = read('src/components/panels/ViewPanels.tsx');
+    expect(src).toContain("onSocialChatTrigger={() => { closeTab(undefined, 'studio'); toggleTab('nbi_pro_chat'); }}");
+  });
+
+  it('closeTab is threaded all the way from App.tsx into ViewPanels — not a stray no-op prop', () => {
+    const app = read('src/App.tsx');
+    const viewPanelsCallSite = app.slice(app.indexOf('<ViewPanels'), app.indexOf('<ViewPanels') + 4000);
+    expect(viewPanelsCallSite).toContain('closeTab={closeTab}');
+    const panels = read('src/components/panels/ViewPanels.tsx');
+    expect(panels).toMatch(/closeTab:\s*\(e: React\.MouseEvent \| undefined, view: ViewType\) => void;/);
+    expect(panels).toMatch(/handleSendForTab, toggleTab, closeTab, updatePreview/);
+  });
+
+  it('closing studio then opening Pro lands on Pro alone, exactly like a fresh Home open', () => {
+    // Simulates the real call order: closeTab('studio') runs first and computes what remains, then
+    // toggleTab pushes 'nbi_pro_chat' — the same end state a Home-page open reaches directly.
+    const afterClose = computeTabClose('studio', ['studio'], 'studio', {}, {});
+    expect(afterClose.nextTabs).toEqual([]); // Code Studio's own pill is gone
+    const finalTabs = [...afterClose.nextTabs, 'nbi_pro_chat'];
+    expect(finalTabs).toEqual(['nbi_pro_chat']); // exactly what a fresh Home → Pro open produces
+  });
+});

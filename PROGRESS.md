@@ -55900,6 +55900,67 @@ first rows will mostly be re-priced from call logs, and the ones at the cap will
 The card gets exact from the first build after deploy. Sandbox cost is shown as its own column and is
 ₹0 unless `AGENTV3_BILL_SANDBOX` + `E2B_USD_PER_HOUR` are set — it is not folded into the token cost.
 
+---
+
+## 2026-09-14 — Offline AI removed permanently ("koi trace na bache")
+
+Admin: *"offline ai ko hamesha ke liye parmanent delete karo, koi tress na bache."* Done — but three
+things that merely SHARE the word "offline" were deliberately kept, and finding them is most of what
+this change was.
+
+### What was deleted (17 files + a dependency)
+
+`src/components/offline/OfflineAI.tsx`, and `src/lib/`: `offlineAssistant`, `offlineChat`,
+`offlineChatStore`, `offlineDeviceTier`, `offlineBeta`, `offlineLlmEngine`, `offlineMemory`,
+`deviceKnowledgeBase` (orphaned — nothing else imported it), each with its test;
+`tests/offlineModelDelete.test.ts`; the `@mlc-ai/web-llm` dependency, its vite `manualChunks` entry and
+its bundle-budget exclusion. The App.tsx lazy import, the sidebar entry, the render block, the
+`'offline_ai'` view id and the knowledge-base entry are gone. **Verified from the built output: no
+`webllm-*` or `OfflineAI-*` chunk is emitted.**
+
+### 🔴 What was KEPT, and why a blind delete would have broken the app
+
+- **`offlineQueue.ts` is not part of this feature.** `main.tsx` uses it to post client error logs
+  (`postWithFallback('/api/logs/error')`). Deleting every `offline*` file — the obvious reading of the
+  request — would have silently removed error reporting.
+- **`neonatalDosing.ts` stays, and so does the medical capability.** `answerOffline` merely *called
+  into* it; the calculator is its own module, used by the 💊 Dose Calculator (mounted in `SDAChat`),
+  `customMedicines` and `erCalcs`. Newborn dosing is untouched. `vialMemory.ts` likewise.
+- **`autoGrowTextarea.ts` stays** — `ProfessionalChat` also uses it.
+
+### The data that would have been thrown away
+
+`offlineAssistant` carried `CURATED_NAV`, a map of feature id → in-app view that made "Open →" work.
+Its own comment said a feature's KB `nav` field *"always WINS… this map is only the fallback"* — so
+the six targets the tests actually guard (`voice_to_app`, `ai_debugger`, `ai_image_gen`,
+`bot_builder`, `ide_terminal`, `settings_logs`) were **moved into their knowledge-base entries**,
+which is where that comment said they belong. The guarantee "asking for the terminal still navigates
+somewhere real" survives, now reading from the single source of truth.
+
+### Eight test files repaired rather than deleted
+
+Three awareness locks (`botBuilder`, `codeVersioning`, `apiTester`) asserted discoverability across
+**Free · Pro · Offline**; the offline third went, the online two-thirds — which is what they actually
+guard — stayed. `neonatalDosing.test.ts` lost its offline wiring block and kept both the calculator
+tests and the ONLINE wiring block that proves every AI gets a *computed* dose rather than a remembered
+one, which was always the safety-critical half. `aiToolsReal`, `settingsShellNav`, `settingsScreenReachable`,
+`autoGrowTextarea`, `polishCoreAiChat` and `bundleBudget` were rewired to the surviving sources.
+
+### The honesty fixes nobody would have noticed
+
+The knowledge base's Dose-Calculator entry claimed *"works with no internet in the Offline AI"*, *"the
+Offline AI remembers each drug's vial"* and *"the same answer online and offline"* — all false the
+moment the feature left. Every AI in the app answers from that entry, so leaving it would have made
+each of them confidently wrong. Corrected to name the 💊 Dose Calculator, which does compute on-device.
+
+### The guard
+
+`polishCoreAiChat.test.ts` gains **"the Offline AI is GONE"** — no menu entry, no `offline_ai` string,
+no module files — *and* asserts that `offlineQueue.ts` and `neonatalDosing.ts` still exist, so a future
+cleanup cannot mistake them for leftovers. Proven by reversion: recreating
+`src/components/offline/OfflineAI.tsx` fails it.
+
+**Gate:** typecheck · typecheck:server · noUnusedImports · vitest (1665 files, 23334 passed, 0 FAIL) ·
 ### 2026-09-14 — 🔴 UI TEXT WAS IN DEVANAGARI ON SEVEN SURFACES. English only, and CI now enforces it.
 
 The admin, from his own phone, with a screenshot of the voice-chat consent popup rendered entirely in

@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { navFor } from '../src/lib/offlineAssistant';
 import { APP_KNOWLEDGE_BASE } from '../src/server/AppContext/AppKnowledgeBase';
 
 /**
@@ -11,6 +10,13 @@ import { APP_KNOWLEDGE_BASE } from '../src/server/AppContext/AppKnowledgeBase';
  */
 
 const kb = (id: string) => APP_KNOWLEDGE_BASE.find((f) => f.id === id);
+
+/**
+ * The KB's own `nav` field IS the navigation target — `navFor` used to read it through the Offline
+ * AI's helper, which was removed with that feature on 2026-09-14. Reading the field directly is
+ * strictly closer to the source, and keeps every assertion below unchanged.
+ */
+const navFor = (f: { nav?: { view?: string; settingsScreen?: string } }) => f.nav ?? null;
 
 describe('Voice to App — real v5 handoff', () => {
   it('KB entry exists, is honest about the real path, and Offline AI can navigate to it', () => {

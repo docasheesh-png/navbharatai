@@ -22,7 +22,6 @@ import { restoreV3Tab, v3TabIsOpen, v3IsActive, V3_TAB_FLAG, V3_ACTIVE_FLAG } fr
 import { clearStickySession } from './components/agentv3/v3SessionContinuity';
 // Lazy — keeps the bundled AppKnowledgeBase (imported by the Offline AI) OUT of the main index chunk,
 // so it loads as its own split chunk only when the user opens Offline AI (bundle-budget safe).
-const OfflineAI = lazy(() => import('./components/offline/OfflineAI').then((m) => ({ default: m.OfflineAI })));
 import { ViewPanels } from './components/panels/ViewPanels';
 import { SidebarNav } from './components/panels/SidebarNav';
 import { TopNav } from './components/panels/TopNav';
@@ -2180,7 +2179,6 @@ export default function App() {
     // entry, TopNav's `if (!item) return null` silently dropped the tab, so opening Other AI showed no
     // header window. Same LayoutGrid icon as its Home card, for consistency.
     { id: 'other_ai',     label: 'Other',              icon: LayoutGrid },
-    { id: 'offline_ai',   label: 'Offline AI',         icon: Smartphone },
     { id: 'preview',      label: 'Preview',           icon: Monitor },
     { id: 'files',        label: 'Files',             icon: FolderOpen },
     { id: 'history',      label: 'History',           icon: History },
@@ -3718,15 +3716,6 @@ export default function App() {
             />
           )}
 
-            {activeView === 'offline_ai' && (
-              <OfflineAI
-                onNavigate={(target) => {
-                  // Offline AI's "Open →": jump straight to the feature's page/tab (and settings screen).
-                  if (target.view) toggleTab(target.view as ViewType);
-                  if (target.settingsScreen) setSettingsScreen(target.settingsScreen as any);
-                }}
-              />
-            )}
 
             {activeView === 'git' && (
               // Phase 1.7 — extracted to GitViewPanel component

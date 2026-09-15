@@ -6,7 +6,7 @@
 // never uploaded) — instant, private, no server. Cross-device sync is a deliberate later slice.
 //
 // Pure + testable: every function accepts an optional Storage so tests inject a fake; the component uses
-// the default localStorage. Mirrors offlineChatStore's defensive load/save discipline.
+// the default localStorage, with the same defensive load/save discipline.
 
 export interface SavedTemplate {
   id: string;

@@ -10,6 +10,12 @@
 // Gracefully degrades to empty results when the key is absent — the rest of the
 // engine is completely unaffected.
 //
+// 🔴 OFF UNLESS `AGENTV3_EMBEDDINGS` SAYS OTHERWISE (2026-09-15) — see embeddingsFlag.ts for why.
+// In short: `search()` below has NO production caller, while `addFile` is called on every file write,
+// so with an OpenAI key present this module would pay to build an index nothing ever reads — and the
+// spend sits outside `captureTurnUsage`, so no cost panel could show it. The flag makes that
+// impossible; the code stays for whoever wires the read half.
+//
 // In-memory store (no external vector DB). Embeddings are computed once per file
 // and cached in the EmbeddingStore for the process lifetime. On server restart
 // they are recomputed lazily as files are re-indexed.
@@ -28,6 +34,7 @@ async function loadOpenAI(): Promise<any> {
 }
 
 import { saveEmbedding, removeEmbedding, loadEmbeddings, hashContent, needsReembed } from './EmbeddingStore';
+import { embeddingsEnabled } from './embeddingsFlag';
 
 export interface EmbeddingEntry {
   id: string;
@@ -98,6 +105,12 @@ export class EmbeddingStore {
    * Never throws.
    */
   async embed(text: string): Promise<number[] | null> {
+    // 🔴 THE ONE GATE, AND IT IS HERE ON PURPOSE (admin 2026-09-15, "pehle openai embeddings band karo").
+    // Every rupee this module can spend passes through this call, and `addFile` already returns without
+    // persisting when it yields null — so one check kills BOTH the OpenAI request and the Firestore
+    // write, and a fourth `addFile` call site added later is free by construction. Putting the check at
+    // the call sites instead is how the third one gets forgotten.
+    if (!embeddingsEnabled()) return null;
     const client = await this.getClient();
     if (!client) return null;
     try {

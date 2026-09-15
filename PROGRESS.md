@@ -56646,3 +56646,59 @@ than obeyed.** Of the 36, **28** are waste (`stale` + `unknown`) and reclaimable
 apps belonging to real users, and the site's own `default` channel is never counted or deletable.
 Reclaiming the 28 takes usage from 36/50 to 8/50 with nothing lost. Removing the 8 is a takedown, is a
 different decision, and was put back to the admin with the list offered first.
+
+---
+
+## 2026-09-15 — An OpenAI key set for one purpose started paying for another, and the thing it paid for has no reader
+
+**The admin set `OPENAI_API_KEY` in Cloud Run to try GPT as a build engine, then asked which backend AI
+sits where before anything else was done.** Answering that question against the code — not from memory —
+turned up something they had not been told and could not have seen.
+
+**What the key actually changed.** Nothing in any build: no tier ladder names an OPENAI rung, so the
+runner that exists in `routes/agentv3.ts` is only ever reached if `AGENTV3_LADDER_*` is given one by
+hand. Nothing in chat either: `AIRouterManager` has no OpenAI provider at all. Semantic memory's
+embeddings are Vertex/Gemini, not OpenAI — checked, not assumed.
+
+🔴 **What it DID change: `EmbeddingSearch.ts` reads the same env var, and `ToolDispatcher` calls
+`getEmbeddingStore(ws).addFile(...)` on EVERY file write — three call sites (2416, 2568, 2636).** From
+the moment the key was set, every file of every build would have been sent to
+`text-embedding-ada-002` and then persisted to Firestore (`workspace_embeddings_v3`), on NavBharatAI's
+own OpenAI account.
+
+🔴 **And the index has no reader.** `EmbeddingStore.search()` has no production call site — `grep` for
+`getEmbeddingStore(` finds exactly three outside the module's own exports and all three are writes. The
+key would have bought a vector index written on every build, stored for ever, and never once consulted.
+
+🔎 **THE CLASS, named so it is recognised elsewhere: A FEATURE WHOSE WRITE HALF IS WIRED AND WHOSE READ
+HALF IS NOT can only ever cost.** It survives review precisely because it looks alive — a real API
+client, a real store, real durable persistence, a hash check so unchanged files are not re-embedded.
+Every part is well built except the one that would make it worth anything.
+
+⚠️ **The second reason it would have stayed invisible, and the more important one: the spend sits
+OUTSIDE `captureTurnUsage`.** It could never have appeared in a build's cost, in the user's wallet, or
+on the admin's spend dashboard. **A cost that no panel can show is the one that cannot be noticed** —
+the same shape as the `E2B_USD_PER_HOUR` half-rate, which also looked deliberately configured while
+being wrong.
+
+**THE FIX — one gate, at the chokepoint.** `AGENTV3_EMBEDDINGS` (default **OFF**, opt-in, blank or
+malformed reads as off) checked inside `EmbeddingStore.embed()`. That one line kills BOTH costs, because
+`addFile` already returns without persisting when `embed` yields null — so the OpenAI request and the
+Firestore write die together, and **a fourth `addFile` call site added later is free by construction**.
+Checking at the three call sites instead is how the fourth one gets forgotten. `ToolDispatcher` is
+untouched and knows nothing about the flag; that is the point of a chokepoint.
+
+**Flagged, not deleted.** The module is real and tested, and deleting working code to stop a bill is the
+mistake this repo already paid for once (`fileMentions.ts`). ⚠️ Stated plainly in the code: turning the
+flag ON today still buys nothing until somebody wires the read half.
+
+⚠️ **A TEST THAT PASSED FOR THE WRONG REASON, caught by re-injection.** The first behavioural assertion
+was `expect(store.embed(...)).resolves.toBeNull()` — and a fake API key yields null too, by failing the
+request, which is exactly the cost we are trying not to pay. Deleting the gate and re-running showed it
+still passing. It now asserts that **no client was ever constructed** (`getClient` caches into
+`this.client`, and the OpenAI constructor accepts any string), which only the gate can produce. Both
+assertions were then re-verified by deleting the gate a second time and watching both fail.
+
+**Test-locked** in `tests/embeddingsOff.test.ts` (8 tests). `CLAUDE.md`'s env registry updated
+hand-to-hand the same session: `OPENAI_API_KEY` is now recorded as SET, with the warning that two
+unrelated subsystems read it.

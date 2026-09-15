@@ -1013,6 +1013,28 @@ the code (it is actually read somewhere) on 2026-07-11.
   Set `off`/unset to disable. Works WITH the reactive stack: escalating 429 re-probe bench (#1801),
   GLM↔KIMI floor balance (#1802, kill switch `AGENTV3_FLOOR_BALANCE=off`), circuit breaker
   (`AGENTV3_CIRCUIT_BREAKER`, default on), and the GLM key-pool.)
+- **`AGENTV3_EMBEDDINGS` — the OpenAI file-embedding index, OFF by default (built 2026-09-15):** ⚠️ **NOT
+  set, and it should stay unset.** Read by `src/server/AgentV3/embeddingsFlag.ts`; the gate is the single
+  line in `EmbeddingStore.embed()` that every cost in that module flows through.
+  🔴 **WHY IT EXISTS: the admin set `OPENAI_API_KEY` for an entirely different reason and this started
+  spending.** `EmbeddingSearch` reads the SAME env var, and `ToolDispatcher` calls
+  `getEmbeddingStore(ws).addFile(...)` on EVERY file write (three call sites), so every file of every
+  build would have gone to `text-embedding-ada-002` and then into Firestore
+  (`workspace_embeddings_v3`) — on NavBharatAI's own OpenAI account.
+  🔴 **AND THE INDEX HAS NO READER.** `EmbeddingStore.search()` has no production call site; all three
+  call sites are writes. So the key would have bought a vector index written on every build, stored for
+  ever, and never once consulted. **Turning this flag on today still buys nothing** until the read half
+  is wired — it is a switch for whoever builds that, not a feature.
+  🔒 **THE CLASS, named so it is recognised elsewhere: A FEATURE WHOSE WRITE HALF IS WIRED AND WHOSE
+  READ HALF IS NOT can only ever cost.** It looks alive in review — real API, real store, real
+  persistence — and produces nothing. It stayed invisible for a second reason: the spend sits OUTSIDE
+  `captureTurnUsage`, so it could never have appeared in a build's cost, the user's wallet, or the admin
+  dashboard. **A cost no panel can show is the one that cannot be noticed.**
+  ⚠️ The default is deliberately OPT-IN, the opposite of most flags here, and a blank or malformed
+  value is OFF rather than on — nobody types a stray word meaning "start calling a paid API on every
+  file write". The module was flagged rather than deleted (it is real and tested; deleting working code
+  to stop a bill is the `fileMentions.ts` mistake). Test-locked in `tests/embeddingsOff.test.ts`.
+
 - **🔴 CHAT GROUNDING — CORRECT AND CURRENT BEATS FAST (admin-mandated 2026-09-12, standing rule).**
   Admin, verbatim: *"latest information aur correct information jyada important hai, time se jyada.
   Chahe to time jyada lage par information sahi aur latest ho!"* So on the chat path, **never trade
@@ -2635,8 +2657,13 @@ known-weak 4.7-flash.
   Opus rate inside that. A stored 'medium'/'max' maps UP to 'mini' (never down to Normal).
 - **Env keys (names only):** `AGENTV3_LADDER_WEAK` / `_NORMAL` / `_STRONG` (override one tier's ladder,
   `PROVIDER:model,…`, applied whole or refused with the reason in the `TIER_LADDER` report line);
-  `OPENAI_API_KEY` (⚠️ **NOT set** — the admin said they will buy it; until then the gpt-5.4 rung yields
-  nothing and changes no build) and `OPENAI_BASE_URL`, `AGENTV3_OPENAI_TIMEOUT_MS`; `RATE_GLM53_FLASH_IN`
+  `OPENAI_API_KEY` (✅ **SET in Cloud Run by the admin 2026-09-15.** It still changes **no build**: no
+  tier ladder names an OPENAI rung, so the key is reached only if `AGENTV3_LADDER_*` is given one
+  explicitly. 🔴 **BUT SETTING IT SWITCHED ON A SECOND, UNRELATED PATH THAT NOBODY DECIDED — see
+  `AGENTV3_EMBEDDINGS`, whose own entry in this registry explains it.** The chat router has no OpenAI provider at all, so free/Pro chat is
+  untouched. ⚠️ Anything reading this key must be checked when it is set: it is read by
+  `EmbeddingSearch.ts` as well as by the build runner, and those two have nothing to do with each
+  other) and `OPENAI_BASE_URL`, `AGENTV3_OPENAI_TIMEOUT_MS`; `RATE_GLM53_FLASH_IN`
   / `_OUT` / `_CACHE` (**code default now the admin's real price, 2026-09-14: $0.15 / $0.50, cache
   $0.0375** — an earlier placeholder priced it at the glm-5 line, ~10× too high, for a few hours, on
   no user's bill); non-flash **GLM-5.3 is $1.40 / $4.40 = the existing glm-5 line**, no new row;

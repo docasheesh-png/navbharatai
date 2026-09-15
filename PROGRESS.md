@@ -56238,3 +56238,126 @@ GLM was slow for ten minutes and the build wrote nothing. The family bench makes
 that has not streamed a token in 20 s is far more likely to time out than to answer, and moving on at 20 s
 instead of 60 s turns the worst case from minutes into seconds. Not built here — it changes provider
 timeouts across every lane and deserves its own measured change.
+
+## 2026-09-15 — The referral system: a decorative feature removed, and a real one built behind a device check
+
+The admin asked to plan a referral system and, while gathering the facts, the honest answer to
+"what free gift do we give?" turned up something else: **NavBharatAI already had a referral feature
+on screen, and none of it existed.**
+
+### What was live, and why it is the second absolute rule's exact shape
+
+The Billing panel carried a code, a share button, a reward promise and an earnings table:
+
+- **Two different codes for one person.** The balance card printed `NB-<random>` minted by
+  `Math.random()` into localStorage; the Promo tab printed `NAV-<mailbox>-REF` computed inline from
+  the email — which also **published the mailbox of anyone who shared their code**.
+- **A promise of money**: *"Earn 10% Free Tokens for every referral."* No attribution, no credit
+  path, no endpoint. Nobody could ever have earned ₹1.
+- **Invented earnings, hardcoded**: `amit_sharma2026@gmail.com ₹50 CLAIMED` and
+  `priya.rastogi@navbharat.ai ₹25 ACTIVE`, seeded into localStorage on first render — so **every
+  user was shown the same two strangers as their own referral income**.
+- A coupon placeholder naming `WELCOME100` and `NAVBHARAT50`, both **deleted** in the 2026-09-10
+  revenue audit: two guaranteed failures, advertised.
+
+Removed (#2953). The guard that replaces it, `tests/noInventedRewardUi.test.ts`, does **not** forbid
+the word "referral" — it forbids the four things that make a reward surface fake: a code minted in
+the browser, reward state seeded from a literal, a named earning promise with no server behind it,
+and example codes the server is known to refuse. A real screen reads a server-minted code and a
+server-held list, so it passes all four by construction.
+
+⚠️ **One of those assertions was wrong on its first writing**, and the lesson is worth more than the
+test: it required `Math.random` and the word "referral" on the SAME LINE, while in the real code they
+were five lines apart — so it **passed against the exact bug it was written for**. It surfaced only
+because each guard was proven by re-injecting the deleted code rather than by reading it.
+
+### The plan the admin approved, and what each rule is for
+
+| | |
+|---|---|
+| **B** (new user) | code ₹100 · email ₹100 · mobile ₹100 · github ₹100 = **₹400** |
+| **A** (referrer) | ₹25 × B's **three verifications** = **₹75** |
+| **One referred user** | **₹475** — below today's flat ₹500 |
+| Organic app user | ₹300 · **Website: ₹0** |
+| **Referrer lifetime cap** | **₹1,500** |
+
+Four rules, each closing a specific leak:
+
+1. **Android only, device-verified — every rupee**, including email and github. A free mailbox and a
+   free GitHub account take three minutes, so ₹200 reachable from a laptop would be an unlimited,
+   scriptable printer that never meets the device check. *Half a gate is no gate.*
+2. **The referrer is paid for verifications, never for a redemption.** Paying on redemption is what
+   makes a CHAIN: one mother account farming a throwaway per cycle, earnings concentrating in one
+   usable wallet.
+3. **Nothing releases until the friend's mobile is verified.** A device id resets on a factory reset
+   (~18 min, ₹0 cash); a phone number does not. The device bounds how many accounts exist at once;
+   only the phone bounds how often the same person returns.
+4. **₹1,500 lifetime cap** — *bounded*, not merely unprofitable, for when the reasoning behind 2 and
+   3 turns out to be wrong about somebody's patience. It counts what was EVER PAID, never what is
+   held: a cap measured against a balance is refunded on every spend, the mistake `weeklyTopUp.ts`
+   already records.
+
+### 🔴 Two real defects found by the work itself
+
+**A ₹400 hole in the claim route.** It proved WHO was asking (the device) and WHETHER anything was
+owed (the paid-steps list) — and **never asked whether the step had been done**. Any caller on a
+genuine Android phone could POST `email`, `github` and `mobile` having verified none of them and
+collect the full ₹400, per device. The device gate made the fraud slower; it did nothing about this.
+The lesson is the store-purchase audit's, in a new place: **a claim is a request, not a fact.**
+`stepIsProven` now reads Firebase's own record (emailVerified, a verified phone, `github.com` among
+the linked providers) and our store for the referrer — never the request body. Removing it fails 8
+tests. `AccountContact` gained `providers` for the same reason: "connected GitHub" is not something a
+client can be trusted to assert.
+
+**A blank env value meant zero.** `Number('')` is **0**, not NaN, so a key present-but-empty in Cloud
+Run — a cleared field, a dropped paste — would have read as a deliberate zero. On the ₹1,500 cap that
+is *no referrer ever earns anything, for ever*, with the console showing the key as configured and
+nothing failing anywhere. Caught by a test before it shipped.
+
+And a third, smaller: `googleAccessToken` took an injected env for its CHECK and read `process.env`
+for the CREDENTIAL — two sources of truth that agree right up until they do not. Found because four
+tests failed; `env` is now threaded, defaulted, so every existing caller is unchanged.
+
+### The dead-code guard learned to clean up after itself
+
+The new modules had no callers, and the guard said so correctly. Rather than only take the exemption,
+the gap its own comment implies was closed: the list says it *"is meant to shrink"*, but the staleness
+test only checked that the FILE still exists — so an exemption granted while a module was being built
+would survive for ever once it was wired, leaving a permanent blind spot exactly where the suite is
+meant to look. **An allowlisted file that has become reachable now fails.** It removed its own three
+entries across the following two commits, twice, without anyone remembering to.
+
+### Also shipped
+
+- **Apple sign-in is not offered on Android** (admin's ask). Kept on iOS — App Store Guideline 4.8
+  requires it beside other social logins — and on the web. An unknown platform still offers it, so a
+  wrong default never removes somebody's only way in. ⚠️ **An existing Apple-on-Android user loses
+  that door in the app** but keeps it on navbharatai.com; the account is untouched.
+- **Privacy Policy §3.2** discloses the device identifier, which is a precondition for shipping it
+  rather than paperwork — the same shape as the 2026-09-02 incident where the policy said "we never
+  share your data with advertisers" while the Meta pixel was being built.
+- The testing-notice popup carries the reward checklist, and **its three-second countdown never
+  starts while money is unclaimed**: a notice that shows somebody ₹100 and removes it before they
+  can reach it, with no way back until the next cold start, is worse than not showing it.
+
+### 🔴 OPEN — not done, and needed before this can be switched on
+
+1. **Play Integrity API enabled** in `gen-lang-client-0866594388`, and the `playintegrity` scope
+   granted to the existing `GOOGLE_PLAY_SA_JSON` service account. Admin-only.
+2. **`PLAY_INTEGRITY_CLOUD_PROJECT`** set as a GitHub repo secret (the project NUMBER, not the id).
+3. **A `.aab` carrying `DeviceIntegrityPlugin`** live on Play — release 91 and earlier do not have it.
+4. **Play Console → Data safety** updated for the device identifier. A declaration that contradicts
+   the policy is a violation, not a mismatch.
+5. **The admin-facing referral view** (spend vs revenue, and an alert on the pattern of one code,
+   many accounts, no phone, never pays) is **NOT built**. Recorded as an open item rather than
+   quietly dropped: the money is bounded by the ₹1,500 cap without it, but nobody can currently SEE
+   what referrals cost.
+6. **Nothing here has met a real handset or a real Play Console.** 111 tests cover every judgement
+   and every failure path against an injected Google; what they cannot cover is whether the API is
+   enabled and the account granted. The first genuine token is the first real test — and every
+   failure mode is honest and visible rather than silent.
+
+Gate on the final state: `typecheck` · `noUnusedImports` · `typecheck:server` · full suite **23,506
+passed** · `build` · `test:bundle` · `boot:check`. ⚠️ Three failures in `tests/esmMirror.test.ts`
+reproduce identically on clean `origin/main` with the change stashed — pre-existing, verified rather
+than assumed, and reported rather than left silent.

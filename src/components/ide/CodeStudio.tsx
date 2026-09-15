@@ -1438,7 +1438,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
               <span className="text-[10px] font-bold">AI</span>
             </button>
             <button
-              onClick={() => handleScreenChange('preview')}
+              // Same shape as the AI button to its left (admin 2026-09-15: "aise hi preview ko bhi karo").
+              // The parent opens NavBharatAI Pro in its own window, on Pro's Preview page — ONE preview,
+              // the one the rest of the product shows. The in-IDE screen stays only as the fallback for a
+              // parent that does not wire this (and for the command palette's markdown.showPreview).
+              onClick={() => { if (onPreviewClick) onPreviewClick(); else handleScreenChange('preview'); }}
               className={cn(
                 "w-20 h-7 rounded-r-lg flex items-center justify-center text-white shadow-lg shadow-indigo-500/20 active:scale-90 transition-all border-y border-r border-l border-indigo-400/20",
                 activeScreen === 'preview' ? "bg-indigo-700" : "bg-indigo-600 hover:bg-indigo-700"

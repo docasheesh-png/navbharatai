@@ -467,3 +467,53 @@ describe('the empty workspace offers ONE way to reach the AI, and it is the real
     expect(panels).not.toContain("closeTab(undefined, 'studio')");
   });
 });
+
+describe("Code Studio's Preview button opens NavBharatAI Pro's Preview page", () => {
+  /**
+   * Admin 2026-09-15: *"aise hi preview ko bhi karo. ide me koi user preview press kare to navbharatai
+   * pro, open hi preview wala page, jo maine screenshot bheji hai woh."*
+   *
+   * It used to run `handleScreenChange('preview')` — Code Studio's OWN preview screen, a third preview
+   * surface beside Pro's and the standalone 'preview' tab. Now it does exactly what the AI button beside
+   * it does: the parent opens NavBharatAI Pro in its own window, plus a nonce telling the Pro panel to
+   * land on its Preview surface instead of the chat.
+   *
+   * The nonce is load-bearing and easy to drop by mistake: Pro's `tab` already defaults to 'preview', but
+   * `showWorkspace` defaults to FALSE — so opening the tab alone shows the full-width chat, and the user
+   * who pressed "Preview" sees no preview at all.
+   */
+  it('delegates to the parent, with the in-IDE screen only as a fallback', () => {
+    const i = studio.indexOf('title="Open Preview"');
+    expect(i).toBeGreaterThan(-1);
+    const btn = studio.slice(Math.max(0, i - 1200), i);
+    expect(btn).toContain('if (onPreviewClick) onPreviewClick(); else handleScreenChange(\'preview\')');
+  });
+
+  it('the parent opens the Pro window AND asks for its Preview surface', () => {
+    const app = read('src/App.tsx');
+    expect(app).toContain("onOpenProPreview={() => { setV3OpenPreviewNonce(Date.now()); toggleTab('nbi_pro_chat'); }}");
+    // The nonce has to actually reach the panel, or the tab opens on the chat.
+    expect(app).toContain('openPreviewNonce={v3OpenPreviewNonce}');
+    const panels = read('src/components/panels/ViewPanels.tsx');
+    expect(panels).toContain('onPreviewClick={onOpenProPreview}');
+  });
+
+  it('the Pro panel lands on the preview surface — tab AND workspace, not just tab', () => {
+    const panel = read('src/components/agentv3/AgentV3Panel.tsx');
+    const i = panel.indexOf('if (!openPreviewNonce) return;');
+    expect(i).toBeGreaterThan(-1);
+    const effect = panel.slice(i, i + 260);
+    expect(effect).toContain("setTab('preview')");
+    // showWorkspace defaults to false; without this the preview stays hidden behind the chat.
+    expect(effect).toContain('setShowWorkspace(true)');
+    // Threaded through the wrapper, or the prop never arrives.
+    expect(read('src/components/agentv3/ProV3Surface.tsx')).toContain('openPreviewNonce={openPreviewNonce}');
+  });
+
+  it('the standalone Preview view is not stranded — the menu and bottom nav still reach it', () => {
+    // Repointing the IDE button must not leave a view nothing can open.
+    const app = read('src/App.tsx');
+    expect(app).toContain("{ id: 'preview',      label: 'Preview',");
+    expect(app).toContain("{ id: 'preview' as ViewType,");
+  });
+});

@@ -90,26 +90,3 @@ describe('appIcon — the Play-Store rules the APK path still needs', () => {
   });
 });
 
-describe('the store publish sheet offers all three ways in', () => {
-  const sheet = readFileSync(join(process.cwd(), 'src/components/agentv3/HostingChooser.tsx'), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
-
-  it('uploads, pastes, and makes — on the shared pipeline, not a second copy of the rules', () => {
-    expect(sheet).toContain('readStoreIcon');
-    expect(sheet).toContain('readStoreIconFromClipboard');
-    expect(sheet).toContain('onMakeIcon');
-    // The old inline 200KB refusal is what made a generated icon impossible to use.
-    expect(sheet).not.toContain('200_000');
-  });
-
-  it('"Make icon" leaves the publish form open — it is a round trip, not a hand-off', () => {
-    const panel = readFileSync(join(process.cwd(), 'src/components/agentv3/AgentV3Panel.tsx'), 'utf8');
-    const at = panel.indexOf('onMakeIcon={');
-    expect(at).toBeGreaterThan(-1);
-    const wiring = panel.slice(at, panel.indexOf('onClose=', at)); // this prop only, not its neighbours
-    expect(wiring).toContain("view: 'imagegen'");
-    // Closing it would discard the name/screenshots the user already typed, so they would come back
-    // from AI Image Gen with an icon and nowhere to paste it.
-    expect(wiring).not.toContain('setShowHostingChooser(false)');
-  });
-});

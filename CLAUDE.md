@@ -2747,6 +2747,46 @@ and costs nothing while off. Read by `src/server/AgentV3/complexityRouting.ts`; 
   FLAGS — "this is a repair" and "this is a big app" are different questions with the same answer
   today — and a test asserts the two produce identical ladders so they cannot drift.
 
+🏗️ **`AGENTV3_PROJECT_MODE` — SOFTWARE PROJECT MODE. BUILT, WIRED, TESTED, AND ASLEEP SINCE
+2026-07-04. ⚠️ Recorded here on 2026-09-17 because it was MISSING FROM THIS REGISTRY ENTIRELY** —
+zero mentions in this file, eight in `PROGRESS.md`. That is precisely the drift this registry exists
+to prevent, and it is why the capability is invisible: a session asked to build "milestone building"
+would build a second copy of it, and the admin cannot decide on a feature nobody tells them exists.
+
+**What it is** (`src/server/AgentV3/ProjectPlan.ts`, 592 lines + `ProjectPlanStore.ts`): for a build
+too big for one conversation, the project is decomposed ONCE into modules carrying explicit
+`dependsOn` edges and **frozen export contracts**, persisted durably, and then each turn builds ONE
+module in a FRESH context holding only that module's spec plus the contracts of modules already
+done — never the transcript. Context stays small however big the project is, so size is bounded by
+the plan rather than by the window. It answers the five ceilings by name: context window, the
+80-step cap, the 30–60 min clock, the budget cap, and small-app-tuned verification.
+
+🔒 **The wiring is VERIFIED, not taken from the doc** (`routes/agentv3.ts` ~14272–14356 creates and
+saves the plan and projects the todos, ~18571 marks each module done/failed after its turn, ~19591
+auto-continues to the next buildable module). This is a live path behind a flag, not dead code —
+unlike `EmbeddingSearch`, whose only reader is called from nowhere.
+
+⚠️ **UNSET ⇒ OFF, and every build is byte-identical to today.** The flag takes `on` (everyone),
+`off`/unset (the kill switch), or **anything else as an ALLOWLIST of uids/emails** — built
+deliberately so the admin can enable it for their OWN account and run one real mega-prompt before
+anyone else sees it. Detection (`detectMegaProject`) is HIGH-PRECISION on purpose: an explicit
+"100+ files/pages/screens", or a big-software noun (ERP/CRM/HMS/SaaS platform/marketplace…) with ≥8
+enumerated features, or ≥14 enumerated features. A false positive costs an ordinary app an extra
+planner call; a false negative just builds exactly as it does today. Minimum 3 modules or it falls
+straight back to the normal path.
+
+🔴 **THE STATE IS A PENDING ADMIN DECISION, NOT AN UNFINISHED FEATURE.** `PROGRESS.md` (2026-07-04)
+records it as *"fully built and dormant … ADMIN DECISION NEEDED (asked in chat, safeguard #3)"*,
+with the exact action: set `AGENTV3_PROJECT_MODE=aashishcpmt09@gmail.com` on Cloud Run, send one
+mega-prompt, watch the module plan appear and advance, then `on` for everyone once happy. **That
+question has been open for over two months.** It is recorded here rather than acted on because the
+key lives in a console no session can reach.
+
+⚠️ **Three honest gaps, from that same entry and still open:** an IMPORTED repo never creates a plan
+(creation fires only on a fresh `new_build`); a reopened incomplete plan needs a typed "continue"
+(restore does not re-emit resumable); and contract DRIFT — a module deviating from its own frozen
+contract — is caught only by the whole-workspace `tsc` each turn, not by a dedicated contract check.
+
 🔴 **THE LEAD RUNG CHANGED 2026-09-17 — `glm-5.3-flash` IS OFF EVERY LADDER** (admin, verbatim: *"glm
 5.3 flash ko hata do!"*, with the FlashX price read off docs.z.ai on their own screen). It is replaced,
 on Weak and Normal and as the PLAN rung of both, by **`glm-4.7-flashx` — $0.07 in / $0.40 out / $0.01

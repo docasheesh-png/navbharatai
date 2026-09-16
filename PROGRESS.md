@@ -59164,3 +59164,49 @@ exists to refuse.
 **Still open from this autopsy (1, 2, 4, 5):** budget-blind planning, unbounded exploration, idle
 sandbox billing, and mid-build scope explosion. Items 1 and 2 are one change to the architect loop —
 where other sessions are active — and are deliberately NOT started here rather than raced.
+
+---
+
+## 2026-09-17 — Item 7: the "Milestone Building" proposal is ALREADY BUILT. Do not build it again.
+
+The admin forwarded a ChatGPT proposal for "Milestone Building" and flagged it under the
+external-suggestion rule ("dont build! text reply only", then "ek ek kar ke sab build karo"). Audited
+it against the real codebase before designing anything, using safeguard #6's method — **filename
+first**, three vocabularies, whole repo. Both halves of the proposal already exist:
+
+**1. Feature-level dependency ordering ⇒ `ProjectPlan.ts` (Software Project Mode), 592 lines.**
+Modules with explicit `dependsOn`, frozen export contracts, dependency-ordered scheduling, durable
+per-module status, todo projection, and a per-module FRESH context carrying only that module's spec
+plus the contracts of finished modules. **Verified wired, not assumed**: `routes/agentv3.ts` ~14272
+creates and saves the plan, ~18571 marks each module done/failed after its turn, ~19591 auto-continues
+to the next buildable module. Gated by `AGENTV3_PROJECT_MODE`, which defaults OFF.
+
+**2. Protect completed milestones ⇒ `greenFreeze.ts`, and it is STRONGER than the proposal.** The
+proposal wanted finished work protected from later passes. Green Freeze already denies post-green
+overwrites **by construction**, deny-by-default with a small explicit allowlist, built on the same
+AsyncLocalStorage idiom as `noClaudeZone` and `aiSpendZone` — so a pass a future session adds is
+refused automatically because it is not on the list. Its own header records why the convention-based
+version ("add `if (previewGreen) skip` twelve times") was rejected: conventions rot. **Default ON,
+already live in production.**
+
+🔴 **SO THE REAL FINDING IS NOT A MISSING FEATURE — IT IS A PENDING ADMIN DECISION, OPEN SINCE
+2026-07-04.** The 2026-07-04 entry above records Software Project Mode as *"fully built and dormant …
+ADMIN DECISION NEEDED (asked in chat, safeguard #3)"* and gives the exact action:
+`AGENTV3_PROJECT_MODE=aashishcpmt09@gmail.com` on Cloud Run, one real mega-prompt, then `on` for all.
+That question was asked and never answered, and the feature has slept for over two months.
+
+🔴 **AND THE REASON NOBODY COULD SEE IT: the flag was MISSING FROM CLAUDE.md's env registry
+entirely** — zero mentions there against eight in this file. The registry exists precisely to stop
+that drift, and this is the same shape as the idle-minutes default that said "NOT taken" eight days
+after it was taken. **Fixed in this change**: a full entry now records what the mode is, that the
+wiring is verified rather than doc-sourced, the allowlist rollout path, the high-precision detection,
+the pending decision, and the three gaps below.
+
+**Three gaps carried forward honestly** (from the 2026-07-04 entry, re-confirmed still open): an
+IMPORTED repo never creates a plan (creation fires only on a fresh `new_build`); a reopened incomplete
+plan needs a typed "continue"; and contract DRIFT is caught only by the whole-workspace `tsc` each
+turn, not by a dedicated contract check.
+
+**What was deliberately NOT done:** the flag was not flipped and no second planner was written. The
+key lives in a console no session can reach, and building a parallel "milestone" system beside a
+working one is exactly the duplicated work safeguard #6 exists to prevent.

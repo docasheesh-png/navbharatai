@@ -25,8 +25,16 @@ describe('the name is App Mart on every surface a user can see', () => {
   it.each(surfaces)('%s carries no user-visible "Nav App Store"', (path) => {
     // Comments are stripped: they are history, and rewriting them would add noise to every future
     // diff for no user-visible gain. Only strings a person can read are renamed.
+    //
+    // 🔴 A BLOCK COMMENT COUNTS ONLY WHEN IT OPENS ITS OWN LINE, and that word is what makes this
+    // assertion real (2026-09-15). The old version matched `/*` anywhere, so the `image/*` and
+    // `**/*.ts` that appear inside ordinary strings opened comments that ran on for hundreds of
+    // lines — in AppKnowledgeBase.ts it deleted essentially the whole file, and this guard passed
+    // on an empty string while a user-visible "Nav App Store" sat in the knowledge base the AIs
+    // read aloud. A negative assertion against text that was silently deleted proves nothing.
     const src = read(path)
-      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+      .replace(/^[ \t]*\/\*[\s\S]*?\*\//gm, '')
       .replace(/^\s*(\/\/|\s\*).*$/gm, '');
     expect(src).not.toContain('Nav App Store');
   });

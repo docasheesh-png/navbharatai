@@ -56583,6 +56583,64 @@ generous clock, and two new tests prove the clamp fires on the exact 4efab9d7 pa
 
 ---
 
+## 2026-09-15 — The APK Reports inbox can now leave the screen (admin: "apk build report download ka option hi nahi banaya aapne?")
+
+**The admin was right, and the answer is not "look again under a different name".** I searched by
+filename and by three vocabularies (`download` / `export` / `saveJson`, `blob` / `createObjectURL`,
+`copy`) across the whole repo before concluding anything. The admin panel has THREE report inboxes.
+**Build Reports** and **User Reports** have had Download and Copy since the day each shipped, both
+funnelling through one `saveJsonFile` helper. **APK Reports**, added on 2026-09-14 as the third page,
+shipped with neither — it could be read on screen and nothing else, with the failing step's log inside a
+`max-h-64` scrolling box. That is why the admin's own capture of the page came back with the log excerpt
+cut off: there was no way to take it off the screen intact.
+
+**What shipped, all of it through the helpers that already existed:**
+- **Download** and **Copy** on an open report — the record in hand IS the whole stored report, so
+  nothing is re-fetched that could differ from what was read.
+- **Download all** beside Clear all — `listApkReports` returns full records, so the inbox file is not a
+  summary.
+- `src/lib/apkReportFile.ts` is the only part with real logic: `owner` and `repo` come from a USER's
+  GitHub account, so a slash or a quote in a filename is a browser refusing to write the file. Same
+  sanitising reason as `apkReportId` on the server, and it falls back to the report id and then to a
+  bare name — a download is never blocked by an unusual repository name.
+
+🔴 **THE HONESTY FIX THAT MATTERS MORE THAN THE BUTTON: "Open the full run on GitHub" is not a link the
+admin can necessarily open.** `mobileShip.ts` takes `owner`/`repo` from the user's OWN connected GitHub
+account, so the run lives in THEIR repository — private in the ordinary case. The page presented it as
+where the complete log lives, sending the one person who has to fix the failure to a 404. It now says
+whose account it is and that everything below it is stored here, and the excerpt's heading states how
+many lines it holds (`reportLogExcerpt` keeps the last 120 of the failed step) instead of leaving
+"truncated" to be guessed at.
+
+### 🔎 The sibling hunt found a DEAD GUARD, and it had been dead silently
+
+Chasing rule 3 across the repo turned up something worth more than the button. **88 test files strip
+comments with `replace(/\/\*[\s\S]*?\*\//g, '')`, which treats `/*` as a comment opener wherever it
+appears — including inside ordinary strings** such as `accept="image/*"` and `'**/*.ts'`. It then runs
+to the next `*/`, hundreds of lines later, deleting real code.
+
+- It bit me first, in the new test: two assertions failed against JSX that was already correct.
+- **Then a scripted sweep of every `not.toContain` guard against every source file the naive strip
+  over-deletes found ONE genuinely dead:** `tests/appMart.test.ts` asserts
+  `AppKnowledgeBase.ts` carries no user-visible "Nav App Store". The naive strip deletes essentially
+  that whole file (583,991 characters), so the guard was passing on an empty string — **and a real
+  user-visible "Nav App Store" had survived the rename in the text every AI reads aloud.** Renamed to
+  App Mart, and the guard re-checked by re-injecting the old string and watching the test fail.
+- The three `not.toContain('Math.random')` game-runtime guards were checked the same way and are
+  genuinely alive (the generated files contain no inline `/*`) — reported as checked, not assumed.
+
+**The lesson, and it is the one this file already teaches about capped search output:** an assertion
+that something is ABSENT proves nothing until you have proved the text was present to be found. A
+negative guard needs a re-injection test the way a positive one does not.
+
+⚠️ **OPEN, deliberately not swept:** the other ~87 files carry the same naive stripper. None is
+currently dead — that was measured, not assumed — but each is one `not.toContain` away from becoming
+so. Centralising a single shared stripper would touch 88 unrelated test files in one diff, which is its
+own risk; the precise detector is noisy in CI (it matched 6 candidates for 1 real defect). Recorded here
+as an open item rather than half-swept.
+
+**Test-locked** in `tests/apkReportDownload.test.ts` (11 tests — the filename rules, both download
+paths, the shared-helper funnel, the honest empty/loading refusals, and the link's ownership note).
 ## 2026-09-15 — THE PUBLISH CEILING FIX WAS BUILT, MERGED AND SWITCHED OFF BY ONE EMPTY STRING
 
 **The report.** The admin's notification panel read: *"Hosting channels are filling up: 36 of about 50

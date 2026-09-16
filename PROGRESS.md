@@ -57579,6 +57579,92 @@ ladder reorder, and whether a faster vendor plan is worth buying. And the root q
 answer: no failed build report has been read yet for this complaint — these numbers are sized from the
 engine's own budgets, not from the traffic that is actually timing out.
 
+---
+
+## 2026-09-16 — Account switching: the ONE-TAP promise was made on web and never wired to native
+
+**Admin:** *"maine bola tha, ek sath kayi account ek sath login hone wala system bana do! par abhi ek
+ek kayi sare login to ho jate hai. par jab account swich karte hai, to wapas se login karna padta hai.
+easy one tap swich nahi ho raha!"*
+
+**This is the SAME feature the 2026-09-02 entry above investigated once already**, and that entry's
+conclusion still stands: true simultaneous sessions were deliberately NOT built (the Firebase SDK holds
+one live session per app instance, and a refresh token in `localStorage` is a permanent account takeover
+for anyone who reaches that storage — not worth the saved tap). The 2026-09-02 fix made the promise
+honest in words: *"Switching signs you in again — one tap with Google, your password for email
+accounts."* That sentence was only ever true on the web.
+
+**Root cause: the login_hint that makes Google's chooser land on one tap was captured, stored — and
+then silently dropped the moment the flow reached a real phone.**
+
+`handleGoogleSignIn` (web) reads the switch-to email out of `SIGN_IN_HINT_KEY`, clears it, and puts it
+on `GoogleAuthProvider.setCustomParameters({ login_hint, prompt: 'select_account' })` — that part has
+worked since 2026-08-22. But `socialSignIn`'s NATIVE branch (the one every phone actually runs) never
+looks at that `GoogleAuthProvider` object at all — it calls the `@capacitor-firebase/authentication`
+plugin's own `signInWithGoogle()` with no arguments. So on native, every single switch opened Google's
+sign-in sheet with **zero idea which account was wanted** — showing the generic account list at best,
+or (for an account this device never natively cached) a completely fresh login at worst. Both look
+identical to "have to log in again", which is exactly the report.
+
+**The fix.** `@capacitor-firebase/authentication`'s own docs use `login_hint` as the example
+`customParameter` for `signInWithGoogle()` — this was always wireable, just never wired past the
+web-only code path:
+- `googleNativeCustomParameters(hint)` (`accountRoster.ts`, pure) — `[{ key: 'login_hint', value }]`
+  when a hint exists, `undefined` otherwise (never `[]`, so a caller can spread it in and add nothing).
+- `socialSignIn` now takes an explicit `signInHint` parameter — threaded through rather than re-read
+  from `SIGN_IN_HINT_KEY` inside it, because the web path already consumed and cleared that key before
+  `socialSignIn` runs; reading it twice would always see it empty the second time.
+- `handleGoogleSignIn` passes the SAME hint it already puts on the web provider through to
+  `socialSignIn`, so one value now drives both paths instead of only the one nobody's phone uses.
+
+**What this does NOT fix, said plainly (rule 6):**
+- **Apple** has no equivalent hint — "Sign in with Apple" is tied to whichever Apple ID is signed into
+  the device at the OS level, not selectable per app-level account chooser. A device with one Apple ID
+  can only ever offer one Apple account, by Apple's own design, not ours.
+- **GitHub**'s OAuth `authorize` page has no true account-select hint either (only a `login` param that
+  pre-fills a text field, not a fast-path); it is always a full-page authorize sheet on both web and
+  native regardless of any hint. Not touched, since faking a "one tap" claim there would repeat the
+  exact overstatement the 2026-09-02 entry corrected.
+- **Simultaneous sessions are still not built**, and still not recommended without a specific reason to
+  take the risk the 2026-09-02 entry named: every wallet/billing/build code path resolves ONE `auth`
+  from `lib/firebase`, and rewiring them all to a switchable instance risks one missed call site
+  spending real money on the wrong account's wallet.
+
+7 new tests (`accountRoster.test.ts`) pin `googleNativeCustomParameters`'s three states (a real hint,
+one with stray whitespace, and "nothing to add" for undefined/null/empty/whitespace-only — asserting
+`undefined`, never `[]`). Gate: `tsc` clean (frontend + server, after `npm install` picked up
+`libsodium-wrappers`'s move to a real dependency from #2967), `noUnusedImports` clean, `vitest run`
+1694 files / 23762 passed / 0 failed, `build` + `test:bundle` + `boot:check` all green.
+## 2026-09-16 — `AGENTV3_STREAM_BUILD_CALLS` is LIVE (admin set it `on` in Cloud Run)
+
+The admin set the master switch the same day the change merged (#2966, `9e9aa9bb`), and left both
+tunables UNSET so the code defaults govern (idle 60 s, hard cap 300 s). Recorded here and in the
+CLAUDE.md env registry in the same session, hand-to-hand, per that registry's own rule — the entry
+had said "NOT live yet / UNSET", which is exactly the doc-vs-reality drift this repo has already paid
+for twice (the idle-minutes default, the E2B rate).
+
+**So every GLM/Kimi build call is now bounded by SILENCE rather than duration**, and a stall keeps
+what already arrived instead of destroying the call. This is the first time that path has ever run
+against a live provider; the flag exists so it reverts with no deploy.
+
+### 🔴 What must be read off the first real builds — and it is not "did it get faster"
+
+1. **Streamed turns reporting 0 input / 0 output tokens.** A stream carries no usage unless Z.ai and
+   Moonshot honour `stream_options.include_usage`. We ask; only a real call settles it. Zero is the
+   HONEST outcome (never an invented number — THE ONE-WALLET LAW), so no user is over-billed, but our
+   own cost report would under-state itself, and the mid-build cost ceiling reads that same ledger.
+   **If the zeros appear, the flag comes back off** and the honest-but-unmeasured path goes with it.
+2. **A `length` / truncated turn that was previously a dead timeout.** That is the fix working, not a
+   regression — the truncation guard names the cut-off file and the next turn rewrites it. "One file
+   short" is the intended better half of the trade.
+3. **Any rung benched for OUR budget ending.** `turnDeadline`'s wording exists to prevent exactly that;
+   a healthy provider benched because the lane ran out would be the change's own failure mode.
+
+### Still open, unchanged by the flag going on
+
+**No failed build report has been read for this complaint.** Every number in the fix — the 60 s idle
+bound, the 300 s cap — is sized from the engine's own budgets, not from the traffic that is actually
+timing out. A report ID is what turns the tuning from reasoning into measurement.
 ## 2026-09-16 — MANDATORY AUTOPSY: XStudy Help continuation build (RELEASE_GATE RED). One root-caused fix shipped, one already-shipped-but-unset lever named, one open root cause recorded.
 
 Fifth absolute rule, triggered by an admin-attached build-diagnostics report (workspace

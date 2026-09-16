@@ -1394,11 +1394,15 @@ the code (it is actually read somewhere) on 2026-07-11.
   🔴 **STILL OPEN:** an abandoned provider call is not cancelled by this stop — the loop ends between
   turns, so a call already in flight runs to completion on the provider's side and is paid for.
 
-- **🐢 THE SLOW-PROVIDER FIX — streamed build calls (built 2026-09-16, NOT live yet):**
-  `AGENTV3_STREAM_BUILD_CALLS` (the master switch — ⚠️ **UNSET, and unset means today's behaviour to
-  the byte**: one non-streaming request, the total clock, the existing ceiling). Tunables, both with
-  working code defaults: `AGENTV3_STREAM_IDLE_MS` (**60 s** — silence after which a provider counts as
-  stalled) and `AGENTV3_STREAM_HARD_CAP_MS` (**300 s** — the absolute ceiling on one streamed call).
+- **🐢 THE SLOW-PROVIDER FIX — streamed build calls (built 2026-09-16; ✅ **SET `on` in Cloud Run by the
+  admin the SAME DAY**):** `AGENTV3_STREAM_BUILD_CALLS` = `on`, so streamed reading is LIVE on every
+  GLM/Kimi build call. ⚠️ **It had never run against a live provider when it was switched on** — the
+  flag exists precisely so it reverts with no deploy, and the first real builds are its first evidence.
+  Unsetting it restores today's pre-change behaviour to the byte: one non-streaming request, the total
+  clock, the existing ceiling. The two tunables were deliberately **left UNSET** (admin, same message),
+  so their code defaults govern: `AGENTV3_STREAM_IDLE_MS` (**60 s** — silence after which a provider
+  counts as stalled) and `AGENTV3_STREAM_HARD_CAP_MS` (**300 s** — the absolute ceiling on one streamed
+  call).
   Read by `src/server/AgentV3/providers/openAiStream.ts`; applied in `OpenAiToolRunner` and in
   `openAiCompatRunners` (`routes/agentv3.ts`).
   **WHY (admin 2026-09-16: "kimi aur glm slow hai, time out ho jata hai").** The GLM/Kimi rung sends ONE

@@ -46,10 +46,10 @@ describe('the constructed chain IS the tier ladder', () => {
   it('WEAK: exactly its five rungs, in order, and nothing else', () => {
     expect(seq(chainFor({ tier: 'weak', noClaude: true }))).toEqual(ladderSeq(TIER_LADDERS.weak));
   });
-  it('NORMAL: kimi-k2.7-code → glm-5.3-flash → Sonnet', () => {
+  it('NORMAL: glm-5.3-flash → kimi-k2.7-code-highspeed → glm-5.3 → Sonnet', () => {
     expect(seq(chainFor({ tier: 'off' }))).toEqual(ladderSeq(TIER_LADDERS.off));
   });
-  it('STRONG: kimi-k3 → Sonnet → Opus, Opus last', () => {
+  it('STRONG: glm-5.3 → kimi-k3 → Sonnet → Opus, Opus last', () => {
     const chain = chainFor({ tier: 'mini' });
     expect(seq(chain)).toEqual(ladderSeq(TIER_LADDERS.mini));
     expect(chain[chain.length - 1].name).toBe('CLAUDE_OPUS');
@@ -70,10 +70,14 @@ describe('the constructed chain IS the tier ladder', () => {
 describe('a missing key removes a rung — it never substitutes another tier\'s model', () => {
   it('Normal with only a Kimi key runs Kimi alone', () => {
     delete process.env.GLM_API_KEY; delete process.env.ANTHROPIC_API_KEY;
-    expect(seq(chainFor({ tier: 'off' }))).toEqual(['KIMI:kimi-k2.7-code']);
+    expect(seq(chainFor({ tier: 'off' }))).toEqual(['KIMI:kimi-k2.7-code-highspeed']);
   });
-  it('Strong without a GLM key runs Sonnet → Opus — Anthropic under GLM, no Kimi rung by design', () => {
+  it('Strong without a GLM key still has ITS OWN Kimi rung (added 2026-09-16) — kimi-k3 → Sonnet → Opus', () => {
     delete process.env.GLM_API_KEY;
+    expect(seq(chainFor({ tier: 'mini' }))).toEqual(['KIMI:kimi-k3', `CLAUDE:${sonnetModel()}`, `CLAUDE_OPUS:${opusModel()}`]);
+  });
+  it('Strong with neither a GLM nor a Kimi key runs Sonnet → Opus alone', () => {
+    delete process.env.GLM_API_KEY; delete process.env.KIMI_API_KEY;
     expect(seq(chainFor({ tier: 'mini' }))).toEqual([`CLAUDE:${sonnetModel()}`, `CLAUDE_OPUS:${opusModel()}`]);
   });
   it('Weak without GLM/Kimi keys still never reaches Sonnet — Haiku alone', () => {
@@ -124,8 +128,10 @@ describe('🔒 the weak-module guard, on the FINAL chain', () => {
     expect(enforceNoClaude(chain, false).map((r) => r.name)).toEqual(['CLAUDE_HAIKU', 'CLAUDE', 'GLM', 'CLAUDE_OPUS', 'KIMI']);
   });
   it('even if Strong\'s ladder is forced through the guard, no Sonnet/Opus survives', () => {
+    // Strong gained its own Kimi rung (kimi-k3) on 2026-09-16 — enforceNoClaude never touches GLM/KIMI,
+    // only CLAUDE/CLAUDE_OPUS, so both non-Claude rungs of Strong's ladder survive the guard.
     const names = chainFor({ tier: 'mini', noClaude: true }).map((r) => r.name);
-    expect(names).toEqual(['GLM']);
+    expect(names).toEqual(['GLM', 'KIMI']);
   });
 });
 

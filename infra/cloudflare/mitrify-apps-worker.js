@@ -41,6 +41,24 @@
 const FIREBASE_PROJECT = 'gen-lang-client-0866594388';
 const APEX = 'mitrify.in';
 
+// ── WHICH COPY OF THIS FILE IS ACTUALLY RUNNING? ─────────────────────────────────────────────────
+// 🔴 THE ROOT CAUSE OF A REAL, EXPENSIVE INCIDENT (2026-09-17). This Worker is deployed by PASTING
+// this file into the Cloudflare dashboard, so nothing links the repo to what is live — and the two
+// silently drifted. `APPS_BUCKET` was fixed here on 2026-09-15 and never pasted, so when the server
+// switched to bucket-only publishing (no Firebase channel any more) every published app died with
+// Firebase's "Site Not Found". The code was right in the repo, right in the editor, and old at the
+// edge, and NOTHING anywhere could say so — an hour went into guessing which of five things was
+// wrong, because the one fact that would have settled it in a second was unobservable.
+//
+// GET /__nbai on ANY app host answers that question:  https://<app>.mitrify.in/__nbai
+//   • JSON comes back  ⇒ this code is live, and `appsBucket` tells you where it is reading from.
+//   • Firebase's "Site Not Found" comes back instead ⇒ an OLDER Worker is live. Press Deploy.
+//
+// ⚠️ BUMP `WORKER_VERSION` WHENEVER THIS FILE CHANGES. That is the entire contract: the value is
+// compared against this file BY A TEST, so a change that forgets to bump it fails CI rather than
+// producing a version string that lies — which would be worse than having no version at all.
+const WORKER_VERSION = '2026-09-17.1';
+
 // ── BUCKET ORIGIN (ROADMAP §10.3) ─────────────────────────────────────────────────────────────────
 // Firebase Hosting serves a published app from a preview CHANNEL, and channels are a finite per-site
 // resource — past the cap, publishing stops for every user at once. Cloud Storage has no such limit.
@@ -94,6 +112,36 @@ export default {
     // A channel id is [a-z0-9-]; reject anything else so this can only ever target a real channel host.
     if (!/^[a-z0-9-]+$/.test(sub)) {
       return new Response('Not found', { status: 404 });
+    }
+
+    // ── THE ONE HONEST ANSWER TO "WHAT IS DEPLOYED?" ────────────────────────────────────────────
+    // Deliberately BEFORE the cache lookup and `no-store`, so it can never be answered by a cached
+    // copy of itself — a stale diagnostic is worse than none. It reports only what is already
+    // public (the bucket serves these objects to anonymous readers by design) and nothing about any
+    // user, any app's contents, or any credential.
+    //
+    // ⚠️ It shadows a path called `/__nbai` inside a published app. The prefix is ours and no
+    // generated app has ever used it; said out loud here rather than left to be discovered.
+    if (url.pathname === '/__nbai') {
+      return new Response(JSON.stringify({
+        worker: 'mitrify-apps-worker',
+        version: WORKER_VERSION,
+        // null, not '' — "reading from Firebase only" is a different state from "misconfigured",
+        // and the whole point of this endpoint is to tell them apart at a glance.
+        appsBucket: APPS_BUCKET || null,
+        bucketOriginEnabled: Boolean(APPS_BUCKET),
+        appPrefix: APP_PREFIX,
+        sub,
+        // Exactly where this app's index.html is looked for. Paste it into a browser: a 200 proves
+        // the server's half, so a failure after that can only be this Worker's half.
+        indexLookedUpAt: APPS_BUCKET
+          ? `https://storage.googleapis.com/${APPS_BUCKET}/${APP_PREFIX}/${sub}/index.html`
+          : null,
+        firebaseFallbackHost: `${FIREBASE_PROJECT}--${sub}.web.app`,
+      }, null, 2), {
+        status: 200,
+        headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+      });
     }
 
     const originHost = `${FIREBASE_PROJECT}--${sub}.web.app`;

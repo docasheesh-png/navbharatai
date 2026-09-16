@@ -17547,6 +17547,52 @@ async function noteBuildOutcome(
             autoResolved: false,
           });
         }
+        // ── UNKNOWN MUST REACH THE PERSON WHO IS ABOUT TO TRUST THE APP ──────────────────────────
+        //
+        // 🔴 THE GAP, and it is structural rather than a bug (audit 2026-09-16). `releaseGate` exists to
+        // make one distinction its own header calls "the most important state in this file": UNKNOWN,
+        // *"nothing failed and nothing was PROVEN — we cannot tell you this works"*. Before this block,
+        // `gate.state` was read in exactly THREE places, all of them immediately above: the severity of
+        // the admin diagnostic, its autoResolved flag, and the `red && blockers > 0` flip. **UNKNOWN had
+        // no consequence anywhere.** It did not change the verdict, it did not change what the user was
+        // told, and it did not trigger the verification it was admitting had been skipped.
+        //
+        // So a build whose preview never came up — and whose page-render, journey, typecheck and test
+        // checks therefore ALL skipped together, which is precisely the correlated way they skip when an
+        // app is most broken — ended with an ordinary success summary. That is the dukaan lie of
+        // 2026-08-12 in its other costume: that one was fixed for RED (the flip above), and the same
+        // reasoning was never extended to the state that means "we did not look".
+        //
+        // ⚠️ IT DELIBERATELY DOES NOT TOUCH `ok`, AND THAT RESTRAINT IS THE POINT. Flipping an UNKNOWN
+        // build to failed would make it FREE (the "working app or free" guard keys on `!result.ok`) —
+        // and autopsy 4efab9d7 is the admin's standing ruling on exactly that mistake in this direction:
+        // *"app bani = preview chala. agar preview chala gaya to ₹0 charge karoge to aise to mai barbad
+        // ho jaunga."* An app we merely failed to PROVE is not an app we proved broken. So this states
+        // the limit of our knowledge honestly and changes nothing about the verdict or the bill.
+        //
+        // 🔎 It is also the MEASUREMENT that has to come first. Nobody can say today how often a build
+        // ships unproven, because nothing counted it. `RELEASE_GATE_UNPROVEN` is a first-class finding,
+        // so the admin Failure Category panel can answer that from real builds — and only then is there
+        // evidence to justify a stronger rule.
+        if (gate.state === 'unknown' && result.ok) {
+          buildDiag.record({
+            phase: 'readiness', severity: 'warning', code: 'RELEASE_GATE_UNPROVEN',
+            // NOT auto-resolved: nothing resolved it. The build simply ended without proof.
+            autoResolved: false,
+            message: 'The app was built, but nothing here was ever proven to RUN',
+            detail: `${gate.unproven.join('; ')}. Every runtime check needs a running app, so they all `
+              + 'skipped together. This is not evidence the app is broken — it is the absence of evidence '
+              + 'that it works, and the two must never be reported as the same thing.',
+          });
+          // The user's own summary says it too, in their words and without a vendor name. They are the
+          // one about to open this app; an admin-only diagnostic does not reach them.
+          result = {
+            ...result,
+            summary: `${result.summary}\n\n⚠️ I could not verify this one end to end — the app never came `
+              + 'up here, so I could not check that it runs, renders and saves. Your files are saved. '
+              + 'Please open the preview and tell me if anything is wrong, and I will fix it.',
+          };
+        }
       } catch { /* the gate reports on the build; a fault HERE must never affect it */ }
 
       // APP HEALTH CULTURE — RED-TEAM (Immune System Phase 3 / GA-17, opt-in AGENTV3_REDTEAM=on): the

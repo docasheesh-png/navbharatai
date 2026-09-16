@@ -1436,6 +1436,45 @@ the code (it is actually read somewhere) on 2026-07-11.
   next vendor), and an abandoned read is aborted so a call nobody will read stops generating and stops
   billing. Test-locked in `openAiStream.test.ts` (the accumulator, pure) and `openAiStreamRunner.test.ts`
   (the behaviour), both proven by reversion.
+- **🐌 THE THROUGHPUT BENCH — the other half of the entry above (built 2026-09-16, autopsy dd1f5f60).
+  ⚠️ NOT set, and the code defaults govern: the feature is ON.** `AGENTV3_SLOW_RUNG_BENCH` (`off` is
+  the instant, no-deploy revert to the pre-2026-09-16 behaviour exactly), `AGENTV3_SLOW_RUNG_RATIO`
+  (**2.5**) and `AGENTV3_SLOW_RUNG_MIN_CALLS` (**3**). Read by `src/server/AgentV3/slowRungBench.ts`;
+  applied in the SUCCESS path of `MultiProviderTurnRunner`.
+  🔴 **WHY, in one sentence: a free-tier build ran 30 minutes, wrote 2 files, never produced a preview
+  — and every single one of its 11 model calls SUCCEEDED.** GLM delivered 15,330 output tokens in
+  1,771 s = **8.65 tokens/second**, against the ~33 tok/s that `floorBudget.ts` already calls the point
+  past which a provider is *"one we would rather fall past than sit behind"*. 29.5 of the 30.1 minutes
+  were inside a provider call; **our own engine's total work was 7.9 seconds.**
+  🔑 **THE CLASS, named so it is recognised again: EVERY escalation path in `MultiProviderTurnRunner`
+  — timeout bench, 429 bench, shared cooldown, dead-rung memory, rung advance — lives inside a
+  `catch`.** A provider that is merely SLOW throws nothing, so it reached none of them: the ladder
+  never left rung 1 and KIMI sat one step away for twenty-nine minutes. And the 30 ms/token constant
+  that defines "too slow to wait for" was read by **no file except the one that defines it** — it
+  sized requests and judged nothing.
+  ⚠️ **STREAMING WIDENED THIS, and that is not an argument against streaming.** Bounding a call by
+  SILENCE assumed two kinds of provider, healthy and stalled. A **steadily slow** one is a third: it
+  never goes quiet (so the 60 s idle bound never fires) and it always has an answer (so hitting the
+  300 s ceiling returns a truncated SUCCESS, not a failure). The ceiling a single slow rung can hold
+  also doubled, 150 s → 300 s, the same day. Do not reason about streamed calls from the two-case
+  model — there are three.
+  🔒 **FOUR PROPERTIES NOT TO "TIDY UP".** (1) It can ONLY move a build to the next rung — never fail
+  one, never shorten a call, never change what a provider is asked. (2) **It never benches the last
+  engine** (`canBenchAnother`): every other bench retires a rung that CANNOT answer, this one retires
+  a rung that CAN, and a slow app beats no app — when the last one is judged slow the report says so
+  once, explicitly. (3) An **unmeasured** turn is discarded, never guessed: a stream without
+  `include_usage` reports 0 tokens, and counting that would score a 300 s call at 60× and retire a
+  healthy vendor on a number nobody measured. (4) A ratio **≤ 1 is REFUSED** and falls back to 2.5 —
+  at 1.0 it would retire every provider on earth including the backstop, so here the dangerous
+  direction is a SMALLER value, not a larger one.
+  📌 Keyed by **FAMILY + MODEL**: family so a 50-key pool accumulates one verdict, model so
+  `glm-5.3-flash` being slow never retires `glm-5.3` — a LATER rung of the same weak ladder. The
+  verdict is **latched in the state** because on the real data it flickers (3.43× → **2.46×** → 3.5×);
+  the runner happened to latch it in a `Set`, which hid the defect. Test-locked and reversion-proven
+  in both halves in `tests/slowRungBench.test.ts`.
+  ✅ **AND THIS REPORT SETTLED THE STREAMING ENTRY'S ONE OPEN QUESTION: Z.ai DOES honour
+  `stream_options.include_usage`** — real per-call input/output/cache token counts came back on every
+  streamed call. The "0 in / 0 out" risk that entry warns to watch for did not materialise.
 - **The referral welcome gift — four earned steps (built 2026-09-15, NOT live yet):**
   `REFERRAL_REWARDS` (the master switch — ⚠️ **UNSET, and unset means today's behaviour exactly**:
   no code is minted, no money moves, and not one document is written). Tunables, all with working

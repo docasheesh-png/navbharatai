@@ -32,7 +32,34 @@
 // incident on its first day in the ladder.
 
 /** GLM's request extension: `{ thinking: { type } }`, or nothing at all. */
-export type GlmThinkingParam = Record<string, never> | { thinking: { type: 'enabled' | 'disabled' } };
+export type GlmThinkingLevel = 'enabled' | 'disabled' | 'low' | 'high' | 'max';
+export type GlmThinkingParam = Record<string, never> | { thinking: { type: GlmThinkingLevel } };
+
+/**
+ * What to send when the caller wants thinking OFF and the model refuses to turn it off.
+ *
+ * 🔴 "CANNOT BE DISABLED" IS NOT "CANNOT BE REDUCED", AND THE PROVIDER SAID SO IN THE SAME SENTENCE
+ * (autopsy ee20478d, 2026-09-15). The 400 that produced this module reads, in full:
+ *
+ *     "This model always engages in thinking and cannot be disabled; please use low, high, or max"
+ *
+ * The first clause was acted on and **the second was not**. This module's first version sent NO
+ * thinking field at all in that case — which does not mean "think less", it means "use your DEFAULT
+ * effort". On glm-5.3-flash that default consumed the entire 4,833-token output ceiling on three
+ * consecutive turns and produced no text and no tool call: a build that wrote nothing in five minutes
+ * while every call returned HTTP 200.
+ *
+ * `low` is the provider's own lowest named level, so the user's "thinking off" preference is honoured
+ * as closely as the model permits, and the reasoning stops crowding out the answer.
+ *
+ * ⚠️ IT IS A DELIBERATE, SELF-CORRECTING BET. The three level names come from the provider's error
+ * text, not from a document this session could read, so the exact field shape is unverified. That is
+ * why `isThinkingParamRejection` exists and why the runner drops the field and retries ONCE when a
+ * model rejects it: if the bet is wrong, the cost is one extra round-trip on the first call of the
+ * process and then byte-identical behaviour to before. A bet that cannot be checked would not be
+ * acceptable here; one that checks itself on first contact is.
+ */
+export const GLM_REDUCED_THINKING: GlmThinkingLevel = 'low';
 
 /**
  * Can this GLM model be told NOT to reason? PURE.
@@ -64,12 +91,33 @@ export function glmCanDisableThinking(model: string | undefined | null): boolean
  * - not a boolean  → `{}`  (the caller has no opinion; unchanged from before this module existed)
  * - `true`         → `{ type: 'enabled' }` — asking a model to reason is accepted by every GLM model,
  *                    including the always-reasoning ones, so this needs no capability check
- * - `false`        → `{ type: 'disabled' }` **only** where that is actually supported; otherwise `{}`,
- *                    because the honest outcome of "please do not reason" on a model that always
- *                    reasons is that it reasons anyway — not that the build fails
+ * - `false`        → `{ type: 'disabled' }` where that is supported; otherwise `{ type: 'low' }` —
+ *                    the provider's own lowest named level. Sending NOTHING was the bug: it selects
+ *                    the model's DEFAULT effort, which is the most reasoning, not the least. See
+ *                    GLM_REDUCED_THINKING above for why this is a safe bet rather than a guess.
  */
 export function glmThinkingParam(model: string | undefined | null, thinking: unknown): GlmThinkingParam {
   if (typeof thinking !== 'boolean') return {};
   if (thinking) return { thinking: { type: 'enabled' } };
-  return glmCanDisableThinking(model) ? { thinking: { type: 'disabled' } } : {};
+  return glmCanDisableThinking(model)
+    ? { thinking: { type: 'disabled' } }
+    : { thinking: { type: GLM_REDUCED_THINKING } };
+}
+
+/**
+ * Did the provider reject our THINKING field specifically? PURE.
+ *
+ * Deliberately narrow. It must match a complaint about this one optional field and nothing else,
+ * because the only action taken on a true answer is "drop the field and try again" — and retrying a
+ * genuinely bad request (a malformed tool schema, an oversized prompt) without changing it would be a
+ * retry loop around a deterministic failure, which the fourth absolute rule forbids by name.
+ *
+ * Matches the two shapes a rejection of an unknown enum value actually takes: the provider naming the
+ * field, or naming thinking/reasoning in an invalid-parameter complaint.
+ */
+export function isThinkingParamRejection(error: unknown): boolean {
+  const text = (error instanceof Error ? error.message : String(error ?? '')).toLowerCase();
+  if (!text) return false;
+  if (!/\bthinking\b|\breasoning(?:_effort)?\b/.test(text)) return false;
+  return /\b400\b|invalid|unsupported|unrecognized|unrecognised|not (?:a )?(?:valid|supported)|bad request|must be one of/.test(text);
 }

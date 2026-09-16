@@ -56992,3 +56992,87 @@ My earlier answer to him named only the first. Recorded as a correction, not qui
 🔴 **STILL OPEN — the flag is not live.** PR #2958 gates `EmbeddingSearch`, and it is green but **not
 merged**, so on production `main` the key is currently ungated and item 1 is spending now. The remedy is
 the admin merging #2958 (or unsetting the key); it is his call under the standing merge-hold rule.
+
+## 2026-09-16 — The admin's two open questions, answered from the code (and the answer to both is the same line)
+
+The admin asked, of the two items the `ee20478d` autopsy left open: *"sabhi question ke best solution
+code se dhund ke batao"*. Both were investigated against the source rather than reasoned about, and
+**both turn out to have the same cause, which is neither of the two levers that were on the table.**
+
+### The finding: we read half of the provider's error message
+
+The 400 that produced `glmThinking.ts` reads, in full:
+
+> *"This model always engages in thinking and cannot be disabled; **please use low, high, or max**"*
+
+The first clause was acted on. The second was not. PR #2957 stopped sending `{type:'disabled'}` and
+sent **nothing at all** — and sending no field does not mean "think less", it means **"use your DEFAULT
+effort"**, which is the MOST reasoning, not the least. That default is what spent the entire
+4,833-token ceiling on three consecutive turns and wrote no files.
+
+**"Cannot be disabled" is not "cannot be reduced."** The provider named its three accepted levels in
+the same sentence and we never tried one.
+
+### Q1 — should `AGENTV3_FLOOR_MS_PER_TOKEN` go 30 → 20? **No, and the number is worth recording.**
+
+- The rate decides the budget: `(150,000 − 5,000) ÷ rate`. At 30 that is **4,833**; at 20 it would be
+  **7,250**.
+- ⚠️ **Where 30 came from is weaker than it looks.** It is a two-point fit over outputs of **111 and
+  182 tokens** (build 4efab9d7) extrapolated **175×** to the loop's 32,000-token ask. `ee20478d` is the
+  only measurement ever taken in the real regime — three points at 4,833 tokens — and it gives
+  **≈19.7 ms/token** against the same ~4.1 s intercept. So the constant probably IS conservative.
+- **It is still the wrong lever, for two reasons.** (1) It does not address the cause: if a model's
+  default reasoning is unbounded, 7,250 tokens is just a bigger number to spend on thinking. (2) The
+  30 is documented as *"the rate we are still willing to WAIT for"* — lowering it converts TRUNCATIONS
+  into TIMEOUTS, and a timeout returns nothing at all, which is the failure the clamp exists to avoid.
+- The two measurements are also from **different models**, so they are not strictly comparable. The
+  instrument to settle it properly already exists — every call records `outputTokens` and `latencyMs`
+  in `llmCalls` — so a per-model measured rate is a real future slice, not a guess to take today.
+
+**Decision: 30 stays. Recorded here so the next session does not re-derive the 19.7 and act on it
+blind.**
+
+### Q2 — should `glm-5.3-flash` move down the ladder? **No — and the code says why the move would buy nothing.**
+
+Checked every Weak rung against `glmCanDisableThinking`:
+
+| rung | can thinking be turned off? |
+|---|---|
+| `glm-5.3-flash` | **no** (proved by the 400) |
+| `kimi-k2.6` | **no** — and `thinkingControl` is set only on the GLM rung (`routes/agentv3.ts`), so Kimi is never sent the field at all |
+| `glm-5.3` | **no** (5.3 family) |
+| `haiku` | n/a — the only non-reasoning rung, and it is last and dearest |
+
+**Three of Weak's four rungs are always-thinking models.** Report `58fe8254` is the confirmation:
+there the GLM rung was 400ing, the chain fell to KIMI, and Kimi returned `4833 output tokens / 0
+characters` three times — the identical starvation, one rung down. Moving flash down the ladder walks
+into the same defect at a higher price (`glm-5.3` is ~9× flash's input rate), which is the opposite of
+both of the admin's stated aims.
+
+**Decision: the ladder is untouched. It is admin policy (2026-09-14) and it was never the problem.**
+
+### What shipped instead
+
+1. **`glmThinkingParam` now sends `{ thinking: { type: 'low' } }`** where `disabled` is not accepted —
+   the provider's own lowest named level — instead of an empty object. `GLM_REDUCED_THINKING` is the
+   one constant.
+2. **The bet checks itself on first contact, so it can never become another 280-failure build.** The
+   level names come from an error message, not a document this session could read, so the field's
+   shape is a reasoned bet. `isThinkingParamRejection` + a one-shot retry drop the field and re-issue
+   the SAME request when a model rejects it; the model is then remembered **process-wide**
+   (`modelRejectsThinkingParam`) so the wasted round-trip is paid at most once per model, not once per
+   call — a per-runner memo would re-pay it on every build, since a runner is constructed per rung per
+   build. Worst case is byte-identical to the behaviour before this change.
+3. ⚠️ **The retry is narrow on purpose**, and only fires when we actually SENT the field: re-issuing a
+   genuinely bad request unchanged would be a retry loop around a deterministic failure, which the
+   fourth absolute rule forbids by name. Test-locked both ways in `tests/glmReducedThinking.test.ts`
+   (11 cases), including that a 429 and an invalid tool schema are never retried.
+4. **#2957's own tests were updated, not flipped.** They pinned the old REMEDY (`toEqual({})`); the
+   INVARIANT they exist for — never send `disabled` to a model that rejects it — is what they assert
+   now, so they still bite on the regression that actually cost 280 calls.
+
+⚠️ **STILL OPEN, and it is the honest bound on all of this:** whether `low` leaves enough of the 4,833
+tokens for a real answer is unmeasured — it needs one live build. If the next report still shows
+`finish_reason: max_tokens` with zero output on that rung, the starvation net from the `ee20478d`
+autopsy catches it (the rung fails over instead of repeating), and the remaining levers are the rate
+(Q1) and a per-model measured throughput.

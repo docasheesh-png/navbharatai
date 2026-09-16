@@ -21,8 +21,14 @@ import { TIER_LADDERS, PLAN_RUNG } from '../src/server/AgentV3/tierLadder';
 describe('🔴 1 · the first rung of every ladder could not succeed', () => {
   it('never asks an always-reasoning model to stop reasoning', () => {
     // The exact model and request that produced 279 bad-requests.
-    expect(glmThinkingParam('glm-5.3-flash', false)).toEqual({});
-    expect(glmThinkingParam('glm-5.3', false)).toEqual({});
+    // ⚠️ UPDATED 2026-09-15 (autopsy ee20478d) — the INVARIANT is unchanged, the REMEDY is not.
+    // What must never happen is sending `disabled` to a model that rejects it; that is what cost 280
+    // failures and it is what every case here still asserts. But the original remedy — send NOTHING —
+    // turned out to select the model's DEFAULT effort, i.e. the MOST reasoning, which then ate the
+    // whole output ceiling and produced zero files. The field is now the provider's own lowest level.
+    expect(glmThinkingParam('glm-5.3-flash', false)).not.toEqual({ thinking: { type: 'disabled' } });
+    expect(glmThinkingParam('glm-5.3', false)).not.toEqual({ thinking: { type: 'disabled' } });
+    expect(glmThinkingParam('glm-5.3-flash', false)).toEqual({ thinking: { type: 'low' } });
   });
 
   it('but still lets the toggle turn reasoning ON — that is accepted everywhere', () => {
@@ -39,7 +45,7 @@ describe('🔴 1 · the first rung of every ladder could not succeed', () => {
   it('DEFAULT-DENY on anything unrecognised — an omitted param never 400s, an unsupported one is fatal', () => {
     for (const id of ['glm-5.4', 'glm-6', 'glm-9.9-flash', 'kimi-k2.6', 'gpt-5.4', '', undefined, null]) {
       expect(glmCanDisableThinking(id as string), String(id)).toBe(false);
-      expect(glmThinkingParam(id as string, false), String(id)).toEqual({});
+      expect(glmThinkingParam(id as string, false), String(id)).not.toEqual({ thinking: { type: 'disabled' } });
     }
   });
 
@@ -54,13 +60,17 @@ describe('🔴 1 · the first rung of every ladder could not succeed', () => {
     const glmRungs = rungs.filter((r) => r.provider === 'GLM');
     expect(glmRungs.length).toBeGreaterThan(0);
     for (const rung of glmRungs) {
-      expect(glmThinkingParam(rung.model, false), rung.model).toEqual({});
+      expect(glmThinkingParam(rung.model, false), rung.model).not.toEqual({ thinking: { type: 'disabled' } });
     }
   });
 
   it('the runner asks the capability question rather than assembling the field itself', () => {
     const src = readFileSync(join(process.cwd(), 'src/server/AgentV3/providers/OpenAiToolRunner.ts'), 'utf8');
-    expect(src).toContain('glmThinkingParam(this.opts.model || params.model, params.thinking)');
+    // The model id is resolved once into `thinkingModel` (ee20478d added a per-model rejection memo
+    // that needs the same id), so the call reads differently — the point it pins is unchanged: the
+    // runner ASKS the shared helper rather than assembling the field itself.
+    expect(src).toContain('glmThinkingParam(thinkingModel, params.thinking)');
+    expect(src).not.toMatch(/thinking:\s*\{\s*type:\s*'disabled'\s*\}/);
     // The shape that produced the 400 must be gone from the runner entirely.
     expect(src).not.toContain("params.thinking ? 'enabled' as const : 'disabled' as const");
   });

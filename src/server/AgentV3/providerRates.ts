@@ -43,29 +43,93 @@ function envRate(name: string, fallback: number): number {
 export function realRateCard(): Record<string, TokenRate> {
   return {
     // ── GLM (Z.ai) ──────────────────────────────────────────────────────────────────────────────
-    // cacheReadPerMTok (Fix 66 billing slice): both Z.ai and Moonshot price a prefix-cache HIT at
-    // ≈25% of the fresh-input rate (their published cache-hit lines). Env-tunable like every rate;
-    // providers WITHOUT a cache line (Gemini/Grok/Claude rows below) omit it → full input rate
-    // (no discount) by construction, so nothing can be under-billed.
+    //
+    // 📋 THE OFFICIAL Z.AI PRICE PAGE, COPIED HERE ON 2026-09-16 (admin sent docs.z.ai/pricing,
+    // verbatim). Recorded in the module that OWNS prices, dated and sourced, so the next routing
+    // change argues from quoted numbers instead of remembered ones. USD per 1M tokens, in / out.
+    //
+    //   LATEST      GLM-5.3-Flash  0.15 / 0.50   cached-in 0.03
+    //               GLM-5.3        1.40 / 4.40   cached-in 0.26
+    //               GLM-5.2        1.40 / 4.40   cached-in 0.26
+    //   TEXT        GLM-5.1        1.40 / 4.40   cached-in 0.26
+    //               GLM-5          1.00 / 3.20   cached-in 0.20   ⚠️ CHEAPER than 5.1/5.2/5.3
+    //               GLM-4.7        0.60 / 2.20   cached-in 0.11
+    //               GLM-4.7-FlashX 0.07 / 0.40   cached-in 0.01
+    //               GLM-4.6        0.60 / 2.20   cached-in 0.11
+    //               GLM-4.5        0.60 / 2.20   cached-in 0.11
+    //               GLM-4.5-X      2.20 / 8.90   cached-in 0.45
+    //               GLM-4.5-Air    0.20 / 1.10   cached-in 0.03
+    //               GLM-4.5-AirX   1.10 / 4.50   cached-in 0.22
+    //               GLM-4-32B-128K 0.10 / 0.10
+    //               GLM-4.7-Flash  FREE · GLM-4.5-Flash FREE
+    //   VISION      GLM-4.6V       0.30 / 0.90   cached-in 0.05
+    //               GLM-4.6V-Flash FREE          ← what visionModels.ts already leads with
+    //               GLM-4.5V       0.60 / 1.80   cached-in 0.11
+    //               GLM-OCR        0.03 / 0.03
+    //   TOOLS       Web Search     $0.01 per use  ⚠️ TWICE Brave's $0.005 — do not switch to it
+    //   IMAGE       GLM-Image      $0.015/image · CogView-4 $0.01/image
+    //   VIDEO       CogVideoX-3    $0.20/video
+    //   AUDIO       GLM-ASR-2512   0.03 / MTok (~$0.0024 per minute)
+    //   AGENTS      Slide/Poster 0.70/MTok · Translation 3.00/MTok · FX video $0.20/video
+    //
+    // ⚠️ "Cached Input Storage" is **Limited-time Free** on every line above. That is a promotion, not
+    // a price — when it ends, storage becomes a separate charge nothing here models. Re-read the page
+    // before leaning on cache economics in any later plan.
+    //
+    // cacheReadPerMTok: these rows now carry Z.ai's OWN published cache-hit numbers. They used to carry
+    // a ≈25%-of-input CONVENTION, and all three moved DOWN (0.0375→0.03, 0.35→0.26, 0.15→0.11) — so the
+    // convention had been over-stating our cost, and a bill is the real cost × markup, so it had been
+    // over-stating the USER's bill too. Env-tunable like every rate; providers WITHOUT a cache line
+    // (Gemini/Grok/Claude rows below) omit it → full input rate (no discount) by construction, so
+    // nothing can be under-billed.
     'glm-flash': { inputPerMTok: envRate('RATE_GLM_FLASH_IN', 0), outputPerMTok: envRate('RATE_GLM_FLASH_OUT', 0) },
-    // glm-5.3-flash (admin 2026-09-14: on the WEAK and NORMAL ladders). Price from the admin the same
-    // day: $0.15 in / $0.50 out per MTok; cache-hit at the Z.ai ≈25% convention (see the note above).
+    // glm-5.3-flash (on the WEAK and NORMAL ladders). $0.15 in / $0.50 out, cache-hit $0.03 — all three
+    // quoted from Z.ai's published page (2026-09-16), not derived.
     // ⚠️ It must NOT fall into the 'glm-flash' $0 line — a "flash" in the NAME is not a price, and this
     // one benchmarks beside the flagship. Matched BEFORE the generic flash rule in realRateFor.
-    'glm-5.3-flash': { inputPerMTok: envRate('RATE_GLM53_FLASH_IN', 0.15), outputPerMTok: envRate('RATE_GLM53_FLASH_OUT', 0.5), cacheReadPerMTok: envRate('RATE_GLM53_FLASH_CACHE', 0.0375) },
-    // glm-5.3 (non-flash, Z.ai, admin 2026-09-14): $1.40 / $4.40 — identical to the glm-5 line below,
-    // which the /glm-?5/ family rule already returns for it. No separate line: one price, one row.
-    'glm-5': { inputPerMTok: envRate('RATE_GLM5_IN', 1.4), outputPerMTok: envRate('RATE_GLM5_OUT', 4.4), cacheReadPerMTok: envRate('RATE_GLM5_CACHE', 0.35) },
-    'glm': { inputPerMTok: envRate('RATE_GLM_IN', 0.6), outputPerMTok: envRate('RATE_GLM_OUT', 2.2), cacheReadPerMTok: envRate('RATE_GLM_CACHE', 0.15) }, // glm-4.x coder
+    'glm-5.3-flash': { inputPerMTok: envRate('RATE_GLM53_FLASH_IN', 0.15), outputPerMTok: envRate('RATE_GLM53_FLASH_OUT', 0.5), cacheReadPerMTok: envRate('RATE_GLM53_FLASH_CACHE', 0.03) },
+    // glm-5.3 (non-flash, Z.ai): $1.40 / $4.40 — the same figures as the glm-5 row below, which the
+    // /glm-?5/ family rule already returns for it. No separate line: one price, one row.
+    // ⚠️ THE ROW IS NAMED 'glm-5' BUT HOLDS THE 5.1/5.2/5.3 PRICE, and that is deliberate rather than a
+    // slip: it is the FAMILY CEILING (see the NEWER-MODEL SAFETY note in realRateFor), so an id we do
+    // not recognise bills at the dearest 5-series rate we know instead of the cheapest. Z.ai's own page
+    // puts real GLM-5 at $1.00 / $3.20 — cheaper — so a literal `glm-5` turn would be OVER-stated here.
+    // Nothing runs it (no ladder names it), and the ceiling is the safe direction for an unknown id;
+    // give it its own row the day something real routes to it.
+    'glm-5': { inputPerMTok: envRate('RATE_GLM5_IN', 1.4), outputPerMTok: envRate('RATE_GLM5_OUT', 4.4), cacheReadPerMTok: envRate('RATE_GLM5_CACHE', 0.26) },
+    'glm': { inputPerMTok: envRate('RATE_GLM_IN', 0.6), outputPerMTok: envRate('RATE_GLM_OUT', 2.2), cacheReadPerMTok: envRate('RATE_GLM_CACHE', 0.11) }, // glm-4.x coder
     // ── Kimi (Moonshot) ─────────────────────────────────────────────────────────────────────────
-    'kimi-k2.7': { inputPerMTok: envRate('RATE_KIMI27_IN', 0.95), outputPerMTok: envRate('RATE_KIMI27_OUT', 4.0), cacheReadPerMTok: envRate('RATE_KIMI27_CACHE', 0.24) },
-    // kimi-k3 (admin 2026-07-28, prepended to the PAID ladder). Its published price is NOT known here,
-    // so the default deliberately mirrors k2.7 — the highest Kimi rate we can actually verify — rather
-    // than an invented number. ⚠️ SET `RATE_KIMI3_IN`/`_OUT`/`_CACHE` to the real published rate once
-    // it is known: until then a genuinely pricier K3 is billed at the k2.7 rate, which UNDER-states our
-    // real cost (margin risk, never a user over-charge). Recorded as an open item in PROGRESS.md.
-    'kimi-k3': { inputPerMTok: envRate('RATE_KIMI3_IN', 0.95), outputPerMTok: envRate('RATE_KIMI3_OUT', 4.0), cacheReadPerMTok: envRate('RATE_KIMI3_CACHE', 0.24) },
-    'kimi': { inputPerMTok: envRate('RATE_KIMI_IN', 0.6), outputPerMTok: envRate('RATE_KIMI_OUT', 2.5), cacheReadPerMTok: envRate('RATE_KIMI_CACHE', 0.15) }, // k2.5/k2.6
+    //
+    // 📋 MOONSHOT'S OWN PRICE TABLE, COPIED HERE ON 2026-09-16 (admin sent it verbatim). USD per 1M
+    // tokens — note the column order on their page is cache-HIT first, then cache-MISS (= fresh input):
+    //
+    //   kimi-k3                   cache-hit 0.30 · input 3.00 · output 15.00 · context 1,048,576
+    //   kimi-k2.7-code            cache-hit 0.19 · input 0.95 · output  4.00 · context 262,144
+    //   kimi-k2.7-code-highspeed  cache-hit 0.38 · input 1.90 · output  8.00 · context 262,144
+    //   kimi-k2.6                 cache-hit 0.16 · input 0.95 · output  4.00 · context 262,144
+    //   kimi-k2.5                 DISCONTINUED 2026-08-31 — no longer maintained or supported
+    //
+    // 🔴 TWO LIVE ROWS WERE WRONG, BOTH UNDER-STATING OUR COST — the direction that quietly eats the
+    // admin's own margin rather than over-charging a user, which is why neither had ever failed a test:
+    //   • k3 was a PLACEHOLDER at the k2.7 rate. Real k3 is $3.00 / $15.00 — **the same price as
+    //     Sonnet**, 3.2× the input and 3.75× the output we were counting. It is on no ladder today
+    //     (2026-09-14 removed it), but this row is the family CEILING for any unrecognised Kimi id.
+    //   • k2.6 was priced on the cheap `kimi` row ($0.60 / $2.50). Real k2.6 is $0.95 / $4.00 — the
+    //     SAME as k2.7-code. And k2.6 is the second rung of the WEAK ladder, which NavBharatAI pays for
+    //     itself, so every weak build has been costing ~58% more input and 60% more output than the
+    //     dashboard showed. That matters directly to "how much am I spending" — it is not cosmetic.
+    'kimi-k2.7': { inputPerMTok: envRate('RATE_KIMI27_IN', 0.95), outputPerMTok: envRate('RATE_KIMI27_OUT', 4.0), cacheReadPerMTok: envRate('RATE_KIMI27_CACHE', 0.19) },
+    // kimi-k3 — now the PUBLISHED price, not the k2.7 placeholder it carried from 2026-07-28.
+    'kimi-k3': { inputPerMTok: envRate('RATE_KIMI3_IN', 3.0), outputPerMTok: envRate('RATE_KIMI3_OUT', 15.0), cacheReadPerMTok: envRate('RATE_KIMI3_CACHE', 0.3) },
+    // kimi-k2.6 — its OWN row now. It used to share the cheap `kimi` line with k2.5 on the assumption
+    // that "older = cheaper"; Moonshot prices it exactly like k2.7-code.
+    'kimi-k2.6': { inputPerMTok: envRate('RATE_KIMI26_IN', 0.95), outputPerMTok: envRate('RATE_KIMI26_OUT', 4.0), cacheReadPerMTok: envRate('RATE_KIMI26_CACHE', 0.16) },
+    // The legacy cheap line. ⚠️ Now k2.5 ONLY, and k2.5 was DISCONTINUED on 2026-08-31 — it is already
+    // off every ladder (removed 2026-09-04 after two build reports showed "404 Not found the model
+    // kimi-k2.5 or Permission denied" on this account). The row stays because old telemetry still names
+    // it and a report must be able to price what it recorded; these figures are HISTORICAL, and
+    // Moonshot no longer publishes a price to check them against.
+    'kimi': { inputPerMTok: envRate('RATE_KIMI_IN', 0.6), outputPerMTok: envRate('RATE_KIMI_OUT', 2.5), cacheReadPerMTok: envRate('RATE_KIMI_CACHE', 0.15) }, // k2.5 (retired)
     // ── Google (Vertex / Gemini) ──────────────────────────────────────────────────────────────────
     'gemini-pro': { inputPerMTok: envRate('RATE_GEMINI_PRO_IN', 1.25), outputPerMTok: envRate('RATE_GEMINI_PRO_OUT', 10) },
     'gemini': { inputPerMTok: envRate('RATE_GEMINI_IN', 0.3), outputPerMTok: envRate('RATE_GEMINI_OUT', 2.5) }, // flash-class
@@ -129,7 +193,11 @@ export function realRateFor(provider: string, model?: string): TokenRate {
     }
     if (m.includes('kimi')) {
       if (m.includes('k3')) return card['kimi-k3'];
-      if (/k2[.\-]?[56]/.test(m)) return card.kimi;        // the known cheap k2.5 / k2.6
+      // k2.6 has its OWN row since 2026-09-16: Moonshot prices it exactly like k2.7-code ($0.95/$4.00),
+      // not like the retired k2.5 it used to share the cheap line with. It is the WEAK ladder's second
+      // rung, so the old lumping under-stated what every free build really costs us.
+      if (/k2[.\-]?6/.test(m)) return card['kimi-k2.6'];
+      if (/k2[.\-]?5/.test(m)) return card.kimi;           // k2.5 — retired 2026-08-31, telemetry only
       return card['kimi-k2.7'];                            // k2.7 and anything newer/unknown
     }
     if (m.includes('gemini')) return m.includes('pro') ? card['gemini-pro'] : card.gemini;

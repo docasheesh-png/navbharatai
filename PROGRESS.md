@@ -56916,3 +56916,61 @@ My earlier answer to him named only the first. Recorded as a correction, not qui
 🔴 **STILL OPEN — the flag is not live.** PR #2958 gates `EmbeddingSearch`, and it is green but **not
 merged**, so on production `main` the key is currently ungated and item 1 is spending now. The remedy is
 the admin merging #2958 (or unsetting the key); it is his call under the standing merge-hold rule.
+
+---
+
+## 2026-09-16 — Z.ai's and Moonshot's own price pages, saved verbatim; four live rates were wrong, all under-counting OUR cost
+
+The admin sent both vendors' pricing pages in full and asked for them to be saved before the next
+routing change ("mai apko other AI ke price bhejunga, fir ek sath me pura module badlenge"). Both tables
+now live in `providerRates.ts` — the module that OWNS prices — dated and sourced, so the coming change
+argues from quoted numbers instead of remembered ones.
+
+### What was wrong, and the pattern behind it
+
+| row | was | is (published) | why it was wrong |
+|---|---|---|---|
+| `glm-5.3-flash` cache | $0.0375 | **$0.03** | a ≈25%-of-input CONVENTION, not a quote |
+| `glm-5.x` cache | $0.35 | **$0.26** | same convention |
+| `glm-4.x` cache | $0.15 | **$0.11** | same convention |
+| `kimi-k2.7` cache | $0.24 | **$0.19** | same convention |
+| `kimi-k3` | $0.95 / $4.00 | **$3.00 / $15.00** | a PLACEHOLDER mirroring k2.7 "because the price is not verifiable here". It is **exactly Sonnet's price** |
+| `kimi-k2.6` | $0.60 / $2.50 | **$0.95 / $4.00** | it shared the cheap line with k2.5 on the assumption that an older rung is a cheaper one |
+
+🔎 **THE CLASS: a DERIVED number and a PLACEHOLDER number both look exactly like a measured one once
+they are in a table.** The file's own header called the convention "their published cache-hit lines" —
+it was neither published nor checked. Nothing could fail, because a price only proves itself against the
+invoice, and nobody had put the invoice next to the table.
+
+⚠️ **Every one of the six ran the same way — UNDER-stating our cost.** That is the direction that eats
+the admin's margin rather than over-charging a user, which is exactly why none of it ever surfaced as a
+complaint or a failing test. Two of them bite where it matters most: `kimi-k2.6` is the WEAK ladder's
+second rung and weak builds are paid for by NavBharatAI, so every free build has cost ~58% more input
+and 60% more output than the dashboard showed; and `kimi-k3` is the family CEILING for any unrecognised
+Kimi id.
+
+🔒 **The tests caught all of it, which is the point of pinning a price.** Seven assertions failed —
+including one whose title *named the convention* ("cache at the Z.ai 25% convention") — so the change
+could not land quietly. `kimi-k2.6` now has its own row and its own branch in the matcher.
+
+### Also recorded, for the module change the admin has planned
+
+`GLM-4.6V-Flash` (what vision already leads with) is **FREE**; `GLM-OCR` $0.03/MTok; `GLM-ASR-2512`
+~$0.0024/minute; `GLM-Image` $0.015/image; `GLM-4.7-FlashX` $0.07/$0.40. One thing NOT to do: Z.ai's
+built-in **Web Search is $0.01 per use, twice Brave's $0.005** — switching to it would cost more.
+⚠️ "Cached Input Storage" is **Limited-time Free** on every Z.ai line — a promotion, not a price.
+
+🔴 **`kimi-k2.5` is DISCONTINUED (2026-08-31), and the first thing checked was whether anything still
+calls it.** Nothing does: removed from the free ladder on 2026-09-04 after two build reports showed
+*"404 Not found the model kimi-k2.5 or Permission denied"* on this account. Its row stays on purpose —
+old telemetry names it and a report must be able to price what it recorded — now labelled historical.
+**So it is NOT a candidate for the build failures below**; verified by grep, not assumed.
+
+⚠️ **These cache rates still do not bite today.** The header records that cache-hit tokens are not
+tracked separately, so cached input is billed at the full cache-MISS rate. The corrected numbers matter
+the moment that tracking lands — and that is a real lever, because Z.ai's cache-hit price is ~5× cheaper
+than fresh input on the two models every build leads with.
+
+🔴 **OPEN, and far larger than anything above: the admin reports ~80% of app builds are FAILING.**
+No fix is proposed here because no evidence has been read yet. Recorded so the next session does not
+mistake a pricing commit for the state of the engine.

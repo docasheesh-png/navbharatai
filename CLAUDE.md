@@ -1916,10 +1916,15 @@ the flag entries above promise.
     replacement — if `kimi-k3` is not a live id the call errors and the ladder falls through to k2.7-code
     exactly as before, so adopting it cannot break a build even if the model does not exist. The FREE
     ladder was deliberately left UNCHANGED — it is cheapest-first with the flagship LAST, so a newer
-    flagship in front would invert the free tier's cost model). ⚠️ **Set `RATE_KIMI3_IN`/`_OUT`/`_CACHE`
-    to K3's real published price** — `providerRates.ts` defaults them to the k2.7 rate because K3's price
-    is not verifiable here, which UNDER-states our real cost if K3 is pricier (margin risk, never a user
-    over-charge). Kimi ids (from platform.kimi.ai/docs/models):
+    flagship in front would invert the free tier's cost model). ✅ **DONE 2026-09-16 — K3's price is published and is now in the rate
+    card: $3.00 in / $15.00 out, cache-hit $0.30, i.e. EXACTLY Sonnet's price.** The old default mirrored
+    k2.7 ($0.95/$4.00) because the price was "not verifiable here", which under-stated our real cost by
+    3.2× on input and 3.75× on output. K3 is on no ladder today, but that row is the family CEILING for
+    any unrecognised Kimi id, so the placeholder mattered. ⚠️ **And `kimi-k2.5` was DISCONTINUED by
+    Moonshot on 2026-08-31** — already off every ladder since 2026-09-04 (it 404'd on this account), its
+    rate row kept only so old telemetry can still be priced. **`kimi-k2.6` is NOT cheap**: Moonshot
+    prices it at $0.95/$4.00, the same as k2.7-code, and it had been sharing k2.5's $0.60/$2.50 line —
+    under-stating the cost of every WEAK build, which NavBharatAI pays for itself. Kimi ids (from platform.kimi.ai/docs/models):
     `kimi-k2.7-code` (strongest coder, 256k), `kimi-k2.7-code-highspeed`, `kimi-k2.6`, `kimi-k2.5` (older/cheaper).
   - Per the Model Routing Policy above, this is the flagship-first PAID/default ladder; the FREE-tier flash-first
     ladder is a SEPARATE (Slice-3) env, not `GLM_MODEL`/`KIMI_MODEL`. (Supersedes the old "flagship stays OUT of
@@ -2641,8 +2646,14 @@ known-weak 4.7-flash.
   BEFORE SETTING IT**: until 2026-09-15 that key alone silently switched on an unmetered,
   never-read embedding spend on every build) and `OPENAI_BASE_URL`, `AGENTV3_OPENAI_TIMEOUT_MS`; `RATE_GLM53_FLASH_IN`
   / `_OUT` / `_CACHE` (**code default now the admin's real price, 2026-09-14: $0.15 / $0.50, cache
-  $0.0375** — an earlier placeholder priced it at the glm-5 line, ~10× too high, for a few hours, on
-  no user's bill); non-flash **GLM-5.3 is $1.40 / $4.40 = the existing glm-5 line**, no new row;
+  $0.03** — corrected 2026-09-16 from the admin's own copy of docs.z.ai/pricing, now recorded verbatim
+  in `providerRates.ts`. It had been $0.0375, a ≈25%-of-input CONVENTION rather than Z.ai's published
+  number, and the same convention over-stated the other two GLM cache rates (glm-5.x $0.35 → **$0.26**,
+  glm-4.x $0.15 → **$0.11**). All three moved DOWN, and a bill is the real cost × markup, so the
+  convention had been over-stating the USER's bill too. An earlier placeholder had priced flash at the
+  glm-5 line, ~10× too high, for a few hours, on no user's bill); non-flash **GLM-5.3 is $1.40 / $4.40 =
+  the existing glm-5 line**, no new row — ⚠️ that row is the FAMILY CEILING, and Z.ai's real GLM-5 is
+  cheaper ($1.00 / $3.20), which the rate card now says in place;
   `RATE_GPT_NANO_IN` / `_OUT` (**$0.20 / $1.25**, GPT-5.4 Nano — priced so it can never be billed at the
   full-GPT bound, but on NO ladder: the admin's own brief says Nano is for classification/extraction,
   never an app-generation engine); `RATE_GPT_IN` / `_OUT` / `_CACHE` for the FULL gpt-5.4 — ⚠️ **still

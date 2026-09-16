@@ -11,17 +11,26 @@ import {
 describe('realRateFor — resolves the exact rate by model id, then provider label', () => {
   it('prices GLM by the exact rung: flash is free, 4.7 is cheap, 5.2 is flagship', () => {
     expect(realRateFor('GLM', 'glm-4.7-flash')).toEqual({ inputPerMTok: 0, outputPerMTok: 0 });
-    expect(realRateFor('GLM', 'glm-4.7')).toEqual({ inputPerMTok: 0.6, outputPerMTok: 2.2, cacheReadPerMTok: 0.15 });
-    expect(realRateFor('GLM', 'glm-5.2')).toEqual({ inputPerMTok: 1.4, outputPerMTok: 4.4, cacheReadPerMTok: 0.35 });
+    expect(realRateFor('GLM', 'glm-4.7')).toEqual({ inputPerMTok: 0.6, outputPerMTok: 2.2, cacheReadPerMTok: 0.11 });
+    expect(realRateFor('GLM', 'glm-5.2')).toEqual({ inputPerMTok: 1.4, outputPerMTok: 4.4, cacheReadPerMTok: 0.26 });
   });
 
-  it('prices Kimi by rung: k2.5 cheap, k2.7 stronger coder', () => {
+  /**
+   * ⚠️ REWRITTEN 2026-09-16 FROM MOONSHOT'S PUBLISHED TABLE. The old title — "k2.5 cheap" — also
+   * covered k2.6, on the assumption that an older rung is a cheaper one. Moonshot prices **k2.6 exactly
+   * like k2.7-code** ($0.95 / $4.00). k2.6 is the WEAK ladder's second rung and weak builds are paid for
+   * by NavBharatAI, so the old lumping under-stated our own cost on every free build.
+   */
+  it('prices Kimi by rung: k2.6 and k2.7-code are the same price; k2.5 is the retired cheap line', () => {
+    expect(realRateFor('KIMI', 'kimi-k2.6')).toEqual({ inputPerMTok: 0.95, outputPerMTok: 4.0, cacheReadPerMTok: 0.16 });
+    expect(realRateFor('KIMI', 'kimi-k2.7-code')).toEqual({ inputPerMTok: 0.95, outputPerMTok: 4.0, cacheReadPerMTok: 0.19 });
+    // k2.5 was DISCONTINUED on 2026-08-31 and is off every ladder; the row survives only so old
+    // telemetry can still be priced, and its figures are historical rather than currently published.
     expect(realRateFor('KIMI', 'kimi-k2.5')).toEqual({ inputPerMTok: 0.6, outputPerMTok: 2.5, cacheReadPerMTok: 0.15 });
-    expect(realRateFor('KIMI', 'kimi-k2.7-code')).toEqual({ inputPerMTok: 0.95, outputPerMTok: 4.0, cacheReadPerMTok: 0.24 });
   });
 
   it('falls back to the provider label when the model id is unknown/absent', () => {
-    expect(realRateFor('GLM')).toEqual({ inputPerMTok: 0.6, outputPerMTok: 2.2, cacheReadPerMTok: 0.15 });
+    expect(realRateFor('GLM')).toEqual({ inputPerMTok: 0.6, outputPerMTok: 2.2, cacheReadPerMTok: 0.11 });
     expect(realRateFor('KIMI')).toEqual({ inputPerMTok: 0.6, outputPerMTok: 2.5, cacheReadPerMTok: 0.15 });
     expect(realRateFor('CLAUDE_HAIKU')).toEqual({ inputPerMTok: 1, outputPerMTok: 5 });
     expect(realRateFor('CLAUDE')).toEqual({ inputPerMTok: 3, outputPerMTok: 15 }); // Sonnet
@@ -70,12 +79,16 @@ describe('usageCostUsd — token cost at a rate', () => {
     )).toBeCloseTo(0.15, 6);
   });
   it('a real GLM slice with a big cache-hit share costs a fraction of the undiscounted price', () => {
-    // HabitTracker-scale: 2.4M GLM input. Undiscounted $1.44; with 80% cache-hit at the default
-    // glm cache rate ($0.15): 0.48M@0.6 + 1.92M@0.15 = 0.288 + 0.288 = $0.576.
+    // HabitTracker-scale: 2.4M GLM input. Undiscounted $1.44; with 80% cache-hit at the PUBLISHED
+    // glm-4.x cache rate ($0.11): 0.48M@0.6 + 1.92M@0.11 = 0.288 + 0.2112 = $0.4992.
+    // ⚠️ This number moved on 2026-09-16 because the rate did: the card had been using a
+    // ≈25%-of-input CONVENTION ($0.15) instead of Z.ai's own published cache-hit price. Every figure
+    // here is now quoted from docs.z.ai/pricing (recorded verbatim in providerRates.ts), and the
+    // correction runs DOWNWARD — it had been over-stating our cost, and therefore the user's bill.
     const entries: ProviderCostEntry[] = [
       { provider: 'GLM', model: 'glm-4.7', usage: { inputTokens: 2_400_000, outputTokens: 0, cacheReadInputTokens: 1_920_000 } },
     ];
-    expect(realProviderCostUsd(entries)).toBeCloseTo(0.576, 3);
+    expect(realProviderCostUsd(entries)).toBeCloseTo(0.4992, 4);
   });
 });
 
@@ -159,9 +172,18 @@ describe('realRateFor — an unknown/newer model can never bill at the cheap rat
     expect(future.inputPerMTok).toBeGreaterThan(cheapKimi.inputPerMTok);
   });
 
-  it('the genuinely cheap Kimi rungs still bill cheap (no over-charging today)', () => {
+  it('the retired k2.5 line still prices what old telemetry recorded', () => {
     expect(realRateFor('KIMI', 'kimi-k2.5')).toEqual(cheapKimi);
-    expect(realRateFor('KIMI', 'kimi-k2.6')).toEqual(cheapKimi);
+    // ⚠️ k2.6 NO LONGER belongs here (2026-09-16): Moonshot publishes it at the k2.7-code price, so it
+    // must be strictly dearer than the retired cheap line and identical to k2.7 on input and output.
+    const k26 = realRateFor('KIMI', 'kimi-k2.6');
+    const k27 = realRateFor('KIMI', 'kimi-k2.7-code');
+    expect(k26.inputPerMTok).toBeGreaterThan(cheapKimi.inputPerMTok);
+    expect(k26.inputPerMTok).toBe(k27.inputPerMTok);
+    expect(k26.outputPerMTok).toBe(k27.outputPerMTok);
+    // Their cache-hit rates genuinely differ ($0.16 vs $0.19) — one row could not express both.
+    expect(k26.cacheReadPerMTok).toBe(0.16);
+    expect(k27.cacheReadPerMTok).toBe(0.19);
   });
 
   it('k2.7 keeps its own rate', () => {

@@ -3,6 +3,7 @@ import {
   decideSelfReward, decideReferrerReward, decideAttribution, attributionRefusalMessage,
   selfProgress, readSteps, ALL_STEPS, REFERRER_PAYING_STEPS,
   referralRewardsEnabled, stepRewardTokens, referrerStepTokens, referrerLifetimeCapTokens,
+  friendVerificationStatus,
   type RewardStep,
 } from '../src/server/lib/referralRewards';
 
@@ -337,5 +338,42 @@ describe('the progress view', () => {
   it('is a view, not a payment — it never reports anything as claimed that was not', () => {
     expect(selfProgress([], ON).some((s) => s.claimed)).toBe(false);
     expect(selfProgress(['garbage'], ON).some((s) => s.claimed)).toBe(false);
+  });
+});
+
+describe('the Earning screen — a referred friend’s three-step status', () => {
+  it('all three undone reads as 0 of 3, never a false positive', () => {
+    expect(friendVerificationStatus(undefined)).toEqual({
+      mobile: false, email: false, github: false, completedCount: 0,
+    });
+    expect(friendVerificationStatus([])).toEqual({
+      mobile: false, email: false, github: false, completedCount: 0,
+    });
+  });
+
+  it('counts exactly the three steps that pay the referrer — referral-code is not one of them', () => {
+    const s = friendVerificationStatus(['referral-code', 'email', 'mobile']);
+    expect(s).toEqual({ mobile: true, email: true, github: false, completedCount: 2 });
+  });
+
+  it('reaches 3 of 3 once every verification is in', () => {
+    expect(friendVerificationStatus(['email', 'mobile', 'github']).completedCount).toBe(3);
+  });
+
+  it('never trusts a garbage or duplicated entry — same discipline as readSteps', () => {
+    expect(friendVerificationStatus(['mobile', 'mobile', 'not-a-real-step']))
+      .toEqual({ mobile: true, email: false, github: false, completedCount: 1 });
+    expect(friendVerificationStatus('not-an-array' as unknown))
+      .toEqual({ mobile: false, email: false, github: false, completedCount: 0 });
+  });
+
+  it('agrees with the money: decideReferrerReward pays exactly for what this reports as done', () => {
+    const friendPaidSteps = ['referral-code', 'email', 'mobile'];
+    const status = friendVerificationStatus(friendPaidSteps);
+    const reward = decideReferrerReward({
+      friendPaidSteps, alreadyPaidToReferrer: [], referrerEarnedTokens: 0, env: ON,
+    });
+    expect(status.completedCount).toBe(2); // email + mobile; referral-code does not pay the referrer
+    expect(reward.recordSteps.sort()).toEqual(['email', 'mobile']);
   });
 });

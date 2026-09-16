@@ -21,7 +21,10 @@
 
 import type { Express, Request, Response } from 'express';
 import { randomBytes } from 'crypto';
-import { doc, getDoc, setDoc, runTransaction, getServerDb as getDb } from '../lib/serverDb';
+import {
+  doc, getDoc, setDoc, runTransaction, getServerDb as getDb,
+  collection, getDocs, query, where, limit,
+} from '../lib/serverDb';
 import { requireUserMatch, resolveAccountContact } from '../lib/authMiddleware';
 import { sendSafeError } from '../lib/httpError';
 import { routeParam } from '../lib/expressCompat';
@@ -33,7 +36,7 @@ import { checkDeviceIntegrity, deviceRefusalMessage, type DeviceCheck } from '..
 import {
   decideSelfReward, decideReferrerReward, decideAttribution, attributionRefusalMessage,
   selfProgress, readSteps, referralRewardsEnabled, referrerLifetimeCapTokens,
-  stepIsProven, stepNotDoneMessage, githubIsLinked,
+  stepIsProven, stepNotDoneMessage, githubIsLinked, friendVerificationStatus,
   ALL_STEPS, type RewardStep, type StepProof,
 } from '../lib/referralRewards';
 
@@ -51,6 +54,8 @@ interface ReferralDoc {
   /** Devices this user has been seen on — the device-level self-referral check reads it. */
   deviceIds?: unknown;
   createdAt?: string;
+  /** Set once, by /redeem, the moment a referrer's code was applied. Sorts the Earning list. */
+  referredAt?: unknown;
 }
 
 const REFERRALS = 'user_referrals';
@@ -161,6 +166,58 @@ export function registerReferralRoutes(app: Express): void {
       });
     } catch (e) {
       return sendSafeError(res, 500, 'Could not read your referral status.', e, 'referral:status');
+    }
+  });
+
+  /**
+   * The "Earning" list: everyone who has used THIS user's referral code, and how far each has got.
+   *
+   * 🔒 READ-ONLY AND MONEY-FREE. Unlike /claim and /redeem this moves no wallet and needs no device
+   * proof — it only ANSWERS a question the referrer is allowed to ask about their own code. Each
+   * friend's step count comes from `friendVerificationStatus(paidSteps)`, the exact signal
+   * `decideReferrerReward` already pays the referrer from — so a friend showing "2 of 3" here can
+   * never disagree with the ₹ that friend has actually earned the referrer.
+   *
+   * Bounded the same way the admin's own referral summary is (`referralAdminSummary.ts`): the
+   * ₹1,500 lifetime cap already bounds a real referrer to roughly twenty friends, so MAX exists only
+   * against a runaway query, never because genuine usage approaches it.
+   */
+  app.get('/api/referral/:userId/referred', requireUserMatch('userId'), async (req: Request, res: Response) => {
+    try {
+      if (!referralRewardsEnabled()) {
+        return res.json({ ok: true, enabled: false, count: 0, friends: [] });
+      }
+      const db = getDb() as any;
+      const userId = routeParam(req.params.userId);
+      const MAX = 500;
+      const snap = await getDocs(
+        query(collection(db, REFERRALS) as any, where('referrerUserId', '==', userId), limit(MAX)) as any,
+      );
+      const rows = (snap.docs || []).map((d: any) => ({ userId: String(d.id), ...(d.data() || {}) })) as
+        (ReferralDoc & { userId: string })[];
+
+      const friends = await Promise.all(rows.map(async (row) => {
+        const contact = await resolveAccountContact(row.userId);
+        const status = friendVerificationStatus(row.paidSteps);
+        return {
+          email: contact.email,
+          // Named to match the SAME fields the /api/referral/:userId status route already uses
+          // (emailVerified / phoneVerified / githubLinked) — one vocabulary for the same three facts,
+          // never `email: true/false` beside `email: "a@b.com"` on the same object.
+          emailVerified: status.email,
+          phoneVerified: status.mobile,
+          githubLinked: status.github,
+          completedCount: status.completedCount,
+          referredAt: typeof row.referredAt === 'string' ? row.referredAt : null,
+        };
+      }));
+
+      // Most recently referred first — a returning referrer checks on the friend they just invited.
+      friends.sort((a, b) => (b.referredAt || '').localeCompare(a.referredAt || ''));
+
+      return res.json({ ok: true, enabled: true, count: friends.length, capped: rows.length >= MAX, friends });
+    } catch (e) {
+      return sendSafeError(res, 500, 'Could not read who has used your referral code.', e, 'referral:referred');
     }
   });
 

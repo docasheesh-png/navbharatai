@@ -58246,3 +58246,109 @@ test:bundle · boot:check · `vitest run` → **1700 files, 23,861 passed, 1 ski
   journey check deliberately downgrades to a non-writing submit against a user's real database, so
   "integration correctness" remains structurally unprovable by the platform.
 - **UNKNOWN still ships.** This change makes it honest and countable; it does not stop it.
+
+---
+
+## 2026-09-16 — P1: UNKNOWN earns one last look (branch `claude/unknown-last-chance-proof`, stacked on #2976)
+
+**The admin's objective, verbatim, is what this serves:** *"THE APP SHOULD BE CORRECT AND WORKING ON THE
+FIRST BUILD AS OFTEN AS POSSIBLE. I am willing to accept some additional seconds/minutes of model latency
+if that significantly improves first-pass correctness."* P0 (#2976) made an unproven build say so. It did
+not make one fewer build unproven. This does.
+
+### The cause of UNKNOWN, traced rather than assumed
+
+`RUNTIME_PROOF = ['preview', 'pages', 'journeys']` — every one of the three is gated on `lastPreviewUrl`,
+so they go quiet together. Each **also** demands headroom before starting: the preview verify wants
+`total − 90 s` (it budgets for a verify **plus a heal**), the page check `total − 45 s`. And
+`deliveryProof` (autopsy `4efab9d7`) already covers the case where the agent published no URL at all — it
+starts the dev server itself.
+
+**So exactly one case was uncovered, and it is the one that produces UNKNOWN on a real build: a preview
+URL EXISTS, the app may well be running, and nobody looked — purely because there was no room for
+verify-plus-heal.** The 90-second bar is correct for the main loop, which must be able to repair what it
+finds. It is far too expensive as the price of *looking*.
+
+### What was built
+
+One verify-**only** last look, after the release gate computes UNKNOWN on a successful build, in
+`routes/agentv3.ts`. `const gate` became `let gate`; the findings object became a `gateFindings()` closure
+so the gate can be **re-computed from the same inputs** rather than edited in place.
+
+Conditions to start, all required: `gate.state === 'unknown'` · `result.ok` · a `lastPreviewUrl` exists ·
+`actuator.browseUrl` exists · not aborted · and `LAST_CHANCE_PROOF_MS` (45 s) still fits inside
+`effectiveBuildSeconds`. **It is a floor for STARTING, never an extension of the build's budget** — below
+it the check does not run and the build stays honestly unproven, which is the correct outcome rather than
+a look cut off half-way.
+
+It then makes ONE `browseUrl` (bounded at 35 s — the *same* value the main verify loop already uses, not
+a new or raised timeout), runs the *same* `analyzePreviewHtml` and the *same* `filterActionableErrors`,
+and applies the *same two bars* the main loop applies:
+
+| Outcome | Bar | Effect |
+|---|---|---|
+| **proven** | `verdict.rendered && consoleErrors.length === 0` | `preview: 'passed'` → gate re-computed → no longer UNKNOWN |
+| **broken** | `!rendered && !inconclusive && !serverDown` | `preview: 'failed'` → the gate turns RED **by its own existing rule** |
+| **neither** | anything ambiguous | evidence untouched — **stays UNKNOWN** |
+
+🔒 **The third row is the constraint the admin stated twice** (*"Do NOT simply change UNKNOWN → SUCCESS"*,
+*"Do NOT simply change UNKNOWN → FAILED unless there is actual evidence that the app is broken"*). Turning
+"we could not tell" into either verdict is the one thing this must never do, and ambiguity is the default
+path, not an edge case.
+
+⚠️ **A heal is out of reach here BY CONSTRUCTION, and that is deliberate.** Had there been 90 s, the main
+loop would already have run and this block would never be reached. So this is verify-only: it converts
+*unproven* into *proven* or *proven-broken*; it does not repair. No model call is made — the whole path is
+deterministic browser work, so a clean build pays nothing extra.
+
+**Report codes:** `LAST_CHANCE_PROOF` (info / error / warning by outcome, with duration and every verdict
+flag), `LAST_CHANCE_PROOF_UNAVAILABLE` (could not open it — *"an infrastructure limit here, never evidence
+about the app itself"*), `LAST_CHANCE_PROOF_SKIPPED` (says **why** it was not attempted, so "unproven"
+never reads as a verdict we reached rather than one we were never in a position to reach).
+
+### Constraints held
+
+No timeout value changed (35 s is the existing one; 45 s is a new *start* floor). No racing, no hedging —
+one call, awaited. No second browser or verification framework — it calls the existing stack. No billing,
+no token accounting, no streaming change. The P0 `deadForRun` implementation (#2975) is untouched, as is
+the P0 `RELEASE_GATE_UNPROVEN` notice (#2976), which still fires whenever this look leaves the build
+unproven.
+
+### Tests
+
+`tests/lastChanceProof.test.ts` — 25 cases across the 13 required areas, including the four 🔒 constraint
+locks (deadForRun untouched · no racing · no billing · no model call) and the metrics baseline.
+
+⚠️ **AND IT CAUGHT THE ANCHOR TRAP A SECOND TIME, ONE STEP EARLIER THAN LAST WEEK.** Three tests in
+`releaseGateUnproven.test.ts` anchored on `gate.state === 'unknown' && result.ok` — the branch's own
+*condition*. That stopped identifying the branch the moment this change added a **sibling guarded by the
+same condition** above it: `indexOf` returned the sibling and the slice contained none of what was being
+asserted. Same class as `releaseGateVerdict.test.ts`'s `at + 700` distance anchor, and the lesson is
+sharper: **an anchor must name the thing, not a property several things share.** Re-anchored on the unique
+finding code and bounded by the gate's own `catch` rather than a character count. What those tests protect
+is unchanged.
+
+**Gate, run last on the final state:** typecheck · typecheck:server · noUnusedImports · build ·
+test:bundle · boot:check · `vitest run` → **1701 files, 23,886 passed, 1 skipped, 0 FAIL.**
+
+### Does this actually improve first-pass correctness, honestly
+
+**Partly, and the halves are different sizes.** It genuinely converts some builds from *unproven* to
+*proven-broken* — and a proven-broken build turns the gate RED, which the existing correction turns into
+`ok: false`, an honest "not ready" message and **no charge**. That is a real correctness outcome the user
+feels. It also converts some to *proven-good*, which is reporting accuracy rather than a better app.
+
+**What it does NOT do is make the app itself more correct.** It cannot repair what it finds — there is no
+budget for a heal at this point by construction. The build that renders broken is still broken; the user
+is simply told the truth and not billed. Claiming otherwise would be the kind of green-tick-over-a-failure
+this file exists to prevent.
+
+### Still open (rule 6)
+
+- **UNKNOWN still ships** when the look is ambiguous, when no browser exists, or when under 45 s remain.
+  Narrowed, not closed.
+- **The rate is still unmeasured.** `RELEASE_GATE_UNPROVEN` (P0) plus the three codes here are what will
+  finally answer "how often, and why" from real builds. No claim about the rate is made here.
+- **Repair-after-proof is not built.** A build proven broken at this point ends honestly instead of being
+  fixed. Doing better needs budget reserved *earlier* in the build, which is a separate change with its
+  own latency trade — and under the admin's stated objective it is the one worth costing next.

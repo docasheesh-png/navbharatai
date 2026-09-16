@@ -11302,6 +11302,17 @@ async function noteBuildOutcome(
     // the stream closed → the client's spinner clears) promptly even when an advisory step hangs. The
     // finalizer is success-aware, so it emits a real SUCCESS result, not a "paused".
     const ADVISORY_CAP_MS = 120_000;
+    /**
+     * Budget the UNKNOWN last-chance proof needs before it may start (see its use below the release
+     * gate). One `browseUrl` is bounded at 35 s, so this is that plus room for the console read and
+     * the gate recompute — deliberately smaller than the main verify loop's 90 s, because that one
+     * budgets for a HEAL pass as well and this one cannot afford or attempt a repair.
+     *
+     * ⚠️ It is a floor for STARTING, never an extension of the build's own budget: below it the check
+     * does not run and the build stays honestly unproven, which is the correct outcome rather than a
+     * half-finished look cut off mid-flight.
+     */
+    const LAST_CHANCE_PROOF_MS = 45_000;
     const armAdvisoryCap = () => {
       if (deadlineMs <= 0) return;
       if (deadlineTimer) clearTimeout(deadlineTimer);
@@ -17468,14 +17479,97 @@ async function noteBuildOutcome(
         gateEvidence.preview = previewVerifiedRendered ? 'passed' : previewVerifiedFailed ? 'failed' : 'not-run';
         // Only changes the WORDING of an unproven preview, never the verdict — see previewUrlPublished.
         gateEvidence.previewUrlPublished = Boolean(lastPreviewUrl);
-        const gate = releaseGate(gateEvidence, {
+        const gateFindings = () => ({
           // Counted from what this build actually recorded, so the gate and the report cannot disagree.
           blockers: buildDiag.shippingIssueCount('error'),
           // Security findings already arrive as error-severity issues above; counting them again here
           // would report one problem twice in the same sentence.
           highSeverity: 0,
           warnings: buildDiag.shippingIssueCount('warning'),
-        }, gateQuality);
+        });
+        let gate = releaseGate(gateEvidence, gateFindings(), gateQuality);
+
+        // ── UNKNOWN EARNS ONE LAST LOOK, NOT A SHRUG ─────────────────────────────────────────────
+        //
+        // 🔴 WHY A BUILD REACHES HERE UNPROVEN, traced rather than assumed. All three runtime proofs
+        // (`RUNTIME_PROOF = preview | pages | journeys`) are gated on `lastPreviewUrl`, and each ALSO
+        // demands headroom: the preview verify wants `total − 90 s` because it budgets for a verify
+        // PLUS a heal pass; the page check wants `total − 45 s`. `deliveryProof` already covers the
+        // case where no URL was ever published — it starts the dev server itself. What nothing covered
+        // is the other case: **a preview URL exists, the app may well be running, and we never looked,
+        // purely because there was no room for verify-plus-heal.** The app is then reported with no
+        // runtime evidence at all, which is exactly the UNKNOWN the admin asked to stop shipping blind.
+        //
+        // 🔑 So: when the gate lands UNKNOWN, spend what remains on the ONE proof that is still
+        // affordable — a single real-browser open. A heal is out of reach by construction here (had
+        // there been 90 s, the main loop would already have run), so this is deliberately verify-ONLY.
+        // It is not a second verification system: it calls the same `browseUrl`, the same
+        // `analyzePreviewHtml`, the same `filterActionableErrors`, and applies the SAME two bars the
+        // main loop applies — rendered-and-quiet is a pass, proven-broken is a failure.
+        //
+        // ⚠️ IT CAN END IN THREE STATES AND MUST BE ABLE TO. A pass upgrades the gate; a proven-broken
+        // render sets `preview: 'failed'`, which the gate ALREADY turns RED with no new flipping logic
+        // from here; and anything ambiguous (inconclusive, server down, rendered-but-noisy) leaves the
+        // evidence untouched and the build honestly UNKNOWN. Turning "we could not tell" into either
+        // verdict is the one thing this must never do.
+        if (
+          gate.state === 'unknown' && result.ok && lastPreviewUrl && actuator.browseUrl
+          && !abort.signal.aborted
+          // Only if ONE bounded open still fits inside the build's own budget — never an extension of
+          // it, and never started when it would be cut off half-way.
+          && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - LAST_CHANCE_PROOF_MS)
+        ) {
+          const proofStartedAt = Date.now();
+          try {
+            events.emit({ type: 'narration', agent: 'architect', text: '🔎 Nothing proved your app runs yet — opening it once more to check…', ts: Date.now() });
+            const shot = await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'last-chance-proof');
+            const verdict = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source });
+            let consoleErrs: string[] = [];
+            try {
+              if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text);
+            } catch { /* console capture is best-effort — its absence must not invent a verdict */ }
+            // The SAME two bars the main verify loop uses, deliberately not a looser pair.
+            const proven = verdict.rendered && consoleErrs.length === 0;
+            const broken = !verdict.rendered && !verdict.inconclusive && !verdict.serverDown;
+            if (proven) gateEvidence.preview = 'passed';
+            else if (broken) gateEvidence.preview = 'failed';
+            if (proven || broken) gate = releaseGate(gateEvidence, gateFindings(), gateQuality);
+            buildDiag.record({
+              phase: 'readiness',
+              severity: proven ? 'info' : broken ? 'error' : 'warning',
+              code: 'LAST_CHANCE_PROOF',
+              autoResolved: proven,
+              message: proven
+                ? 'Nothing had proven this app runs, so it was opened once more — it renders cleanly'
+                : broken
+                  ? 'Nothing had proven this app runs, so it was opened once more — it did NOT render'
+                  : 'Nothing had proven this app runs; the last look was inconclusive, so the build stays unproven',
+              detail: `${Date.now() - proofStartedAt}ms · rendered=${verdict.rendered} · inconclusive=${verdict.inconclusive} `
+                + `· serverDown=${verdict.serverDown} · consoleErrors=${consoleErrs.length}`
+                + (proven || broken ? '' : ' — deliberately left as NOT proven rather than guessed either way'),
+            });
+          } catch {
+            // Could not open it at all (no browser, timeout). That is an infrastructure limit, not a
+            // verdict about the app: the gate stays exactly as it was.
+            buildDiag.record({
+              phase: 'readiness', severity: 'warning', code: 'LAST_CHANCE_PROOF_UNAVAILABLE', autoResolved: false,
+              message: 'Could not open the app for a final check, so it remains unproven',
+              detail: `${Date.now() - proofStartedAt}ms — an infrastructure limit here, never evidence about the app itself.`,
+            });
+          }
+        } else if (gate.state === 'unknown' && result.ok) {
+          // Say WHY the last look was not even attempted — otherwise "unproven" reads as a verdict we
+          // reached rather than one we were never in a position to reach.
+          buildDiag.record({
+            phase: 'readiness', severity: 'info', code: 'LAST_CHANCE_PROOF_SKIPPED', autoResolved: true,
+            message: 'No final check was possible for this build',
+            detail: !lastPreviewUrl
+              ? 'No preview URL was ever available — the platform already attempted to start one (see the delivery-proof lines above).'
+              : abort.signal.aborted ? 'The build was stopped.'
+                : !actuator.browseUrl ? 'This sandbox has no browser available.'
+                  : 'Not enough of the build budget remained to open the app even once.',
+          });
+        }
         // WHERE DID THIS BUILD'S SANDBOX MINUTES GO, AND HOW MUCH MEMORY DID IT NEED? Two observations,
         // recorded last so they include every gate above (the browser-driven ones most of all — a peak
         // measured before Chromium ran would under-state exactly the number a RAM change must respect).

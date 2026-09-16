@@ -29,6 +29,23 @@ describe('realRateFor — resolves the exact rate by model id, then provider lab
     expect(realRateFor('KIMI', 'kimi-k2.5')).toEqual({ inputPerMTok: 0.6, outputPerMTok: 2.5, cacheReadPerMTok: 0.15 });
   });
 
+  /**
+   * 🔴 THE DEFECT THIS TEST WAS WRITTEN TO CATCH (found 2026-09-16, while wiring kimi-k2.7-code-highspeed
+   * onto the Normal ladder). The model has NO row and NO matcher branch before this change, so
+   * `realRateFor` fell through the 'k3' / 'k2.6' / 'k2.5' branches to the final `return card['kimi-k2.7']`
+   * — silently billing HALF Moonshot's real price for a model priced at exactly 2x k2.7-code on every
+   * column (identical coding quality, only faster tokens/sec). Verified by re-deleting the `highspeed`
+   * branch and confirming this assertion fails before restoring it.
+   */
+  it('prices kimi-k2.7-code-highspeed at its OWN rate — 2x k2.7-code, never the plain k2.7-code rate', () => {
+    const highspeed = realRateFor('KIMI', 'kimi-k2.7-code-highspeed');
+    const regular = realRateFor('KIMI', 'kimi-k2.7-code');
+    expect(highspeed).toEqual({ inputPerMTok: 1.9, outputPerMTok: 8.0, cacheReadPerMTok: 0.38 });
+    expect(highspeed.inputPerMTok).toBe(regular.inputPerMTok * 2);
+    expect(highspeed.outputPerMTok).toBe(regular.outputPerMTok * 2);
+    expect(highspeed.cacheReadPerMTok).not.toEqual(regular.cacheReadPerMTok);
+  });
+
   it('falls back to the provider label when the model id is unknown/absent', () => {
     expect(realRateFor('GLM')).toEqual({ inputPerMTok: 0.6, outputPerMTok: 2.2, cacheReadPerMTok: 0.11 });
     expect(realRateFor('KIMI')).toEqual({ inputPerMTok: 0.6, outputPerMTok: 2.5, cacheReadPerMTok: 0.15 });

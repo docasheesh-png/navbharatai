@@ -13,6 +13,7 @@ import { getServerDb } from '../lib/serverDb';
 import { audit } from '../lib/audit';
 import { capProblems, type BuildDiagnosticsReport } from './BuildDiagnostics';
 import { redactSecrets } from './SecretRedactor';
+import { summarizeModelPerformance, type ModelPerformanceSummary } from './modelPerformance';
 
 const COLLECTION = 'workspace_diagnostics_v3';
 /** Firestore's hard per-document limit is 1 MB; stay well under it after trimming. */
@@ -620,6 +621,23 @@ export interface AllDiagnosticsEntry extends DiagnosticsHistoryEntry {
   billedInr?: number | null;
   billedUsd?: number | null;
   zeroBillReason?: string | null;
+  /**
+   * THE MODEL-PERFORMANCE PROJECTION (2026-09-16) — what this build's models actually did.
+   *
+   * 🔑 IT COSTS NO EXTRA I/O, WHICH IS WHY IT BELONGS HERE. The query already reads each whole
+   * document to project `ok`/`summary`, so `llmCalls` and the failure ledger are ALREADY in memory;
+   * summarising them is a walk over at most `MAX_LLM_CALLS` (300) records per row. The alternative —
+   * opening each full report from an analysis script — is one network round trip per build on a list
+   * of up to 500, which is the reason this comparison had never been made.
+   *
+   * ⚠️ COMPACT BY DESIGN: one row per (provider, model), never the individual calls. A build with 300
+   * calls contributes two or three rows, so the response grows with the number of MODELS used, not
+   * with the amount of work done.
+   *
+   * Absent only if summarising threw; a legacy report yields a summary with empty arrays rather than
+   * nothing, so "no models recorded" and "this field was never computed" stay distinguishable.
+   */
+  modelPerformance?: ModelPerformanceSummary | null;
 }
 
 /**
@@ -670,6 +688,12 @@ export async function listAllDiagnostics(limit = 100, sinceMs?: number | null): 
             billedUsd: num(bill?.billedUsd),
             zeroBillReason: str(bill?.zeroBillReason),
           };
+        })(),
+        // Read-only aggregation over data this query already has in memory. Wrapped because an
+        // admin listing must never fail over an observability field: a summary that throws yields
+        // `null` ("not computed") and the row still carries everything it carried before.
+        modelPerformance: (() => {
+          try { return summarizeModelPerformance(r); } catch { return null; }
         })(),
       };
     });

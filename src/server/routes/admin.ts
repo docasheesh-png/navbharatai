@@ -14,6 +14,9 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Admin panel reads/writes admin_mfa +
 // aggregates user_token_wallets / ai_usage_logs / payment_transactions (all server-side).
 import { doc, getDoc, setDoc, updateDoc, collection, getDocs, runTransaction, getServerDb as getDb } from '../lib/serverDb';
+import { summarizeReferrals, selfPayoutTokens } from '../lib/referralAdminSummary';
+import { ledgerPatch } from '../lib/walletStatement';
+import { stepRewardTokens, referrerLifetimeCapTokens, referralRewardsEnabled } from '../lib/referralRewards';
 import { mirroredCreditPatch } from '../lib/walletMirror';
 import { audit } from '../lib/audit';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
@@ -56,6 +59,7 @@ import { capSessionReports } from '../AgentV3/BuildDiagnostics';
 import { firstPassStatsFromMeta, firstPassHeadline, FIRST_PASS_TARGET } from '../../lib/firstPassQuality';
 import { licenceExposures, licenceExposureHeadline, activeExposureCount } from '../../lib/licenceExposure';
 import { builderScorecard, scorecardHeadline } from '../../lib/builderMetrics';
+import { categorizeBuildFailures } from '../lib/buildFailureCategory';
 import { selectStaleDevices, canBroadcast, cohortSummary, updateBroadcastPayload } from '../lib/updateBroadcast';
 import { deviceTokenStore } from '../lib/DeviceTokenStore';
 import { sendPushToUser } from '../lib/PushNotificationService';
@@ -1053,6 +1057,37 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     }
   });
 
+  /**
+   * FAILURE CATEGORY (admin 2026-09-16, verbatim: "jitne bhi build reports admin penal me hai, wah ek
+   * alag analysis laga do. jisme sabhi failed build ko catagorise kiya jaye. kis type ki apps nahi ban
+   * pa rahi hai. kya koi specific prkar hai, ya rendom.").
+   *
+   * Reads the SAME durable, comprehensive source the All-Builds browser reads — `listAllDiagnostics`,
+   * every workspace's LATEST build report, across every user — rather than the user-submitted inbox
+   * (`listAdminBuildReports`), which is only the builds someone bothered to click Report on and would
+   * answer a different, biased question. `categorizeBuildFailures` (buildFailureCategory.ts) does the
+   * actual grouping: by APP TYPE (the same domain classifier a build prompt is already analysed with)
+   * and by FAILURE REASON (keyword-matched against the engine's own real message text). Both tables
+   * carry their real sample size and cap, never a rate presented as if it covered everything.
+   */
+  app.get('/api/admin/failure-categories', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '500'), 10) || 500, 1), 500);
+      const dateFilter = parseDateFilter(req.query.date);
+      const all = await listAllDiagnostics(limit, sinceMsFor(dateFilter));
+      const report = categorizeBuildFailures(all.map((b) => ({ workspaceId: b.workspaceId, ok: b.ok ?? null, prompt: b.prompt, rootCause: b.rootCause })));
+      res.json({
+        ...report,
+        window: limit,
+        reportsRead: all.length,
+        capped: all.length >= limit,
+        sampleNote: 'Each row is the LATEST build of one project (workspace), not every build ever run — the current state of everything on the platform, not a full history. A count at the fetch limit is a lower bound: narrow the date range to look further back.',
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to categorise build failures.' });
+    }
+  });
+
   // ALL BUILDS browser (admin 2026-08-06: "koi bhi user kuch bhi app banaye — admin apne panel se
   // puri 0→100% build report download kar sake, user ke send kiye bina"). Every build's report is
   // already durably recorded (workspace latest doc + per-build history, including in-progress
@@ -1875,7 +1910,14 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         const patch = mirroredCreditPatch(w, delta, 'gift');
         tx.update(walletRef, {
           ...patch,
-          walletLedger: [...(w.walletLedger || []), { type: 'admin_adjustment', amountCoinsOrTokens: delta, reason: reason || 'Admin adjustment', timestamp: new Date().toISOString() }],
+          // 🔒 Through the shared appender — see walletStatement.ts.
+          ...ledgerPatch(w, {
+            type: 'admin_adjustment',
+            amountCoinsOrTokens: delta,
+            description: reason || 'Admin adjustment',
+            reason: reason || 'Admin adjustment',
+            timestamp: new Date().toISOString(),
+          }),
           updatedAt: new Date().toISOString(),
         });
         return patch.tokenBalance;
@@ -2081,6 +2123,42 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
    * this route the first evidence of a wrong step is a 403 inside a Cloud Build log on a user's
    * publish. With it, the admin gets the exact missing step while they are still in the console.
    */
+  /**
+   * WHAT REFERRALS COST, AND WHO LOOKS LIKE A FARM.
+   *
+   * 🔒 READ-ONLY, and bounded. It reads at most MAX rows of `user_referrals` — a scan of a growing
+   * collection is exactly the kind of admin panel that becomes a Firestore bill — and when it hits
+   * that ceiling it says so, so every figure is presented as a LOWER BOUND rather than a total that
+   * is quietly wrong. The alternative, an unbounded read, would be honest for a year and then not.
+   */
+  app.get('/api/admin/referral/summary', verifyAdminToken, async (_req: Request, res: Response) => {
+    const MAX = 2000;
+    try {
+      const db = getDb() as any;
+      if (!db) return res.json({ ok: false, reason: 'store-unavailable' });
+      const snap = await getDocs(collection(db, 'user_referrals') as any);
+      const all = (snap.docs || []).map((d: any) => ({ userId: String(d.id), ...(d.data() || {}) }));
+      const rows = all.slice(0, MAX);
+      const summary = summarizeReferrals(rows, all.length > MAX);
+      const perStep = stepRewardTokens();
+      const self = selfPayoutTokens(rows, perStep);
+      return res.json({
+        ok: true,
+        enabled: referralRewardsEnabled(),
+        ...summary,
+        selfTokens: self,
+        totalTokens: self + summary.referrerTokens,
+        perStepTokens: perStep,
+        capTokens: referrerLifetimeCapTokens(),
+        // Only the busiest handful are worth a human's attention; the rest is noise on a screen.
+        topReferrers: summary.topReferrers.slice(0, 20),
+      });
+    } catch (e) {
+      // A panel that 500s tells the admin nothing. Report the failure AS the answer.
+      return res.json({ ok: false, reason: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
   app.get('/api/admin/hosting/preflight', verifyAdminToken, async (_req: Request, res: Response) => {
     try {
       // The SAME scope the hosting engine itself uses, so a permission this check passes is genuinely

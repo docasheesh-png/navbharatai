@@ -18,7 +18,7 @@ import { useEffect, useState, lazy, Suspense } from 'react';
 import { Mic } from 'lucide-react';
 import { auth } from '../../lib/firebase';
 import type { SonicTurn } from './SonicChat';
-import { voiceConsent, resolveVoiceLang } from '../../lib/voiceChatBilling';
+import { voiceConsent } from '../../lib/voiceChatBilling';
 
 /**
  * The call surface is LOADED ON DEMAND, and that is a correctness point, not a micro-optimisation.
@@ -33,9 +33,6 @@ import { voiceConsent, resolveVoiceLang } from '../../lib/voiceChatBilling';
  * by the time the chunk is needed, the user has already tapped twice.
  */
 const SonicChat = lazy(() => import('./SonicChat').then((m) => ({ default: m.SonicChat })));
-
-/** The user's own language for the consent card — read at render, so a change applies immediately. */
-const voiceLang = () => resolveVoiceLang((k) => localStorage.getItem(k));
 
 /**
  * `professionalId` = which professional this chat is (the server loads that professional's own
@@ -72,7 +69,7 @@ export function ProfessionalVoiceButton({ professionalId, getHistory, className,
 
   if (!enabled || !signedIn) return null;
 
-  const consent = voiceConsent(voiceLang());
+  const consent = voiceConsent();
 
   return (
     <>

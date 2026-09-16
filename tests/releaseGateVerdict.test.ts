@@ -56,8 +56,19 @@ describe('the verdict may no longer contradict the evidence', () => {
   it('the correction itself can never break a build', () => {
     // It lives inside the gate's try/catch: a fault in the honesty check must not fail the build it
     // is judging.
+    //
+    // ⚠️ ANCHORED ON THE NEXT STATEMENT, NOT ON A CHARACTER COUNT (2026-09-16). This slice used to be
+    // `at + 700`, which asserts a DISTANCE rather than a relationship: adding the sibling UNKNOWN
+    // branch between the correction and the catch pushed the catch past 700 and failed a test that
+    // should not have cared. That is the identical trap `buildCostCeiling.test.ts` already records —
+    // "an anchor cannot drift with the length of what sits between" — so it is fixed the same way.
+    // What is PROTECTED is unchanged: the correction is still proven to sit inside the gate's catch.
     const at = route.indexOf("code: 'OUTCOME_RELEASE_GATE_RED'");
-    expect(route.slice(at, at + 700)).toContain('catch { /* the gate reports on the build; a fault HERE must never affect it */ }');
+    expect(at).toBeGreaterThan(-1);
+    const catchAt = route.indexOf('catch { /* the gate reports on the build; a fault HERE must never affect it */ }', at);
+    expect(catchAt).toBeGreaterThan(at);
+    // …and nothing re-opens the try in between, so the correction is genuinely still inside it.
+    expect(route.slice(at, catchAt)).not.toContain('try {');
   });
 
   it('flipping ok:false also makes the build FREE — the standing "working app or free" law', () => {

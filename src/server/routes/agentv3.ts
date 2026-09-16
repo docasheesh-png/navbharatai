@@ -204,6 +204,7 @@ import { scanGeneratedCode, formatCodeScanReport } from '../AgentV3/CodeSafetySc
 import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
 import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, pacedRunner, sharedRateLimitCooldowns, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
+import { buildStreamingEnabled, streamHardCapMs } from '../AgentV3/providers/openAiStream';
 import {
   openShell,
   readShell,
@@ -330,9 +331,10 @@ import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective, classifyFailure } from '../lib/BuildRetrospectiveEngine';
 import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
-import { outcomeCodeOf, providerFailuresLookDegraded } from '../AgentV3/BuildDiagnostics';
+import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMisconfigured, buildStarvedItsOutputBudget } from '../AgentV3/BuildDiagnostics';
 import { estimateBuildTime, complexityFromPrompt, liveEtaTick } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
+import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionReserve';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
@@ -484,6 +486,9 @@ import { sandboxCost, sandboxBillableUsd, sandboxBillingNote } from '../AgentV3/
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
 import { renderRescueEligible, renderRescueConfirmsSuccess } from '../AgentV3/renderRescue';
+import { shouldAttemptPlatformPreview, platformPreviewBudgetMs, platformPreviewPort } from '../AgentV3/deliveryProof';
+import { floorTimeoutForTokens } from '../AgentV3/floorBudget';
+import { parseDevServerHealthLine } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { analyzeDesignCoverage, designRepairInstruction, designCoverageSummary } from '../AgentV3/DesignCoverage';
 import { auditRlsInSql, rlsAuditSummary } from '../AppMakerLab/generator/RlsPolicy';
@@ -2345,7 +2350,14 @@ export function balanceFloorLead(runners: NamedRunner[], kimiFirst: boolean): Na
  *   • Prompt-size skip default 0 = no skip (admin 2026-07-11: "1st try for every file glm/kimi").
  */
 export function floorTuning(): { floorTimeoutMs: number; floorMaxPromptChars: number; kimiTimeoutMs: number } {
-  const floorTimeoutMs = Number(process.env.AGENTV3_CHEAP_FLOOR_TIMEOUT_MS) || 60_000;
+  // 🔴 THE DEFAULT IS DERIVED FROM WHAT WE ASK FOR, not typed in (autopsy 4efab9d7 — floorBudget.ts).
+  //
+  // It was 60_000 while `buildMaxTokensPerTurn()` authorised 32,000 output tokens — about seventeen
+  // times what 60 seconds can carry at the rate that build measured. The turn that writes the files is
+  // exactly the turn that uses the budget, so it could not fit, and a ten-minute build wrote nothing.
+  // Deriving it means the two numbers can never drift apart again: change the token ask and the clock
+  // follows. The explicit env still wins, for an admin who has measured something better.
+  const floorTimeoutMs = Number(process.env.AGENTV3_CHEAP_FLOOR_TIMEOUT_MS) || floorTimeoutForTokens(buildMaxTokensPerTurn());
   const floorMaxRaw = (process.env.AGENTV3_CHEAP_FLOOR_MAX_PROMPT_CHARS ?? '').trim();
   const floorMaxPromptChars = floorMaxRaw !== '' && Number.isFinite(Number(floorMaxRaw)) ? Number(floorMaxRaw) : 0;
   const kimiTimeoutMs = Math.max(floorTimeoutMs, Number(process.env.AGENTV3_KIMI_TIMEOUT_MS) || 120_000);
@@ -2373,8 +2385,21 @@ export function openAiCompatRunners(
   for (const model of models) {
     keys.forEach((apiKey, k) => {
       try {
-        const client = new OpenAI({ apiKey, baseURL, timeout: timeoutMs, maxRetries: 0 });
-        const runner = pacedRunner(sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts }), floorMaxPromptChars), name);
+        // ONE bound, both places. The SDK's `timeout` is what actually aborts the request; the runner's
+        // `timeoutMs` is what it reconciles against the lane's deadline and what it sizes the token ask
+        // from. They used to disagree — SDK 60 s, runner's default 120 s — so the runner authorised an
+        // answer for a clock that was not the one running, and the report's error text ("Request timed
+        // out.") is the SDK's, never the runner's. Passing the same number makes the pair honest.
+        //
+        // 🔴 …AND THE SAME REASONING INVERTS WHEN THE TURN IS STREAMED (2026-09-16). The SDK's timeout
+        // bounds the WHOLE request, stream included, so leaving it at the floor bound would abort a
+        // healthy stream at 150 s — killing exactly the slow-but-working provider the streamed path
+        // exists to keep. Under the flag the SDK is given the stream's own hard ceiling and silence
+        // becomes the hang signal (openAiStream.ts); the runner is handed the same number, so the pair
+        // stays honest in both modes. Flag off ⇒ this is the old line to the byte.
+        const sdkTimeoutMs = buildStreamingEnabled() ? Math.max(timeoutMs, streamHardCapMs()) : timeoutMs;
+        const client = new OpenAI({ apiKey, baseURL, timeout: sdkTimeoutMs, maxRetries: 0 });
+        const runner = pacedRunner(sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts, timeoutMs }), floorMaxPromptChars), name);
         out.push(k === 0
           ? { name, runner, modelId: model }
           : { name: `${name}#${k + 1}`, runner, reportAs: name, modelId: model });
@@ -2997,7 +3022,12 @@ function unavailableTierRunner(level: PowerLevel, ladderText: string, missingKey
  * build when the floor was off, which is exactly what the rule forbids. A 429-storm on rung 1 now costs
  * one failed call per cooldown window (the shared bench still sidelines the rung), not a reorder.
  */
-export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void; onChain?: (chain: ChainRung[]) => void }): TurnRunner {
+export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void;
+  /** Retired-rung memory owned by the CALLER, so it can span several runner instances — the fast
+   *  lane's per-file runners share ONE build's map. Omitted ⇒ each runner keeps its own, as before.
+   *  See MultiProviderOptions.deadRungs for why this is caller-owned and never a singleton. */
+  deadRungs?: Map<string, string>;
+}): TurnRunner {
   const level = toPowerLevel(opts.tier as PowerLevel | boolean | string | undefined | null);
   const parsed = tierLadder(level);
   if (parsed.rejected) console.warn(`[AGENTV3] ${parsed.rejected}`);
@@ -3029,6 +3059,8 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
       opts.onProviderError?.(name, err);
     },
     ...(opts.onTurnComplete ? { onTurnComplete: opts.onTurnComplete } : {}),
+    ...(opts.onProviderBenched ? { onProviderBenched: opts.onProviderBenched } : {}),
+    ...(opts.deadRungs ? { deadRungs: opts.deadRungs } : {}),
   });
 }
 
@@ -11271,6 +11303,17 @@ async function noteBuildOutcome(
     // the stream closed → the client's spinner clears) promptly even when an advisory step hangs. The
     // finalizer is success-aware, so it emits a real SUCCESS result, not a "paused".
     const ADVISORY_CAP_MS = 120_000;
+    /**
+     * Budget the UNKNOWN last-chance proof needs before it may start (see its use below the release
+     * gate). One `browseUrl` is bounded at 35 s, so this is that plus room for the console read and
+     * the gate recompute — deliberately smaller than the main verify loop's 90 s, because that one
+     * budgets for a HEAL pass as well and this one cannot afford or attempt a repair.
+     *
+     * ⚠️ It is a floor for STARTING, never an extension of the build's own budget: below it the check
+     * does not run and the build stays honestly unproven, which is the correct outcome rather than a
+     * half-finished look cut off mid-flight.
+     */
+    const LAST_CHANCE_PROOF_MS = 45_000;
     const armAdvisoryCap = () => {
       if (deadlineMs <= 0) return;
       if (deadlineTimer) clearTimeout(deadlineTimer);
@@ -11588,6 +11631,16 @@ async function noteBuildOutcome(
         },
       });
       buildDiagRef = buildDiag; // expose to the outer catch so a build crash is captured too
+      // OBSERVABILITY ONLY (2026-09-16) — record what the request analyser concluded above, so a
+      // model's measured performance can be correlated with the DIFFICULTY of the work it was handed
+      // (modelPerformance.ts). The value was computed long before this line; this only stores it, and
+      // nothing in the build ever reads it back.
+      //
+      // ⚠️ Stored rather than re-derived at read time: the report keeps only the FIRST 200 characters
+      // of the prompt, while `analyzeRequest` scores explicit length bands (+5 over 300, +10 over 800)
+      // and takes `fileCount`/`historyTurns` that are not stored at all. A re-derived score would be a
+      // different number printed as the same fact.
+      try { buildDiag.setRequestAnalysis(analysis); } catch { /* observation only — never a build's problem */ }
       // A clean sheet, so "healed twice" means twice in THIS build — see HealLedger.
       resetHealLedger(workspaceId);
 
@@ -11718,6 +11771,11 @@ async function noteBuildOutcome(
       /** The cost ceiling fires at most once per build — see captureTurnUsage below. */
       let costCeilingFired = false;
       /**
+       * The "this provider reported no tokens" notice fires at most once per build, same reasoning as
+       * the ceiling: a report that says the same thing on every turn reads like many events.
+       */
+      let usageUnreportedFired = false;
+      /**
        * SHADOW ledger — fast-lane turns, recorded for OBSERVATION and never for billing.
        *
        * The admin chose to measure before changing fast-lane attribution (2026-08-11), and measurement
@@ -11734,7 +11792,34 @@ async function noteBuildOutcome(
         shadowFastLaneLedger.add(used, usage, model);
       };
       billingCtx.providerLedger = providerLedger; // Fix 67 — expose to the wall-clock/advisory finalizer
-      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string, cacheReadInputTokens?: number): void => {
+      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean }, model?: string, cacheReadInputTokens?: number): void => {
+        // 🔴 SAY IT WHEN WE DO NOT KNOW. A provider that returns no token counts contributes zeros to
+        // the ledger, and zeros are indistinguishable from a turn that genuinely cost nothing — the
+        // exact misreading autopsy f04421ef already paid for once, arriving here through a different
+        // door: a STREAMED turn carries usage only if the provider honours `stream_options.include_usage`,
+        // and whether Z.ai/Moonshot do is a fact only a real call can settle.
+        //
+        // The user is never over-billed by this (we cannot invent tokens, so an unmeasured turn is
+        // free to them). What it protects is the ADMIN's own cost figure, which silently under-states
+        // itself otherwise — the same shape as the E2B_USD_PER_HOUR drift, and on the very panel used
+        // to judge provider spend.
+        if (usage.measured === false && !usageUnreportedFired) {
+          usageUnreportedFired = true;
+          try {
+            buildDiag.record({
+              phase: 'build', severity: 'warning', code: 'USAGE_NOT_REPORTED',
+              // Not a defect in the build — the app is unaffected — so it resolves itself.
+              autoResolved: true,
+              message: 'A provider returned no token usage — this build\'s cost is an under-estimate',
+              detail: `${used}${model ? ` (${model})` : ''} answered without reporting token counts, so its `
+                + 'turns contribute 0 to this report\'s token and cost figures. Nothing was over-charged — we never '
+                + 'invent tokens — but OUR OWN cost for this build is higher than the number shown. Most likely cause: '
+                + 'the streamed path (AGENTV3_STREAM_BUILD_CALLS) asks for usage via stream_options.include_usage and '
+                + 'this provider does not send it. If this appears on every build, unset that flag to return to the '
+                + 'non-streamed path, which does report usage.',
+            });
+          } catch { /* diagnostics are best-effort — they must never disturb a build */ }
+        }
         // Fix 66 — the cache-hit share rides the ledger entry so the REAL-cost settle prices it at the
         // provider's cheaper cache-read rate (usageCostUsd). Margin-safe: providers without a cache
         // line in the rate card price it at the full input rate (identical to before).
@@ -11804,6 +11889,15 @@ async function noteBuildOutcome(
           ].filter(Boolean).join(' '),
         });
       } catch { /* diagnostics are best-effort — never blocks a build */ }
+      // The bench is a FACT ABOUT THE ENGINE and must appear in the timeline as one — otherwise the only
+      // trace of "KIMI was reached" is the absence of further GLM lines, which nobody can read.
+      const recordProviderBenched = (family: string, reason: string): void => {
+        buildDiag.record({
+          phase: 'provider', severity: 'info', code: 'PROVIDER_BENCHED',
+          message: `${family} benched for the rest of this build: ${reason}`,
+          autoResolved: true,
+        });
+      };
       const recordProviderFallback = (name: string, err: unknown): void => {
         // Structured per-provider failure TALLY (admin 2026-07-11: "kaun se providers fail hue,
         // kitni baar") + the existing per-event timeline entry (carries the message).
@@ -11822,14 +11916,44 @@ async function noteBuildOutcome(
       // the caller the ACTUAL delivering provider so the build report records the truth (rule 5), never a
       // fixed 'anthropic'. Token/billing accounting stays in each caller's existing sink (no onTurnComplete
       // here — avoids double-counting the fast lane's own buildUsage.add).
+      /**
+       * THE FAST LANE'S RETIRED-RUNG MEMORY — ONE map, THIS build, every per-file call.
+       *
+       * 🔴 THE DEFECT IT CLOSES (Panchang build `16cabab2`, 2026-09-16). `makeFastTextRunner()` is called
+       * FRESH inside `fastGenerateOnce`, i.e. once per FILE, so every file got a runner with an empty
+       * dead-rung map and re-discovered the same starved GLM rungs from zero. That build wrote two files
+       * cheaply (21.9 s, 58.6 s) and then spent **812.9 s on `muhurat.ts` and 1,397.3 s on `astro.ts`** —
+       * 92.6% of all its model time — paying the identical GLM output-budget starvation over again, while
+       * KIMI sat one rung down the ladder and was never reached on either file (`providerDelivery:
+       * {GLM: 5}`, `providerFailures: {GLM: 108}`, of which 89 were output-budget).
+       *
+       * The retirement logic itself was already correct and already built (MultiProviderTurnRunner's
+       * `deadForRun`); it was simply scoped to one runner, which is right for the agentic `client` below
+       * (constructed ONCE, reused every turn) and wrong for a lane that constructs one runner per file.
+       * So this is a LIFETIME fix, not new behaviour: nothing about what gets retired, or when, changes.
+       *
+       * 🔒 LIFETIME, stated exactly because the safety argument is entirely about lifetime: this `const`
+       * lives in the per-request build scope, alongside `buildDiag` and the ledgers. It is created when
+       * this build starts and becomes garbage when it ends. A second build — same user or not — runs this
+       * line again and gets its own empty map, so a rung retired here can never be skipped in anyone
+       * else's build. It is deliberately NOT a module-level singleton, which is the one shape that would
+       * turn "slow for this build" into "blacklisted for everybody".
+       */
+      const fastLaneDeadRungs = new Map<string, string>();
       const makeFastTextRunner = (onUsed?: (used: string) => void): TurnRunner => buildTurnRunner({
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
+        // Shared across every per-file runner this lane builds — the whole point of the change above.
+        // A fresh runner per call is KEPT on purpose: `onUsed` must stay per-call, because the fast lane
+        // generates files CONCURRENTLY (SimpleBuilder's mapWithConcurrency) and one shared callback would
+        // attribute the wrong provider to a file. Only the MEMORY is shared; the callbacks stay private.
+        deadRungs: fastLaneDeadRungs,
         onProviderUsed: (used) => { try { onUsed?.(used); } catch { /* caller callback best-effort */ } captureProvider(used); },
         // OBSERVATION ONLY — captureShadowUsage feeds the shadow ledger, never the billing one. This is
         // what makes the fast-lane billing question answerable without answering it by accident.
         onTurnComplete: captureShadowUsage,
         onProviderError: recordProviderFallback,
+        onProviderBenched: recordProviderBenched,
       });
       const client = buildTurnRunner({
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
@@ -11837,6 +11961,7 @@ async function noteBuildOutcome(
         onProviderUsed: captureProvider,
         onTurnComplete: captureTurnUsage,
         onProviderError: recordProviderFallback,
+        onProviderBenched: recordProviderBenched,
         // Autopsy f04421ef — see runnerChainSummary.ts. Recorded once (record() collapses an identical
         // repeat), admin-only like every other provider name.
         onChain: (chain) => {
@@ -13607,6 +13732,12 @@ async function noteBuildOutcome(
         // U-1 — opt-in lint gate (default OFF); blocks a finished build on real ESLint errors when enabled.
         lintGate: runLintGate,
         // WATCHDOG — hard wall-clock cap so a build can never hang for 20-30 min (0 = disabled).
+        //
+        // ⚠️ THIS IS THE BUILD'S FULL CLOCK, AND IT IS DELIBERATELY *NOT* WHAT THE GENERATION RUNNER
+        // GETS. Every runner that spreads `baseRunnerOpts` is a HEAL runner — they are the ones that
+        // SPEND the correction reserve, so they keep the full ceiling. The three generation-shaped
+        // runners (the main build, the escalation, the empty-build retry) override it below with
+        // `generationBudgetMs(...)`, which holds the reserve back. See correctionReserve.ts.
         maxBuildMs: effectiveBuildSeconds * 1000,
         // AI Diagnosis Bundle #4 — capture every model turn's I/O (truncation, failures, latency)
         // into the build report. Shared by the default build AND every escalated/retry/heal runner.
@@ -13623,6 +13754,14 @@ async function noteBuildOutcome(
         ...baseRunnerOpts,
         client,
         model,
+        // ── THE CORRECTION RESERVE, ENFORCED ─────────────────────────────────────────────────────
+        // Generation stops at the reserve line instead of at the wall, so the verify → repair →
+        // re-verify stage below has a budget of its own rather than whatever generation happened to
+        // leave. It is the SAME tail `buildBudgetSteer` already tells the model is off-limits at its
+        // `final` stage — advisory until now, and a build that ignored it reached every post-build
+        // check with the headroom test already false. Nothing here extends the build's wall clock:
+        // `deadlineMs` and `finalizeOnDeadline` are untouched.
+        maxBuildMs: generationBudgetMs(effectiveBuildSeconds * 1000, Date.now() - buildStartedAt),
         // D7: persist the build transcript so it survives a reconnect/refresh. Best-effort —
         // a store failure never breaks the build (see AgentRunner). Reloadable via the
         // GET /api/agentv3/conversations endpoints below.
@@ -14354,7 +14493,9 @@ async function noteBuildOutcome(
           let text = first.text;
           let stopReason = first.stopReason;
           let attempts = 0;
-          while (shouldContinue(stopReason, attempts)) {
+          // The THIRD argument is what stops a reasoning-only response being "continued" three times
+          // into the same nothing — see shouldContinue's docblock (report 58fe8254).
+          while (shouldContinue(stopReason, attempts, text)) {
             attempts += 1;
             events.emit({ type: 'narration', agent: 'architect', text: `✍️ That file list was longer than one response allows — continuing it (${attempts}/${MAX_CONTINUATIONS}) so nothing is left half-written…`, ts: Date.now() });
             let next: { text: string; stopReason: string | null };
@@ -14797,6 +14938,10 @@ async function noteBuildOutcome(
               // Opus ONLY in power mode — a power-off escalation caps at Sonnet, never Opus
               // (admin rule 2026-06-28). Escalation only runs in normal mode anyway.
               model: resolveModel(tier === 'opus' && onlyOpus),
+              // Generation-shaped, so it respects the correction reserve too. Without this the
+              // escalation would be handed a FRESH full-length clock (AgentRunner starts its own
+              // stopwatch inside run()) and could spend the reserve the main runner just protected.
+              maxBuildMs: generationBudgetMs(effectiveBuildSeconds * 1000, Date.now() - buildStartedAt),
               persistence: {
                 store: getConversationStore(),
                 conversationId: mainConversationId, // same session conversation — append, don't fork
@@ -14953,6 +15098,9 @@ async function noteBuildOutcome(
           client: buildTurnRunner(healRunnerOpts()),
           model: resolveModel(powerLevelReqEffective), // the tier's pinned model (Strong → Sonnet; Powerful/FT → Opus; Normal → Sonnet)
           effort: powerSpecResolved.effort,
+          // Generation-shaped (it re-runs the whole build), so it respects the correction reserve —
+          // same reason as the escalation runner above.
+          maxBuildMs: generationBudgetMs(effectiveBuildSeconds * 1000, Date.now() - buildStartedAt),
           persistence: {
             store: getConversationStore(),
             conversationId: mainConversationId, // same session conversation — append, don't fork
@@ -15110,6 +15258,16 @@ async function noteBuildOutcome(
           }
         }
         if (check.verified) gateEvidence.typecheck = check.ok ? 'passed' : 'failed';
+      }
+      // Fallback (production build report, 2026-09-16): the deterministic gate above only runs when
+      // the build is already marked `ok` at this point, so a build not yet called successful never
+      // even attempts it and this evidence stays 'not-run' — even when the AGENT ITSELF already ran a
+      // real `tsc --noEmit` earlier in its own turn. That build's report showed exactly this: two clean
+      // agent-run typechecks sitting in its own `commands` log, and the release gate still telling the
+      // user "the typecheck did not run". Only fills a gap; never overrides real G3 evidence above.
+      if (gateEvidence.typecheck === 'not-run') {
+        const fromAgent = buildDiag.typecheckEvidenceFromAgentCommands();
+        if (fromAgent) gateEvidence.typecheck = fromAgent;
       }
 
       // MISSING-FILES GATE for the AGENTIC path (deep-test App #4 — Instagram, 2026-07-13). The fast
@@ -16360,6 +16518,83 @@ async function noteBuildOutcome(
       // but was never confirmed to render, so nothing here was proven to RUN" — 1.4 seconds after the
       // same build had watched it render. Nothing failed, nothing logged; the report simply lied.
       let previewVerifiedRendered = false;
+
+      // ── 🔴 DELIVERY PROOF: THE PLATFORM BRINGS THE PREVIEW UP ITSELF (autopsy 4efab9d7, 2026-09-15) ──
+      //
+      // Every proof below is gated on `lastPreviewUrl`, and until today the ONLY thing that ever set it
+      // was the agent calling update_preview. A build whose model timed out before running the dev
+      // server therefore had a compiled bundle, a saved snapshot, a dashboard rendering on the admin's
+      // phone — and no proof, because nothing ever looked. See deliveryProof.ts for the whole story.
+      // Deterministic, no model call, no code change, bounded, and never a gate: a server that will not
+      // come up leaves the build exactly as unproven as it was.
+      try {
+        const remainingForProof = effectiveBuildSeconds > 0
+          ? effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt)
+          : null;
+        const presentFiles = (!lastPreviewUrl && !abort.signal.aborted && expectsArtifacts && !isImportTurn)
+          ? await withTimeout(actuator.listFiles(workspaceId), 15_000, 'platform-preview-list').catch(() => [] as string[])
+          : [];
+        const proofDecision = shouldAttemptPlatformPreview({
+          expectsArtifacts,
+          hasPreviewUrl: Boolean(lastPreviewUrl),
+          aborted: abort.signal.aborted,
+          isImportTurn,
+          appFiles: presentFiles.length,
+          hasPackageJson: presentFiles.some((f) => /(^|\/)package\.json$/.test(String(f))),
+          remainingMs: remainingForProof,
+        });
+        if (proofDecision.attempt) {
+          const budget = platformPreviewBudgetMs(remainingForProof, previewWakeBudgetMs());
+          const rec = await raceTimeout(sandboxStore.getRecord(workspaceId), 3_000, 'platform-preview-record').catch(() => null);
+          const recipe = await raceTimeout(sandboxStore.getRecipe(workspaceId), 3_000, 'platform-preview-recipe').catch(() => null);
+          const port = platformPreviewPort(recipe?.port, rec?.declaredPort, oneShotDevPort(framework));
+          events.emit({ type: 'narration', agent: 'architect', text: '🔎 Starting your app to check that it runs…', ts: Date.now() });
+          const startedAt = Date.now();
+          // The health-check wrapper in devServerHost recognises this command, installs stale deps and
+          // waits for the port — the same single call the revive path below trusts.
+          const started = await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), budget, 'platform-preview-start')
+            .catch((e) => ({ stdout: '', stderr: e instanceof Error ? e.message : String(e), exitCode: -1 }));
+          const health = parseDevServerHealthLine(`${started.stdout}\n${started.stderr}`);
+          const servingPort = health?.up && health.port ? health.port : port;
+          // EARN IT — the same probe the preview-health route runs: follow redirects, keep the body, and
+          // judge the body with the tested analyzer. A 404 shell is not a live app whatever the status.
+          const probe = await raceTimeout(
+            actuator.runCommand(workspaceId, `curl -sL --max-time 5 -w "\\n__STATUS__%{http_code}" http://127.0.0.1:${servingPort} 2>/dev/null || echo "__STATUS__000"`),
+            10_000, 'platform-preview-probe',
+          ).catch(() => ({ stdout: '__STATUS__000', stderr: '', exitCode: -1 }));
+          const rawProbe = probe.stdout || '';
+          const statusMatch = /__STATUS__(\d{3})\s*$/.exec(rawProbe.trim());
+          const statusCode = statusMatch ? Number(statusMatch[1]) : 0;
+          const probeBody = statusMatch ? rawProbe.slice(0, rawProbe.lastIndexOf('__STATUS__')) : rawProbe;
+          const portUp = statusCode >= 200 && statusCode < 400;
+          const pageVerdict = portUp ? analyzePreviewHtml(probeBody) : null;
+          if (portUp && pageVerdict && !pageVerdict.serverDown) {
+            const rawUrl = await withTimeout(actuator.getPortUrl(workspaceId, servingPort), 10_000, 'platform-preview-url');
+            const url = applyPreviewDomain(rawUrl);
+            lastPreviewUrl = url;
+            events.emit({ type: 'preview', url, ts: Date.now() });
+            try { await sandboxStore.saveDeclaredPort(workspaceId, servingPort); } catch { /* memory for the door — never this build's problem */ }
+            buildDiag.record({
+              phase: 'preview', severity: 'info', code: 'PLATFORM_PREVIEW_UP',
+              message: `No preview had been published, so the platform started the app itself: port ${servingPort} is serving (HTTP ${statusCode}) after ${Math.round((Date.now() - startedAt) / 1000)}s. The runtime checks below now have something to look at.`,
+              autoResolved: true,
+            });
+          } else {
+            buildDiag.record({
+              phase: 'preview', severity: 'warning', code: 'PLATFORM_PREVIEW_NOT_UP',
+              message: `No preview had been published, so the platform tried to start the app itself — nothing served on port ${servingPort} within ${Math.round((Date.now() - startedAt) / 1000)}s (HTTP ${statusCode || 'none'}). ${(started.stderr || '').slice(0, 200)}`.trim(),
+              autoResolved: false,
+            });
+          }
+        } else if (!lastPreviewUrl && expectsArtifacts && !isImportTurn && !abort.signal.aborted) {
+          buildDiag.record({
+            phase: 'preview', severity: 'info', code: 'PLATFORM_PREVIEW_SKIPPED',
+            message: `The platform did not try to start the app itself: ${proofDecision.reason}.`,
+            autoResolved: true,
+          });
+        }
+      } catch { /* proof is best-effort — a failure here leaves the build exactly as unproven as before */ }
+
       if (
         process.env.AGENTV3_RENDER_RESCUE !== 'off'
         && renderRescueEligible({ ok: result.ok, expectsArtifacts, filesWritten: writtenFiles.size })
@@ -17276,14 +17511,125 @@ async function noteBuildOutcome(
         gateEvidence.preview = previewVerifiedRendered ? 'passed' : previewVerifiedFailed ? 'failed' : 'not-run';
         // Only changes the WORDING of an unproven preview, never the verdict — see previewUrlPublished.
         gateEvidence.previewUrlPublished = Boolean(lastPreviewUrl);
-        const gate = releaseGate(gateEvidence, {
+        const gateFindings = () => ({
           // Counted from what this build actually recorded, so the gate and the report cannot disagree.
           blockers: buildDiag.shippingIssueCount('error'),
           // Security findings already arrive as error-severity issues above; counting them again here
           // would report one problem twice in the same sentence.
           highSeverity: 0,
           warnings: buildDiag.shippingIssueCount('warning'),
-        }, gateQuality);
+        });
+        let gate = releaseGate(gateEvidence, gateFindings(), gateQuality);
+
+        // ── THE BUDGET LEDGER: where this build's clock actually went ────────────────────────────
+        //
+        // 🔎 Recorded because the reserve's whole justification is a number nobody had. Until now
+        // nothing counted how much of a build's wall clock generation consumed, so "generation ate
+        // the budget and the checks all skipped" was a reading of the CODE (every post-build gate
+        // subtracts its own 30-120 s from the same total and reserves nothing) and not of any build.
+        // These four figures are what turn it into a measurement — and they are also what will say
+        // whether the reserve was worth its cost, since an `unusedMs` that is almost always the whole
+        // reserve means it is being held back from work that needed it.
+        //
+        // Admin-only, `info`, never a blocker: an accounting line must not be able to fail a build.
+        try {
+          const totalBudgetMs = effectiveBuildSeconds * 1000;
+          const reserveMs = correctionReserveMs(totalBudgetMs);
+          const atGateMs = Date.now() - buildStartedAt;
+          const unusedMs = totalBudgetMs > 0 ? Math.max(0, totalBudgetMs - atGateMs) : 0;
+          buildDiag.record({
+            phase: 'readiness', severity: 'info', code: 'CORRECTION_BUDGET', autoResolved: true,
+            message: reserveMs > 0
+              ? `Correction reserve: ${Math.round(reserveMs / 1000)}s held back from generation`
+              : 'Correction reserve: none (wall-clock cap disabled or the reserve is switched off)',
+            detail: `total=${Math.round(totalBudgetMs / 1000)}s · reserve=${Math.round(reserveMs / 1000)}s `
+              + `· generationCap=${Math.round(generationBudgetMs(totalBudgetMs, 0) / 1000)}s `
+              + `· elapsedAtGate=${Math.round(atGateMs / 1000)}s · leftAtGate=${Math.round(unusedMs / 1000)}s `
+              + `· gate=${gate.state}`,
+          });
+        } catch { /* an accounting line must never affect the build it is accounting for */ }
+
+        // ── UNKNOWN EARNS ONE LAST LOOK, NOT A SHRUG ─────────────────────────────────────────────
+        //
+        // 🔴 WHY A BUILD REACHES HERE UNPROVEN, traced rather than assumed. All three runtime proofs
+        // (`RUNTIME_PROOF = preview | pages | journeys`) are gated on `lastPreviewUrl`, and each ALSO
+        // demands headroom: the preview verify wants `total − 90 s` because it budgets for a verify
+        // PLUS a heal pass; the page check wants `total − 45 s`. `deliveryProof` already covers the
+        // case where no URL was ever published — it starts the dev server itself. What nothing covered
+        // is the other case: **a preview URL exists, the app may well be running, and we never looked,
+        // purely because there was no room for verify-plus-heal.** The app is then reported with no
+        // runtime evidence at all, which is exactly the UNKNOWN the admin asked to stop shipping blind.
+        //
+        // 🔑 So: when the gate lands UNKNOWN, spend what remains on the ONE proof that is still
+        // affordable — a single real-browser open. A heal is out of reach by construction here (had
+        // there been 90 s, the main loop would already have run), so this is deliberately verify-ONLY.
+        // It is not a second verification system: it calls the same `browseUrl`, the same
+        // `analyzePreviewHtml`, the same `filterActionableErrors`, and applies the SAME two bars the
+        // main loop applies — rendered-and-quiet is a pass, proven-broken is a failure.
+        //
+        // ⚠️ IT CAN END IN THREE STATES AND MUST BE ABLE TO. A pass upgrades the gate; a proven-broken
+        // render sets `preview: 'failed'`, which the gate ALREADY turns RED with no new flipping logic
+        // from here; and anything ambiguous (inconclusive, server down, rendered-but-noisy) leaves the
+        // evidence untouched and the build honestly UNKNOWN. Turning "we could not tell" into either
+        // verdict is the one thing this must never do.
+        if (
+          gate.state === 'unknown' && result.ok && lastPreviewUrl && actuator.browseUrl
+          && !abort.signal.aborted
+          // Only if ONE bounded open still fits inside the build's own budget — never an extension of
+          // it, and never started when it would be cut off half-way.
+          && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - LAST_CHANCE_PROOF_MS)
+        ) {
+          const proofStartedAt = Date.now();
+          try {
+            events.emit({ type: 'narration', agent: 'architect', text: '🔎 Nothing proved your app runs yet — opening it once more to check…', ts: Date.now() });
+            const shot = await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'last-chance-proof');
+            const verdict = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source });
+            let consoleErrs: string[] = [];
+            try {
+              if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text);
+            } catch { /* console capture is best-effort — its absence must not invent a verdict */ }
+            // The SAME two bars the main verify loop uses, deliberately not a looser pair.
+            const proven = verdict.rendered && consoleErrs.length === 0;
+            const broken = !verdict.rendered && !verdict.inconclusive && !verdict.serverDown;
+            if (proven) gateEvidence.preview = 'passed';
+            else if (broken) gateEvidence.preview = 'failed';
+            if (proven || broken) gate = releaseGate(gateEvidence, gateFindings(), gateQuality);
+            buildDiag.record({
+              phase: 'readiness',
+              severity: proven ? 'info' : broken ? 'error' : 'warning',
+              code: 'LAST_CHANCE_PROOF',
+              autoResolved: proven,
+              message: proven
+                ? 'Nothing had proven this app runs, so it was opened once more — it renders cleanly'
+                : broken
+                  ? 'Nothing had proven this app runs, so it was opened once more — it did NOT render'
+                  : 'Nothing had proven this app runs; the last look was inconclusive, so the build stays unproven',
+              detail: `${Date.now() - proofStartedAt}ms · rendered=${verdict.rendered} · inconclusive=${verdict.inconclusive} `
+                + `· serverDown=${verdict.serverDown} · consoleErrors=${consoleErrs.length}`
+                + (proven || broken ? '' : ' — deliberately left as NOT proven rather than guessed either way'),
+            });
+          } catch {
+            // Could not open it at all (no browser, timeout). That is an infrastructure limit, not a
+            // verdict about the app: the gate stays exactly as it was.
+            buildDiag.record({
+              phase: 'readiness', severity: 'warning', code: 'LAST_CHANCE_PROOF_UNAVAILABLE', autoResolved: false,
+              message: 'Could not open the app for a final check, so it remains unproven',
+              detail: `${Date.now() - proofStartedAt}ms — an infrastructure limit here, never evidence about the app itself.`,
+            });
+          }
+        } else if (gate.state === 'unknown' && result.ok) {
+          // Say WHY the last look was not even attempted — otherwise "unproven" reads as a verdict we
+          // reached rather than one we were never in a position to reach.
+          buildDiag.record({
+            phase: 'readiness', severity: 'info', code: 'LAST_CHANCE_PROOF_SKIPPED', autoResolved: true,
+            message: 'No final check was possible for this build',
+            detail: !lastPreviewUrl
+              ? 'No preview URL was ever available — the platform already attempted to start one (see the delivery-proof lines above).'
+              : abort.signal.aborted ? 'The build was stopped.'
+                : !actuator.browseUrl ? 'This sandbox has no browser available.'
+                  : 'Not enough of the build budget remained to open the app even once.',
+          });
+        }
         // WHERE DID THIS BUILD'S SANDBOX MINUTES GO, AND HOW MUCH MEMORY DID IT NEED? Two observations,
         // recorded last so they include every gate above (the browser-driven ones most of all — a peak
         // measured before Chromium ran would under-state exactly the number a RAM change must respect).
@@ -17354,6 +17700,52 @@ async function noteBuildOutcome(
             message: `The build reported success while the release gate was RED with ${gateBlockers} unresolved build-breaking issue(s) — the verdict has been corrected to NOT ok.`,
             autoResolved: false,
           });
+        }
+        // ── UNKNOWN MUST REACH THE PERSON WHO IS ABOUT TO TRUST THE APP ──────────────────────────
+        //
+        // 🔴 THE GAP, and it is structural rather than a bug (audit 2026-09-16). `releaseGate` exists to
+        // make one distinction its own header calls "the most important state in this file": UNKNOWN,
+        // *"nothing failed and nothing was PROVEN — we cannot tell you this works"*. Before this block,
+        // `gate.state` was read in exactly THREE places, all of them immediately above: the severity of
+        // the admin diagnostic, its autoResolved flag, and the `red && blockers > 0` flip. **UNKNOWN had
+        // no consequence anywhere.** It did not change the verdict, it did not change what the user was
+        // told, and it did not trigger the verification it was admitting had been skipped.
+        //
+        // So a build whose preview never came up — and whose page-render, journey, typecheck and test
+        // checks therefore ALL skipped together, which is precisely the correlated way they skip when an
+        // app is most broken — ended with an ordinary success summary. That is the dukaan lie of
+        // 2026-08-12 in its other costume: that one was fixed for RED (the flip above), and the same
+        // reasoning was never extended to the state that means "we did not look".
+        //
+        // ⚠️ IT DELIBERATELY DOES NOT TOUCH `ok`, AND THAT RESTRAINT IS THE POINT. Flipping an UNKNOWN
+        // build to failed would make it FREE (the "working app or free" guard keys on `!result.ok`) —
+        // and autopsy 4efab9d7 is the admin's standing ruling on exactly that mistake in this direction:
+        // *"app bani = preview chala. agar preview chala gaya to ₹0 charge karoge to aise to mai barbad
+        // ho jaunga."* An app we merely failed to PROVE is not an app we proved broken. So this states
+        // the limit of our knowledge honestly and changes nothing about the verdict or the bill.
+        //
+        // 🔎 It is also the MEASUREMENT that has to come first. Nobody can say today how often a build
+        // ships unproven, because nothing counted it. `RELEASE_GATE_UNPROVEN` is a first-class finding,
+        // so the admin Failure Category panel can answer that from real builds — and only then is there
+        // evidence to justify a stronger rule.
+        if (gate.state === 'unknown' && result.ok) {
+          buildDiag.record({
+            phase: 'readiness', severity: 'warning', code: 'RELEASE_GATE_UNPROVEN',
+            // NOT auto-resolved: nothing resolved it. The build simply ended without proof.
+            autoResolved: false,
+            message: 'The app was built, but nothing here was ever proven to RUN',
+            detail: `${gate.unproven.join('; ')}. Every runtime check needs a running app, so they all `
+              + 'skipped together. This is not evidence the app is broken — it is the absence of evidence '
+              + 'that it works, and the two must never be reported as the same thing.',
+          });
+          // The user's own summary says it too, in their words and without a vendor name. They are the
+          // one about to open this app; an admin-only diagnostic does not reach them.
+          result = {
+            ...result,
+            summary: `${result.summary}\n\n⚠️ I could not verify this one end to end — the app never came `
+              + 'up here, so I could not check that it runs, renders and saves. Your files are saved. '
+              + 'Please open the preview and tell me if anything is wrong, and I will fix it.',
+          };
         }
       } catch { /* the gate reports on the build; a fault HERE must never affect it */ }
 
@@ -18649,8 +19041,29 @@ async function noteBuildOutcome(
           // genuinely DID fail, that is a new decision with its own evidence — not this one restated.
           const refused = looksLikeRefusal(result.summary);
           const degraded = !refused && providerFailuresLookDegraded(buildDiag.providerFailureBreakdown());
+          // (d) OUR OWN CONFIGURATION (build report 58fe8254, 2026-09-15). A rung that rejects every
+          // call with the same PERMANENT error is neither an engine limit nor an outage to ride out —
+          // it is our request or our ladder being wrong, and it will still be wrong tomorrow. That
+          // build logged `GLM: 279 bad-request` and the user was asked to buy credits; not one of
+          // those calls would have gone differently with a fuller wallet.
+          //
+          // Tested AFTER `degraded` because degraded is the transient reading and a build can carry
+          // both — when providers really were flaky, saying so is the more useful of the two truths.
+          const misconfigured = !refused && !degraded
+            && providerFailuresLookMisconfigured(buildDiag.providerFailureBreakdown());
+          // (e) OUR OWN OUTPUT CEILING (build report ee20478d, 2026-09-15). The rungs ANSWERED — three
+          // times, inside their clock, HTTP 200 every time — and produced nothing, because the ceiling
+          // we authorise is spent on a reasoning model's thinking before any content exists. The user
+          // was told "the model replied without building" and asked to buy a stronger engine. A fuller
+          // wallet would have changed nothing: the ceiling is a constant of ours, identical on every
+          // tier. Grouped with (d) because it is the same KIND of fact — our configuration, not their
+          // service — and tested last only because the readings above are strictly more specific.
+          const starved = !refused && !degraded && !misconfigured
+            && buildStarvedItsOutputBudget(buildDiag.providerFailureBreakdown());
           if (!refused) {
-            const emptyCause = assessBuildInput(prompt).buildable ? 'engine' : 'no-instruction';
+            const emptyCause = misconfigured || starved
+              ? 'our-configuration'
+              : assessBuildInput(prompt).buildable ? 'engine' : 'no-instruction';
             events.emit({
               type: 'narration',
               agent: 'architect',
@@ -18658,12 +19071,17 @@ async function noteBuildOutcome(
               ts: Date.now(),
             });
           }
-          if (refused || degraded) {
+          if (refused || degraded || misconfigured || starved) {
             buildDiag.record({
               phase: 'build', severity: 'warning', code: 'UPSELL_SUPPRESSED', autoResolved: false,
               message: refused
                 ? 'Did not ask this user to add credits: the engine REFUSED this request on policy grounds. A refusal is an answer, not a capability limit — selling a stronger engine after one offers to do the very thing we just declined to do.'
-                : 'Did not ask this user to add credits: the build failed because the engine did not respond, not because the app needed a stronger one. Charging for our own slowness is what this check exists to prevent.',
+                : starved
+                  // Deliberately NOT the "did not respond" wording below: it responded, inside its clock,
+                  // every time. Saying otherwise would send the next reader to a provider status page
+                  // when the number to change is ours (see floorBudget.ts).
+                  ? 'Did not ask this user to add credits: every rung ANSWERED and produced nothing, because our own output ceiling was spent before the answer began. A fuller wallet buys a different model, not a different ceiling — this build would have failed identically on the strongest engine we have.'
+                  : 'Did not ask this user to add credits: the build failed because the engine did not respond, not because the app needed a stronger one. Charging for our own slowness is what this check exists to prevent.',
             });
           }
         }

@@ -68,7 +68,6 @@ describe('dead control sweep', () => {
     'src/components/ide/ActivityBar.tsx',
     'src/components/ide/BotBuilder.tsx',
     'src/components/ide/CostEstimator.tsx',
-    'src/components/ide/PreviewPanel.tsx',
   ]) {
     it(`${rel} has no button that does nothing`, () => {
       const dead = handlerless(rel);

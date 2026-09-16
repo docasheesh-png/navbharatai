@@ -11,7 +11,7 @@
 // budget stops it from growing unchecked in the meantime.
 //
 // KNOWN TOTAL-JS GROWTH DRIVER (root cause of the 2026-07-20 total-JS bump 1050→1200):
-// the offline assistant (`src/lib/offlineAssistant.ts`) imports the ENTIRE server feature
+// a client-side helper importing the ENTIRE server feature
 // catalog `APP_KNOWLEDGE_BASE` (`src/server/AppContext/AppKnowledgeBase.ts`) into the CLIENT
 // bundle, so every new user-facing feature/recipe entry legitimately grows total JS. This
 // is intentional feature growth, not accidental bloat — hence the budget is raised, per the
@@ -145,7 +145,7 @@ import { pathToFileURL } from 'node:url';
 //   modulepreload    react-vendor-*.js    59.2 KB gz   <- downloaded on first paint
 //   modulepreload    firebase-vendor-*.js 188.9 KB gz  <- downloaded on first paint
 //   FIRST-PAINT JS                       495.8 KB gz
-//   ...while `largestChunkGzipKB` reported 250.3 KB for OfflineAI-*.js, a LAZY chunk that first
+//   ...while `largestChunkGzipKB` reported 250.3 KB for a LAZY view chunk that first
 //   paint does not fetch at all.
 //
 // So the guard was reporting a number ~2x smaller than the real first-paint cost, about a file the
@@ -176,7 +176,7 @@ export const LAST_MEASURED = {
 
 export const BUDGETS = {
   /** Largest single JS chunk, gzipped, lazy ones included. Measured 250.3 KB on 2026-09-10 -- which
-   *  was OfflineAI, NOT the entry. This is a "no single chunk balloons" guard and nothing more; the
+   *  was a lazy view, NOT the entry. This is a "no single chunk balloons" guard and nothing more; the
    *  first-paint guard is `firstPaintJsGzipKB` below. See the 2026-09-10 note. */
   largestChunkGzipKB: 400,
   /** What the browser must download before it can render: the entry script plus every modulepreload
@@ -233,13 +233,17 @@ export function checkBudget(measured, budgets = BUDGETS) {
 
 /**
  * LAZY, OPT-IN chunks that are NEVER part of the main app's initial load — so they must not count
- * against the app bundle budget. Today this is the on-device LLM (web-llm), a ~2 MB chunk fetched only
- * when a user turns on the Offline-Thinking beta (named `webllm-*` via vite manualChunks). The budget
+ * against the app bundle budget.
+ * only on an explicit user action. The budget
  * still protects every eagerly-loaded chunk. Pure predicate so it's unit-testable.
  */
-export const EXCLUDED_CHUNK_PREFIXES = ['webllm'];
-export function isBudgetExcludedJs(file) {
-  return EXCLUDED_CHUNK_PREFIXES.some((p) => file.startsWith(p));
+// EMPTY since 2026-09-14: its only entry was `webllm`, the on-device LLM chunk, which left with the
+// Offline AI. The MECHANISM stays — a genuinely opt-in, never-first-paint chunk should be excluded
+// from the main-app ceiling rather than inflating it — so the next such dependency adds one string
+// here instead of re-deriving the reasoning. An empty list simply excludes nothing today.
+export const EXCLUDED_CHUNK_PREFIXES = [];
+export function isBudgetExcludedJs(file, prefixes = EXCLUDED_CHUNK_PREFIXES) {
+  return prefixes.some((p) => file.startsWith(p));
 }
 
 /**
@@ -289,7 +293,7 @@ export function measureDist(distDir = 'dist') {
   let largestChunkGzip = 0;
   let largestChunkName = '';
   for (const file of readdirSync(assetsDir)) {
-    if (file.endsWith('.js') && isBudgetExcludedJs(file)) continue; // opt-in lazy chunk (e.g. web-llm)
+    if (file.endsWith('.js') && isBudgetExcludedJs(file)) continue; // opt-in lazy chunk
     const gz = gzipSync(readFileSync(join(assetsDir, file))).length;
     if (file.endsWith('.js')) {
       totalJs += gz;

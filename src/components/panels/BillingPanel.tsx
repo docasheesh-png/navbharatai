@@ -2,7 +2,7 @@
  * Phase 1.7 — App.tsx split, Part 8: BillingPanel
  *
  * Extracted from App.tsx (was the `activeView === 'billing'` block, ~784 lines).
- * Multi-model token wallet: balance cards, transactions, promocode/referrals,
+ * Multi-model token wallet: balance cards, transactions, promo codes,
  * buy-credit gateway, and budget/reminder SRE limits.
  *
  * Pure render — all state and side effects stay in App.tsx and are threaded in
@@ -11,6 +11,9 @@
 import { cn } from '../../lib/utils';
 import { FreeGiftBanner } from './FreeGiftBanner';
 import { HostingPlanCard } from './HostingPlanCard';
+import { ReferralPanel } from './ReferralPanel';
+import { WalletStatementPanel } from './WalletStatementPanel';
+import type { ReferralProgress } from '../../hooks/useReferralProgress';
 import { AppLockGate } from '../AppLockGate';
 import {
   Wallet, Zap, RefreshCw, AlertCircle, Sparkles, Gift, CreditCard,
@@ -29,10 +32,8 @@ export interface BillingPanelProps {
   wallet: any;
   loadingWallet: boolean;
   dailyUsage: { date: string; count: number; builds: number };
-  myReferralCode: string;
   billingTransactions: any[];
   billingLogs: any[];
-  referralHistory: any[];
   activeBillingDetailTab: BillingDetailTab;
   reminderLimit: number;
   budgetLimit: number;
@@ -41,7 +42,6 @@ export interface BillingPanelProps {
   isRedeemingCoupon: boolean;
   couponError: string | null;
   couponSuccess: string | null;
-  copiedReferral: boolean;
   buyAmountInput: string;
   isRecharging: boolean;
   /**
@@ -73,8 +73,10 @@ export interface BillingPanelProps {
   onSetBudgetLimit: (v: number) => void;
   onSetDismissedReminderWarning: (v: boolean) => void;
   onSetCouponCodeInput: (v: string) => void;
+  /** The referral state for this account — see useReferralProgress. Empty off Android. */
+  referral: ReferralProgress;
+  onRefreshReferral: () => void;
   onRedeemPromoCoupon: (code: string) => void;
-  onSetCopiedReferral: (v: boolean) => void;
   onSetBuyAmountInput: (v: string) => void;
   onCreateBillingOrder: (amount: number) => void;
   onSetTempReminderLimit: (v: string) => void;
@@ -88,10 +90,10 @@ export interface BillingPanelProps {
 
 export function BillingPanel(props: BillingPanelProps) {
   const {
-    user, wallet, loadingWallet, dailyUsage, myReferralCode,
-    billingTransactions, billingLogs, referralHistory, activeBillingDetailTab,
+    user, wallet, loadingWallet, dailyUsage,
+    billingTransactions, billingLogs, activeBillingDetailTab,
     reminderLimit, budgetLimit, dismissedReminderWarning, couponCodeInput,
-    isRedeemingCoupon, couponError, couponSuccess, copiedReferral,
+    isRedeemingCoupon, couponError, couponSuccess,
     buyAmountInput, isRecharging, tempReminderLimit, tempBudgetLimit,
     platformFeePct = DEFAULT_PLATFORM_FEE_PCT,
     storeRail = 'web-gateway', storeConfig = null, buyingProductId = null,
@@ -99,7 +101,7 @@ export function BillingPanel(props: BillingPanelProps) {
     limitError, limitSuccess,
     onShowAuth, onFetchWallet, onSetActiveBillingDetailTab, onSetReminderLimit,
     onSetBudgetLimit, onSetDismissedReminderWarning, onSetCouponCodeInput,
-    onRedeemPromoCoupon, onSetCopiedReferral, onSetBuyAmountInput,
+    onRedeemPromoCoupon, onSetBuyAmountInput, referral, onRefreshReferral,
     onCreateBillingOrder, onSetTempReminderLimit, onSetTempBudgetLimit,
     onSetLimitError, onSetLimitSuccess, onToast,
   } = props;
@@ -158,8 +160,10 @@ export function BillingPanel(props: BillingPanelProps) {
             </div>
           </div>
 
-          {/* 11.3 — Daily Usage Stats + 11.4 Referral Code */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* 11.3 — Daily Usage Stats. The third tile here used to print a "My Referral Code"
+              invented in localStorage (`NB-XXXXXX`), which the Promo tab then contradicted with a
+              second, different invented code. Both are gone — see the DETAILED TAB 2 note below. */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="bg-[#161b22] border border-white/5 rounded-2xl p-5 space-y-2">
               <p className="text-[9px] font-black text-[#484f58] uppercase tracking-widest">Today's Messages</p>
               <p className="text-3xl font-black text-white">{dailyUsage.date === new Date().toDateString() ? dailyUsage.count : 0}</p>
@@ -169,19 +173,6 @@ export function BillingPanel(props: BillingPanelProps) {
               <p className="text-[9px] font-black text-[#484f58] uppercase tracking-widest">Today's Builds</p>
               <p className="text-3xl font-black text-white">{dailyUsage.date === new Date().toDateString() ? dailyUsage.builds : 0}</p>
               <p className="text-[10px] text-indigo-400">Preview builds today</p>
-            </div>
-            <div className="bg-[#161b22] border border-white/5 rounded-2xl p-5 space-y-2">
-              <p className="text-[9px] font-black text-[#484f58] uppercase tracking-widest">My Referral Code</p>
-              <p className="text-xl font-black text-indigo-400 font-mono">{myReferralCode}</p>
-              <button
-                onClick={() => {
-                  navigator.clipboard?.writeText(`Join NavBharatAI — India's own AI App Maker! Use my code ${myReferralCode} for bonus tokens: https://navbharatai.com`);
-                  onToast('Referral link copied! ✓', 'success');
-                }}
-                className="text-[9px] font-black text-indigo-400 hover:text-white uppercase tracking-widest transition-colors"
-              >
-                Copy & Share →
-              </button>
             </div>
           </div>
 
@@ -346,7 +337,7 @@ export function BillingPanel(props: BillingPanelProps) {
                   <Gift className="w-5 h-5" />
                 </div>
                 <span className="text-[8px] font-black font-mono tracking-widest uppercase bg-amber-500/10 text-amber-300 px-2 py-0.5 rounded border border-amber-500/20">
-                  REFERRALS
+                  PROMO CODE
                 </span>
               </div>
               <div>
@@ -606,114 +597,102 @@ export function BillingPanel(props: BillingPanelProps) {
                     </div>
                   </div>
                 </div>
+
+                {/* THE STATEMENT — every credit and every charge, with a running balance, reconciled
+                    against the wallet's own figure (admin 2026-09-15: "ek ek paise ka sahi sahi
+                    hisab … user ke current balance se match hona chahiye"). It lives under the token
+                    audit because that is what it is: the audit, shown to the person whose money it
+                    is. It reports an honest mismatch rather than hiding one — see the panel. */}
+                <WalletStatementPanel userId={user.uid} />
               </div>
             )}
 
-            {/* DETAILED TAB 2: PROMOCODE */}
+            {/* DETAILED TAB 2: PROMO CODE
+                🔴 THE REFERRAL HALF OF THIS TAB WAS DELETED (admin 2026-09-15), and it was not a
+                half-built feature — it was a DECORATIVE one, live to real users.
+
+                It showed a referral code invented in the browser (`NAV-<mailbox>-REF` here, while the
+                balance card above showed a DIFFERENT random `NB-XXXXXX`, so one person saw two codes
+                for one thing); it promised "Earn 10% Free Tokens for every referral"; and it listed
+                two invented earners — amit_sharma2026@gmail.com ₹50 and priya.rastogi@navbharat.ai
+                ₹25 — hardcoded, so EVERY user was shown the same two strangers as their own earnings.
+                Nothing of it existed on the server: no code, no attribution, no credit, not one
+                endpoint. Nobody could ever have earned ₹1 from it.
+
+                That is the state the second absolute rule names as forbidden: a feature that looks
+                done and does nothing. The real referral system is being built now — four earning
+                steps, device-verified, Android only — and it will bring its own screen backed by
+                real server state. Until it lands, this tab is what it can honestly be: promo codes,
+                which are real (see promoCoupons.ts).
+
+                The coupon box also named WELCOME100 and NAVBHARAT50 as examples. Both codes were
+                DELETED in the 2026-09-10 revenue audit, so the placeholder was advertising two
+                guaranteed failures to everyone who read it. */}
             {activeBillingDetailTab === 'gift' && (
               <div className="space-y-6 animate-in fade-in duration-300">
                 <div className="border-b border-white/5 pb-4">
                   <span className="text-[10px] bg-amber-500/10 border border-amber-500/20 text-amber-400 px-3 py-1.5 rounded-xl font-black uppercase tracking-wider font-mono">
-                    Promo Hub & Referrals
+                    Promo Code
                   </span>
-                  <h3 className="text-xl font-black text-white uppercase tracking-tight mt-3">Promotional Voucher & Reward Engine</h3>
+                  <h3 className="text-xl font-black text-white uppercase tracking-tight mt-3">Redeem a Promotional Code</h3>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
-                  <div className="space-y-6">
+                {/* REFER A FRIEND — the four earned steps and the code. Replaces the decorative
+                    referral surface deleted on 2026-09-15; every number in it is the server's. */}
+                <ReferralPanel
+                  userId={user.uid}
+                  enabled={referral.enabled}
+                  code={referral.code}
+                  shareMessage={referral.shareMessage}
+                  rows={referral.rows}
+                  earnedRupees={referral.earnedRupees}
+                  capRupees={referral.capRupees}
+                  capReached={referral.capReached}
+                  referred={referral.referred}
+                  emailVerified={referral.emailVerified}
+                  phoneVerified={referral.phoneVerified}
+                  githubLinked={referral.githubLinked}
+                  onRefresh={onRefreshReferral}
+                  onToast={onToast}
+                />
 
-                    {/* Copyable Code Box */}
-                    <div className="bg-black/30 border border-amber-500/20 rounded-2xl p-6 relative overflow-hidden group">
-                      <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 rounded-full blur-xl group-hover:bg-amber-500/10 transition-all"></div>
-                      <h4 className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest">Your Unique Referral Code</h4>
-                      <div className="flex items-center justify-between gap-4 mt-3 bg-[#0d1117] border border-white/10 rounded-xl px-5 py-3.5">
-                        <span className="text-base text-amber-400 font-mono font-black tracking-widest">
-                          NAV-{(user?.email || 'USER').split('@')[0].toUpperCase()}-REF
-                        </span>
-                        <button
-                          onClick={() => {
-                            navigator.clipboard.writeText(`NAV-${(user?.email || 'USER').split('@')[0].toUpperCase()}-REF`);
-                            onSetCopiedReferral(true);
-                            setTimeout(() => onSetCopiedReferral(false), 2000);
-                          }}
-                          className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-black text-[10px] font-black uppercase tracking-widest rounded-lg transition-all"
-                        >
-                          {copiedReferral ? 'COPIED!' : 'COPY'}
-                        </button>
-                      </div>
-                      <p className="text-xs text-amber-200/70 leading-relaxed font-semibold mt-4">
-                        🤝 Earn <span className="text-white font-black">10% Free Tokens</span> for every referral — when your referred user purchases tokens, 10% gets added to your account for free!
-                      </p>
+                <div className="max-w-2xl">
+                  {/* Voucher redeem panel */}
+                  <div className="bg-black/20 border border-white/5 rounded-2xl p-6 space-y-4">
+                    <div>
+                      <h4 className="text-xs font-black text-white uppercase tracking-wider">Redeem Reward Coupons</h4>
+                      <p className="text-[10px] text-[#8b949e] font-bold font-mono">Each promo code can only be applied once.</p>
+                    </div>
+                    <div className="flex gap-3">
+                      <input
+                        type="text"
+                        placeholder="Enter your promo code"
+                        value={couponCodeInput}
+                        onChange={(e) => onSetCouponCodeInput(e.target.value)}
+                        className="flex-1 bg-[#0d1117] border border-white/10 rounded-xl px-4 py-3 text-xs font-mono font-bold uppercase tracking-widest text-white focus:outline-none focus:border-amber-500 transition-colors"
+                      />
+                      <button
+                        onClick={() => onRedeemPromoCoupon(couponCodeInput)}
+                        disabled={isRedeemingCoupon || !couponCodeInput}
+                        className="px-6 py-3 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-500/20 disabled:text-[#8b949e]/30 text-black rounded-xl font-black uppercase tracking-widest text-[9px] transition-all duration-200"
+                      >
+                        {isRedeemingCoupon ? 'VALIDATING...' : 'APPLY CODE'}
+                      </button>
                     </div>
 
-                    {/* Voucher redeem panel */}
-                    <div className="bg-black/20 border border-white/5 rounded-2xl p-6 space-y-4">
-                      <div>
-                        <h4 className="text-xs font-black text-white uppercase tracking-wider">Redeem Reward Coupons</h4>
-                        <p className="text-[10px] text-[#8b949e] font-bold font-mono">Each promo code / referral code can only be applied once!</p>
+                    {couponError && (
+                      <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl text-xs flex items-center gap-2 font-semibold">
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                        <span>{couponError}</span>
                       </div>
-                      <div className="flex gap-3">
-                        <input
-                          type="text"
-                          placeholder="e.g. WELCOME100, NAVBHARAT50"
-                          value={couponCodeInput}
-                          onChange={(e) => onSetCouponCodeInput(e.target.value)}
-                          className="flex-1 bg-[#0d1117] border border-white/10 rounded-xl px-4 py-3 text-xs font-mono font-bold uppercase tracking-widest text-white focus:outline-none focus:border-amber-500 transition-colors"
-                        />
-                        <button
-                          onClick={() => onRedeemPromoCoupon(couponCodeInput)}
-                          disabled={isRedeemingCoupon || !couponCodeInput}
-                          className="px-6 py-3 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-500/20 disabled:text-[#8b949e]/30 text-black rounded-xl font-black uppercase tracking-widest text-[9px] transition-all duration-200"
-                        >
-                          {isRedeemingCoupon ? 'VALIDATING...' : 'APPLY CODE'}
-                        </button>
+                    )}
+
+                    {couponSuccess && (
+                      <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-3 rounded-xl text-xs flex items-center gap-2 font-semibold animate-pulse">
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        <span>{couponSuccess}</span>
                       </div>
-
-                      {couponError && (
-                        <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl text-xs flex items-center gap-2 font-semibold">
-                          <AlertCircle className="w-4 h-4 shrink-0" />
-                          <span>{couponError}</span>
-                        </div>
-                      )}
-
-                      {couponSuccess && (
-                        <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-3 rounded-xl text-xs flex items-center gap-2 font-semibold animate-pulse">
-                          <CheckCircle2 className="w-4 h-4 shrink-0" />
-                          <span>{couponSuccess}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Refer history */}
-                  <div className="space-y-4">
-                    <h4 className="text-xs font-black text-white uppercase tracking-wider font-mono">Referred Accounts & Tokens Earned</h4>
-                    <div className="border border-white/5 rounded-2xl overflow-hidden font-mono text-xs bg-black/10">
-                      <table className="w-full text-left">
-                        <thead>
-                          <tr className="border-b border-white/5 bg-black/30 text-[#8b949e] font-black uppercase tracking-widest text-[9px]">
-                            <th className="py-2.5 px-4">User Email Referred</th>
-                            <th className="py-2.5 px-4">Reward Link</th>
-                            <th className="py-2.5 px-4 text-emerald-400">Claim Value</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-white/5 font-semibold">
-                          {referralHistory.map((ref, idx) => (
-                            <tr key={idx} className="hover:bg-white/5 transition-all">
-                              <td className="py-3 px-4 text-white font-medium">{ref.email}</td>
-                              <td className="py-3 px-4">
-                                <span className={`text-[8px] px-2 py-0.5 rounded font-black uppercase tracking-wider ${
-                                  ref.status === 'CLAIMED' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-500/10 text-slate-400 border border-slate-500/15'
-                                }`}>
-                                  {ref.status} (10%)
-                                </span>
-                              </td>
-                              <td className="py-3 px-4 text-emerald-400 font-bold">₹{ref.creditsEarned.toFixed(2)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    )}
                   </div>
                 </div>
               </div>

@@ -67,7 +67,7 @@ export interface BrainConfig {
 }
 
 export type ViewType =
-  | 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat' | 'offline_ai'
+  | 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat'
   | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings'
   | 'deploy' | 'templates' | 'donation' | 'studio' | 'report'
   | 'security' | 'about' | 'admin' | 'billing' | 'secrets' | 'testing' | 'api'
@@ -101,7 +101,7 @@ export type SettingsScreen =
   // at all. Same lesson as 'modules' above: a duplicate surface is where this bug class comes back.
   | 'domain' | 'auth' | 'storage'
   // Legal & Trust pages (admin 2026-08-08): one screen per document, driven by the legal registry.
-  | 'legal_privacy' | 'legal_terms' | 'legal_grievance' | 'legal_dpa' | 'legal_security' | 'legal_nda';
+  | 'legal_privacy' | 'legal_terms' | 'legal_grievance' | 'legal_dpa' | 'legal_security';
 
 export type ErrorType = 'AUTH' | 'QUOTA' | 'NETWORK' | 'CONFIG' | 'UNKNOWN';
 

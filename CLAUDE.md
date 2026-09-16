@@ -271,6 +271,39 @@ not finish."* **Every clause was false, and the app on screen was working while 
   **Until one ledger exists that any actor writes a proven fact into and every verdict reads from, this
   class returns** — it is an OPEN root cause in `PROGRESS.md`, not a closed item.
 
+### 🔴 A FACT ABOUT A PROVIDER CALL IS NEVER A FACT ABOUT THE APP — and the platform proves the preview ITSELF (autopsy 4efab9d7, 2026-09-15)
+
+Admin, with the dashboard rendering on his phone beside "This build did not fully succeed, so it is
+FREE": *"app ban jaye to 'app not build' dikha kar free (₹0) charge nahi karna hai! … app bani =
+preview chala. agar preview chala gaya to ₹0 charge karoge to aise to mai barbad ho jaunga."*
+
+- **What happened:** GLM was slow; a ~50-key pool timed out eight times at 60 s inside one 480 s turn
+  (the in-run timeout bench was per KEY, so a pool could never reach two consecutive strikes; KIMI sat
+  one rung away the whole time). The turn timeout was recorded as an unresolved provider ERROR labelled
+  with the PLANNED model id (`claude-sonnet-4-6`, on a weak build that never called Claude).
+  `shippingIssueCount` counted that ENGINE error as an APP blocker → release gate RED → verdict flipped
+  to NOT ok → "working app or free" → ₹0. The user's build-health card printed the vendor id.
+- 🔴 **THE SAME CLASS WAS ROOT-CAUSED TWO DAYS EARLIER (70115adf, 2026-09-13) for ONE error string** —
+  budget-ended — and the timeout sibling was never hunted. The instance was fixed; the class was not.
+- **Fixed at the class:** `isAppFinding` (`BuildDiagnostics.ts`) excludes every `provider`-phase issue
+  BY PHASE from the release gate AND the user's health card (one predicate, both readers); the health
+  card redacts every line by construction; the in-run timeout bench is keyed by provider FAMILY
+  (`reportAs ?? name`) so two timeouts across ANY keys bench the pool for the run, independent of the
+  env-tunable shared cooldown; a turn that times out with nothing received says "no provider answered"
+  and keeps the planned id in the detail.
+- 🔒 **DELIVERY PROOF (`deliveryProof.ts`):** every runtime proof is gated on a preview URL that only
+  the AGENT used to publish. Now, after a build that was meant to produce an app, if no URL was ever
+  published the platform starts the dev server itself (`npm run dev`, the revive path's own call),
+  probes the port it knows (recipe → declared → framework default), judges the body with the same
+  analyzer the health route uses, and PUBLISHES the URL — so the render rescue, the verify loop and
+  the gate see the app exactly as they would an agent-published one. `PLATFORM_PREVIEW_UP` /
+  `_NOT_UP` / `_SKIPPED` say what happened; kill switch `AGENTV3_PLATFORM_PREVIEW=off`.
+- ⚠️ **Stated plainly, because the admin's rule cuts both ways:** the model wrote ZERO files in that
+  build; the rendering app was the pre-seeded golden template. Under real-cost billing a rendered
+  template costs the user what it cost us (about ₹11 there), and the honest "not built" notice still
+  lists the features the prompt asked for and did not get. That is the admin's rule applied, not a
+  loophole — and a zero-write turn that renders is billed by it.
+
 **Step 1 — Read the WHOLE report and build an itemized ledger (every flaw, however small).**
 Read the report end to end — never a truncated tail. Enumerate EVERY issue, imperfection,
 warning, retry, and rough edge, no matter how tiny, and classify each into exactly one bucket,
@@ -980,6 +1013,37 @@ the code (it is actually read somewhere) on 2026-07-11.
   Set `off`/unset to disable. Works WITH the reactive stack: escalating 429 re-probe bench (#1801),
   GLM↔KIMI floor balance (#1802, kill switch `AGENTV3_FLOOR_BALANCE=off`), circuit breaker
   (`AGENTV3_CIRCUIT_BREAKER`, default on), and the GLM key-pool.)
+- **🆓 THE FREE CHAT LADDER — three vendors, cheapest-first (admin-decided 2026-09-15):**
+  `GLM glm-4.7-flash (₹0)` → `Vertex gemini-2.5-flash-lite` → `OpenAI gpt-5-nano` → `Vertex
+  gemini-2.5-flash`. The Gemini-DIRECT door and the `glm-4.7` last rung were removed. **The gain is
+  VENDOR COUNT:** the old ladder spent six registrations on TWO vendors, so the fallback was mostly
+  Google falling back to itself, and its one non-Google rung shared a KEY with the free leader (so it
+  died in the same 429 storm). Env keys: **`OPENAI_CHAT_MODEL`** (overrides the pinned id — the
+  default `gpt-5-nano` could not be verified against the account, and a wrong id 404s and falls
+  through SILENTLY, so this is the no-deploy correction; a non-nano value warns, because the ceiling
+  was cleared on the nano price) and `OPENAI_CHAT_TIMEOUT_MS` (20 s, same reasoning as the GLM leader).
+  ⚠️ **Provider `src/server/AI/Router/providers/OpenAiChatProvider.ts` is NEW** — before it this repo
+  had no OpenAI chat provider at all, which is why "add Nano" was a build and not a config change.
+  It is TEXT-ONLY and defers image turns to the next rung; free chat's own image/PDF path
+  (`runVisionChain`) is separate and untouched.
+  🔴 **THE ADMIN APPROVED Nano AT POSITION 1 AND IT SHIPPED AT 2 — recorded, not silently changed.**
+  They chose Nano-before-lite while the rate card still mis-priced flash-lite at the FLASH line
+  (index 4.90); the invoice fix below drops it to **1.20**, cheaper than Nano (2.85). Shipping the
+  approved order would have contradicted their own "kharcha kam se kam" instruction AND required
+  weakening `freeChainCost.test.ts`, which enforces cheapest-first. Swapping priorities 1 and 2 is
+  the entire edit if they want it back.
+  🔒 **EVERY RUNG MUST BE A STRING LITERAL.** `freeChainCost.test.ts` parses these registrations out
+  of the source to price them, and a shape it cannot read is — in its own words — *"silently exempt
+  from the ceiling"*. The first draft of the Nano rung passed a function call and was invisible to it.
+- **💸 `gemini-2.5-flash-lite` IS NOT PRICED LIKE `gemini-2.5-flash` (corrected 2026-09-15 from the
+  admin's own invoice).** Both used to resolve to the single `'gemini'` rate line, so every flash-lite
+  turn was reported at **3× its real cost** on the exact panel used to judge Google spend — margin-safe
+  (we over-stated our own spend, never a user's bill) and wrong all the same, the same shape as the
+  `E2B_USD_PER_HOUR` drift. **The input half is INVOICE-VERIFIED:** that month's SKUs read `Flash GA
+  Text Input 6,116,640 → ₹175.32` and `Flash Lite Text Input 5,237,016 → ₹50.04` = ₹2.866e-5 vs
+  ₹9.555e-6 per unit = **exactly 3.0×**, reproducing $0.30 → $0.10. ⚠️ The OUTPUT half is **not**
+  invoice-verified (no flash-lite output SKU appeared in that report); `$0.40` is the published
+  pair-mate of the confirmed input. Keys: `RATE_GEMINI_LITE_IN` / `RATE_GEMINI_LITE_OUT`.
 - **🔴 CHAT GROUNDING — CORRECT AND CURRENT BEATS FAST (admin-mandated 2026-09-12, standing rule).**
   Admin, verbatim: *"latest information aur correct information jyada important hai, time se jyada.
   Chahe to time jyada lage par information sahi aur latest ho!"* So on the chat path, **never trade
@@ -1330,6 +1394,107 @@ the code (it is actually read somewhere) on 2026-07-11.
   🔴 **STILL OPEN:** an abandoned provider call is not cancelled by this stop — the loop ends between
   turns, so a call already in flight runs to completion on the provider's side and is paid for.
 
+- **🐢 THE SLOW-PROVIDER FIX — streamed build calls (built 2026-09-16; ✅ **SET `on` in Cloud Run by the
+  admin the SAME DAY**):** `AGENTV3_STREAM_BUILD_CALLS` = `on`, so streamed reading is LIVE on every
+  GLM/Kimi build call. ⚠️ **It had never run against a live provider when it was switched on** — the
+  flag exists precisely so it reverts with no deploy, and the first real builds are its first evidence.
+  Unsetting it restores today's pre-change behaviour to the byte: one non-streaming request, the total
+  clock, the existing ceiling. The two tunables were deliberately **left UNSET** (admin, same message),
+  so their code defaults govern: `AGENTV3_STREAM_IDLE_MS` (**60 s** — silence after which a provider
+  counts as stalled) and `AGENTV3_STREAM_HARD_CAP_MS` (**300 s** — the absolute ceiling on one streamed
+  call).
+  Read by `src/server/AgentV3/providers/openAiStream.ts`; applied in `OpenAiToolRunner` and in
+  `openAiCompatRunners` (`routes/agentv3.ts`).
+  **WHY (admin 2026-09-16: "kimi aur glm slow hai, time out ho jata hai").** The GLM/Kimi rung sends ONE
+  opaque request bounded by a TOTAL wall clock (`floorBudget.ts`: 5 s + 30 ms × tokens, capped 150 s).
+  A total clock cannot tell a HUNG provider from a merely SLOW one and kills both — **and when it
+  fires, nothing comes back**: the files that answer had already written are lost with it. The output
+  ceiling is sized from the same clock (~4,800 tokens), so a big file needs more turns, each of which
+  can be killed the same way.
+  🔑 **THE CHANGE: the bound becomes SILENCE, not duration.** A provider emitting tokens is not hung
+  however slow it is. So a streamed turn is killed only after `AGENTV3_STREAM_IDLE_MS` of total quiet —
+  and a stall **keeps what already arrived**, returned as a TRUNCATED turn, which is the one shape the
+  engine already recovers from (the adapter salvages the cut file's path, the truncation guard names
+  it, the next turn rewrites it). "One file short" instead of "no app".
+  ⚠️ **TWO THINGS RIDE THIS ONE FLAG, and the second is not obvious from its name.** (1) The SDK client
+  is constructed with the stream's hard cap instead of the floor bound — otherwise the SDK would abort
+  a healthy stream at 150 s and defeat the whole change. (2) `reconcileFloorBudget` sizes the token ask
+  from whatever clock bounds the call, so a 300 s ceiling authorises ~9,800 output tokens instead of
+  ~4,800 — **fewer turns per file**, which is the second half of the speed win. That is coherent rather
+  than incidental: the clamp exists because a timeout used to lose everything, and under streaming it
+  no longer does.
+  🔴 **THE ONE HONEST COST, stated rather than discovered later: a stream carries NO token usage unless
+  the provider honours `stream_options.include_usage`.** The request asks for it; whether Z.ai and
+  Moonshot answer it is a fact only a real call can settle. If they do not, `usage` is **zero** — never
+  an invented number (THE ONE-WALLET LAW forbids estimating tokens from text length), so the USER is
+  never over-billed, but OUR cost report under-states itself. **What to watch on the first real builds:
+  streamed turns showing 0 input/0 output tokens in the admin build report.** If they do, unset the
+  flag and the honest-but-unmeasured path goes away with it.
+  🔒 Nothing else changes: the lane deadline still wins whenever it is nearer (`turnDeadline` remains
+  the authority on the budget), our clock ending still reads as OUR budget and never benches a
+  provider, a stall with only reasoning and no answer is still a rung FAILURE (the chain falls to the
+  next vendor), and an abandoned read is aborted so a call nobody will read stops generating and stops
+  billing. Test-locked in `openAiStream.test.ts` (the accumulator, pure) and `openAiStreamRunner.test.ts`
+  (the behaviour), both proven by reversion.
+- **The referral welcome gift — four earned steps (built 2026-09-15, NOT live yet):**
+  `REFERRAL_REWARDS` (the master switch — ⚠️ **UNSET, and unset means today's behaviour exactly**:
+  no code is minted, no money moves, and not one document is written). Tunables, all with working
+  code defaults: `REFERRAL_STEP_TOKENS` (**₹100** per step for the new user), `REFERRER_STEP_TOKENS`
+  (**₹25** per verification for the referrer) and `REFERRER_LIFETIME_CAP_TOKENS` (**₹1,500**, the
+  most one referrer may EVER earn — admin-mandated). Read by `src/server/lib/referralRewards.ts`;
+  the routes are `GET/POST /api/referral/...` (`routes/referral.ts`).
+  **THE PLAN, and the totals are the point:** a new user earns ₹100 each for applying a referral
+  code, verifying email, verifying mobile and connecting GitHub (**₹400**); the referrer earns ₹25
+  for each of that friend's THREE verifications (**₹75**). One referred user costs **₹475** —
+  *below* today's flat ₹500 welcome gift — and an organic app user with no code costs ₹300. This
+  REPLACES `giftPlan.ts`'s flat grant for accounts on it; the two must never both pay, which is what
+  the master switch is for.
+  🔒 **WEBSITE: ₹0, AND THAT IS THE WHOLE DESIGN** (admin: *"websites par kuch bhi nahi dena"*).
+  Every rupee is claimed inside the Android app behind a device check. A free mailbox and a free
+  GitHub account cost nothing and take three minutes, so ₹200 reachable from a laptop would be an
+  unlimited, scriptable printer that never meets the device check. **Half a gate is no gate.** A code
+  can still be SHARED from the website — only claiming is Android-only.
+  🔒 **THE REFERRER IS PAID FOR VERIFICATIONS, NEVER FOR A REDEMPTION, and nothing releases until the
+  friend's MOBILE is verified.** Paying on redemption is what would make a CHAIN — one "mother"
+  account farming a throwaway per cycle, earnings concentrating in one usable wallet. A device id
+  resets on a factory reset (~18 minutes, ₹0 cash); a phone number does not. The device bounds how
+  many accounts exist at once; only the phone bounds how often the same person returns.
+  ⚠️ **A MALFORMED tunable falls back to its default, and a BLANK one means UNSET — not zero.**
+  `Number('')` is **0**, not NaN, so without that check a key present-but-empty in Cloud Run (a
+  cleared field, a dropped paste) would have read as a deliberate zero. On the lifetime cap that is
+  "no referrer ever earns anything, for ever", with the console showing the key as configured and
+  nothing failing anywhere. An explicit `0` is still honoured — nobody types a zero by accident.
+  🔴 **A CLAIM IS A REQUEST, NOT A FACT.** The first version of the claim route proved WHO was asking
+  (the device) and WHETHER anything was owed (the paid-steps list) and never asked whether the step
+  had been DONE — so any caller on a genuine Android phone could POST all four and collect ₹400 per
+  device. `stepIsProven` now reads Firebase's own account record (emailVerified, a verified phone,
+  `github.com` among the linked providers) and our store for the referrer, never the request body.
+  **Do not add a step without a proof rule**; `stepIsProven` is deliberately total rather than
+  defaulting, so a fifth step is unpayable until someone decides how it is proven.
+- **Play Integrity — the device check (built 2026-09-15). ⚠️ NOT a Cloud Run key:**
+  **`PLAY_INTEGRITY_CLOUD_PROJECT`** is a **GitHub REPO SECRET** read at BUILD time by
+  `android/app/build.gradle`, because it is baked into the `.aab`. It is the Google Cloud project
+  **NUMBER** that owns the Play Integrity API — ⚠️ **the digits, not the project id**
+  (`gen-lang-client-0866594388` is the id; the number is beside it on the console home). A
+  non-numeric value parses to 0 and reads as "not configured", which is the safe direction.
+  Recorded here anyway so nobody searches Cloud Run for it and concludes it is missing.
+  **Three things must ALL be true before a bonus can be paid**, and each failure is honest and
+  visible rather than silent: (1) the **Play Integrity API is ENABLED** in
+  `gen-lang-client-0866594388`; (2) the SAME service account already used for Play billing
+  (`GOOGLE_PLAY_SA_JSON`, a Cloud Run key) also holds the **`playintegrity`** scope — one account,
+  two scopes, and a token minted for a scope the account lacks is issued happily and then refused at
+  the call; (3) a `.aab` carrying `DeviceIntegrityPlugin` is live on Play (release 91 and earlier do
+  NOT have it). Until then every check is `unavailable`, which pays **₹0** — the gate FAILS CLOSED,
+  deliberately unlike `jobLease.ts` and the web-risk budget, because there is no later gate to catch
+  a wrong "yes".
+  ⚠️ `buildFeatures { buildConfig true }` is required alongside it: AGP has generated `BuildConfig`
+  only on request since 8.0 and this project is on 8.13, so without that line the failure is a
+  missing-symbol compile error naming nothing useful.
+  🔒 **Play Data safety must be updated before the next rollout.** Privacy Policy **§3.2** already
+  discloses the device identifier (`tests/privacyPolicyTruth.test.ts` guards the policy), but a Play
+  declaration that contradicts the policy is a violation, not a mismatch — and this is the same shape
+  as the 2026-09-02 incident where the policy said "we never share your data with advertisers" while
+  the Meta pixel was being built.
 - **Visitor analytics for published apps (shipped 2026-09-10, ROADMAP §13 item 1.1):**
   `AGENTV3_SITE_ANALYTICS` (kill switch — **default ON**; `off` stops the beacon being stamped at
   publish and the hit route recording; apps already published keep their script until republished,
@@ -1824,10 +1989,15 @@ the flag entries above promise.
     replacement — if `kimi-k3` is not a live id the call errors and the ladder falls through to k2.7-code
     exactly as before, so adopting it cannot break a build even if the model does not exist. The FREE
     ladder was deliberately left UNCHANGED — it is cheapest-first with the flagship LAST, so a newer
-    flagship in front would invert the free tier's cost model). ⚠️ **Set `RATE_KIMI3_IN`/`_OUT`/`_CACHE`
-    to K3's real published price** — `providerRates.ts` defaults them to the k2.7 rate because K3's price
-    is not verifiable here, which UNDER-states our real cost if K3 is pricier (margin risk, never a user
-    over-charge). Kimi ids (from platform.kimi.ai/docs/models):
+    flagship in front would invert the free tier's cost model). ✅ **DONE 2026-09-16 — K3's price is published and is now in the rate
+    card: $3.00 in / $15.00 out, cache-hit $0.30, i.e. EXACTLY Sonnet's price.** The old default mirrored
+    k2.7 ($0.95/$4.00) because the price was "not verifiable here", which under-stated our real cost by
+    3.2× on input and 3.75× on output. K3 is on no ladder today, but that row is the family CEILING for
+    any unrecognised Kimi id, so the placeholder mattered. ⚠️ **And `kimi-k2.5` was DISCONTINUED by
+    Moonshot on 2026-08-31** — already off every ladder since 2026-09-04 (it 404'd on this account), its
+    rate row kept only so old telemetry can still be priced. **`kimi-k2.6` is NOT cheap**: Moonshot
+    prices it at $0.95/$4.00, the same as k2.7-code, and it had been sharing k2.5's $0.60/$2.50 line —
+    under-stating the cost of every WEAK build, which NavBharatAI pays for itself. Kimi ids (from platform.kimi.ai/docs/models):
     `kimi-k2.7-code` (strongest coder, 256k), `kimi-k2.7-code-highspeed`, `kimi-k2.6`, `kimi-k2.5` (older/cheaper).
   - Per the Model Routing Policy above, this is the flagship-first PAID/default ladder; the FREE-tier flash-first
     ladder is a SEPARATE (Slice-3) env, not `GLM_MODEL`/`KIMI_MODEL`. (Supersedes the old "flagship stays OUT of
@@ -2306,6 +2476,22 @@ Do not rewrite existing Hindi/mixed-language strings as part of unrelated work �
 that introduces unneeded diffs. All **new** code written in any session must
 follow this standard from the start.
 
+🔴 **THIS RULE WAS BROKEN SEVEN TIMES BEFORE IT WAS ENFORCED (admin 2026-09-14).** The admin caught
+the voice-chat consent popup — a **price** — rendered entirely in Devanagari, and asked the question
+that settles the whole matter: *"south india wale kaise padhenge isko??"* Devanagari is not a national
+script, so "the user's language" had quietly become one region's language shown to a national
+audience. Six separate modules had each grown the same `lang === 'hi' ? … : …` branch, and three cited
+an earlier admin instruction (2026-07-20, 2026-08-05, 2026-08-10) as justification. **Those three are
+SUPERSEDED** — the admin's own correction after seeing the result — and each module records that in
+its header so nobody re-derives the old behaviour from the old quote.
+
+🔒 **`tests/uiLanguageEnglishOnly.test.ts` now enforces it in CI**: any Devanagari in client code
+(`src/**` minus `src/server/**`, comments stripped) fails the build. A file is **guilty until
+listed**, and the allowlist entries — greeting detection fed to a model, the localisation editor for
+the USER's own app, build-prompt content, input parsing — each carry the reason they are not UI
+strings. **Comments are deliberately NOT swept**: the Hindi in them is the admin's own verbatim words
+kept as evidence, and destroying that trail to satisfy a lint would cost more than it buys.
+
 ## Engineer AI — permanent constraints (never change without admin sign-off)
 
 - **AI Model (multi-provider fallback — Phase 2, admin-approved):**
@@ -2487,9 +2673,21 @@ is now **`src/server/AgentV3/tierLadder.ts`**, and the build chain is built from
 
 | Tier (UI) | Internal | The ladder (first → last) | Escalation cap |
 |---|---|---|---|
-| Weak (free) | `weak` | GLM `glm-5.3-flash` → KIMI `kimi-k2.6` → GLM `glm-5.3` → Claude **Haiku** | never escalates (NavBharatAI pays) |
-| Normal (paid economy) | `off` | GLM `glm-5.3-flash` → KIMI `kimi-k2.7-code` → GLM `glm-5.3` → Claude Sonnet | Sonnet |
-| Strong (paid premium) | `mini` | GLM `glm-5.3` → Claude Sonnet → Claude **Opus** | Opus (its last rung) |
+| Weak (free) | `weak` | GLM `glm-5.3-flash` → KIMI `kimi-k2.7-code` → GLM `glm-5.3` → Claude **Haiku** | never escalates (NavBharatAI pays) |
+| Normal (paid economy) | `off` | GLM `glm-5.3-flash` → KIMI `kimi-k2.7-code-highspeed` → GLM `glm-5.3` → Claude Sonnet | Sonnet |
+| Strong (paid premium) | `mini` | GLM `glm-5.3` → KIMI `kimi-k3` → Claude Sonnet → Claude **Opus** | Opus (its last rung) |
+
+🔴 **KIMI RUNGS REVISED 2026-09-16** (admin, verbatim: *"free wale me kimi 2.6 ki jagah kimi code 2.7 kar
+de! normal wale me kimi code 2.7 highspeed karo strong me kimi k3 bhi add karo"*): Weak's Kimi rung moved
+k2.6 → k2.7-code (Moonshot's dedicated coder, same price, better quality, at no extra cost to the builds
+NavBharatAI pays for itself); Normal's moved to k2.7-code-highspeed (same model, ~2x tokens/sec, exactly
+2x the price — priced into what the paying user is billed); Strong gained a Kimi rung for the first time,
+`kimi-k3`, at exactly Sonnet parity, as the second rung (a third independent vendor before climbing to
+Claude). Adding the highspeed rung SURFACED a real under-billing defect: `providerRates.ts`'s Kimi matcher
+had no branch for the `-highspeed` suffix and would have silently billed it at half its real price via the
+plain k2.7-code fallback — fixed with a dedicated `'kimi-k2.7-highspeed'` rate row and matcher branch in
+the same change, test-locked (and reversion-proofed by re-deleting the branch and confirming the new test
+fails) in `providerRates.test.ts`.
 
 🔴 **REVISED THE SAME DAY UNDER THE ADMIN'S FULL AUTHORITY GRANT** (verbatim: *"mujhe yeh chahiye: mera
 kam se kam kharcha; user ko best se best app, ek hi baar me (build fail kam se kam). aapko puri authority
@@ -2498,10 +2696,10 @@ Kimi-led Normal/Strong, gpt-5.4 last on Weak) was superseded once the real price
 **glm-5.3-flash $0.15 / $0.50, glm-5.3 $1.40 / $4.40.** The one lever behind both aims is that the FIRST
 rung must be strong enough that heals are rare — a $0 rung that fails costs more than a $0.15 rung that
 succeeds. So 5.3-flash leads Weak and Normal; 5.3 is the strong rung under Sonnet everywhere and leads
-Strong; Kimi stays as the second vendor on Weak/Normal; **glm-4.7-flash, kimi-k3 and gpt-5.4 are on no
-ladder** (weak-at-coding / unverified id + unknown price / no key + unknown price). **Nothing to buy from
-OpenAI.** Haiku is again Weak's last rung. `healLadder` now drops a leading rung only when it is the
-known-weak 4.7-flash.
+Strong; Kimi stays as the second vendor on every tier (see the 2026-09-16 revision above — k3 joined
+Strong that day); **glm-4.7-flash and gpt-5.4 are on no ladder** (weak-at-coding / no key + unknown
+price). **Nothing to buy from OpenAI.** Haiku is again Weak's last rung. `healLadder` now drops a leading
+rung only when it is the known-weak 4.7-flash.
 
 - **The chain IS the ladder.** A build on a tier runs that tier's rungs, in that order, and nothing else —
   no Vertex/Gemini rung, no borrowed Sonnet when the floor is off, no live-health GLM↔KIMI lead swap. A
@@ -2527,11 +2725,20 @@ known-weak 4.7-flash.
   Opus rate inside that. A stored 'medium'/'max' maps UP to 'mini' (never down to Normal).
 - **Env keys (names only):** `AGENTV3_LADDER_WEAK` / `_NORMAL` / `_STRONG` (override one tier's ladder,
   `PROVIDER:model,…`, applied whole or refused with the reason in the `TIER_LADDER` report line);
-  `OPENAI_API_KEY` (⚠️ **NOT set** — the admin said they will buy it; until then the gpt-5.4 rung yields
-  nothing and changes no build) and `OPENAI_BASE_URL`, `AGENTV3_OPENAI_TIMEOUT_MS`; `RATE_GLM53_FLASH_IN`
+  `OPENAI_API_KEY` (the admin **bought a key on 2026-09-15** and asked what to name it; whether it is
+  yet set in Cloud Run is unconfirmed here. ⚠️ **On its own it still changes NO build** — no tier
+  ladder names OPENAI, so the rung yields nothing. **READ THE `AGENTV3_FILE_EMBEDDINGS` ENTRY BELOW
+  BEFORE SETTING IT**: until 2026-09-15 that key alone silently switched on an unmetered,
+  never-read embedding spend on every build) and `OPENAI_BASE_URL`, `AGENTV3_OPENAI_TIMEOUT_MS`; `RATE_GLM53_FLASH_IN`
   / `_OUT` / `_CACHE` (**code default now the admin's real price, 2026-09-14: $0.15 / $0.50, cache
-  $0.0375** — an earlier placeholder priced it at the glm-5 line, ~10× too high, for a few hours, on
-  no user's bill); non-flash **GLM-5.3 is $1.40 / $4.40 = the existing glm-5 line**, no new row;
+  $0.03** — corrected 2026-09-16 from the admin's own copy of docs.z.ai/pricing, now recorded verbatim
+  in `providerRates.ts`. It had been $0.0375, a ≈25%-of-input CONVENTION rather than Z.ai's published
+  number, and the same convention over-stated the other two GLM cache rates (glm-5.x $0.35 → **$0.26**,
+  glm-4.x $0.15 → **$0.11**). All three moved DOWN, and a bill is the real cost × markup, so the
+  convention had been over-stating the USER's bill too. An earlier placeholder had priced flash at the
+  glm-5 line, ~10× too high, for a few hours, on no user's bill); non-flash **GLM-5.3 is $1.40 / $4.40 =
+  the existing glm-5 line**, no new row — ⚠️ that row is the FAMILY CEILING, and Z.ai's real GLM-5 is
+  cheaper ($1.00 / $3.20), which the rate card now says in place;
   `RATE_GPT_NANO_IN` / `_OUT` (**$0.20 / $1.25**, GPT-5.4 Nano — priced so it can never be billed at the
   full-GPT bound, but on NO ladder: the admin's own brief says Nano is for classification/extraction,
   never an app-generation engine); `RATE_GPT_IN` / `_OUT` / `_CACHE` for the FULL gpt-5.4 — ⚠️ **still
@@ -2540,8 +2747,54 @@ known-weak 4.7-flash.
   `AGENTV3_BUILD_ALLOW_GEMINI`, `AGENTV3_VERTEX_PEER`, `AGENTV3_FLOOR_BALANCE`, `AGENTV3_FREE_KIMI_LEAD`,
   `AGENTV3_WEAK_FLAGSHIP_HEAL`, `GLM_MODEL` / `KIMI_MODEL` / `AGENTV3_FREE_*_MODEL` (the ladders name their
   models; those envs still feed the legacy `cheapBuildFloorRunners`, which only tests call now).
-- ⚠️ **Not yet done, said plainly:** the OpenAI rung is untested against a real response (no key); the
+- **🔴 `AGENTV3_FILE_EMBEDDINGS` — the flag that stops a PROVIDER KEY being a FEATURE SWITCH (shipped
+  2026-09-15). ⚠️ NOT set, and unset means exactly today's behaviour: zero calls, zero cost.**
+  `EmbeddingSearch` (AgentV3's per-file vector index) used to have NO flag at all — its only gate was
+  the PRESENCE of `OPENAI_API_KEY`. Found on the day the admin bought an OpenAI key and asked only
+  what to name it, so nothing had been spent.
+  **What the key alone would have started, none of it visible:** `ToolDispatcher` calls `addFile()` on
+  EVERY write, EVERY batched file and EVERY edit (three call sites), so an ordinary build fires dozens
+  of `text-embedding-ada-002` calls — on every tier, **free included**, on NavBharatAI's own account.
+  They are made with the OpenAI SDK directly, so they never pass `captureTurnUsage`: **in no build
+  ledger, in no rate card (`providerRates.ts` prices no embedding model), invisible to
+  `AGENTV3_BUILD_COST_CEILING_USD`, and never billed to the user.** That is the money audit's own
+  class — a paid call with no governance — reached through a credential rather than a ladder.
+  🔴 **AND IT BOUGHT NOTHING: `search()` — the only reader of the index — is called from no live code
+  path.** Embed, persist to Firestore, never read. Recorded as an **OPEN root cause** rather than
+  quietly wired up, because "make semantic retrieval real" is a separate decision with its own cost
+  (`ContextReranker.ts` has described the path as dormant all along).
+  🔒 **BOTH are required now, flag FIRST:** `getClient()` returns null unless the flag is on AND a key
+  exists, checked at call time so switching it off in Cloud Run bites without a deploy. An unreadable
+  value means OFF, never ON. Test-locked in `tests/fileEmbeddingsAreOptIn.test.ts`, whose last case is
+  a **reversion guard** asserting the ORDER out of the source (comments stripped) — proven to fail when
+  the flag line is deleted, because the behavioural tests alone would not.
+  ⚠️ **If it is ever turned on, price it first.** `text-embedding-3-small` is ~5× cheaper than ada-002
+  and scores better; the swap is free TODAY only because nothing is stored yet — once vectors exist,
+  changing the model silently mixes incompatible embeddings at the same 1536 dimensions, which
+  `cosineSimilarity`'s length check cannot catch.
+- ⚠️ **Not yet done, said plainly:** the OpenAI rung is untested against a real response; the
   chat router (`AIRouterManager`) has no OpenAI provider — that is slice 3, only if GPT should serve chat.
+- 🔴 **`OPENAI_API_KEY` IS SET IN CLOUD RUN (admin, 2026-09-15) — AND IT WOKE A PATH OUTSIDE THIS POLICY.**
+  The three ladders are unchanged (no tier names OPENAI, so no build routes to GPT). But
+  `src/server/routes/build.ts:130` — the LEGACY `/api/build` chain, live at `server.ts:739` — carries
+  `{ name: 'openai', run: () => callOpenAI(...) }` as **rung 6** (claude → grok → aiRouter → gemini →
+  groq → **openai** → deepseek → openrouter). `callOpenAI` runs **`gpt-4o-mini`**, and
+  `resolveApiKey('openai')` falls through to the generic `process.env['OPENAI_API_KEY']` branch
+  (`aiClients.ts:67`). **That rung threw "OpenAI API Key not available" and fell through until the key
+  was set; it is now a real billable call on NavBharatAI's account**, from a provider this policy never
+  approved, costed by `estimateTokens` rather than the real-cost ledger. Rare (five rungs must fail
+  first) and it does add genuine resilience — which is exactly why it is recorded as an ADMIN DECISION
+  here rather than silently gated or silently left. ⚠️ Anyone auditing "what does this key switch on?"
+  must check BOTH the ladders AND this legacy chain; reasoning that stops at `tierLadder.ts` misses it.
+- ⚠️ **FOUR COMMENTS SAID GPT WAS ON THE WEAK LADDER, AND THE ADMIN CAUGHT IT BY READING THE CODE
+  (2026-09-15).** They were true of the admin's FIRST list on 2026-09-14 and stale within the same day.
+  The table was updated; `providerRates.ts`, `routes/agentv3.test.ts` (×2) and `routes/agentv3.ts` were
+  not. **`tsc` and `vitest` cannot read a comment**, so nothing failed. **THE RULE: do not restate
+  another module's fact — point at the module that owns it.** `TIER_LADDERS` is the only place a rung
+  exists. Pinned by `tests/ladderClaimsMatchTheTable.test.ts`, which DERIVES the invariant from the table
+  (so adding GPT for real silences it automatically) and is proven by reversion. `routes/agentv3.ts` is
+  listed in its `OWNED_BY_ANOTHER_PR` set because PR #2957 was live in that region — remove that entry
+  once #2957 lands.
 
 **THE AGENT × TIER TABLE (admin-approved 2026-09-14, aims verbatim: "user ki app best of best bane — 1 try
 me" · "mera kharcha kam se kam ho").** Test-locked in `tests/agentRolesPerTier.test.ts`.

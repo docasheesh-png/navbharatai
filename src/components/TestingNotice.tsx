@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { FlaskConical, MessageSquare, X } from 'lucide-react';
+import { CheckCircle2, Circle, FlaskConical, MessageSquare, X } from 'lucide-react';
 import { ThemeMode, getThemeClasses } from '../lib/theme';
 import { cn } from '../lib/utils';
 import { TESTING_NOTICE_COPY, TESTING_NOTICE_MS, markTestingNoticeShown } from '../lib/testingNotice';
+import { checklistHeadline, type ChecklistRow } from '../lib/referralChecklist';
 
 /**
  * "We are still testing — please report what breaks." Shown once per app open, on the home screen.
@@ -18,6 +19,15 @@ import { TESTING_NOTICE_COPY, TESTING_NOTICE_MS, markTestingNoticeShown } from '
  *
  * Motion: a plain CSS animation, so `index.css`'s `.nb-reduce-motion` rule switches it off for anyone
  * who asked for reduced motion. Nothing here needs to know about that setting.
+ *
+ * ── THE REWARD CHECKLIST (admin 2026-09-15) ──────────────────────────────────────────────────────
+ * The admin asked for the four welcome-gift steps to appear here, ✅/❌ with their ₹ and their
+ * claimed/pending state. That is additive, except for one thing it could not leave alone: THE THREE
+ * SECONDS. A message asking people to report bugs can afford to vanish; one showing somebody ₹100
+ * they have not collected cannot, because once it has gone they cannot get it back until the next
+ * cold start. So while anything is unclaimed the countdown NEVER STARTS and the user closes it
+ * themselves; once everything is claimed the money section disappears and the three seconds return.
+ * The decision lives in `lib/referralChecklist.ts` — this file only renders it.
  */
 export const TestingNotice: React.FC<{
   theme: ThemeMode;
@@ -25,7 +35,15 @@ export const TestingNotice: React.FC<{
   onReport: () => void;
   /** Called when the notice leaves the screen, however it left. */
   onDone: () => void;
-}> = ({ theme, onReport, onDone }) => {
+  /**
+   * The unclaimed-reward rows, or empty. EMPTY IS THE DEFAULT AND MEANS "behave exactly as before" —
+   * on the website, for a signed-out visitor, while the lookup is in flight, and for anyone who has
+   * claimed all four. Nothing about the notice changes until there is genuinely money on screen.
+   */
+  rewardRows?: ChecklistRow[];
+  /** Opens the screen where the pending steps can actually be completed. */
+  onOpenRewards?: () => void;
+}> = ({ theme, onReport, onDone, rewardRows = [], onOpenRewards }) => {
   const colors = getThemeClasses(theme);
   const [leaving, setLeaving] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -48,11 +66,16 @@ export const TestingNotice: React.FC<{
   // reading of "once per app open".
   useEffect(() => { markTestingNoticeShown(); }, []);
 
+  // 🔒 UNCLAIMED MONEY MEANS NO COUNTDOWN AT ALL — not a longer one, and not merely a paused one.
+  // A timer that fires while somebody is reading four lines about ₹100 takes the money off the
+  // screen, and they cannot ask for it back.
+  const waitForUser = rewardRows.some((r) => !r.claimed);
+
   useEffect(() => {
-    if (paused || closed.current) return;
+    if (paused || closed.current || waitForUser) return;
     timer.current = setTimeout(close, TESTING_NOTICE_MS);
     return () => { if (timer.current) clearTimeout(timer.current); };
-  }, [paused, close]);
+  }, [paused, close, waitForUser]);
 
   const hold = useCallback(() => setPaused(true), []);
   const release = useCallback(() => setPaused(false), []);
@@ -92,6 +115,29 @@ export const TestingNotice: React.FC<{
         <div className="min-w-0 flex-1">
           <p className="text-sm font-bold leading-snug">{TESTING_NOTICE_COPY.title}</p>
           <p className="mt-0.5 text-xs leading-snug opacity-80">{TESTING_NOTICE_COPY.body}</p>
+          {waitForUser && (
+            <div className="mt-3 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-2.5">
+              <p className="text-[11px] font-bold text-emerald-500">{checklistHeadline(rewardRows)}</p>
+              <ul className="mt-1.5 space-y-1">
+                {rewardRows.map((row) => (
+                  <li key={row.step} className="flex items-start gap-1.5 text-[11px] leading-snug">
+                    {row.claimed
+                      ? <CheckCircle2 size={13} className="mt-px shrink-0 text-emerald-500" aria-hidden="true" />
+                      : <Circle size={13} className="mt-px shrink-0 opacity-40" aria-hidden="true" />}
+                    <span className={row.claimed ? 'opacity-60' : 'font-semibold'}>{row.label}</span>
+                  </li>
+                ))}
+              </ul>
+              {onOpenRewards && (
+                <button
+                  onClick={() => { close(); onOpenRewards(); }}
+                  className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-wider text-white hover:bg-emerald-500"
+                >
+                  Claim now
+                </button>
+              )}
+            </div>
+          )}
           <button
             onClick={() => { close(); onReport(); }}
             className="mt-2.5 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-wider text-white hover:bg-indigo-500"

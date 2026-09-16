@@ -55601,6 +55601,43 @@ this session's other open PR (#2933, an unrelated AgentV3 fix) to keep the two c
 reviewable. PR #2937 opened; per the standing merge-hold rule, driven to green CI but not merged
 without the admin's explicit go-ahead.
 
+### 2026-09-14 — the preview address bar said "srcdoc"
+
+**Admin screenshot + question:** *"preview me yeh 'srcdoc' jis type box me likha hai — is srcdoc box ka
+kya kaam hai? isko delete kar dene se navbharatai par kya fark padega?"*
+
+**What the box is:** a real address bar for pages *inside the user's app* (`PreviewSurface.tsx`,
+`routeBar`) — ‹ › step the app's **own** history, and typing `/dashboard` + Enter performs a real
+navigation. Its docblock is explicit that it renders only once the app reports its location, *"so a
+preview that cannot drive itself never shows a dead control"*.
+
+🔴 **So it was not dead — it was mislabelled, and the guard could not tell.** The in-browser preview is
+an `about:srcdoc` iframe, and `location.pathname` of that URL is the literal string **`"srcdoc"`**. The
+app therefore *did* report — it reported garbage — so the `routePath ?` guard passed and the bar
+advertised an address that was never real.
+
+**The navigation half was already correct**, which is what makes deletion the wrong answer: the
+handler routes this mode by **hash** precisely because *"a srcdoc document cannot be navigated at
+all"*. Back, forward and Enter genuinely work. Only the display was wrong.
+
+`currentPath()` now reports the hash route in that mode (`#/dashboard` → `/dashboard`, no hash → `/`),
+keyed on `SOURCE === 'in-browser'` **or** `location.protocol === 'about:'` — the mode alone is
+sufficient (the in-browser preview rewrites BrowserRouter to HashRouter), and the protocol check is
+the belt for any future opaque document. **The live-server preview is byte-identical** — there
+`pathname` is the real path.
+
+**Answer to "delete kar dein?": no.** On the live preview this is a genuinely working feature that VS
+Code and Cursor both have and NavBharatAI lacked until 2026-09-10. Deleting the bar to remove one
+wrong word would have cost the feature on the mode where it is real.
+
+`tests/previewAddressBarSrcdoc.test.ts` — 9 tests, run against the **emitted bridge source** rather
+than a description of it. **Proven by reversion: 4 fail** when the mode guard is removed. Full gate
+green on the final state: **1665 files · 23,293 passed · 0 FAIL**.
+
+⚠️ **Noticed in the same screenshot, NOT fixed, recorded so it is not lost:** the preview header read
+**`4456m 8s`** — 74 hours — beside a build stamped `b:09-14 11:33`. That elapsed figure is almost
+certainly measuring from the wrong origin (a workspace's first build rather than this turn's start).
+Not investigated; raised as an open item.
 ---
 
 ## 2026-09-14 — 🔴 WHITE-LABEL BREACH: the provider's name was on a user screen. The one the admin found was not the worst one.
@@ -55900,6 +55937,208 @@ first rows will mostly be re-priced from call logs, and the ones at the cap will
 The card gets exact from the first build after deploy. Sandbox cost is shown as its own column and is
 ₹0 unless `AGENTV3_BILL_SANDBOX` + `E2B_USD_PER_HOUR` are set — it is not folded into the token cost.
 
+## 2026-09-15 — AUTOPSY `58fe8254`: the first rung of every ladder could not succeed
+
+**Prompt:** *"Continue the build from where it left off and finish the remaining steps."*
+**Outcome:** 0 files · `RELEASE_GATE: RED` · `providerFailures: { GLM: 280 }` · billed ₹0 (absorbed).
+
+### The five-bucket ledger (45 entries)
+
+| | n | |
+|---|---|---|
+| ✅ self-healed | **0** | `autoResolved: 0`. Nothing was fixed |
+| 🔀 worked around | **10** | every one a fallback around a rung that could never work |
+| ⏭️ skipped | **5** | page-render · user journey · typecheck · test suite · preview (all "no live preview") |
+| ❌ still broken | **6 unresolved** | 4× `LLM_TRUNCATED`, `FASTLANE_CONTINUATION_FAILED`, `RELEASE_GATE` RED |
+| 🥵 struggled | **4** | **280 GLM failures** · 3 identical continuations (~160 s each) · 81 s first call · **11.3 min sandbox, 97% idle** |
+
+### 🔴 1 · `glm-5.3-flash` rejected every call — and it leads two ladders. FIXED.
+
+Every one of the 280 failures was the same hard 400:
+
+> *"This model always engages in thinking and cannot be disabled; please use low, high, or max"*
+
+`OpenAiToolRunner` sent `thinking: { type: 'disabled' }` whenever the app-level toggle was off. The
+**2026-09-14 ladder change** made `glm-5.3-flash` the first rung of Weak and Normal, `glm-5.3` the
+first of Strong, and GLM the **plan rung of all three** — so since that day **every build on every tier
+opened on a rung that could not answer**, and fell through it `GLM → GLM#2 → … and 80 more`.
+
+🔎 **The class was already root-caused here, for the other vendor, and the sibling was never hunted.**
+`models.ts`'s `modelSupportsAdaptiveThinking` exists because of the *identical* failure on Anthropic
+(2026-07-05, a Haiku turn sending `thinking: {type:'adaptive'}` that "burned the ENTIRE
+provider-fallback chain"). Its docblock already states the cure: *"a MISSING thinking/effort param
+never 400s … whereas an UNSUPPORTED one is a fatal request error."* The guard went on the Claude
+client and not on the OpenAI-compatible one. Note too that `ClaudeClient` only ever sends the param to
+turn thinking **on** — it never asks a model to turn it off. The GLM path did.
+
+`glmThinking.ts` applies the same rule, **default-deny on an unknown id**, with a numeric version test
+so `glm-5.4` and later are covered before they exist. A test sweeps every GLM rung of every ladder
+**and the plan rung**, read from `tierLadder.ts` itself.
+
+### 🔴 2 · Kimi thought for 4,833 tokens and returned 0 characters — three times. FIXED.
+
+`outputTokens: 4833, responseChars: 0, finish=max_tokens`, identically, three times. `parseOpenAiCompletion`
+read only `message.content`, so a reasoning model that spends its whole budget thinking was
+**indistinguishable from one that said nothing**. The adapter now reads `reasoning_content` and reports
+`reasoningOnly` — and **never puts reasoning in the transcript**; it is evidence, not the answer.
+
+**The money was burned one layer up:** `shouldContinue(stopReason, attempts)` saw a truncated stop and
+continued — from an empty string, so `continuationPrompt('')` re-issued *the same call*, three times,
+~160 s each. A truncation is worth resuming because a **partial** answer exists; nothing is partial
+about zero characters. That is the retry-loop-around-a-deterministic-failure the fourth absolute rule
+forbids. The third argument is opt-in, so no unread lane changes silently.
+
+### 🔴 3 · We asked the user for money for our own misconfiguration. FIXED.
+
+After 279 bad-requests **we caused**, the user was shown *"Your app needs our strongest engine to
+finish cleanly. Add credits."* Not one of those calls would have gone differently with a fuller wallet.
+
+The guard existed and could not see it. `DEGRADED_BUCKETS`' own comment promises that
+`model-unavailable` and `auth` get *"their own, louder treatment"* — **and for the user there was
+none**: `providerFailuresLookDegraded` correctly excludes them (they are not transient),
+`deadLadderRung` writes an **admin** line only, and the upsell fired anyway. So all three of
+`model-unavailable`, `auth` and `bad-request` reached "add credits".
+
+`providerFailuresLookMisconfigured` closes the class for all three, requiring a **repeat** (≥3) so one
+stray 400 cannot suppress an honest outcome. The message blames neither the user's wallet nor their
+wording, and names no vendor (white-label §2).
+
+⚠️ **The existing guard in `laneFailure.test.ts` caught my own change** — it requires the evidence
+check beside the upsell and my comment pushed it out of its 900-char window. Re-measured to 1800 **and
+strengthened**: it now requires *both* predicates, so a future edit cannot drop either.
+
+### Recorded as open, not fixed
+
+- 🔴 **The summary said *"Stopped, as you asked"*** to a user whose prompt was *"Continue the build"*.
+  Nobody stopped it; the budget ran out. Not traced to its source in this change.
+- 🔴 **Provider traffic continued 5.5 minutes past `endedAt`** (issues to `…789369`, build ended
+  `…460124`) — the abandoned-in-flight-call root cause already open from the cost-ceiling work.
+- 🔴 **`AGENT_STEP` claimed "1/5 file(s) unchanged (0 changed, 4 new)"** on a build that produced
+  **zero** files — the evidence-ledger class from `697b38ee`, a fourth witness.
+- 🟡 **97% sandbox idle** (11.3 min up, 0.3 min working). Fourth report running.
+- 🟡 **ETA "~2–4 min"** at `confidence 0.4` against a build that ran ~10 min. Fifth report running.
+
+### Verification
+
+`tests/thinkingParamAndReasoningOnly.test.ts` — **26 tests** built from the report's real numbers.
+**Proven by reversion:** removing the version guard fails 3; the continuation guard fails 1; the
+misconfiguration buckets fail 2. Full gate green on the final state: **1675 files · 23,465 passed ·
+0 FAIL**.
+---
+
+## 2026-09-14 — Offline AI removed permanently ("koi trace na bache")
+
+Admin: *"offline ai ko hamesha ke liye parmanent delete karo, koi tress na bache."* Done — but three
+things that merely SHARE the word "offline" were deliberately kept, and finding them is most of what
+this change was.
+
+### What was deleted (17 files + a dependency)
+
+`src/components/offline/OfflineAI.tsx`, and `src/lib/`: `offlineAssistant`, `offlineChat`,
+`offlineChatStore`, `offlineDeviceTier`, `offlineBeta`, `offlineLlmEngine`, `offlineMemory`,
+`deviceKnowledgeBase` (orphaned — nothing else imported it), each with its test;
+`tests/offlineModelDelete.test.ts`; the `@mlc-ai/web-llm` dependency, its vite `manualChunks` entry and
+its bundle-budget exclusion. The App.tsx lazy import, the sidebar entry, the render block, the
+`'offline_ai'` view id and the knowledge-base entry are gone. **Verified from the built output: no
+`webllm-*` or `OfflineAI-*` chunk is emitted.**
+
+### 🔴 What was KEPT, and why a blind delete would have broken the app
+
+- **`offlineQueue.ts` is not part of this feature.** `main.tsx` uses it to post client error logs
+  (`postWithFallback('/api/logs/error')`). Deleting every `offline*` file — the obvious reading of the
+  request — would have silently removed error reporting.
+- **`neonatalDosing.ts` stays, and so does the medical capability.** `answerOffline` merely *called
+  into* it; the calculator is its own module, used by the 💊 Dose Calculator (mounted in `SDAChat`),
+  `customMedicines` and `erCalcs`. Newborn dosing is untouched. `vialMemory.ts` likewise.
+- **`autoGrowTextarea.ts` stays** — `ProfessionalChat` also uses it.
+
+### The data that would have been thrown away
+
+`offlineAssistant` carried `CURATED_NAV`, a map of feature id → in-app view that made "Open →" work.
+Its own comment said a feature's KB `nav` field *"always WINS… this map is only the fallback"* — so
+the six targets the tests actually guard (`voice_to_app`, `ai_debugger`, `ai_image_gen`,
+`bot_builder`, `ide_terminal`, `settings_logs`) were **moved into their knowledge-base entries**,
+which is where that comment said they belong. The guarantee "asking for the terminal still navigates
+somewhere real" survives, now reading from the single source of truth.
+
+### Eight test files repaired rather than deleted
+
+Three awareness locks (`botBuilder`, `codeVersioning`, `apiTester`) asserted discoverability across
+**Free · Pro · Offline**; the offline third went, the online two-thirds — which is what they actually
+guard — stayed. `neonatalDosing.test.ts` lost its offline wiring block and kept both the calculator
+tests and the ONLINE wiring block that proves every AI gets a *computed* dose rather than a remembered
+one, which was always the safety-critical half. `aiToolsReal`, `settingsShellNav`, `settingsScreenReachable`,
+`autoGrowTextarea`, `polishCoreAiChat` and `bundleBudget` were rewired to the surviving sources.
+
+### The honesty fixes nobody would have noticed
+
+The knowledge base's Dose-Calculator entry claimed *"works with no internet in the Offline AI"*, *"the
+Offline AI remembers each drug's vial"* and *"the same answer online and offline"* — all false the
+moment the feature left. Every AI in the app answers from that entry, so leaving it would have made
+each of them confidently wrong. Corrected to name the 💊 Dose Calculator, which does compute on-device.
+
+### The guard
+
+`polishCoreAiChat.test.ts` gains **"the Offline AI is GONE"** — no menu entry, no `offline_ai` string,
+no module files — *and* asserts that `offlineQueue.ts` and `neonatalDosing.ts` still exist, so a future
+cleanup cannot mistake them for leftovers. Proven by reversion: recreating
+`src/components/offline/OfflineAI.tsx` fails it.
+
+**Gate:** typecheck · typecheck:server · noUnusedImports · vitest (1665 files, 23334 passed, 0 FAIL) ·
+### 2026-09-14 — 🔴 UI TEXT WAS IN DEVANAGARI ON SEVEN SURFACES. English only, and CI now enforces it.
+
+The admin, from his own phone, with a screenshot of the voice-chat consent popup rendered entirely in
+Hindi: *"maine apko bola tha, aur claude.md me bhi likha hai — ui me professional language (english
+only) honi chahiye. apne fir bhi devnagri likh di? **south india wale kaise padhenge isko??** batao"*
+
+**That question is the whole argument, and it is not about style.** NavBharatAI is a national product
+and Devanagari is not a national script: a Tamil, Telugu, Kannada or Malayalam speaker cannot read a
+Hindi string at all. "Show it in the user's language" had quietly become "show it in one region's
+language" — and on the surface he caught, the string was a **price the user was about to be charged**.
+
+🔎 **THE SHAPE OF THE BUG IS THE FINDING, and it is why an edit was not the fix.** This was never one
+careless string. **Six modules had independently grown the same `lang === 'hi' ? … : …` branch**, each
+from a different change, each believing it served Indian users — and three of them cited an admin
+instruction as justification (2026-07-20 *"language wahi ho jo user likh raha ho"*, 2026-08-05
+*"warning user ki language me aye"*, 2026-08-10 *"user ki language me ek popup aaye"*). A seventh had
+Hindi hard-coded straight into JSX, and the donation defaults in `src/config/defaultContent.ts` were
+Hindi too. **CLAUDE.md forbade all of it the entire time.** A rule that lives only in a document is a
+rule a new session may miss; this one was missed seven times.
+
+🔴 **THE OLDER INSTRUCTIONS ARE SUPERSEDED, and that is stated rather than quietly reversed.** The
+admin did ask for user-language warnings on 2026-07-20, 2026-08-05 and 2026-08-10. Those asks and this
+one cannot both be kept. This is his own correction after seeing the result, so it wins — and each
+module now carries the supersession in its header, so nobody re-derives the old behaviour from the old
+quote.
+
+**Fixed (branch `claude/ui-english-only`):** `voiceChatBilling.ts` (the screenshot),
+`zipReplaceWarning.ts`, `updateNoticeI18n.ts` → `updateNotice.ts`, `chatToolbar.ts`,
+`apkChargeNotice.ts`, `chatMessageActions.ts`, `DonationPanel.tsx`, `defaultContent.ts`.
+
+**The 50/50 half — the wrong branch is now IMPOSSIBLE, not merely unused.** The `VoiceLang`,
+`ChatToolbarLang`, `ChargeLang` and `NoticeLang` types are deleted, `resolveVoiceLang` is deleted, and
+so is `detectNoticeLang` with its whole Hinglish token list — a chooser with one choice is dead
+machinery that invites the second choice back. `AppUpdateChatNotice`'s `userText` prop went with it
+(six call sites), because it existed only to infer a language.
+⚠️ Three of the six branches were already DORMANT — no caller passed `'hi'` — so they shipped nothing
+to a user and would have fired the day someone did. They were removed on the same rule.
+
+🔒 **`tests/uiLanguageEnglishOnly.test.ts` is the half that lasts.** It walks every client file
+(`src/**` minus `src/server/**`), strips comments, and fails on Devanagari in real code. **Proven by
+injection, not assumed**: a Hindi string added to `chatToolbar.ts` fails it, and a Hindi quote in a
+comment does not. A file is **guilty until listed**, same discipline as
+`tests/whiteLabelClientSurfaces.test.ts`, and a stale allowlist entry fails too.
+
+**Deliberately ALLOWED, each with its reason in the test** — these are not UI strings: greeting
+DETECTION patterns fed to a model (`apnapanEngine.ts`); the localisation editor for the USER's own app,
+where a language picker must print each language in its own script (`LocalizationManager.tsx`); build-
+prompt content for a generated app (`TemplatesPanel.tsx`); parsing of what the user typed
+(`useChatEngine.ts`); a negative code example inside an AI prompt (`appUtils.ts`).
+
+**Scope stated honestly:** comments are NOT rewritten, in client or server. CLAUDE.md asks for English
+there too, but the Hindi in them is the admin's own verbatim words kept as evidence, and destroying
+that trail to satisfy a lint would cost more than it buys. Server prompts written TO models are also
+out of scope — they are not UI.
 ---
 
 ## 2026-09-14 — The dead strip under the Pro composer: one device inset, reserved three times
@@ -55965,3 +56204,2390 @@ passed, 1 skipped, 0 failed** · build · bundle budget · boot check — all gr
   them, but `env(safe-area-inset-bottom)` is 0 in every environment available here, so the strip cannot
   be measured from this session. The admin's screenshot is the before; the after needs one look on the
   same phone.
+## 2026-09-14 — Legal & Trust: six tiles became two, the NDA was retired, and nothing became unreachable
+
+The admin looked at Settings → Legal & Trust and asked the right question: *"mujhe nahi lagta ki sach me
+inki need hai… agar ham yeh hide kar den — grievance redressal, DPA, security documents aur NDA — to kya
+app me koi future problem ayega? kya Claude, ChatGPT, Gemini etc me yeh hote hai?"*
+
+### The honest answer, which is not the same for all four
+
+🔴 **Grievance Redressal could NOT be hidden, and the reason is in our own source.** The Privacy Policy
+links to `/grievance` **three times** (lines 55, 163, 207) and the Terms **once** (line 50), and the
+policy's own words describe it as the page that *"names the officer responsible and the timelines we
+must answer within under the IT Rules, 2021."* Removing the page would have left **four broken links
+inside our published legal documents** — worse than never having had it, because a regulator reading
+"we have a grievance page" and finding nothing is a stronger finding than an omission.
+
+It is also a real obligation: the IT (Intermediary Guidelines) Rules, 2021 require an intermediary to
+publish the Grievance Officer's name and contact, and NavBharatAI **is** an intermediary — the Nav App
+Store and published apps host user content. The repo already treated it as required: the admin Monitor
+carries an `officerIsNamed` warning.
+
+**DPA / Security: no legal requirement to publish for a consumer app**, one reference each to fix.
+**NDA: no requirement, no references, and publishing a blank mutual NDA is not what comparable AI
+platforms do either** — those are negotiated per deal, not posted. Retired.
+
+### What was actually done
+
+- **NDA deleted** — `nda.ts`, its registry entry, its id in the union, its tests.
+- **Settings grid: two tiles** (Privacy Policy, Terms of Service), driven by a new `settingsTile` flag
+  on `LegalMeta` rather than by deleting registry entries. The documents still exist.
+- **The three untiled documents are now reachable in MORE places, not fewer.** Grievance already had a
+  public URL; **`/dpa` and `/security` are new public URLs**, and both are linked from inside the
+  Privacy Policy (at the AI-processing and Security sections — where the reader is already asking the
+  question) and from the Terms.
+  🔒 That is a net increase in reach, not a hiding: a tile could only ever be opened by somebody
+  already signed in, and the people who want these two are a business customer's lawyer and a security
+  researcher, neither of whom has an account.
+- **`AppKnowledgeBase` updated in the same change**, per the standing rule — every AI in the app
+  answers "where is the DPA?" from it, so leaving it describing five tiles and an NDA would have made
+  every assistant wrong about the app.
+
+### The guard that matters
+
+`tests/legalDocs.test.ts` gains **"every HIDDEN document is still reachable"**: for each document with
+`settingsTile: false` it asserts a public URL exists AND that the Privacy Policy or the Terms links to
+it. So a future tile removal cannot quietly orphan a compliance page — which is the only way this
+change could have gone wrong.
+
+⚠️ Verified rather than assumed: `spaFallbackShouldDefer('/dpa')` and `('/security')` both return
+**true**, so the new URLs reach the server-rendered page instead of the SPA shell. That deferral is
+derived from `ALL_PUBLIC_LEGAL_PATHS`, so it needed no second edit — exactly what that module was
+written for.
+
+**Gate:** typecheck · typecheck:server · noUnusedImports · vitest (1673 files, 23427 passed, 0 FAIL) ·
+build · test:bundle · boot:check.
+
+
+### 2026-09-15 — 🔴 AUTOPSY 4efab9d7: a rendering app was called "NOT ready" and made FREE. The class was two days old.
+
+Admin, with the SaaS dashboard rendering on his phone beside *"This build did not fully succeed, so it is
+FREE — no charge"*: *"yaar apko -100,000 bar bola hai. app ban jaye to 'app not build' dikha kar free (₹0)
+charge nahi karna hai! … app bani = preview chala. agar preview chala gaya to ₹0 charge karoge to aise to
+mai barbad ho jaunga."* Branch `claude/delivery-proof`.
+
+**THE LEDGER (fifth rule, all five buckets, from the whole report):**
+- ✅ **Self-healed: 1** — `REQUIREMENT_GAPS` filled sensible defaults (info, not a heal of anything broken).
+- 🔀 **Worked around: 8** — eight `PROVIDER_FALLBACK` lines, "Provider GLM failed — Request timed out.",
+  one every 60 s. Each "fallback" went to ANOTHER GLM KEY, never to the next vendor. Debt, not resilience.
+- ⏭️ **Skipped: 5** — route smoke check, page-render check, user journey, E2E scaffold, and the whole
+  browser verify loop: all gated on a preview URL that was never published, so all skipped at once.
+- ❌ **Still broken / shipped imperfect: 5** — (1) verdict NOT ok on a rendering app → ₹0 [the admin's
+  complaint]; (2) `Model call failed (claude-sonnet-4-6)` printed on the USER's build-health card — a
+  vendor id, on a weak build that never called that vendor (White-Label breach); (3) a provider timeout
+  counted as an APP blocker; (4) the ladder structurally unable to reach KIMI (a ~50-key GLM pool × 60 s
+  per key vs a 480 s turn); (5) the platform never tried to bring the preview up although `PROD_BUILD_OK`
+  and a saved snapshot said there was an app to look at.
+- 🥵 **Struggle: 3** — 8 minutes of timeouts for ONE turn; 42 s time-to-first-call with a 24 s silence
+  (the golden-scaffold seeding, unrecorded until it finished); a 10-minute sandbox 96% idle. **The model
+  wrote zero files.** Two read calls, then the timeouts. The app on screen was the pre-seeded template.
+
+**THE MISSING SUBSYSTEM (Step 2):** a verdict that reads the APP's evidence and only the app's. Two
+readers — the release gate and the user's health card — both counted "unresolved errors" from a timeline
+that mixes the engine's struggle ledger with the app's defect list, and both were wrong the same way.
+And the proof they needed (a preview) existed only if the AGENT chose to publish one: `lastPreviewUrl`
+was set by nothing else. This is the CLAUDE.md "no shared EVIDENCE LEDGER" open root cause showing up a
+third time: the facts to contradict the verdict were in the same report (`PROD_BUILD_OK`,
+`PREVIEW_SNAPSHOT_SAVED`) and nothing read them.
+
+🔴 **THE SAME CLASS WAS ROOT-CAUSED TWO DAYS EARLIER (report 70115adf, 2026-09-13).** That fix taught
+`recordLlmCall` to file a *budget-ended* call as info (`isBudgetEndedError`). A *timed-out* call — thrown
+by the very next code path, `model turn N timed out after Xms` — still landed as an unresolved error and
+was still counted. The comment above that fix even says *"`shippingIssueCount` counts exactly those, so
+the release gate reported '1 build-breaking blocker'"*. The instance was fixed; the class was not
+(a38c6fef, again, 48 hours later).
+
+**DNA-level fixes (Step 3), each test-locked:**
+1. **`isAppFinding(issue)`** (`BuildDiagnostics.ts`) — ONE predicate: every `provider`-phase issue is
+   excluded BY PHASE, plus the process-only codes. `shippingIssueCount` (the gate) and
+   `buildHealthFromDiagnostics` (the user's card) both read it, so they cannot disagree. A code added next
+   month in the provider phase is excluded the day it is written. `tests/engineEventsNeverBlock.test.ts`
+   pins the exact record from this report. ⚠️ `tests/budgetEndedNotAFailure.test.ts` carried the OLD
+   premise as an assertion ("an ordinary failed call IS still a blocker") — superseded in place, with the
+   reason, and a sibling test proves the gate still blocks on an APP-phase error.
+2. **The user's health card redacts every line by construction** (`redactProvidersText`) and lists only
+   app findings. The card can no longer print a vendor id whatever the timeline says.
+3. **The in-run timeout bench is keyed by provider FAMILY** (`reportAs ?? name`,
+   `MultiProviderTurnRunner.ts`). Two consecutive timeouts across ANY keys of one provider skip every
+   remaining key of that provider for the rest of the run — independent of the env-tunable shared
+   cooldown, which did not fire in this build (`AGENTV3_RATE_LIMIT_COOLDOWN_MS` may be off in Cloud Run;
+   unverifiable from here, so the bench no longer depends on it). The 429 bench stays per KEY on purpose.
+   `PROVIDER_BENCHED` is recorded so "KIMI was reached" is a line, not an inference. Reproduced in
+   `MultiProviderTurnRunner.test.ts` with a 50-key pool, cooldowns DISABLED and a MOVING clock (the
+   existing pool test used a frozen clock, under which the bench trivially holds): 2 attempts, then KIMI.
+4. **A turn that timed out with nothing received says so:** *"A model turn timed out with no provider
+   answering"*, planned model id in the detail — not "Model call failed (claude-sonnet-4-6)".
+5. **🔒 DELIVERY PROOF — the platform brings the preview up ITSELF** (`deliveryProof.ts` + the block
+   above the render rescue in `routes/agentv3.ts`). After a build meant to produce an app, if no preview
+   URL was ever published: start the dev server deterministically (`npm run dev` — the revive path's own
+   call, no model, no code change), probe the port we know (recipe → declared → framework default), judge
+   the body with `analyzePreviewHtml`, and if a page serves, PUBLISH the URL the same way the agent does.
+   From there the render rescue, the verify loop, the gate and billing run exactly as for an agent-published
+   preview. Bounded (≤ 4 min, never past the wall-clock margin), never a gate, kill switch
+   `AGENTV3_PLATFORM_PREVIEW=off`. Report codes: `PLATFORM_PREVIEW_UP` / `_NOT_UP` / `_SKIPPED` (with the
+   reason). `tests/deliveryProof.test.ts` pins the decision table; the wiring test pins the ORDER.
+
+**What this build would look like now:** no blocker (gate UNKNOWN or, with the platform preview, YELLOW
+"runs and renders"), verdict ok, the health card says READY with the design/accessibility caveats, and the
+bill is the REAL cost (≈ ₹11: ₹0.5 of tokens + ₹2.3 of sandbox × the markup). On the admin's free-list
+account it would still be ₹0 — that is the free list, not the verdict.
+
+**The 50/50 half — why did the problem arise at all, and what makes the wrong branch impossible:**
+- The engine's struggle ledger and the app's defect list were ONE list, read by severity. Now the
+  predicate separates them by PHASE, at the only place both readers consult.
+- Proof depended on the agent's cooperation. Now the platform proves the app whether or not the model
+  ever ran the dev server.
+- A pool bench that needed a second mechanism configured was not a bench. Now it holds on its own.
+
+**Said plainly (rule 3), because the admin's rule cuts both ways:** the model wrote zero files here; the
+app that rendered was the pre-seeded golden template. Under the admin's rule a rendered app is billed at
+real cost, and the honest "not built" notice still names the features the prompt asked for (RBAC, settings,
+billing) and did not get. If the admin wants a ZERO-WRITE turn to be free even when the template renders,
+that is a separate decision — it is not what "app bani = preview chala" says, so it was not built.
+
+**OPEN, recorded honestly (rule 6):**
+- 🔴 The shared cross-instance cooldown did not bench GLM in this build. The code path is correct in
+  tests; the likely cause is `AGENTV3_RATE_LIMIT_COOLDOWN_MS=off` in Cloud Run or a lost `reportAs` on a
+  wrapped chain. The in-run family bench above makes the build correct either way; confirming the env is
+  one look at the console.
+- 🔴 A ~50-key GLM pool with a 60 s timeout per key is a ladder that can spend 50 minutes in one vendor
+  if every bench is off. The pool SIZE is the admin's; the code now bounds the damage to two windows.
+- 🔴 The turn-level timeout (480 s) does not cancel the in-flight provider call (already open, 2026-09-13).
+- The `EVIDENCE LEDGER` root cause stays open — this is its third appearance.
+
+**PROACTIVE (Step 6, the one lever):** the biggest first-try loss here was not the verdict — it was that
+GLM was slow for ten minutes and the build wrote nothing. The family bench makes the next such night cost
+~2 minutes instead of 8 before KIMI takes over. The next lever is a **first-token watchdog**: a provider
+that has not streamed a token in 20 s is far more likely to time out than to answer, and moving on at 20 s
+instead of 60 s turns the worst case from minutes into seconds. Not built here — it changes provider
+timeouts across every lane and deserves its own measured change.
+
+## 2026-09-15 — The referral system: a decorative feature removed, and a real one built behind a device check
+
+The admin asked to plan a referral system and, while gathering the facts, the honest answer to
+"what free gift do we give?" turned up something else: **NavBharatAI already had a referral feature
+on screen, and none of it existed.**
+
+### What was live, and why it is the second absolute rule's exact shape
+
+The Billing panel carried a code, a share button, a reward promise and an earnings table:
+
+- **Two different codes for one person.** The balance card printed `NB-<random>` minted by
+  `Math.random()` into localStorage; the Promo tab printed `NAV-<mailbox>-REF` computed inline from
+  the email — which also **published the mailbox of anyone who shared their code**.
+- **A promise of money**: *"Earn 10% Free Tokens for every referral."* No attribution, no credit
+  path, no endpoint. Nobody could ever have earned ₹1.
+- **Invented earnings, hardcoded**: `amit_sharma2026@gmail.com ₹50 CLAIMED` and
+  `priya.rastogi@navbharat.ai ₹25 ACTIVE`, seeded into localStorage on first render — so **every
+  user was shown the same two strangers as their own referral income**.
+- A coupon placeholder naming `WELCOME100` and `NAVBHARAT50`, both **deleted** in the 2026-09-10
+  revenue audit: two guaranteed failures, advertised.
+
+Removed (#2953). The guard that replaces it, `tests/noInventedRewardUi.test.ts`, does **not** forbid
+the word "referral" — it forbids the four things that make a reward surface fake: a code minted in
+the browser, reward state seeded from a literal, a named earning promise with no server behind it,
+and example codes the server is known to refuse. A real screen reads a server-minted code and a
+server-held list, so it passes all four by construction.
+
+⚠️ **One of those assertions was wrong on its first writing**, and the lesson is worth more than the
+test: it required `Math.random` and the word "referral" on the SAME LINE, while in the real code they
+were five lines apart — so it **passed against the exact bug it was written for**. It surfaced only
+because each guard was proven by re-injecting the deleted code rather than by reading it.
+
+### The plan the admin approved, and what each rule is for
+
+| | |
+|---|---|
+| **B** (new user) | code ₹100 · email ₹100 · mobile ₹100 · github ₹100 = **₹400** |
+| **A** (referrer) | ₹25 × B's **three verifications** = **₹75** |
+| **One referred user** | **₹475** — below today's flat ₹500 |
+| Organic app user | ₹300 · **Website: ₹0** |
+| **Referrer lifetime cap** | **₹1,500** |
+
+Four rules, each closing a specific leak:
+
+1. **Android only, device-verified — every rupee**, including email and github. A free mailbox and a
+   free GitHub account take three minutes, so ₹200 reachable from a laptop would be an unlimited,
+   scriptable printer that never meets the device check. *Half a gate is no gate.*
+2. **The referrer is paid for verifications, never for a redemption.** Paying on redemption is what
+   makes a CHAIN: one mother account farming a throwaway per cycle, earnings concentrating in one
+   usable wallet.
+3. **Nothing releases until the friend's mobile is verified.** A device id resets on a factory reset
+   (~18 min, ₹0 cash); a phone number does not. The device bounds how many accounts exist at once;
+   only the phone bounds how often the same person returns.
+4. **₹1,500 lifetime cap** — *bounded*, not merely unprofitable, for when the reasoning behind 2 and
+   3 turns out to be wrong about somebody's patience. It counts what was EVER PAID, never what is
+   held: a cap measured against a balance is refunded on every spend, the mistake `weeklyTopUp.ts`
+   already records.
+
+### 🔴 Two real defects found by the work itself
+
+**A ₹400 hole in the claim route.** It proved WHO was asking (the device) and WHETHER anything was
+owed (the paid-steps list) — and **never asked whether the step had been done**. Any caller on a
+genuine Android phone could POST `email`, `github` and `mobile` having verified none of them and
+collect the full ₹400, per device. The device gate made the fraud slower; it did nothing about this.
+The lesson is the store-purchase audit's, in a new place: **a claim is a request, not a fact.**
+`stepIsProven` now reads Firebase's own record (emailVerified, a verified phone, `github.com` among
+the linked providers) and our store for the referrer — never the request body. Removing it fails 8
+tests. `AccountContact` gained `providers` for the same reason: "connected GitHub" is not something a
+client can be trusted to assert.
+
+**A blank env value meant zero.** `Number('')` is **0**, not NaN, so a key present-but-empty in Cloud
+Run — a cleared field, a dropped paste — would have read as a deliberate zero. On the ₹1,500 cap that
+is *no referrer ever earns anything, for ever*, with the console showing the key as configured and
+nothing failing anywhere. Caught by a test before it shipped.
+
+And a third, smaller: `googleAccessToken` took an injected env for its CHECK and read `process.env`
+for the CREDENTIAL — two sources of truth that agree right up until they do not. Found because four
+tests failed; `env` is now threaded, defaulted, so every existing caller is unchanged.
+
+### The dead-code guard learned to clean up after itself
+
+The new modules had no callers, and the guard said so correctly. Rather than only take the exemption,
+the gap its own comment implies was closed: the list says it *"is meant to shrink"*, but the staleness
+test only checked that the FILE still exists — so an exemption granted while a module was being built
+would survive for ever once it was wired, leaving a permanent blind spot exactly where the suite is
+meant to look. **An allowlisted file that has become reachable now fails.** It removed its own three
+entries across the following two commits, twice, without anyone remembering to.
+
+### Also shipped
+
+- **Apple sign-in is not offered on Android** (admin's ask). Kept on iOS — App Store Guideline 4.8
+  requires it beside other social logins — and on the web. An unknown platform still offers it, so a
+  wrong default never removes somebody's only way in. ⚠️ **An existing Apple-on-Android user loses
+  that door in the app** but keeps it on navbharatai.com; the account is untouched.
+- **Privacy Policy §3.2** discloses the device identifier, which is a precondition for shipping it
+  rather than paperwork — the same shape as the 2026-09-02 incident where the policy said "we never
+  share your data with advertisers" while the Meta pixel was being built.
+- The testing-notice popup carries the reward checklist, and **its three-second countdown never
+  starts while money is unclaimed**: a notice that shows somebody ₹100 and removes it before they
+  can reach it, with no way back until the next cold start, is worse than not showing it.
+
+### 🔴 OPEN — not done, and needed before this can be switched on
+
+1. **Play Integrity API enabled** in `gen-lang-client-0866594388`, and the `playintegrity` scope
+   granted to the existing `GOOGLE_PLAY_SA_JSON` service account. Admin-only.
+2. **`PLAY_INTEGRITY_CLOUD_PROJECT`** set as a GitHub repo secret (the project NUMBER, not the id).
+3. **A `.aab` carrying `DeviceIntegrityPlugin`** live on Play — release 91 and earlier do not have it.
+4. **Play Console → Data safety** updated for the device identifier. A declaration that contradicts
+   the policy is a violation, not a mismatch.
+5. **The admin-facing referral view** (spend vs revenue, and an alert on the pattern of one code,
+   many accounts, no phone, never pays) is **NOT built**. Recorded as an open item rather than
+   quietly dropped: the money is bounded by the ₹1,500 cap without it, but nobody can currently SEE
+   what referrals cost.
+6. **Nothing here has met a real handset or a real Play Console.** 111 tests cover every judgement
+   and every failure path against an injected Google; what they cannot cover is whether the API is
+   enabled and the account granted. The first genuine token is the first real test — and every
+   failure mode is honest and visible rather than silent.
+
+Gate on the final state: `typecheck` · `noUnusedImports` · `typecheck:server` · full suite **23,506
+passed** · `build` · `test:bundle` · `boot:check`. ⚠️ Three failures in `tests/esmMirror.test.ts`
+reproduce identically on clean `origin/main` with the change stashed — pre-existing, verified rather
+than assumed, and reported rather than left silent.
+
+### Correction, same day — open item 5 is closed
+
+The entry above records *"the admin-facing referral view is NOT built"*. It is now: a bounded,
+read-only `GET /api/admin/referral/summary` and a **Referral cost** card on the admin Reports tab —
+what was paid to new users, what was paid to referrers, how many accounts were referred, and the
+busiest referrers with a **"worth a look"** marker.
+
+Recorded as a correction rather than by editing the line above, per this file's append-only rule: the
+original said what was true when it was written, and a reader needs to see both.
+
+🔒 **The marker is a QUESTION, not a verdict, and there is deliberately no action behind it.** It
+means one referrer has several friends and none of them verified a mobile — the shape a factory-reset
+farm leaves. Each of those facts is individually innocent (a popular referrer has many friends; a new
+user has not verified their phone *yet*), so the response is a sorted list for a human to read: no
+block, no clawback, no flag written back to an account. The cost of being wrong about a real
+enthusiastic user is taking money they earned; the cost of being slow about a farm is bounded at
+₹1,500 by the cap. Those are not the same size, so the smaller risk gets a report rather than an
+automation. A test asserts the summary object has no field that could do anything.
+
+⚠️ The scan is bounded (2,000 rows), and past that ceiling the card says every figure is a **lower
+bound** rather than presenting a total that is quietly wrong. An unbounded read would be honest for a
+year and then not.
+
+## 2026-09-15 — Every paisa accounted for: the wallet statement, and the invariant that could not hold
+
+Admin: *"user wallet me token balance me ek ek paise ka sahi sahi hisab hona chahiye. ₹ / token
+credit kab kaise, ₹ / token deducted kab kaha kaise, aur user ke current balance se match hona
+chahiye."*
+
+The invariant that answers all of it is one line of bookkeeping:
+
+> **opening balance + Σ (every ledger row) = tokenBalance**
+
+And the wallet was already built to satisfy it — every writer that moves `tokenBalance` also appends
+or updates a ledger row for the same tokens. A build writes its own row; a chat turn accumulates into
+a daily bucket row that always carries the bucket's RUNNING total, so the sum stays right either way.
+
+### 🔴 Except it could not hold, and nobody had written down why
+
+The ledger is capped at **500 entries** — it must be, because an unbounded array eventually meets
+Firestore's 1 MiB document limit. All **four** trim sites did `[...ledger, entry].slice(-500)`,
+dropping the oldest rows with **nothing recorded about them**. From the 501st entry onward, the sum
+of a user's visible history was simply less than their balance by an amount nobody could name. A
+statement would have had to show a number that did not add up, or invent one.
+
+**The fix is the oldest one in accounting: a statement does not begin at the beginning of time, it
+begins at an OPENING BALANCE.** `appendLedgerEntry` folds whatever rolls off into
+`ledgerOpeningTokens`, so the invariant survives trimming exactly and for ever — the history a user
+can SEE is bounded, the arithmetic is not. All four sites now go through that one helper; trimming
+anywhere else is what re-opens this.
+
+Proven, not asserted: 600 real debits through `computeDebitedWallet`, 700 mixed credits and debits,
+50 chat turns into one rollup bucket, and 600 daily buckets — every one ends with the books
+balancing. Restoring the old `slice(-500)` fails two of them.
+
+### A second defect found on the way
+
+`payments.ts` appended to the ledger **without trimming at all**, while every debit path trimmed at
+500 — so purchase rows could grow unbounded toward the document limit, and the two halves of one
+ledger disagreed about whether it had a size. Now bounded like the rest.
+
+And an import **cycle** I created myself and then removed: `walletDebit` imported the appender while
+the appender imported `MAX_WALLET_LEDGER_ENTRIES` back from it. It typechecked and would very
+probably have worked — the constant is only read inside a function body — but a cycle on the money
+path breaks one day on a bundler change for reasons nobody can see. The constants moved down to
+`walletStatement.ts`, which is where the trim is enforced; `walletDebit` re-exports them so every
+existing importer is untouched.
+
+### What the user now sees
+
+Wallet & Billing → the balance card → **Statement**: every credit and charge, oldest to newest, with
+the date, what it was for, the rupees, and **the balance after that line**. It ends in a verdict:
+
+- **Everything adds up** — opening + credits − charges equals the balance, exactly.
+- **These entries do not match your balance** — with the difference in rupees, and an ask to report
+  it. 🔒 It shows this rather than hiding it: a statement that could only ever say "balanced" is
+  decoration, and decoration on a money screen is what stops anyone looking.
+- **Part of this history is older than our records** — the honest third state, for an account whose
+  oldest rows rolled off before opening balances existed. Calling that a mismatch would frighten
+  people whose money is fine and teach the admin to ignore the one that matters; calling it balanced
+  would be a lie.
+
+Two things that explain most real questions are stated on the screen rather than left to support: a
+charge under ₹0.01 is **carried** to the next charge instead of being rounded up, and a day's small
+assistant charges are **grouped** into one line so a wall of ₹0.02 rows never pushes the purchase
+history off the end.
+
+🔒 **The reconciler only ever REPORTS.** It never adjusts a balance to make its own arithmetic work —
+a test asserts it does not modify the document it is handed. And it reports, rather than reconciles
+away, a legitimate difference between the two stored views (`tokenBalance` and `remaining_balance`):
+a Pass buyer's views differ by the Pass price, permanently and by design, and an assignment there is
+exactly the bug `walletMirror.ts` was written to end.
+
+⚠️ **What this does NOT do, said plainly:** it cannot recover history already lost. An account that
+was past 500 entries before this shipped keeps its `unknown` verdict for ever — the rows are gone.
+From here on, every account stays reconcilable.
+
+Gate on the final state: `typecheck` · `noUnusedImports` · `typecheck:server` · full suite **23,532
+passed** · `build` · `test:bundle` · `boot:check`. The three `esmMirror` failures reproduce on clean
+`origin/main`.
+
+### The same day — the invariant was only half true, and one of the offenders was mine
+
+The entry above fixed the four TRIM sites. An audit of every writer then found the other half: **eight**
+places appended to `walletLedger` by hand, `[...(w.walletLedger || []), entry]`, bounded by nothing
+and moving no opening balance — the phone bonus, the admin adjustment, the hosting refund, the plan
+credit, the remix credit, and **both referral credits, which I had written myself minutes after
+fixing the defect everywhere else.**
+
+That last one is the argument for the test rather than the convention: the author who had just
+root-caused the bug reintroduced it while the fix was still uncommitted. `ledgerPatch(wallet, entry)`
+now returns the ledger AND both bookkeeping fields together, so a caller cannot take one and forget
+the others, and `tests/ledgerWritersUseAppender.test.ts` fails CI on a hand-rolled write or a trim
+outside the appender. Guilty until allowlisted; three files are listed, each with the reason.
+
+🔴 **And the guard found a worse one than the trim.** The Nav App Store remix credit recorded its
+amount as `tokens` / `amountInr` while every reader — and the reconciler — sums
+`amountCoinsOrTokens`. So a creator's remix earnings RAISED THEIR BALANCE AND APPEARED IN NO TOTAL,
+and their statement would have reported a mismatch nobody could explain. It now writes the standard
+field and keeps the old ones, so rows already written in the old shape still read.
+
+Gate: full suite **23,536 passed**; the three `esmMirror` failures reproduce on clean `origin/main`.
+
+### And the allowlist was hiding one more
+
+`accountMerge.ts` was allowlisted out of the ledger-writer guard with the reason *"it is the one place
+the OPENING balances of both wallets must be added together too"* — a claim written from intent rather
+than from the code. **It was false.** The merge inherited `into`'s opening and dropped `other`'s
+entirely, so every merged wallet's books were off by the sum of the other wallet's rows: a mismatch
+shown to a user whose money was perfectly correct.
+
+The merge now RE-STRIKES the opening balance — `balance − Σ(visible rows)`, struck once at the merge,
+with every later movement checked against it exactly as before — and a test pins it. The allowlist
+entry carries the corrected reason and a note that the original was wrong, rather than being quietly
+rewritten.
+
+🔒 **The lesson is about allowlists, not about merging: an exemption whose reason nobody verified is
+an exemption that hides a bug.** This is the third defect in two days found by writing down a reason
+and then checking it (the others: a guard that passed against the bug it was written for, and an
+`env` threaded for a check but not for the credential).
+
+### 2026-09-15 — 🔴 "BUILDER NE EK BHI FILE KYU NAHI BANAYI?" — answered, and it was arithmetic
+
+The admin read the previous autopsy and asked the one question it had not answered: *"autopsy me sab fix
+kar diya? builder ne ek bhi file kyu nahi banayi? fix nahi hua to karo."* **It had not been fixed.** PR
+#2951 fixed the VERDICT (a rendering app called not-built and made free) and the ladder's inability to
+reach the next vendor. It never explained why the model wrote nothing. Branch `claude/floor-budget`.
+
+**THE ANSWER, from the report's own numbers:**
+
+| | |
+|---|---|
+| What the loop AUTHORISED per turn | **32,000 output tokens** (`buildMaxTokensPerTurn`) |
+| What the floor rung ALLOWED | **60 seconds** (`AGENTV3_CHEAP_FLOOR_TIMEOUT_MS`, default 60_000) |
+| What 60 s could carry, at that build's own measured rate | **≈ 1,830 tokens** |
+| What 32,000 tokens would have taken | **≈ 16 minutes** |
+
+The rate is not an estimate — it is a two-point fit on that build's OWN successful turns, same model,
+same night: 111 tokens → 7,466 ms and 182 tokens → 9,631 ms, i.e. ≈ 4.1 s overhead + **30.5 ms/token**.
+
+**So the engine was authorising seventeen times more output than its own clock could carry.** Turns 1
+and 2 passed because they emitted 111 and 182 tokens — tool calls with no content. Turn 3 was THE TURN
+THAT WRITES THE FILES, the only turn that ever uses the budget, and it could not fit on any key.
+
+🔎 **AND IT WAS OUR CLOCK, NOT THE PROVIDER.** The eight GLM failures are spaced 60,006 / 60,010 /
+60,007 / 60,005 / 60,003 / 60,004 / 60,004 ms apart — a **seven-millisecond spread across seven gaps**.
+A provider failing does not fail on a metronome. That is `new OpenAI({ timeout: 60_000 })` firing eight
+times, and the turn then hit its own 480 s ceiling (480,039 ms elapsed) having learned nothing.
+**The build was structurally incapable of writing a file whenever the floor was slow — not unlucky.**
+
+**THE INVARIANT (`src/server/AgentV3/floorBudget.ts`): never authorise more output than the clock can
+carry.** When the two disagree the ASK is clamped to the CLOCK, and that choice is the whole point,
+because the two failure modes are not equally bad:
+- **TRUNCATION** (`finish_reason: 'length'`) — the files written so far COME BACK, and the existing
+  truncation guard names the one file that was cut.
+- **TIMEOUT** — nothing comes back. Ten minutes, zero files.
+
+A turn that asks for more than it can deliver converts a recoverable partial success into a total loss.
+
+**What changed, all derived from one module so the pair can never drift apart again:**
+1. `floorTuning().floorTimeoutMs` is **derived from the loop's own token ask** —
+   `floorTimeoutForTokens(buildMaxTokensPerTurn())`, capped at 150 s — instead of a hand-typed 60_000.
+   Change the token ask and the clock follows. An explicit env still wins.
+2. `OpenAiToolRunner` clamps `max_tokens` with `reconcileFloorBudget(ask, bound.timeoutMs)` — the
+   EFFECTIVE clock after `turnDeadline`, so a lane with 30 s left cannot authorise a 32,000-token
+   answer either.
+3. The SDK bound and the runner bound are now **one number**. They disagreed — `new OpenAI({ timeout:
+   60_000 })` against the runner's own 120 s default — which is why the report's error text is the
+   SDK's *"Request timed out."* and never the runner's own message. The runner was sizing its answer
+   for a clock that was not the one running.
+
+**The cap is sized, not picked:** a build turn gets 480 s and PR #2951 benches a provider FAMILY after
+2 consecutive timeouts, so the worst case a healthy ladder absorbs is 2 × 150 s = 300 s, leaving 180 s
+for the vendor behind it. A test asserts that sum, so raising the cap without re-checking it fails CI.
+
+**NET EFFECT, and it is better on both of the admin's aims at once:**
+| | before | after |
+|---|---|---|
+| tokens the floor can actually deliver | ~1,833 | **~4,833** (2.64×) |
+| what happens on overflow | timeout → **nothing returns** | truncation → **files so far return** |
+
+**The 50/50 half — why the condition existed at all:** two numbers owned by different modules, set years
+apart, that nobody ever compared. Neither was wrong alone. Deriving one from the other is what makes the
+mismatch impossible rather than merely fixed today.
+
+⚠️ **Honest limit, stated rather than glossed:** I cannot prove those eight calls WOULD have succeeded at
+150 s — we killed them at 60 s and never found out. What is proven is the structural defect (17× more
+authorised than deliverable) and that the clamp makes the overflow recoverable. The real answer to
+"slow versus dead" is **streaming with a first-token watchdog** — a provider that has streamed no token
+in 20 s is dead and should be dropped at 20 s, while one still producing should never be killed. That is
+the next lever, deliberately NOT built here: it changes the GLM/Kimi call from non-streaming to streaming
+on the path that carries every build, and it deserves its own measured change rather than a ride on this
+one. Recorded as an OPEN root cause.
+
+**Test-locked** in `tests/floorBudget.test.ts` (15 tests, including the report's own arithmetic pinned so
+the reasoning cannot rot) and `OpenAiToolRunner.test.ts`. ⚠️ `'uses the turn maxTokens, else the option
+default'` encoded the OLD contract (the ask always passes through) — updated to the new rule with a
+generous clock, and two new tests prove the clamp fires on the exact 4efab9d7 pair.
+
+## 2026-09-15 — AUTOPSY `ee20478d`: 4,833 was never a model's number. It was ours.
+
+**Prompt:** *"Make the whole app fully responsive and comfortable to use on a mobile phone
+(touch-friendly, no horizontal scroll)."* — an EDIT of an existing 1-source-file app, on the Weak
+ladder. **Result: 0 files, RELEASE_GATE RED, ~5 minutes, and the user was asked to buy credits.**
+
+### The finding, and it is arithmetic
+
+Three model calls, all `ok: true`, all HTTP 200, all inside their clock:
+
+| | outputTokens | responseChars | toolCalls | finishReason | latency |
+|---|---|---|---|---|---|
+| call 1 | **4833** | 0 | 0 | max_tokens | 97,369 ms |
+| call 2 | **4833** | 0 | 0 | max_tokens | 95,776 ms |
+| call 3 | **4833** | 0 | 0 | max_tokens | 104,488 ms |
+
+`outputTokens: 4833` also appears **three times on KIMI** in report `58fe8254`, the night before, on a
+different model. Two vendors cannot independently stop at the same number.
+
+`FLOOR_TIMEOUT_CAP_MS` (150,000) − `FLOOR_CALL_OVERHEAD_MS` (5,000) = 145,000 ms ÷ 30 ms/token =
+**4,833**. It is a CONSTANT — the most any floor rung can ever be authorised, on every build, whatever
+it asks for. The build loop asks for 32,000; the clamp cuts ~85% of it away on every single call.
+
+**Why that is fatal rather than merely small:** `floorBudget.ts` justifies the clamp in writing —
+*"TRUNCATION: the files written so far COME BACK"*. That is true of a model that emits tool calls as it
+goes. It is **false of a reasoning model**, whose thinking is billed to the same `max_tokens` and
+emitted BEFORE any content. `glm-5.3-flash` — the first rung of the Weak AND Normal ladders since
+2026-09-14, and the plan rung for all three tiers — is exactly that, proved by the 400 in the previous
+autopsy (*"This model always engages in thinking and cannot be disabled"*). So the clamp produced the
+total loss it was written to prevent, by the mechanism it was written to use.
+
+### 🔴 THE MISSING SUBSYSTEM, named: nothing anywhere asks "did this call produce anything?"
+
+Every honesty gate the platform owns reads the **provider-FAILURE** ledger. These three calls succeeded.
+So they were in no ledger, no bucket, no predicate — `providerFailuresLookDegraded` false,
+`providerFailuresLookMisconfigured` false, `providerFailures` key absent from the report entirely — and
+the free-tier upsell fired. **A fuller wallet would have changed nothing: the ceiling is a constant of
+ours, identical on every tier we sell.**
+
+The platform DID see it, three times, and hedged: `LLM_TRUNCATED — "output may be truncated"`. The
+record carrying that warning also carries `responseChars: 0` and `toolCalls: 0`. It described a total
+loss as a possible trim, and nothing downstream was told anything had gone wrong.
+
+### The five buckets
+
+- ✅ **Self-healed: 0.** The report's own `autoResolved` count for the failure is 0. Correct, for once.
+- 🔀 **Worked around: 0** — and that is the defect. There WAS a working rung one step down
+  (`KIMI kimi-k2.6`, not a forced-thinking model) and the ladder never reached it.
+- ⏭️ **Skipped: 4.** 3 × `LLM_TRUNCATED` seen and not acted on; 1 × the empty turn appended to the
+  transcript and nudged as if it had been a reply.
+- ❌ **Still broken: 3.** Zero files; `"the model replied without building"` (it never replied); the
+  upsell.
+- 🥵 **Struggle: ~5 minutes**, of which ~4.9 were three identical doomed calls. `SANDBOX_SESSION`:
+  7.7 min up, **7.3 idle (95%)**.
+
+### DNA-level fixes (all shipped in this change)
+
+1. **`floorBudget.ts` — `turnStarvedItsBudget` / `starvedBudgetError` / `STARVED_BUDGET_MESSAGE`.**
+   A turn that produced no text and no tool call and was cut at the ceiling is a **failure of that
+   rung**, never an answer from it. Deliberately provider-INDEPENDENT (truncated OR reasoning-only),
+   because keying it on GLM's `reasoning_content` is how the class hid across two vendors.
+2. **`OpenAiToolRunner` THROWS it** instead of returning a turn nobody can use, so the chain falls to
+   the next rung — a different vendor, usually not forced-thinking — and the build proceeds.
+3. **`MultiProviderTurnRunner` retires the starved rung for the run**, keyed on the MODEL (like
+   model-unavailable), never on the provider. First occurrence is enough and the argument is not
+   "probably": the budget is a constant for the run and an agentic transcript only GROWS, so a rung
+   that could not begin an answer on turn 1 has strictly less room on turn 2. ⚠️ It is explicitly NOT
+   a timeout — benching a healthy vendor for our own arithmetic would be the wrong repair.
+4. **New failure bucket `output-budget`** + `OUTPUT_BUDGET_STARVED` (raised on FIRST sight, once per
+   provider) + `buildStarvedItsOutputBudget`. This is what puts an HTTP-200-that-produced-nothing into
+   the ledger every honesty check already reads.
+5. **The upsell is suppressed** (reason **(e)**), with a suppression note that says the true thing —
+   *"every rung ANSWERED and produced nothing… a fuller wallet buys a different model, not a different
+   ceiling"* — rather than the existing "the engine did not respond", which would send the next reader
+   to a provider status page.
+6. **`AgentRunner` stops nudging a model that never got to answer**, stops appending the empty turn
+   (which made the next prompt LONGER and so even less likely to fit), and tells the user the truth:
+   *"our engine ran out of room to answer before it began. This is our limit, not your app."*
+7. **`LLM_TRUNCATED` says what happened** when nothing was produced, instead of "may be truncated".
+
+### Step 5 — the 50/50 law: why it could arise at all
+
+`tests/floorBudget.test.ts` had a round-trip test asserting the clock derived from an ask can carry
+that ask — guarded by **`if (clock < FLOOR_TIMEOUT_CAP_MS)`**. That `if` excludes every ask big enough
+to reach the cap, and the loop's real ask (32,000) reaches it by a factor of six. **The pair was proven
+self-consistent on five sizes the engine never asks for, and the one size it asks for on every single
+build went unmeasured.** Replaced with a test that states the production number out loud — clamped,
+4,833, an 85% cut — so a retune of either constant has to be looked at.
+
+The same shape bit `tests/laneFailure.test.ts`, whose proximity window went 900 → 1800 and was about to
+need a third widening. It was measuring **comment volume**, not code distance: each autopsy adds a
+paragraph above the call site. It now measures the stripped CODE, where the real distance is small and
+constant. Verified to still bite (removing the check fails it).
+
+### ⚠️ OPEN ROOT CAUSES — recorded honestly, not patched
+
+1. **The floor can never emit a large answer in one turn, and no fix here changes that.** 32,000 tokens
+   at 30 ms/token is 16 minutes; a build turn has 480 s. `FLOOR_TIMEOUT_CAP_MS` is deliberately 150 s
+   so that two consecutive timeouts (300 s) still leave 180 s for the next vendor — raising it without
+   re-checking that sum is how a slow provider eats a whole turn. **Not touched.**
+2. **`AGENTV3_FLOOR_MS_PER_TOKEN = 30` is ~50% conservative against this very report.** 4,833 tokens in
+   (97,369 − 5,000) ms is **19.1 ms/token**. At 20 the same 150 s clock would afford ~7,250 tokens.
+   Deliberately NOT changed: the 30 was measured on a visibly degraded night and is documented as "the
+   rate we are still willing to WAIT for" — lowering it converts truncations back into timeouts, which
+   is the failure mode that returns nothing. It is a real lever and it is the admin's call.
+3. **`glm-5.3-flash` leads the Weak and Normal ladders and is the plan rung for all three tiers**, and
+   it cannot disable thinking. The ladder is admin-mandated policy (2026-09-14) and was NOT changed —
+   the fixes above make the ladder work as written by falling to the rung behind it. But two consecutive
+   autopsies, two nights, have now ended at zero files on this rung. Flagged for the admin.
+4. **Gemini's runner does not set `truncated`**, so the AgentRunner net would not fire for it. Out of
+   scope here: Gemini is not a BUILD rung on any tier ladder since 2026-09-14.
+---
+
+## 2026-09-15 — The APK Reports inbox can now leave the screen (admin: "apk build report download ka option hi nahi banaya aapne?")
+
+**The admin was right, and the answer is not "look again under a different name".** I searched by
+filename and by three vocabularies (`download` / `export` / `saveJson`, `blob` / `createObjectURL`,
+`copy`) across the whole repo before concluding anything. The admin panel has THREE report inboxes.
+**Build Reports** and **User Reports** have had Download and Copy since the day each shipped, both
+funnelling through one `saveJsonFile` helper. **APK Reports**, added on 2026-09-14 as the third page,
+shipped with neither — it could be read on screen and nothing else, with the failing step's log inside a
+`max-h-64` scrolling box. That is why the admin's own capture of the page came back with the log excerpt
+cut off: there was no way to take it off the screen intact.
+
+**What shipped, all of it through the helpers that already existed:**
+- **Download** and **Copy** on an open report — the record in hand IS the whole stored report, so
+  nothing is re-fetched that could differ from what was read.
+- **Download all** beside Clear all — `listApkReports` returns full records, so the inbox file is not a
+  summary.
+- `src/lib/apkReportFile.ts` is the only part with real logic: `owner` and `repo` come from a USER's
+  GitHub account, so a slash or a quote in a filename is a browser refusing to write the file. Same
+  sanitising reason as `apkReportId` on the server, and it falls back to the report id and then to a
+  bare name — a download is never blocked by an unusual repository name.
+
+🔴 **THE HONESTY FIX THAT MATTERS MORE THAN THE BUTTON: "Open the full run on GitHub" is not a link the
+admin can necessarily open.** `mobileShip.ts` takes `owner`/`repo` from the user's OWN connected GitHub
+account, so the run lives in THEIR repository — private in the ordinary case. The page presented it as
+where the complete log lives, sending the one person who has to fix the failure to a 404. It now says
+whose account it is and that everything below it is stored here, and the excerpt's heading states how
+many lines it holds (`reportLogExcerpt` keeps the last 120 of the failed step) instead of leaving
+"truncated" to be guessed at.
+
+### 🔎 The sibling hunt found a DEAD GUARD, and it had been dead silently
+
+Chasing rule 3 across the repo turned up something worth more than the button. **88 test files strip
+comments with `replace(/\/\*[\s\S]*?\*\//g, '')`, which treats `/*` as a comment opener wherever it
+appears — including inside ordinary strings** such as `accept="image/*"` and `'**/*.ts'`. It then runs
+to the next `*/`, hundreds of lines later, deleting real code.
+
+- It bit me first, in the new test: two assertions failed against JSX that was already correct.
+- **Then a scripted sweep of every `not.toContain` guard against every source file the naive strip
+  over-deletes found ONE genuinely dead:** `tests/appMart.test.ts` asserts
+  `AppKnowledgeBase.ts` carries no user-visible "Nav App Store". The naive strip deletes essentially
+  that whole file (583,991 characters), so the guard was passing on an empty string — **and a real
+  user-visible "Nav App Store" had survived the rename in the text every AI reads aloud.** Renamed to
+  App Mart, and the guard re-checked by re-injecting the old string and watching the test fail.
+- The three `not.toContain('Math.random')` game-runtime guards were checked the same way and are
+  genuinely alive (the generated files contain no inline `/*`) — reported as checked, not assumed.
+
+**The lesson, and it is the one this file already teaches about capped search output:** an assertion
+that something is ABSENT proves nothing until you have proved the text was present to be found. A
+negative guard needs a re-injection test the way a positive one does not.
+
+⚠️ **OPEN, deliberately not swept:** the other ~87 files carry the same naive stripper. None is
+currently dead — that was measured, not assumed — but each is one `not.toContain` away from becoming
+so. Centralising a single shared stripper would touch 88 unrelated test files in one diff, which is its
+own risk; the precise detector is noisy in CI (it matched 6 candidates for 1 real defect). Recorded here
+as an open item rather than half-swept.
+
+**Test-locked** in `tests/apkReportDownload.test.ts` (11 tests — the filename rules, both download
+paths, the shared-helper funnel, the honest empty/loading refusals, and the link's ownership note).
+## 2026-09-15 — THE PUBLISH CEILING FIX WAS BUILT, MERGED AND SWITCHED OFF BY ONE EMPTY STRING
+
+**The report.** The admin's notification panel read: *"Hosting channels are filling up: 36 of about 50
+in use, 14 left. 28 can be reclaimed right now."* They forwarded a ChatGPT prompt asking for an audit
+of ~33 hosting providers, a provider pool and a resell model. Per the external-suggestion rule that was
+treated as raw material, not an order — and the real codebase answered the question before the research
+would have started.
+
+**What the audit found: nothing was missing.** `bucketPublish.ts` (mirror every publish into Cloud
+Storage), `bucketOnlyPublish.ts` (skip Firebase entirely — the thing that actually removes the ceiling)
+and `infra/cloudflare/mitrify-apps-worker.js` (serve from the bucket, fall back to Firebase) had all
+shipped green weeks earlier. The bucket `navbharatai-published-apps` had existed in
+`gen-lang-client-0866594388` since 2026-08-23 with `allUsers → Storage Object Viewer` already granted,
+and `mitrify.in`'s wildcard DNS was already live and proxied through Cloudflare (verified by resolving
+`test.mitrify.in` and `v3-abc.mitrify.in`, not assumed).
+
+**The whole ceiling was held open by `const APPS_BUCKET = '';` on line 66 of the Worker.** With it
+empty, `if (APPS_BUCKET && cacheable)` is never true and the entire bucket origin below it is
+unreachable code. No provider is needed, no architecture change, no new spend.
+
+🔴 **AND A TEST WAS HOLDING IT EMPTY.** `bucketPublish.test.ts` asserted
+`expect(worker).toMatch(/const APPS_BUCKET = '';/)` under the heading *"ships with the bucket origin
+EMPTY, so behaviour is unchanged until it is set"*. That was correct when written — a pre-filled name
+would have switched the origin the moment the Worker was redeployed, **before the bucket existed**. Once
+the bucket existed and was public, the same assertion stopped protecting anything and started enforcing
+the off state, while the capacity card climbed toward a cap that stops publishing for **every user at
+once**. Nothing failed the whole time, which is exactly why it went unnoticed.
+
+**The class, named so it is recognised again: a guard that encodes a PRECONDITION rather than an
+INVARIANT becomes a lock the day the precondition is met.** "Not activated yet" is a state, not a
+property of the code — and a test is the wrong place to keep a state, because a state has no way to
+notice that it changed. The two are distinguishable by asking what would have to be true for the
+assertion to be wrong: for a real invariant, nothing.
+
+**Fixed.** `APPS_BUCKET = 'navbharatai-published-apps'`; the stale assertion is REMOVED with the reason
+recorded in place rather than silently flipped; and the invariant now runs the other way in
+`tests/workerBucketOrigin.test.ts`, which owns it alone so the two files cannot disagree about its
+direction. It asserts the name is set and bucket-shaped, that the Worker's `APP_PREFIX` equals the
+server's exported one (two files, two languages, no import between them — a mismatch would 404 every app
+at the edge and fall through to Firebase, looking like "the bucket path just isn't working" rather than
+a typo), that the Firebase fallback survives (every app published before the bucket must keep working),
+and that the SPA deep-link rewrite survives. Verified to bite by emptying the constant and watching it
+fail.
+
+**STILL OPEN — the ceiling is not removed until three Cloud Run keys are set, and the ORDER is not a
+preference.** The remaining work is admin console work, and the admin asked to be guided through it
+rather than have it assumed:
+
+1. `PUBLISHED_APPS_BUCKET = navbharatai-published-apps` and `PUBLISHED_APP_DOMAIN = mitrify.in`
+2. the Worker redeployed from this file (Cloudflare dashboard paste — this file is the only record of
+   what is running, which is why the value belongs here and not only in the console)
+3. a real publish confirmed loading at `https://<sub>.mitrify.in`
+4. **only then** `PUBLISHED_APPS_BUCKET_ONLY=on`
+
+`bucketOnlyPublishEnabled()` ANDs all three and never warns, so any missing precondition disables the
+path silently and correctly — but setting the flag with a Worker that is not serving hands users dead
+links. Until step 4, a publish still consumes a channel.
+
+⚠️ **Recorded honestly: "delete all 36" is not what the panel offers, and the admin was told so rather
+than obeyed.** Of the 36, **28** are waste (`stale` + `unknown`) and reclaimable; the other 8 are LIVE
+apps belonging to real users, and the site's own `default` channel is never counted or deletable.
+Reclaiming the 28 takes usage from 36/50 to 8/50 with nothing lost. Removing the 8 is a takedown, is a
+different decision, and was put back to the admin with the list offered first.
+
+---
+
+## 2026-09-15 — A Play bundle build that could not have succeeded now says so before it starts
+
+**From the same failure report.** A user pressed "Google Play bundle"; the run died in about a minute
+with `Missing signing secret(s): ANDROID_KEYSTORE_BASE64 …`, and that was the first they heard of it.
+
+**Nothing was broken, and that is the point.** The generated workflow's own pre-flight did exactly the
+right thing, and refusing to hand back an unsigned bundle is correct — Play rejects one anyway. What was
+wrong is that the press **could not have succeeded**, and only GitHub knew. `.apk` (debug-signed, zero
+setup) works on the first press for everyone; `.aab` cannot work for anybody until they install Java,
+run `keytool`, base64 the file and paste four secrets into GitHub.
+
+**What shipped:** `GET /api/mobile-ship/signing-status` asks GitHub which secret NAMES the repository
+has — the API never returns values, which is exactly what makes it safe to ask on the user's behalf —
+and `StoreBuildPanel` checks it BEFORE dispatching, but only for the workflow that needs a key.
+
+🔒 **ONLY A VERDICT BLOCKS.** A failed lookup is `unknown`, never `missing`: our own inability to check
+is not evidence about the user's repository, and a check that blocked the build on a GitHub hiccup would
+be a worse failure than the one it exists to prevent. The asymmetry sets every default here — a wrong
+"your key is missing" costs one press; a build that cannot succeed costs a run, several minutes, and the
+belief that the app builder is broken.
+
+⚠️ **A half-configured key is named exactly** (`ANDROID_KEY_ALIAS is still missing`) — that is the case
+nobody can debug from a generic message. And the refusal always names what works right now: a message
+that only says "no" leaves someone who wanted to try their app with nothing to press.
+
+**The drift guard that earned its place immediately:** a test asserts this module's four names against
+the names `mobileShipKit` really generates into the workflow — and it failed on its first run, because
+my own regex `ANDROID_[A-Z_]+` stopped at `ANDROID_KEYSTORE_BASE`, digits being outside the class. A
+guard that could not have caught a real rename would have been decoration.
+
+**Test-locked** in `tests/signingReadiness.test.ts` (11 tests). `AppKnowledgeBase` updated, so every AI
+in the app can tell a user this check exists. **Next: the auto half** — NavBharatAI generating the
+upload key and writing the four secrets itself, so the Play bundle is one press too.
+
+---
+
+## 2026-09-15 — NavBharatAI makes the user's Android upload key, so a Play bundle is one press
+
+**The second half of the admin's option 3.** The warning half stops a build that could not have
+succeeded; this half removes the reason it could not. Until today a Play Store bundle required the user
+to install a JDK, run `keytool` with six flags, base64 the file, and paste four secrets into GitHub —
+the wall where most people stop, and the same wall every competitor has.
+
+### 🔴 The objection that stood for years, and why it no longer holds
+
+`mobileSetup.ts` states it in writing: *"A signing key IS the app's permanent identity — if we held it
+and lost it, their app could never be updated again."* **That is true of the APP SIGNING key and false
+of this one.** Every new app on Play uses Play App Signing (mandatory for the `.aab` format): Google
+holds the app signing key, and what the developer holds is an **upload key**, which Google can **reset**
+if it is lost. The worst case is a support request, not a dead app.
+
+🔒 **And we still do not hold it.** The key is sealed into the user's OWN repository as GitHub Actions
+secrets and handed to their browser once to save. No vault row, no Firestore document, no log line — a
+test asserts the route contains no `encrypt(`, no store call and no `console.log`. Both old comments
+were corrected in place rather than deleted, so the original reasoning stays visible beside the reason
+it changed.
+
+### ✅ Verified with Java's own tooling, not assumed
+
+This sandbox has a JDK, so the generated PKCS#12 was read back by the real `keytool` rather than
+reasoned about:
+- `keytool -list -v` → *"Keystore type: PKCS12 · Alias name: upload · Entry type: PrivateKeyEntry ·
+  SHA256withRSA · 2048-bit RSA · valid until 2056"*, and the printed SHA-256 matched
+  `sha256Fingerprint` byte for byte.
+- `keytool -importkeystore` → **exit 0**, which only succeeds if the private key genuinely unlocks with
+  the password we generated.
+
+A hostile app name (`Shiv Medical Store, "Ltd" <test>`) came back as a valid distinguished name — a
+comma or a quote inside an X.509 DN is a syntax error, not a character.
+
+### The decisions that are not obvious
+
+- **PKCS#12, one password, two secrets.** A PKCS#12 keystore protects its key entry with the STORE
+  password, so `ANDROID_KEY_PASSWORD` must EQUAL `ANDROID_KEYSTORE_PASSWORD`. Different values produce
+  "Cannot recover key" at build time — the exact failure `mobileBuildRepair` already classifies.
+- **30-year validity.** Play rejects an upload certificate that expires before 22 Oct 2033, and by the
+  time that error appears the key is already in the user's repository — fixing it then is a key reset,
+  not an edit.
+- **RSA keygen on Node's NATIVE crypto**, not node-forge's pure-JS one, which would block the event
+  loop for seconds inside a request. forge does only the certificate and the PKCS#12 wrapper.
+- 🔴 **It will NEVER replace a key that is already there** without `replace: true` said explicitly. A
+  user who has published once is tied to that upload key; replacing it silently makes their next update
+  unpublishable, and no amount of convenience is worth that.
+- 🔒 **A repository we could not READ is never written to.** The key we cannot see is exactly the one at
+  risk, so a failed listing returns before a key is generated — test-locked by ordering, not by comment.
+- ⚠️ **A partial write is named, never swallowed.** Four secrets go up one at a time; if the third
+  fails the user is told which landed. It does **not** roll back — deleting what it managed to set could
+  delete a secret that was already there and correct.
+
+**Two new dependencies**, both verified through the repo's own gates (`audit:gate` ✅ 0 high/critical,
+`license:gate` ✅ no un-allowlisted copyleft): `node-forge` for the X.509 certificate and PKCS#12
+container, `libsodium-wrappers` for the `crypto_box_seal` that GitHub requires before a secret may be
+posted. There is no dependency-free route: Node has X25519 but neither XSalsa20-Poly1305 nor blake2b at
+the digest length a sealed box needs, and hand-rolling PKCS#12 ASN.1 would be the fragile choice.
+
+**Test-locked** in `tests/androidKeystore.test.ts` (10) and `tests/githubSecretWrite.test.ts` (10) —
+including that a sealed value really decrypts back with the matching secret key, that two seals of one
+value differ, and that a GitHub error body is never echoed to the screen. `AppKnowledgeBase` updated so
+every AI can explain the new button, what it will not do, and that a lost key is recoverable.
+## 2026-09-15 — A PROVIDER KEY WAS A FEATURE SWITCH: `OPENAI_API_KEY` alone started an unmetered, never-read embedding spend
+
+**How it was found.** The admin bought an OpenAI key and asked one question: *"claude run me kis naam se
+save karu?"* Answering it meant verifying the name against live code rather than against `CLAUDE.md`
+(safeguard #1 applied to a doc claim), and the grep for `OPENAI_API_KEY` returned more than the tier
+ladder. Nothing had been spent yet — the key was not set.
+
+**The name is `OPENAI_API_KEY`**, verified at `src/server/AgentV3/tierLadder.ts:238`
+(`case 'OPENAI': return 'OPENAI_API_KEY';`) and consumed at `src/server/routes/agentv3.ts:2951`.
+Companions: `OPENAI_BASE_URL`, `AGENTV3_OPENAI_TIMEOUT_MS`.
+
+**What the same grep exposed, and it is the real finding.** `src/server/AgentV3/EmbeddingSearch.ts` had
+**no flag of any kind** — its only gate was `this.apiKey = apiKey ?? process.env.OPENAI_API_KEY ?? ''`.
+Three consequences, each verified from code rather than reasoned about:
+
+1. **It runs on every build, on every tier.** `ToolDispatcher` calls `getEmbeddingStore(...).addFile()`
+   at three sites — single write (2416), batched write (2568), edit (2636). A normal build fires dozens
+   of `text-embedding-ada-002` calls, free tier included, on NavBharatAI's own account.
+2. **It is unmetered by construction.** The calls go through the OpenAI SDK directly, never through
+   `captureTurnUsage`. So they are in no build ledger, in no rate card (`providerRates.ts` prices no
+   embedding model at all), invisible to `AGENTV3_BUILD_COST_CEILING_USD`, and never billed to the
+   user. This is precisely the class the 2026-09-12 money audit named — a paid call with nothing
+   governing it — reached through a credential instead of through a ladder.
+3. 🔴 **And it bought nothing.** `EmbeddingStore.search()` — the only thing that READS the index — is
+   called from no live code path. `getEmbeddingStore` is imported in exactly one module
+   (`ToolDispatcher`) and only ever for `addFile`. Embed, persist to Firestore, never read.
+
+**The fix is the class, not the instance (fourth absolute rule, step 2).** The bug is not "embeddings
+are expensive"; it is that **a provider credential was doing the job of a feature switch**, which
+breaks this repo's own repeated law that a key must not be the single input that changes behaviour and
+that unset means today's behaviour exactly. `AGENTV3_FILE_EMBEDDINGS` (default OFF) now gates it:
+`getClient()` returns null unless the flag is on **and** a key exists, the flag is read at call time so
+Cloud Run bites without a deploy, and an unreadable value means OFF rather than ON.
+
+**Test-locked** in `tests/fileEmbeddingsAreOptIn.test.ts` (9 cases). The last one is a **reversion
+guard**: the behavioural tests alone would still pass with the flag line deleted, because a real call
+with a fake key fails and is caught, returning null either way — so the ORDER (flag before key) is
+asserted out of the source with comments stripped. Proven by deleting the line and watching only that
+test go red, then restoring it.
+
+**STILL OPEN, deliberately not closed here:**
+- **Semantic retrieval is dormant and is not being woken by this change.** Wiring `search()` into the
+  build is a separate decision with its own cost, and doing it inside a change whose purpose is to
+  STOP an ungoverned spend would be the widening the rules forbid. `ContextReranker.ts` has said the
+  path is dormant all along; it still is.
+- **If embeddings are ever switched on, price them first.** `text-embedding-3-small` is ~5× cheaper
+  than ada-002 and benchmarks better. The swap is free only while nothing is stored — once vectors
+  exist, changing the model mixes incompatible embeddings at the same 1536 dimensions, which
+  `cosineSimilarity`'s length check cannot detect.
+- **GPT is still on no tier ladder** (`TIER_LADDERS` names GLM / KIMI / CLAUDE only), and the chat
+  router has no OpenAI provider. So the key, once set, changes no build. `RATE_GPT_IN` / `_OUT` /
+  `_CACHE` remain unknown and bounded at the Sonnet line — margin-safe, but the admin's cost view
+  would over-state GPT until the real prices are set.
+
+## 2026-09-15 (later) — the admin read the code and said GPT was on the weak tier. He was right about the TEXT and the table was right about the BEHAVIOUR
+
+**What happened.** Told that "no tier ladder names OPENAI", the admin replied *"wapas se dekho weak mode
+me hai."* Both statements were true, which is the defect:
+
+| Source | Claim | Truth |
+|---|---|---|
+| `tierLadder.ts` `TIER_LADDERS` (what `buildTurnRunner` maps) | weak = GLM `glm-5.3-flash` → KIMI `kimi-k2.6` → GLM `glm-5.3` → Haiku. `OPENAI` count **0** | ✅ this is what runs |
+| `providerRates.ts:77` | *"OpenAI (GPT) — the last rung of the WEAK ladder"* | ❌ stale |
+| `routes/agentv3.test.ts:1916, 1938` | *"the admin's weak ladder puts GPT-5.4 after Haiku"* | ❌ stale |
+| `routes/agentv3.ts:2936` | same | ❌ stale |
+
+The claim was true of the admin's FIRST list on 2026-09-14 and was superseded the SAME DAY once the real
+GLM prices were known (`CLAUDE.md`: *"gpt-5.4 is OUT of every ladder … Nothing to buy from OpenAI"*). The
+table was updated; four comments were not.
+
+🔴 **Nothing could have caught it.** `tsc` and `vitest` cannot read a comment, so the code was correct and
+self-contradicting for a day, and the only reader who noticed was a human being.
+
+**THE CLASS FIX — do not restate another module's fact; point at the module that owns it.** A sentence
+that asserts nothing cannot go stale. `providerRates.ts` now carries only the PRICE (its own business) and
+points at `tierLadder.ts` for the rung. `tests/ladderClaimsMatchTheTable.test.ts` **derives** the
+invariant from `TIER_LADDERS`, so the day GPT is genuinely added the guard stops complaining by itself —
+it encodes the invariant, never the current answer. Proven by reversion: re-inserting the exact shipped
+sentence fails it; a comment that merely points at the table does not.
+
+⚠️ `routes/agentv3.ts:2936` carries the same stale sentence and is **deliberately NOT fixed** — PR #2957
+(another live session) is editing that very chain-assembly region, and racing it to a comment produces a
+conflict whoever is right. It is named in the guard's `OWNED_BY_ANOTHER_PR` set with that reason; remove
+the entry when #2957 lands.
+
+### The admin then set `OPENAI_API_KEY` in Cloud Run — and it woke TWO things, not one
+
+My earlier answer to him named only the first. Recorded as a correction, not quietly amended:
+
+1. **`EmbeddingSearch`** — as documented in this file's previous entry. **Measured** rather than asserted:
+   `buildEmbedText` is hard-capped (path + ≤10 export names + 300 chars = **451 chars ≈ 113 tokens**), so
+   at ~60 calls per build and ~1,260 builds/month it is **≈ $0.85 ≈ ₹74/month**, plus ~75,600 Firestore
+   writes ≈ $0.14. **The earlier entry was right about the class and silent about the magnitude** — it is
+   ~₹86/month, not a large leak, and the admin makes decisions on numbers. Still buys nothing: `search()`
+   has no live caller.
+2. 🔴 **`/api/build`'s legacy fallback chain, rung 6.** `routes/build.ts:130` lists
+   `{ name: 'openai', run: () => callOpenAI(...) }`; `callOpenAI` runs **`gpt-4o-mini`** and
+   `resolveApiKey('openai')` falls through to the generic `process.env['OPENAI_API_KEY']` branch
+   (`aiClients.ts:67`). Registered live at `server.ts:739` → `/api/build` and `/api/build-stream`.
+   **That rung threw "OpenAI API Key not available" and fell through until today; it is now a real
+   billable call on NavBharatAI's account.** It is rung SIX (claude → grok → aiRouter → gemini → groq →
+   openai), so it is rare — but it is a provider the Model Routing Policy never approved, and its cost is
+   recorded from `estimateTokens`, not from the real-cost ledger.
+   **Deliberately NOT changed here.** `CLAUDE.md` marks the routing policy *"⚠️ CONFIRM WITH ADMIN BEFORE
+   CHANGING"*, and "should a new provider be allowed to serve a build?" is exactly that question. Put to
+   the admin rather than decided.
+
+🔴 **STILL OPEN — the flag is not live.** PR #2958 gates `EmbeddingSearch`, and it is green but **not
+merged**, so on production `main` the key is currently ungated and item 1 is spending now. The remedy is
+the admin merging #2958 (or unsetting the key); it is his call under the standing merge-hold rule.
+
+## 2026-09-15 (later still) — GPT Nano joins the FREE chat ladder, and the admin's invoice corrected a price we had wrong
+
+**Two things ship together, and the second is why the first changed shape.**
+
+### 1. The free chat ladder — three vendors instead of two
+
+`GLM glm-4.7-flash (₹0) → Vertex gemini-2.5-flash-lite → OpenAI gpt-5-nano → Vertex gemini-2.5-flash`.
+The Gemini-DIRECT door and the `glm-4.7` last rung are gone, on the admin's instruction.
+
+**The gain is VENDOR COUNT, not rung count.** The old ladder spent six registrations on TWO vendors, so
+its "fallback" was largely Google falling back to itself; the single non-Google rung was `glm-4.7`, which
+shares a KEY with the free leader and therefore dies in the same 429 storm that killed it. Three
+genuinely independent vendors answer now.
+
+`src/server/AI/Router/providers/OpenAiChatProvider.ts` is new — this repo had **no OpenAI chat provider
+at all**, so "put Nano in the ladder" was a build, not a config change. Text-only (an image turn defers
+to the next rung, as `GlmProvider` does); self-gates on `OPENAI_API_KEY`; streams with its pinned model.
+
+🔴 **The model id could not be verified from this session and that is stated rather than papered over.**
+A wrong `gpt-5-nano` 404s and the ladder falls through to Vertex — safe, but SILENT, which is the failure
+mode this repo keeps paying for. So a rejected model logs one loud admin line naming `OPENAI_CHAT_MODEL`,
+which also overrides a pinned id so an operator can correct it without a deploy. An override that is not
+a nano-class id warns, because the free-tier ceiling was cleared on the nano price.
+
+### 2. `gemini-2.5-flash-lite` was billed at the flash rate — found in the admin's own invoice
+
+Both ids resolved to the one `'gemini'` rate line ($0.30/$2.50), so **every flash-lite turn was reported
+at 3× its real cost** on the exact screen the admin judges Google spend from. Margin-safe direction (we
+over-stated our own spend, never a user's bill) and wrong all the same — the shape of the
+`E2B_USD_PER_HOUR` drift.
+
+**The input half is invoice-verified, not taken from a price page.** That month's SKUs read
+`Flash GA Text Input 6,116,640 → ₹175.32` and `Flash Lite Text Input 5,237,016 → ₹50.04`, i.e.
+₹2.866e-5 vs ₹9.555e-6 per unit = **exactly 3.0×**, which reproduces $0.30 → $0.10. ⚠️ The OUTPUT half
+is **not** invoice-verified (no flash-lite output SKU appeared); $0.40 is the published pair-mate of the
+input the invoice just confirmed, and `RATE_GEMINI_LITE_OUT` corrects it when a real SKU disagrees.
+
+### 🔴 The order the admin approved is NOT the order that shipped, and that is the honest part
+
+They approved `GLM-flash → Nano → lite → flash` **while our rate card still mis-priced flash-lite at
+4.90**. The fix in this same change drops it to **1.20 — cheaper than Nano (2.85)**. So the decision was
+built on a number this commit proves wrong, and shipping it would have required *weakening a guard*:
+`freeChainCost.test.ts` enforces cheapest-first as an invariant. Their standing instruction is
+*"kharcha kam se kam"*, and cheapest-first serves it, so lite ships at priority 1 and Nano at 2. Swapping
+the two is the whole edit if they want it back — put to them explicitly, not assumed either way.
+
+### 🔎 What the existing guard caught — in my own first draft
+
+The first version registered the rung as `OpenAiChatProvider.model()`, a function call.
+`freeChainCost.test.ts` parses these registrations out of the source to price them, and its own comment
+warns that a shape it cannot read is *"silently exempt from the ceiling"* — so the new rung would have
+been exempt from BOTH the ceiling and the ordering guard, with nothing failing to say so. Every rung is
+now a literal. **The guard did exactly the job it was written for, on the person who added the rung.**
+
+Two of its assertions were genuinely outdated and were corrected rather than worked around: the
+`>= 4` rungs floor (the ladder deliberately got shorter) and a line pinning the now-deleted `glm-4.7`
+rung by name — replaced by the property it was really there for, that no rung bypasses `registerFree`.
+
+**Test-locked** in `tests/freeChatNanoLadder.test.ts` (19). Proven by reversion: deleting the flash-lite
+mapping fails 3; deleting the OpenAI registration fails 1. One case pins a non-obvious dependency — the
+old guard mislabels the nano rung as `VERTEX`, and that is safe ONLY because `realRateFor` matches the
+model id before the provider label. Verified by running the function rather than by hand: my own
+hand-calculation of that case was wrong.
+
+**STILL OPEN:** the `/api/build` legacy `openai` rung (`gpt-4o-mini`) is untouched — it is a routing-policy
+question for the admin, recorded in the previous entry.
+## 2026-09-16 — The admin's two open questions, answered from the code (and the answer to both is the same line)
+
+The admin asked, of the two items the `ee20478d` autopsy left open: *"sabhi question ke best solution
+code se dhund ke batao"*. Both were investigated against the source rather than reasoned about, and
+**both turn out to have the same cause, which is neither of the two levers that were on the table.**
+
+### The finding: we read half of the provider's error message
+
+The 400 that produced `glmThinking.ts` reads, in full:
+
+> *"This model always engages in thinking and cannot be disabled; **please use low, high, or max**"*
+
+The first clause was acted on. The second was not. PR #2957 stopped sending `{type:'disabled'}` and
+sent **nothing at all** — and sending no field does not mean "think less", it means **"use your DEFAULT
+effort"**, which is the MOST reasoning, not the least. That default is what spent the entire
+4,833-token ceiling on three consecutive turns and wrote no files.
+
+**"Cannot be disabled" is not "cannot be reduced."** The provider named its three accepted levels in
+the same sentence and we never tried one.
+
+### Q1 — should `AGENTV3_FLOOR_MS_PER_TOKEN` go 30 → 20? **No, and the number is worth recording.**
+
+- The rate decides the budget: `(150,000 − 5,000) ÷ rate`. At 30 that is **4,833**; at 20 it would be
+  **7,250**.
+- ⚠️ **Where 30 came from is weaker than it looks.** It is a two-point fit over outputs of **111 and
+  182 tokens** (build 4efab9d7) extrapolated **175×** to the loop's 32,000-token ask. `ee20478d` is the
+  only measurement ever taken in the real regime — three points at 4,833 tokens — and it gives
+  **≈19.7 ms/token** against the same ~4.1 s intercept. So the constant probably IS conservative.
+- **It is still the wrong lever, for two reasons.** (1) It does not address the cause: if a model's
+  default reasoning is unbounded, 7,250 tokens is just a bigger number to spend on thinking. (2) The
+  30 is documented as *"the rate we are still willing to WAIT for"* — lowering it converts TRUNCATIONS
+  into TIMEOUTS, and a timeout returns nothing at all, which is the failure the clamp exists to avoid.
+- The two measurements are also from **different models**, so they are not strictly comparable. The
+  instrument to settle it properly already exists — every call records `outputTokens` and `latencyMs`
+  in `llmCalls` — so a per-model measured rate is a real future slice, not a guess to take today.
+
+**Decision: 30 stays. Recorded here so the next session does not re-derive the 19.7 and act on it
+blind.**
+
+### Q2 — should `glm-5.3-flash` move down the ladder? **No — and the code says why the move would buy nothing.**
+
+Checked every Weak rung against `glmCanDisableThinking`:
+
+| rung | can thinking be turned off? |
+|---|---|
+| `glm-5.3-flash` | **no** (proved by the 400) |
+| `kimi-k2.6` | **no** — and `thinkingControl` is set only on the GLM rung (`routes/agentv3.ts`), so Kimi is never sent the field at all |
+| `glm-5.3` | **no** (5.3 family) |
+| `haiku` | n/a — the only non-reasoning rung, and it is last and dearest |
+
+**Three of Weak's four rungs are always-thinking models.** Report `58fe8254` is the confirmation:
+there the GLM rung was 400ing, the chain fell to KIMI, and Kimi returned `4833 output tokens / 0
+characters` three times — the identical starvation, one rung down. Moving flash down the ladder walks
+into the same defect at a higher price (`glm-5.3` is ~9× flash's input rate), which is the opposite of
+both of the admin's stated aims.
+
+**Decision: the ladder is untouched. It is admin policy (2026-09-14) and it was never the problem.**
+
+### What shipped instead
+
+1. **`glmThinkingParam` now sends `{ thinking: { type: 'low' } }`** where `disabled` is not accepted —
+   the provider's own lowest named level — instead of an empty object. `GLM_REDUCED_THINKING` is the
+   one constant.
+2. **The bet checks itself on first contact, so it can never become another 280-failure build.** The
+   level names come from an error message, not a document this session could read, so the field's
+   shape is a reasoned bet. `isThinkingParamRejection` + a one-shot retry drop the field and re-issue
+   the SAME request when a model rejects it; the model is then remembered **process-wide**
+   (`modelRejectsThinkingParam`) so the wasted round-trip is paid at most once per model, not once per
+   call — a per-runner memo would re-pay it on every build, since a runner is constructed per rung per
+   build. Worst case is byte-identical to the behaviour before this change.
+3. ⚠️ **The retry is narrow on purpose**, and only fires when we actually SENT the field: re-issuing a
+   genuinely bad request unchanged would be a retry loop around a deterministic failure, which the
+   fourth absolute rule forbids by name. Test-locked both ways in `tests/glmReducedThinking.test.ts`
+   (11 cases), including that a 429 and an invalid tool schema are never retried.
+4. **#2957's own tests were updated, not flipped.** They pinned the old REMEDY (`toEqual({})`); the
+   INVARIANT they exist for — never send `disabled` to a model that rejects it — is what they assert
+   now, so they still bite on the regression that actually cost 280 calls.
+
+⚠️ **STILL OPEN, and it is the honest bound on all of this:** whether `low` leaves enough of the 4,833
+tokens for a real answer is unmeasured — it needs one live build. If the next report still shows
+`finish_reason: max_tokens` with zero output on that rung, the starvation net from the `ee20478d`
+autopsy catches it (the rung fails over instead of repeating), and the remaining levers are the rate
+(Q1) and a per-model measured throughput.
+---
+
+## 2026-09-16 — Z.ai's and Moonshot's own price pages, saved verbatim; four live rates were wrong, all under-counting OUR cost
+
+The admin sent both vendors' pricing pages in full and asked for them to be saved before the next
+routing change ("mai apko other AI ke price bhejunga, fir ek sath me pura module badlenge"). Both tables
+now live in `providerRates.ts` — the module that OWNS prices — dated and sourced, so the coming change
+argues from quoted numbers instead of remembered ones.
+
+### What was wrong, and the pattern behind it
+
+| row | was | is (published) | why it was wrong |
+|---|---|---|---|
+| `glm-5.3-flash` cache | $0.0375 | **$0.03** | a ≈25%-of-input CONVENTION, not a quote |
+| `glm-5.x` cache | $0.35 | **$0.26** | same convention |
+| `glm-4.x` cache | $0.15 | **$0.11** | same convention |
+| `kimi-k2.7` cache | $0.24 | **$0.19** | same convention |
+| `kimi-k3` | $0.95 / $4.00 | **$3.00 / $15.00** | a PLACEHOLDER mirroring k2.7 "because the price is not verifiable here". It is **exactly Sonnet's price** |
+| `kimi-k2.6` | $0.60 / $2.50 | **$0.95 / $4.00** | it shared the cheap line with k2.5 on the assumption that an older rung is a cheaper one |
+
+🔎 **THE CLASS: a DERIVED number and a PLACEHOLDER number both look exactly like a measured one once
+they are in a table.** The file's own header called the convention "their published cache-hit lines" —
+it was neither published nor checked. Nothing could fail, because a price only proves itself against the
+invoice, and nobody had put the invoice next to the table.
+
+⚠️ **Every one of the six ran the same way — UNDER-stating our cost.** That is the direction that eats
+the admin's margin rather than over-charging a user, which is exactly why none of it ever surfaced as a
+complaint or a failing test. Two of them bite where it matters most: `kimi-k2.6` is the WEAK ladder's
+second rung and weak builds are paid for by NavBharatAI, so every free build has cost ~58% more input
+and 60% more output than the dashboard showed; and `kimi-k3` is the family CEILING for any unrecognised
+Kimi id.
+
+🔒 **The tests caught all of it, which is the point of pinning a price.** Seven assertions failed —
+including one whose title *named the convention* ("cache at the Z.ai 25% convention") — so the change
+could not land quietly. `kimi-k2.6` now has its own row and its own branch in the matcher.
+
+### Also recorded, for the module change the admin has planned
+
+`GLM-4.6V-Flash` (what vision already leads with) is **FREE**; `GLM-OCR` $0.03/MTok; `GLM-ASR-2512`
+~$0.0024/minute; `GLM-Image` $0.015/image; `GLM-4.7-FlashX` $0.07/$0.40. One thing NOT to do: Z.ai's
+built-in **Web Search is $0.01 per use, twice Brave's $0.005** — switching to it would cost more.
+⚠️ "Cached Input Storage" is **Limited-time Free** on every Z.ai line — a promotion, not a price.
+
+🔴 **`kimi-k2.5` is DISCONTINUED (2026-08-31), and the first thing checked was whether anything still
+calls it.** Nothing does: removed from the free ladder on 2026-09-04 after two build reports showed
+*"404 Not found the model kimi-k2.5 or Permission denied"* on this account. Its row stays on purpose —
+old telemetry names it and a report must be able to price what it recorded — now labelled historical.
+**So it is NOT a candidate for the build failures below**; verified by grep, not assumed.
+
+⚠️ **These cache rates still do not bite today.** The header records that cache-hit tokens are not
+tracked separately, so cached input is billed at the full cache-MISS rate. The corrected numbers matter
+the moment that tracking lands — and that is a real lever, because Z.ai's cache-hit price is ~5× cheaper
+than fresh input on the two models every build leads with.
+
+🔴 **OPEN, and far larger than anything above: the admin reports ~80% of app builds are FAILING.**
+No fix is proposed here because no evidence has been read yet. Recorded so the next session does not
+mistake a pricing commit for the state of the engine.
+
+## 2026-09-16 — The three ladders' Kimi rungs, revised on the admin's explicit per-tier instruction
+
+Admin, verbatim: *"free wale me kimi 2.6 ki jagah kimi code 2.7 kar de! normal wale me kimi code 2.7
+highspeed karo strong me kimi k3 bhi add karo."* This is the explicit per-tier routing confirmation the
+Model Routing Policy requires before `TIER_LADDERS` changes — three moves, all in
+`src/server/AgentV3/tierLadder.ts`:
+
+- **Weak's Kimi rung: `kimi-k2.6` → `kimi-k2.7-code`.** Moonshot's own price table (saved above,
+  2026-09-16) already showed these at the SAME price ($0.95/$4.00 in/out) — k2.7-code is Moonshot's
+  dedicated coding model, so this is a straight quality upgrade at no extra cost to the builds
+  NavBharatAI absorbs 100% of.
+- **Normal's Kimi rung: `kimi-k2.7-code` → `kimi-k2.7-code-highspeed`.** Same model family, ~2x
+  tokens/sec, and Moonshot prices it at EXACTLY 2x k2.7-code across every column ($1.90/$8.00/$0.38
+  cache — no quality difference, only speed). The admin was told this cost tradeoff before asking for
+  it (in an earlier turn this session) and proceeded anyway; it lands on Normal, a tier the USER pays
+  for, so the extra cost is priced into their bill rather than absorbed.
+- **Strong gains a Kimi rung for the first time: `kimi-k3`**, placed as the SECOND rung (after
+  `glm-5.3`, before Sonnet). Priced at exactly Sonnet parity ($3.00/$15.00), so this costs nothing extra
+  over what the ladder already assumed for its escalation path — it just gives Strong a third
+  independent vendor family to absorb a GLM outage before climbing all the way to Claude. "Opus sirf
+  zarurat par" is unaffected: Opus is still the last rung.
+
+🔴 **A real under-billing defect was found and fixed in the same change, not left for later.** Adding
+`kimi-k2.7-code-highspeed` to a ladder exposed that `providerRates.ts`'s `realRateFor()` Kimi matcher had
+**no branch for the `-highspeed` suffix at all** — it would have fallen through to the plain
+`return card['kimi-k2.7']` line and silently billed this model at HALF its real price, forever, on every
+Normal-tier build that reached it. Fixed with a dedicated `'kimi-k2.7-highspeed'` rate row
+($1.90/$8.00/$0.38, env-tunable via `RATE_KIMI27HS_IN`/`_OUT`/`_CACHE`) and a matcher branch checked
+BEFORE the k3/k2.6/k2.5/fallback chain. Verified by the re-injection method this repo's own rules
+require: the branch was deleted, `providerRates.test.ts`'s new pinned-price test was confirmed to FAIL
+(received $0.95/$4.00/$0.19 instead of the expected $1.90/$8.00/$0.38), then the fix was restored and
+the test re-confirmed green.
+
+**Test files updated to match the new `TIER_LADDERS` table** (all reversion-checked, none left
+asserting a value that happened to already be true): `tests/tierLadder.test.ts` (ladder sequences, the
+"kimi-k3 is on no ladder" assertion rewritten to "kimi-k3 is on Strong alone", the second-vendor
+assertion for Strong, `availableRungs`/`describeLadder`/`planLadder` expectations),
+`tests/tierChainFidelity.test.ts` (stale ordering in two test titles fixed per the "point at the owning
+module" lesson; the "Strong without a GLM key has no Kimi rung by design" test's premise was now FALSE
+and was rewritten with a new companion test covering the still-real "neither GLM nor Kimi keyed" case;
+the `enforceNoClaude`-on-Strong test now expects `['GLM', 'KIMI']` instead of `['GLM']`).
+`tests/freeKimiLadder.test.ts` and `tests/weakHealLadder.test.ts` were confirmed (again) to test the
+separate, documented-as-legacy `cheapBuildFloorRunners`/`kimiDefault` code path in `routes/agentv3.ts`,
+not `TIER_LADDERS` — left untouched, matching prior investigation.
+
+🔎 **One more sibling only the FULL suite run caught, confirming why the gate runs on the final state and
+not mid-way:** `src/server/routes/agentv3.test.ts`'s `planRunnerChainNames` tests asserted Strong's plan
+chain as `['GLM', 'CLAUDE', 'CLAUDE_OPUS']` (no Kimi) — a third place deriving from `planLadder('mini')`
+that the sibling-hunt grep for `kimi-k2.6`/`kimi-k2.7-code` literals did not surface, because it names no
+Kimi model at all in its old form. Updated to `['GLM', 'KIMI', 'CLAUDE', 'CLAUDE_OPUS']`, and the
+weak-guard test's `['GLM']` → `['GLM', 'KIMI']` (the guard strips Claude rungs only; it never touches
+GLM/Kimi).
+
+Full verification gate run on the final merged state (this branch was rebased onto PR #2963's GLM/Kimi
+price-correction commit before these edits, so both changes ship together and neither drifts from the
+other): `npm run typecheck` · `node scripts/noUnusedImports.mjs` · `npm run typecheck:server` ·
+`npm run build` · `npm run test:bundle` · `npm run boot:check` · `npx vitest run` (Tests line read
+directly, not a truncated tail).
+
+CLAUDE.md's "THREE TIERS, THREE LADDERS" table and its per-tier rationale paragraph updated in the same
+change to match — the ladder is meant to be a single source of truth and the doc must not drift from it.
+
+⚠️ **Still open, unchanged by this work:** the admin's ~80% build-failure claim (no evidence supplied
+yet) and the second, unsent batch of AI provider prices ("ek sath me pura module badlenge") the admin
+said would follow the GLM/Kimi corrections.
+
+## 2026-09-16 — PRODUCTION OUTAGE: Cloud Run couldn't start. Root cause + a new CI gate for the whole class
+
+**Symptom:** `navbharat-ai-prod` failed its Cloud Run startup TCP probe on port 8080, consecutively,
+across multiple revisions (`…-03942-t7r`, `…-03943-wkk`). Cloud Run: *"The user-provided container
+failed to start and listen on the port defined provided by the PORT=8080 environment variable within
+the allocated timeout."* `server.ts` already does the correct thing — `PORT` from env, default 8080,
+`app.listen(PORT, '0.0.0.0', …)` — so the port-binding code itself was never the problem.
+
+**Root cause (confirmed by reproducing the exact Dockerfile build+runtime stages locally, without
+Docker: `npm ci` → `npm run build` → `npm prune --omit=dev` → `node dist/server.cjs`):**
+`src/server/lib/githubSecrets.ts` (new 2026-09-15, the Android-upload-key GitHub Actions secrets
+writer) does a top-level `import _sodium from 'libsodium-wrappers'`, statically wired into `server.ts`
+via `registerMobileShipRoutes`. `libsodium-wrappers` was listed only in `devDependencies`. The
+Dockerfile's runtime stage runs `npm prune --omit=dev` before shipping the image, so the module was
+physically absent at container boot: `require('libsodium-wrappers')` threw synchronously, before
+`app.listen()` ever ran, and the process exited before the port ever opened. This is the exact class
+the Dockerfile's own header comment already warns about (the `typescript` misclassification, fixed
+2026-08-04) — it recurred with a different package.
+
+**Why CI's existing boot-check missed it:** `scripts/boot-check.sh` — which the Dockerfile comment
+names as *"the backstop that turns that class of mistake into a red check instead of an outage"* —
+bundles and runs `server.ts` against the FULL, unpruned `node_modules`. It answers "does the bundle
+crash on load", not "does the bundle crash on load with only the dependencies the shipped image will
+actually contain". It passed cleanly on every PR that touched this file.
+
+**Fix (`libsodium-wrappers` moved `devDependencies` → `dependencies`) verified end-to-end:** rebuilt,
+pruned to production deps, ran `node dist/server.cjs` with `NODE_ENV=production PORT=8080` — reached
+`🚀 Server running on http://localhost:8080` and answered `curl` with `HTTP 200`. Confirmed by
+reversion too (reverting the classification reproduces the exact `MODULE_NOT_FOUND` crash).
+
+**Siblings hunted (fourth absolute rule) — three more real, if not yet acute:** `google-auth-library`
+(imported statically in 8 files, including `routes/agentv3.ts`/`routes/admin.ts`), `semver`
+(`DependencyAnalysis.ts`), and `ws` (`sonic/sonicWs.ts`) are all imported directly by server-reachable
+code but were never declared in `package.json` at all — they currently survive `npm prune --omit=dev`
+only because some genuine dependency happens to need them transitively (`google-auth-library` →
+9.15.1, `semver` → 7.8.3, `ws` → 8.21.3, confirmed present after a real prune). That is a phantom
+dependency in exactly the same sense libsodium was: nothing in `package.json` promises they will stay
+there, so the next unrelated version bump of whatever pulls them in transitively could silently drop
+one and reproduce this exact outage on a totally different package, on a day nobody touched
+`githubSecrets.ts` at all. All three are now explicit `dependencies` with their currently-resolved
+versions. (`electron` and `playwright` also matched a naive text scan of the bundle but are FALSE
+POSITIVES — both are inside code-GENERATOR template strings, `DesktopExportGenerator.ts`'s Electron
+scaffold for a user's exported desktop app and `E2BActuator.ts`'s Playwright screenshot scripts shipped
+to the E2B sandbox VM — neither ever runs in this process. This is exactly why the new gate below is
+built on esbuild's AST-accurate `--metafile`, not a text scan.)
+
+**The systemic fix — `scripts/serverDepsGate.mjs`, wired into `.github/workflows/ci.yml` and
+`npm run deps:server-gate`:** bundles `server.ts` exactly as the Dockerfile's build stage does, with
+`--metafile`, and checks every EXTERNAL package esbuild's real parser found is a `dependency` — not
+merely present in `node_modules`, not merely a `devDependency`. Two things make it precise rather than
+noisy:
+- It reads `imp.kind` from the metafile and only flags `require-call`/`import-statement` (unconditional,
+  runs the instant the referencing module loads) — never `dynamic-import`. This is what correctly
+  excludes `vite`, whose only import in `server.ts` is `await import('vite')` gated behind
+  `NODE_ENV !== 'production'`, safe precisely because it can never execute in the shipped container.
+  `vite` staying a `devDependency` is correct and the gate must never flag it.
+- It reads the metafile's own module graph, not the bundle's text — which is what correctly excludes
+  `electron`/`playwright` (string-literal false positives, see above) without needing a manual
+  allowlist that would rot the moment a new generator template is added.
+- Proven by reversion: reverting the `libsodium-wrappers` classification reproduces the exact FAIL the
+  gate now blocks CI on, naming the package and why.
+
+**Regression suite:** `tests/serverDepsGate.test.ts` (20 cases) — the pure functions
+(`packageNameOf`, `externalPackagesFromMetafile`, `findMissingProductionDeps`), including the vite
+dynamic-import case, the electron/playwright-shaped "external but never called" case, and a wiring
+check that the gate is really in `ci.yml` and `package.json`.
+
+**Gate:** `typecheck` / `noUnusedImports` / `typecheck:server` / `audit:gate` / `license:gate` /
+`build` / `test:bundle` / `boot:check` / `deps:server-gate` all clean. `npx vitest run` — **1692
+files, 23,735 passed, 1 skipped (pre-existing), 0 FAIL**, run last on the final state.
+
+⚠️ **Open, stated plainly:** this gate checks `server.ts`'s own bundle. It does not (yet) check
+anything imported only from a route registered lazily behind a dynamic `import()` elsewhere — by
+construction, a genuinely lazy/dynamic import is correctly excluded (see the vite case), but that also
+means a NEW class of bug — a dynamically-imported module whose OWN static imports are missing a
+production dependency — would only surface the first time that code path actually runs in production,
+not at boot. That is a real, narrower gap; today's outage was specifically a boot-time (`require-call`)
+failure and this gate closes exactly that class.
+## 2026-09-16 — The slow-provider fix: a build call is now bounded by SILENCE, not by duration
+
+Admin, verbatim: *"kimi aur glm slow hai, time out ho jata hai. isko fix karne ka kya kya option hai
+apke pas sabhi batao!!"* — then *"aap jo jo kar sakte ho karo!"*
+
+### What was actually wrong (read out of the code, not inferred from the symptom)
+
+The GLM/Kimi rung sends **one non-streaming request** and bounds it with a **TOTAL wall clock**
+(`floorBudget.ts`: 5 s + 30 ms × tokens, capped at 150 s). Three consequences compound:
+
+1. **A total clock cannot tell a HUNG provider from a SLOW one.** It was introduced to catch the
+   244-second hang of autopsy a487e019, and it does — but it kills a provider that has been emitting
+   tokens the whole time with exactly the same verdict.
+2. **When it fires, NOTHING comes back.** The whole call is discarded, including the files that answer
+   had already written. `floorBudget.ts` states this trade in its own header — truncation returns the
+   partial, a timeout returns nothing — and then had no way to reach the better outcome, because with
+   one opaque request there is no partial to keep.
+3. **The output ceiling is sized from that same clock** (~4,800 tokens at 150 s), so a large file needs
+   several turns, each of which is another chance to be killed.
+
+### The fix, and why it is the CONDITION and not the instance
+
+🔑 **A total clock is a PROXY for "is this provider hung?" — streaming makes that measurable directly.**
+A provider emitting tokens is not hung however slow it is; a provider silent for a minute is hung
+however early in the call it is. So the bound becomes **idle time**, and — the half that actually
+recovers builds — **a stall keeps what already arrived**, reported as a TRUNCATED turn. That is not a
+new concept: it is the exact shape a token-limit cut already produces, so the adapter's path salvage,
+the `truncated` flag and the truncation guard that NAMES the lost file all work on it unchanged.
+"One file short" instead of "no app".
+
+- New PURE module `src/server/AgentV3/providers/openAiStream.ts` — the accumulator's only output is an
+  `OpenAiCompletionLike`, the exact shape the non-streaming call produces, so `parseOpenAiCompletion`
+  stays the SINGLE translation. The breakage-prone part of the system is deliberately not touched;
+  the two read modes cannot drift into disagreeing about what a turn meant.
+- `OpenAiToolRunner` gains the streamed branch; `openAiCompatRunners` gives the SDK client the stream's
+  hard cap instead of the floor bound (otherwise the SDK aborts a healthy stream at 150 s and the whole
+  change is defeated — found by reading the SDK's own timeout semantics, not by a failing test).
+- **`onText` finally receives real deltas** rather than one block at the end, and is not double-fired.
+
+### Kept honest, deliberately
+
+- **Default OFF** (`AGENTV3_STREAM_BUILD_CALLS`). This path carries every build on the cheap floor and
+  has never run against a live provider; unset is today's behaviour to the byte. Same reasoning
+  `AGENTV3_STREAMING_PREVIEW` shipped on.
+- **A stall with nothing usable is still a rung FAILURE**, thrown so the chain falls through and
+  `isTimeout` can bench a provider that keeps stalling. **Reasoning alone does not count as an answer**
+  — a model that streamed only its thinking has produced nothing to salvage or continue from.
+- **Our clock ending never reads as the provider's fault** (`BUDGET_REACHED_MESSAGE`), so a rung handed
+  two seconds because the LANE had two seconds left is not benched for our budgeting.
+- **The abandoned read is aborted.** `turnDeadline.ts` records a build that logged provider traffic 148
+  seconds after it had ended; racing a promise stops the waiting, not the call. And the orphaned
+  `next()` promise is explicitly disarmed — aborting the stream is exactly what makes it reject, which
+  would otherwise be an unhandled rejection in the build server, thrown by the code added to make
+  builds more reliable.
+
+🔴 **THE ONE OPEN COST, recorded rather than left to be discovered: a stream carries no token usage
+unless the provider honours `stream_options.include_usage`.** The request asks for it; whether Z.ai and
+Moonshot answer it cannot be settled from a session. If they do not, usage is **zero** — never an
+invented number (THE ONE-WALLET LAW forbids estimating tokens from text length), so no user is ever
+over-billed, but our own cost report under-states itself. **First real builds must be checked for
+streamed turns reporting 0 tokens**; if they do, the flag comes back off.
+
+### Verified by reversion, not by the tests merely passing
+
+Both guards were proven to bite: re-injecting "any stall destroys the call" failed the
+partial-keeping test, and re-injecting "a stall keeps the provider's finish_reason" failed the
+truncation test. 144 provider tests pass, including the 121 pre-existing ones that prove the
+non-streaming path is unchanged.
+
+### Still the admin's, not code's
+
+The env values themselves (idle/cap tuning against a REAL slow build's measured ms-per-token), any
+ladder reorder, and whether a faster vendor plan is worth buying. And the root question the code cannot
+answer: no failed build report has been read yet for this complaint — these numbers are sized from the
+engine's own budgets, not from the traffic that is actually timing out.
+
+---
+
+## 2026-09-16 — Account switching: the ONE-TAP promise was made on web and never wired to native
+
+**Admin:** *"maine bola tha, ek sath kayi account ek sath login hone wala system bana do! par abhi ek
+ek kayi sare login to ho jate hai. par jab account swich karte hai, to wapas se login karna padta hai.
+easy one tap swich nahi ho raha!"*
+
+**This is the SAME feature the 2026-09-02 entry above investigated once already**, and that entry's
+conclusion still stands: true simultaneous sessions were deliberately NOT built (the Firebase SDK holds
+one live session per app instance, and a refresh token in `localStorage` is a permanent account takeover
+for anyone who reaches that storage — not worth the saved tap). The 2026-09-02 fix made the promise
+honest in words: *"Switching signs you in again — one tap with Google, your password for email
+accounts."* That sentence was only ever true on the web.
+
+**Root cause: the login_hint that makes Google's chooser land on one tap was captured, stored — and
+then silently dropped the moment the flow reached a real phone.**
+
+`handleGoogleSignIn` (web) reads the switch-to email out of `SIGN_IN_HINT_KEY`, clears it, and puts it
+on `GoogleAuthProvider.setCustomParameters({ login_hint, prompt: 'select_account' })` — that part has
+worked since 2026-08-22. But `socialSignIn`'s NATIVE branch (the one every phone actually runs) never
+looks at that `GoogleAuthProvider` object at all — it calls the `@capacitor-firebase/authentication`
+plugin's own `signInWithGoogle()` with no arguments. So on native, every single switch opened Google's
+sign-in sheet with **zero idea which account was wanted** — showing the generic account list at best,
+or (for an account this device never natively cached) a completely fresh login at worst. Both look
+identical to "have to log in again", which is exactly the report.
+
+**The fix.** `@capacitor-firebase/authentication`'s own docs use `login_hint` as the example
+`customParameter` for `signInWithGoogle()` — this was always wireable, just never wired past the
+web-only code path:
+- `googleNativeCustomParameters(hint)` (`accountRoster.ts`, pure) — `[{ key: 'login_hint', value }]`
+  when a hint exists, `undefined` otherwise (never `[]`, so a caller can spread it in and add nothing).
+- `socialSignIn` now takes an explicit `signInHint` parameter — threaded through rather than re-read
+  from `SIGN_IN_HINT_KEY` inside it, because the web path already consumed and cleared that key before
+  `socialSignIn` runs; reading it twice would always see it empty the second time.
+- `handleGoogleSignIn` passes the SAME hint it already puts on the web provider through to
+  `socialSignIn`, so one value now drives both paths instead of only the one nobody's phone uses.
+
+**What this does NOT fix, said plainly (rule 6):**
+- **Apple** has no equivalent hint — "Sign in with Apple" is tied to whichever Apple ID is signed into
+  the device at the OS level, not selectable per app-level account chooser. A device with one Apple ID
+  can only ever offer one Apple account, by Apple's own design, not ours.
+- **GitHub**'s OAuth `authorize` page has no true account-select hint either (only a `login` param that
+  pre-fills a text field, not a fast-path); it is always a full-page authorize sheet on both web and
+  native regardless of any hint. Not touched, since faking a "one tap" claim there would repeat the
+  exact overstatement the 2026-09-02 entry corrected.
+- **Simultaneous sessions are still not built**, and still not recommended without a specific reason to
+  take the risk the 2026-09-02 entry named: every wallet/billing/build code path resolves ONE `auth`
+  from `lib/firebase`, and rewiring them all to a switchable instance risks one missed call site
+  spending real money on the wrong account's wallet.
+
+7 new tests (`accountRoster.test.ts`) pin `googleNativeCustomParameters`'s three states (a real hint,
+one with stray whitespace, and "nothing to add" for undefined/null/empty/whitespace-only — asserting
+`undefined`, never `[]`). Gate: `tsc` clean (frontend + server, after `npm install` picked up
+`libsodium-wrappers`'s move to a real dependency from #2967), `noUnusedImports` clean, `vitest run`
+1694 files / 23762 passed / 0 failed, `build` + `test:bundle` + `boot:check` all green.
+## 2026-09-16 — `AGENTV3_STREAM_BUILD_CALLS` is LIVE (admin set it `on` in Cloud Run)
+
+The admin set the master switch the same day the change merged (#2966, `9e9aa9bb`), and left both
+tunables UNSET so the code defaults govern (idle 60 s, hard cap 300 s). Recorded here and in the
+CLAUDE.md env registry in the same session, hand-to-hand, per that registry's own rule — the entry
+had said "NOT live yet / UNSET", which is exactly the doc-vs-reality drift this repo has already paid
+for twice (the idle-minutes default, the E2B rate).
+
+**So every GLM/Kimi build call is now bounded by SILENCE rather than duration**, and a stall keeps
+what already arrived instead of destroying the call. This is the first time that path has ever run
+against a live provider; the flag exists so it reverts with no deploy.
+
+### 🔴 What must be read off the first real builds — and it is not "did it get faster"
+
+1. **Streamed turns reporting 0 input / 0 output tokens.** A stream carries no usage unless Z.ai and
+   Moonshot honour `stream_options.include_usage`. We ask; only a real call settles it. Zero is the
+   HONEST outcome (never an invented number — THE ONE-WALLET LAW), so no user is over-billed, but our
+   own cost report would under-state itself, and the mid-build cost ceiling reads that same ledger.
+   **If the zeros appear, the flag comes back off** and the honest-but-unmeasured path goes with it.
+2. **A `length` / truncated turn that was previously a dead timeout.** That is the fix working, not a
+   regression — the truncation guard names the cut-off file and the next turn rewrites it. "One file
+   short" is the intended better half of the trade.
+3. **Any rung benched for OUR budget ending.** `turnDeadline`'s wording exists to prevent exactly that;
+   a healthy provider benched because the lane ran out would be the change's own failure mode.
+
+### Still open, unchanged by the flag going on
+
+**No failed build report has been read for this complaint.** Every number in the fix — the 60 s idle
+bound, the 300 s cap — is sized from the engine's own budgets, not from the traffic that is actually
+timing out. A report ID is what turns the tuning from reasoning into measurement.
+## 2026-09-16 — MANDATORY AUTOPSY: XStudy Help continuation build (RELEASE_GATE RED). One root-caused fix shipped, one already-shipped-but-unset lever named, one open root cause recorded.
+
+Fifth absolute rule, triggered by an admin-attached build-diagnostics report (workspace
+`agentv3-OyByVslldzf144gQpGdHfeOjJE23-247789d0-f539-4725-88d9-4dfe2ff0810a`, weak tier, prompt
+"Continue the build from where it left off and finish the remaining steps"). Read end to end (2512
+lines) before drawing any conclusion, per the rule.
+
+### The 5-bucket ledger
+
+- ✅ **Self-healed (3):** two automatic GLM→next-provider fallbacks on a 60s timeout, GLM correctly
+  benched after the second consecutive timeout so the ladder reached KIMI; and `RENDER_RESCUE` —
+  the build's own verdict said "not ok" but a real-browser check showed the app renders, and the
+  platform upgraded the RECORDED outcome to match the stronger evidence.
+- 🔀 **Worked around (2):** the agent explicitly triaged known findings away under time pressure
+  ("I will NOT polish further… keep the app functional rather than chase non-critical evaluate
+  items" — leaving a real `@types/react-router-dom` v5-vs-v6 mismatch and design/a11y grades
+  unaddressed); and the page-render check for 1 route "produced no result" and the build proceeded
+  to a verdict without that check ever completing.
+- ⏭️ **Skipped (1):** a Playwright E2E suite was scaffolded into the project but never installed or
+  run in the sandbox (`@playwright/test` absent) — a real verification capability sat unused.
+- ❌ **Still broken / shipped imperfect (5):** the build-breaking blocker itself (3 fake/incomplete
+  demo-data findings, never fixed — this is why the gate is RED); design consistency graded D
+  (54/100 — 25 colours, 114 off-grid spacing values); accessibility graded C (62/100 — missing alt
+  text, 3 unlabeled fields, 1 unlabeled icon button); the stale `@types/react-router-dom` mismatch;
+  and — the one that matters most — **`RELEASE_GATE` itself said "the typecheck did not run" while
+  the SAME report's own `commands` log shows the agent ran `tsc --noEmit` twice, both clean.** A
+  false statement sitting a few hundred lines below the evidence that contradicts it.
+- 🥵 **Struggle points:** 16+ minutes of pure read-only reconstruction (ls, tsc, 6+ greps, ~10 full
+  file reads incl. 4× re-reading `index.css`) before writing a single line, because the prior turn
+  was cut off mid-CSS-write and nothing told this turn what was left to do — confirmed by the
+  platform's own `REPEATED_READS` finding (25 reads, only 15 distinct files, 40% re-reads); two
+  60-second dead GLM timeouts; **one single non-streamed Kimi call took 413 seconds (6.9 minutes —
+  32% of the entire 21.4-minute build) to write the missing CSS in one shot**, with zero partial
+  visibility and total exposure to a hard timeout; several GLM investigation calls individually took
+  72–100 seconds. Net: of 21.4 minutes wall-clock, the sandbox's own telemetry says only ~1.9
+  minutes (9%) was real operations — 91% was the user watching a spinner while models thought.
+
+### The missing subsystem
+
+There is no persisted, structured "what's left to finish" state across an interrupted build turn.
+"Continue the build" made this session re-derive, by hand, via 6+ greps and 10 file reads, a fact
+the previous (cut-off) turn already knew: which CSS classes the markup referenced but never
+defined. A deterministic pre-flight diff (markup class usage vs. CSS definitions — literally the
+computation the model itself ran manually) handed to the continuation turn as a ready list would
+have removed most of the 16-minute recon and the 40% repeated-read waste in one motion. Recorded as
+an **open root cause** below rather than built now — it is a real feature, not a bug fix, and needs
+its own scoped design (this diff-based hand-off would generalize past CSS to "what's referenced but
+undefined" for any file pair, which is worth doing right rather than narrowly for CSS alone).
+
+### Root-caused and fixed in this change (PR pending)
+
+**The `RELEASE_GATE` false "the typecheck did not run" claim.** Traced to
+`src/server/routes/agentv3.ts`: `gateEvidence.typecheck` defaults to `'not-run'` and is ONLY ever
+set by the deterministic G3 post-build gate (`postBuildCodeGateShouldRun`), which itself requires
+`buildOk` (the build already marked successful at that point in the pipeline) before it will even
+attempt a check. So a build not yet marked `ok` never gets a typecheck evidence write, however many
+times the AGENT ITSELF ran `tsc --noEmit` as part of its own workflow — and that evidence (the
+`commands` log) is sitting in the very same report `releaseGate.ts` reads from to write "the
+typecheck did not run". This is the SAME missing-evidence-ledger class already recorded as an OPEN
+root cause on 2026-09-14 (autopsy `697b38ee`) — "every fact needed to contradict them was already
+recorded... until one ledger exists that any actor writes a proven fact into and every verdict
+reads from, this class returns" — returning here, four days later, in a different subsystem.
+
+Fix (additive-only, never touches G3's own execution/repair/budget logic): a new pure pair in
+`src/server/AgentV3/TscGate.ts` — `looksLikeTypecheckCommand` (recognizes a stand-alone
+`tsc --noEmit` invocation) and `typecheckEvidenceFromCommands` (scans a build's own recorded
+command history for the LATEST such command and reads its OUTPUT with the same `hasTscErrors`
+parser G3 itself trusts — never the shell exit code, because a piped command like
+`tsc --noEmit | head -40`, the exact shape in this report, reports `head`'s exit code, not tsc's).
+Wired as `BuildDiagnostics.typecheckEvidenceFromAgentCommands()` and consulted in `agentv3.ts` as a
+fallback immediately after the G3 block, ONLY when `gateEvidence.typecheck` is still `'not-run'` —
+never overriding real G3 evidence. Runs unconditionally for every build (fast-lane included), which
+also closes the same evidence gap for fast-lane builds whose own ad-hoc typechecks were never fed
+into the gate at all. Regression-locked: 11 new cases in `TscGate.test.ts` including the exact
+piped-command regression shape from this report, plus 2 wiring cases in `BuildDiagnostics.test.ts`.
+Full gate green on the final state: `typecheck` + `typecheck:server` + `noUnusedImports` + `build`
++ `deps:server-gate` + `boot:check` + `vitest run` (1694 files, 23770 passed, 1 skipped, 0 FAIL).
+
+**The 50/50 law applied:** the reactive half is the fallback above. The other half — why did G3
+never run at all for this build in the first place, when the build had a live preview and rendered
+cleanly? — was investigated and left deliberately alone: `postBuildCodeGateShouldRun`'s `buildOk`
+gate is guarded by its own dedicated test ("EVERY code gate goes through the one predicate — a later
+one cannot repeat the bug", explicitly counting FIVE call sites sharing the guard) and its own
+comment trail suggests the gate is intentionally conservative about running repair passes on a build
+the engine has not yet called successful. Loosening that condition is a wider, riskier change with
+its own blast radius across five call sites and is NOT done here — the fallback above closes the
+honesty gap without needing to change when G3 itself runs.
+
+### Proactive, world-best layer
+
+**The single highest-value lever available right now, already built, zero new code: turn on
+`AGENTV3_STREAM_BUILD_CALLS`.** This exact report is a same-day, dated demonstration of precisely
+the failure class that flag (PR #2966, merged hours before this build ran) exists to eliminate — a
+413-second single call with zero partial visibility, and two 60-second dead timeouts, out of a
+21.4-minute build. It is unset (default off) in Cloud Run. Recommending the admin set it is the one
+proactive action this autopsy surfaces as immediately actionable with no further engineering.
+
+**The bigger, structural lever:** the "no resume-state subsystem" gap above. A build that can hand
+a continuation turn a ready-made "here is exactly what's unfinished" fact sheet — starting narrowly
+with the CSS-class-usage-vs-definition diff this build computed by hand — would cut both the 16
+minutes of recon and the 40% repeated-read waste this report's own `REPEATED_READS` finding named.
+Proposed as the next system-level build, not attempted inline in this autopsy given its scope.
+
+### Open root causes (rule 6 — recorded honestly, not silently shipped as closed)
+
+- The resume-state subsystem above — genuinely a new feature, not a patch.
+- `AGENTV3_STREAM_BUILD_CALLS` remains unset in Cloud Run — an admin action, not a code gap.
+- Design-consistency (D, 54/100) and accessibility (C, 62/100) grades below the bar are DETECTED
+  and reported honestly but not auto-healed on the weak tier by default — matches
+  `AGENTV3_DESIGN_GATE`'s existing scope (detection always on; repair is its own flag) and is not a
+  new gap this autopsy needs to fix, recorded here only for completeness of the ledger.
+- The 3 fake/incomplete-code READINESS_BLOCKER items that made this specific build RED were never
+  fixed — that is the individual app's outstanding work, correctly left for the user's own "fix it"
+  follow-up per the build's own honest verdict, not a platform defect.
+**No failed build report has been read for this complaint.** Every number in the fix — the 60 s idle
+bound, the 300 s cap — is sized from the engine's own budgets, not from the traffic that is actually
+timing out. A report ID is what turns the tuning from reasoning into measurement.
+
+---
+
+## 2026-09-16 — Referral code + "Earning" list on My Profile
+
+Admin: *"user ka refral code (jisse user ko 25+25+25 =75 ₹ milenge) user ki profile me clear show
+hona chahiye. sath me button- 'earning'. is earning button par click karne se — yeh user ka refral
+code kis kis user ne use kiya hai, uski email id aur us user ne 3 me se kitne step complete kar liye
+woh list bhi show ho!"*
+
+### What shipped
+
+- **`friendVerificationStatus(paidSteps)`** (`referralRewards.ts`, pure) — how far one referred
+  friend has got on the three steps that pay their referrer (mobile / email / github), read straight
+  from the friend's own `paidSteps`. Deliberately the SAME signal `decideReferrerReward` already pays
+  from, so "2 of 3" on the new screen can never disagree with the ₹ the referrer actually received.
+- **`GET /api/referral/:userId/referred`** — the Earning list itself. Read-only and money-free (no
+  wallet write, no device proof needed — it only answers a question the referrer is allowed to ask
+  about their own code): queries `user_referrals` where `referrerUserId == me`, and for each friend
+  returns their email (`resolveAccountContact`, the same server-privileged lookup the claim route
+  already uses) plus `emailVerified` / `phoneVerified` / `githubLinked` / `completedCount`. Bounded at
+  500 rows the same way `referralAdminSummary.ts`'s admin scan is bounded — the ₹1,500 lifetime cap
+  already keeps a real referrer to roughly twenty friends, so the limit only guards a runaway query.
+- **`ReferralEarningsSheet.tsx`** — the "Earning" button's modal. Lists every friend with their email
+  and a Mobile/Email/GitHub badge row, or an honest empty/disabled state. Uses the vendored
+  `Github` icon (`ui/BrandIcons.tsx`), never `lucide-react`'s (removed upstream in 1.x — see that
+  file's own header). Sheet geometry uses `nb-sheet-overlay` + `nb-sheet` + `nb-sheet-over-nav`
+  (z-[400], above the tab bar) rather than a bare `vh` cap — the mobile-scroll and tab-bar-overlap
+  classes both caught a first draft that got this wrong before it ever reached CI.
+- **`ProfilePage.tsx`** — a new "Your Referral Code" card (code + Copy + the **Earning** button),
+  fed by the SAME `useReferralProgress` hook `ReferralPanel` (Billing → Refer a Friend) already uses
+  — Android-only by construction, so this card is silent on the website exactly like the rest of the
+  referral surface already is. No new platform gate invented.
+- `AppKnowledgeBase.ts`'s `referral` entry updated (path, description, howToUse, keywords) per the
+  mandatory sync rule — the code now has TWO places (Billing → Promo, and My Profile), and the
+  Earning list is documented so every AI in the app can answer "who used my code" correctly.
+
+### Working alongside PR #2971
+
+`claude/profile-verification-buttons` (open at the time this shipped) also touches `ProfilePage.tsx`
+and `ReferralPanel.tsx`, adding real email/phone/GitHub verify buttons — a different feature in an
+overlapping file. Built independently on `main`, not on that branch; a merge conflict at whichever
+merges second is expected (CLAUDE.md, "Working alongside other live sessions") and not a mistake.
+
+### Verification gate — run last, on the final state
+
+`npm run typecheck` / `typecheck:server` / `noUnusedImports.mjs` / `build` / `test:bundle` /
+`boot:check` all clean. `npx vitest run` — **1694 files, 23772 passed, 1 skipped, 0 FAIL** (the run
+that caught the two geometry mistakes above and confirmed their fixes).
+
+### Still open
+
+No admin decision was needed here — the feature reuses existing infrastructure (the hook, the
+step-proof signal, the shared sheet CSS) rather than inventing anything new.
+
+## 2026-09-16 — Admin panel: "Failure category" — which app TYPE fails most, and WHY (new feature)
+
+Admin asked (verbatim): *"jitne bhi build reports admin penal me hai, wah ek alag analysis laga do.
+jisme sabhi failed build ko catagorise kiya jaye. matlab 78% build failed hai. kis type ki apps nahi
+ban pa rahi hai. kya koi specific prkar hai, ya rendom... ek button banado, 'failure catagory'."*
+
+**Honest scope note before the feature itself: no build reports were actually shared with this
+session to "read" — the admin's message referred to reports sent in other sessions/conversations.**
+Built from the platform's own comprehensive durable record instead (below), which is a superset of
+any hand-picked sample and is what actually answers "is there a pattern" honestly.
+
+**Data source, chosen deliberately.** Three candidate sources exist: `admin_build_reports` (the
+"Report" button inbox — a SELF-SELECTED sample of builds a user was upset enough to flag),
+`user_build_history` (status/title only, no rootCause), and `workspace_diagnostics_v3` via
+`listAllDiagnostics()` (every workspace's LATEST build, durable, already backing
+`/api/admin/all-builds`). Used the third. This is the same correction `AdminDashboard.tsx` already
+made once, on 2026-08-12, for the sibling "first-pass quality" headline — see the comment at
+`AdminDashboard.tsx:376` ("IT WAS MEASURING COMPLAINTS, NOT BUILDS") — applied here from the start
+rather than shipped biased and fixed later.
+
+**Two axes, both reusing existing platform truth instead of inventing a new one:**
+1. **By app TYPE** — the domain a build's prompt belongs to, via `analyzeRequirementGaps().domain`
+   (`RequirementGapAnalyzer.ts`), the SAME classifier a build prompt is already analysed with.
+   Centralised on purpose rather than writing a second domain-guessing regex list (fourth absolute
+   rule, step 2/3).
+2. **By failure REASON** — a new, evidence-grounded keyword classifier
+   (`src/server/lib/buildFailureCategory.ts`), matched against `rootCause` text read verbatim out of
+   `BuildDiagnostics.ts` / `turnDeadline.ts` (db-unreachable, sandbox-unavailable, provider-budget,
+   cost-ceiling, stuck-tool, tool-call-failed, typecheck-failed, dependency-error, preview-failed,
+   runtime-error, review-critical, no-files). Unmatched text lands in an honest `other` bucket —
+   never forced into a wrong category — and every bucket carries up to 3 real examples
+  (workspaceId + raw rootCause text) so the admin can verify the classification themselves.
+
+⚠️ **A sibling classifier was found and deliberately NOT merged into this one — recorded, not
+duplicated silently.** `src/lib/buildReportAnalytics.ts` already has its own `CATEGORY_RULES` regex
+list solving the same reason-classification problem, on the same underlying rootCause vocabulary,
+but sourced from the biased `admin_build_reports` inbox and feeding the existing "Failure patterns"
+panel already live in the admin dashboard (`AdminDashboard.tsx` ~line 3589). Consolidating the two
+classifiers, and/or repointing that older panel at the same comprehensive `listAllDiagnostics`
+source this feature uses, would be the complete fix — but that touches a live, already-shipped
+panel's classification output, which is a wider, riskier change than this feature PR should carry.
+Left as an **open root cause** (rule 6) rather than guessed at; see the comment block at the top of
+`buildFailureCategory.ts`.
+
+**Honesty conventions followed** (matching `builderMetrics.ts` / `ReferralCostCard.tsx` /
+`BuildCostCard.tsx`): rates are `null`, never `0`, when the denominator is zero; in-flight/unsettled
+builds are excluded from rate math but counted separately (`unjudged`) rather than silently dropped;
+the read window and whether it was capped are always shown, never a bare percentage with no stated
+sample size.
+
+**Shipped:**
+- `src/server/lib/buildFailureCategory.ts` — pure module (`classifyFailureReason`, `domainOfPrompt`,
+  `categorizeBuildFailures`), no Firestore/env/clock reads.
+- `tests/buildFailureCategory.test.ts` — 15 tests: real-string pattern matches, honest `other` /
+  `no-root-cause` buckets, pattern precedence, unjudged-build exclusion from rates, domain grouping
+  sorted by FAILED count (not raw total), zero-judged domains never appearing, capped examples.
+- `GET /api/admin/failure-categories` (`src/server/routes/admin.ts`) — reads `listAllDiagnostics`,
+  categorises, returns the report plus `window`/`reportsRead`/`capped`/`sampleNote`.
+- `src/components/admin/FailureCategoryCard.tsx` — new admin panel card (stat tiles, by-app-type
+  table, expandable by-reason list with raw examples), wired into `AdminDashboard.tsx` beside the
+  existing Build Costs / Referral Cost cards. Uses the shared `adminGet`/`adminFailed` helper from
+  `src/lib/adminFetch.ts` (the disciplined fetch pattern built 2026-09-14 specifically to prevent an
+  error response being silently rendered as zero data) rather than a hand-rolled fetch.
+
+**Verification gate, run on the final state:** frontend `tsc --noEmit` clean, server
+`tsc -p tsconfig.server.json --noEmit` clean, `node scripts/noUnusedImports.mjs` clean,
+`npx vitest run tests/buildFailureCategory.test.ts` → 15/15 passed. Full-suite gate (`npm run
+build`, `npm run test:bundle`, `npm run boot:check`, full `npx vitest run`) run before push.
+
+No `AppKnowledgeBase.ts` entry — this is admin-only internal tooling (same precedent as
+`BuildCostCard`/`ReferralCostCard`, neither of which has an entry either).
+---
+
+## 2026-09-16 — Three real verification buttons: email, phone, GitHub — and the referral screen's own dead ones fixed alongside them
+
+**Admin:** *"user ke profile page par. 3 varification button add karo! 1- email verification 2- phone
+verification 3- github verification. ji button lar click kiya jaye wahi verification start ho, (aur
+refral system me use ho). jo jo verification complete ho jaye, woh likh kar aye (alredy aa raha hai)."*
+
+**Server-side, nothing was missing.** `stepIsProven` (`referralRewards.ts`) already reads all three
+facts straight from Firebase — `emailVerified`, a linked phone, `github.com` among the linked
+providers — because the referral payout needed proof no request body could fake. What was missing was
+a real way to MAKE those facts true, reachable from the app rather than from a phone's OS settings.
+
+**🔴 And while building it, the SAME missing capability turned up a second time, already broken.**
+`ReferralPanel.tsx` (Billing → Refer a Friend) told a blocked step *"Verify your email address first"*
+/ *"Connect your GitHub account first"* as **plain, unclickable text** — and its own `onVerifyPhone`
+prop was declared in the component's interface and **never called by anything**, nor ever passed by
+its one caller (`BillingPanel.tsx`). Three "buttons" that only ever rendered as words, on the one
+screen whose whole job is finishing these steps. Root-cause discipline (rule 3, hunt the siblings)
+means this shipped in the same change rather than being left for later.
+
+**What was built — one shared, reusable action module, used by both screens:**
+- `src/lib/accountVerificationActions.ts` (pure-ish, no server import): `sendVerificationEmail(user)`
+  wraps Firebase's own `sendEmailVerification`; `linkGithubAccount(auth)` LINKS GitHub onto the
+  CURRENTLY SIGNED-IN account (never `signInWithCredential`, which would switch the session to
+  whoever that GitHub identity belongs to — the wrong outcome when verifying the account you are
+  already in). Mirrors `AuthComponent.tsx`'s existing native-vs-web split for GitHub sign-in: native
+  (Capacitor) uses `@capacitor-firebase/authentication`'s own GitHub sheet then `linkWithCredential`;
+  web uses `linkWithPopup`, falling back to `linkWithRedirect` only on a genuinely blocked popup
+  (`popupFailureAction` — the SAME decision the sign-in screen already makes, reused rather than
+  re-derived). A redirect completes itself: `App.tsx`'s existing `getRedirectResult` handler already
+  reads a GitHub credential off ANY redirect result, sign-in or link, so no new wiring was needed
+  there. Phone is deliberately NOT here — `VerifyPhoneSheet` already does that whole job; duplicating
+  it would be the exact "four drifted copies" class rule 4 exists to prevent.
+- Two small type-declaration additions in `declarations.d.ts` (`linkWithPopup`, `linkWithRedirect`,
+  `sendEmailVerification`) — this repo hand-writes a minimal `firebase/auth` shim rather than the
+  SDK's full types, and these three were simply never added because nothing had called them yet.
+
+**Profile page — the new Verifications card.** Three rows (Email / Phone / GitHub), each showing a
+green "Verified"/"Connected" badge when done, or a real "Verify"/"Connect" button when not. Email:
+click sends a real Firebase verification link, then the SAME button becomes "Refresh" (Firebase's
+client SDK caches `emailVerified` until `.reload()` is called — there is no live listener for it).
+GitHub: click runs the shared `linkGithubAccount` action; already-linked is a no-op, never a re-link.
+Phone: unchanged — still opens the one existing `VerifyPhoneSheet` already mounted on this page. The
+old "Mobile not verified — Verify" line beside the avatar is now a read-only "✓ verified" glance (its
+job moved to the card, so there is exactly one Verify button per step, never two doing the same
+thing).
+
+**Referral screen — the dead text replaced with the SAME real actions.** `ReferralPanel.tsx` now
+mounts its own `VerifyPhoneSheet` and calls `sendVerificationEmail` / `linkGithubAccount` directly
+(via the `firebase.ts` `auth` singleton it already has no trouble reaching, the same pattern
+`ProfilePage` uses) — no new props threaded through `BillingPanel`/`App.tsx`, keeping the fix
+self-contained and low-risk. A blocked row now shows the explanation text AND a real button beside
+it; completing email or GitHub calls `props.onRefresh()`, which re-fetches `/api/referral/:userId` —
+the SERVER's own facts, never a client-invented "done" state. The dead `onVerifyPhone` prop is
+deleted rather than left declared-and-unused, which is the exact bug this closes.
+
+**What this does NOT claim, said plainly (rule 6):** simultaneous multi-account sessions are still out
+of scope (see the 2026-09-02 entry above) — this is about VERIFYING facts on the one signed-in
+account, unrelated to that design question. Apple has no linkable equivalent (tied to the device's one
+signed-in Apple ID) and GitHub's OAuth page has no true account-select hint (only a text prefill) —
+neither is touched, since claiming "one tap" there would repeat the exact overstatement the 2026-08-22
+entry (see the account-switch fix above) already corrected once.
+
+**Tests:** `accountVerificationActions.test.ts` (13 — `isGithubLinked`'s three states; the native
+credential going through `linkWithCredential` and never `signInWithCredential`; the popup → redirect
+→ cancel decision tree; the one honest error message for a GitHub identity already used elsewhere).
+`tests/verificationButtonsAreReal.test.ts` (10, source-scan, matching this repo's own convention for
+locking a UI-wiring class rather than a DOM render — the vitest environment here is `node`) — pins
+that both screens call the real actions, that the dead `onVerifyPhone` prop is gone, and that a
+blocked referral row renders an actual button. `phoneGate.test.ts`'s existing profile-verification
+assertion was updated to the new card's wording (`'Not linked yet'` replacing `'Mobile not verified'`)
+without weakening what it protects — the same three underlying checks (`user.phoneNumber ?`,
+`maskPhone`, `setVerifyOpen(true)`) still hold.
+
+Gate: `tsc` clean (frontend + server), `noUnusedImports` clean, `vitest run` 1696 files / 23785 passed
+/ 0 failed, `build` + `test:bundle` + `boot:check` all green. `AppKnowledgeBase.ts`'s `my_profile` and
+`referral` entries updated in the same change per the mandatory sync rule.
+
+## 2026-09-16 — A streamed turn that reports no tokens is now SAID, not silently counted as zero
+
+**Trigger: the admin forwarded an external (ChatGPT) 24-point plan, "Make Kimi/GLM Timeout-Resistant".**
+Per the external-suggestion rule it was audited against the real code rather than transcribed. **Most
+of it was already built by PR #2966** (merged hours earlier), and saying so plainly is the point of
+this entry — a later session must not rebuild it:
+
+| Plan item | Reality |
+|---|---|
+| Idle/stall timeout replacing the wall clock | ✅ `readStream()` races each `iterator.next()` against a fresh 60 s timer |
+| Separate first-byte (TTFT) bound | ✅ `withTimeout(call(), idleMs)` |
+| Timer resets on provider activity | ✅ fresh timer per chunk |
+| Partial output survives a stall | ✅ `toCompletion()` → `finish_reason:'length'` |
+| **No half-written file from a truncated stream** | ✅ **already impossible by construction** — `salvageTruncatedPath` recovers the `path` and deliberately never the partial `content`, so a cut `write_file` errors honestly at dispatch |
+| Continuation instead of retry | ✅ truncated turn flows back into the loop |
+| **Don't bench a vendor for being slow** | ✅ **already correct** — a stall WITH partial answer returns normally (no throw ⇒ no timeout strike); only 60 s of silence with nothing produced throws; our own budget throws `BUDGET_REACHED_MESSAGE`, worded to not match `isTimeoutProviderError` |
+| Raised ceiling | ✅ live: `(300 s − 5 s) / 30 ms` = **9,833** output tokens |
+
+**Rejected, with reasons.** Item 15 (adaptive hedging — race two providers on paid tiers) directly
+contradicts **money-audit leak 6**, where racing was found billing BOTH providers on every chat turn
+and was confined to paid surfaces by `streamRacePolicy.ts` on the admin's own instruction. Re-opening
+it inside the BUILD path would re-create a leak the admin ordered closed. Items 13/14 (rolling
+provider score, `SLOW_RELIABLE` mode) are unbuildable today for the reason below — the telemetry they
+would learn from cannot yet be trusted. Items 16–19 (parallel tool calls, context firewall, dynamic
+tool loading, progress events) are real work but a different project; bundling them here would break
+the small-reviewable-change rule.
+
+### The one thing that was genuinely broken, and it is the money panel
+
+🔴 **`parseOpenAiCompletion` collapsed a MISSING `usage` into `{inputTokens: 0, outputTokens: 0}`** —
+so a turn whose provider reported nothing was indistinguishable from one that genuinely cost nothing.
+
+**This is the SAME CLASS as autopsy f04421ef, arriving through a different door.** That one was a
+report printing `GLM: 54 call(s) · 0 in · 0 out` for an unsettled ledger, and the zeros were read — in
+an autopsy handed to the admin — as a measured zero; the renderer was fixed to print *"tokens not
+recorded"*. A STREAMED turn carries token counts only when the provider honours
+`stream_options.include_usage`, and whether Z.ai and Moonshot do **is a fact no session can settle
+without a real call**. `AGENTV3_STREAM_BUILD_CALLS` is LIVE, so this is not hypothetical — and
+CLAUDE.md's own entry for that flag names exactly this as the thing to watch.
+
+⚠️ **The accumulator already knew.** `OpenAiStreamAccumulator.usageMissing()` computes precisely this
+signal and **nothing in production called it** — the fact was computed and then thrown away one layer
+later. (It is left in place: it is a tested public accessor, and the fact now travels by the shared
+`toCompletion → parseOpenAiCompletion` path instead, which is the single-translation discipline that
+module's header argues for.)
+
+🔒 **NO BILL MOVES.** The ONE-WALLET LAW forbids inventing tokens, so an unmeasured turn still costs
+the user ₹0 — the safe direction, unchanged. What was broken is the **admin's own cost figure**, which
+under-states itself silently on the exact panel used to judge provider spend — the same shape as the
+`E2B_USD_PER_HOUR` drift.
+
+**Fixed at the class, source → choke point:**
+- `TurnUsage.measured?: boolean` (`ClaudeClient.ts`) — only ever written as `false`, so every existing
+  reader, snapshot and test is byte-identical on a measured turn.
+- `parseOpenAiCompletion` sets it when the provider reported NEITHER count. An absent `usage` and a
+  `usage: {}` are equally unmeasured; **a genuine `prompt_tokens: 0` stays a measurement** and is
+  test-locked as such. Covers the non-streamed path too — the class, not the instance.
+- `MultiProviderTurnRunner` forwards it through `onTurnComplete`.
+- `captureTurnUsage` (`routes/agentv3.ts`) — the choke point every build and heal turn already passes
+  through, beside the cost ceiling and for the same reason — records **`USAGE_NOT_REPORTED`** once per
+  build, naming the provider, the model, and the flag to unset.
+
+**The 300 s / 480 s sum, corrected in place rather than re-tuned.** `FLOOR_TIMEOUT_CAP_MS`'s comment
+documents an invariant — *"2 × 150 s = 300 s, leaving 180 s for the vendor behind it… raising this
+without re-checking that sum is how a slow provider eats a whole turn again"* — and the streamed path
+does not consult that constant at all: it uses `streamHardCapMs()` (300 s), making the sum 2 × 300 s
+against a 480 s turn, with no reserve. **It is still safe, and the comment now says why:** a stall
+fires at 60 s, so the 300 s ceiling is reached only by a provider actively emitting, and one emitting
+an ANSWER returns it truncated rather than dying. The narrow real exposure is autopsy ee20478d's case
+— a reasoning-only model can now hold a rung for 300 s instead of 150 s before yielding nothing. **Not
+re-tuned on a guess**; the honest input is what real streamed builds do.
+
+**Verification gate, run last on the final state:** `typecheck` · `typecheck:server` ·
+`noUnusedImports` · `build` · `test:bundle` · `boot:check` · `vitest run` → **1698 files, 23,824
+passed, 1 skipped, 0 FAIL**. New: `tests/usageNotReported.test.ts` (13), **proven by reversion** —
+removing the adapter line fails 4 of them.
+
+### Open root causes (rule 6)
+
+- **Whether Z.ai and Moonshot actually honour `include_usage` is still unknown** — that is the fact
+  this change makes VISIBLE rather than answers. Watch `USAGE_NOT_REPORTED` on the next real streamed
+  builds; if it fires every time, the honest options are to unset `AGENTV3_STREAM_BUILD_CALLS` or to
+  accept an admin-side cost under-count while the user's bill stays correct.
+- **Items 13/14 (adaptive, telemetry-driven provider routing) stay unbuilt, deliberately.** The plan's
+  own best line is *"do not claim Kimi or GLM are fast until actual production telemetry proves it"* —
+  and until the above is answered, the token half of that telemetry may be silently zero. Routing
+  learned from numbers we cannot yet trust would be a guess wearing a measurement's clothes.
+
+## 2026-09-16 — The fast lane re-discovered the same dead rung on every file. One map per build fixes it.
+
+**Triggered by a real build report the admin sent** (Panchang/Muhurat app, workspace
+`…CJShlpGNSBbWGb9pr7lD3RrVJ6t1`, build `16cabab2-3916-48cf-927b-6d243e945ff8`), plus a second report
+(`…XukOoloPf0cuUpwwxaYpsfjb8N13`) that carried no `llmCalls` at all. This is the first change in this
+repo driven by measured per-call `latencyMs`, not by reasoning about model reputation.
+
+### What the report actually measured
+
+| call | file | latencyMs | out tokens | tok/s | finish |
+|---|---|---|---|---|---|
+| 1 | file-list plan | 33,314 | 1,908 | 57.3 | end_turn |
+| 2 | shared contract | 62,669 | 0 | — | **never dispatched** (budget exhausted) |
+| 3 | `src/lib/cities.ts` | 21,939 | 2,545 | 116.0 | end_turn |
+| 4 | `src/index.css` | 58,645 | 7,190 | 122.6 | end_turn |
+| 5 | **`src/lib/muhurat.ts`** | **812,870** | 8,000 | **9.8** | max_tokens |
+| 6 | **`src/lib/astro.ts`** | **1,397,269** | 8,000 | **5.7** | max_tokens |
+
+Calls 5+6 = **2,210,139 ms of 2,386,706 ms — 92.6% of all model time in two calls.** Same model, same
+build, same night as calls 3–4 which ran at 116–123 tok/s. `providerDelivery: {GLM: 5}`,
+`providerFailures: {GLM: 108}` of which **89 were output-budget starvation**. KIMI is rung 2 of the weak
+ladder and was **never reached on any file**.
+
+### Root cause — a LIFETIME bug, not a logic bug
+
+Three code facts, each verified in source rather than inferred from the JSON:
+
+1. **`glm-5.3-flash` always reasons** (`glmThinking.ts`: *"5.3 is the first family that always
+   reasons… cannot be disabled"*). On the two files needing real algorithmic content it spent its whole
+   authorised ceiling thinking and returned no text and no tool call — `OUTPUT_BUDGET_STARVED`.
+2. **A starved rung is deliberately NOT a timeout** (`MultiProviderTurnRunner.ts`: *"It must NOT be
+   treated as a timeout: the provider answered, quickly and correctly, inside its clock"*). So
+   `isStarvedBudgetError` never touches `timeoutStreak`, and the "2 consecutive timeouts bench the
+   family" escalation **cannot fire for this class** — which is why KIMI was never reached. **This is
+   correct and is left exactly as it is.**
+3. **The retirement memory that exists for precisely this problem was scoped one level too narrow.**
+   `deadForRun` lives per `makeMultiProviderTurnRunner` instance. The agentic path builds `client`
+   ONCE and reuses it, so a rung starved on turn 1 is skipped on turns 2..n — working as designed. But
+   `fastGenerateOnce` calls `makeFastTextRunner()` **fresh inside itself, once per file**, so every file
+   started with an empty map and re-paid the identical starvation. That is the 812.9 s and the 1,397.3 s.
+
+### The change (narrow by construction — 2 functional lines)
+
+- `MultiProviderOptions.deadRungs?: Map<string, string>` — the retired-rung memory, **owned by the
+  caller** so its lifetime is the caller's. Omitted ⇒ the runner keeps its own private map, byte-identical
+  to before.
+- `const deadForRun = opts.deadRungs ?? new Map(...)` — the entire behavioural diff.
+- `buildTurnRunner` forwards it only when supplied.
+- `routes/agentv3.ts`: **one `const fastLaneDeadRungs = new Map()` per build request**, handed to every
+  per-file runner the fast lane builds.
+
+🔒 **A fresh runner per file is KEPT on purpose.** Only the MEMORY is shared. `onUsed` must stay
+per-call because SimpleBuilder generates files CONCURRENTLY (`mapWithConcurrency`) — one shared callback
+would attribute the wrong provider to a file, corrupting `deliveredVia` and the cost ledger.
+
+🔒 **Lifetime, which is the whole safety argument:** the map is a `const` inside the
+`app.post('/api/agentv3/chat')` handler — created when a build starts, garbage when it ends. A second
+build runs that line again and gets an empty map. It is deliberately **not** a module singleton, the one
+shape that would turn "slow for this build" into "blacklisted for everyone". Test-locked three ways
+(declared after the handler opens, indented, and no zero-indent declaration anywhere).
+
+**Unchanged and verified unchanged by a diff audit:** every timeout value, the 300 s streaming ceiling,
+the starved≠timeout split, the ladder, provider fallback order, streaming behaviour, wallet/token
+accounting, pricing, context handling, tool loading. No hedging or racing introduced.
+
+**Tests:** `tests/fastLaneDeadRungMemory.test.ts` (13), covering the five required cases — same-build
+skip, new-build reset, cross-user isolation, success-is-never-dead, starved≠timeout — plus wiring.
+**Proven by reversion: un-sharing the map fails 5 of them.**
+
+**Gate, run last on the final state:** typecheck · typecheck:server · noUnusedImports · build ·
+test:bundle · boot:check · `vitest run` → **1699 files, 23,850 passed, 1 skipped, 0 FAIL.**
+
+### Honest limitations (rule 6)
+
+- **The saving is not yet measured.** This removes a *re-discovery* cost the report proves was paid; by
+  how much depends on how many rungs starve per file, which needs a post-change build report to say.
+- **A rung starved on a LARGE file is skipped for later SMALL files too**, where it might have fitted.
+  Accepted deliberately: the fallback is a different *vendor* one rung down (the thing that never
+  happened in this build), against a demonstrated 1,397 s cost for the status quo. Revisit only if a
+  real report shows a rung being retired too eagerly.
+- **The underlying starvation is untouched.** `glm-5.3-flash` still burns its ceiling on reasoning for
+  complex files. This change stops us paying for that discovery repeatedly; it does not stop the first
+  occurrence. That remains open.
+
+## 2026-09-16 — The acceptance gate's UNKNOWN state had no teeth: a build nobody proved shipped as a success
+
+**Admin changed the optimization objective**: first-pass correctness over latency, explicitly accepting
+extra seconds/minutes. Asked for a full audit of the build → verify → repair → accept pipeline before any
+change. This entry is the audit's one implemented finding; the rest is recorded as P1/P2, not built.
+
+### What the audit found (verified in code, not intent)
+
+The verification machinery is far more complete than the symptom suggests: the fast lane runs an
+unresolved-local-import gate, a deterministic mispath auto-fix, an in-process esbuild parse gate and
+`tsc`, then up to **3 repair rounds** (`SimpleBuilder` verify → repair → re-verify). Post-build there is
+platform-published preview proof (`deliveryProof.ts`), page-render checks, a real-browser user journey
+(fill → submit → **reload** → confirm persisted), console/runtime error capture with a bounded repair
+(`AGENTV3_AUTOFIX`), the app's own test suite (`AGENTV3_VACCINE`), adversarial input fuzzing
+(`AGENTV3_REDTEAM`), and a four-state release gate. `ADVISORY_CAP_MS` (120 s) was checked and does **not**
+bound any of this — it is armed at line ~17808, *after* the gate, and covers only genuinely advisory
+post-work (reviewer, reflection, GitHub push).
+
+🔴 **The gap is the acceptance gate's enforcement, and it is structural.** `releaseGate.ts` computes four
+states and its own header calls UNKNOWN — *"nothing failed and nothing was PROVEN — we cannot tell you
+this works"* — "the most important state in this file". But `gate.state` was consumed in exactly **three**
+places in the entire server, all in one block of `routes/agentv3.ts`:
+
+1. the severity of the admin diagnostic (17503)
+2. its `autoResolved` flag (17506)
+3. the `red && gateBlockers > 0` verdict flip (17535)
+
+**UNKNOWN had no consequence anywhere** — not on `ok`, not on the user's summary, not on what got
+re-checked. And because every runtime proof is gated on a preview URL, those checks skip *together*,
+precisely when an app is most broken. So the exact case the admin described — "appears built while still
+having functional/runtime problems" — ended with an ordinary success message. This is the 2026-08-12
+dukaan lie in its other costume: fixed for RED, never extended to the state meaning "we did not look".
+
+### The P0 shipped
+
+When the gate lands UNKNOWN on an otherwise-successful build: record a first-class
+**`RELEASE_GATE_UNPROVEN`** finding (severity warning, **not** auto-resolved), and append an honest line
+to the **user's own summary** — they are the one about to open the app, and the diagnostics report is
+admin-gated (Fix 68).
+
+🔒 **It deliberately does NOT touch `ok`, and that restraint is the point.** Flipping an unproven build to
+failed would make it FREE (the "working app or free" guard keys on `!result.ok`), which autopsy
+`4efab9d7` is the admin's standing ruling against: *"app bani = preview chala… to aise to mai barbad ho
+jaunga."* **Not proven ≠ proven broken.** Nothing about the verdict, the bill, timeouts, streaming,
+routing or hedging changes.
+
+🔎 **It is also the measurement that must come first.** Nobody can say today how often a build ships
+unproven, because nothing counted it. As a first-class finding it is now countable by the Failure Category
+panel (#2973) — and only that number can justify a stronger rule.
+
+**Tests:** `tests/releaseGateUnproven.test.ts` (11) — gate semantics (nothing-proven ⇒ UNKNOWN; static
+cleanliness can never earn a pass; one real proof leaves UNKNOWN; a genuine failure stays RED) plus wiring
+(finding recorded, not auto-resolved, reaches the user's summary, **never** sets `ok: false`, names no
+provider). **Proven by reversion: removing the branch fails 3.**
+
+⚠️ **One existing test had to be repaired, and the reason is worth recording.**
+`releaseGateVerdict.test.ts`'s "the correction itself can never break a build" sliced `at + 700` chars to
+find the enclosing `catch` — asserting a *distance*, not a relationship. Adding a sibling branch pushed
+the catch past 700 and failed a test that should not have cared. That is precisely the trap
+`buildCostCeiling.test.ts` already documents (*"an anchor cannot drift with the length of what sits
+between"*). Re-anchored on the next statement; **what it protects is unchanged** — the correction is still
+proven to sit inside the gate's try/catch, and it now additionally proves no `try {` re-opens in between.
+
+**Gate, run last on the final state:** typecheck · typecheck:server · noUnusedImports · build ·
+test:bundle · boot:check · `vitest run` → **1700 files, 23,861 passed, 1 skipped, 0 FAIL.**
+
+### Proposed next, NOT built (evidence-ranked)
+
+- **P1 — give UNKNOWN a retry, not just a label.** When the gate would land UNKNOWN and build budget
+  remains, spend it attempting the proof that was skipped rather than ending. The machinery exists
+  (`deliveryProof` already starts the dev server when the agent published no preview); what is missing is
+  a second attempt when the first yielded nothing. This is where the admin's "accept more latency" trade
+  actually converts into correctness.
+- **P2 — patch-based editing for EDIT builds.** The fast lane is 100% whole-file (`<<<FILE …>>>`, *"Write
+  the COMPLETE, real file"*); zero `edit_file`/`replace_symbol` calls appeared in either sampled report.
+  For fresh builds this is correct and carries no stale-file risk. For edits it risks silent loss of
+  unrelated existing code and is also the dominant output-token cost. Needs an EDIT-build report to
+  justify — both samples were fresh builds, so the evidence for this is not yet in hand.
+
+### Still open (rule 6)
+
+- **How often UNKNOWN actually ships is unmeasured** — that is what this change begins counting. No claim
+  about the rate is made here.
+- **The gate cannot prove integrations** (auth, real database writes against a user-owned Supabase). The
+  journey check deliberately downgrades to a non-writing submit against a user's real database, so
+  "integration correctness" remains structurally unprovable by the platform.
+- **UNKNOWN still ships.** This change makes it honest and countable; it does not stop it.
+
+---
+
+## 2026-09-16 — P1: UNKNOWN earns one last look (branch `claude/unknown-last-chance-proof`, stacked on #2976)
+
+**The admin's objective, verbatim, is what this serves:** *"THE APP SHOULD BE CORRECT AND WORKING ON THE
+FIRST BUILD AS OFTEN AS POSSIBLE. I am willing to accept some additional seconds/minutes of model latency
+if that significantly improves first-pass correctness."* P0 (#2976) made an unproven build say so. It did
+not make one fewer build unproven. This does.
+
+### The cause of UNKNOWN, traced rather than assumed
+
+`RUNTIME_PROOF = ['preview', 'pages', 'journeys']` — every one of the three is gated on `lastPreviewUrl`,
+so they go quiet together. Each **also** demands headroom before starting: the preview verify wants
+`total − 90 s` (it budgets for a verify **plus a heal**), the page check `total − 45 s`. And
+`deliveryProof` (autopsy `4efab9d7`) already covers the case where the agent published no URL at all — it
+starts the dev server itself.
+
+**So exactly one case was uncovered, and it is the one that produces UNKNOWN on a real build: a preview
+URL EXISTS, the app may well be running, and nobody looked — purely because there was no room for
+verify-plus-heal.** The 90-second bar is correct for the main loop, which must be able to repair what it
+finds. It is far too expensive as the price of *looking*.
+
+### What was built
+
+One verify-**only** last look, after the release gate computes UNKNOWN on a successful build, in
+`routes/agentv3.ts`. `const gate` became `let gate`; the findings object became a `gateFindings()` closure
+so the gate can be **re-computed from the same inputs** rather than edited in place.
+
+Conditions to start, all required: `gate.state === 'unknown'` · `result.ok` · a `lastPreviewUrl` exists ·
+`actuator.browseUrl` exists · not aborted · and `LAST_CHANCE_PROOF_MS` (45 s) still fits inside
+`effectiveBuildSeconds`. **It is a floor for STARTING, never an extension of the build's budget** — below
+it the check does not run and the build stays honestly unproven, which is the correct outcome rather than
+a look cut off half-way.
+
+It then makes ONE `browseUrl` (bounded at 35 s — the *same* value the main verify loop already uses, not
+a new or raised timeout), runs the *same* `analyzePreviewHtml` and the *same* `filterActionableErrors`,
+and applies the *same two bars* the main loop applies:
+
+| Outcome | Bar | Effect |
+|---|---|---|
+| **proven** | `verdict.rendered && consoleErrors.length === 0` | `preview: 'passed'` → gate re-computed → no longer UNKNOWN |
+| **broken** | `!rendered && !inconclusive && !serverDown` | `preview: 'failed'` → the gate turns RED **by its own existing rule** |
+| **neither** | anything ambiguous | evidence untouched — **stays UNKNOWN** |
+
+🔒 **The third row is the constraint the admin stated twice** (*"Do NOT simply change UNKNOWN → SUCCESS"*,
+*"Do NOT simply change UNKNOWN → FAILED unless there is actual evidence that the app is broken"*). Turning
+"we could not tell" into either verdict is the one thing this must never do, and ambiguity is the default
+path, not an edge case.
+
+⚠️ **A heal is out of reach here BY CONSTRUCTION, and that is deliberate.** Had there been 90 s, the main
+loop would already have run and this block would never be reached. So this is verify-only: it converts
+*unproven* into *proven* or *proven-broken*; it does not repair. No model call is made — the whole path is
+deterministic browser work, so a clean build pays nothing extra.
+
+**Report codes:** `LAST_CHANCE_PROOF` (info / error / warning by outcome, with duration and every verdict
+flag), `LAST_CHANCE_PROOF_UNAVAILABLE` (could not open it — *"an infrastructure limit here, never evidence
+about the app itself"*), `LAST_CHANCE_PROOF_SKIPPED` (says **why** it was not attempted, so "unproven"
+never reads as a verdict we reached rather than one we were never in a position to reach).
+
+### Constraints held
+
+No timeout value changed (35 s is the existing one; 45 s is a new *start* floor). No racing, no hedging —
+one call, awaited. No second browser or verification framework — it calls the existing stack. No billing,
+no token accounting, no streaming change. The P0 `deadForRun` implementation (#2975) is untouched, as is
+the P0 `RELEASE_GATE_UNPROVEN` notice (#2976), which still fires whenever this look leaves the build
+unproven.
+
+### Tests
+
+`tests/lastChanceProof.test.ts` — 25 cases across the 13 required areas, including the four 🔒 constraint
+locks (deadForRun untouched · no racing · no billing · no model call) and the metrics baseline.
+
+⚠️ **AND IT CAUGHT THE ANCHOR TRAP A SECOND TIME, ONE STEP EARLIER THAN LAST WEEK.** Three tests in
+`releaseGateUnproven.test.ts` anchored on `gate.state === 'unknown' && result.ok` — the branch's own
+*condition*. That stopped identifying the branch the moment this change added a **sibling guarded by the
+same condition** above it: `indexOf` returned the sibling and the slice contained none of what was being
+asserted. Same class as `releaseGateVerdict.test.ts`'s `at + 700` distance anchor, and the lesson is
+sharper: **an anchor must name the thing, not a property several things share.** Re-anchored on the unique
+finding code and bounded by the gate's own `catch` rather than a character count. What those tests protect
+is unchanged.
+
+**Gate, run last on the final state:** typecheck · typecheck:server · noUnusedImports · build ·
+test:bundle · boot:check · `vitest run` → **1701 files, 23,886 passed, 1 skipped, 0 FAIL.**
+
+### Does this actually improve first-pass correctness, honestly
+
+**Partly, and the halves are different sizes.** It genuinely converts some builds from *unproven* to
+*proven-broken* — and a proven-broken build turns the gate RED, which the existing correction turns into
+`ok: false`, an honest "not ready" message and **no charge**. That is a real correctness outcome the user
+feels. It also converts some to *proven-good*, which is reporting accuracy rather than a better app.
+
+**What it does NOT do is make the app itself more correct.** It cannot repair what it finds — there is no
+budget for a heal at this point by construction. The build that renders broken is still broken; the user
+is simply told the truth and not billed. Claiming otherwise would be the kind of green-tick-over-a-failure
+this file exists to prevent.
+
+### Still open (rule 6)
+
+- **UNKNOWN still ships** when the look is ambiguous, when no browser exists, or when under 45 s remain.
+  Narrowed, not closed.
+- **The rate is still unmeasured.** `RELEASE_GATE_UNPROVEN` (P0) plus the three codes here are what will
+  finally answer "how often, and why" from real builds. No claim about the rate is made here.
+- **Repair-after-proof is not built.** A build proven broken at this point ends honestly instead of being
+  fixed. Doing better needs budget reserved *earlier* in the build, which is a separate change with its
+  own latency trade — and under the admin's stated objective it is the one worth costing next.
+## 2026-09-16 — App Mart: congratulations on approval (bell + email), and re-publish replaces instead of duplicating (APK store)
+
+Admin request, verbatim (Hinglish): notify + email the creator when their app is approved for App
+Mart; and when a user edits and re-publishes an app, admin approval afterward must not create a
+second app — the old one should be replaced in place.
+
+**1) Congratulations notification + email on approval.** New shared module
+`src/server/lib/storeApprovalNotify.ts` (`notifyStoreApproval`), covering BOTH store surfaces — the
+APK store's `'approved'` decision and the web-app store's `'listed'` decision are the same real event
+("your app is now live and anyone can find it"), so one module serves both rather than two hand-written
+copies. Same shape as the existing per-user "your site is down" path in `siteUptimeSweep.ts`: an
+in-app bell entry via `AdminNotificationStore.saveNotification`, plus a best-effort email via
+`alertEmail.ts` when one is configured and the account's email is verified — reused rather than
+reinvented, since that pair is already this platform's one answer to "reach a user outside the app".
+Wired into both `POST /api/nav-store/admin/review` and `POST /api/nav-store/web/admin/review` in
+`routes/navStore.ts`, firing only on the TRANSITION into approved/listed (never on a re-click of an
+already-approved app), and — matching the "side effects after the response" discipline `web/publish`'s
+own bake step already uses in this file — fired AFTER `res.json(...)`, so a slow or unconfigured email
+provider can never hold up the admin's review screen. Never throws; a notification/email failure can
+never turn a successful approval into an error response.
+
+**2) Re-publish replaces the listing instead of duplicating it (APK store).** The web-app store already
+had this right (`saveWebApp`'s own comment: "one app id per (owner, workspace), so updating never
+spawns a duplicate listing") — the APK store did not. `ingestApkSubmission` in `routes/navStore.ts`
+always minted a brand-new record id, so editing an app in its own GitHub repo and sending it for review
+again created a SECOND, unrelated submission: an already-approved app stayed live under its old listing
+while a fresh `pending` one queued up beside it, with nothing in the admin queue showing the two were
+the same app.
+
+Root cause fixed with a new pure decision function, `findRepublishTarget` (`navStoreStore.ts`): matches
+an existing submission by `(uid, provenance.repo)` — the same GitHub repo IS the same app, since the
+store only ever ingests a NavBharatAI build and one app lives in one repo — excluding a `'removed'`
+submission (a real takedown; a fresh submission after one starts its own clean record rather than
+quietly reviving what an admin took down). When a match exists, `ingestApkSubmission` reuses its id
+(carrying the lifetime `downloads` count forward, same continuity rule `saveWebApp` already applies to
+`runs`/`remixes`) and deletes the old binary's storage object once the new one is saved.
+
+Status ALWAYS resets to `'pending'` on a re-publish, even replacing an `'approved'` submission —
+deliberately NOT mirroring the web-app store's "a clean re-publish keeps its earned place" leniency.
+A NEW BINARY needs its OWN scan and its OWN human look; the APK store's whole safety model (this
+file's own header: "malware built for a specific campaign is routinely unknown to every engine on the
+day it ships — the scan informs the reviewer, it does not replace them") applies to every submission,
+not just first ones, and carrying an old approval forward onto different bytes would be exactly the
+shortcut that model exists to refuse. This also matches the admin's own framing of the request
+("admin ke approval ke baad" — after admin's approval [each time]) — every update still needs a fresh
+admin look; it just lands in the same slot instead of a new one.
+
+Regression-locked: `navStoreStore.test.ts` (9 cases on `findRepublishTarget`, pure) and
+`storeApprovalNotify.test.ts` (10 cases: message content, the White-Label Law — never names an
+underlying AI vendor — and the notify orchestration with injected deps, mirroring
+`siteUptimeSweep.test.ts`'s harness style). `tests/navStoreRoutes.test.ts` updated for both new
+exports. Full gate green on the final, merged-onto-`main` state: typecheck (frontend + server),
+noUnusedImports, build, `deps:server-gate`, `boot:check`, `vitest run` — 1702 files, 23878 passed,
+1 skipped, 0 FAIL.
+
+**Open, stated plainly:** the APK store's `packageName` field is permanently blank (`packageName: ''`,
+hardcoded, never populated anywhere) — Android package identity is not tracked at all today.
+`provenance.repo` was used instead as this app's real identity key because it is the only stable value
+that already exists on every submission; a real `packageName` extracted from the APK's manifest would
+be a cleaner, more standard key and is a separate, future improvement.
+
+---
+
+## 2026-09-16 — P0: a protected CORRECTION RESERVE, so verify → repair → re-verify has a budget of its own
+
+**The admin's objective, verbatim:** *"FIRST-BUILD CORRECTNESS > MINIMUM LATENCY… I am willing to let a
+build take longer if that materially increases the probability that the final application is actually
+working."* #2976 made an unproven build say so; #2978 gave it one last look. Neither gave correction a
+budget. This does.
+
+### The audit, traced from code (no guesses)
+
+| Question | Answer, with the line |
+|---|---|
+| Where is the budget created? | `maxBuildSeconds()` (`routes/agentv3.ts:1668`, default **1800 s**) → `scaleBuildSeconds(…, depth)` (`PipelineDepth.ts:55`, ×2.0 for `deep`, ceiling 3600 s) → `effectiveBuildSeconds` → `deadlineMs`. |
+| Is it a hard wall all stages respect? | **Yes.** `setTimeout(finalizeOnDeadline, deadlineMs)` finalizes the response; `ADVISORY_CAP_MS` (120 s) is armed only **after** the gate, so it does not eat the correction window. |
+| Where do the repair rounds come from? | `autoFixMaxAttempts()` (`AutoFix.ts:143`) — **default 1**, hard-capped at 3, via `AGENTV3_AUTOFIX_ATTEMPTS`. Not three by default. |
+| Is repair budget reserved, or leftovers? | 🔴 **Leftovers, entirely.** ~25 post-build checks each ask `Date.now() - buildStartedAt < effectiveBuildSeconds*1000 - X` with X = 30 s (render rescue), 45 s (page check, last-chance proof), 60 s (heal floor), 90 s (preview verify + heal, journeys, review) and 120 s (red-team). **Not one of them reserves anything.** |
+| Can generation consume the whole budget? | 🔴 **Yes, by construction.** `baseRunnerOpts.maxBuildMs = effectiveBuildSeconds * 1000` — the *whole* clock — and `buildTimedOut` stops the runner only at 100%. |
+| What happens when verification finds a real error with no budget left? | The gates are never entered at all: they all fail their headroom test **together**, so verify → repair → re-verify is skipped in silence. That is the mechanism behind the UNKNOWN gate. |
+| Can a reserve be introduced without touching provider timeouts? | **Yes** — it is a split of the build's own wall clock; no provider timeout, stream bound or ceiling is involved. |
+| Fast lane? | **Not the problem.** `SimpleBuilder` is independently hard-bounded at `overallTimeoutMs ?? 240_000` and the route passes no override. Only the agentic path could eat the budget. |
+
+🔎 **One discovery that changed the design:** `AgentRunner` sets `buildStartMs = Date.now()` **inside
+`run()`**, so `maxBuildMs` is a **per-runner** cap, not a build-wide one. Every heal/escalation runner
+therefore gets a *fresh* full-length clock today. A reserve that only bounded the main runner would be
+spent by the first escalation.
+
+### The change
+
+New `src/server/AgentV3/correctionReserve.ts`. `generationBudgetMs(totalMs, elapsedMs)` is handed to
+the **three generation-shaped runners only** — the main build, the escalation, the empty-build retry.
+Every heal runner keeps `baseRunnerOpts`' full ceiling, because **they are the ones that spend the
+reserve.**
+
+🔑 **The fraction is DERIVED, not chosen.** `CORRECTION_RESERVE_FRACTION = 1 - BUDGET_STAGE_AT.final`
+= **10%**. `buildBudgetSteer` has told the model since the f04421ef autopsy that past 90% it must
+*"stop all work now except saving what you have and writing an honest summary"* — **advisory, and
+nothing enforced it.** The reserve is that same line, enforced. It takes no time the engine had not
+already declared spent, which is why no new number had to be invented. If that threshold moves, this
+moves with it.
+
+**The band makes one fraction safe at every cap:** floor **120 s** (the preview-verify gate needs
+*more* than 90 s of headroom to be entered — a 90 s reserve would cost generation time and still leave
+every check skipping), ceiling **300 s** (a deep build's 10% is six minutes; correction is a bounded
+repair round, not a second build), share **25%** (on a short cap the floor would otherwise take 40%).
+Default 1800 s → **180 s**. Deep 3600 s → 300 s. Short 300 s → 75 s, and the honest consequence is
+stated rather than hidden: a five-minute total budget cannot afford a repair round and does not
+pretend to reserve one.
+
+🔒 **`MIN_GENERATION_MS` exists to stop a cap of zero, which would be the opposite of a cap.**
+`buildTimedOut` treats `maxBuildMs <= 0` as *"no watchdog configured"* and never stops the runner — so
+a reserve computation that reached 0 would silently **remove** the wall-clock guard from the very
+build it bounds. A positive floor makes that arithmetically impossible, and a test asserts the cap
+really fires at every input.
+
+**Telemetry:** one `CORRECTION_BUDGET` finding per build — `total`, `reserve`, `generationCap`,
+`elapsedAtGate`, `leftAtGate`, `gate`. Admin-only, `info`, wrapped: an accounting line must never fail
+the build it accounts for.
+
+**Kill switch:** `AGENTV3_CORRECTION_RESERVE=off` → generation keeps the whole budget, byte-identical
+to today, no deploy.
+
+### The honest trade, stated rather than buried
+
+**Generation now stops 10% earlier.** For a build that would have used its last 10% productively, that
+is a real loss. Two things make it the right trade, and neither is an assumption:
+
+1. **That population was already getting no verification.** A build finishing at 95% leaves 90 s, and
+   the verify gate needs *more* than 90 s — so it was skipped anyway. Cutting at 90% does not cost
+   those builds their verification; it costs them 10% of generation and **buys** them the verification
+   they were never getting.
+2. **The 90% line is the engine's own existing policy**, not a new restriction invented here.
+
+⚠️ **What I could NOT measure, and did not pretend to:** how often generation actually runs to the
+wall. No telemetry existed for it — which is exactly why `CORRECTION_BUDGET` is in this change. If
+`leftAtGate` turns out to be large on most builds, the reserve is costing generation time it did not
+need, and the band should shrink. **That is a measurement to take, not a claim being made here.**
+
+### Not done, deliberately (P1/P2, not implemented)
+
+- **P1 — targeted repair context.** `buildPreviewRepairPrompt` (`PreviewVerify.ts:321`) passes the
+  analyzer's problems and up to 15 console errors, then says *"read the relevant files first"* — so
+  file selection is the model's job and costs turns. The admin's richer bundle (stack trace, error
+  category, network error, affected file/location) is a real improvement and a separate change.
+- **P2 — repair-model routing (GLM for simple, Kimi for hard).** `healRunnerOpts()` already returns a
+  tier-shaped option object, so `tierLadder.ts`'s `healLadder` could carry a difficulty hint cleanly.
+  **Not required by the reserve**, so it is not in it — and the admin explicitly said not to redesign
+  the ladder for this task.
+- **Raising the repair rounds above 1.** Deliberately untouched: the default is 1, and raising it
+  without first seeing whether round 1 even runs would be spending a budget on an unmeasured problem.
+
+**Gate, run last on the final state:** typecheck · typecheck:server · noUnusedImports · build ·
+test:bundle · boot:check · `vitest run` → **1704 files, 23,935 passed, 1 skipped, 0 FAIL.**
+`tests/correctionReserve.test.ts` — 32 cases over the 16 required properties, reversion-proven
+(2 fail when the wiring is removed).
+
+---
+
+## 2026-09-16 — The evidence layer: model performance aggregated across builds (branch `claude/model-performance-telemetry`)
+
+**Admin approved the audit's recommendation: telemetry first, routing later.** *"Every optimization must
+be evidence-driven."* This is the evidence.
+
+### The gap, restated from the audit
+
+Every build's report already carries `llmCalls` (`LlmCallRecord`: model, latency, in/out tokens,
+`finishReason`, `ok`, `error`) and an accurate per-provider failure ledger (`providerFailures` /
+`providerFailureReasons`, bucketed by `classifyProviderFailure`). But `listAllDiagnostics` — the ONLY
+cross-build index — projected metadata alone. **So "is Kimi better than GLM on complex files?" could be
+answered only by opening reports one at a time, and the single real observation anyone had was n = 1.**
+
+### What shipped
+
+`src/server/AgentV3/modelPerformance.ts` (new, PURE — no clock, no env, no I/O) summarises one report
+into per-`(provider, model)` rows plus per-provider failures plus build-level dimensions.
+`listAllDiagnostics` projects it. **It costs no extra I/O**: that query already reads each whole
+document to project `ok`/`summary`, so `llmCalls` is already in memory — summarising is a walk over at
+most `MAX_LLM_CALLS` (300) records per row, and the output is one row per MODEL, never per call.
+
+### 🔒 The four integrity rules, each forced by something real in the data
+
+1. **A FAILED CALL'S MODEL ID IS NOT THE MODEL THAT FAILED.** `AgentRunner`'s failure path
+   (`AgentRunner.ts:586`) reports the *requested* model — a Claude id — because the chain threw before
+   any rung said which one it was; only the success path carries `turn.model ?? model`. Attributing
+   failures per model would file **every GLM starvation under `claude-haiku`**. So per-model stats come
+   from successful calls, failures are reported per PROVIDER from the ledger, and the failed calls are
+   counted honestly as `unattributedFailedCalls` rather than dropped.
+2. **"Not reported" is never zero.** No usage ⇒ `outputTokens: null`, plus `usageReportedCalls` so an
+   analysis knows how many calls a total is built from. Averaging a missing value as 0 would have
+   under-stated a model's real output by a third in the mixed case (test 10).
+3. **Failure buckets are READ, never re-derived.** `output-budget` and `timeout` come from the ledger
+   the runner filled with the SAME predicates it routed on. A second regex here would be a second
+   opinion, and the two would drift. Test-locked by asserting the module (comments stripped) contains
+   no such regex.
+4. **NO first-pass-success flag is invented.** The admin asked for an authoritative field "if one
+   exists". **None does**: `ok` means the runner returned a result (a build healed three times is still
+   `ok: true`), the release gate answers a different question and its `unknown` is by design neither
+   pass nor fail, and nothing records "no repair was needed". The three components are exposed and
+   `FIRST_PASS_NOTE` states the limitation in the code.
+
+### The one field that was not already on the document
+
+`taskType` / `complexityScore` / `startTier` went only to `agentV3CostTelemetry`, a separate store. So
+`BuildDiagnostics.setRequestAnalysis()` records them on the report — called once, after `buildDiag`
+exists, with a value the route computed long before, wrapped, and **read by nothing in the build**.
+
+⚠️ **Stored rather than re-derived, and that is not a preference.** `analyzeRequest` is pure, so a
+reader could re-run it on the stored prompt — but the report keeps only the FIRST **200** characters
+(`HISTORY_PROMPT_MAX`) while the score has explicit length bands (+5 over 300, +10 over 800) and takes
+`fileCount`/`historyTurns` that are not stored at all. A re-derived score would be **a different number
+printed as the same fact**. A legacy report reads `null`, never a re-derivation.
+
+`repairCount` is exposed as `previewRepairAttempts`, named precisely: `PREVIEW_NOT_RENDERED` is recorded
+once per preview-heal iteration, immediately before the heal runner runs, so it counts that loop's
+model-backed attempts exactly — and NOT the deterministic heals (syntax, import-path, tsconfig) that
+spend no model call. Those are all in `issueCodeCounts`, unaggregated, so a later question needs no code
+change. (`REAL_HEAL` was checked and is a test-only fixture code, not production.)
+
+### Build behaviour is unchanged
+
+**65 insertions, 0 deletions.** The only executable line on the build path is the wrapped
+`setRequestAnalysis` call. Verified untouched: `tierLadder.ts`, `correctionReserve.ts`,
+`releaseGate.ts`, `floorBudget.ts`, `MultiProviderTurnRunner.ts`, `openAiStream.ts`, `AgentRunner.ts`,
+`SimpleBuilder.ts`. No ladder, model id, timeout, streaming, max-tokens, billing, gate, reserve,
+`deadForRun` or routing change; no new model call; no new route. Authorization is unchanged — the
+projection rides an existing `verifyAdminToken` listing.
+
+**Gate, run last on the final state:** typecheck · typecheck:server · noUnusedImports · build ·
+test:bundle · boot:check · `vitest run` → **1705 files, 23,969 passed, 1 skipped, 0 FAIL.**
+`tests/modelPerformance.test.ts` — 34 cases over the 17 required properties, reversion-proven in both
+halves (projection removed ⇒ 1 fails; recorder removed ⇒ 2 fail).
+
+### What it does NOT yet answer, said plainly
+
+Nothing is measured yet — this makes measurement possible. The data accrues from the next build onward;
+older reports carry no `requestAnalysis` and read as unavailable rather than being back-filled from a
+truncated prompt. **The 50–100 build analysis is deliberately NOT started**, per the admin, and no
+GLM/Kimi routing change is made.

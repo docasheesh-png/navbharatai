@@ -8,10 +8,25 @@
 // consistency AND that SettingsPanel never statically imports the heavy index again.
 
 export interface LegalMeta {
-  id: 'legal_privacy' | 'legal_terms' | 'legal_grievance' | 'legal_dpa' | 'legal_security' | 'legal_nda';
+  id: 'legal_privacy' | 'legal_terms' | 'legal_grievance' | 'legal_dpa' | 'legal_security';
   title: string;
   subtitle: string;
   updated: string;
+  /**
+   * Does this document get its OWN tile in Settings → Legal & Trust?
+   *
+   * 🔴 THE TILES AND THE DOCUMENTS ARE NO LONGER THE SAME LIST (admin 2026-09-14: "waki ke Grievance
+   * Redressal, dpa, Security/Trust page ko Privacy Policy, Terms me ghusa do"). Six tiles made a wall
+   * of legal buttons on a phone, most of which a normal user has no reason to open.
+   *
+   * ⚠️ HIDDEN IS NOT REMOVED, AND THE DIFFERENCE IS THE WHOLE POINT. Every document below still
+   * exists, still has a PUBLIC URL, and is still linked from inside the Privacy Policy and the Terms
+   * — which is where somebody actually looking for it is already reading. Grievance Redressal in
+   * particular is a legal obligation under the IT Rules, 2021: the Privacy Policy links to it three
+   * times and the Terms once, and deleting the page would have left four broken links inside our own
+   * published legal documents, which is worse than never having had it.
+   */
+  settingsTile: boolean;
 }
 
 export const LEGAL_META: LegalMeta[] = [
@@ -20,37 +35,41 @@ export const LEGAL_META: LegalMeta[] = [
     title: 'Privacy Policy',
     subtitle: 'What data we collect, why, where it lives, and your rights (DPDP Act)',
     updated: '2 September 2026',
+    settingsTile: true,
   },
   {
     id: 'legal_terms',
     title: 'Terms of Service',
     subtitle: 'The rules of using NavBharatAI — tokens, refunds, your app ownership',
     updated: '8 August 2026',
+    settingsTile: true,
   },
   {
-    // Placed third, directly under the two documents it points at: somebody who reads the policy and
-    // disagrees with it needs the complaint route in the same glance, not at the bottom of a list.
+    // No tile, and reachable in MORE places than before: /grievance is a public URL (the address a
+    // regulator or a Play reviewer is given), the Privacy Policy links to it three times and the
+    // Terms once. A complaint route belongs next to the rule somebody is complaining about.
     id: 'legal_grievance',
     title: 'Grievance Redressal',
     subtitle: 'Who to complain to, and how fast we must answer (IT Rules, 2021)',
     updated: '12 September 2026',
+    settingsTile: false,
   },
   {
     id: 'legal_dpa',
     title: 'Data Processing Agreement (DPA)',
     subtitle: 'For business customers — how we process your data as your processor',
     updated: '8 August 2026',
+    // For BUSINESS customers, who need a URL to send their lawyer — not a button an ordinary user
+    // scrolls past. Now at /dpa, linked from the Privacy Policy's AI-processing section.
+    settingsTile: false,
   },
   {
     id: 'legal_security',
     title: 'Security at NavBharatAI',
     subtitle: 'Encryption, access control, incident response, and how to report a vulnerability',
     updated: '8 August 2026',
-  },
-  {
-    id: 'legal_nda',
-    title: 'Non-Disclosure Agreement (NDA)',
-    subtitle: 'Our standard mutual NDA template for partners, investors and contractors',
-    updated: '8 August 2026',
+    // Same reasoning as the DPA: now at /security, linked from the Privacy Policy's Security section,
+    // which is exactly where a reader who wants the detail already is.
+    settingsTile: false,
   },
 ];

@@ -234,9 +234,16 @@ describe('a user can verify BEFORE hitting the wall', () => {
   it('Profile shows the verified number, or offers to verify', () => {
     // Without this the ONLY route to verification is to attempt an import and be refused. A feature you
     // can reach only by first failing at something else is not finished.
+    //
+    // 🔄 UPDATED 2026-09-16: the offer moved from a bare "Mobile not verified" line into the
+    // Verifications card (three real steps — email/phone/github — see accountVerificationActions.ts),
+    // where an unverified phone now reads "Not linked yet" beside its own Verify button. The
+    // underlying guarantee this test protects is unchanged: `user.phoneNumber` is still checked
+    // directly, the masked number is still shown when verified, and the SAME `setVerifyOpen(true)`
+    // still opens the one real VerifyPhoneSheet.
     expect(profile).toContain('user.phoneNumber ?');
     expect(profile).toContain('maskPhone(user.phoneNumber)');
-    expect(profile).toContain('Mobile not verified');
+    expect(profile).toContain('Not linked yet');
     expect(profile).toContain('setVerifyOpen(true)');
   });
 

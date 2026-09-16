@@ -40,7 +40,18 @@ export interface OpenAiCompletionLike {
    *  REAL-cost billing prices the exact GLM/Kimi rung that ran (flash-free vs flagship). */
   model?: string;
   choices: Array<{
-    message: { role: string; content: string | null; tool_calls?: OpenAiToolCall[] };
+    message: {
+      role: string;
+      content: string | null;
+      tool_calls?: OpenAiToolCall[];
+      /**
+       * The reasoning a thinking model emits BEFORE its answer. GLM (Z.AI) and Kimi (Moonshot) both
+       * return it here, separate from `content` — so a model that spends its whole output budget
+       * reasoning returns `content: null` with a large `completion_tokens`, which is indistinguishable
+       * from "said nothing" unless this field is read. Build report 58fe8254 is that case, three times.
+       */
+      reasoning_content?: string | null;
+    };
     finish_reason: string | null;
   }>;
   usage?: {
@@ -223,6 +234,9 @@ export function parseOpenAiCompletion(completion: OpenAiCompletionLike): TurnRes
   const choice = completion?.choices?.[0];
   const message = choice?.message ?? { role: 'assistant', content: null };
   const text = typeof message.content === 'string' ? message.content : '';
+  // Reasoning is NOT the answer and is never appended to the transcript — it is read only to tell
+  // "spent its budget thinking" apart from "returned nothing". See TurnResult.reasoningOnly.
+  const reasoning = typeof message.reasoning_content === 'string' ? message.reasoning_content : '';
 
   // A `length` finish means the output was cut at the token limit — a write_file's `content` arg can be
   // sliced mid-string, so its arguments no longer parse. Salvage just the path in that case so the
@@ -249,11 +263,20 @@ export function parseOpenAiCompletion(completion: OpenAiCompletionLike): TurnRes
     0,
     completion?.usage?.prompt_tokens_details?.cached_tokens ?? completion?.usage?.cached_tokens ?? 0,
   );
+  // 🔴 A MISSING `usage` IS NOT A ZERO, and collapsing the two here is what made it unrecoverable
+  // downstream (see TurnUsage.measured). The test is whether the provider reported EITHER count as a
+  // real number — an absent `usage` object and a `usage: {}` are equally unmeasured, while a genuine
+  // `prompt_tokens: 0` is a measurement and stays one.
+  const measured = Number.isFinite(completion?.usage?.prompt_tokens)
+    || Number.isFinite(completion?.usage?.completion_tokens);
   const usage: TurnUsage = {
     inputTokens: completion?.usage?.prompt_tokens ?? 0,
     outputTokens: completion?.usage?.completion_tokens ?? 0,
     cacheCreationInputTokens: 0,
     cacheReadInputTokens: cachedRead,
+    // Only ever written as `false`. Leaving it absent when measured keeps every existing reader,
+    // snapshot and test byte-identical — this field is additive by construction.
+    ...(measured ? {} : { measured: false as const }),
   };
 
   // If the model returned tool calls, the agent loop must run them: force tool_use.
@@ -262,5 +285,20 @@ export function parseOpenAiCompletion(completion: OpenAiCompletionLike): TurnRes
   // cut off a write_file mid-arguments must be visible to the truncation guard (CargoPilot kimi case).
   const truncated = choice?.finish_reason === 'length';
 
-  return { text, toolUses, stopReason, ...(truncated ? { truncated } : {}), usage, rawContent, ...(typeof completion?.model === 'string' && completion.model ? { model: completion.model } : {}) };
+  // THE MODEL THOUGHT AND NEVER ANSWERED. Reasoning present, no text, no tool call — so there is
+  // nothing to append to the transcript and nothing to "continue" from. Reported as its own fact so
+  // the loop can stop paying to resume a call that never started (build report 58fe8254: three
+  // continuations, ~160 s each, every one identical because there was no partial answer to extend).
+  const reasoningOnly = Boolean(reasoning) && !text && toolUses.length === 0;
+
+  return {
+    text,
+    toolUses,
+    stopReason,
+    ...(truncated ? { truncated } : {}),
+    ...(reasoningOnly ? { reasoningOnly } : {}),
+    usage,
+    rawContent,
+    ...(typeof completion?.model === 'string' && completion.model ? { model: completion.model } : {}),
+  };
 }

@@ -18,12 +18,32 @@
 // borrowing. `tests/tierChainFidelity.test.ts` asserts the CONSTRUCTED chain's (name, model) sequence
 // against this table, so the two cannot drift.
 //
-// THE THREE LADDERS (admin 2026-09-14). Claude rungs carry a SYMBOLIC model ('sonnet' / 'opus' /
-// 'haiku') that the route resolves through models.ts, so a Claude id bump never touches this file.
+// THE THREE LADDERS (admin 2026-09-14, Kimi rungs revised 2026-09-16). Claude rungs carry a SYMBOLIC
+// model ('sonnet' / 'opus' / 'haiku') that the route resolves through models.ts, so a Claude id bump
+// never touches this file.
 //
-//   WEAK   (free)      GLM glm-5.3-flash → KIMI kimi-k2.6 → GLM glm-5.3 → HAIKU
-//   NORMAL (economy)   GLM glm-5.3-flash → KIMI kimi-k2.7-code → GLM glm-5.3 → CLAUDE sonnet
-//   STRONG (premium)   GLM glm-5.3 → CLAUDE sonnet → CLAUDE_OPUS opus
+//   WEAK   (free)      GLM glm-5.3-flash → KIMI kimi-k2.7-code → GLM glm-5.3 → HAIKU
+//   NORMAL (economy)   GLM glm-5.3-flash → KIMI kimi-k2.7-code-highspeed → GLM glm-5.3 → CLAUDE sonnet
+//   STRONG (premium)   GLM glm-5.3 → KIMI kimi-k3 → CLAUDE sonnet → CLAUDE_OPUS opus
+//
+// 🔴 REVISED 2026-09-16 (admin, verbatim: "free wale me kimi 2.6 ki jagah kimi code 2.7 kar de! normal
+// wale me kimi code 2.7 highspeed karo strong me kimi k3 bhi add karo") — this is the explicit
+// per-tier routing confirmation the Model Routing Policy requires before a ladder changes:
+//   • Weak's Kimi rung moved from k2.6 to k2.7-code, Moonshot's DEDICATED coding model — same price
+//     ($0.95/$4.00) as k2.6, so this is a quality upgrade at no extra cost to the builds NavBharatAI
+//     itself pays for.
+//   • Normal's Kimi rung moved to k2.7-code-highspeed — the SAME model, ~2x tokens/sec, at exactly 2x
+//     k2.7-code's price ($1.90/$8.00). No quality difference; the admin was told this before asking for
+//     it, and it lands on Normal (a paying tier) rather than Weak, so the extra cost is priced into
+//     what the user is billed, not absorbed. Adding this rung is what SURFACED a real defect: the rate
+//     matcher had no branch for "highspeed" and would have silently billed it at half price forever —
+//     fixed in providerRates.ts in the same change (see 'kimi-k2.7-highspeed').
+//   • Strong gains a Kimi rung for the first time — kimi-k3, Moonshot's flagship, priced at exactly
+//     Sonnet parity ($3.00/$15.00). Placed as the SECOND rung (after glm-5.3, before Sonnet): a third
+//     independent vendor family absorbs a GLM outage without climbing all the way to Claude, and at
+//     Sonnet's own price this costs nothing extra over what the ladder already assumed. "Opus sirf
+//     zarurat par" is unaffected — Opus is still the last rung, reached only after glm-5.3, k3 AND
+//     Sonnet have all failed or the finished build failed its gate.
 //
 // 🔴 DECIDED UNDER THE ADMIN'S FULL AUTHORITY GRANT (2026-09-14, verbatim: "mera kam se kam kharcha;
 // user ko best se best app, ek hi baar me (build fail kam se kam); aapko puri authority hai").
@@ -36,9 +56,9 @@
 //   • glm-5.3 ($1.40 / $4.40, 95th-percentile coding) is the strong rung under Sonnet ($3 / $15) on
 //     every tier and LEADS Strong — Sonnet and Opus are reached only when it fails or the build fails
 //     its gate. Same vendor as rung 1, so no new key and no new bill surface.
-//   • Kimi stays on Weak (k2.6) and Normal (k2.7-code) as the second-vendor rung, so a Z.ai 429 storm
-//     cannot take a tier down. kimi-k3 is OUT: its id is unverified on this account and its price is
-//     unknown (the rate card still carries it at the k2.7 placeholder).
+//   • Kimi stays on every tier as the second-vendor rung, so a Z.ai 429 storm cannot take a tier down —
+//     k2.7-code on Weak, k2.7-code-highspeed on Normal, k3 on Strong (added 2026-09-16; see the revision
+//     note above for why and at what price).
 //   • gpt-5.4 is OUT of every ladder: no key, price unknown, and the admin's own brief says the Nano
 //     class is not an app-generation engine. Nothing to buy. Haiku is again Weak's last rung, exactly
 //     as the 2026-07-13 amendment described.
@@ -69,18 +89,19 @@ export interface LadderRung {
 export const TIER_LADDERS: Readonly<Record<PowerLevel, readonly LadderRung[]>> = {
   weak: [
     { provider: 'GLM', model: 'glm-5.3-flash' },
-    { provider: 'KIMI', model: 'kimi-k2.6' },
+    { provider: 'KIMI', model: 'kimi-k2.7-code' },
     { provider: 'GLM', model: 'glm-5.3' },
     { provider: 'CLAUDE_HAIKU', model: 'haiku' },
   ],
   off: [
     { provider: 'GLM', model: 'glm-5.3-flash' },
-    { provider: 'KIMI', model: 'kimi-k2.7-code' },
+    { provider: 'KIMI', model: 'kimi-k2.7-code-highspeed' },
     { provider: 'GLM', model: 'glm-5.3' },
     { provider: 'CLAUDE', model: 'sonnet' },
   ],
   mini: [
     { provider: 'GLM', model: 'glm-5.3' },
+    { provider: 'KIMI', model: 'kimi-k3' },
     { provider: 'CLAUDE', model: 'sonnet' },
     { provider: 'CLAUDE_OPUS', model: 'opus' },
   ],

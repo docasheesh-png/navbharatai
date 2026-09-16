@@ -93,9 +93,14 @@ describe('The policy has a PUBLIC URL — the thing Meta and Play actually requi
   it('serves the compliance pages from the server, not the app shell', () => {
     // `/grievance` joined on 2026-09-12 for exactly the same reason as the other two: it is a URL a
     // regulator or a store reviewer opens, sometimes with a tool that does not run JavaScript.
-    expect(Object.keys(PUBLIC_LEGAL_ROUTES).sort()).toEqual(['/grievance', '/privacy', '/terms']);
+    // `/dpa` and `/security` joined on 2026-09-14, when those two lost their Settings tiles — a tile
+    // only serves somebody already signed in, and the people who want these are a business
+    // customer's lawyer and a security researcher, neither of whom has an account.
+    expect(Object.keys(PUBLIC_LEGAL_ROUTES).sort()).toEqual(['/dpa', '/grievance', '/privacy', '/security', '/terms']);
     expect(PUBLIC_LEGAL_ROUTES['/privacy']).toBe('legal_privacy');
     expect(PUBLIC_LEGAL_ROUTES['/grievance']).toBe('legal_grievance');
+    expect(PUBLIC_LEGAL_ROUTES['/dpa']).toBe('legal_dpa');
+    expect(PUBLIC_LEGAL_ROUTES['/security']).toBe('legal_security');
   });
 
   it('the SPA catch-all DEFERS both, or they would silently return index.html', () => {

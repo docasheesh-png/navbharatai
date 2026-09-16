@@ -120,7 +120,7 @@ const V3_EXT_COLOR: Record<string, string> = {
 // stale (never-cleared) `resume` prop re-apply an old chat on each reopen. See the resume effect below.
 let lastAppliedResumeNonce = 0;
 
-export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number; autoSend?: boolean } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
+export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPreviewNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; openPreviewNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number; autoSend?: boolean } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
   const { state, running, error, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
@@ -3511,6 +3511,22 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingDeploy?.nonce]);
 
+  // OPEN STRAIGHT ONTO THE PREVIEW SURFACE (admin 2026-09-15: "ide me koi user preview press kare to
+  // navbharatai pro, open hi preview wala page").
+  //
+  // Code Studio's Preview button opens the Pro tab and asks for THIS surface. Opening the tab alone is
+  // not enough: `tab` already defaults to 'preview', but `showWorkspace` defaults to FALSE — so a fresh
+  // Pro lands on the full-width chat and the preview the user pressed for is nowhere in sight. This is
+  // the same explicit open the footer's Preview item performs (setTab + setShowWorkspace(true), never
+  // openTab's re-tap collapse), driven by a nonce so a second press re-opens it after the user has
+  // wandered off to Pro Chat. 0/undefined = nobody asked, exactly like freshOpenNonce.
+  useEffect(() => {
+    if (!openPreviewNonce) return;
+    setTab('preview');
+    setShowWorkspace(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openPreviewNonce]);
+
   // Load the file contents when the Files tab is opened (and not already loaded), so each file
   // row can show its line count — without the user having to click into a file first.
   useEffect(() => {
@@ -4094,7 +4110,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           <div ref={scrollRef} className="flex-1 overflow-auto px-2 py-2 space-y-2.5 min-h-0">
             {(() => {
               const lastUser = [...convo].reverse().find((m) => m.role === 'user');
-              return lastUser ? <AppUpdateChatNotice userText={lastUser.text} /> : null;
+              return lastUser ? <AppUpdateChatNotice /> : null;
             })()}
             {coldStartVisible && (
               <div className="text-sm text-zinc-500 mt-6 text-center">

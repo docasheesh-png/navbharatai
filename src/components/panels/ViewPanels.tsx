@@ -147,6 +147,10 @@ export interface ViewPanelsProps {
   onSwitchApp?: (sessionId: string) => void;
   /** Real compile-error problems from the live preview bundle, surfaced in Code Studio's Problems panel. */
   problems?: PreviewProblem[];
+  /** Code Studio's "Preview" button: open NavBharatAI Pro in its own window, ON its Preview surface
+   *  (admin 2026-09-15). App owns it because only App can both switch the tab and hand the Pro panel
+   *  the nonce that tells it which surface to land on. */
+  onOpenProPreview: () => void;
 }
 
 export function ViewPanels({
@@ -162,7 +166,7 @@ export function ViewPanels({
   sessions, currentSessionId, togglePin, currentProSessionId,
   previewHistory, fileUploadConflict, resolveFileConflict, handleFilesUpload,
   downloadAppZip, setActiveFile, wallet, setShowAuth,
-  zipSizeModal, setZipSizeModal, v3Preview, previousFiles, onV3FixError, onBuildViaV5Prompt, onAutoFixInV5, onSwitchApp, problems = [],
+  zipSizeModal, setZipSizeModal, v3Preview, previousFiles, onV3FixError, onBuildViaV5Prompt, onAutoFixInV5, onSwitchApp, onOpenProPreview, problems = [],
 }: ViewPanelsProps) {
   return (
     <>
@@ -227,7 +231,12 @@ export function ViewPanels({
             mode={mode}
             onModeChange={setMode}
             isAppBuilt={isAppBuilt}
-            onPreviewClick={() => toggleTab('preview')}
+            // IDE top-bar "Preview" button → the SAME NavBharatAI Pro window the AI button opens, landing
+            // on Pro's own Preview page (admin 2026-09-15: "ide me koi user preview press kare to
+            // navbharatai pro, open hi preview wala page"). It used to open the standalone 'preview' tab
+            // — a third preview surface beside Pro's. That tab still exists and is still reachable from
+            // the slide menu and the default bottom nav; it is simply no longer what the IDE shows you.
+            onPreviewClick={onOpenProPreview}
             // IDE top-bar "AI" button → open the FULL NavBharatAI Pro (same session/workspace/memory,
             // so it is 100% in sync with what's open in the IDE), not the in-IDE mini chat (admin 2026-07-31).
             onSocialChatTrigger={() => toggleTab('nbi_pro_chat')}

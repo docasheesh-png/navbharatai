@@ -33,9 +33,33 @@ export function isTruncatedStop(stopReason: string | null | undefined): boolean 
  */
 export const MAX_CONTINUATIONS = 3;
 
-/** Continue only while the model is still hitting the ceiling AND we have attempts left. */
-export function shouldContinue(stopReason: string | null | undefined, attemptsSoFar: number): boolean {
-  return isTruncatedStop(stopReason) && attemptsSoFar < MAX_CONTINUATIONS;
+/**
+ * Continue only while the model is still hitting the ceiling, we have attempts left, AND there is
+ * something to continue FROM.
+ *
+ * 🔴 THE THIRD CONDITION IS NOT A REFINEMENT — IT IS THE WHOLE BUG (build report 58fe8254,
+ * 2026-09-15). A reasoning model given the fast lane's output budget can spend ALL of it thinking and
+ * emit no answer at all: three Kimi calls returned `outputTokens: 4833, responseChars: 0,
+ * finish=max_tokens`. That is a truncated stop with an EMPTY body, so the old two-condition test said
+ * "continue" — and `continuationPrompt('')` produces a prompt with no tail, i.e. **the same call
+ * again**. It ran three times, ~160 s each, and the identical nothing came back each time. The build
+ * spent roughly eight minutes and its entire budget re-issuing one call, then reported zero files.
+ *
+ * A truncation is worth resuming because a PARTIAL answer exists and would otherwise be wasted.
+ * Nothing is partial about zero characters: that is a call that never began answering, and asking it
+ * to "carry on from where you stopped" is the retry-loop-around-a-deterministic-failure the fourth
+ * absolute rule forbids. The honest move is to stop and let the ladder's next rung try.
+ */
+export function shouldContinue(
+  stopReason: string | null | undefined,
+  attemptsSoFar: number,
+  producedSoFar?: string,
+): boolean {
+  if (!isTruncatedStop(stopReason) || attemptsSoFar >= MAX_CONTINUATIONS) return false;
+  // `undefined` keeps every existing caller's behaviour; only a caller that PASSES the text opts into
+  // the guard, so this can never silently change a lane that has not been read and updated.
+  if (producedSoFar !== undefined && producedSoFar.trim() === '') return false;
+  return true;
 }
 
 /** How much of the produced text to echo back so the model can resume at the exact cut point. */

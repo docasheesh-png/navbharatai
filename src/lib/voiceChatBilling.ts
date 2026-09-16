@@ -24,8 +24,15 @@
 /** The confirmed rate. One constant: the charge and the popup must never be able to disagree. */
 export const VOICE_PAISE_PER_SECOND = 2;
 
-/** Languages this consent text exists in. Mirrors the platform's own narration languages. */
-export type VoiceLang = 'en' | 'hi';
+// 🔴 THE HINDI BRANCH IS GONE (admin 2026-09-14, from his own phone, seeing this very popup in
+// Devanagari): "ui me professional language (english only) honi chahiye … south india wale kaise
+// padhenge isko??" — which is the whole argument in one line. NavBharatAI is a national product, and
+// Devanagari is not a national script: a Tamil, Telugu, Kannada or Malayalam speaker cannot read the
+// price they are about to be charged. English is the one script every one of them shares.
+//
+// This SUPERSEDES the 2026-08-10 instruction quoted above ("user ki language me ek popup aaye"). The
+// earlier ask and this one cannot both be kept, and the newer one is the admin's own correction after
+// seeing the result. CLAUDE.md's language standard says the same thing and always did.
 
 /** ₹ per minute, derived — never a second hand-written number that could drift from the rate. */
 export function voiceRupeesPerMinute(paisePerSecond: number = VOICE_PAISE_PER_SECOND): number {
@@ -44,14 +51,12 @@ export function voiceCostInr(seconds: number, paisePerSecond: number = VOICE_PAI
 }
 
 /** A duration a person reads without doing arithmetic: "45 sec", "2 min 5 sec". PURE. */
-export function formatVoiceDuration(seconds: number, lang: VoiceLang = 'en'): string {
+export function formatVoiceDuration(seconds: number): string {
   const s = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
   const m = Math.floor(s / 60);
   const rest = s % 60;
-  const secWord = lang === 'hi' ? 'सेकंड' : 'sec';
-  const minWord = lang === 'hi' ? 'मिनट' : 'min';
-  if (m === 0) return `${rest} ${secWord}`;
-  return rest === 0 ? `${m} ${minWord}` : `${m} ${minWord} ${rest} ${secWord}`;
+  if (m === 0) return `${rest} sec`;
+  return rest === 0 ? `${m} min` : `${m} min ${rest} sec`;
 }
 
 export interface VoiceConsent {
@@ -86,17 +91,8 @@ export interface VoiceConsent {
  * PURE.
  */
 export function voiceConsent(
-  lang: VoiceLang = 'en',
   paisePerSecond: number = VOICE_PAISE_PER_SECOND,
 ): VoiceConsent {
-  if (lang === 'hi') {
-    return {
-      title: 'वॉइस चैट — यह सेवा सशुल्क है',
-      body: `${paisePerSecond} पैसे प्रति सेकंड`,
-      confirm: 'ठीक है, शुरू करें',
-      cancel: 'रहने दें',
-    };
-  }
   return {
     title: 'Voice chat is a paid feature',
     body: `${paisePerSecond} paise per second`,
@@ -112,29 +108,10 @@ export function voiceConsent(
  */
 export function voiceRunningCostLabel(
   seconds: number,
-  lang: VoiceLang = 'en',
   paisePerSecond: number = VOICE_PAISE_PER_SECOND,
 ): string {
   const cost = voiceCostInr(seconds, paisePerSecond);
-  const time = formatVoiceDuration(seconds, lang);
-  const money = `₹${cost.toFixed(2)}`;
-  return lang === 'hi' ? `${time} · ${money}` : `${time} · ${money}`;
-}
-
-/**
- * Which language the consent popup speaks.
- *
- * The admin asked for the price "user ki language me". The app already knows: the language picker
- * writes `navbharat_language`. Hindi and Hinglish both get the Hindi text — a Hinglish speaker reads
- * Devanagari comfortably, and the alternative (showing them English) would defeat the point of
- * asking. Everything else, and an unset preference, gets English. PURE apart from the reader passed
- * in, so the mapping is testable without a browser.
- */
-export function resolveVoiceLang(get: (k: string) => string | null | undefined): VoiceLang {
-  let saved: string | null | undefined;
-  try { saved = get('navbharat_language'); } catch { return 'en'; }
-  const v = String(saved ?? '').trim().toLowerCase();
-  return v === 'hindi' || v === 'hinglish' ? 'hi' : 'en';
+  return `${formatVoiceDuration(seconds)} · ₹${cost.toFixed(2)}`;
 }
 
 /** Master switch, project convention: `off` disables paid voice everywhere without a deploy. */

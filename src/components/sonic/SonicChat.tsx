@@ -16,7 +16,7 @@ import { createPortal } from 'react-dom';
 import { downsampleFloat32, float32ToBase64PCM16, base64PCM16ToFloat32 } from './sonicAudio';
 import { BOLI_OPTIONS, type SonicBoli } from '../../server/sonic/sonicBoli';
 import { auth } from '../../lib/firebase';
-import { voiceRunningCostLabel, resolveVoiceLang } from '../../lib/voiceChatBilling';
+import { voiceRunningCostLabel } from '../../lib/voiceChatBilling';
 import { resolveWebSocketUrl, isNativeShell } from '../../lib/apiBase';
 import { requestMic, micMessage, micSupported } from '../../lib/micCapability';
 
@@ -342,7 +342,7 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
                 together — a number on its own tells the user nothing about whether to keep talking. */}
             {status === 'live' && billedSeconds !== null && billedSeconds > 0 && (
               <span style={{ marginTop: 6, fontSize: 11, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
-                {voiceRunningCostLabel(billedSeconds, resolveVoiceLang((k) => localStorage.getItem(k)))}
+                {voiceRunningCostLabel(billedSeconds)}
               </span>
             )}
             {error && <p style={{ color: '#f87171', marginTop: 12, maxWidth: 340, textAlign: 'center', fontSize: 13 }}>⚠️ {error}</p>}

@@ -164,7 +164,18 @@ export function NotificationBell({ user }: { user: FirebaseUser | null }) {
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} aria-hidden="true" />
-          <div className="absolute right-0 top-11 z-50 w-80 max-w-[92vw] max-h-[70vh] supports-[height:100dvh]:max-h-[70dvh] overflow-y-auto rounded-2xl border border-white/10 bg-[#161b22] shadow-2xl">
+          {/*
+            🔴 POSITIONED AGAINST THE VIEWPORT, NOT THE BELL'S OWN WRAPPER (fixed 2026-09-16, admin
+            report: "notification screen se bahar ja raha hai" — every line clipped on its left edge).
+            This wrapper is `<div className="relative">` around just the bell button, and the bell is
+            NOT the rightmost header control (the account/admin badge sits to its right) — so the old
+            `absolute right-0` anchored the panel's right edge well short of the screen's right edge,
+            and the 320px-wide panel ran off the LEFT edge of narrow phone screens. `fixed` anchors to
+            the viewport instead of that ancestor, and `right-3` + a width capped at
+            `100vw - 1.5rem` guarantees equal margins on both sides — the panel can never overflow
+            either edge, wherever the bell sits in the header.
+          */}
+          <div className="fixed right-3 top-12 z-50 w-80 max-w-[calc(100vw-1.5rem)] max-h-[70vh] supports-[height:100dvh]:max-h-[70dvh] overflow-y-auto rounded-2xl border border-white/10 bg-[#161b22] shadow-2xl">
             <div className="sticky top-0 bg-[#161b22] border-b border-white/10">
               <div className="flex items-center justify-between gap-2 px-4 py-3">
                 <span className="text-sm font-black text-white truncate">

@@ -125,6 +125,20 @@ describe('BuildDiagnostics', () => {
     expect(r.issues.some((i) => i.code === 'SANDBOX_CMD' && /migrate/.test(i.message))).toBe(false);
   });
 
+  it('typecheckEvidenceFromAgentCommands: a clean agent-run tsc --noEmit is visible as release-gate fallback evidence (production report, 2026-09-16)', () => {
+    const d = fresh();
+    expect(d.typecheckEvidenceFromAgentCommands()).toBeUndefined(); // nothing recorded yet
+    // The exact regression shape: piped through `head`, exit code is head's (0), never tsc's own.
+    d.recordCommand({ command: './node_modules/.bin/tsc --noEmit 2>&1 | head -40', exitCode: 0, stdout: '', stderr: '', durationMs: 3000 });
+    expect(d.typecheckEvidenceFromAgentCommands()).toBe('passed');
+  });
+
+  it('typecheckEvidenceFromAgentCommands: a real compile error in the output is failed', () => {
+    const d = fresh();
+    d.recordCommand({ command: 'npx tsc --noEmit', exitCode: 2, stdout: '', stderr: 'error TS2532: Object is possibly undefined.', durationMs: 1000 });
+    expect(d.typecheckEvidenceFromAgentCommands()).toBe('failed');
+  });
+
   it('a genuinely healthy migrate (exit 0, DB in sync) is NOT flagged DB_UNREACHABLE', () => {
     const d = fresh();
     d.recordCommand({ command: 'npx prisma migrate dev --name init', exitCode: 0, stdout: 'Your database is now in sync with your schema.', durationMs: 5000 });

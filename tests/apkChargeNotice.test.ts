@@ -43,10 +43,11 @@ describe('BEFORE the click — the price is never a surprise', () => {
     expect(chargeButtonLabel(1)).toBe('Download');
   });
 
-  it('is written in Hindi, not transliterated', () => {
-    expect(chargeHint(1, 'hi')).toMatch(/[ऀ-ॿ]/);
-    expect(chargeHint(1, 'hi')).toContain('₹1');
-    expect(chargeHint(1, 'hi')).not.toContain('for each build');
+  it('🔒 is English — the Hindi variant was removed (admin 2026-09-14)', () => {
+    // "south india wale kaise padhenge isko??" — a Hindi-only price is unreadable to most of India.
+    expect(chargeHint(1)).not.toMatch(/[\u0900-\u097F]/);
+    expect(chargeHint(1)).toContain('₹1');
+    expect(chargeHint(1)).toMatch(/build/i);
   });
 });
 
@@ -71,11 +72,11 @@ describe('AFTER the file arrives — the receipt can never claim a charge nobody
     }
   });
 
-  it('Hindi receipt is written, and keeps the same two facts', () => {
-    const r = chargeReceipt({ priceInr: 1, applied: true, lang: 'hi' });
-    expect(r).toMatch(/[ऀ-ॿ]/);
+  it('🔒 the receipt is English too, and keeps the same two facts', () => {
+    const r = chargeReceipt({ priceInr: 1, applied: true });
+    expect(r).not.toMatch(/[\u0900-\u097F]/);
     expect(r).toContain('₹1');
-    expect(chargeReceipt({ priceInr: 1, applied: false, lang: 'hi' })).toMatch(/कोई शुल्क नहीं/);
+    expect(chargeReceipt({ priceInr: 1, applied: false })).toMatch(/no charge/i);
   });
 });
 

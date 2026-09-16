@@ -29,6 +29,7 @@
 
 import { doc, getDoc, runTransaction, getServerDb } from './serverDb';
 import { computeDebitedWallet } from './walletDebit';
+import { ledgerPatch } from './walletStatement';
 import { checkPlanPayable, giftRemaining, paidSpendableTokens } from './giftSpend';
 import { inrToDebitTokens, inrToWalletTokens, TOKENS_PER_RUPEE } from './payments';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletResolve';
@@ -246,16 +247,14 @@ export function computePlanPurchase(
         ...w,
         tokenBalance: (typeof w.tokenBalance === 'number' && Number.isFinite(w.tokenBalance) ? w.tokenBalance : 0) + creditedTokens,
         remaining_balance: (typeof w.remaining_balance === 'number' && Number.isFinite(w.remaining_balance) ? w.remaining_balance : 0) + creditedInr,
-        walletLedger: [
-          ...(Array.isArray(w.walletLedger) ? w.walletLedger : []),
-          {
-            type: 'refund',
-            amountCoinsOrTokens: creditedTokens,
-            moneySpent: 0,
-            timestamp: nowIso,
-            description: `Unused days on your ${tierForPlanId(prior?.id)?.name ?? 'previous'} plan, returned as credit`,
-          },
-        ],
+        // 🔒 Through the shared appender — see walletStatement.ts.
+        ...ledgerPatch(w, {
+          type: 'refund',
+          amountCoinsOrTokens: creditedTokens,
+          moneySpent: 0,
+          timestamp: nowIso,
+          description: `Unused days on your ${tierForPlanId(prior?.id)?.name ?? 'previous'} plan, returned as credit`,
+        }),
       }
     : w;
 
@@ -357,17 +356,15 @@ function grantBundledCredit(
     tokenBalance: n(w.tokenBalance) + tokens,
     remaining_balance: n(w.remaining_balance) + tier.bundledCreditInr,
     total_balance: n(w.total_balance) + tier.bundledCreditInr,
-    walletLedger: [
-      ...(Array.isArray(w.walletLedger) ? w.walletLedger : []),
-      {
-        type: 'plan_credit',
-        amountCoinsOrTokens: tokens,
-        moneySpent: 0,
-        timestamp: nowIso,
-        planRef: buildRef,
-        description: `${tier.name} plan — ₹${tier.bundledCreditInr} build credit included`,
-      },
-    ],
+    // 🔒 Through the shared appender — see walletStatement.ts.
+    ...ledgerPatch(w, {
+      type: 'plan_credit',
+      amountCoinsOrTokens: tokens,
+      moneySpent: 0,
+      timestamp: nowIso,
+      planRef: buildRef,
+      description: `${tier.name} plan — ₹${tier.bundledCreditInr} build credit included`,
+    }),
   };
 }
 

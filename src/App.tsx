@@ -22,7 +22,6 @@ import { restoreV3Tab, v3TabIsOpen, v3IsActive, V3_TAB_FLAG, V3_ACTIVE_FLAG } fr
 import { clearStickySession } from './components/agentv3/v3SessionContinuity';
 // Lazy — keeps the bundled AppKnowledgeBase (imported by the Offline AI) OUT of the main index chunk,
 // so it loads as its own split chunk only when the user opens Offline AI (bundle-budget safe).
-const OfflineAI = lazy(() => import('./components/offline/OfflineAI').then((m) => ({ default: m.OfflineAI })));
 import { ViewPanels } from './components/panels/ViewPanels';
 import { SidebarNav } from './components/panels/SidebarNav';
 import { TopNav } from './components/panels/TopNav';
@@ -36,6 +35,7 @@ import { cn } from './lib/utils';
 // native shell so the Play Console health declarations stay truthful. Web is untouched.
 import { isNativeApp } from './lib/mobileNative';
 import { medicalViewBlocked, medicalFeaturesHidden } from './lib/playCompliance';
+import { isComingSoonTool } from './lib/comingSoonTools';
 // SDAChat kept eager — used immediately on tab open
 import { PROFESSIONAL_CHATS } from './components/professionals/professionalConfigs';
 import { endProfessionalChat, browserStore as professionalStore } from './lib/professionalChatStore';
@@ -45,6 +45,8 @@ import { isModeSurface, FREE_MODE_ID, NEW_FREE_MODE_ID } from './components/chat
 import { ReportSheet } from './components/ReportSheet';
 import { TestingNotice } from './components/TestingNotice';
 import { shouldShowTestingNotice, testingNoticeAlreadyShown } from './lib/testingNotice';
+import { useReferralProgress } from './hooks/useReferralProgress';
+import { useHeldReferralCode } from './hooks/useHeldReferralCode';
 import { useShakeToReport } from './hooks/useShakeToReport';
 // EngineerAIChat retired — replaced by NavBharatAI Pro (ProV3Surface).
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -252,7 +254,6 @@ export default function App() {
     FREE_DAILY_MESSAGES,
     wallet, setWallet,
     dailyUsage, setDailyUsage, incrementDailyUsage, isFreeLimitReached,
-    myReferralCode,
     billingLogs, setBillingLogs,
     billingTransactions, setBillingTransactions,
     loadingWallet, setLoadingWallet,
@@ -275,9 +276,7 @@ export default function App() {
     limitError, setLimitError,
     limitSuccess, setLimitSuccess,
     dismissedReminderWarning, setDismissedReminderWarning,
-    copiedReferral, setCopiedReferral,
     buyAmountInput, setBuyAmountInput,
-    referralHistory, setReferralHistory,
     fetchWallet,
     createBillingOrder,
     storeRail, storeConfig, platformFeePct, buyStorePack, buyingProductId, storePurchaseNotice,
@@ -1280,6 +1279,11 @@ export default function App() {
     // the render guards below) means a medical view cannot open in the native shell no matter which
     // button, deep link, or restored state asked for it.
     if (medicalViewBlocked(view, isNativeApp())) return;
+    // HELD-BACK TOOLS (admin 2026-09-15): the Other page already renders these tiles disabled, but the
+    // gate belongs HERE too, for the same reason the medical one does — this is the single path every
+    // tab-open takes, so a tool the admin has not tested cannot be reached by any button, deep link or
+    // future doorway that forgets to ask. Re-enabling is one line in lib/comingSoonTools.ts.
+    if (isComingSoonTool(view)) return;
     // Pre-warm server when user opens chat tabs (fire-and-forget)
     if (view === 'nbi_chat' || view === 'nbi_pro_chat') {
       fetch('/api/health', { method: 'GET' }).catch(() => {});
@@ -1374,6 +1378,12 @@ export default function App() {
    * Read once, in the initialiser, so a re-render can never resurrect a notice the user dismissed.
    */
   const [testingNoticeOpen, setTestingNoticeOpen] = useState(() => !testingNoticeAlreadyShown());
+  // The four welcome-gift steps, for the notice's checklist. Returns empty without a request on the
+  // website and for a signed-out visitor, so nothing here costs anything outside the Android app.
+  const referralProgress = useReferralProgress(user?.uid ?? null);
+  // A code typed on the sign-in screen is applied here, once, the moment there is an account for it.
+  // Returns a message either way; it can never throw into the screen the user just signed in to.
+  useHeldReferralCode(user?.uid ?? null, referralProgress.refresh);
   useShakeToReport(useCallback(() => setReportOpen(true), []));
 
   // Persist ONLY the v5.0 view so a reload lands back in Pro v5.0 (see activeView init). Any other
@@ -2180,7 +2190,6 @@ export default function App() {
     // entry, TopNav's `if (!item) return null` silently dropped the tab, so opening Other AI showed no
     // header window. Same LayoutGrid icon as its Home card, for consistency.
     { id: 'other_ai',     label: 'Other',              icon: LayoutGrid },
-    { id: 'offline_ai',   label: 'Offline AI',         icon: Smartphone },
     { id: 'preview',      label: 'Preview',           icon: Monitor },
     { id: 'files',        label: 'Files',             icon: FolderOpen },
     { id: 'history',      label: 'History',           icon: History },
@@ -2271,6 +2280,10 @@ export default function App() {
   // A deploy requested from the Git panel for a specific real provider → v5.0 runs its real
   // build+deploy pipeline for it (see AgentV3Panel pendingDeploy).
   const [v3DeployRequest, setV3DeployRequest] = useState<{ provider: string; nonce: number } | null>(null);
+  // Code Studio's Preview button asks NavBharatAI Pro to open ON its Preview surface (admin 2026-09-15).
+  // A nonce, not a boolean, for the same reason freshOpenNonce is one: a second press must re-open the
+  // preview even after the user has switched to Pro Chat inside the panel. 0 = nobody asked.
+  const [v3OpenPreviewNonce, setV3OpenPreviewNonce] = useState(0);
   // Snapshot of the workspace files taken right BEFORE each v5.0 build (admin autopsy 2026-07-21) —
   // the Diff Viewer's "previous version" so it shows exactly what the last build changed.
   const [previousFiles, setPreviousFiles] = useState<Record<string, string>>({});
@@ -3054,6 +3067,10 @@ export default function App() {
               theme={theme}
               onReport={() => setReportOpen(true)}
               onDone={() => setTestingNoticeOpen(false)}
+              // Empty everywhere but a signed-in Android app with something unclaimed, so the notice
+              // behaves exactly as it did before for everyone else. See lib/referralChecklist.ts.
+              rewardRows={referralProgress.rows}
+              onOpenRewards={() => { setActiveView('billing'); setActiveBillingDetailTab('gift'); }}
             />
           )}
 
@@ -3075,6 +3092,7 @@ export default function App() {
               email={user?.email}
               resume={v3Resume}
               freshOpenNonce={v3OpenNonce}
+              openPreviewNonce={v3OpenPreviewNonce}
               /* In focus mode (header hidden) the v5.0 composer drops its outer frame so the
                  input reads as a clean floating popup — see AgentV3Panel's footer. */
               focusMode={focusMode}
@@ -3645,10 +3663,8 @@ export default function App() {
               wallet={wallet}
               loadingWallet={loadingWallet}
               dailyUsage={dailyUsage}
-              myReferralCode={myReferralCode}
               billingTransactions={billingTransactions}
               billingLogs={billingLogs}
-              referralHistory={referralHistory}
               activeBillingDetailTab={activeBillingDetailTab}
               reminderLimit={reminderLimit}
               budgetLimit={budgetLimit}
@@ -3657,7 +3673,6 @@ export default function App() {
               isRedeemingCoupon={isRedeemingCoupon}
               couponError={couponError}
               couponSuccess={couponSuccess}
-              copiedReferral={copiedReferral}
               buyAmountInput={buyAmountInput}
               isRecharging={isRecharging}
               storeRail={storeRail}
@@ -3678,7 +3693,8 @@ export default function App() {
               onSetDismissedReminderWarning={setDismissedReminderWarning}
               onSetCouponCodeInput={setCouponCodeInput}
               onRedeemPromoCoupon={redeemPromoCoupon}
-              onSetCopiedReferral={setCopiedReferral}
+              referral={referralProgress}
+              onRefreshReferral={referralProgress.refresh}
               onSetBuyAmountInput={setBuyAmountInput}
               onCreateBillingOrder={createBillingOrder}
               onSetTempReminderLimit={setTempReminderLimit}
@@ -3718,15 +3734,6 @@ export default function App() {
             />
           )}
 
-            {activeView === 'offline_ai' && (
-              <OfflineAI
-                onNavigate={(target) => {
-                  // Offline AI's "Open →": jump straight to the feature's page/tab (and settings screen).
-                  if (target.view) toggleTab(target.view as ViewType);
-                  if (target.settingsScreen) setSettingsScreen(target.settingsScreen as any);
-                }}
-              />
-            )}
 
             {activeView === 'git' && (
               // Phase 1.7 — extracted to GitViewPanel component
@@ -3855,6 +3862,11 @@ export default function App() {
             previousFiles={previousFiles}
             onV3FixError={(errText) => setV3PendingFix({ text: `The in-browser preview failed to build with this error:\n\n${errText}\n\nPlease find the cause in the project files and fix it so the app builds and runs.`, nonce: Date.now() })}
             onBuildViaV5Prompt={(text) => { setV3PendingFix({ text, nonce: Date.now() }); toggleTab('nbi_pro_chat'); }}
+            /* Code Studio's "Preview" button (admin 2026-09-15: "ide me koi user preview press kare to
+               navbharatai pro, open hi preview wala page"). Same shape as the AI button beside it —
+               NavBharatAI Pro opens in its OWN window, alongside Code Studio — with the nonce telling the
+               panel to land on its Preview surface rather than the chat. */
+            onOpenProPreview={() => { setV3OpenPreviewNonce(Date.now()); toggleTab('nbi_pro_chat'); }}
             onAutoFixInV5={(workspaceId, text) => {
               // Open the SCANNED Pro v5 app's session (so v5 fixes THAT app's files) with the fix
               // prompt prefilled — a fresh fix conversation in the v5 page (admin 2026-07-24).

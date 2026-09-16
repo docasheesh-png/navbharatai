@@ -5,7 +5,7 @@ import {
   VOICE_TICK_MS, VOICE_MAX_CALL_SECONDS, unbilledSeconds, voiceSecondsCostInr,
   mayStartVoiceCall, shouldEndCallForBalance, voiceDebitRef, voiceChargeDescription,
 } from '../src/server/sonic/voiceBilling';
-import { VOICE_PAISE_PER_SECOND, resolveVoiceLang, voiceConsent } from '../src/lib/voiceChatBilling';
+import { VOICE_PAISE_PER_SECOND, voiceConsent } from '../src/lib/voiceChatBilling';
 
 /**
  * ADMIN 2026-08-10: "ek voice chat ka option hai SDA (doctor ai) me — usko bhi paid service bana kar
@@ -103,19 +103,23 @@ describe('the ledger', () => {
   });
 });
 
-describe('the popup speaks the user\'s own language', () => {
-  it('Hindi and Hinglish both get the Hindi text', () => {
-    // A Hinglish speaker reads Devanagari comfortably; showing them English would defeat the point.
-    expect(resolveVoiceLang(() => 'hindi')).toBe('hi');
-    expect(resolveVoiceLang(() => 'Hinglish')).toBe('hi');
-    expect(resolveVoiceLang(() => 'english')).toBe('en');
-    expect(resolveVoiceLang(() => null)).toBe('en');
-    expect(resolveVoiceLang(() => { throw new Error('no storage'); })).toBe('en');
+describe('🔴 the popup is ENGLISH — the admin caught it in Devanagari on his own phone (2026-09-14)', () => {
+  // "ui me professional language (english only) honi chahiye … south india wale kaise padhenge isko??"
+  // This SUPERSEDES the 2026-08-10 "user ki language me ek popup aaye" quoted at the top of this file:
+  // a Tamil or Telugu speaker cannot read the price they are about to be charged in Devanagari.
+  it('carries no Devanagari in any field', () => {
+    expect(JSON.stringify(voiceConsent())).not.toMatch(/[\u0900-\u097F]/);
   });
 
-  it('and it quotes the rate the wallet will really charge', () => {
-    expect(voiceConsent('hi').body).toContain(String(VOICE_PAISE_PER_SECOND));
-    expect(voiceConsent('en').body).toContain(String(VOICE_PAISE_PER_SECOND));
+  it('the language machinery is gone from the module, not merely unused', () => {
+    const src = read('src/lib/voiceChatBilling.ts');
+    expect(src).not.toContain('resolveVoiceLang');
+    expect(src).not.toMatch(/VoiceLang\b/);
+    expect(src).not.toMatch(/lang === 'hi'/);
+  });
+
+  it('and it still quotes the rate the wallet will really charge', () => {
+    expect(voiceConsent().body).toContain(String(VOICE_PAISE_PER_SECOND));
   });
 });
 
@@ -186,7 +190,7 @@ describe('WIRING — the charge is real, and it is asked for first', () => {
   it('the price is agreed BEFORE the call, not discovered after it', () => {
     // Tapping the mic opens a consent card, not a call.
     expect(button).toContain('onClick={() => setAsking(true)}');
-    expect(button).toContain('voiceConsent(voiceLang())');
+    expect(button).toContain('voiceConsent()');
     expect(button).toContain('{consent.body}');
   });
 

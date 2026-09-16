@@ -98,3 +98,14 @@ jobs:
 
       - name: Boot smoke-check (server starts without crash)
         run: npm run boot:check
+
+      # 🔴 THE BOOT SMOKE-CHECK ABOVE RUNS AGAINST THE FULL, UNPRUNED node_modules — devDependencies
+      # included — so it cannot see the class of bug that took production down on 2026-09-16: a
+      # package imported by server.ts at module load time (`libsodium-wrappers`, via
+      # `githubSecrets.ts`) that was classified as a devDependency. The Dockerfile's runtime stage
+      # runs `npm prune --omit=dev` before shipping the image; the boot-check step here never does,
+      # so it passed while the real container crashed before ever binding port 8080. This gate answers
+      # the question the boot-check cannot: "does every package the production bundle actually
+      # requires survive that prune?" — via esbuild's own AST-accurate metafile, no Docker needed.
+      - name: Server production-dependency gate (every runtime import must survive `npm prune --omit=dev`)
+        run: npm run deps:server-gate

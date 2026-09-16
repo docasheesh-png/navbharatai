@@ -80,6 +80,20 @@ vi.mock('../src/server/lib/navStoreStore', () => ({
   listApps: async (status: string) => Object.values(state.apps).filter((a) => a.status === status),
   listAppsByUid: async (uid: string) => Object.values(state.apps).filter((a) => a.uid === uid),
   toPublic: (a: Record<string, unknown>) => ({ id: a.id, appName: a.appName, developerName: 'dev' }),
+  // The real pure function — kept here (not imported) because vi.mock factories are hoisted above
+  // imports and cannot reference an outer module binding. See navStoreStore.test.ts for its own
+  // dedicated, isolated tests of this exact logic.
+  findRepublishTarget: (existing: Array<Record<string, unknown>>, repo: string) => {
+    if (!repo) return null;
+    return existing.find((a) => (a.provenance as { repo?: string } | undefined)?.repo === repo && a.status !== 'removed') ?? null;
+  },
+}));
+
+// Fire-and-forget on approval — mocked to a no-op so route tests stay hermetic and never touch
+// Firebase Admin auth or an email provider. notifyStoreApproval has its own dedicated tests in
+// storeApprovalNotify.test.ts.
+vi.mock('../src/server/lib/storeApprovalNotify', () => ({
+  notifyStoreApproval: async () => {},
 }));
 
 const { registerNavStoreRoutes, validateSubmission, isStoreAdmin, UPLOAD_FEE_INR } =

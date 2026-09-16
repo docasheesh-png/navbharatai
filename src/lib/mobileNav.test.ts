@@ -75,7 +75,6 @@ describe('every professional gets the compact header (locked)', () => {
 describe('who owns the device inset — one answer, published from one boolean', () => {
   const nav = readFileSync(resolve(__dirname, './mobileNav.ts'), 'utf8');
   const pro = readFileSync(resolve(__dirname, '../components/agentv3/AgentV3Panel.tsx'), 'utf8');
-  const offline = readFileSync(resolve(__dirname, '../components/offline/OfflineAI.tsx'), 'utf8');
   const css = readFileSync(resolve(__dirname, '../index.css'), 'utf8');
 
   it('the bar being visible means the composer adds NOTHING — the page already reserved it', () => {
@@ -97,13 +96,16 @@ describe('who owns the device inset — one answer, published from one boolean',
     expect(MOBILE_NAV_TOTAL_HEIGHT).toContain('safe-area-inset-bottom');
   });
 
-  it('🔴 neither composer hard-codes the inset any more — that WAS the dead strip', () => {
+  it('🔴 the composer does not hard-code the inset any more — that WAS the dead strip', () => {
     // ⚠️ Comments are stripped first: both files now QUOTE the old value while explaining why it
     // went, and a guard that cannot tell a comment from code would fail on its own documentation.
     const code = (src: string) => src
       .replace(/\/\*[\s\S]*?\*\//g, ' ')
       .split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n');
-    for (const [name, src] of [['Pro', pro], ['Offline AI', offline]] as const) {
+    // The Offline AI carried the identical pattern and was asserted here too; it was permanently
+    // removed on 2026-09-14 (admin: "offline ai ko hamesa ke liye parmanent delete karo"), so the
+    // Pro composer is now the only composer this rule can apply to.
+    for (const [name, src] of [['Pro', pro]] as const) {
       expect(code(src), name).not.toContain('pb-[env(safe-area-inset-bottom)]');
       expect(code(src), name).toContain('var(--nb-safe-below, env(safe-area-inset-bottom, 0px))');
     }

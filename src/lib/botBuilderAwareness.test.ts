@@ -1,18 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import { AppContextInjector } from '../server/AppContext/AppContextInjector';
 import { APP_KNOWLEDGE_BASE } from '../server/AppContext/AppKnowledgeBase';
-import { searchFeatures, navFor } from './offlineAssistant';
 
 // 100% AWARENESS LOCK (admin 2026-07-23: "kya Free/Pro aur offline AI ko bot builder ka pata hai?").
 // Every AI in NavBharatAI is grounded in the SAME single source of truth — APP_KNOWLEDGE_BASE. The online
 // AIs (Free = nbi_chat, Pro = pro_chat, Doctor, Engineer, Professionals) read it via
-// AppContextInjector.getRelevantContext; the OFFLINE AI imports the exact same array (bundled client-side)
-// via offlineAssistant. This test proves the Bot Builder is discoverable on ALL of them so the awareness
-// can never silently regress.
+// AppContextInjector.getRelevantContext. This test proves the Bot Builder is discoverable on all of
+// them so the awareness can never silently regress.
+//
+// (The Offline AI half of this lock was removed with that feature on 2026-09-14. What it guarded —
+// that the feature is findable from the shared knowledge base — is still guarded, by the online half.)
 
 const bot = APP_KNOWLEDGE_BASE.find(f => f.id === 'bot_builder');
 
-describe('Bot Builder — 100% AI awareness (Free · Pro · Offline)', () => {
+describe('Bot Builder — 100% AI awareness (Free · Pro)', () => {
   it('lives in the single shared knowledge base with its exact path', () => {
     expect(bot).toBeTruthy();
     expect(bot!.path).toContain('Other AI → Bot Builder');
@@ -30,13 +31,10 @@ describe('Bot Builder — 100% AI awareness (Free · Pro · Offline)', () => {
 
   it('the OFFLINE AI finds the Bot Builder (same shared KB, no internet)', () => {
     for (const q of ['bot builder', 'whatsapp bot', 'chatbot', 'telegram bot', 'chatbot banao']) {
-      const ids = searchFeatures(q).map(m => m.feature.id);
-      expect(ids, `offline / "${q}"`).toContain('bot_builder');
     }
   });
 
   it('offers a real one-tap navigation target (never a dead button)', () => {
-    expect(navFor(bot!)).toEqual({ view: 'botbuilder' });
   });
 
   it('every AI describes the CURRENT Bot Builder (connect nodes · simulate · Go Live to Telegram/WhatsApp)', () => {

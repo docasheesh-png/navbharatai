@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { navFor } from '../src/lib/offlineAssistant';
 import { APP_KNOWLEDGE_BASE } from '../src/server/AppContext/AppKnowledgeBase';
 import type { SettingsScreen } from '../src/types';
 
@@ -21,7 +20,16 @@ import type { SettingsScreen } from '../src/types';
 
 const kb = (id: string) => APP_KNOWLEDGE_BASE.find((f) => f.id === id);
 
-describe('Settings Terminal — KB entry + Offline AI navigation', () => {
+/**
+ * The KB entry's own `nav` field IS the navigation target. It used to be read through the Offline
+ * AI's `navFor` helper, which went with that feature on 2026-09-14; the curated fallback map it also
+ * consulted was moved INTO the knowledge base, which is where that file's own comment said such
+ * targets belong ("A feature's OWN `nav` field always WINS"). So these guarantees are unchanged and
+ * now read from the single source of truth.
+ */
+const navFor = (f: { nav?: { view?: string; settingsScreen?: string } }) => f.nav ?? null;
+
+describe('Settings Terminal — KB entry + in-app navigation', () => {
   it('🔒 the removed Settings terminal is gone from the knowledge base too', () => {
     // A KB entry outliving its screen is worse than the screen itself: every AI in the app would keep
     // sending users to "Settings → App Settings → Terminal", which no longer exists.
@@ -59,7 +67,7 @@ describe('Settings Terminal — KB entry + Offline AI navigation', () => {
     expect(entry!.path).toContain('Settings → App Settings → Logs');
   });
 
-  it('Offline AI navFor(settings_logs) opens the logs settings screen (working button)', () => {
+  it('settings_logs navigates to the logs settings screen (a working button)', () => {
     const entry = kb('settings_logs');
     const nav = navFor(entry!);
     expect(nav).toEqual({ view: 'settings', settingsScreen: 'logs' });

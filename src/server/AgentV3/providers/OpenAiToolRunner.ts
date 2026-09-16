@@ -13,6 +13,8 @@
 
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 import { turnDeadline, BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE } from '../turnDeadline';
+import { glmThinkingParam, isThinkingParamRejection, type GlmThinkingLevel } from './glmThinking';
+import { reconcileFloorBudget, turnStarvedItsBudget, starvedBudgetError } from '../floorBudget';
 import {
   toolDefsToOpenAI,
   transcriptToOpenAI,
@@ -21,6 +23,14 @@ import {
   type OpenAiMessage,
   type OpenAiTool,
 } from './OpenAiToolAdapter';
+import {
+  OpenAiStreamAccumulator,
+  buildStreamingEnabled,
+  streamHardCapMs,
+  streamIdleMs,
+  type OpenAiStreamChunkLike,
+  type StreamStopCause,
+} from './openAiStream';
 
 /** The narrow slice of an OpenAI-compatible SDK the runner needs (DI/tests). */
 export interface OpenAiChatClient {
@@ -37,10 +47,31 @@ export interface OpenAiChatClient {
          * Only sent when the runner is configured with `thinkingControl` (the GLM
          * rung), so standard OpenAI providers (Grok, etc.) never receive it.
          */
-        thinking?: { type: 'enabled' | 'disabled' };
-      }): Promise<OpenAiCompletionLike>;
+        thinking?: { type: GlmThinkingLevel };
+        /** Streamed read (see openAiStream.ts). Only ever sent when the stream flag is on. */
+        stream?: true;
+        /** Ask the provider to put token usage on the final chunk — a stream carries none otherwise. */
+        stream_options?: { include_usage: true };
+      }): Promise<OpenAiCompletionLike | OpenAiChatStream>;
     };
   };
+}
+
+/**
+ * What an OpenAI-compatible SDK hands back for `stream: true` — an async iterable of chunks, with an
+ * abort controller attached. Structural, so any SDK (or a test double) satisfies it.
+ *
+ * `controller.abort()` matters as much as the iteration does: when OUR clock stops waiting, the
+ * provider is still generating and still billing. `turnDeadline.ts` records the build that logged
+ * provider traffic **148 seconds after the build had ended** for exactly this reason — racing a
+ * promise stops the waiting, not the call.
+ */
+export interface OpenAiChatStream extends AsyncIterable<OpenAiStreamChunkLike> {
+  controller?: { abort(): void };
+}
+
+function isChatStream(v: unknown): v is OpenAiChatStream {
+  return Boolean(v) && typeof (v as AsyncIterable<unknown>)[Symbol.asyncIterator] === 'function';
 }
 
 /** Reject a promise if it does not settle within `ms`. Portable (no SDK/AbortController dependency),
@@ -55,6 +86,76 @@ function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> 
       (e) => { clearTimeout(timer); reject(e); },
     );
   });
+}
+
+/**
+ * Read a streamed turn, bounded by SILENCE rather than by duration.
+ *
+ * Each `next()` races two clocks: the idle bound (no chunk for `idleMs` ⇒ the provider has stopped)
+ * and the absolute ceiling (`endAt`, already reconciled with the lane's deadline). Whichever fires,
+ * the stream is ABORTED — a call nobody will read must stop generating and stop billing — and what
+ * has already arrived is kept.
+ *
+ * Returns why it stopped; the accumulator holds what was received. Never throws for a stall: a stall
+ * with content is a truncated answer, and a stall with nothing is the caller's decision to make
+ * (it has to be a provider failure, so the bench can see it).
+ */
+async function readStream(
+  stream: OpenAiChatStream,
+  acc: OpenAiStreamAccumulator,
+  opts: { idleMs: number; endAt: number; onText?: (t: string) => void; now?: () => number },
+): Promise<StreamStopCause> {
+  const now = opts.now ?? (() => Date.now());
+  const iterator = stream[Symbol.asyncIterator]();
+  const abort = () => { try { stream.controller?.abort(); } catch { /* best-effort */ } };
+
+  try {
+    for (;;) {
+      const msToCeiling = opts.endAt - now();
+      if (msToCeiling <= 0) { abort(); return 'deadline'; }
+      const waitMs = Math.min(opts.idleMs, msToCeiling);
+
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const stalled = Symbol('stalled');
+      const tick = new Promise<typeof stalled>((resolve) => {
+        timer = setTimeout(() => resolve(stalled), waitMs);
+      });
+
+      const advance = iterator.next();
+      let step: IteratorResult<OpenAiStreamChunkLike> | typeof stalled;
+      try {
+        step = await Promise.race([advance, tick]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+
+      if (step === stalled) {
+        // 🔴 THE ABANDONED PROMISE MUST BE DISARMED. We stop waiting on `advance`, but it is still
+        // live — and aborting the stream is precisely what makes it reject a moment later. With no
+        // handler attached that is an unhandled rejection in the build server, from a path that
+        // exists to make builds MORE reliable. Swallowed deliberately: the value can no longer be
+        // read by anybody, and the stall is already being reported by the return below.
+        advance.catch(() => { /* abandoned by our clock — see above */ });
+        abort();
+        // Which clock ran out decides the caller's wording — and a provider must never be blamed
+        // for our budget (turnDeadline.ts). `waitMs` was the ceiling only when it was the smaller.
+        return msToCeiling <= opts.idleMs ? 'deadline' : 'idle';
+      }
+      if (step.done) return 'complete';
+
+      const before = acc.textSoFar().length;
+      acc.push(step.value);
+      // REAL incremental text now, not one block at the end: the loop's onText contract finally
+      // receives the answer as it is written, which is what a user watching a build sees.
+      if (opts.onText) {
+        const delta = acc.textSoFar().slice(before);
+        if (delta) opts.onText(delta);
+      }
+    }
+  } catch (err) {
+    abort();
+    throw err;
+  }
 }
 
 export interface OpenAiToolRunnerOptions {
@@ -86,6 +187,29 @@ export interface OpenAiToolRunnerOptions {
 }
 
 /**
+ * Models observed to REJECT the `thinking` field, remembered for the life of this process.
+ *
+ * Process-scoped rather than per-runner because a runner is constructed per rung per build, so a
+ * per-instance memo would re-pay the wasted round-trip on every single build. It can only ever cause
+ * an OPTIONAL field to be omitted, so a stale entry costs nothing but the model's default effort —
+ * exactly the behaviour that shipped before this field was sent at all.
+ */
+const thinkingParamRejectedBy = new Set<string>();
+
+function rememberThinkingParamRejected(model: string | undefined): void {
+  if (model) thinkingParamRejectedBy.add(model.toLowerCase().trim());
+}
+
+export function modelRejectsThinkingParam(model: string | undefined): boolean {
+  return Boolean(model) && thinkingParamRejectedBy.has(String(model).toLowerCase().trim());
+}
+
+/** Test-only: forget what was learned, so one case cannot leak into the next. */
+export function _resetThinkingParamMemo(): void {
+  thinkingParamRejectedBy.clear();
+}
+
+/**
  * A TurnRunner backed by an OpenAI-compatible chat-completions client with native
  * function calling. Usable for Grok (xAI) and any OpenAI-style endpoint.
  */
@@ -101,43 +225,148 @@ export class OpenAiToolRunner implements TurnRunner {
 
     // GLM rung only: forward the user's thinking toggle to GLM's reasoning switch, so
     // the one app-level thinking setting controls this module too — not just Claude.
-    const thinking = this.opts.thinkingControl && typeof params.thinking === 'boolean'
-      ? { thinking: { type: params.thinking ? 'enabled' as const : 'disabled' as const } }
+    //
+    // 🔴 THE MODEL DECIDES WHETHER "OFF" IS EVEN SAYABLE (build report 58fe8254, 2026-09-15). This line
+    // used to send `{ type: 'disabled' }` to whatever model the rung named, and `glm-5.3-flash` — the
+    // FIRST rung of the Weak and Normal ladders since 2026-09-14 — rejects that with a hard 400
+    // ("This model always engages in thinking and cannot be disabled"). One build logged **280** of
+    // them.
+    //
+    // 🔴 AND OMITTING THE FIELD WAS NOT THE ANSWER EITHER (autopsy ee20478d, one day later). That 400's
+    // full text is *"…cannot be disabled; please use low, high, or max"* — the first clause was acted
+    // on and the second was not. Sending NO field does not mean "think less", it means "use your
+    // DEFAULT effort", and on glm-5.3-flash that default ate the entire output ceiling on three
+    // consecutive turns: 4,833 tokens, no text, no tool call, zero files in five minutes.
+    // `glmThinkingParam` now sends the provider's own lowest level instead; see glmThinking.ts.
+    const thinkingModel = this.opts.model || params.model;
+    const thinking = this.opts.thinkingControl && !modelRejectsThinkingParam(thinkingModel)
+      ? glmThinkingParam(thinkingModel, params.thinking)
       : {};
 
-    // The caller's remaining budget, if it gave us one, reconciled with this runner's own bound. With
-    // no deadline this is `this.opts.timeoutMs` unchanged — see turnDeadline.ts for why that matters.
-    const bound = turnDeadline(this.opts.timeoutMs ?? 120_000, params.deadlineAt);
+    // 🔴 HOW WE READ DECIDES WHICH CLOCK BOUNDS THE CALL (admin 2026-09-16: "kimi aur glm slow hai,
+    // time out ho jata hai"). Non-streaming keeps the TOTAL bound it has always had, because with one
+    // opaque request that is the only hang signal available. Streaming replaces it with the hard
+    // ceiling and measures SILENCE instead — see openAiStream.ts for why a proxy became a direct
+    // measurement. The lane's deadline still wins whenever it is nearer; `turnDeadline` stays the
+    // authority on the budget either way, and with the flag off this line is the old one exactly.
+    const streaming = buildStreamingEnabled();
+    const configuredMs = streaming ? streamHardCapMs() : (this.opts.timeoutMs ?? 120_000);
+    const bound = turnDeadline(configuredMs, params.deadlineAt);
     // 🔴 REFUSE BEFORE SPENDING. The lane that asked has already run out of clock, so this call's answer
     // can no longer be read by anybody. Starting it would buy nothing and bill for it — which is exactly
     // the 148 seconds of post-mortem provider traffic in the report that produced this contract.
     if (bound.expired) throw new Error(BUDGET_EXHAUSTED_MESSAGE);
     const timeoutMs = bound.timeoutMs;
-    const completion = await withTimeout(
-      this.client.chat.completions.create({
+    // 🔴 NEVER AUTHORISE MORE OUTPUT THAN THE CLOCK CAN CARRY (autopsy 4efab9d7 — see floorBudget.ts).
+    //
+    // The build loop asks for 32,000 tokens a turn; this rung had 60 seconds, which at the rate that
+    // build itself measured is about 1,830. So the ONE turn that writes files — the only turn that
+    // ever uses the budget — could not fit, on any key, and the report said the app was not built.
+    //
+    // Clamping converts the failure mode: a turn that runs long now ends TRUNCATED, which returns the
+    // files it already wrote and names the one that was cut, instead of TIMED OUT, which returns
+    // nothing at all. `bound.timeoutMs` (not the configured one) is used deliberately — a lane with
+    // thirty seconds left must not authorise a 32,000-token answer either.
+    const budget = reconcileFloorBudget(params.maxTokens ?? this.opts.defaultMaxTokens ?? 8000, timeoutMs);
+    const request = {
         // The OpenAI-compatible provider has its own model ids, so an explicit option
         // model wins over the Anthropic model id the loop passes for Claude.
         model: this.opts.model || params.model,
         messages,
         ...(tools.length ? { tools, tool_choice: 'auto' as const } : {}),
-        max_tokens: params.maxTokens ?? this.opts.defaultMaxTokens ?? 8000,
+        max_tokens: budget.maxTokens,
         ...thinking,
-      }),
-      timeoutMs,
-      // WHOSE CLOCK RAN OUT DECIDES THE WORDING, and it is not a detail. "timed out" is matched by
-      // MultiProviderTurnRunner's isTimeout, which benches a rung after two in a row — correct when the
-      // PROVIDER was slow, and a lie when we handed it eight seconds because the LANE had eight seconds
-      // left. A provider must never be benched for our budgeting.
-      bound.source === 'deadline'
-        ? BUDGET_REACHED_MESSAGE
-        : `OpenAI-compatible call (GLM/Kimi) timed out after ${timeoutMs}ms`,
-    );
+        // `include_usage` is what puts token counts on the final chunk. Without it a stream carries
+        // NONE, and the ONE-WALLET LAW forbids inventing them — so an unmeasured turn would be billed
+        // at zero and our own cost report would under-state itself. Asking is all the code can do;
+        // whether a given provider honours it is a fact only a real call can settle.
+        ...(streaming ? { stream: true as const, stream_options: { include_usage: true as const } } : {}),
+    };
+    // 🔒 THE BET CHECKS ITSELF ON FIRST CONTACT, so it can never become another 280-failure build.
+    //
+    // The three level names (`low` / `high` / `max`) come from the provider's own error text, not from
+    // a document this session could read — so the field's exact shape is a reasoned bet, not a verified
+    // fact. If a model rejects it, we drop the field and retry the SAME call once; the model is then
+    // remembered for the life of the process, so the extra round-trip is paid at most once per model
+    // rather than once per call. Worst case is byte-identical to the behaviour before this change.
+    //
+    // ⚠️ The retry is narrow ON PURPOSE. `isThinkingParamRejection` must match a complaint about this
+    // one optional field and nothing else: re-sending a genuinely bad request unchanged would be a
+    // retry loop around a deterministic failure, which the fourth absolute rule forbids by name. And
+    // the retry happens only when we actually SENT the field — never on a call that had no opinion.
+    const call = async (): Promise<OpenAiCompletionLike | OpenAiChatStream> => {
+      try {
+        return await this.client.chat.completions.create(request);
+      } catch (err) {
+        if (!('thinking' in request) || !isThinkingParamRejection(err)) throw err;
+        rememberThinkingParamRejected(thinkingModel);
+        const { thinking: _dropped, ...withoutThinking } = request;
+        return this.client.chat.completions.create(withoutThinking);
+      }
+    };
+
+    // WHOSE CLOCK RAN OUT DECIDES THE WORDING, and it is not a detail. "timed out" is matched by
+    // MultiProviderTurnRunner's isTimeout, which benches a rung after two in a row — correct when the
+    // PROVIDER was slow, and a lie when we handed it eight seconds because the LANE had eight seconds
+    // left. A provider must never be benched for our budgeting.
+    const clockMessage = (ms: number) => (bound.source === 'deadline'
+      ? BUDGET_REACHED_MESSAGE
+      : `OpenAI-compatible call (GLM/Kimi) timed out after ${ms}ms`);
+
+    const idleMs = Math.min(streamIdleMs(), timeoutMs);
+    const startedAt = Date.now();
+    // The response OBJECT must still arrive promptly even when streaming: a provider that has not
+    // answered the request at all inside the idle window is hung before it has begun.
+    const raw = await withTimeout(call(), streaming ? idleMs : timeoutMs, clockMessage(streaming ? idleMs : timeoutMs));
+
+    let completion: OpenAiCompletionLike;
+    let streamedText = false;
+    if (streaming && isChatStream(raw)) {
+      streamedText = true;
+      const acc = new OpenAiStreamAccumulator();
+      const stop = await readStream(raw, acc, {
+        idleMs,
+        endAt: startedAt + timeoutMs,
+        onText: params.onText,
+      });
+
+      // 🔑 THE POINT OF THE WHOLE CHANGE. A stall used to destroy the call; now it keeps the answer
+      // that had already arrived and reports it as TRUNCATED — the one vocabulary the engine already
+      // handles well (the adapter salvages the cut file's path, the truncation guard names it, the
+      // next turn rewrites it). "One file short" instead of "no app".
+      //
+      // With NOTHING salvageable it must still be a provider failure, not a quiet empty answer:
+      // thrown so the chain falls to the next vendor AND `isTimeout` can bench a rung that keeps
+      // stalling. Reasoning alone is not salvageable — see `hasAnswer`.
+      if (stop !== 'complete' && !acc.hasAnswer()) {
+        throw new Error(stop === 'deadline' ? BUDGET_REACHED_MESSAGE : clockMessage(idleMs));
+      }
+      completion = acc.toCompletion(stop);
+    } else {
+      completion = raw as OpenAiCompletionLike;
+    }
 
     const result = parseOpenAiCompletion(completion);
 
-    // Stream the visible text to the caller in one shot if a callback was provided
-    // (this runner is non-streaming; the loop's onText contract still gets the text).
-    if (params.onText && result.text) params.onText(result.text);
+    // 🔴 A TURN THAT COULD NOT BEGIN AN ANSWER IS A FAILURE OF THIS RUNG, NOT AN ANSWER FROM IT
+    // (autopsy ee20478d, 2026-09-15 — see floorBudget.ts for the arithmetic).
+    //
+    // The clamp above authorises at most 4,833 output tokens, and a reasoning model's thinking is
+    // billed to that same ceiling and emitted BEFORE any content. So this rung can return HTTP 200,
+    // `finish_reason: 'length'`, no text and no tool call — 4,833 tokens of thinking and nothing to
+    // salvage. Returning it as a result made three things go wrong at once: the loop appended an
+    // EMPTY assistant turn and nudged the model to "stop describing and act" (it had described
+    // nothing), the identical doomed call was repeated twice more at ~97 s each, and the failure
+    // never entered the provider-failure ledger — so every honesty check that reads that ledger was
+    // blind and the user was asked to pay for a stronger engine.
+    //
+    // Throwing puts it where it belongs: the chain falls to the NEXT rung, which is a different
+    // vendor and usually not a forced-thinking one, and the build proceeds instead of ending empty.
+    if (turnStarvedItsBudget(result)) throw starvedBudgetError(budget.maxTokens, budget.requested);
+
+    // Hand the visible text to the caller in one shot — unless the streamed path already delivered it
+    // delta by delta, in which case repeating it here would print the answer twice.
+    if (!streamedText && params.onText && result.text) params.onText(result.text);
 
     return result;
   }

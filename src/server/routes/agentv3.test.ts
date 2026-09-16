@@ -1913,8 +1913,10 @@ describe('enforceNoClaude — the UNBREAKABLE weak-module guard (admin rule 2026
   // (Sonnet/Opus) is still stripped no matter how the chain was assembled; the model-pinned
   // CLAUDE_HAIKU backstop is KEPT and moved to the END ("to last me").
   it('strips CLAUDE (Sonnet/Opus) and keeps the model-pinned Haiku backstop IN PLACE', () => {
-    // Since 2026-09-14 the ladder owns the ORDER (the admin's weak ladder puts GPT-5.4 after Haiku),
-    // so this guard only removes; it no longer moves Haiku to the end. Same fixture, Sonnet gone,
+    // Since 2026-09-14 the LADDER owns the ORDER, so this guard only removes; it no longer moves
+    // Haiku to the end. (This comment used to justify that by naming a specific rung as sitting
+    // after Haiku — stale within a day. The reasoning stands on the division of duties, not on which
+    // rung happens to sit last; see tierLadder.ts for the real order.) Same fixture, Sonnet gone,
     // everything else exactly where it was.
     const out = enforceNoClaude(chain, true).map((r) => r.name);
     expect(out).toEqual(chain.map((r) => r.name).filter((n) => n !== 'CLAUDE'));
@@ -1935,8 +1937,9 @@ describe('enforceNoClaude — the UNBREAKABLE weak-module guard (admin rule 2026
     const weird = [{ name: 'CLAUDE' }, { name: 'CLAUDE_HAIKU' }, { name: 'GLM' }, { name: 'CLAUDE' }];
     const out = enforceNoClaude(weird, true).map((r) => r.name);
     // Sonnet gone; Haiku stays WHERE THE LADDER PUT IT. The 2026-07-13 "to last me" reorder was for a
-    // boolean-assembled chain; the admin's 2026-09-14 weak ladder places GPT-5.4 after Haiku, so the
-    // guard decides WHAT may run on weak and the ladder decides WHERE (see tierLadder.ts).
+    // boolean-assembled chain; now the guard decides WHAT may run on weak and the ladder decides
+    // WHERE (see tierLadder.ts, which owns the order — this comment no longer names a rung, because
+    // the version that did went stale the day after it was written).
     expect(out).toEqual(['CLAUDE_HAIKU', 'GLM']);
   });
 
@@ -1972,13 +1975,14 @@ describe('planRunnerChainNames — the plan phase respects WEAK ⇒ NO CLAUDE (a
     expect(names).not.toContain('GROK');
   });
 
-  it('normal plans on glm-5.3-flash first; strong on glm-5.3 first with Opus last', () => {
+  it('normal plans on glm-5.3-flash first; strong on glm-5.3 first, Kimi k3 second, Opus last', () => {
+    // Strong's ladder gained a Kimi rung (kimi-k3) on 2026-09-16, second after glm-5.3.
     expect(planRunnerChainNames(false, 'off')).toEqual(['GLM', 'KIMI', 'GLM', 'CLAUDE']);
-    expect(planRunnerChainNames(false, 'mini')).toEqual(['GLM', 'CLAUDE', 'CLAUDE_OPUS']);
+    expect(planRunnerChainNames(false, 'mini')).toEqual(['GLM', 'KIMI', 'CLAUDE', 'CLAUDE_OPUS']);
   });
 
   it('the guard still strips every Claude rung from a weak plan whatever the ladder said', () => {
-    expect(planRunnerChainNames(true, 'mini')).toEqual(['GLM']);
+    expect(planRunnerChainNames(true, 'mini')).toEqual(['GLM', 'KIMI']);
   });
 });
 

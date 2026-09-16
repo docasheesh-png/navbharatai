@@ -18,6 +18,7 @@ import { pacerEnabled, getSharedPacer } from '../RateLimitPacer';
 import { parseEnvFlag } from '../../lib/envFlag';
 import { isModelUnavailableError } from '../providerErrorClass';
 import { isBudgetEndedError } from '../turnDeadline';
+import { isStarvedBudgetError } from '../floorBudget';
 
 export interface NamedRunner {
   /** Bench/identity name, e.g. 'GROK', 'CLAUDE'. UNIQUE per rung — the timeout/429 bench keys on it,
@@ -51,13 +52,19 @@ export interface MultiProviderOptions {
   /** Called when a provider throws before the next is tried (greppable diagnostics). */
   onProviderError?: (name: string, error: unknown) => void;
   /**
+   * Called ONCE when a provider FAMILY is benched for the rest of this run (2 consecutive timeouts
+   * across any of its keys). Lets the build report say "GLM benched after 2 timeouts — the ladder
+   * moved on" instead of leaving the reader to infer it from the rungs that were NOT called.
+   */
+  onProviderBenched?: (family: string, reason: string) => void;
+  /**
    * Billing Phase 3 — called when a turn succeeds, with the provider that answered, its measured
    * token usage, AND the exact model id that answered (TurnResult.model — used by REAL-cost billing
    * to price a GLM-flash turn as free and a glm-5.2 turn at the flagship rate). Feeds the
    * per-provider/model ProviderUsageLedger. Purely observational: it never changes which provider
    * runs or how the turn is billed. `model` is optional so older callers keep compiling.
    */
-  onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string, cacheReadInputTokens?: number) => void;
+  onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean }, model?: string, cacheReadInputTokens?: number) => void;
   /**
    * Shared 429-cooldown registry (StudySync autopsy 2026-07-16) — the cross-instance memory of which
    * bench names are currently rate-limit-saturated. Defaults to the process-wide singleton so every
@@ -66,6 +73,25 @@ export interface MultiProviderOptions {
   cooldowns?: RateLimitCooldowns;
   /** Clock override for tests (defaults to Date.now). */
   now?: () => number;
+  /**
+   * The retired-rung memory (dead key → reason), supplied by the CALLER so it can outlive this one
+   * runner instance. Omit it and the runner keeps its own private map — byte-identical to before.
+   *
+   * 🔴 WHY IT IS AN OPTION RATHER THAN ALWAYS-PRIVATE (autopsy of the Panchang build `16cabab2`,
+   * 2026-09-16). The retirement below is scoped to ONE runner instance, which is exactly right for the
+   * agentic path: `routes/agentv3.ts` builds `client` once and reuses it for every turn, so a rung that
+   * starved on turn 1 is skipped on turns 2..n. **The FAST lane builds a NEW runner for every file it
+   * generates**, so that memory was thrown away between files and each file re-discovered the same dead
+   * rungs from scratch. In that build `muhurat.ts` spent 812.9 s and `astro.ts` spent 1,397.3 s doing so
+   * — 92.6% of the whole build's model time — and KIMI, one rung further down the ladder, was never
+   * reached on either.
+   *
+   * 🔒 IT IS A MAP THE CALLER OWNS, NOT A MODULE SINGLETON, and that is the whole safety argument: its
+   * lifetime is exactly the lifetime of whatever created it. One per build ⇒ it cannot outlive the build
+   * and cannot be seen by another build or another user. A process-wide singleton would do the opposite
+   * and is deliberately NOT offered here.
+   */
+  deadRungs?: Map<string, string>;
 }
 
 /**
@@ -507,7 +533,9 @@ export function makeMultiProviderTurnRunner(
   // life (one runner instance = one build). A transient failure (overload/timeout/5xx) is NOT
   // remembered — EXCEPT the timeout BENCH (admin design 2026-07-07): 2 CONSECUTIVE timeouts bench
   // the provider for the rest of the run, so a degraded GLM/KIMI evening can't grind every turn.
-  const deadForRun = new Map<string, string>(); // dead-key → the fatal reason
+  // Caller-supplied when the memory must outlive this instance (the fast lane's per-file runners —
+  // see MultiProviderOptions.deadRungs); otherwise private to this runner, exactly as before.
+  const deadForRun = opts.deadRungs ?? new Map<string, string>(); // dead-key → the fatal reason
   /**
    * The key a rung is retired under once it fails PERMANENTLY.
    *
@@ -519,8 +547,31 @@ export function makeMultiProviderTurnRunner(
    * per call into a build with no Kimi at all.
    */
   const deadKeyFor = (entry: NamedRunner, err: unknown): string =>
-    (isModelUnavailableError(err) && entry.modelId) ? `${entry.name}::${entry.modelId}` : entry.name;
-  const timeoutStreak = new Map<string, number>(); // name → consecutive timeout count
+    ((isModelUnavailableError(err) || isStarvedBudgetError(err)) && entry.modelId)
+      ? `${entry.name}::${entry.modelId}`
+      : entry.name;
+  /**
+   * 🔴 THE TIMEOUT STREAK IS KEYED BY PROVIDER FAMILY, NOT BY KEY (autopsy 4efab9d7, 2026-09-15).
+   *
+   * It used to be keyed by `name`, and every key in a pool has a DISTINCT name ('GLM', 'GLM#2', …) —
+   * deliberately, so a 429 on one key never sidelines its siblings. But a TIMEOUT is not a property
+   * of a key: it is the provider's service being slow, and every key of that service sees the same
+   * slowness. Keyed by name, "2 consecutive timeouts" could never accumulate across a pool: each
+   * key started its own streak at zero, and a ~50-key GLM pool burned the whole 480-second turn
+   * budget eight 60-second timeouts deep without ever reaching KIMI, which was next on the ladder
+   * and one rung away the entire time. The build wrote nothing in ten minutes.
+   *
+   * The shared cross-instance cooldown (`pool:<family>` below) was meant to cover this and did not
+   * fire in that build — it is env-tunable and can be OFF, and a bench that depends on a second
+   * mechanism being configured is not a bench. This in-run streak needs nothing: after
+   * TIMEOUT_BENCH_AFTER consecutive timeouts on ANY keys of one family, every remaining key of that
+   * family is skipped for the rest of this run, so the ladder reaches the next vendor at most two
+   * timeout windows in. A non-pool rung's family is its own name, so nothing else changes.
+   *
+   * The 429 streak stays per KEY on purpose — a per-key quota genuinely differs between keys.
+   */
+  const timeoutStreak = new Map<string, number>(); // provider FAMILY (reportAs ?? name) → consecutive timeout count
+  const benchedFamilies = new Set<string>();
   const rateLimitStreak = new Map<string, number>(); // name → consecutive 429 count
   const TIMEOUT_BENCH_AFTER = 2;
   const RATE_LIMIT_BENCH_AFTER = 2; // 2 consecutive 429s → stop hammering a throttled provider this run
@@ -549,8 +600,8 @@ export function makeMultiProviderTurnRunner(
       for (let i = 0; i < chain.length; i++) {
         const { name, runner } = chain[i];
         const reportName = chain[i].reportAs ?? name; // normalized label for telemetry/delivery (key-pool)
-        if ((timeoutStreak.get(name) ?? 0) >= TIMEOUT_BENCH_AFTER) {
-          fellBackFrom.push(name); // benched — skip without spending its timeout again this run
+        if ((timeoutStreak.get(reportName) ?? 0) >= TIMEOUT_BENCH_AFTER) {
+          fellBackFrom.push(name); // the FAMILY is benched — skip every remaining key without spending another timeout window
           continue;
         }
         if ((rateLimitStreak.get(name) ?? 0) >= RATE_LIMIT_BENCH_AFTER) {
@@ -584,7 +635,7 @@ export function makeMultiProviderTurnRunner(
         const attemptStartedAt = now();
         try {
           const result = await runner.runTurn(params);
-          timeoutStreak.delete(name); // a success resets the consecutive-timeout streak
+          timeoutStreak.delete(reportName); // a success resets the family's consecutive-timeout streak
           rateLimitStreak.delete(name); // …and the consecutive-429 streak (the provider recovered)
           cooldowns.clear(name); // …and the SHARED cooldown — the provider is back for everyone
           if (isPoolMember(chain[i])) cooldowns.clear(`pool:${reportName}`); // …and the POOL cooldown (service recovered)
@@ -595,6 +646,10 @@ export function makeMultiProviderTurnRunner(
             opts.onTurnComplete?.(reportName, {
               inputTokens: result.usage?.inputTokens ?? 0,
               outputTokens: result.usage?.outputTokens ?? 0,
+              // Carried, not re-derived: a turn whose provider reported nothing must stay
+              // distinguishable from one that genuinely cost nothing (TurnUsage.measured). Reading
+              // the zeros above cannot tell those apart, which is the whole point of the flag.
+              ...(result.usage?.measured === false ? { measured: false as const } : {}),
             }, result.model, result.usage?.cacheReadInputTokens ?? 0);
           } catch { /* telemetry attribution must never disturb the build */ }
           return result;
@@ -619,7 +674,23 @@ export function makeMultiProviderTurnRunner(
             const reason1 = err instanceof Error ? err.message : String(err);
             throw new Error(`This build's time budget ended before the step could finish (${reason1}). No provider failed — the work was stopped by our own deadline.`);
           }
-          if (isFatalProviderError(err) || isModelUnavailableError(err)) {
+          if (isFatalProviderError(err) || isModelUnavailableError(err) || isStarvedBudgetError(err)) {
+            // 🔴 A STARVED RUNG IS RETIRED ON ITS FIRST OCCURRENCE, AND THE ARGUMENT IS NOT "PROBABLY"
+            // (autopsy ee20478d, 2026-09-15). The authorised budget is a CONSTANT for the whole run —
+            // 4,833 tokens, derived from a fixed cap and a fixed rate — and an agentic transcript only
+            // ever GROWS. So a rung that could not begin an answer on turn 1 has strictly less room on
+            // turn 2, and re-proving that costs ~97 s of the user's build every single turn. That
+            // build spent three of them, back to back, on the same doomed call.
+            //
+            // It is keyed on the MODEL via `deadKeyFor`, exactly like model-unavailable and for the
+            // same reason: this is a fact about one rung's model at this budget, never about the
+            // provider. The other GLM rungs, the other vendors and the Claude/Haiku backstop are all
+            // untouched — and a run in which every rung starves still ends at the honest "all
+            // providers failed" throw below rather than silently.
+            //
+            // ⚠️ It must NOT be treated as a timeout: the provider answered, quickly and correctly,
+            // inside its clock. Benching the family for our own ceiling would take a healthy vendor
+            // off the ladder for the rest of the build.
             // A MODEL-NOT-FOUND is as deterministic as a revoked key and was, until this report, the one
             // permanent failure with no memory anywhere in the chain: it is neither a timeout nor a 429,
             // so it hit no bench and fell through to the next rung on EVERY call, forever. Build faa98da9
@@ -631,7 +702,12 @@ export function makeMultiProviderTurnRunner(
             // still ends at the honest "all providers unavailable" throw below rather than silently.
             deadForRun.set(deadKeyFor(chain[i], err), err instanceof Error ? err.message : String(err));
           } else if (isTimeoutProviderError(err)) {
-            timeoutStreak.set(name, (timeoutStreak.get(name) ?? 0) + 1); // bench after 2 in a row
+            const familyStreak = (timeoutStreak.get(reportName) ?? 0) + 1;
+            timeoutStreak.set(reportName, familyStreak); // bench the FAMILY after 2 in a row, across any of its keys
+            if (familyStreak >= TIMEOUT_BENCH_AFTER && !benchedFamilies.has(reportName)) {
+              benchedFamilies.add(reportName);
+              try { opts.onProviderBenched?.(reportName, `${familyStreak} consecutive timeouts — every remaining ${reportName} key is skipped for the rest of this run so the ladder can reach the next provider`); } catch { /* telemetry only */ }
+            }
             // TaskFlow autopsy 2026-07-17: 212 GLM TIMEOUTS in one build — the same cross-instance
             // blindness the 429 cooldown fixed, in the other transient class. A timeout wastes far
             // MORE wall-clock than a 429 (the full timeout window burns before the fallback), so the

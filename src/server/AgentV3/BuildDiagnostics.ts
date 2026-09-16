@@ -19,12 +19,55 @@ import { sandboxCost, describeSandboxCost } from './sandboxCost';
 import { redactProvidersText } from '../lib/providerRedaction';
 import { costAlertAdvisory, costAlertThresholdUsd } from './costAlert';
 import { isModelUnavailableError } from './providerErrorClass';
+import { isStarvedBudgetError } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
 import { isBudgetEndedError } from './turnDeadline';
+import { typecheckEvidenceFromCommands } from './TscGate';
 
 export type IssuePhase =
   | 'sandbox' | 'provider' | 'plan' | 'tool' | 'build' | 'readiness' | 'preview' | 'autofix' | 'deploy';
 export type IssueSeverity = 'info' | 'warning' | 'error';
+
+/**
+ * Findings that measure OUR OWN PROCESS rather than the user's app. Recorded at warning severity so
+ * a human notices them; never a reason to hesitate before shipping the app.
+ */
+const PROCESS_ONLY_CODES = new Set([
+  'GROUNDING_COST', 'POST_ANSWER_TIMING', 'SERVICE_GRAPH_MULTI', 'SERVICE_GRAPH_SINGLE',
+  'JOURNEY_NOT_DERIVED', 'RELEASE_GATE',
+]);
+
+/**
+ * 🔴 IS THIS FINDING ABOUT THE APP, OR ABOUT THE ENGINE THAT BUILT IT? (autopsy 4efab9d7, 2026-09-15)
+ *
+ * The one predicate the release gate, the user's build-health card and every "is it shippable?"
+ * count read from. It exists because the answer was being given in two places and both were wrong
+ * in the same way: an ERROR recorded in the **provider** phase — a model call that timed out — was
+ * counted as a "build-breaking blocker" of the APP. The gate went RED, the verdict was flipped to
+ * NOT ok, and a build whose production bundle had compiled and whose dashboard was rendering on the
+ * admin's own phone was declared not ready and made FREE. The admin's words: *"app ban jaye to
+ * 'app not build' dikha kar free (₹0) charge nahi karna hai."*
+ *
+ * ⚠️ THE SAME CLASS HAD BEEN ROOT-CAUSED TWO DAYS EARLIER (report 70115adf, 2026-09-13) — for ONE
+ * error message. `isBudgetEndedError` taught the recorder to file a *budget-ended* call as info; a
+ * *timed-out* call, thrown by the very next code path, still landed as an unresolved error and was
+ * still counted. Fixing the instance and not the class is what this repo's a38c6fef entry warns
+ * about, and it recurred in 48 hours.
+ *
+ * THE RULE, stated once: **a fact about a provider call can never be a fact about the app.** A
+ * timeout, a fallback, a rate limit, a benched key — these are the engine's struggle ledger, which
+ * the admin reads and the fifth absolute rule mines. Whether the app works is decided by the app's
+ * own evidence: does it typecheck, does it build, does it render, does a journey hold. So every
+ * issue in the `provider` phase is excluded here BY PHASE, not by code — a new provider-phase code
+ * added next month is excluded on the day it is written, which is the only way this stays fixed.
+ *
+ * Pure. Never throws.
+ */
+export function isAppFinding(issue: Pick<BuildIssue, 'phase' | 'code'>): boolean {
+  if (!issue) return false;
+  if (issue.phase === 'provider') return false;
+  return !PROCESS_ONLY_CODES.has(issue.code);
+}
 
 /**
  * How recently a build must have recorded something to count as STILL RUNNING rather than ended.
@@ -296,6 +339,21 @@ export interface BuildDiagnosticsReport {
   providerChain?: string;
   /** The distinct provider families in that chain, for lining up against providerDelivery. */
   providerChainNames?: string[];
+  /**
+   * What the request analyser concluded about THIS prompt, recorded so a model's performance can be
+   * correlated with the difficulty of the work it was given (modelPerformance.ts).
+   *
+   * 🔴 IT IS STORED RATHER THAN RE-DERIVED, AND THE DIFFERENCE IS NOT COSMETIC. `analyzeRequest` is
+   * pure, so a reader could in principle re-run it on the stored prompt — but the stored prompt is
+   * TRUNCATED (HISTORY_PROMPT_MAX = 200 chars) and the score has explicit length bands (+5 over 300,
+   * +10 over 800) plus `fileCount` and `historyTurns` inputs that are not stored at all. Re-deriving
+   * would therefore produce a DIFFERENT number from the one the build actually routed on, and print
+   * it as if it were the same fact. A legacy report carries nothing here and must read as unavailable.
+   *
+   * Observability only: written once at build start from a value the route already computed, read by
+   * nothing in the build path.
+   */
+  requestAnalysis?: { taskType: string; complexityScore: number; startTier: string };
   liveTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
   /** The cache-hit input tokens seen so far, paired with `liveTokens`. Same unreconciled status. */
   liveCacheReadInputTokens?: number;
@@ -415,6 +473,7 @@ export class BuildDiagnostics {
   private readonly issues: BuildIssue[] = [];
   /** provider → failure bucket → count. See recordProviderFailure. */
   private readonly providerFailureReasons = new Map<string, Map<string, number>>();
+  private requestAnalysis?: { taskType: string; complexityScore: number; startTier: string };
   private readonly meta: BuildDiagnosticsMeta;
   private readonly now: () => number;
   private readonly startedAt: number;
@@ -713,6 +772,17 @@ export class BuildDiagnostics {
   }
 
   /**
+   * Release-gate fallback evidence (2026-09-16): did a real typecheck already run somewhere in this
+   * build's OWN command history, even though the deterministic post-build gate never ran one? See
+   * `typecheckEvidenceFromCommands` in `./TscGate` for the full reasoning and the exact report that
+   * surfaced the gap. `undefined` means "found nothing to go on" — callers should leave their own
+   * evidence at whatever default they already had, never invent a pass.
+   */
+  typecheckEvidenceFromAgentCommands(): 'passed' | 'failed' | undefined {
+    return typecheckEvidenceFromCommands(this.commands);
+  }
+
+  /**
    * AI Diagnosis Bundle #4 — record one model turn's I/O (provider, model, prompt/response size +
    * preview, finish reason, tokens, latency). A `finishReason: 'max_tokens'` here is the smoking gun
    * for a truncated multi-file generation (the OneShot 8K-token cut-off).
@@ -961,15 +1031,33 @@ export class BuildDiagnostics {
         detail: rec.provider ? `provider=${rec.provider}` : undefined,
       });
     } else if (!rec.ok || truncated) {
+      // A TURN that timed out with nothing received is not "<model> failed" — no single provider
+      // answered at all, and the `model` on the record is the PLANNED id the runner was constructed
+      // with (App #5 lesson below: the nominal label is not the delivering provider). Report 4efab9d7
+      // printed "Model call failed (claude-sonnet-4-6)" for a weak build on which no Claude call was
+      // ever made; the chain had spent the whole turn timing out on one vendor's key pool. Say what
+      // is actually known, and keep the planned id where it belongs — in the detail.
+      const turnTimedOutUnanswered = !rec.ok && /timed out after/.test(rec.error ?? '') && !(rec.inputTokens || 0) && !rec.provider;
       this.record({
         phase: 'provider',
         severity: rec.ok ? 'warning' : 'error',
         code: rec.ok ? 'LLM_TRUNCATED' : 'LLM_CALL_FAILED',
         message: rec.ok
-          ? `Model response hit the token limit (${rec.model ?? 'model'}, finish=${rec.finishReason}) — output may be truncated.`
-          : `Model call failed (${rec.model ?? 'model'}): ${rec.error ?? 'unknown error'}`.slice(0, 400),
+          // 🔴 "MAY BE TRUNCATED" WAS TOO KIND BY HALF (autopsy ee20478d, 2026-09-15). This warning
+          // fired three times in a build that produced ZERO output — 4,833 tokens spent, 0 response
+          // characters, 0 tool calls, every time — and the hedged wording read like a caveat on an
+          // answer that arrived. The platform had the evidence in its hand (`responseChars` and
+          // `toolCalls` are on this very record) and described a total loss as a possible trim.
+          // Nothing downstream acted, because nothing downstream was told anything had gone wrong.
+          ? (!rec.responseChars && !rec.toolCalls
+              ? `A model turn spent its ENTIRE output allowance (${rec.outputTokens ?? 0} tokens) and produced NOTHING — no text, no tool call (${rec.model ?? 'model'}, finish=${rec.finishReason}). `
+                + 'This is our own output ceiling being smaller than the answer needed, not a provider fault and not the app: see floorBudget.ts.'
+              : `Model response hit the token limit (${rec.model ?? 'model'}, finish=${rec.finishReason}) — output may be truncated.`)
+          : turnTimedOutUnanswered
+            ? `A model turn timed out with no provider answering (${rec.error})`.slice(0, 400)
+            : `Model call failed (${rec.model ?? 'model'}): ${rec.error ?? 'unknown error'}`.slice(0, 400),
         autoResolved: false,
-        detail: rec.provider ? `provider=${rec.provider}` : undefined,
+        detail: rec.provider ? `provider=${rec.provider}` : turnTimedOutUnanswered ? `planned model=${rec.model ?? 'unknown'} — the label, not a provider that ran` : undefined,
       });
     }
   }
@@ -1308,6 +1396,8 @@ export class BuildDiagnostics {
    */
   /** Providers already flagged for a dead ladder rung — one warning each, never 55. */
   private readonly deadRungFlagged = new Set<string>();
+  /** Providers already flagged for a starved output budget — one warning each. */
+  private readonly starvedBudgetFlagged = new Set<string>();
 
   recordProviderFailure(name: string, reason?: unknown): void {
     if (!name) return;
@@ -1344,6 +1434,31 @@ export class BuildDiagnostics {
           autoResolved: false,
         });
       }
+
+      // OUR OWN OUTPUT CEILING STARVED A HEALTHY RUNG (autopsy ee20478d, 2026-09-15).
+      //
+      // Raised on the FIRST occurrence, unlike the dead-rung warning above which waits for a second:
+      // a dead rung needs a repeat to prove it is systematic rather than unlucky, whereas this one is
+      // arithmetic — the authorised budget is a constant for the run, so one starved call proves every
+      // later call on that rung would starve too. That is exactly why the rung is retired on first
+      // sight in MultiProviderTurnRunner, and this finding is the admin-facing half of that decision.
+      //
+      // It exists because the failure it names is INVISIBLE to every other signal: the provider
+      // returned HTTP 200, so before this bucket existed nothing appeared in this ledger at all, and
+      // every honesty check the platform owns reads this ledger.
+      if (bucket === 'output-budget' && !this.starvedBudgetFlagged.has(name)) {
+        this.starvedBudgetFlagged.add(name);
+        const detail = (reason instanceof Error ? reason.message : String(reason ?? '')).split('\n')[0].slice(0, 200);
+        this.record({
+          phase: 'provider',
+          severity: 'warning',
+          code: 'OUTPUT_BUDGET_STARVED',
+          message: `The ${name} rung answered inside its clock and produced nothing, because our own output ceiling was spent before the answer began — "${detail}". `
+            + 'This is NOT a provider outage and NOT the user\'s prompt: a reasoning model bills its thinking to the same ceiling, so a ceiling below its thinking returns a truncated reply with no text and no tool call. '
+            + 'The ceiling is FLOOR_TIMEOUT_CAP_MS / AGENTV3_FLOOR_MS_PER_TOKEN (see floorBudget.ts); the rung was retired for the rest of this build so the ladder could reach a vendor that fits.',
+          autoResolved: false,
+        });
+      }
     }
     this.notify();
   }
@@ -1376,6 +1491,20 @@ export class BuildDiagnostics {
   }
 
   /** Record the ordered engine chain this build was given. Best-effort; a blank value records nothing. */
+  /**
+   * Record what the analyser concluded about this request. Called once, at build start, with a value
+   * the route has already computed — no work is done here and nothing in the build reads it back.
+   */
+  setRequestAnalysis(a: { taskType?: string; complexityScore?: number; startTier?: string } | null | undefined): void {
+    const taskType = typeof a?.taskType === 'string' ? a.taskType.trim() : '';
+    const startTier = typeof a?.startTier === 'string' ? a.startTier.trim() : '';
+    const score = a?.complexityScore;
+    // All three or none: a half-recorded analysis would read as a real measurement with a missing
+    // half, which is the shape `USAGE_NOT_REPORTED` exists to keep out of this report.
+    if (!taskType || !startTier || typeof score !== 'number' || !Number.isFinite(score)) return;
+    this.requestAnalysis = { taskType, complexityScore: score, startTier };
+  }
+
   setProviderChain(chain: string, names?: string[]): void {
     const text = typeof chain === 'string' ? chain.trim() : '';
     if (!text) return;
@@ -1540,12 +1669,8 @@ export class BuildDiagnostics {
    * practice, which is the same as not having it. Anything already resolved is likewise not a caveat.
    */
   shippingIssueCount(severity: IssueSeverity): number {
-    const PROCESS_ONLY = new Set([
-      'GROUNDING_COST', 'POST_ANSWER_TIMING', 'SERVICE_GRAPH_MULTI', 'SERVICE_GRAPH_SINGLE',
-      'JOURNEY_NOT_DERIVED', 'RELEASE_GATE',
-    ]);
     return this.issues.filter(
-      (i) => i.severity === severity && !i.autoResolved && !PROCESS_ONLY.has(i.code),
+      (i) => i.severity === severity && !i.autoResolved && isAppFinding(i),
     ).length;
   }
 
@@ -1641,6 +1766,7 @@ export class BuildDiagnostics {
       builtBy: dominantDeliveryProvider(this.providerDelivery),
       providerFailures: this.providerFailures.size ? Object.fromEntries(this.providerFailures) : undefined,
       providerFailureReasons: this.providerFailureReasons.size ? this.providerFailureBreakdown() : undefined,
+      requestAnalysis: this.requestAnalysis,
       providerTokens: this.providerTokens,
       shadowFastLaneTokens: this.shadowFastLaneTokens,
       providerChain: this.providerChain,
@@ -1928,6 +2054,13 @@ export function classifyProviderFailure(reason: unknown): string {
   // here only, which is precisely how the platform ended up able to NAME this defect in a report while
   // the runner that could have acted on it had never heard of the class.
   if (isModelUnavailableError(text)) return 'model-unavailable';
+  // OUR OWN CEILING, not the provider's (autopsy ee20478d, 2026-09-15). The rung answered — quickly,
+  // correctly, inside its clock — and we had authorised so little output that the answer never began.
+  // It gets its own bucket because every other reading of it is wrong and leads somewhere useless:
+  // `timeout` benches a healthy vendor for our arithmetic, `context-length` blames the user's prompt
+  // for a cap on the reply, and `other:` is where this class hid for two nights across two vendors.
+  // Checked here, above the generic tests, so a future reword of the marker cannot fall through them.
+  if (isStarvedBudgetError(text)) return 'output-budget';
   if (/\b429\b|rate.?limit|too many requests|quota/.test(t)) return 'rate-limit';
   if (/timeout|timed out|etimedout|deadline/.test(t)) return 'timeout';
   if (/\b401\b|\b403\b|unauthor|forbidden|invalid api key|authentication/.test(t)) return 'auth';
@@ -1947,6 +2080,49 @@ export function classifyProviderFailure(reason: unknown): string {
  * tomorrow. They get their own, louder treatment.
  */
 const DEGRADED_BUCKETS = new Set(['timeout', 'rate-limit', 'server-error', 'network']);
+
+/**
+ * Buckets that mean OUR OWN REQUEST OR LADDER IS WRONG — they never come right on a retry.
+ *
+ * 🔴 THE COMMENT ABOVE PROMISED THESE "their own, louder treatment", AND FOR THE USER THERE WAS NONE
+ * (build report 58fe8254, 2026-09-15). One free build recorded `GLM: 279 bad-request` — every call to
+ * the first rung of its ladder rejected with the same hard 400, because we asked a model that always
+ * reasons to stop reasoning. `providerFailuresLookDegraded` correctly said "not degraded" (it is not
+ * transient), `deadLadderRung` matches only `model-unavailable` so it said nothing — and the user was
+ * shown **"Your app needs our strongest engine to finish cleanly. Add credits."**
+ *
+ * We asked someone for money because our own request was malformed. That is worse than the 2026-09-13
+ * outage case this file already fixed, not better: an outage at least might have passed on a retry.
+ *
+ * `auth` is here for the same reason and had the identical hole; `model-unavailable` had an ADMIN line
+ * and still reached the upsell. One predicate now covers all three.
+ */
+const OUR_CONFIGURATION_BUCKETS = new Set(['model-unavailable', 'auth', 'bad-request']);
+
+/**
+ * Did this build fail because of OUR configuration rather than the engine's ability or the app's
+ * difficulty? Reads the SAME recorded buckets the admin's report shows, so the two cannot disagree.
+ *
+ * ⚠️ Requires a REPEAT (≥ `minCount`), deliberately. A single 400 can be one odd prompt hitting one
+ * rung's schema, and suppressing an honest outcome on one stray failure would be its own dishonesty.
+ * A bucket that repeats is a rung that cannot work — which is the thing worth being loud about. PURE.
+ */
+export function providerFailuresLookMisconfigured(
+  reasons: Record<string, string> | null | undefined,
+  minCount = 3,
+): boolean {
+  const rows = Object.values(reasons ?? {});
+  if (!rows.length) return false;
+  return rows.some((row) => String(row)
+    .split(',')
+    .some((part) => {
+      // Each part reads like " 279 bad-request" — the count and the bucket name.
+      const m = /^\s*(\d+)\s+(.+?)\s*$/.exec(part);
+      if (!m) return false;
+      const n = Number(m[1]);
+      return Number.isFinite(n) && n >= minCount && OUR_CONFIGURATION_BUCKETS.has(m[2]);
+    }));
+}
 
 /**
  * Codes that mean "we went around it", not "we fixed it". See the tally in `report()`.
@@ -1986,6 +2162,28 @@ export function providerFailuresLookDegraded(
     .split(',')
     .map((part) => part.trim().replace(/^\d+\s*/, ''))
     .some((bucket) => DEGRADED_BUCKETS.has(bucket)));
+}
+
+/**
+ * Did this build fail because OUR OWN output ceiling starved a healthy rung? PURE.
+ *
+ * 🔴 WHY IT IS A SEPARATE PREDICATE, AND WHY ONE OCCURRENCE IS ENOUGH (autopsy ee20478d, 2026-09-15).
+ * `providerFailuresLookMisconfigured` needs three of a bucket before it will call our configuration
+ * wrong, because a single `bad-request` can be a one-off the next call gets right. This bucket cannot:
+ * the authorised budget is a constant for the run, so one starved call is a proof about every call.
+ * Requiring three would mean burning three ~97-second turns to earn the right to say so — the precise
+ * waste the retirement in MultiProviderTurnRunner exists to stop, which would make the two halves of
+ * one fix contradict each other.
+ *
+ * Reads the RECORDED buckets, so it can never disagree with the report the admin is looking at.
+ */
+export function buildStarvedItsOutputBudget(
+  reasons: Record<string, string> | null | undefined,
+): boolean {
+  return Object.values(reasons ?? {}).some((row) => String(row)
+    .split(',')
+    .map((part) => part.trim().replace(/^\d+\s*/, ''))
+    .includes('output-budget'));
 }
 
 /**

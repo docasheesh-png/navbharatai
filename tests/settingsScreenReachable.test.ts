@@ -68,7 +68,6 @@ function navigableScreens(): Set<string> {
   const out = new Set<string>();
   for (const m of panelSrc.matchAll(/setSettingsScreen\(\s*'([a-z0-9_]+)'/gi)) out.add(m[1]);
   for (const src of [
-    read('src/lib/offlineAssistant.ts'),
     read('src/server/AppContext/AppKnowledgeBase.ts'),
     read('src/components/agentv3/AgentV3Panel.tsx'),
     read('src/App.tsx'),

@@ -57693,3 +57693,82 @@ Proposed as the next system-level build, not attempted inline in this autopsy gi
 - The 3 fake/incomplete-code READINESS_BLOCKER items that made this specific build RED were never
   fixed — that is the individual app's outstanding work, correctly left for the user's own "fix it"
   follow-up per the build's own honest verdict, not a platform defect.
+
+---
+
+## 2026-09-16 — Three real verification buttons: email, phone, GitHub — and the referral screen's own dead ones fixed alongside them
+
+**Admin:** *"user ke profile page par. 3 varification button add karo! 1- email verification 2- phone
+verification 3- github verification. ji button lar click kiya jaye wahi verification start ho, (aur
+refral system me use ho). jo jo verification complete ho jaye, woh likh kar aye (alredy aa raha hai)."*
+
+**Server-side, nothing was missing.** `stepIsProven` (`referralRewards.ts`) already reads all three
+facts straight from Firebase — `emailVerified`, a linked phone, `github.com` among the linked
+providers — because the referral payout needed proof no request body could fake. What was missing was
+a real way to MAKE those facts true, reachable from the app rather than from a phone's OS settings.
+
+**🔴 And while building it, the SAME missing capability turned up a second time, already broken.**
+`ReferralPanel.tsx` (Billing → Refer a Friend) told a blocked step *"Verify your email address first"*
+/ *"Connect your GitHub account first"* as **plain, unclickable text** — and its own `onVerifyPhone`
+prop was declared in the component's interface and **never called by anything**, nor ever passed by
+its one caller (`BillingPanel.tsx`). Three "buttons" that only ever rendered as words, on the one
+screen whose whole job is finishing these steps. Root-cause discipline (rule 3, hunt the siblings)
+means this shipped in the same change rather than being left for later.
+
+**What was built — one shared, reusable action module, used by both screens:**
+- `src/lib/accountVerificationActions.ts` (pure-ish, no server import): `sendVerificationEmail(user)`
+  wraps Firebase's own `sendEmailVerification`; `linkGithubAccount(auth)` LINKS GitHub onto the
+  CURRENTLY SIGNED-IN account (never `signInWithCredential`, which would switch the session to
+  whoever that GitHub identity belongs to — the wrong outcome when verifying the account you are
+  already in). Mirrors `AuthComponent.tsx`'s existing native-vs-web split for GitHub sign-in: native
+  (Capacitor) uses `@capacitor-firebase/authentication`'s own GitHub sheet then `linkWithCredential`;
+  web uses `linkWithPopup`, falling back to `linkWithRedirect` only on a genuinely blocked popup
+  (`popupFailureAction` — the SAME decision the sign-in screen already makes, reused rather than
+  re-derived). A redirect completes itself: `App.tsx`'s existing `getRedirectResult` handler already
+  reads a GitHub credential off ANY redirect result, sign-in or link, so no new wiring was needed
+  there. Phone is deliberately NOT here — `VerifyPhoneSheet` already does that whole job; duplicating
+  it would be the exact "four drifted copies" class rule 4 exists to prevent.
+- Two small type-declaration additions in `declarations.d.ts` (`linkWithPopup`, `linkWithRedirect`,
+  `sendEmailVerification`) — this repo hand-writes a minimal `firebase/auth` shim rather than the
+  SDK's full types, and these three were simply never added because nothing had called them yet.
+
+**Profile page — the new Verifications card.** Three rows (Email / Phone / GitHub), each showing a
+green "Verified"/"Connected" badge when done, or a real "Verify"/"Connect" button when not. Email:
+click sends a real Firebase verification link, then the SAME button becomes "Refresh" (Firebase's
+client SDK caches `emailVerified` until `.reload()` is called — there is no live listener for it).
+GitHub: click runs the shared `linkGithubAccount` action; already-linked is a no-op, never a re-link.
+Phone: unchanged — still opens the one existing `VerifyPhoneSheet` already mounted on this page. The
+old "Mobile not verified — Verify" line beside the avatar is now a read-only "✓ verified" glance (its
+job moved to the card, so there is exactly one Verify button per step, never two doing the same
+thing).
+
+**Referral screen — the dead text replaced with the SAME real actions.** `ReferralPanel.tsx` now
+mounts its own `VerifyPhoneSheet` and calls `sendVerificationEmail` / `linkGithubAccount` directly
+(via the `firebase.ts` `auth` singleton it already has no trouble reaching, the same pattern
+`ProfilePage` uses) — no new props threaded through `BillingPanel`/`App.tsx`, keeping the fix
+self-contained and low-risk. A blocked row now shows the explanation text AND a real button beside
+it; completing email or GitHub calls `props.onRefresh()`, which re-fetches `/api/referral/:userId` —
+the SERVER's own facts, never a client-invented "done" state. The dead `onVerifyPhone` prop is
+deleted rather than left declared-and-unused, which is the exact bug this closes.
+
+**What this does NOT claim, said plainly (rule 6):** simultaneous multi-account sessions are still out
+of scope (see the 2026-09-02 entry above) — this is about VERIFYING facts on the one signed-in
+account, unrelated to that design question. Apple has no linkable equivalent (tied to the device's one
+signed-in Apple ID) and GitHub's OAuth page has no true account-select hint (only a text prefill) —
+neither is touched, since claiming "one tap" there would repeat the exact overstatement the 2026-08-22
+entry (see the account-switch fix above) already corrected once.
+
+**Tests:** `accountVerificationActions.test.ts` (13 — `isGithubLinked`'s three states; the native
+credential going through `linkWithCredential` and never `signInWithCredential`; the popup → redirect
+→ cancel decision tree; the one honest error message for a GitHub identity already used elsewhere).
+`tests/verificationButtonsAreReal.test.ts` (10, source-scan, matching this repo's own convention for
+locking a UI-wiring class rather than a DOM render — the vitest environment here is `node`) — pins
+that both screens call the real actions, that the dead `onVerifyPhone` prop is gone, and that a
+blocked referral row renders an actual button. `phoneGate.test.ts`'s existing profile-verification
+assertion was updated to the new card's wording (`'Not linked yet'` replacing `'Mobile not verified'`)
+without weakening what it protects — the same three underlying checks (`user.phoneNumber ?`,
+`maskPhone`, `setVerifyOpen(true)`) still hold.
+
+Gate: `tsc` clean (frontend + server), `noUnusedImports` clean, `vitest run` 1696 files / 23785 passed
+/ 0 failed, `build` + `test:bundle` + `boot:check` all green. `AppKnowledgeBase.ts`'s `my_profile` and
+`referral` entries updated in the same change per the mandatory sync rule.

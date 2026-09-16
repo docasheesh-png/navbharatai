@@ -11,7 +11,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
-import { User, Wallet, Clock, CheckCircle2, Circle, AlertCircle, ChevronRight, Edit3, Save, X, CalendarDays, Zap, Activity, LogOut, AlertTriangle, Smartphone } from 'lucide-react';
+import { User, Wallet, Clock, CheckCircle2, Circle, AlertCircle, ChevronRight, Edit3, Save, X, CalendarDays, Zap, Activity, LogOut, AlertTriangle, Smartphone, ShieldCheck, Mail, Loader2 } from 'lucide-react';
+import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { ApiKeysCard } from './ApiKeysCard';
@@ -19,6 +20,7 @@ import { panelWidth, panelColumns, type DeviceMode } from '../../lib/panelWidth'
 import { maskPhone } from '../../lib/phoneNumber';
 import { VerifyPhoneSheet } from '../VerifyPhoneSheet';
 import { auth as firebaseAuth } from '../../lib/firebase';
+import { sendVerificationEmail, linkGithubAccount, isGithubLinked, describeLinkGithubError } from '../../lib/accountVerificationActions';
 
 // ── Types mirroring server responses ──────────────────────────────────────────
 
@@ -138,9 +140,66 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
 
   // Edit state
   const [editing, setEditing] = useState(false);
-  // Verify-number sheet, opened from the mobile row above. Reloads on success so the row re-reads the
-  // auth record rather than showing a state this component invented.
+  // Verify-number sheet, opened from the Verifications card below. Reloads on success so the row
+  // re-reads the auth record rather than showing a state this component invented.
   const [verifyOpen, setVerifyOpen] = useState(false);
+
+  // ── Verifications card (admin 2026-09-16: "3 verification button add karo — email, phone, github,
+  // jo referral system me use ho") ─────────────────────────────────────────────────────────────────
+  // `emailVerified` / `providerData` live ON the Firebase `user` object; these two mirror them into
+  // component state so a completed action re-renders this card without waiting for the PARENT to hand
+  // down a new `user` object (which it may never do — `.reload()` and a link both mutate the SAME
+  // Firebase User in place). Re-synced from `user` on every prop change via the effect below, so
+  // switching accounts or a genuine parent refresh is never shadowed by a stale local copy.
+  const [emailVerified, setEmailVerified] = useState(user?.emailVerified ?? false);
+  const [githubLinked, setGithubLinked] = useState(isGithubLinked(user));
+  useEffect(() => {
+    setEmailVerified(user?.emailVerified ?? false);
+    setGithubLinked(isGithubLinked(user));
+  }, [user]);
+
+  const [verifyBusy, setVerifyBusy] = useState<'email' | 'github' | null>(null);
+  const [verifyError, setVerifyError] = useState<{ which: 'email' | 'github'; text: string } | null>(null);
+  const [emailSent, setEmailSent] = useState(false);
+
+  const handleVerifyEmail = async () => {
+    if (!user || !user.email) return;
+    setVerifyBusy('email'); setVerifyError(null);
+    try {
+      await sendVerificationEmail(user);
+      setEmailSent(true);
+    } catch (e: any) {
+      setVerifyError({ which: 'email', text: e?.message || 'Could not send the verification email. Please try again.' });
+    } finally {
+      setVerifyBusy(null);
+    }
+  };
+
+  const refreshEmailStatus = async () => {
+    if (!user) return;
+    setVerifyBusy('email');
+    try {
+      await user.reload();
+      setEmailVerified(user.emailVerified);
+      if (user.emailVerified) setEmailSent(false);
+    } finally {
+      setVerifyBusy(null);
+    }
+  };
+
+  const handleConnectGithub = async () => {
+    setVerifyBusy('github'); setVerifyError(null);
+    try {
+      const outcome = await linkGithubAccount(firebaseAuth);
+      if (outcome === 'ok') setGithubLinked(true);
+      // 'cancelled' and 'redirecting' need no message — a closed popup is silent, and a redirect
+      // navigates the page away (App.tsx's own getRedirectResult finishes it on return).
+    } catch (e) {
+      setVerifyError({ which: 'github', text: describeLinkGithubError(e) });
+    } finally {
+      setVerifyBusy(null);
+    }
+  };
   const [editName, setEditName] = useState('');
   const [editBio, setEditBio] = useState('');
   const [editPhone, setEditPhone] = useState('');
@@ -313,27 +372,16 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
             <div className="flex-1 min-w-0">
               <h1 className="text-xl font-black text-white truncate">{displayName}</h1>
               <p className="text-xs text-[#8b949e] mt-0.5">{user.email}</p>
-              {/* MOBILE VERIFICATION (admin 2026-08-22). Shown here because otherwise the ONLY way to
-                  verify would be to attempt an import and be refused — a feature you can only reach by
-                  first failing at something else is not finished. `phoneNumber` is on the auth record
-                  only once a phone credential is really linked, so its presence IS the verification;
-                  nothing here asks the server or can disagree with it. */}
-              <p className="text-[11px] mt-1 flex items-center gap-1.5">
-                <Smartphone className="w-3 h-3 text-[#484f58]" />
-                {user.phoneNumber ? (
-                  <span className="text-emerald-400 font-mono">{maskPhone(user.phoneNumber)} · verified</span>
-                ) : (
-                  <>
-                    <span className="text-[#8b949e]">Mobile not verified</span>
-                    <button
-                      onClick={() => setVerifyOpen(true)}
-                      className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 hover:text-indigo-300"
-                    >
-                      Verify
-                    </button>
-                  </>
-                )}
-              </p>
+              {/* Mobile status, at a glance next to the name — the ACTION button for it lives in the
+                  Verifications card below, so there is exactly one "Verify" per step, not two doing
+                  the same thing. `phoneNumber` is on the auth record only once a credential is really
+                  linked, so its presence IS the verification; nothing here asks the server or can
+                  disagree with it (admin 2026-08-22). */}
+              {user.phoneNumber && (
+                <p className="text-[11px] mt-1 flex items-center gap-1.5 text-emerald-400 font-mono">
+                  <Smartphone className="w-3 h-3" /> {maskPhone(user.phoneNumber)} · verified
+                </p>
+              )}
               <p className="text-[10px] text-[#484f58] mt-1 font-mono">Member since {memberSince}</p>
               {saveSuccess && (
                 <span className="text-[10px] text-emerald-400 font-bold mt-1 block">✓ Profile saved</span>
@@ -425,6 +473,112 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
                 {p.providerId === 'google.com' ? '🔵 Google' : p.providerId === 'github.com' ? '⚫ GitHub' : p.providerId}
               </span>
             ))}
+          </div>
+        </div>
+
+        {/* ── Verifications (admin 2026-09-16) ────────────────────────────────
+            One real button per step — click it, the verification actually starts, and a step already
+            done shows as done. Verifying all three (plus applying a friend's referral code, in the
+            Refer a Friend screen) is what the referral bonus is paid against. */}
+        <div className="bg-[#161b22] border border-white/5 rounded-3xl p-6 space-y-3">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-indigo-400" />
+            <h2 className="text-xs font-black text-white uppercase tracking-widest">Verifications</h2>
+          </div>
+          <p className="text-[11px] text-[#8b949e] -mt-1">
+            Verifying these keeps your account recoverable — and each one unlocks part of your referral bonus.
+          </p>
+
+          <div className="space-y-2 pt-1">
+            {/* Email */}
+            <div className="bg-[#0d1117] rounded-2xl p-4 border border-white/5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <Mail className="w-4 h-4 text-[#8b949e] shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-white">Email verification</p>
+                    <p className="text-[10px] text-[#484f58] truncate">{user.email || 'No email on this account'}</p>
+                  </div>
+                </div>
+                {emailVerified ? (
+                  <span className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-[10px] font-bold border border-emerald-500/20">
+                    <CheckCircle2 className="w-3 h-3" /> Verified
+                  </span>
+                ) : user.email ? (
+                  <button
+                    onClick={emailSent ? refreshEmailStatus : handleVerifyEmail}
+                    disabled={verifyBusy === 'email'}
+                    className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-[10px] font-black uppercase tracking-wider transition-all"
+                  >
+                    {verifyBusy === 'email' && <Loader2 className="w-3 h-3 animate-spin" />}
+                    {emailSent ? 'Refresh' : 'Verify'}
+                  </button>
+                ) : (
+                  <span className="shrink-0 text-[10px] font-bold text-[#484f58]">Not available</span>
+                )}
+              </div>
+              {emailSent && !emailVerified && (
+                <p className="text-[10px] text-amber-400/90 mt-2">
+                  We sent a link to {user.email}. Open it, then press Refresh here.
+                </p>
+              )}
+              {verifyError?.which === 'email' && (
+                <p className="text-[10px] text-red-400 mt-2">{verifyError.text}</p>
+              )}
+            </div>
+
+            {/* Phone */}
+            <div className="bg-[#0d1117] rounded-2xl p-4 border border-white/5 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <Smartphone className="w-4 h-4 text-[#8b949e] shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-white">Phone verification</p>
+                  <p className="text-[10px] text-[#484f58] truncate">{user.phoneNumber ? maskPhone(user.phoneNumber) : 'Not linked yet'}</p>
+                </div>
+              </div>
+              {user.phoneNumber ? (
+                <span className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-[10px] font-bold border border-emerald-500/20">
+                  <CheckCircle2 className="w-3 h-3" /> Verified
+                </span>
+              ) : (
+                <button
+                  onClick={() => setVerifyOpen(true)}
+                  className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black uppercase tracking-wider transition-all"
+                >
+                  Verify
+                </button>
+              )}
+            </div>
+
+            {/* GitHub */}
+            <div className="bg-[#0d1117] rounded-2xl p-4 border border-white/5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <Github className="w-4 h-4 text-[#8b949e] shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-white">GitHub verification</p>
+                    <p className="text-[10px] text-[#484f58] truncate">Lets you import and deploy your own repos too</p>
+                  </div>
+                </div>
+                {githubLinked ? (
+                  <span className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-[10px] font-bold border border-emerald-500/20">
+                    <CheckCircle2 className="w-3 h-3" /> Connected
+                  </span>
+                ) : (
+                  <button
+                    onClick={handleConnectGithub}
+                    disabled={verifyBusy === 'github'}
+                    className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-[10px] font-black uppercase tracking-wider transition-all"
+                  >
+                    {verifyBusy === 'github' && <Loader2 className="w-3 h-3 animate-spin" />}
+                    Connect
+                  </button>
+                )}
+              </div>
+              {verifyError?.which === 'github' && (
+                <p className="text-[10px] text-red-400 mt-2">{verifyError.text}</p>
+              )}
+            </div>
           </div>
         </div>
 

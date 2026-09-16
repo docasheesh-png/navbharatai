@@ -58352,3 +58352,63 @@ this file exists to prevent.
 - **Repair-after-proof is not built.** A build proven broken at this point ends honestly instead of being
   fixed. Doing better needs budget reserved *earlier* in the build, which is a separate change with its
   own latency trade — and under the admin's stated objective it is the one worth costing next.
+## 2026-09-16 — App Mart: congratulations on approval (bell + email), and re-publish replaces instead of duplicating (APK store)
+
+Admin request, verbatim (Hinglish): notify + email the creator when their app is approved for App
+Mart; and when a user edits and re-publishes an app, admin approval afterward must not create a
+second app — the old one should be replaced in place.
+
+**1) Congratulations notification + email on approval.** New shared module
+`src/server/lib/storeApprovalNotify.ts` (`notifyStoreApproval`), covering BOTH store surfaces — the
+APK store's `'approved'` decision and the web-app store's `'listed'` decision are the same real event
+("your app is now live and anyone can find it"), so one module serves both rather than two hand-written
+copies. Same shape as the existing per-user "your site is down" path in `siteUptimeSweep.ts`: an
+in-app bell entry via `AdminNotificationStore.saveNotification`, plus a best-effort email via
+`alertEmail.ts` when one is configured and the account's email is verified — reused rather than
+reinvented, since that pair is already this platform's one answer to "reach a user outside the app".
+Wired into both `POST /api/nav-store/admin/review` and `POST /api/nav-store/web/admin/review` in
+`routes/navStore.ts`, firing only on the TRANSITION into approved/listed (never on a re-click of an
+already-approved app), and — matching the "side effects after the response" discipline `web/publish`'s
+own bake step already uses in this file — fired AFTER `res.json(...)`, so a slow or unconfigured email
+provider can never hold up the admin's review screen. Never throws; a notification/email failure can
+never turn a successful approval into an error response.
+
+**2) Re-publish replaces the listing instead of duplicating it (APK store).** The web-app store already
+had this right (`saveWebApp`'s own comment: "one app id per (owner, workspace), so updating never
+spawns a duplicate listing") — the APK store did not. `ingestApkSubmission` in `routes/navStore.ts`
+always minted a brand-new record id, so editing an app in its own GitHub repo and sending it for review
+again created a SECOND, unrelated submission: an already-approved app stayed live under its old listing
+while a fresh `pending` one queued up beside it, with nothing in the admin queue showing the two were
+the same app.
+
+Root cause fixed with a new pure decision function, `findRepublishTarget` (`navStoreStore.ts`): matches
+an existing submission by `(uid, provenance.repo)` — the same GitHub repo IS the same app, since the
+store only ever ingests a NavBharatAI build and one app lives in one repo — excluding a `'removed'`
+submission (a real takedown; a fresh submission after one starts its own clean record rather than
+quietly reviving what an admin took down). When a match exists, `ingestApkSubmission` reuses its id
+(carrying the lifetime `downloads` count forward, same continuity rule `saveWebApp` already applies to
+`runs`/`remixes`) and deletes the old binary's storage object once the new one is saved.
+
+Status ALWAYS resets to `'pending'` on a re-publish, even replacing an `'approved'` submission —
+deliberately NOT mirroring the web-app store's "a clean re-publish keeps its earned place" leniency.
+A NEW BINARY needs its OWN scan and its OWN human look; the APK store's whole safety model (this
+file's own header: "malware built for a specific campaign is routinely unknown to every engine on the
+day it ships — the scan informs the reviewer, it does not replace them") applies to every submission,
+not just first ones, and carrying an old approval forward onto different bytes would be exactly the
+shortcut that model exists to refuse. This also matches the admin's own framing of the request
+("admin ke approval ke baad" — after admin's approval [each time]) — every update still needs a fresh
+admin look; it just lands in the same slot instead of a new one.
+
+Regression-locked: `navStoreStore.test.ts` (9 cases on `findRepublishTarget`, pure) and
+`storeApprovalNotify.test.ts` (10 cases: message content, the White-Label Law — never names an
+underlying AI vendor — and the notify orchestration with injected deps, mirroring
+`siteUptimeSweep.test.ts`'s harness style). `tests/navStoreRoutes.test.ts` updated for both new
+exports. Full gate green on the final, merged-onto-`main` state: typecheck (frontend + server),
+noUnusedImports, build, `deps:server-gate`, `boot:check`, `vitest run` — 1702 files, 23878 passed,
+1 skipped, 0 FAIL.
+
+**Open, stated plainly:** the APK store's `packageName` field is permanently blank (`packageName: ''`,
+hardcoded, never populated anywhere) — Android package identity is not tracked at all today.
+`provenance.repo` was used instead as this app's real identity key because it is the only stable value
+that already exists on every submission; a real `packageName` extracted from the APK's manifest would
+be a cleaner, more standard key and is a separate, future improvement.

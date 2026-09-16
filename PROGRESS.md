@@ -57779,7 +57779,135 @@ Proposed as the next system-level build, not attempted inline in this autopsy gi
 - The 3 fake/incomplete-code READINESS_BLOCKER items that made this specific build RED were never
   fixed — that is the individual app's outstanding work, correctly left for the user's own "fix it"
   follow-up per the build's own honest verdict, not a platform defect.
+**No failed build report has been read for this complaint.** Every number in the fix — the 60 s idle
+bound, the 300 s cap — is sized from the engine's own budgets, not from the traffic that is actually
+timing out. A report ID is what turns the tuning from reasoning into measurement.
 
+---
+
+## 2026-09-16 — Referral code + "Earning" list on My Profile
+
+Admin: *"user ka refral code (jisse user ko 25+25+25 =75 ₹ milenge) user ki profile me clear show
+hona chahiye. sath me button- 'earning'. is earning button par click karne se — yeh user ka refral
+code kis kis user ne use kiya hai, uski email id aur us user ne 3 me se kitne step complete kar liye
+woh list bhi show ho!"*
+
+### What shipped
+
+- **`friendVerificationStatus(paidSteps)`** (`referralRewards.ts`, pure) — how far one referred
+  friend has got on the three steps that pay their referrer (mobile / email / github), read straight
+  from the friend's own `paidSteps`. Deliberately the SAME signal `decideReferrerReward` already pays
+  from, so "2 of 3" on the new screen can never disagree with the ₹ the referrer actually received.
+- **`GET /api/referral/:userId/referred`** — the Earning list itself. Read-only and money-free (no
+  wallet write, no device proof needed — it only answers a question the referrer is allowed to ask
+  about their own code): queries `user_referrals` where `referrerUserId == me`, and for each friend
+  returns their email (`resolveAccountContact`, the same server-privileged lookup the claim route
+  already uses) plus `emailVerified` / `phoneVerified` / `githubLinked` / `completedCount`. Bounded at
+  500 rows the same way `referralAdminSummary.ts`'s admin scan is bounded — the ₹1,500 lifetime cap
+  already keeps a real referrer to roughly twenty friends, so the limit only guards a runaway query.
+- **`ReferralEarningsSheet.tsx`** — the "Earning" button's modal. Lists every friend with their email
+  and a Mobile/Email/GitHub badge row, or an honest empty/disabled state. Uses the vendored
+  `Github` icon (`ui/BrandIcons.tsx`), never `lucide-react`'s (removed upstream in 1.x — see that
+  file's own header). Sheet geometry uses `nb-sheet-overlay` + `nb-sheet` + `nb-sheet-over-nav`
+  (z-[400], above the tab bar) rather than a bare `vh` cap — the mobile-scroll and tab-bar-overlap
+  classes both caught a first draft that got this wrong before it ever reached CI.
+- **`ProfilePage.tsx`** — a new "Your Referral Code" card (code + Copy + the **Earning** button),
+  fed by the SAME `useReferralProgress` hook `ReferralPanel` (Billing → Refer a Friend) already uses
+  — Android-only by construction, so this card is silent on the website exactly like the rest of the
+  referral surface already is. No new platform gate invented.
+- `AppKnowledgeBase.ts`'s `referral` entry updated (path, description, howToUse, keywords) per the
+  mandatory sync rule — the code now has TWO places (Billing → Promo, and My Profile), and the
+  Earning list is documented so every AI in the app can answer "who used my code" correctly.
+
+### Working alongside PR #2971
+
+`claude/profile-verification-buttons` (open at the time this shipped) also touches `ProfilePage.tsx`
+and `ReferralPanel.tsx`, adding real email/phone/GitHub verify buttons — a different feature in an
+overlapping file. Built independently on `main`, not on that branch; a merge conflict at whichever
+merges second is expected (CLAUDE.md, "Working alongside other live sessions") and not a mistake.
+
+### Verification gate — run last, on the final state
+
+`npm run typecheck` / `typecheck:server` / `noUnusedImports.mjs` / `build` / `test:bundle` /
+`boot:check` all clean. `npx vitest run` — **1694 files, 23772 passed, 1 skipped, 0 FAIL** (the run
+that caught the two geometry mistakes above and confirmed their fixes).
+
+### Still open
+
+No admin decision was needed here — the feature reuses existing infrastructure (the hook, the
+step-proof signal, the shared sheet CSS) rather than inventing anything new.
+
+## 2026-09-16 — Admin panel: "Failure category" — which app TYPE fails most, and WHY (new feature)
+
+Admin asked (verbatim): *"jitne bhi build reports admin penal me hai, wah ek alag analysis laga do.
+jisme sabhi failed build ko catagorise kiya jaye. matlab 78% build failed hai. kis type ki apps nahi
+ban pa rahi hai. kya koi specific prkar hai, ya rendom... ek button banado, 'failure catagory'."*
+
+**Honest scope note before the feature itself: no build reports were actually shared with this
+session to "read" — the admin's message referred to reports sent in other sessions/conversations.**
+Built from the platform's own comprehensive durable record instead (below), which is a superset of
+any hand-picked sample and is what actually answers "is there a pattern" honestly.
+
+**Data source, chosen deliberately.** Three candidate sources exist: `admin_build_reports` (the
+"Report" button inbox — a SELF-SELECTED sample of builds a user was upset enough to flag),
+`user_build_history` (status/title only, no rootCause), and `workspace_diagnostics_v3` via
+`listAllDiagnostics()` (every workspace's LATEST build, durable, already backing
+`/api/admin/all-builds`). Used the third. This is the same correction `AdminDashboard.tsx` already
+made once, on 2026-08-12, for the sibling "first-pass quality" headline — see the comment at
+`AdminDashboard.tsx:376` ("IT WAS MEASURING COMPLAINTS, NOT BUILDS") — applied here from the start
+rather than shipped biased and fixed later.
+
+**Two axes, both reusing existing platform truth instead of inventing a new one:**
+1. **By app TYPE** — the domain a build's prompt belongs to, via `analyzeRequirementGaps().domain`
+   (`RequirementGapAnalyzer.ts`), the SAME classifier a build prompt is already analysed with.
+   Centralised on purpose rather than writing a second domain-guessing regex list (fourth absolute
+   rule, step 2/3).
+2. **By failure REASON** — a new, evidence-grounded keyword classifier
+   (`src/server/lib/buildFailureCategory.ts`), matched against `rootCause` text read verbatim out of
+   `BuildDiagnostics.ts` / `turnDeadline.ts` (db-unreachable, sandbox-unavailable, provider-budget,
+   cost-ceiling, stuck-tool, tool-call-failed, typecheck-failed, dependency-error, preview-failed,
+   runtime-error, review-critical, no-files). Unmatched text lands in an honest `other` bucket —
+   never forced into a wrong category — and every bucket carries up to 3 real examples
+  (workspaceId + raw rootCause text) so the admin can verify the classification themselves.
+
+⚠️ **A sibling classifier was found and deliberately NOT merged into this one — recorded, not
+duplicated silently.** `src/lib/buildReportAnalytics.ts` already has its own `CATEGORY_RULES` regex
+list solving the same reason-classification problem, on the same underlying rootCause vocabulary,
+but sourced from the biased `admin_build_reports` inbox and feeding the existing "Failure patterns"
+panel already live in the admin dashboard (`AdminDashboard.tsx` ~line 3589). Consolidating the two
+classifiers, and/or repointing that older panel at the same comprehensive `listAllDiagnostics`
+source this feature uses, would be the complete fix — but that touches a live, already-shipped
+panel's classification output, which is a wider, riskier change than this feature PR should carry.
+Left as an **open root cause** (rule 6) rather than guessed at; see the comment block at the top of
+`buildFailureCategory.ts`.
+
+**Honesty conventions followed** (matching `builderMetrics.ts` / `ReferralCostCard.tsx` /
+`BuildCostCard.tsx`): rates are `null`, never `0`, when the denominator is zero; in-flight/unsettled
+builds are excluded from rate math but counted separately (`unjudged`) rather than silently dropped;
+the read window and whether it was capped are always shown, never a bare percentage with no stated
+sample size.
+
+**Shipped:**
+- `src/server/lib/buildFailureCategory.ts` — pure module (`classifyFailureReason`, `domainOfPrompt`,
+  `categorizeBuildFailures`), no Firestore/env/clock reads.
+- `tests/buildFailureCategory.test.ts` — 15 tests: real-string pattern matches, honest `other` /
+  `no-root-cause` buckets, pattern precedence, unjudged-build exclusion from rates, domain grouping
+  sorted by FAILED count (not raw total), zero-judged domains never appearing, capped examples.
+- `GET /api/admin/failure-categories` (`src/server/routes/admin.ts`) — reads `listAllDiagnostics`,
+  categorises, returns the report plus `window`/`reportsRead`/`capped`/`sampleNote`.
+- `src/components/admin/FailureCategoryCard.tsx` — new admin panel card (stat tiles, by-app-type
+  table, expandable by-reason list with raw examples), wired into `AdminDashboard.tsx` beside the
+  existing Build Costs / Referral Cost cards. Uses the shared `adminGet`/`adminFailed` helper from
+  `src/lib/adminFetch.ts` (the disciplined fetch pattern built 2026-09-14 specifically to prevent an
+  error response being silently rendered as zero data) rather than a hand-rolled fetch.
+
+**Verification gate, run on the final state:** frontend `tsc --noEmit` clean, server
+`tsc -p tsconfig.server.json --noEmit` clean, `node scripts/noUnusedImports.mjs` clean,
+`npx vitest run tests/buildFailureCategory.test.ts` → 15/15 passed. Full-suite gate (`npm run
+build`, `npm run test:bundle`, `npm run boot:check`, full `npx vitest run`) run before push.
+
+No `AppKnowledgeBase.ts` entry — this is admin-only internal tooling (same precedent as
+`BuildCostCard`/`ReferralCostCard`, neither of which has an entry either).
 ---
 
 ## 2026-09-16 — Three real verification buttons: email, phone, GitHub — and the referral screen's own dead ones fixed alongside them

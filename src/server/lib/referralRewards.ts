@@ -394,3 +394,31 @@ export function githubIsLinked(providers: unknown): boolean {
   return Array.isArray(providers)
     && providers.some((p) => String(p ?? '').trim().toLowerCase() === 'github.com');
 }
+
+// ── The Earning screen: how far each referred friend has got ───────────────────────────────────────
+
+/** One referred friend's progress on the three steps that pay THEIR referrer. */
+export interface FriendStepStatus {
+  mobile: boolean;
+  email: boolean;
+  github: boolean;
+  /** 0–3. What the admin's "Earning" list actually shows next to each friend's name. */
+  completedCount: number;
+}
+
+/**
+ * How far a referred friend has got, for the referrer's own "who used my code" list.
+ *
+ * Deliberately reads the friend's own PAID steps — the exact signal `decideReferrerReward` pays
+ * from — rather than asking Firebase again for a second opinion. A step only ever reaches
+ * `paidSteps` after `stepIsProven` has confirmed it against the friend's real account, so "2 of 3
+ * complete" here can never disagree with the ₹ the referrer has actually been paid for that friend.
+ * PURE, like everything else in this module.
+ */
+export function friendVerificationStatus(paidSteps: unknown): FriendStepStatus {
+  const paid = readSteps(paidSteps);
+  const mobile = paid.includes('mobile');
+  const email = paid.includes('email');
+  const github = paid.includes('github');
+  return { mobile, email, github, completedCount: [mobile, email, github].filter(Boolean).length };
+}

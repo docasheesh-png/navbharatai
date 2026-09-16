@@ -64,7 +64,7 @@ export interface MultiProviderOptions {
    * per-provider/model ProviderUsageLedger. Purely observational: it never changes which provider
    * runs or how the turn is billed. `model` is optional so older callers keep compiling.
    */
-  onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string, cacheReadInputTokens?: number) => void;
+  onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean }, model?: string, cacheReadInputTokens?: number) => void;
   /**
    * Shared 429-cooldown registry (StudySync autopsy 2026-07-16) — the cross-instance memory of which
    * bench names are currently rate-limit-saturated. Defaults to the process-wide singleton so every
@@ -625,6 +625,10 @@ export function makeMultiProviderTurnRunner(
             opts.onTurnComplete?.(reportName, {
               inputTokens: result.usage?.inputTokens ?? 0,
               outputTokens: result.usage?.outputTokens ?? 0,
+              // Carried, not re-derived: a turn whose provider reported nothing must stay
+              // distinguishable from one that genuinely cost nothing (TurnUsage.measured). Reading
+              // the zeros above cannot tell those apart, which is the whole point of the flag.
+              ...(result.usage?.measured === false ? { measured: false as const } : {}),
             }, result.model, result.usage?.cacheReadInputTokens ?? 0);
           } catch { /* telemetry attribution must never disturb the build */ }
           return result;

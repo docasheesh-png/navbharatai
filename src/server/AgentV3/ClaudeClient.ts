@@ -58,6 +58,23 @@ export interface TurnUsage {
   outputTokens: number;
   cacheCreationInputTokens: number;
   cacheReadInputTokens: number;
+  /**
+   * `false` ⇒ the provider returned NO usage at all, so the zeros above are the ABSENCE of a
+   * measurement rather than a measured zero. Absent/`true` ⇒ the provider reported its counts.
+   *
+   * 🔴 WHY THIS FIELD EXISTS, and it is the same class autopsy f04421ef already paid for once. That
+   * one was a report printing `GLM: 54 call(s) · 0 in · 0 out` for an unsettled ledger, and the zeros
+   * were read — in an autopsy handed to the admin — as a measured zero. The renderer was fixed to say
+   * "tokens not recorded". A STREAMED turn reopens the identical hole through a different door: token
+   * counts ride the final chunk only when the provider honours `stream_options.include_usage`, and
+   * whether Z.ai and Moonshot do is a fact no session can settle without a real call. Without this
+   * flag an unreported turn is indistinguishable from a genuinely free one.
+   *
+   * 🔒 IT NEVER CHANGES A BILL. The ONE-WALLET LAW forbids inventing tokens, so an unmeasured turn
+   * still costs the user zero — the safe direction. What it changes is whether the ADMIN can SEE that
+   * our own cost figure is an under-estimate, instead of reading a confident zero.
+   */
+  measured?: boolean;
 }
 
 export interface TurnResult {

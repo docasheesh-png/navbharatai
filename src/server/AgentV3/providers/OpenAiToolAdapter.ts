@@ -263,11 +263,20 @@ export function parseOpenAiCompletion(completion: OpenAiCompletionLike): TurnRes
     0,
     completion?.usage?.prompt_tokens_details?.cached_tokens ?? completion?.usage?.cached_tokens ?? 0,
   );
+  // 🔴 A MISSING `usage` IS NOT A ZERO, and collapsing the two here is what made it unrecoverable
+  // downstream (see TurnUsage.measured). The test is whether the provider reported EITHER count as a
+  // real number — an absent `usage` object and a `usage: {}` are equally unmeasured, while a genuine
+  // `prompt_tokens: 0` is a measurement and stays one.
+  const measured = Number.isFinite(completion?.usage?.prompt_tokens)
+    || Number.isFinite(completion?.usage?.completion_tokens);
   const usage: TurnUsage = {
     inputTokens: completion?.usage?.prompt_tokens ?? 0,
     outputTokens: completion?.usage?.completion_tokens ?? 0,
     cacheCreationInputTokens: 0,
     cacheReadInputTokens: cachedRead,
+    // Only ever written as `false`. Leaving it absent when measured keeps every existing reader,
+    // snapshot and test byte-identical — this field is additive by construction.
+    ...(measured ? {} : { measured: false as const }),
   };
 
   // If the model returned tool calls, the agent loop must run them: force tool_use.

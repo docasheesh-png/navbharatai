@@ -8,9 +8,10 @@ import { join } from 'node:path';
 import {
   COMPLEX_SCORE_LINE, BORDERLINE_MARGIN, complexityFromScore, needsSecondOpinion,
   parseComplexityAnswer, complexityPrompt, decideComplexity, startLadderForComplexity,
-  complexityWouldReroute, complexityRoutingEnabled,
+  complexityWouldReroute, complexityRoutingEnabled, scorerCouldNotRead,
 } from '../src/server/AgentV3/complexityRouting';
 import { TIER_LADDERS, healLadder } from '../src/server/AgentV3/tierLadder';
+import { analyzeRequest } from '../src/server/AgentV3/RequestAnalyser';
 
 const seq = (rungs: readonly { provider: string; model: string }[]): string[] => rungs.map((r) => `${r.provider}:${r.model}`);
 
@@ -66,6 +67,76 @@ describe('💸 a model call is only bought when its answer could change the outc
     expect(calls).toBe(1);
     expect(d.verdict).toBe('complex');
     expect(d.source).toBe('model');
+  });
+});
+
+// "jo language hamara code nahi samajh paye" (admin 2026-09-17). The scorer's signals are ALL ASCII, so
+// a request in an Indian script is not merely mis-scored — it is unread, and the score-based ask above
+// cannot catch that, because an unread request scores 5 and 5 is nowhere near the 40 line.
+describe('🔴 a request the scorer could not READ is asked about, whatever it scored', () => {
+  it('the hole is real: a big Devanagari app scores like small talk', () => {
+    const hindi = 'एक अस्पताल प्रबंधन ऐप बनाओ जिसमें डॉक्टर लॉगिन, मरीज़ रिकॉर्ड, अपॉइंटमेंट बुकिंग, बिलिंग और रिपोर्ट हों';
+    const a = analyzeRequest({ prompt: hindi });
+    expect(a.taskType).toBe('chat');                 // not one signal matched
+    expect(a.complexityScore).toBeLessThan(20);      // …so the biggest app in this file scores tiny
+    expect(needsSecondOpinion(a.complexityScore)).toBe(false);   // the score alone would NEVER ask
+    expect(needsSecondOpinion(a.complexityScore, hindi)).toBe(true); // reading the prompt does
+  });
+
+  it('is script-agnostic — India is not one script', () => {
+    for (const p of [
+      'একটি হাসপাতাল ব্যবস্থাপনা অ্যাপ তৈরি করুন',      // Bengali
+      'ஒரு மருத்துவமனை மேலாண்மை செயலியை உருவாக்கவும்',   // Tamil
+      'ఒక ఆసుపత్రి నిర్వహణ యాప్‌ను రూపొందించండి',        // Telugu
+      'ایک ہسپتال مینجمنٹ ایپ بنائیں',                  // Urdu
+    ]) expect(scorerCouldNotRead(p), p).toBe(true);
+  });
+
+  it('romanized Hinglish is NOT unread — the signals really do read it', () => {
+    // The one real Hinglish build report in evidence (58f110de) landed mid-pack on every measure.
+    expect(scorerCouldNotRead('Text to image generator app banao asli .')).toBe(false);
+    expect(scorerCouldNotRead('ek todo app banao jisme login ho')).toBe(false);
+    expect(scorerCouldNotRead('build me a hospital management app with billing')).toBe(false);
+  });
+
+  it('one foreign word inside an English sentence is not an unread request', () => {
+    expect(scorerCouldNotRead('build a todo app, call it मेरा ऐप')).toBe(false);
+  });
+
+  it('💸 a scrap too short to classify never buys a call', async () => {
+    expect(scorerCouldNotRead('ऐप')).toBe(false);
+    expect(scorerCouldNotRead('')).toBe(false);
+    expect(scorerCouldNotRead('🎨🎨🎨🎨🎨🎨🎨🎨')).toBe(false);   // emoji are not letters
+    let calls = 0;
+    await decideComplexity({ prompt: 'ऐप', score: 5 }, async () => { calls += 1; return 'complex'; });
+    expect(calls).toBe(0);
+  });
+
+  it('end to end: the unread request reaches the second opinion and is rerouted to KIMI', async () => {
+    const hindi = 'एक अस्पताल प्रबंधन ऐप बनाओ जिसमें डॉक्टर लॉगिन, मरीज़ रिकॉर्ड और बिलिंग हो';
+    let asked = '';
+    const d = await decideComplexity(
+      { prompt: hindi, score: analyzeRequest({ prompt: hindi }).complexityScore },
+      async (p) => { asked = p; return 'complex'; },
+    );
+    expect(asked).toContain(hindi.slice(0, 20));     // the prompt is PASSED, never translated first
+    expect(d.verdict).toBe('complex');
+    expect(d.source).toBe('model');
+    expect(seq(startLadderForComplexity(TIER_LADDERS.weak, d.verdict))[0]).toBe('KIMI:kimi-k2.7-code');
+  });
+
+  it('🔒 an unread request the model cannot answer stays on TODAY\'s behaviour — never a guess', async () => {
+    const d = await decideComplexity({ prompt: 'एक अस्पताल प्रबंधन ऐप बनाओ जिसमें बिलिंग हो', score: 5 },
+      async () => { throw new Error('down'); });
+    expect(d.verdict).toBe('simple');                // the cheap rung, exactly as before this change
+    expect(d.source).toBe('model-unavailable');
+    expect(d.reason).toContain('script');            // and the report says WHY it could not be sure
+  });
+
+  it('🔒 the reason line still names no vendor', async () => {
+    const d = await decideComplexity({ prompt: 'एक अस्पताल प्रबंधन ऐप बनाओ जिसमें बिलिंग हो', score: 5 },
+      async () => 'complex');
+    expect(d.reason).not.toMatch(/glm|kimi|claude|anthropic|openai|gpt|nano|sonnet|opus|gemini|grok/i);
   });
 });
 

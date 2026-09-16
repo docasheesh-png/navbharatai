@@ -58904,3 +58904,81 @@ rather than assumed.
 earlier turn), and the milestone-building audit.
 
 **Gate, run last on the final state:** see the commit.
+
+---
+
+## 2026-09-17 — Item 6: the answer was NOT translation. The scorer could not READ the request.
+
+The admin delegated this one ("woh aap apne hisab se behtar karo"), and I said I would MEASURE before
+adding cost. I did. **The measurement killed the idea I was about to build, and pointed at a real hole
+next to it.**
+
+### What the seven real build reports actually say
+
+| report | prompt | issues | model calls |
+|---|---|---|---|
+| `58f110de` "Text to image generator app banao asli" | Hinglish | 195 | 23 |
+| `41acada6` "Music player for Android 16" | plain English | **311** | **40** |
+| `e6175ca1` "Can you generate images?" | plain English | 252 | 40 |
+| `1743bdfb` (alarm app) | Devanagari — but a CHAT turn, not a build prompt | 44 | 6 |
+
+- **Not one build prompt in the evidence base is in Devanagari.** The single Devanagari message was a
+  question ("क्या मैं prompt डालूं") misrouted to a build — the defect already fixed this session.
+- The Hinglish build landed **mid-pack on every measure**; the two WORST builds were in plain English.
+- Every Devanagari character in that report is in the model's REPLY. **The generated app's files contain
+  none** — the builder handled a Hinglish request and still wrote an English UI.
+
+**So a translation step would have spent a call and added latency on every non-English build, risked
+losing the user's intent before the builder saw it, and fixed nothing I can find evidence of.** Not built,
+and the reason is recorded here rather than the feature being quietly dropped.
+
+### The real hole, which is the admin's sentence read literally
+
+*"jo language **hamara code** nahi samajh paye"* — the language OUR CODE cannot read. Not the model's.
+
+`RequestAnalyser`'s signals are **all ASCII** — `simpleApp`, `coding`, `debugging`, `architecture`,
+`hardSignal`, and the shared `isComplexAppPrompt` alike. Verified: zero non-Latin characters in the whole
+scoring path. So a Devanagari request for a hospital app with doctor logins, patient records, appointments
+and billing matches nothing, falls to `taskType: 'chat'`, and scores **5**.
+
+🔴 **AND YESTERDAY'S OWN CHANGE MADE THAT WORSE, WHICH IS WHY THIS IS NOT A TIDY-UP.** The complexity
+routing shipped hours earlier asks a second opinion only when the score is within ±3 of the 40 line. A
+score of 5 is not borderline — it is *confidently* simple. So the biggest app in the file would have gone
+to the cheapest rung with **no Kimi and no second opinion**, more silently than the day before.
+
+**Fixed at the class:** `scorerCouldNotRead(prompt)` — script-agnostic, not a Devanagari test, because
+India is not one script (Bengali, Tamil, Telugu, Urdu and the rest are equally unreadable to an ASCII
+regex). It measures the share of LETTERS outside the Latin range (≥25%, min 12 letters), so romanized
+Hinglish stays FALSE — the signals really do read "banao ek todo app" — and one Hindi word inside an
+English sentence is not an unread request. `needsSecondOpinion` now returns true for such a prompt
+**whatever it scored**, and the admin report says WHICH of the two reasons bought the call.
+
+🔒 **It cannot cost more when it fails.** An unread prompt whose second opinion is down falls back to
+`simple` — byte-identical to the behaviour before this change. The ask is the mechanism; the fallback is
+today. Test-locked in `tests/complexityRouting.test.ts` and **proven by reversion** (deleting the one
+guard line fails three cases, confirmed).
+
+### 🔴 TWO OPEN ROOT CAUSES FOUND WHILE HUNTING SIBLINGS (rule 6 — recorded, not patched)
+
+**1. Pipeline DEPTH, the ETA, and the preflight cost estimate have the same blindness — and depth matters
+more than routing.** `complexityFromPrompt` (`BuildTimeEstimator.ts`) counts page/feature words with ASCII
+regexes too. A Devanagari complex app yields `moduleCount 1, featureCount 1` → magnitude 2 → **the FAST
+LANE**, plus a wildly optimistic ETA and a too-low cost estimate. Not fixed here because the fix is a
+thread-through, not a regex: `complexityFromPrompt` runs at route line ~11075 and `estimateBuildCost`
+earlier still, both **before** `decideComplexity` at ~11573. Flooring the counts on "unread" instead would
+send a Devanagari *calculator* down the deep pipeline — wrong in the expensive direction. The real fix is
+to move the one complexity decision earlier and let all three readers share it; that is a design change
+with real blast radius and belongs in its own PR.
+
+**2. 🔴 THE ILLEGAL-CONTENT DETECTION IS BLIND TO DEVANAGARI, AND THIS ONE MUST NOT BE PATCHED CASUALLY.**
+`illegalContentRules.ts` has **zero** Devanagari in its code (comments stripped and re-checked). The Hindi
+in `promptSafety.ts` is the refusal MESSAGE only — the output, not the detection. So the porn ban that
+report `03997004` exists to enforce can be walked past by asking in Hindi.
+**Bounded, not unmitigated:** the models themselves still refuse (that was always the model's virtue, per
+`03997004`), and this session's refusal-is-final and trailing-question fixes stop the retry and the upsell
+that followed. The cost is one build's worth of refusals, **not** a published site.
+**Why it is not fixed in this change:** CLAUDE.md's own ruling is that detection stays PRECISION-FIRST and
+carries an `exempt` stand-down for a sexual-health clinic, a school safety curriculum, a harassment
+reporting tool. Adding Devanagari *subject* patterns without equally careful Devanagari *exempt* patterns
+would show a Hindi-speaking doctor the blunt ban message — the exact harm the admin corrected on
+2026-09-13 ("yeh thoda jyada hi ho gaya"). Both halves ship together or neither does.

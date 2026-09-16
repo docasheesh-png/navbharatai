@@ -55,6 +55,47 @@ export const COMPLEX_SCORE_LINE = 40;
  */
 export const BORDERLINE_MARGIN = 3;
 
+/**
+ * 🔴 THE SECOND WAY THE CODE CANNOT TELL: IT COULD NOT READ THE REQUEST AT ALL.
+ *
+ * Admin, 2026-09-17: *"jo language hamara code nahi samajh paye…"* — the language OUR CODE does not
+ * understand. That is not the model's problem: seven real build reports show the BUILDER handles Hindi
+ * and Hinglish fine (report 58f110de asked in Hinglish, produced an app whose files contain no Hindi at
+ * all, and landed mid-pack on every quality measure — the two WORST builds in that set were in plain
+ * English). So nothing here translates the user's words; translating would spend a call on every such
+ * build, add latency, and risk losing intent before the builder ever sees it.
+ *
+ * What genuinely cannot read Hindi is `RequestAnalyser`'s scorer. **Every one of its signals is ASCII** —
+ * `simpleApp`, `coding`, `debugging`, `architecture`, `hardSignal`, and `isComplexAppPrompt` alike. A
+ * Devanagari request for a hospital app with doctor logins, patient records, appointments and billing
+ * matches none of them, falls to `taskType: 'chat'`, and scores **5**.
+ *
+ * ⚠️ AND THE SCORE-BASED ASK ABOVE CANNOT CATCH IT, WHICH IS WHY THIS EXISTS. 5 is nowhere near the 40
+ * line, so `needsSecondOpinion` would have answered "not borderline" with total confidence and sent the
+ * biggest app on the cheapest rung — a hole this file's own routing change of the same day made matter
+ * more than it did the day before. A confident wrong answer is worse than an admitted unknown.
+ */
+export const UNREADABLE_LETTER_SHARE = 0.25;
+
+/** Below this many letters there is nothing to classify, and a call would be spent on noise. */
+export const MIN_LETTERS_TO_ASK = 12;
+
+/**
+ * PURE. Did the deterministic scorer have anything to read?
+ *
+ * True when a real share of the request's LETTERS are outside the Latin range the signals are written
+ * in. Deliberately script-agnostic rather than a Devanagari test — Bengali, Tamil, Telugu, Marathi,
+ * Gujarati, Kannada, Malayalam, Punjabi, Odia, Urdu and Arabic are all just as unreadable to an ASCII
+ * regex, and India is not one script. Romanized Hinglish stays FALSE: the signals really do read
+ * "banao ek todo app", and one Hindi word inside an English sentence is not an unread request.
+ */
+export function scorerCouldNotRead(prompt: string): boolean {
+  const letters = String(prompt ?? '').match(/\p{L}/gu) ?? [];
+  if (letters.length < MIN_LETTERS_TO_ASK) return false;
+  const nonLatin = letters.filter((c) => !/[A-Za-z]/.test(c)).length;
+  return nonLatin / letters.length >= UNREADABLE_LETTER_SHARE;
+}
+
 /** Kill switch. `off` restores the pre-2026-09-17 behaviour exactly: every build opens on rung 1. */
 export function complexityRoutingEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return String(env.AGENTV3_COMPLEX_TO_KIMI ?? '').trim().toLowerCase() !== 'off';
@@ -74,7 +115,8 @@ export function complexityFromScore(score: number): ComplexityVerdict {
  * 18 would spend a call to move a verdict from `simple` to `simple`. "Kharcha kam se kam" applies to
  * the classifier too — a question whose answer cannot change the outcome is not worth asking.
  */
-export function needsSecondOpinion(score: number): boolean {
+export function needsSecondOpinion(score: number, prompt?: string): boolean {
+  if (prompt !== undefined && scorerCouldNotRead(prompt)) return true;
   return Number.isFinite(score) && Math.abs(score - COMPLEX_SCORE_LINE) <= BORDERLINE_MARGIN;
 }
 
@@ -97,7 +139,7 @@ export function parseComplexityAnswer(raw: string | null | undefined): Complexit
 export function complexityPrompt(userPrompt: string): string {
   return [
     'Decide how big the app this person is asking for really is.',
-    'Answer with ONE word: "simple" or "complex".',
+    'The request may be in any language or script. Answer with ONE word: "simple" or "complex".',
     '',
     '"simple"  — one screen or a few, no accounts, no server, no database.',
     '            calculator, todo list, clock, landing page, portfolio, quiz.',
@@ -129,13 +171,20 @@ export async function decideComplexity(
   if (!complexityRoutingEnabled(opts.env ?? process.env)) {
     return { ...base, verdict: 'simple', source: 'disabled', reason: 'complexity routing is switched off' };
   }
-  if (!needsSecondOpinion(score) || !llmCall) {
+  const unread = scorerCouldNotRead(input?.prompt ?? '');
+  if (!needsSecondOpinion(score, input?.prompt) || !llmCall) {
     return {
       ...base,
       source: 'deterministic',
-      reason: `score ${score} is ${deterministic === 'complex' ? 'above' : 'at or below'} the ${COMPLEX_SCORE_LINE} line`,
+      reason: unread
+        ? `the request is not in a script the scorer reads, and no second opinion was available, so the ${score} score stands`
+        : `score ${score} is ${deterministic === 'complex' ? 'above' : 'at or below'} the ${COMPLEX_SCORE_LINE} line`,
     };
   }
+  /** Why the call is being bought — the two are different facts and the admin report should say which. */
+  const why = unread
+    ? 'the request is not in a script the scorer reads'
+    : `score ${score} is borderline`;
 
   const timeoutMs = Math.max(500, opts.timeoutMs ?? 6_000);
   try {
@@ -145,11 +194,11 @@ export async function decideComplexity(
     ]);
     const parsed = parseComplexityAnswer(answer);
     if (!parsed) {
-      return { ...base, source: 'model-unavailable', reason: `score ${score} is borderline; the second opinion did not answer, so the score stands` };
+      return { ...base, source: 'model-unavailable', reason: `${why}; the second opinion did not answer, so the score stands` };
     }
-    return { verdict: parsed, score, source: 'model', reason: `score ${score} is borderline; a second opinion read it as ${parsed}` };
+    return { verdict: parsed, score, source: 'model', reason: `${why}; a second opinion read it as ${parsed}` };
   } catch {
-    return { ...base, source: 'model-unavailable', reason: `score ${score} is borderline; the second opinion was unavailable, so the score stands` };
+    return { ...base, source: 'model-unavailable', reason: `${why}; the second opinion was unavailable, so the score stands` };
   }
 }
 

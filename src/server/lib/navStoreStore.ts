@@ -204,6 +204,30 @@ export async function listAppsByUid(uid: string, limit = 50): Promise<StoreApp[]
 }
 
 /**
+ * Which of a developer's own existing submissions (if any) a fresh publish-from-build should REPLACE
+ * rather than duplicate (2026-09-16 — mirrors `saveWebApp`'s "one app id per (owner, workspace)" rule
+ * in `navStoreWeb.ts`, applied to the APK store's own identity).
+ *
+ * Without this, editing an app in its own repo and sending it for review again created a SECOND,
+ * unrelated store record: an already-approved app kept its old listing live while a brand-new
+ * `pending` one queued up beside it, and an admin working the queue had no way to know the two were
+ * the same app.
+ *
+ * Matched by `provenance.repo` — the same GitHub repo IS the same app, by construction: the store only
+ * ever ingests a NavBharatAI build (`ingestApkSubmission` REQUIRES provenance), and one app lives in
+ * one repo. `uid` narrows it to the CALLER's own submissions — `listAppsByUid` already filters by uid,
+ * so this only ever sees one developer's own history and can never match someone else's app.
+ *
+ * A `removed` submission is deliberately EXCLUDED: that is a real takedown (the binary's bytes are
+ * already deleted), and a fresh submission after one starts its own clean record rather than quietly
+ * reviving the listing an admin took down. Pure.
+ */
+export function findRepublishTarget(existing: StoreApp[], repo: string): StoreApp | null {
+  if (!repo) return null;
+  return existing.find((a) => a.provenance?.repo === repo && a.status !== 'removed') ?? null;
+}
+
+/**
  * Strip a record down to what the public may see.
  *
  * Deliberately omits the uploader's email and phone, our storage path, and the raw scanner engine

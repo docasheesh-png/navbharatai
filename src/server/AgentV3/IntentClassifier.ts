@@ -384,6 +384,29 @@ const AUX_OPENERS = /^(?:can|could|would|will|shall|should|do|does|did|is|are|am
 const AUX_ASKS_US = /^(?:can|could|would|will|do|does|did|are)\s+(?:you|u|aap|tum)\b/;
 
 /**
+ * "kya main/mai/aap/tum/hum/hume …" — the Hindi/Hinglish "should I…?" / "may I…?" construction.
+ *
+ * 🔴 UNANCHORED ON PURPOSE (autopsy 2026-09-16). Every other line in `readsAsQuestion` requires the
+ * message to OPEN with a question word — but Hindi places "kya" right before the verb it questions as
+ * often as at the sentence's start, so a long lead-in statement followed by a short trailing question
+ * ("मैं एक अलार्म ऐप बनाना चाहता हूं … क्या मैं prompt डालूं?" — "I want to build an alarm app… should I
+ * paste the prompt?") asks its real question at the END. The old `^`-anchored version could not see
+ * past the declarative opening clause, so the message hard-locked to a build order at HIGH confidence,
+ * skipped the LLM upgrade entirely (see `classifyIntentSmart`), and ran a real, billed weak-tier build
+ * for a question that wanted a one-line "haan, bhej dijiye" in reply.
+ *
+ * Devanagari included deliberately, and — for now — ONLY this one pattern: the reported message was
+ * typed in native script, where every OTHER signal in this file (WH_OPENERS, NEW_BUILD_SIGNALS, …) is
+ * Romanized-only and therefore blind to it (recorded as a separate, larger open item in PROGRESS.md —
+ * this is not a general Devanagari pass). This one phrase is safe to add on its own: Devanagari has no
+ * other reading of "kya main/aap/tum/hum", so the risk of a false positive is the same as the Romanized
+ * form already carried. `\b` is not used around the Devanagari half — under a non-`u` JS regex it does
+ * not fire correctly across non-ASCII script boundaries, so whitespace/string edges do the job instead.
+ */
+const MIDSENTENCE_KYA_QUESTION =
+  /(?:^|[\s,.!])kya\s+(?:aap|tum|main|mai|hum|hume)\b|(?:^|[\s,।!])क्या\s+(?:मैं|मई|आप|तुम|हम|हमें)(?:\s|$|[।,.!?])/;
+
+/**
  * Does this message READ as a question — a request for an answer rather than an order to act? Pure.
  */
 export function readsAsQuestion(lower: string): boolean {
@@ -392,9 +415,7 @@ export function readsAsQuestion(lower: string): boolean {
   if (text.endsWith('?')) return true;
   if (WH_OPENERS.test(text)) return true;
   if (AUX_OPENERS.test(text)) return AUX_ASKS_US.test(text);
-  // "kya aap … sakte ho" — the Hinglish ability question, whose opener is a wh-word anyway but whose
-  // mark is very often missing.
-  return /^kya\s+(?:aap|tum|main|mai)\b/.test(text);
+  return MIDSENTENCE_KYA_QUESTION.test(text);
 }
 
 /**

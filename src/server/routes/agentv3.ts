@@ -13697,6 +13697,15 @@ async function noteBuildOutcome(
         // runner that spreads baseRunnerOpts (escalation/retry/heal/fix/critFix) so all their tokens
         // are billed even when their `result` is later discarded.
         usageSink: buildUsage,
+        // 🔴 Autopsy 2026-09-16 (alarm-app build). A user cancelled seconds after the fast lane
+        // (SimpleBuilder) timed out and salvaged one file into the workspace — before this loop had
+        // run a single turn of its own. Its abort message read `writtenFiles` only through its own
+        // `totalToolUses`, saw zero, and told the user "nothing had been written yet" while the SAME
+        // response's billing line correctly charged them for the file it had just denied existed.
+        // `writtenFiles` is the same route-level Map the billing decision (`decideCancelledBuildBill`)
+        // already trusts — reading it live (not at construction time, since the fast lane salvages
+        // AFTER baseRunnerOpts is built) is what keeps this answer and that one from disagreeing.
+        hasExistingFiles: () => writtenFiles.size > 0,
         system: architectSystem,
         // Built-in tools PLUS anything the user connected. Concatenated with ours FIRST so a
         // connected service can never displace a platform tool in the list the model reads.

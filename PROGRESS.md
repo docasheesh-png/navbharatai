@@ -58591,3 +58591,119 @@ Nothing is measured yet — this makes measurement possible. The data accrues fr
 older reports carry no `requestAnalysis` and read as unavailable rather than being back-filled from a
 truncated prompt. **The 50–100 build analysis is deliberately NOT started**, per the admin, and no
 GLM/Kimi routing change is made.
+
+## 2026-09-16 — Autopsy: the alarm-app build (`b3a2c81e`) — a question that built an app, and the two bugs found chasing it
+
+Admin sent a real build-diagnostics report (workspace `agentv3-myMfCqmTwcd3NmSqTOlrvnFEG1m2-86ca627a…`,
+build `b3a2c81e`). Full forensic autopsy per the fifth absolute rule.
+
+### The ledger, five buckets
+
+- ✅ **Self-healed (2):** the fast lane's timeout handed 1 salvaged file to the full builder instead of
+  losing it (`SIMPLE_BUILD_FALLBACK`/`SIMPLE_BUILD_SALVAGE`); the file-list continuation logic
+  (`1/3, 2/3, 3/3`) recovered from GLM/Kimi `max_tokens` truncation on an oversized response.
+- 🔀 **Worked around (1):** GLM repeatedly failed with `OUTPUT_BUDGET_STARVED` and the ladder fell
+  through to KIMI — the ladder did its job, but at a cost recorded below as a struggle point, not a win.
+- ⏭️ **Skipped (1, now fixed):** the message's real question — "क्या मैं prompt डालूं" ("should I paste
+  the prompt?") — was never read as a question at all. See Root Cause 1.
+- ❌ **Still broken (1, now fixed):** the build's own summary told the user "Nothing had been written
+  yet, so nothing was lost" while, in the SAME response, the billing line correctly charged them 50%
+  for a file it had just denied existed. See Root Cause 2.
+- 🥵 **Struggle points (2):** a 26-attempt GLM retry storm during the shared-contract design step
+  (~84.6s, zero output); a 40-attempt GLM retry storm during file generation whose LOGGED TIMESTAMPS
+  run to **1789590778236 — ~52 minutes AFTER** the build had already been cancelled, billed, and closed
+  (`endedAt: 1789587434781`). This is new, concrete evidence for the OPEN root cause already recorded
+  under `AGENTV3_BUILD_COST_CEILING_USD` ("an abandoned provider call is not cancelled by this stop") —
+  and shows it is not one trailing call but a sustained, unattended retry cascade. **NOT fixed this
+  session** — cancelling an in-flight provider call needs an AbortSignal threaded through the GLM/Kimi
+  HTTP clients themselves, a larger, cross-cutting change that deserves its own dedicated pass rather
+  than a rushed patch under this autopsy's time budget. Recorded here as OPEN (rule 6).
+  🔎 **Cross-reference, not a duplicate:** the `OUTPUT_BUDGET_STARVED` failure THIS build hit — a total
+  wall-clock kill that returns nothing, on the exact prompt/budget shape this report shows — is the
+  named symptom of the **🐢 SLOW-PROVIDER FIX (`AGENTV3_STREAM_BUILD_CALLS`)** that landed in `main` at
+  09:53 UTC the SAME DAY, ~9.7 hours before this build ran at 19:37 UTC. Whether that flag was already
+  live in Cloud Run at 19:37 (and, if so, whether its scope covers the "shared contract" aux call that
+  starved here, not only per-file build calls) is a Cloud Run timeline question this session cannot
+  answer from the repo alone — flagged for whoever is watching that flag's first real builds, not
+  re-diagnosed here. The **post-cancellation persistence** (~52 minutes) is a separate dimension that
+  flag does not touch: it changes how a STALL is detected mid-call, not whether an already-ABORTED
+  build's retry loop stops asking a provider for more.
+
+### Missing subsystem, named
+
+**There is no shared, live "does anything real exist in this workspace right now" answer.** Two
+different code paths in the SAME build — the route's `writtenFiles` Map (billing) and `AgentRunner`'s
+own `totalToolUses` counter (the user-facing summary) — each kept a private, narrower notion of "was
+anything built", and a build that spans a fast-lane handoff is exactly the shape that makes them
+disagree. This is the same class this file already names for the evidence ledger under the "ZERO FILES
+IS NOT NOTHING HAPPENED" entry, one level down: not different SUBSYSTEMS disagreeing, but two READERS
+of the same build disagreeing about a fact neither of them owns.
+
+### Root Cause 1 — a trailing "kya main/hum" asks its real question at the END, and the classifier is Devanagari-blind (FIXED)
+
+`IntentClassifier.readsAsQuestion()` required a question word to OPEN the message. Hindi places "kya"
+right before the verb it questions as often as at the sentence's start — this exact message asked its
+real question ("should I paste the prompt?") only after a declarative lead-in that itself contained a
+build verb ("बनाना चाहता हूं"). Result: HIGH-confidence `new_build`, the LLM upgrade (`classifyIntentSmart`)
+never consulted, a real weak-tier build ran and had to be cancelled by the user.
+
+**Verified separately, and worse: the ENTIRE deterministic classifier has ZERO Devanagari-script
+patterns** (confirmed by scanning the file for the Unicode Devanagari block — none). Every signal array
+(`NEW_BUILD_SIGNALS`, `EDIT_SIGNALS`, `BUILD_SIGNALS`, `WH_OPENERS`, …) is Romanized-only. For a message
+typed in native script, the ENTIRE fast, deterministic layer is blind by construction, and the
+classification rests entirely on one LLM call to the cheapest free-tier model with a one-line prompt.
+
+**Fixed, narrowly:** `readsAsQuestion` now also matches "kya main/mai/aap/tum/hum/hume" (and its
+Devanagari equivalent "क्या मैं/आप/तुम/हम/हमें") ANYWHERE in the sentence, not just at the start. This is
+deliberately the ONE unambiguous pattern added in both scripts — not a general translation of the
+classifier, which would be a much larger, riskier change needing its own dedicated review. Test-locked
+in `tests/capabilityQuestion.test.ts` with the exact reported prompt plus Romanized variants and two
+negative cases (an order containing "main" that isn't the particle; a "kya" that questions a noun, not
+"should I").
+
+🔴 **OPEN ROOT CAUSE, recorded rather than rushed (rule 6):** the classifier's full Devanagari blindness
+is real and larger than this one pattern — `namesSpecificDeliverable`, every signal array, and the
+LONG_MESSAGE_THRESHOLD length check (a Devanagari sentence runs LONGER in UTF-16 code units than the
+same content transliterated, purely from matras/conjuncts, which could bias that threshold against
+native-script users) all deserve a dedicated, carefully-tested pass — NOT a same-day translation
+attempt under this autopsy's time budget. NavBharatAI is an India-first app; this is worth a real slice.
+
+### Root Cause 2 — two different signals answered "did we build anything?", and disagreed (FIXED)
+
+`AgentRunner.ts` decided `builtSomething` at every abort/watchdog/step-cap exit (4 call sites) as
+`totalToolUses > 0` — a counter PRIVATE to that one AgentRunner instance. When the fast lane
+(SimpleBuilder) times out and hands off to the full builder having already salvaged a real file, this
+loop starts with `totalToolUses === 0` even though the workspace genuinely has work to resume from. The
+user cancelled seconds after the handoff and was told "Nothing had been written yet, so nothing was
+lost" — while `CANCELLED_BUILD_CHARGED`, reading the route's own `writtenFiles.size`, correctly billed
+them 50% for "files saved but no app verified running" in the exact same response.
+
+**Fixed at the class, not the instance:** added `hasExistingFiles?: () => boolean` to
+`AgentRunnerOptions` — a LIVE callback (not a value captured at construction, since the fast lane
+salvages files AFTER `baseRunnerOpts` is built), wired once at the route level to
+`() => writtenFiles.size > 0` — the SAME Map the billing decision already trusts. One helper,
+`builtSomethingNow()`, replaces all four `totalToolUses > 0` call sites inside `AgentRunner.ts`, so a
+fifth exit added later inherits the fix by construction instead of needing to remember it. Every OTHER
+`totalToolUses` use (readiness/lint/dep-health/prettier gates, checkpoint nudges) is untouched — those
+legitimately ask "did THIS loop do enough", a different question. Additive: any of the other 15
+`AgentRunner` construction sites that don't pass `hasExistingFiles` behave byte-identically to before.
+Test-locked in `AgentRunner.test.ts` (two new cases: the exact failure shape, and the honest control
+where nothing was salvaged and the "nothing was lost" wording must still fire).
+
+### Proactive layer
+
+**The single highest-value lever here is closing the Devanagari gap properly** — not as a patch, but as
+its own slice: a real transliteration/normalization pass so every existing Romanized signal array works
+for native-script Hindi too, with the same test discipline this fix used (exact reported prompts,
+positive AND negative cases). Until then, EVERY Devanagari-typed ambiguous message pays for a full LLM
+call that a Romanized one would answer in zero-cost regex — a real, structural cost gap between two
+users asking the identical thing in two scripts of the same language, in a product whose whole edge is
+serving India. Proposed as the next slice; not started here (out of this autopsy's safe scope).
+
+**Gate, run last on this change's final state:** `typecheck` clean · `typecheck:server` clean ·
+`noUnusedImports` clean · `npm run build` exit 0 · `test:bundle` within budget · `boot:check` PASS
+("server reached 'Server running'") · `npx vitest run` → **1705 files, 23,980 passed, 1 skipped, 0
+FAIL.**
+
+Branch `claude/build-report-autopsy-tmn3ov`, restarted from `origin/main` this session per the
+merged-PR rule (its prior sole commit had already landed as PR #2947).

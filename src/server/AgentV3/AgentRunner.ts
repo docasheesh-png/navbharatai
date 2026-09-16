@@ -130,6 +130,23 @@ export interface AgentRunnerOptions {
   /** When aborted (e.g. the user pressed Stop), the loop stops between turns. */
   signal?: AbortSignal;
   /**
+   * 🔴 ROOT CAUSE (build report, alarm-app autopsy 2026-09-16). `builtSomething` at every abort/
+   * timeout/step-cap exit below was computed as `totalToolUses > 0` — a counter PRIVATE to this one
+   * AgentRunner instance. When the fast lane (SimpleBuilder) times out and hands off to this loop
+   * having already salvaged a real file into the workspace, `totalToolUses` starts at 0 here even
+   * though the build genuinely has work to resume from. A user who cancelled seconds after the
+   * handoff was told "Nothing had been written yet, so nothing was lost" in the SAME response whose
+   * OWN billing line (`writtenFiles.size`, at the route level) correctly charged them for a saved
+   * file — two signals answering the same question, disagreeing, in one build.
+   *
+   * Optional callback returning whether the WORKSPACE already holds files as of right now — checked
+   * LIVE (not captured at construction), so it reflects work done by lanes OUTSIDE this loop before
+   * it started. Combined with this run's own `totalToolUses` wherever "is there something to resume
+   * from" is asked. Omitted (all callers except the top-level build/heal chain) → behaves exactly as
+   * before, so this is additive only.
+   */
+  hasExistingFiles?: () => boolean;
+  /**
    * Optional durable persistence of the transcript (D7). When provided, the build is created
    * in the store at the start, the new transcript turns are appended as the loop runs, and the
    * final status/usage/billing is written when it ends — so the build survives a reconnect.
@@ -345,6 +362,13 @@ export class AgentRunner {
     const budgetStagesSent = new Set<BudgetStage>();
     // Total tool calls across the whole run — a build that never called a tool built nothing.
     let totalToolUses = 0;
+    // ONE place answering "is there something to resume from", so the four abort/timeout/step-cap
+    // exits below can never drift into disagreeing with each other (or with the route's own
+    // `writtenFiles`-based billing decision — see `hasExistingFiles`'s doc comment for the report
+    // this closes). `totalToolUses` alone only sees work done BY THIS loop; a fast-lane handoff can
+    // hand this loop a non-empty workspace before it ever runs a turn.
+    const builtSomethingNow = (): boolean =>
+      totalToolUses > 0 || this.opts.hasExistingFiles?.() === true;
     // How many times we've nudged a build that only NARRATED (described its plan / said it would
     // "assign the frontend expert") without calling a single tool. The model often plans out loud
     // on its first turn; terminating there is the "model replied without building" bug. We instead
@@ -500,7 +524,7 @@ export class AgentRunner {
           const cause = abortCauseOf(this.opts.signal);
           const summary = abortSummary(cause, {
             minutes: maxBuildMs ? Math.round(maxBuildMs / 60000) : undefined,
-            builtSomething: totalToolUses > 0,
+            builtSomething: builtSomethingNow(),
           });
           await persist('stopped');
           events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
@@ -512,7 +536,7 @@ export class AgentRunner {
         // reported ok:true (the work is real and resumable); one that produced nothing is ok:false.
         if (buildTimedOut(buildStartMs, maxBuildMs, Date.now())) {
           const minutes = Math.round((maxBuildMs as number) / 60000);
-          const builtSomething = totalToolUses > 0;
+          const builtSomething = builtSomethingNow();
           const summary = builtSomething
             ? `I stopped after about ${minutes} min to avoid an endless loop. Your files so far are saved — send another message and I'll continue from here.`
             : `I stopped after about ${minutes} min — the build wasn't making progress (often a preview that won't come up). Nothing was lost; try again or rephrase.`;
@@ -596,7 +620,7 @@ export class AgentRunner {
           const isTurnTimeout = err instanceof Error && /timed out after/.test(err.message);
           if (isTurnTimeout) {
             const minutes = Math.max(1, Math.round(turnTimeoutMs / 60000));
-            const builtSomething = totalToolUses > 0;
+            const builtSomething = builtSomethingNow();
             const summary = builtSomething
               ? `A model response stalled and was stopped after about ${minutes} min. Your files so far are saved — send another message and I'll continue from here.`
               : `The model didn't respond in time (stalled after about ${minutes} min). Nothing was lost — please try again.`;
@@ -1020,7 +1044,7 @@ export class AgentRunner {
       // treats builtSomething as success; this exit now applies the SAME policy, and when the
       // readiness gate is enabled the success claim must still be EARNED by the objective scan.
       {
-        const builtSomething = totalToolUses > 0;
+        const builtSomething = builtSomethingNow();
         let ok = expectsArtifacts && builtSomething;
         let summary = ok
           ? `Step limit reached (${stepCap}) — stopping here. Your files are saved; send another message to continue.`

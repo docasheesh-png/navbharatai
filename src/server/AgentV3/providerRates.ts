@@ -119,6 +119,11 @@ export function realRateCard(): Record<string, TokenRate> {
     //     itself, so every weak build has been costing ~58% more input and 60% more output than the
     //     dashboard showed. That matters directly to "how much am I spending" — it is not cosmetic.
     'kimi-k2.7': { inputPerMTok: envRate('RATE_KIMI27_IN', 0.95), outputPerMTok: envRate('RATE_KIMI27_OUT', 4.0), cacheReadPerMTok: envRate('RATE_KIMI27_CACHE', 0.19) },
+    // kimi-k2.7-code-highspeed — its OWN row, added 2026-09-16 when the model first reached a ladder
+    // (Normal tier). Before this it had NO row and NO matcher branch, so `realRateFor` fell through to
+    // the plain k2.7-code line above — silently billing HALF the real price for a model Moonshot prices
+    // at exactly 2x k2.7-code across every column (same coding quality, faster tokens/sec).
+    'kimi-k2.7-highspeed': { inputPerMTok: envRate('RATE_KIMI27HS_IN', 1.9), outputPerMTok: envRate('RATE_KIMI27HS_OUT', 8.0), cacheReadPerMTok: envRate('RATE_KIMI27HS_CACHE', 0.38) },
     // kimi-k3 — now the PUBLISHED price, not the k2.7 placeholder it carried from 2026-07-28.
     'kimi-k3': { inputPerMTok: envRate('RATE_KIMI3_IN', 3.0), outputPerMTok: envRate('RATE_KIMI3_OUT', 15.0), cacheReadPerMTok: envRate('RATE_KIMI3_CACHE', 0.3) },
     // kimi-k2.6 — its OWN row now. It used to share the cheap `kimi` line with k2.5 on the assumption
@@ -193,6 +198,10 @@ export function realRateFor(provider: string, model?: string): TokenRate {
     }
     if (m.includes('kimi')) {
       if (m.includes('k3')) return card['kimi-k3'];
+      // highspeed BEFORE the plain k2.7 fallback: it is a distinct, dearer SKU (2x k2.7-code across
+      // every column), not a suffix on the regular model, and matching it late would silently bill it
+      // at half its real price — the exact defect found when this rung joined the Normal ladder.
+      if (m.includes('highspeed')) return card['kimi-k2.7-highspeed'];
       // k2.6 has its OWN row since 2026-09-16: Moonshot prices it exactly like k2.7-code ($0.95/$4.00),
       // not like the retired k2.5 it used to share the cheap line with. It is the WEAK ladder's second
       // rung, so the old lumping under-stated what every free build really costs us.

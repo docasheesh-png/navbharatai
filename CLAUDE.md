@@ -2600,9 +2600,21 @@ is now **`src/server/AgentV3/tierLadder.ts`**, and the build chain is built from
 
 | Tier (UI) | Internal | The ladder (first → last) | Escalation cap |
 |---|---|---|---|
-| Weak (free) | `weak` | GLM `glm-5.3-flash` → KIMI `kimi-k2.6` → GLM `glm-5.3` → Claude **Haiku** | never escalates (NavBharatAI pays) |
-| Normal (paid economy) | `off` | GLM `glm-5.3-flash` → KIMI `kimi-k2.7-code` → GLM `glm-5.3` → Claude Sonnet | Sonnet |
-| Strong (paid premium) | `mini` | GLM `glm-5.3` → Claude Sonnet → Claude **Opus** | Opus (its last rung) |
+| Weak (free) | `weak` | GLM `glm-5.3-flash` → KIMI `kimi-k2.7-code` → GLM `glm-5.3` → Claude **Haiku** | never escalates (NavBharatAI pays) |
+| Normal (paid economy) | `off` | GLM `glm-5.3-flash` → KIMI `kimi-k2.7-code-highspeed` → GLM `glm-5.3` → Claude Sonnet | Sonnet |
+| Strong (paid premium) | `mini` | GLM `glm-5.3` → KIMI `kimi-k3` → Claude Sonnet → Claude **Opus** | Opus (its last rung) |
+
+🔴 **KIMI RUNGS REVISED 2026-09-16** (admin, verbatim: *"free wale me kimi 2.6 ki jagah kimi code 2.7 kar
+de! normal wale me kimi code 2.7 highspeed karo strong me kimi k3 bhi add karo"*): Weak's Kimi rung moved
+k2.6 → k2.7-code (Moonshot's dedicated coder, same price, better quality, at no extra cost to the builds
+NavBharatAI pays for itself); Normal's moved to k2.7-code-highspeed (same model, ~2x tokens/sec, exactly
+2x the price — priced into what the paying user is billed); Strong gained a Kimi rung for the first time,
+`kimi-k3`, at exactly Sonnet parity, as the second rung (a third independent vendor before climbing to
+Claude). Adding the highspeed rung SURFACED a real under-billing defect: `providerRates.ts`'s Kimi matcher
+had no branch for the `-highspeed` suffix and would have silently billed it at half its real price via the
+plain k2.7-code fallback — fixed with a dedicated `'kimi-k2.7-highspeed'` rate row and matcher branch in
+the same change, test-locked (and reversion-proofed by re-deleting the branch and confirming the new test
+fails) in `providerRates.test.ts`.
 
 🔴 **REVISED THE SAME DAY UNDER THE ADMIN'S FULL AUTHORITY GRANT** (verbatim: *"mujhe yeh chahiye: mera
 kam se kam kharcha; user ko best se best app, ek hi baar me (build fail kam se kam). aapko puri authority
@@ -2611,10 +2623,10 @@ Kimi-led Normal/Strong, gpt-5.4 last on Weak) was superseded once the real price
 **glm-5.3-flash $0.15 / $0.50, glm-5.3 $1.40 / $4.40.** The one lever behind both aims is that the FIRST
 rung must be strong enough that heals are rare — a $0 rung that fails costs more than a $0.15 rung that
 succeeds. So 5.3-flash leads Weak and Normal; 5.3 is the strong rung under Sonnet everywhere and leads
-Strong; Kimi stays as the second vendor on Weak/Normal; **glm-4.7-flash, kimi-k3 and gpt-5.4 are on no
-ladder** (weak-at-coding / unverified id + unknown price / no key + unknown price). **Nothing to buy from
-OpenAI.** Haiku is again Weak's last rung. `healLadder` now drops a leading rung only when it is the
-known-weak 4.7-flash.
+Strong; Kimi stays as the second vendor on every tier (see the 2026-09-16 revision above — k3 joined
+Strong that day); **glm-4.7-flash and gpt-5.4 are on no ladder** (weak-at-coding / no key + unknown
+price). **Nothing to buy from OpenAI.** Haiku is again Weak's last rung. `healLadder` now drops a leading
+rung only when it is the known-weak 4.7-flash.
 
 - **The chain IS the ladder.** A build on a tier runs that tier's rungs, in that order, and nothing else —
   no Vertex/Gemini rung, no borrowed Sonnet when the floor is off, no live-health GLM↔KIMI lead swap. A

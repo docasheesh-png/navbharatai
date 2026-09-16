@@ -58733,3 +58733,44 @@ re-fixes it.
 No ladder, model id, timeout, streaming bound, `max_tokens`, billing, release gate, or routing change.
 The governor only ever moves a build to the next rung; it cannot fail a build, shorten a call, or
 change what any provider is asked for. `AGENTV3_SLOW_RUNG_BENCH=off` reverts it with no deploy.
+
+### Same day, same PR — OPEN ROOT CAUSE 3 CLOSED: the twelve identical ticks
+
+The admin asked for every problem fixed at the root, so the item named above as *"the ETA is useless
+for exactly the builds that need it"* is closed here rather than carried.
+
+**What it actually was.** `unevidencedEtaTickLine` was a pure function of `elapsedMs`, so it printed
+**the same sentence at minute 2 and at minute 28** — twelve times in that report, with the only
+changing figure buried mid-sentence. A user skimming it cannot tell *working* from *hung*. That is
+the mechanism behind *"tried thrice"*, and it is the only ledger item the user actually SEES.
+
+**Why the module was right to refuse a number, and wrong to stop there.** `etaEvidence.ts` exists
+because three autopsies caught the build promising "~2–4 min" against 12- and 26-minute runs; its law
+is *"show the number wherever it is measured, and the phase wherever it is not."* That law was applied
+to the ESTIMATE and never to the BUDGET — and `maxBuildSeconds` is not an estimate. It is a fixed,
+configured number, so *"18 minutes in, up to 11 more"* is arithmetic over two known quantities,
+exactly as defensible as elapsed time itself. Withholding it was omission, not honesty.
+
+**The fix.** The tick takes the build's own cap (`effectiveBuildSeconds * 1000`, already in scope at
+the call site) and reports where the build stands inside it. Past `LONG_RUN_BUDGET_SHARE` (0.6) it
+says plainly that this one is running long and states what will happen — *"I'll keep working for up
+to N min more, then save whatever is finished and tell you honestly how far it got — nothing you have
+is lost."* **Every clause is something the engine really does** on a timeout: the files are already
+persisted, `GREEN_GUARD` keeps an unverified turn rather than rolling it back, the summary is honest
+and the build is billed ₹0. It never claims the build WILL finish — the one promise this module
+exists to refuse.
+
+- 🔒 **A healthy build never sees the long-run wording.** This line appears only while NOTHING has
+  been measured, and a normal build has handed the line to `measuredEtaText` / `stepEtaText` minutes
+  earlier — so a build still unmeasured at 60% of its cap is genuinely in trouble.
+- ⚠️ **No cap ⇒ no mention of a cap.** `budgetMs` absent, 0 or malformed is the
+  `effectiveBuildSeconds === 0` convention used throughout the route, and returns the pre-2026-09-16
+  sentence **byte-identical**. Past the cap it also falls back rather than inventing a negative.
+- Display only: it cannot fail, slow, or change a build.
+- `tests/etaEvidenceWiring.test.ts` was STRENGTHENED, not relaxed — it now asserts the budget
+  ARGUMENT reaches the line, so the regression cannot return silently. Reversion-proven: 4 cases fail
+  without the fix.
+
+**Still open from this autopsy (1, 2, 4, 5):** budget-blind planning, unbounded exploration, idle
+sandbox billing, and mid-build scope explosion. Items 1 and 2 are one change to the architect loop —
+where other sessions are active — and are deliberately NOT started here rather than raced.

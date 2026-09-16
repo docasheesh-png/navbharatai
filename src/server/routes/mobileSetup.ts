@@ -11,9 +11,16 @@
 //   NavBharatAI : assembles the project, writes the workflows, creates/pushes the repo, starts the
 //                 build, and hands back the finished binary.
 //   GitHub      : compiles and signs, on its own runners.
-//   The user    : keeps their keystore and Apple credentials, as GitHub secrets we never see. A
-//                 signing key IS the app's permanent identity — if we held it and lost it, their app
-//                 could never be updated again.
+//   The user    : keeps their keystore and Apple credentials, as GitHub secrets we never see.
+//
+// ⚠️ ONE CLAUSE OF THAT LINE WAS CORRECTED ON 2026-09-15, and the original is kept in view because its
+// reasoning held for years: "A signing key IS the app's permanent identity — if we held it and lost it,
+// their app could never be updated again." True of the APP SIGNING key. NOT true of the UPLOAD key,
+// which is the only one a developer holds under Play App Signing (mandatory for the .aab format):
+// Google holds the app signing key and can RESET a lost upload key.
+// So `/api/mobile-ship/signing-setup` will now CREATE the upload key on request and seal it into the
+// user's OWN repository — removing the JDK / keytool / base64 / four-pasted-secrets wall that is where
+// most people stopped. NavBharatAI still keeps no copy, which is the half of the old rule that stands.
 
 import type { Express, Request, Response } from 'express';
 import axios from 'axios';

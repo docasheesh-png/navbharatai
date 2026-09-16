@@ -334,6 +334,7 @@ import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
 import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMisconfigured, buildStarvedItsOutputBudget } from '../AgentV3/BuildDiagnostics';
 import { estimateBuildTime, complexityFromPrompt, liveEtaTick } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
+import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionReserve';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
@@ -13721,6 +13722,12 @@ async function noteBuildOutcome(
         // U-1 — opt-in lint gate (default OFF); blocks a finished build on real ESLint errors when enabled.
         lintGate: runLintGate,
         // WATCHDOG — hard wall-clock cap so a build can never hang for 20-30 min (0 = disabled).
+        //
+        // ⚠️ THIS IS THE BUILD'S FULL CLOCK, AND IT IS DELIBERATELY *NOT* WHAT THE GENERATION RUNNER
+        // GETS. Every runner that spreads `baseRunnerOpts` is a HEAL runner — they are the ones that
+        // SPEND the correction reserve, so they keep the full ceiling. The three generation-shaped
+        // runners (the main build, the escalation, the empty-build retry) override it below with
+        // `generationBudgetMs(...)`, which holds the reserve back. See correctionReserve.ts.
         maxBuildMs: effectiveBuildSeconds * 1000,
         // AI Diagnosis Bundle #4 — capture every model turn's I/O (truncation, failures, latency)
         // into the build report. Shared by the default build AND every escalated/retry/heal runner.
@@ -13737,6 +13744,14 @@ async function noteBuildOutcome(
         ...baseRunnerOpts,
         client,
         model,
+        // ── THE CORRECTION RESERVE, ENFORCED ─────────────────────────────────────────────────────
+        // Generation stops at the reserve line instead of at the wall, so the verify → repair →
+        // re-verify stage below has a budget of its own rather than whatever generation happened to
+        // leave. It is the SAME tail `buildBudgetSteer` already tells the model is off-limits at its
+        // `final` stage — advisory until now, and a build that ignored it reached every post-build
+        // check with the headroom test already false. Nothing here extends the build's wall clock:
+        // `deadlineMs` and `finalizeOnDeadline` are untouched.
+        maxBuildMs: generationBudgetMs(effectiveBuildSeconds * 1000, Date.now() - buildStartedAt),
         // D7: persist the build transcript so it survives a reconnect/refresh. Best-effort —
         // a store failure never breaks the build (see AgentRunner). Reloadable via the
         // GET /api/agentv3/conversations endpoints below.
@@ -14913,6 +14928,10 @@ async function noteBuildOutcome(
               // Opus ONLY in power mode — a power-off escalation caps at Sonnet, never Opus
               // (admin rule 2026-06-28). Escalation only runs in normal mode anyway.
               model: resolveModel(tier === 'opus' && onlyOpus),
+              // Generation-shaped, so it respects the correction reserve too. Without this the
+              // escalation would be handed a FRESH full-length clock (AgentRunner starts its own
+              // stopwatch inside run()) and could spend the reserve the main runner just protected.
+              maxBuildMs: generationBudgetMs(effectiveBuildSeconds * 1000, Date.now() - buildStartedAt),
               persistence: {
                 store: getConversationStore(),
                 conversationId: mainConversationId, // same session conversation — append, don't fork
@@ -15069,6 +15088,9 @@ async function noteBuildOutcome(
           client: buildTurnRunner(healRunnerOpts()),
           model: resolveModel(powerLevelReqEffective), // the tier's pinned model (Strong → Sonnet; Powerful/FT → Opus; Normal → Sonnet)
           effort: powerSpecResolved.effort,
+          // Generation-shaped (it re-runs the whole build), so it respects the correction reserve —
+          // same reason as the escalation runner above.
+          maxBuildMs: generationBudgetMs(effectiveBuildSeconds * 1000, Date.now() - buildStartedAt),
           persistence: {
             store: getConversationStore(),
             conversationId: mainConversationId, // same session conversation — append, don't fork
@@ -17488,6 +17510,34 @@ async function noteBuildOutcome(
           warnings: buildDiag.shippingIssueCount('warning'),
         });
         let gate = releaseGate(gateEvidence, gateFindings(), gateQuality);
+
+        // ── THE BUDGET LEDGER: where this build's clock actually went ────────────────────────────
+        //
+        // 🔎 Recorded because the reserve's whole justification is a number nobody had. Until now
+        // nothing counted how much of a build's wall clock generation consumed, so "generation ate
+        // the budget and the checks all skipped" was a reading of the CODE (every post-build gate
+        // subtracts its own 30-120 s from the same total and reserves nothing) and not of any build.
+        // These four figures are what turn it into a measurement — and they are also what will say
+        // whether the reserve was worth its cost, since an `unusedMs` that is almost always the whole
+        // reserve means it is being held back from work that needed it.
+        //
+        // Admin-only, `info`, never a blocker: an accounting line must not be able to fail a build.
+        try {
+          const totalBudgetMs = effectiveBuildSeconds * 1000;
+          const reserveMs = correctionReserveMs(totalBudgetMs);
+          const atGateMs = Date.now() - buildStartedAt;
+          const unusedMs = totalBudgetMs > 0 ? Math.max(0, totalBudgetMs - atGateMs) : 0;
+          buildDiag.record({
+            phase: 'readiness', severity: 'info', code: 'CORRECTION_BUDGET', autoResolved: true,
+            message: reserveMs > 0
+              ? `Correction reserve: ${Math.round(reserveMs / 1000)}s held back from generation`
+              : 'Correction reserve: none (wall-clock cap disabled or the reserve is switched off)',
+            detail: `total=${Math.round(totalBudgetMs / 1000)}s · reserve=${Math.round(reserveMs / 1000)}s `
+              + `· generationCap=${Math.round(generationBudgetMs(totalBudgetMs, 0) / 1000)}s `
+              + `· elapsedAtGate=${Math.round(atGateMs / 1000)}s · leftAtGate=${Math.round(unusedMs / 1000)}s `
+              + `· gate=${gate.state}`,
+          });
+        } catch { /* an accounting line must never affect the build it is accounting for */ }
 
         // ── UNKNOWN EARNS ONE LAST LOOK, NOT A SHRUG ─────────────────────────────────────────────
         //

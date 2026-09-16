@@ -58074,3 +58074,87 @@ removing the adapter line fails 4 of them.
   own best line is *"do not claim Kimi or GLM are fast until actual production telemetry proves it"* —
   and until the above is answered, the token half of that telemetry may be silently zero. Routing
   learned from numbers we cannot yet trust would be a guess wearing a measurement's clothes.
+
+## 2026-09-16 — The fast lane re-discovered the same dead rung on every file. One map per build fixes it.
+
+**Triggered by a real build report the admin sent** (Panchang/Muhurat app, workspace
+`…CJShlpGNSBbWGb9pr7lD3RrVJ6t1`, build `16cabab2-3916-48cf-927b-6d243e945ff8`), plus a second report
+(`…XukOoloPf0cuUpwwxaYpsfjb8N13`) that carried no `llmCalls` at all. This is the first change in this
+repo driven by measured per-call `latencyMs`, not by reasoning about model reputation.
+
+### What the report actually measured
+
+| call | file | latencyMs | out tokens | tok/s | finish |
+|---|---|---|---|---|---|
+| 1 | file-list plan | 33,314 | 1,908 | 57.3 | end_turn |
+| 2 | shared contract | 62,669 | 0 | — | **never dispatched** (budget exhausted) |
+| 3 | `src/lib/cities.ts` | 21,939 | 2,545 | 116.0 | end_turn |
+| 4 | `src/index.css` | 58,645 | 7,190 | 122.6 | end_turn |
+| 5 | **`src/lib/muhurat.ts`** | **812,870** | 8,000 | **9.8** | max_tokens |
+| 6 | **`src/lib/astro.ts`** | **1,397,269** | 8,000 | **5.7** | max_tokens |
+
+Calls 5+6 = **2,210,139 ms of 2,386,706 ms — 92.6% of all model time in two calls.** Same model, same
+build, same night as calls 3–4 which ran at 116–123 tok/s. `providerDelivery: {GLM: 5}`,
+`providerFailures: {GLM: 108}` of which **89 were output-budget starvation**. KIMI is rung 2 of the weak
+ladder and was **never reached on any file**.
+
+### Root cause — a LIFETIME bug, not a logic bug
+
+Three code facts, each verified in source rather than inferred from the JSON:
+
+1. **`glm-5.3-flash` always reasons** (`glmThinking.ts`: *"5.3 is the first family that always
+   reasons… cannot be disabled"*). On the two files needing real algorithmic content it spent its whole
+   authorised ceiling thinking and returned no text and no tool call — `OUTPUT_BUDGET_STARVED`.
+2. **A starved rung is deliberately NOT a timeout** (`MultiProviderTurnRunner.ts`: *"It must NOT be
+   treated as a timeout: the provider answered, quickly and correctly, inside its clock"*). So
+   `isStarvedBudgetError` never touches `timeoutStreak`, and the "2 consecutive timeouts bench the
+   family" escalation **cannot fire for this class** — which is why KIMI was never reached. **This is
+   correct and is left exactly as it is.**
+3. **The retirement memory that exists for precisely this problem was scoped one level too narrow.**
+   `deadForRun` lives per `makeMultiProviderTurnRunner` instance. The agentic path builds `client`
+   ONCE and reuses it, so a rung starved on turn 1 is skipped on turns 2..n — working as designed. But
+   `fastGenerateOnce` calls `makeFastTextRunner()` **fresh inside itself, once per file**, so every file
+   started with an empty map and re-paid the identical starvation. That is the 812.9 s and the 1,397.3 s.
+
+### The change (narrow by construction — 2 functional lines)
+
+- `MultiProviderOptions.deadRungs?: Map<string, string>` — the retired-rung memory, **owned by the
+  caller** so its lifetime is the caller's. Omitted ⇒ the runner keeps its own private map, byte-identical
+  to before.
+- `const deadForRun = opts.deadRungs ?? new Map(...)` — the entire behavioural diff.
+- `buildTurnRunner` forwards it only when supplied.
+- `routes/agentv3.ts`: **one `const fastLaneDeadRungs = new Map()` per build request**, handed to every
+  per-file runner the fast lane builds.
+
+🔒 **A fresh runner per file is KEPT on purpose.** Only the MEMORY is shared. `onUsed` must stay
+per-call because SimpleBuilder generates files CONCURRENTLY (`mapWithConcurrency`) — one shared callback
+would attribute the wrong provider to a file, corrupting `deliveredVia` and the cost ledger.
+
+🔒 **Lifetime, which is the whole safety argument:** the map is a `const` inside the
+`app.post('/api/agentv3/chat')` handler — created when a build starts, garbage when it ends. A second
+build runs that line again and gets an empty map. It is deliberately **not** a module singleton, the one
+shape that would turn "slow for this build" into "blacklisted for everyone". Test-locked three ways
+(declared after the handler opens, indented, and no zero-indent declaration anywhere).
+
+**Unchanged and verified unchanged by a diff audit:** every timeout value, the 300 s streaming ceiling,
+the starved≠timeout split, the ladder, provider fallback order, streaming behaviour, wallet/token
+accounting, pricing, context handling, tool loading. No hedging or racing introduced.
+
+**Tests:** `tests/fastLaneDeadRungMemory.test.ts` (13), covering the five required cases — same-build
+skip, new-build reset, cross-user isolation, success-is-never-dead, starved≠timeout — plus wiring.
+**Proven by reversion: un-sharing the map fails 5 of them.**
+
+**Gate, run last on the final state:** typecheck · typecheck:server · noUnusedImports · build ·
+test:bundle · boot:check · `vitest run` → **1699 files, 23,850 passed, 1 skipped, 0 FAIL.**
+
+### Honest limitations (rule 6)
+
+- **The saving is not yet measured.** This removes a *re-discovery* cost the report proves was paid; by
+  how much depends on how many rungs starve per file, which needs a post-change build report to say.
+- **A rung starved on a LARGE file is skipped for later SMALL files too**, where it might have fitted.
+  Accepted deliberately: the fallback is a different *vendor* one rung down (the thing that never
+  happened in this build), against a demonstrated 1,397 s cost for the status quo. Revisit only if a
+  real report shows a rung being retired too eagerly.
+- **The underlying starvation is untouched.** `glm-5.3-flash` still burns its ceiling on reasoning for
+  complex files. This change stops us paying for that discovery repeatedly; it does not stop the first
+  occurrence. That remains open.

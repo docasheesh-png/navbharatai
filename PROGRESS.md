@@ -57503,3 +57503,78 @@ means a NEW class of bug — a dynamically-imported module whose OWN static impo
 production dependency — would only surface the first time that code path actually runs in production,
 not at boot. That is a real, narrower gap; today's outage was specifically a boot-time (`require-call`)
 failure and this gate closes exactly that class.
+## 2026-09-16 — The slow-provider fix: a build call is now bounded by SILENCE, not by duration
+
+Admin, verbatim: *"kimi aur glm slow hai, time out ho jata hai. isko fix karne ka kya kya option hai
+apke pas sabhi batao!!"* — then *"aap jo jo kar sakte ho karo!"*
+
+### What was actually wrong (read out of the code, not inferred from the symptom)
+
+The GLM/Kimi rung sends **one non-streaming request** and bounds it with a **TOTAL wall clock**
+(`floorBudget.ts`: 5 s + 30 ms × tokens, capped at 150 s). Three consequences compound:
+
+1. **A total clock cannot tell a HUNG provider from a SLOW one.** It was introduced to catch the
+   244-second hang of autopsy a487e019, and it does — but it kills a provider that has been emitting
+   tokens the whole time with exactly the same verdict.
+2. **When it fires, NOTHING comes back.** The whole call is discarded, including the files that answer
+   had already written. `floorBudget.ts` states this trade in its own header — truncation returns the
+   partial, a timeout returns nothing — and then had no way to reach the better outcome, because with
+   one opaque request there is no partial to keep.
+3. **The output ceiling is sized from that same clock** (~4,800 tokens at 150 s), so a large file needs
+   several turns, each of which is another chance to be killed.
+
+### The fix, and why it is the CONDITION and not the instance
+
+🔑 **A total clock is a PROXY for "is this provider hung?" — streaming makes that measurable directly.**
+A provider emitting tokens is not hung however slow it is; a provider silent for a minute is hung
+however early in the call it is. So the bound becomes **idle time**, and — the half that actually
+recovers builds — **a stall keeps what already arrived**, reported as a TRUNCATED turn. That is not a
+new concept: it is the exact shape a token-limit cut already produces, so the adapter's path salvage,
+the `truncated` flag and the truncation guard that NAMES the lost file all work on it unchanged.
+"One file short" instead of "no app".
+
+- New PURE module `src/server/AgentV3/providers/openAiStream.ts` — the accumulator's only output is an
+  `OpenAiCompletionLike`, the exact shape the non-streaming call produces, so `parseOpenAiCompletion`
+  stays the SINGLE translation. The breakage-prone part of the system is deliberately not touched;
+  the two read modes cannot drift into disagreeing about what a turn meant.
+- `OpenAiToolRunner` gains the streamed branch; `openAiCompatRunners` gives the SDK client the stream's
+  hard cap instead of the floor bound (otherwise the SDK aborts a healthy stream at 150 s and the whole
+  change is defeated — found by reading the SDK's own timeout semantics, not by a failing test).
+- **`onText` finally receives real deltas** rather than one block at the end, and is not double-fired.
+
+### Kept honest, deliberately
+
+- **Default OFF** (`AGENTV3_STREAM_BUILD_CALLS`). This path carries every build on the cheap floor and
+  has never run against a live provider; unset is today's behaviour to the byte. Same reasoning
+  `AGENTV3_STREAMING_PREVIEW` shipped on.
+- **A stall with nothing usable is still a rung FAILURE**, thrown so the chain falls through and
+  `isTimeout` can bench a provider that keeps stalling. **Reasoning alone does not count as an answer**
+  — a model that streamed only its thinking has produced nothing to salvage or continue from.
+- **Our clock ending never reads as the provider's fault** (`BUDGET_REACHED_MESSAGE`), so a rung handed
+  two seconds because the LANE had two seconds left is not benched for our budgeting.
+- **The abandoned read is aborted.** `turnDeadline.ts` records a build that logged provider traffic 148
+  seconds after it had ended; racing a promise stops the waiting, not the call. And the orphaned
+  `next()` promise is explicitly disarmed — aborting the stream is exactly what makes it reject, which
+  would otherwise be an unhandled rejection in the build server, thrown by the code added to make
+  builds more reliable.
+
+🔴 **THE ONE OPEN COST, recorded rather than left to be discovered: a stream carries no token usage
+unless the provider honours `stream_options.include_usage`.** The request asks for it; whether Z.ai and
+Moonshot answer it cannot be settled from a session. If they do not, usage is **zero** — never an
+invented number (THE ONE-WALLET LAW forbids estimating tokens from text length), so no user is ever
+over-billed, but our own cost report under-states itself. **First real builds must be checked for
+streamed turns reporting 0 tokens**; if they do, the flag comes back off.
+
+### Verified by reversion, not by the tests merely passing
+
+Both guards were proven to bite: re-injecting "any stall destroys the call" failed the
+partial-keeping test, and re-injecting "a stall keeps the provider's finish_reason" failed the
+truncation test. 144 provider tests pass, including the 121 pre-existing ones that prove the
+non-streaming path is unchanged.
+
+### Still the admin's, not code's
+
+The env values themselves (idle/cap tuning against a REAL slow build's measured ms-per-token), any
+ladder reorder, and whether a faster vendor plan is worth buying. And the root question the code cannot
+answer: no failed build report has been read yet for this complaint — these numbers are sized from the
+engine's own budgets, not from the traffic that is actually timing out.

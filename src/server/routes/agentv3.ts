@@ -204,6 +204,7 @@ import { scanGeneratedCode, formatCodeScanReport } from '../AgentV3/CodeSafetySc
 import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
 import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, pacedRunner, sharedRateLimitCooldowns, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
+import { buildStreamingEnabled, streamHardCapMs } from '../AgentV3/providers/openAiStream';
 import {
   openShell,
   readShell,
@@ -2383,12 +2384,20 @@ export function openAiCompatRunners(
   for (const model of models) {
     keys.forEach((apiKey, k) => {
       try {
-        const client = new OpenAI({ apiKey, baseURL, timeout: timeoutMs, maxRetries: 0 });
         // ONE bound, both places. The SDK's `timeout` is what actually aborts the request; the runner's
         // `timeoutMs` is what it reconciles against the lane's deadline and what it sizes the token ask
         // from. They used to disagree — SDK 60 s, runner's default 120 s — so the runner authorised an
         // answer for a clock that was not the one running, and the report's error text ("Request timed
         // out.") is the SDK's, never the runner's. Passing the same number makes the pair honest.
+        //
+        // 🔴 …AND THE SAME REASONING INVERTS WHEN THE TURN IS STREAMED (2026-09-16). The SDK's timeout
+        // bounds the WHOLE request, stream included, so leaving it at the floor bound would abort a
+        // healthy stream at 150 s — killing exactly the slow-but-working provider the streamed path
+        // exists to keep. Under the flag the SDK is given the stream's own hard ceiling and silence
+        // becomes the hang signal (openAiStream.ts); the runner is handed the same number, so the pair
+        // stays honest in both modes. Flag off ⇒ this is the old line to the byte.
+        const sdkTimeoutMs = buildStreamingEnabled() ? Math.max(timeoutMs, streamHardCapMs()) : timeoutMs;
+        const client = new OpenAI({ apiKey, baseURL, timeout: sdkTimeoutMs, maxRetries: 0 });
         const runner = pacedRunner(sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts, timeoutMs }), floorMaxPromptChars), name);
         out.push(k === 0
           ? { name, runner, modelId: model }

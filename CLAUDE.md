@@ -1013,6 +1013,37 @@ the code (it is actually read somewhere) on 2026-07-11.
   Set `off`/unset to disable. Works WITH the reactive stack: escalating 429 re-probe bench (#1801),
   GLM↔KIMI floor balance (#1802, kill switch `AGENTV3_FLOOR_BALANCE=off`), circuit breaker
   (`AGENTV3_CIRCUIT_BREAKER`, default on), and the GLM key-pool.)
+- **🆓 THE FREE CHAT LADDER — three vendors, cheapest-first (admin-decided 2026-09-15):**
+  `GLM glm-4.7-flash (₹0)` → `Vertex gemini-2.5-flash-lite` → `OpenAI gpt-5-nano` → `Vertex
+  gemini-2.5-flash`. The Gemini-DIRECT door and the `glm-4.7` last rung were removed. **The gain is
+  VENDOR COUNT:** the old ladder spent six registrations on TWO vendors, so the fallback was mostly
+  Google falling back to itself, and its one non-Google rung shared a KEY with the free leader (so it
+  died in the same 429 storm). Env keys: **`OPENAI_CHAT_MODEL`** (overrides the pinned id — the
+  default `gpt-5-nano` could not be verified against the account, and a wrong id 404s and falls
+  through SILENTLY, so this is the no-deploy correction; a non-nano value warns, because the ceiling
+  was cleared on the nano price) and `OPENAI_CHAT_TIMEOUT_MS` (20 s, same reasoning as the GLM leader).
+  ⚠️ **Provider `src/server/AI/Router/providers/OpenAiChatProvider.ts` is NEW** — before it this repo
+  had no OpenAI chat provider at all, which is why "add Nano" was a build and not a config change.
+  It is TEXT-ONLY and defers image turns to the next rung; free chat's own image/PDF path
+  (`runVisionChain`) is separate and untouched.
+  🔴 **THE ADMIN APPROVED Nano AT POSITION 1 AND IT SHIPPED AT 2 — recorded, not silently changed.**
+  They chose Nano-before-lite while the rate card still mis-priced flash-lite at the FLASH line
+  (index 4.90); the invoice fix below drops it to **1.20**, cheaper than Nano (2.85). Shipping the
+  approved order would have contradicted their own "kharcha kam se kam" instruction AND required
+  weakening `freeChainCost.test.ts`, which enforces cheapest-first. Swapping priorities 1 and 2 is
+  the entire edit if they want it back.
+  🔒 **EVERY RUNG MUST BE A STRING LITERAL.** `freeChainCost.test.ts` parses these registrations out
+  of the source to price them, and a shape it cannot read is — in its own words — *"silently exempt
+  from the ceiling"*. The first draft of the Nano rung passed a function call and was invisible to it.
+- **💸 `gemini-2.5-flash-lite` IS NOT PRICED LIKE `gemini-2.5-flash` (corrected 2026-09-15 from the
+  admin's own invoice).** Both used to resolve to the single `'gemini'` rate line, so every flash-lite
+  turn was reported at **3× its real cost** on the exact panel used to judge Google spend — margin-safe
+  (we over-stated our own spend, never a user's bill) and wrong all the same, the same shape as the
+  `E2B_USD_PER_HOUR` drift. **The input half is INVOICE-VERIFIED:** that month's SKUs read `Flash GA
+  Text Input 6,116,640 → ₹175.32` and `Flash Lite Text Input 5,237,016 → ₹50.04` = ₹2.866e-5 vs
+  ₹9.555e-6 per unit = **exactly 3.0×**, reproducing $0.30 → $0.10. ⚠️ The OUTPUT half is **not**
+  invoice-verified (no flash-lite output SKU appeared in that report); `$0.40` is the published
+  pair-mate of the confirmed input. Keys: `RATE_GEMINI_LITE_IN` / `RATE_GEMINI_LITE_OUT`.
 - **🔴 CHAT GROUNDING — CORRECT AND CURRENT BEATS FAST (admin-mandated 2026-09-12, standing rule).**
   Admin, verbatim: *"latest information aur correct information jyada important hai, time se jyada.
   Chahe to time jyada lage par information sahi aur latest ho!"* So on the chat path, **never trade

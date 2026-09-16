@@ -138,6 +138,20 @@ export function realRateCard(): Record<string, TokenRate> {
     // ── Google (Vertex / Gemini) ──────────────────────────────────────────────────────────────────
     'gemini-pro': { inputPerMTok: envRate('RATE_GEMINI_PRO_IN', 1.25), outputPerMTok: envRate('RATE_GEMINI_PRO_OUT', 10) },
     'gemini': { inputPerMTok: envRate('RATE_GEMINI_IN', 0.3), outputPerMTok: envRate('RATE_GEMINI_OUT', 2.5) }, // flash-class
+    // ── Gemini FLASH-LITE — a separate line, because it is NOT the same price as flash ────────────
+    // 🔴 FOUND IN THE ADMIN'S OWN INVOICE (2026-09-15). Both flash-lite and flash used to resolve to
+    // the 'gemini' line above, so every flash-lite turn was reported at 3x its real cost. That is the
+    // margin-SAFE direction (we over-state our own spend, never a user's bill) — but the screen the
+    // admin judges Google spend on was wrong, which is exactly how E2B_USD_PER_HOUR went unnoticed
+    // for a month.
+    // THE INPUT HALF IS INVOICE-VERIFIED, not taken from a price page: that month's SKUs read
+    // "Flash GA Text Input 6,116,640 -> Rs 175.32" and "Flash Lite Text Input 5,237,016 -> Rs 50.04",
+    // i.e. Rs 2.866e-5 vs Rs 9.555e-6 per unit = EXACTLY 3.0x, which reproduces $0.30 -> $0.10.
+    // ⚠️ The OUTPUT half is NOT invoice-verified — no flash-lite OUTPUT SKU appeared in that report.
+    // $0.40 is Google's published pair-mate for the $0.10 input that the invoice just confirmed, so
+    // it is corroborated rather than guessed; `RATE_GEMINI_LITE_OUT` corrects it the day a real
+    // output SKU shows a different number.
+    'gemini-lite': { inputPerMTok: envRate('RATE_GEMINI_LITE_IN', 0.1), outputPerMTok: envRate('RATE_GEMINI_LITE_OUT', 0.4) },
     // ── xAI (Grok) ────────────────────────────────────────────────────────────────────────────────
     'grok': { inputPerMTok: envRate('RATE_GROK_IN', 3), outputPerMTok: envRate('RATE_GROK_OUT', 15) },
     // ── Anthropic (Claude) ────────────────────────────────────────────────────────────────────────
@@ -209,7 +223,13 @@ export function realRateFor(provider: string, model?: string): TokenRate {
       if (/k2[.\-]?5/.test(m)) return card.kimi;           // k2.5 — retired 2026-08-31, telemetry only
       return card['kimi-k2.7'];                            // k2.7 and anything newer/unknown
     }
-    if (m.includes('gemini')) return m.includes('pro') ? card['gemini-pro'] : card.gemini;
+    if (m.includes('gemini')) {
+      if (m.includes('pro')) return card['gemini-pro'];
+      // 'lite' BEFORE the generic flash rule — flash-lite is a THIRD of flash, and resolving it to
+      // the flash line is the bug this entry was added to fix. Same precedence shape as glm-5.3-flash.
+      if (m.includes('lite')) return card['gemini-lite'];
+      return card.gemini;
+    }
     if (m.includes('grok')) return card.grok;
     if (m.startsWith('gpt') && m.includes('nano')) return card['gpt-nano'];
     if (m.startsWith('gpt') || /^o\d/.test(m)) return card.gpt; // gpt-5.4 and the o-series reasoning ids

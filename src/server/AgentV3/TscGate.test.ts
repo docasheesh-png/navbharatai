@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { hasTscErrors, looksLikeTscHelpOutput } from './TscGate';
+import {
+  hasTscErrors, looksLikeTscHelpOutput, looksLikeTypecheckCommand, typecheckEvidenceFromCommands,
+} from './TscGate';
 
 describe('hasTscErrors', () => {
   it('detects a real compile error', () => {
@@ -48,5 +50,70 @@ describe('looksLikeTscHelpOutput — a config-less tsc that never actually ran (
     expect(looksLikeTscHelpOutput('')).toBe(false);
     expect(looksLikeTscHelpOutput(null)).toBe(false);
     expect(looksLikeTscHelpOutput('added 240 packages\nbuilt in 3s')).toBe(false);
+  });
+});
+
+describe('looksLikeTypecheckCommand', () => {
+  it('a stand-alone --noEmit run, however it is invoked, counts', () => {
+    expect(looksLikeTypecheckCommand('./node_modules/.bin/tsc --noEmit 2>&1 | head -40')).toBe(true);
+    expect(looksLikeTypecheckCommand('npx tsc --noEmit')).toBe(true);
+    expect(looksLikeTypecheckCommand('tsc -p tsconfig.json --noEmit 2>&1 | tail -200 || true')).toBe(true);
+  });
+
+  it('a build script that emits (no --noEmit) does not count — it is a different claim', () => {
+    expect(looksLikeTypecheckCommand('tsc -p tsconfig.build.json && vite build')).toBe(false);
+    expect(looksLikeTypecheckCommand('npm run build')).toBe(false);
+  });
+
+  it('null / undefined / unrelated commands are false', () => {
+    expect(looksLikeTypecheckCommand(null)).toBe(false);
+    expect(looksLikeTypecheckCommand(undefined)).toBe(false);
+    expect(looksLikeTypecheckCommand('npm run dev')).toBe(false);
+  });
+});
+
+describe('typecheckEvidenceFromCommands — the release-gate fallback (production report, 2026-09-16)', () => {
+  it('🔴 THE EXACT REGRESSION: a clean agent-run `tsc --noEmit | head -40` reads as passed', () => {
+    // Verbatim shape from the report: piped through `head`, so the recorded exit code (0) is head's,
+    // not tsc's — this function must read the OUTPUT, not the exit code, to be trustworthy at all.
+    const commands = [
+      { command: './node_modules/.bin/tsc --noEmit 2>&1 | head -40', stdout: '', stderr: '' },
+    ];
+    expect(typecheckEvidenceFromCommands(commands)).toBe('passed');
+  });
+
+  it('a real compile error in the output reads as failed, regardless of exit code', () => {
+    const commands = [
+      { command: 'npx tsc --noEmit', stdout: 'src/App.tsx(4,2): error TS2304: Cannot find name X.', stderr: '' },
+    ];
+    expect(typecheckEvidenceFromCommands(commands)).toBe('failed');
+  });
+
+  it('the LATEST typecheck wins — the agent fixed it between two runs', () => {
+    const commands = [
+      { command: 'npx tsc --noEmit', stdout: 'error TS2304: Cannot find name X.', stderr: '' },
+      { command: 'some_other_command --flag', stdout: 'unrelated', stderr: '' },
+      { command: 'npx tsc --noEmit', stdout: '', stderr: '' },
+    ];
+    expect(typecheckEvidenceFromCommands(commands)).toBe('passed');
+  });
+
+  it('a tsc HELP page (no real project) is skipped — never counted as a clean pass', () => {
+    const commands = [
+      { command: 'tsc --noEmit', stdout: 'tsc: The TypeScript Compiler - Version 5.5.3\nCOMMON COMMANDS', stderr: '' },
+    ];
+    expect(typecheckEvidenceFromCommands(commands)).toBeUndefined();
+  });
+
+  it('no typecheck-shaped command anywhere → undefined, never invents a pass', () => {
+    const commands = [
+      { command: 'npm install', stdout: 'added 240 packages', stderr: '' },
+      { command: 'npm run build', stdout: 'built in 3s', stderr: '' },
+    ];
+    expect(typecheckEvidenceFromCommands(commands)).toBeUndefined();
+  });
+
+  it('an empty command list is undefined, not a crash', () => {
+    expect(typecheckEvidenceFromCommands([])).toBeUndefined();
   });
 });

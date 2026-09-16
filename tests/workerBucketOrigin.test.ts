@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { createHash } from 'crypto';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { APP_PREFIX } from '../src/server/AgentV3/bucketPublish';
@@ -55,5 +56,63 @@ describe('the Worker is actually pointed at the published-apps bucket', () => {
     // Firebase Hosting did this for free; an object store returns 404. Without it, moving to the
     // bucket turns every refresh on /dashboard into a blank page.
     expect(worker).toContain('const spa = await fetch(`${base}/index.html`);');
+  });
+});
+
+/**
+ * 🔴 THE SECOND INCIDENT, AND THE ONE THIS SECTION EXISTS FOR (2026-09-17).
+ *
+ * `APPS_BUCKET` was fixed in the repo on 2026-09-15 and the test above has passed ever since — and
+ * the Worker running at the edge was still the old one, because this file is deployed by PASTING it
+ * into the Cloudflare dashboard and nothing links the two. When the server switched to bucket-only
+ * publishing, every published app died with Firebase's "Site Not Found". The code was right in the
+ * repo, right in the dashboard editor, and old at the edge.
+ *
+ * What made it expensive was not the mistake; it was that the mistake was UNOBSERVABLE. Five
+ * different explanations fitted the same symptom and none could be ruled out from outside, because
+ * the Worker had no way to say what it was. `GET /__nbai` is that way.
+ *
+ * ⚠️ These assertions do NOT prove what is deployed — nothing in CI can. They prove the endpoint
+ * exists and that its version string still describes this file, which is what makes a one-second
+ * check at the edge meaningful instead of a number nobody trusts.
+ */
+describe('the Worker can say which copy of itself is running', () => {
+  it('exposes GET /__nbai and reports the bucket it is actually reading from', () => {
+    expect(worker).toContain("if (url.pathname === '/__nbai')");
+    expect(worker).toContain('version: WORKER_VERSION');
+    // The bucket is the ONE field the whole diagnostic is for — reporting a version without it
+    // would tell you the code is new and still not tell you whether it can find an app.
+    expect(worker).toContain('appsBucket: APPS_BUCKET || null');
+  });
+
+  it('answers BEFORE the cache and is never stored — a stale diagnostic is worse than none', () => {
+    const diagnostic = worker.indexOf("url.pathname === '/__nbai'");
+    const cacheLookup = worker.indexOf('await cache.match(cacheKey)');
+    expect(diagnostic).toBeGreaterThan(-1);
+    expect(cacheLookup).toBeGreaterThan(-1);
+    expect(diagnostic).toBeLessThan(cacheLookup);
+    expect(worker).toContain("'cache-control': 'no-store'");
+  });
+
+  it('🔒 WORKER_VERSION still matches this file — a version string that lies is worse than none', () => {
+    // The contract is simply "bump it when you change the file". Encoded as a hash of everything
+    // EXCEPT the version line itself (which necessarily changes when it is bumped), pinned here.
+    // A failure means one of two things and the message says which:
+    //   • you changed the Worker → bump WORKER_VERSION, then paste the printed hash in below;
+    //   • you bumped it without changing anything else → paste the printed hash in below.
+    const version = constant('WORKER_VERSION');
+    expect(version, 'WORKER_VERSION must be a non-empty string').toMatch(/^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$/);
+
+    const body = worker.replace(/^const WORKER_VERSION = '[^']*';$/m, '');
+    const hash = createHash('sha256').update(body).digest('hex').slice(0, 16);
+    const PINNED = 'ce798a2c2b0658ad';
+    expect(
+      hash,
+      `The Worker changed but WORKER_VERSION/the pin did not.\n` +
+      `  1. Bump WORKER_VERSION in infra/cloudflare/mitrify-apps-worker.js (it is ${version} today).\n` +
+      `  2. Set PINNED in this test to: ${hash}\n` +
+      `  3. PASTE the file into the Cloudflare dashboard and press Deploy — CI cannot do this, and\n` +
+      `     skipping it is exactly the drift this test was written after.`,
+    ).toBe(PINNED);
   });
 });

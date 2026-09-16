@@ -57635,3 +57635,147 @@ one with stray whitespace, and "nothing to add" for undefined/null/empty/whitesp
 `undefined`, never `[]`). Gate: `tsc` clean (frontend + server, after `npm install` picked up
 `libsodium-wrappers`'s move to a real dependency from #2967), `noUnusedImports` clean, `vitest run`
 1694 files / 23762 passed / 0 failed, `build` + `test:bundle` + `boot:check` all green.
+## 2026-09-16 — `AGENTV3_STREAM_BUILD_CALLS` is LIVE (admin set it `on` in Cloud Run)
+
+The admin set the master switch the same day the change merged (#2966, `9e9aa9bb`), and left both
+tunables UNSET so the code defaults govern (idle 60 s, hard cap 300 s). Recorded here and in the
+CLAUDE.md env registry in the same session, hand-to-hand, per that registry's own rule — the entry
+had said "NOT live yet / UNSET", which is exactly the doc-vs-reality drift this repo has already paid
+for twice (the idle-minutes default, the E2B rate).
+
+**So every GLM/Kimi build call is now bounded by SILENCE rather than duration**, and a stall keeps
+what already arrived instead of destroying the call. This is the first time that path has ever run
+against a live provider; the flag exists so it reverts with no deploy.
+
+### 🔴 What must be read off the first real builds — and it is not "did it get faster"
+
+1. **Streamed turns reporting 0 input / 0 output tokens.** A stream carries no usage unless Z.ai and
+   Moonshot honour `stream_options.include_usage`. We ask; only a real call settles it. Zero is the
+   HONEST outcome (never an invented number — THE ONE-WALLET LAW), so no user is over-billed, but our
+   own cost report would under-state itself, and the mid-build cost ceiling reads that same ledger.
+   **If the zeros appear, the flag comes back off** and the honest-but-unmeasured path goes with it.
+2. **A `length` / truncated turn that was previously a dead timeout.** That is the fix working, not a
+   regression — the truncation guard names the cut-off file and the next turn rewrites it. "One file
+   short" is the intended better half of the trade.
+3. **Any rung benched for OUR budget ending.** `turnDeadline`'s wording exists to prevent exactly that;
+   a healthy provider benched because the lane ran out would be the change's own failure mode.
+
+### Still open, unchanged by the flag going on
+
+**No failed build report has been read for this complaint.** Every number in the fix — the 60 s idle
+bound, the 300 s cap — is sized from the engine's own budgets, not from the traffic that is actually
+timing out. A report ID is what turns the tuning from reasoning into measurement.
+## 2026-09-16 — MANDATORY AUTOPSY: XStudy Help continuation build (RELEASE_GATE RED). One root-caused fix shipped, one already-shipped-but-unset lever named, one open root cause recorded.
+
+Fifth absolute rule, triggered by an admin-attached build-diagnostics report (workspace
+`agentv3-OyByVslldzf144gQpGdHfeOjJE23-247789d0-f539-4725-88d9-4dfe2ff0810a`, weak tier, prompt
+"Continue the build from where it left off and finish the remaining steps"). Read end to end (2512
+lines) before drawing any conclusion, per the rule.
+
+### The 5-bucket ledger
+
+- ✅ **Self-healed (3):** two automatic GLM→next-provider fallbacks on a 60s timeout, GLM correctly
+  benched after the second consecutive timeout so the ladder reached KIMI; and `RENDER_RESCUE` —
+  the build's own verdict said "not ok" but a real-browser check showed the app renders, and the
+  platform upgraded the RECORDED outcome to match the stronger evidence.
+- 🔀 **Worked around (2):** the agent explicitly triaged known findings away under time pressure
+  ("I will NOT polish further… keep the app functional rather than chase non-critical evaluate
+  items" — leaving a real `@types/react-router-dom` v5-vs-v6 mismatch and design/a11y grades
+  unaddressed); and the page-render check for 1 route "produced no result" and the build proceeded
+  to a verdict without that check ever completing.
+- ⏭️ **Skipped (1):** a Playwright E2E suite was scaffolded into the project but never installed or
+  run in the sandbox (`@playwright/test` absent) — a real verification capability sat unused.
+- ❌ **Still broken / shipped imperfect (5):** the build-breaking blocker itself (3 fake/incomplete
+  demo-data findings, never fixed — this is why the gate is RED); design consistency graded D
+  (54/100 — 25 colours, 114 off-grid spacing values); accessibility graded C (62/100 — missing alt
+  text, 3 unlabeled fields, 1 unlabeled icon button); the stale `@types/react-router-dom` mismatch;
+  and — the one that matters most — **`RELEASE_GATE` itself said "the typecheck did not run" while
+  the SAME report's own `commands` log shows the agent ran `tsc --noEmit` twice, both clean.** A
+  false statement sitting a few hundred lines below the evidence that contradicts it.
+- 🥵 **Struggle points:** 16+ minutes of pure read-only reconstruction (ls, tsc, 6+ greps, ~10 full
+  file reads incl. 4× re-reading `index.css`) before writing a single line, because the prior turn
+  was cut off mid-CSS-write and nothing told this turn what was left to do — confirmed by the
+  platform's own `REPEATED_READS` finding (25 reads, only 15 distinct files, 40% re-reads); two
+  60-second dead GLM timeouts; **one single non-streamed Kimi call took 413 seconds (6.9 minutes —
+  32% of the entire 21.4-minute build) to write the missing CSS in one shot**, with zero partial
+  visibility and total exposure to a hard timeout; several GLM investigation calls individually took
+  72–100 seconds. Net: of 21.4 minutes wall-clock, the sandbox's own telemetry says only ~1.9
+  minutes (9%) was real operations — 91% was the user watching a spinner while models thought.
+
+### The missing subsystem
+
+There is no persisted, structured "what's left to finish" state across an interrupted build turn.
+"Continue the build" made this session re-derive, by hand, via 6+ greps and 10 file reads, a fact
+the previous (cut-off) turn already knew: which CSS classes the markup referenced but never
+defined. A deterministic pre-flight diff (markup class usage vs. CSS definitions — literally the
+computation the model itself ran manually) handed to the continuation turn as a ready list would
+have removed most of the 16-minute recon and the 40% repeated-read waste in one motion. Recorded as
+an **open root cause** below rather than built now — it is a real feature, not a bug fix, and needs
+its own scoped design (this diff-based hand-off would generalize past CSS to "what's referenced but
+undefined" for any file pair, which is worth doing right rather than narrowly for CSS alone).
+
+### Root-caused and fixed in this change (PR pending)
+
+**The `RELEASE_GATE` false "the typecheck did not run" claim.** Traced to
+`src/server/routes/agentv3.ts`: `gateEvidence.typecheck` defaults to `'not-run'` and is ONLY ever
+set by the deterministic G3 post-build gate (`postBuildCodeGateShouldRun`), which itself requires
+`buildOk` (the build already marked successful at that point in the pipeline) before it will even
+attempt a check. So a build not yet marked `ok` never gets a typecheck evidence write, however many
+times the AGENT ITSELF ran `tsc --noEmit` as part of its own workflow — and that evidence (the
+`commands` log) is sitting in the very same report `releaseGate.ts` reads from to write "the
+typecheck did not run". This is the SAME missing-evidence-ledger class already recorded as an OPEN
+root cause on 2026-09-14 (autopsy `697b38ee`) — "every fact needed to contradict them was already
+recorded... until one ledger exists that any actor writes a proven fact into and every verdict
+reads from, this class returns" — returning here, four days later, in a different subsystem.
+
+Fix (additive-only, never touches G3's own execution/repair/budget logic): a new pure pair in
+`src/server/AgentV3/TscGate.ts` — `looksLikeTypecheckCommand` (recognizes a stand-alone
+`tsc --noEmit` invocation) and `typecheckEvidenceFromCommands` (scans a build's own recorded
+command history for the LATEST such command and reads its OUTPUT with the same `hasTscErrors`
+parser G3 itself trusts — never the shell exit code, because a piped command like
+`tsc --noEmit | head -40`, the exact shape in this report, reports `head`'s exit code, not tsc's).
+Wired as `BuildDiagnostics.typecheckEvidenceFromAgentCommands()` and consulted in `agentv3.ts` as a
+fallback immediately after the G3 block, ONLY when `gateEvidence.typecheck` is still `'not-run'` —
+never overriding real G3 evidence. Runs unconditionally for every build (fast-lane included), which
+also closes the same evidence gap for fast-lane builds whose own ad-hoc typechecks were never fed
+into the gate at all. Regression-locked: 11 new cases in `TscGate.test.ts` including the exact
+piped-command regression shape from this report, plus 2 wiring cases in `BuildDiagnostics.test.ts`.
+Full gate green on the final state: `typecheck` + `typecheck:server` + `noUnusedImports` + `build`
++ `deps:server-gate` + `boot:check` + `vitest run` (1694 files, 23770 passed, 1 skipped, 0 FAIL).
+
+**The 50/50 law applied:** the reactive half is the fallback above. The other half — why did G3
+never run at all for this build in the first place, when the build had a live preview and rendered
+cleanly? — was investigated and left deliberately alone: `postBuildCodeGateShouldRun`'s `buildOk`
+gate is guarded by its own dedicated test ("EVERY code gate goes through the one predicate — a later
+one cannot repeat the bug", explicitly counting FIVE call sites sharing the guard) and its own
+comment trail suggests the gate is intentionally conservative about running repair passes on a build
+the engine has not yet called successful. Loosening that condition is a wider, riskier change with
+its own blast radius across five call sites and is NOT done here — the fallback above closes the
+honesty gap without needing to change when G3 itself runs.
+
+### Proactive, world-best layer
+
+**The single highest-value lever available right now, already built, zero new code: turn on
+`AGENTV3_STREAM_BUILD_CALLS`.** This exact report is a same-day, dated demonstration of precisely
+the failure class that flag (PR #2966, merged hours before this build ran) exists to eliminate — a
+413-second single call with zero partial visibility, and two 60-second dead timeouts, out of a
+21.4-minute build. It is unset (default off) in Cloud Run. Recommending the admin set it is the one
+proactive action this autopsy surfaces as immediately actionable with no further engineering.
+
+**The bigger, structural lever:** the "no resume-state subsystem" gap above. A build that can hand
+a continuation turn a ready-made "here is exactly what's unfinished" fact sheet — starting narrowly
+with the CSS-class-usage-vs-definition diff this build computed by hand — would cut both the 16
+minutes of recon and the 40% repeated-read waste this report's own `REPEATED_READS` finding named.
+Proposed as the next system-level build, not attempted inline in this autopsy given its scope.
+
+### Open root causes (rule 6 — recorded honestly, not silently shipped as closed)
+
+- The resume-state subsystem above — genuinely a new feature, not a patch.
+- `AGENTV3_STREAM_BUILD_CALLS` remains unset in Cloud Run — an admin action, not a code gap.
+- Design-consistency (D, 54/100) and accessibility (C, 62/100) grades below the bar are DETECTED
+  and reported honestly but not auto-healed on the weak tier by default — matches
+  `AGENTV3_DESIGN_GATE`'s existing scope (detection always on; repair is its own flag) and is not a
+  new gap this autopsy needs to fix, recorded here only for completeness of the ledger.
+- The 3 fake/incomplete-code READINESS_BLOCKER items that made this specific build RED were never
+  fixed — that is the individual app's outstanding work, correctly left for the user's own "fix it"
+  follow-up per the build's own honest verdict, not a platform defect.

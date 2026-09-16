@@ -57425,6 +57425,84 @@ change to match — the ladder is meant to be a single source of truth and the d
 yet) and the second, unsent batch of AI provider prices ("ek sath me pura module badlenge") the admin
 said would follow the GLM/Kimi corrections.
 
+## 2026-09-16 — PRODUCTION OUTAGE: Cloud Run couldn't start. Root cause + a new CI gate for the whole class
+
+**Symptom:** `navbharat-ai-prod` failed its Cloud Run startup TCP probe on port 8080, consecutively,
+across multiple revisions (`…-03942-t7r`, `…-03943-wkk`). Cloud Run: *"The user-provided container
+failed to start and listen on the port defined provided by the PORT=8080 environment variable within
+the allocated timeout."* `server.ts` already does the correct thing — `PORT` from env, default 8080,
+`app.listen(PORT, '0.0.0.0', …)` — so the port-binding code itself was never the problem.
+
+**Root cause (confirmed by reproducing the exact Dockerfile build+runtime stages locally, without
+Docker: `npm ci` → `npm run build` → `npm prune --omit=dev` → `node dist/server.cjs`):**
+`src/server/lib/githubSecrets.ts` (new 2026-09-15, the Android-upload-key GitHub Actions secrets
+writer) does a top-level `import _sodium from 'libsodium-wrappers'`, statically wired into `server.ts`
+via `registerMobileShipRoutes`. `libsodium-wrappers` was listed only in `devDependencies`. The
+Dockerfile's runtime stage runs `npm prune --omit=dev` before shipping the image, so the module was
+physically absent at container boot: `require('libsodium-wrappers')` threw synchronously, before
+`app.listen()` ever ran, and the process exited before the port ever opened. This is the exact class
+the Dockerfile's own header comment already warns about (the `typescript` misclassification, fixed
+2026-08-04) — it recurred with a different package.
+
+**Why CI's existing boot-check missed it:** `scripts/boot-check.sh` — which the Dockerfile comment
+names as *"the backstop that turns that class of mistake into a red check instead of an outage"* —
+bundles and runs `server.ts` against the FULL, unpruned `node_modules`. It answers "does the bundle
+crash on load", not "does the bundle crash on load with only the dependencies the shipped image will
+actually contain". It passed cleanly on every PR that touched this file.
+
+**Fix (`libsodium-wrappers` moved `devDependencies` → `dependencies`) verified end-to-end:** rebuilt,
+pruned to production deps, ran `node dist/server.cjs` with `NODE_ENV=production PORT=8080` — reached
+`🚀 Server running on http://localhost:8080` and answered `curl` with `HTTP 200`. Confirmed by
+reversion too (reverting the classification reproduces the exact `MODULE_NOT_FOUND` crash).
+
+**Siblings hunted (fourth absolute rule) — three more real, if not yet acute:** `google-auth-library`
+(imported statically in 8 files, including `routes/agentv3.ts`/`routes/admin.ts`), `semver`
+(`DependencyAnalysis.ts`), and `ws` (`sonic/sonicWs.ts`) are all imported directly by server-reachable
+code but were never declared in `package.json` at all — they currently survive `npm prune --omit=dev`
+only because some genuine dependency happens to need them transitively (`google-auth-library` →
+9.15.1, `semver` → 7.8.3, `ws` → 8.21.3, confirmed present after a real prune). That is a phantom
+dependency in exactly the same sense libsodium was: nothing in `package.json` promises they will stay
+there, so the next unrelated version bump of whatever pulls them in transitively could silently drop
+one and reproduce this exact outage on a totally different package, on a day nobody touched
+`githubSecrets.ts` at all. All three are now explicit `dependencies` with their currently-resolved
+versions. (`electron` and `playwright` also matched a naive text scan of the bundle but are FALSE
+POSITIVES — both are inside code-GENERATOR template strings, `DesktopExportGenerator.ts`'s Electron
+scaffold for a user's exported desktop app and `E2BActuator.ts`'s Playwright screenshot scripts shipped
+to the E2B sandbox VM — neither ever runs in this process. This is exactly why the new gate below is
+built on esbuild's AST-accurate `--metafile`, not a text scan.)
+
+**The systemic fix — `scripts/serverDepsGate.mjs`, wired into `.github/workflows/ci.yml` and
+`npm run deps:server-gate`:** bundles `server.ts` exactly as the Dockerfile's build stage does, with
+`--metafile`, and checks every EXTERNAL package esbuild's real parser found is a `dependency` — not
+merely present in `node_modules`, not merely a `devDependency`. Two things make it precise rather than
+noisy:
+- It reads `imp.kind` from the metafile and only flags `require-call`/`import-statement` (unconditional,
+  runs the instant the referencing module loads) — never `dynamic-import`. This is what correctly
+  excludes `vite`, whose only import in `server.ts` is `await import('vite')` gated behind
+  `NODE_ENV !== 'production'`, safe precisely because it can never execute in the shipped container.
+  `vite` staying a `devDependency` is correct and the gate must never flag it.
+- It reads the metafile's own module graph, not the bundle's text — which is what correctly excludes
+  `electron`/`playwright` (string-literal false positives, see above) without needing a manual
+  allowlist that would rot the moment a new generator template is added.
+- Proven by reversion: reverting the `libsodium-wrappers` classification reproduces the exact FAIL the
+  gate now blocks CI on, naming the package and why.
+
+**Regression suite:** `tests/serverDepsGate.test.ts` (20 cases) — the pure functions
+(`packageNameOf`, `externalPackagesFromMetafile`, `findMissingProductionDeps`), including the vite
+dynamic-import case, the electron/playwright-shaped "external but never called" case, and a wiring
+check that the gate is really in `ci.yml` and `package.json`.
+
+**Gate:** `typecheck` / `noUnusedImports` / `typecheck:server` / `audit:gate` / `license:gate` /
+`build` / `test:bundle` / `boot:check` / `deps:server-gate` all clean. `npx vitest run` — **1692
+files, 23,735 passed, 1 skipped (pre-existing), 0 FAIL**, run last on the final state.
+
+⚠️ **Open, stated plainly:** this gate checks `server.ts`'s own bundle. It does not (yet) check
+anything imported only from a route registered lazily behind a dynamic `import()` elsewhere — by
+construction, a genuinely lazy/dynamic import is correctly excluded (see the vite case), but that also
+means a NEW class of bug — a dynamically-imported module whose OWN static imports are missing a
+production dependency — would only surface the first time that code path actually runs in production,
+not at boot. That is a real, narrower gap; today's outage was specifically a boot-time (`require-call`)
+failure and this gate closes exactly that class.
 ## 2026-09-16 — The slow-provider fix: a build call is now bounded by SILENCE, not by duration
 
 Admin, verbatim: *"kimi aur glm slow hai, time out ho jata hai. isko fix karne ka kya kya option hai

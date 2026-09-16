@@ -436,7 +436,42 @@ export function namesSpecificDeliverable(lower: string): boolean {
   return false;
 }
 
+/**
+ * Does this text contain native Devanagari script (Hindi, Marathi, …)?
+ *
+ * 🔴 THE GUARD THIS FUNCTION EXISTS FOR (autopsy 2026-09-16, alarm-app build). Every keyword array in
+ * this file — `NEW_BUILD_SIGNALS`, `EDIT_SIGNALS`, `BUILD_SIGNALS`, `WH_OPENERS`, `ANSWER_ONLY_PATTERNS`,
+ * `STATE_QUESTION_SIGNALS` — is Romanized-only (confirmed by scanning the whole file for this Unicode
+ * block: zero hits before this change). So a message typed in NATIVE Hindi script cannot earn a
+ * confident classification from ANY of them; the only thing that can make one look confident is an
+ * ACCIDENT — a stray Romanized/English word inside it tripping a keyword array (`BUILD_SIGNALS` matches
+ * "css", "api", "login", …), or the char-count `LONG_MESSAGE_THRESHOLD` (which Devanagari's matras and
+ * conjuncts inflate well past the same sentence's length in Roman script, for no reason connected to
+ * the message's actual complexity).
+ *
+ * The fix is NOT translating every array into Hindi — that is a much larger, riskier project (recorded
+ * separately in PROGRESS.md as an open item) and this file's own keyword approach does not scale to a
+ * language whose question particle can land anywhere in the sentence (see `MIDSENTENCE_KYA_QUESTION`).
+ * Instead: a classifier that cannot read a script must never CLAIM confidence about text in it. Any
+ * message containing Devanagari is capped at LOW confidence below, however it was otherwise classified
+ * — which is what sends it to the LLM upgrade (`classifyIntentSmart`) instead of hard-locking on a
+ * coincidence. A message that mixes scripts (Hindi with an English technical word, the common case) is
+ * still read for whatever Romanized signal it carries — this only ever REMOVES an unearned HIGH, never
+ * invents an intent.
+ */
+export function containsDevanagari(text: string): boolean {
+  return /[ऀ-ॿ]/.test(text);
+}
+
 export function classifyIntentWithConfidence(message: string): IntentWithConfidence {
+  const result = classifyIntentWithConfidenceCore(message);
+  if (result.confidence === 'high' && containsDevanagari(message)) {
+    return { ...result, confidence: 'low' };
+  }
+  return result;
+}
+
+function classifyIntentWithConfidenceCore(message: string): IntentWithConfidence {
   const text = typeof message === 'string' ? message.trim() : '';
   if (!text) return { intent: 'new_build', confidence: 'low' };
 

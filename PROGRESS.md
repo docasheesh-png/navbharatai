@@ -58707,3 +58707,58 @@ FAIL.**
 
 Branch `claude/build-report-autopsy-tmn3ov`, restarted from `origin/main` this session per the
 merged-PR rule (its prior sole commit had already landed as PR #2947).
+
+## 2026-09-17 — Same autopsy, continued: a classifier that cannot read a script must never claim confidence about it
+
+Admin asked whether GPT Nano should do "these two jobs" (the trailing-question fix and the classifier's
+Devanagari blindness, both from the alarm-app autopsy above). Answer, and what shipped:
+
+**Job 1 (trailing "kya main/hum")** — already fixed for free, by regex, in the previous commit on this
+branch. Routing it through Nano now would spend money and add latency on something that already costs
+₹0 and 0ms. Left untouched.
+
+**Job 2 (the classifier's full Devanagari blindness)** — the admin's instinct was right in spirit
+(GPT Nano's own brief, recorded in `CLAUDE.md`, says it is *for classification/extraction* — intent
+classification is exactly that), but calling an LLM on EVERY message would cost real money on the 90%+
+of messages that are unambiguous Romanized orders, which the "READ THE MOOD FIRST" rule explicitly keeps
+free and instant. Translating every keyword array into Hindi was rejected the same way in yesterday's
+autopsy — too large, too risky to rush.
+
+**What shipped instead: `containsDevanagari()` (`IntentClassifier.ts`).** Every keyword array in this
+file is Romanized-only, so the only way Devanagari text can earn a HIGH-confidence result is by
+ACCIDENT — a stray Romanized/English word inside it tripping a keyword array, or the raw UTF-16 char
+count crossing `LONG_MESSAGE_THRESHOLD` (Devanagari's matras/conjuncts inflate this well past the same
+sentence's length in Roman script, unrelated to actual complexity). `classifyIntentWithConfidence` now
+wraps its own logic and downgrades any `high` result to `low` whenever the input contains Devanagari —
+never invents or removes an intent, only removes an UNEARNED confidence claim, which is what sends the
+message to the LLM upgrade (`classifyIntentSmart`) instead of hard-locking on a coincidence.
+
+**Where Nano actually fits, and where it doesn't.** `classifyIntentSmart`'s LLM call already runs
+through the free chat router, which already includes GPT Nano as a rung (added in PR #2962). This
+change does not hard-pin Nano over that router's own fallback ladder — doing so would trade away the
+resilience the ladder exists for (if Nano is briefly unavailable, GLM-flash still answers). What this
+change DOES do is make sure that LLM step is actually CONSULTED for every Devanagari message, instead of
+being skipped on a false HIGH-confidence match — which is the real gap Nano's presence in the ladder
+could not close on its own.
+
+**The honest cost trade-off, stated plainly:** any message containing Devanagari script — including an
+otherwise-unambiguous Hinglish order with one Hindi word mixed in — now pays one extra free-tier LLM
+call before building, where before (once the trailing-question fix landed) it would have been instant
+for the clear cases. This is the same asymmetry the READ THE MOOD FIRST rule already accepts elsewhere:
+wrong-toward-instant-build costs real money and a cancelled build; one extra cheap classification call
+costs a few hundred milliseconds and, per the admin's own brief, is exactly what Nano is for.
+
+Regression-locked in `src/server/AgentV3/IntentClassifier.test.ts`: `containsDevanagari` in isolation,
+a long mixed-script message with every ingredient of the original hard-lock (length + BUILD_SIGNALS +
+NEW_BUILD_SIGNALS) downgraded to LOW while its Roman-script twin stays HIGH and instant (the control
+case proving the "common path pays nothing" rule is untouched), a Devanagari question already at LOW
+left alone (proving the wrapper only ever removes an unearned HIGH, never invents one), and an
+edit/problem-report signal embedded in Devanagari losing its unearned HIGH the same way a build signal
+does.
+
+**Gate, run last on this change's final state:** `typecheck` clean · `typecheck:server` clean ·
+`noUnusedImports` clean · `npm run build` exit 0 · `test:bundle` within budget · `boot:check` PASS ·
+`npx vitest run` — see the commit for the exact pass count.
+
+Still open, unchanged from yesterday: the classifier's broader Devanagari blindness (every keyword array
+itself, not just the confidence gate around them) remains a separate, larger, deliberately-deferred item.

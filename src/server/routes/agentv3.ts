@@ -11743,6 +11743,11 @@ async function noteBuildOutcome(
       /** The cost ceiling fires at most once per build — see captureTurnUsage below. */
       let costCeilingFired = false;
       /**
+       * The "this provider reported no tokens" notice fires at most once per build, same reasoning as
+       * the ceiling: a report that says the same thing on every turn reads like many events.
+       */
+      let usageUnreportedFired = false;
+      /**
        * SHADOW ledger — fast-lane turns, recorded for OBSERVATION and never for billing.
        *
        * The admin chose to measure before changing fast-lane attribution (2026-08-11), and measurement
@@ -11759,7 +11764,34 @@ async function noteBuildOutcome(
         shadowFastLaneLedger.add(used, usage, model);
       };
       billingCtx.providerLedger = providerLedger; // Fix 67 — expose to the wall-clock/advisory finalizer
-      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string, cacheReadInputTokens?: number): void => {
+      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean }, model?: string, cacheReadInputTokens?: number): void => {
+        // 🔴 SAY IT WHEN WE DO NOT KNOW. A provider that returns no token counts contributes zeros to
+        // the ledger, and zeros are indistinguishable from a turn that genuinely cost nothing — the
+        // exact misreading autopsy f04421ef already paid for once, arriving here through a different
+        // door: a STREAMED turn carries usage only if the provider honours `stream_options.include_usage`,
+        // and whether Z.ai/Moonshot do is a fact only a real call can settle.
+        //
+        // The user is never over-billed by this (we cannot invent tokens, so an unmeasured turn is
+        // free to them). What it protects is the ADMIN's own cost figure, which silently under-states
+        // itself otherwise — the same shape as the E2B_USD_PER_HOUR drift, and on the very panel used
+        // to judge provider spend.
+        if (usage.measured === false && !usageUnreportedFired) {
+          usageUnreportedFired = true;
+          try {
+            buildDiag.record({
+              phase: 'build', severity: 'warning', code: 'USAGE_NOT_REPORTED',
+              // Not a defect in the build — the app is unaffected — so it resolves itself.
+              autoResolved: true,
+              message: 'A provider returned no token usage — this build\'s cost is an under-estimate',
+              detail: `${used}${model ? ` (${model})` : ''} answered without reporting token counts, so its `
+                + 'turns contribute 0 to this report\'s token and cost figures. Nothing was over-charged — we never '
+                + 'invent tokens — but OUR OWN cost for this build is higher than the number shown. Most likely cause: '
+                + 'the streamed path (AGENTV3_STREAM_BUILD_CALLS) asks for usage via stream_options.include_usage and '
+                + 'this provider does not send it. If this appears on every build, unset that flag to return to the '
+                + 'non-streamed path, which does report usage.',
+            });
+          } catch { /* diagnostics are best-effort — they must never disturb a build */ }
+        }
         // Fix 66 — the cache-hit share rides the ledger entry so the REAL-cost settle prices it at the
         // provider's cheaper cache-read rate (usageCostUsd). Margin-safe: providers without a cache
         // line in the rate card price it at the full input rate (identical to before).

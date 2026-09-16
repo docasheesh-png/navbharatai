@@ -57858,3 +57858,91 @@ without weakening what it protects — the same three underlying checks (`user.p
 Gate: `tsc` clean (frontend + server), `noUnusedImports` clean, `vitest run` 1696 files / 23785 passed
 / 0 failed, `build` + `test:bundle` + `boot:check` all green. `AppKnowledgeBase.ts`'s `my_profile` and
 `referral` entries updated in the same change per the mandatory sync rule.
+
+## 2026-09-16 — A streamed turn that reports no tokens is now SAID, not silently counted as zero
+
+**Trigger: the admin forwarded an external (ChatGPT) 24-point plan, "Make Kimi/GLM Timeout-Resistant".**
+Per the external-suggestion rule it was audited against the real code rather than transcribed. **Most
+of it was already built by PR #2966** (merged hours earlier), and saying so plainly is the point of
+this entry — a later session must not rebuild it:
+
+| Plan item | Reality |
+|---|---|
+| Idle/stall timeout replacing the wall clock | ✅ `readStream()` races each `iterator.next()` against a fresh 60 s timer |
+| Separate first-byte (TTFT) bound | ✅ `withTimeout(call(), idleMs)` |
+| Timer resets on provider activity | ✅ fresh timer per chunk |
+| Partial output survives a stall | ✅ `toCompletion()` → `finish_reason:'length'` |
+| **No half-written file from a truncated stream** | ✅ **already impossible by construction** — `salvageTruncatedPath` recovers the `path` and deliberately never the partial `content`, so a cut `write_file` errors honestly at dispatch |
+| Continuation instead of retry | ✅ truncated turn flows back into the loop |
+| **Don't bench a vendor for being slow** | ✅ **already correct** — a stall WITH partial answer returns normally (no throw ⇒ no timeout strike); only 60 s of silence with nothing produced throws; our own budget throws `BUDGET_REACHED_MESSAGE`, worded to not match `isTimeoutProviderError` |
+| Raised ceiling | ✅ live: `(300 s − 5 s) / 30 ms` = **9,833** output tokens |
+
+**Rejected, with reasons.** Item 15 (adaptive hedging — race two providers on paid tiers) directly
+contradicts **money-audit leak 6**, where racing was found billing BOTH providers on every chat turn
+and was confined to paid surfaces by `streamRacePolicy.ts` on the admin's own instruction. Re-opening
+it inside the BUILD path would re-create a leak the admin ordered closed. Items 13/14 (rolling
+provider score, `SLOW_RELIABLE` mode) are unbuildable today for the reason below — the telemetry they
+would learn from cannot yet be trusted. Items 16–19 (parallel tool calls, context firewall, dynamic
+tool loading, progress events) are real work but a different project; bundling them here would break
+the small-reviewable-change rule.
+
+### The one thing that was genuinely broken, and it is the money panel
+
+🔴 **`parseOpenAiCompletion` collapsed a MISSING `usage` into `{inputTokens: 0, outputTokens: 0}`** —
+so a turn whose provider reported nothing was indistinguishable from one that genuinely cost nothing.
+
+**This is the SAME CLASS as autopsy f04421ef, arriving through a different door.** That one was a
+report printing `GLM: 54 call(s) · 0 in · 0 out` for an unsettled ledger, and the zeros were read — in
+an autopsy handed to the admin — as a measured zero; the renderer was fixed to print *"tokens not
+recorded"*. A STREAMED turn carries token counts only when the provider honours
+`stream_options.include_usage`, and whether Z.ai and Moonshot do **is a fact no session can settle
+without a real call**. `AGENTV3_STREAM_BUILD_CALLS` is LIVE, so this is not hypothetical — and
+CLAUDE.md's own entry for that flag names exactly this as the thing to watch.
+
+⚠️ **The accumulator already knew.** `OpenAiStreamAccumulator.usageMissing()` computes precisely this
+signal and **nothing in production called it** — the fact was computed and then thrown away one layer
+later. (It is left in place: it is a tested public accessor, and the fact now travels by the shared
+`toCompletion → parseOpenAiCompletion` path instead, which is the single-translation discipline that
+module's header argues for.)
+
+🔒 **NO BILL MOVES.** The ONE-WALLET LAW forbids inventing tokens, so an unmeasured turn still costs
+the user ₹0 — the safe direction, unchanged. What was broken is the **admin's own cost figure**, which
+under-states itself silently on the exact panel used to judge provider spend — the same shape as the
+`E2B_USD_PER_HOUR` drift.
+
+**Fixed at the class, source → choke point:**
+- `TurnUsage.measured?: boolean` (`ClaudeClient.ts`) — only ever written as `false`, so every existing
+  reader, snapshot and test is byte-identical on a measured turn.
+- `parseOpenAiCompletion` sets it when the provider reported NEITHER count. An absent `usage` and a
+  `usage: {}` are equally unmeasured; **a genuine `prompt_tokens: 0` stays a measurement** and is
+  test-locked as such. Covers the non-streamed path too — the class, not the instance.
+- `MultiProviderTurnRunner` forwards it through `onTurnComplete`.
+- `captureTurnUsage` (`routes/agentv3.ts`) — the choke point every build and heal turn already passes
+  through, beside the cost ceiling and for the same reason — records **`USAGE_NOT_REPORTED`** once per
+  build, naming the provider, the model, and the flag to unset.
+
+**The 300 s / 480 s sum, corrected in place rather than re-tuned.** `FLOOR_TIMEOUT_CAP_MS`'s comment
+documents an invariant — *"2 × 150 s = 300 s, leaving 180 s for the vendor behind it… raising this
+without re-checking that sum is how a slow provider eats a whole turn again"* — and the streamed path
+does not consult that constant at all: it uses `streamHardCapMs()` (300 s), making the sum 2 × 300 s
+against a 480 s turn, with no reserve. **It is still safe, and the comment now says why:** a stall
+fires at 60 s, so the 300 s ceiling is reached only by a provider actively emitting, and one emitting
+an ANSWER returns it truncated rather than dying. The narrow real exposure is autopsy ee20478d's case
+— a reasoning-only model can now hold a rung for 300 s instead of 150 s before yielding nothing. **Not
+re-tuned on a guess**; the honest input is what real streamed builds do.
+
+**Verification gate, run last on the final state:** `typecheck` · `typecheck:server` ·
+`noUnusedImports` · `build` · `test:bundle` · `boot:check` · `vitest run` → **1698 files, 23,824
+passed, 1 skipped, 0 FAIL**. New: `tests/usageNotReported.test.ts` (13), **proven by reversion** —
+removing the adapter line fails 4 of them.
+
+### Open root causes (rule 6)
+
+- **Whether Z.ai and Moonshot actually honour `include_usage` is still unknown** — that is the fact
+  this change makes VISIBLE rather than answers. Watch `USAGE_NOT_REPORTED` on the next real streamed
+  builds; if it fires every time, the honest options are to unset `AGENTV3_STREAM_BUILD_CALLS` or to
+  accept an admin-side cost under-count while the user's bill stays correct.
+- **Items 13/14 (adaptive, telemetry-driven provider routing) stay unbuilt, deliberately.** The plan's
+  own best line is *"do not claim Kimi or GLM are fast until actual production telemetry proves it"* —
+  and until the above is answered, the token half of that telemetry may be silently zero. Routing
+  learned from numbers we cannot yet trust would be a guess wearing a measurement's clothes.

@@ -56,6 +56,23 @@ export const FLOOR_CALL_OVERHEAD_MS = 5_000;
  * absorb is 2 × this before it reaches the next vendor. At 150 s that is 300 s, leaving 180 s for the
  * vendor behind it. Raising this without re-checking that sum is how a slow provider eats a whole turn
  * again.
+ *
+ * ⚠️ AND THAT SUM NO LONGER DESCRIBES A STREAMED CALL — read this before reasoning from the paragraph
+ * above (2026-09-16). With `AGENTV3_STREAM_BUILD_CALLS` on, `OpenAiToolRunner` bounds the call with
+ * `streamHardCapMs()` (300 s) INSTEAD of this constant, which that path never consults. So the
+ * arithmetic becomes 2 × 300 s = 600 s against a 480 s turn — there is no 180 s reserve left for the
+ * vendor behind it.
+ *
+ * 🔑 WHY THAT IS STILL SAFE, and the one case where it is not. A streamed call is bounded by SILENCE:
+ * a genuine stall fires at `streamIdleMs()` (60 s), not at 300 s, so the ceiling is reached only by a
+ * provider that is actively emitting — and one that emits an ANSWER returns it as a truncated turn
+ * rather than dying. The exposure is the narrow case autopsy ee20478d already named: a reasoning model
+ * that streams `reasoning_content` and nothing else can now hold a rung for 300 s instead of 150 s
+ * before yielding nothing. It ends as our-clock (`BUDGET_REACHED_MESSAGE`), so it correctly does NOT
+ * bench the provider — which also means nothing shortens its second attempt.
+ *
+ * Left as measured behaviour rather than re-tuned on a guess: the honest input is what real streamed
+ * builds do, which is what `USAGE_NOT_REPORTED` and the report's timing lines exist to show.
  */
 export const FLOOR_TIMEOUT_CAP_MS = 150_000;
 /** Below this, a call cannot deliver anything useful — a floor under the floor. */

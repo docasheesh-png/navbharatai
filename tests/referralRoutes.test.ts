@@ -34,6 +34,9 @@ vi.mock('../src/server/lib/serverDb', () => {
     exists: () => Object.prototype.hasOwnProperty.call(DOCS, ref.path),
     data: () => DOCS[ref.path],
   });
+  // A real-enough `where`/`getDocs` so the Earning list's own query can be tested against the SAME
+  // fake store the rest of this file writes into — filtering by field equality only, which is all
+  // the referral routes ever ask for.
   return {
     doc: mkRef,
     getDoc: async (ref: any) => read(ref),
@@ -47,8 +50,22 @@ vi.mock('../src/server/lib/serverDb', () => {
       },
       update: (ref: any, patch: any) => { DOCS[ref.path] = { ...(DOCS[ref.path] || {}), ...patch }; },
     }),
-    collection: () => ({}), query: () => ({}), where: () => ({}), orderBy: () => ({}),
-    limit: () => ({}), getDocs: async () => ({ docs: [] }), getServerDb: () => ({}),
+    collection: (_db: any, col: string) => ({ __col: col }),
+    query: (ref: any, ...constraints: any[]) => ({ __col: ref.__col, constraints }),
+    where: (field: string, op: string, value: any) => ({ __where: { field, op, value } }),
+    orderBy: () => ({}),
+    limit: (n: number) => ({ __limit: n }),
+    getDocs: async (q: any) => {
+      const col = q.__col;
+      const constraints = q.constraints || [];
+      const wheres = constraints.filter((c: any) => c.__where).map((c: any) => c.__where);
+      const limitC = constraints.find((c: any) => typeof c.__limit === 'number');
+      let entries = Object.entries(DOCS).filter(([path]) => path.startsWith(`${col}/`));
+      entries = entries.filter(([, data]: any) => wheres.every((w: any) => (data || {})[w.field] === w.value));
+      if (limitC) entries = entries.slice(0, limitC.__limit);
+      return { docs: entries.map(([path, data]) => ({ id: path.slice(col.length + 1), data: () => data })) };
+    },
+    getServerDb: () => ({}),
   };
 });
 
@@ -58,10 +75,17 @@ vi.mock('../src/server/lib/serverDb', () => {
  */
 let account = { email: 'u@example.com', emailVerified: true, phone: '+919876543210', providers: ['google.com', 'github.com'] };
 
+/**
+ * A per-UID override on top of the shared `account` above, for tests that need several DIFFERENT
+ * friends' emails visible at once (the Earning list). Every existing test that mutates `account`
+ * directly keeps working unchanged — a uid with no entry here just falls back to it.
+ */
+let accountsByUid: Record<string, typeof account> = {};
+
 vi.mock('../src/server/lib/authMiddleware', () => ({
   requireUserMatch: () => (_req: any, _res: any, next: any) => next?.(),
   verifiedPhoneNumber: async () => null,
-  resolveAccountContact: async () => account,
+  resolveAccountContact: async (uid: string) => accountsByUid[uid] ?? account,
 }));
 
 vi.mock('../src/server/lib/deviceIntegrity', async (orig) => {
@@ -76,6 +100,7 @@ async function routes() {
 const GET_STATUS = async () => (await routes()).get('GET /api/referral/:userId')!;
 const POST_REDEEM = async () => (await routes()).get('POST /api/referral/:userId/redeem')!;
 const POST_CLAIM = async () => (await routes()).get('POST /api/referral/:userId/claim')!;
+const GET_REFERRED = async () => (await routes()).get('GET /api/referral/:userId/referred')!;
 
 const tokensOf = (uid: string) => Number(DOCS[key('user_token_wallets', uid)]?.tokenBalance || 0);
 const rupeesOf = (uid: string) => Number(DOCS[key('user_token_wallets', uid)]?.remaining_balance || 0);
@@ -102,12 +127,18 @@ async function claim(uid: string, step: string, deviceId = 'a1b2c3d4e5f60718') {
 async function completeAllSteps(uid: string, deviceId = 'a1b2c3d4e5f60718') {
   for (const s of ['referral-code', 'email', 'github', 'mobile']) await claim(uid, s, deviceId);
 }
+async function referred(uid: string) {
+  const res = mockRes();
+  await (await GET_REFERRED())(mockReq({ params: { userId: uid } }), res);
+  return res.body as any;
+}
 
 const ENV = { ...process.env };
 beforeEach(() => {
   for (const k of Object.keys(DOCS)) delete DOCS[k];
   deviceAnswer = { verdict: 'verified', deviceId: 'a1b2c3d4e5f60718', detail: 'ok' };
   account = { email: 'u@example.com', emailVerified: true, phone: '+919876543210', providers: ['google.com', 'github.com'] };
+  accountsByUid = {};
   process.env.REFERRAL_REWARDS = 'on';
 });
 afterEach(() => { process.env = { ...ENV }; vi.resetModules(); });
@@ -426,5 +457,98 @@ describe('the whole journey, end to end', () => {
   it('an ORGANIC user with no code gets ₹300 — three steps, no code step', async () => {
     for (const s of ['email', 'github', 'mobile']) await claim('B', s);
     expect(tokensOf('B')).toBe(30_000);
+  });
+});
+
+describe('the Earning list — who used my code, and how far each has got', () => {
+  it('OFF is today’s behaviour: an empty, honest list', async () => {
+    delete process.env.REFERRAL_REWARDS;
+    const r = await referred('A');
+    expect(r.enabled).toBe(false);
+    expect(r.friends).toEqual([]);
+  });
+
+  it('a referrer with nobody yet sees an empty list, not an error', async () => {
+    await status('A');
+    const r = await referred('A');
+    expect(r.ok).toBe(true);
+    expect(r.count).toBe(0);
+    expect(r.friends).toEqual([]);
+  });
+
+  it('lists a friend who only redeemed the code, at 0 of 3', async () => {
+    const code = (await status('A')).code;
+    await redeem('B', code, 'bbbbbbbbbbbbbbbb');
+    const r = await referred('A');
+    expect(r.count).toBe(1);
+    expect(r.friends[0]).toMatchObject({
+      emailVerified: false, phoneVerified: false, githubLinked: false, completedCount: 0,
+    });
+  });
+
+  it('reports each friend’s EMAIL and exactly how many of the three steps are done', async () => {
+    const code = (await status('A')).code;
+    accountsByUid['B'] = { email: 'friend.b@example.com', emailVerified: true, phone: '+911111111111', providers: ['google.com'] };
+    await redeem('B', code, 'bbbbbbbbbbbbbbbb');
+    await claim('B', 'email', 'bbbbbbbbbbbbbbbb');
+    await claim('B', 'mobile', 'bbbbbbbbbbbbbbbb'); // github not done
+
+    const r = await referred('A');
+    expect(r.count).toBe(1);
+    expect(r.friends[0]).toMatchObject({
+      email: 'friend.b@example.com',
+      emailVerified: true, phoneVerified: true, githubLinked: false, completedCount: 2,
+    });
+  });
+
+  it('never lists somebody else’s friends — the query is scoped to MY code alone', async () => {
+    const codeA = (await status('A')).code;
+    const codeX = (await status('X')).code;
+    await redeem('B', codeA, 'bbbbbbbbbbbbbbbb');
+    await redeem('C', codeX, 'cccccccccccccccc');
+
+    const a = await referred('A');
+    expect(a.count).toBe(1);
+
+    const x = await referred('X');
+    expect(x.count).toBe(1);
+  });
+
+  it('lists MULTIPLE friends, each with their own email and their own progress', async () => {
+    const code = (await status('A')).code;
+    accountsByUid['B'] = { email: 'b@example.com', emailVerified: true, phone: '', providers: [] };
+    accountsByUid['C'] = { email: 'c@example.com', emailVerified: true, phone: '+912222222222', providers: ['github.com'] };
+    await redeem('B', code, 'bbbbbbbbbbbbbbbb');
+    await redeem('C', code, 'cccccccccccccccc');
+    await claim('B', 'email', 'bbbbbbbbbbbbbbbb');
+    await claim('C', 'email', 'cccccccccccccccc');
+    await claim('C', 'mobile', 'cccccccccccccccc');
+    await claim('C', 'github', 'cccccccccccccccc');
+
+    const r = await referred('A');
+    expect(r.count).toBe(2);
+    const byEmail = Object.fromEntries(r.friends.map((f: any) => [f.email, f]));
+    expect(byEmail['b@example.com'].completedCount).toBe(1);
+    expect(byEmail['c@example.com'].completedCount).toBe(3);
+  });
+
+  it('agrees exactly with the money — completedCount never disagrees with what the referrer was paid', async () => {
+    const code = (await status('A')).code;
+    await redeem('B', code, 'bbbbbbbbbbbbbbbb');
+    await completeAllSteps('B', 'bbbbbbbbbbbbbbbb'); // referral-code + email + github + mobile
+
+    const r = await referred('A');
+    // referral-code does not count toward the 3 that pay the referrer.
+    expect(r.friends[0].completedCount).toBe(3);
+    expect(tokensOf('A')).toBe(7_500); // ₹75 — exactly 3 × ₹25, matching the list
+  });
+
+  it('is READ-ONLY — calling it moves no money and needs no device proof', async () => {
+    const code = (await status('A')).code;
+    await redeem('B', code, 'bbbbbbbbbbbbbbbb');
+    deviceAnswer = { verdict: 'not-verified', deviceId: null, detail: 'emulator' };
+    const r = await referred('A');
+    expect(r.ok).toBe(true);
+    expect(tokensOf('A')).toBe(0);
   });
 });

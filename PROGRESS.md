@@ -57779,6 +57779,63 @@ Proposed as the next system-level build, not attempted inline in this autopsy gi
 - The 3 fake/incomplete-code READINESS_BLOCKER items that made this specific build RED were never
   fixed — that is the individual app's outstanding work, correctly left for the user's own "fix it"
   follow-up per the build's own honest verdict, not a platform defect.
+**No failed build report has been read for this complaint.** Every number in the fix — the 60 s idle
+bound, the 300 s cap — is sized from the engine's own budgets, not from the traffic that is actually
+timing out. A report ID is what turns the tuning from reasoning into measurement.
+
+---
+
+## 2026-09-16 — Referral code + "Earning" list on My Profile
+
+Admin: *"user ka refral code (jisse user ko 25+25+25 =75 ₹ milenge) user ki profile me clear show
+hona chahiye. sath me button- 'earning'. is earning button par click karne se — yeh user ka refral
+code kis kis user ne use kiya hai, uski email id aur us user ne 3 me se kitne step complete kar liye
+woh list bhi show ho!"*
+
+### What shipped
+
+- **`friendVerificationStatus(paidSteps)`** (`referralRewards.ts`, pure) — how far one referred
+  friend has got on the three steps that pay their referrer (mobile / email / github), read straight
+  from the friend's own `paidSteps`. Deliberately the SAME signal `decideReferrerReward` already pays
+  from, so "2 of 3" on the new screen can never disagree with the ₹ the referrer actually received.
+- **`GET /api/referral/:userId/referred`** — the Earning list itself. Read-only and money-free (no
+  wallet write, no device proof needed — it only answers a question the referrer is allowed to ask
+  about their own code): queries `user_referrals` where `referrerUserId == me`, and for each friend
+  returns their email (`resolveAccountContact`, the same server-privileged lookup the claim route
+  already uses) plus `emailVerified` / `phoneVerified` / `githubLinked` / `completedCount`. Bounded at
+  500 rows the same way `referralAdminSummary.ts`'s admin scan is bounded — the ₹1,500 lifetime cap
+  already keeps a real referrer to roughly twenty friends, so the limit only guards a runaway query.
+- **`ReferralEarningsSheet.tsx`** — the "Earning" button's modal. Lists every friend with their email
+  and a Mobile/Email/GitHub badge row, or an honest empty/disabled state. Uses the vendored
+  `Github` icon (`ui/BrandIcons.tsx`), never `lucide-react`'s (removed upstream in 1.x — see that
+  file's own header). Sheet geometry uses `nb-sheet-overlay` + `nb-sheet` + `nb-sheet-over-nav`
+  (z-[400], above the tab bar) rather than a bare `vh` cap — the mobile-scroll and tab-bar-overlap
+  classes both caught a first draft that got this wrong before it ever reached CI.
+- **`ProfilePage.tsx`** — a new "Your Referral Code" card (code + Copy + the **Earning** button),
+  fed by the SAME `useReferralProgress` hook `ReferralPanel` (Billing → Refer a Friend) already uses
+  — Android-only by construction, so this card is silent on the website exactly like the rest of the
+  referral surface already is. No new platform gate invented.
+- `AppKnowledgeBase.ts`'s `referral` entry updated (path, description, howToUse, keywords) per the
+  mandatory sync rule — the code now has TWO places (Billing → Promo, and My Profile), and the
+  Earning list is documented so every AI in the app can answer "who used my code" correctly.
+
+### Working alongside PR #2971
+
+`claude/profile-verification-buttons` (open at the time this shipped) also touches `ProfilePage.tsx`
+and `ReferralPanel.tsx`, adding real email/phone/GitHub verify buttons — a different feature in an
+overlapping file. Built independently on `main`, not on that branch; a merge conflict at whichever
+merges second is expected (CLAUDE.md, "Working alongside other live sessions") and not a mistake.
+
+### Verification gate — run last, on the final state
+
+`npm run typecheck` / `typecheck:server` / `noUnusedImports.mjs` / `build` / `test:bundle` /
+`boot:check` all clean. `npx vitest run` — **1694 files, 23772 passed, 1 skipped, 0 FAIL** (the run
+that caught the two geometry mistakes above and confirmed their fixes).
+
+### Still open
+
+No admin decision was needed here — the feature reuses existing infrastructure (the hook, the
+step-proof signal, the shared sheet CSS) rather than inventing anything new.
 
 ---
 

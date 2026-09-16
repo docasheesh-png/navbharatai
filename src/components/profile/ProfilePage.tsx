@@ -11,7 +11,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
-import { User, Wallet, Clock, CheckCircle2, Circle, AlertCircle, ChevronRight, Edit3, Save, X, CalendarDays, Zap, Activity, LogOut, AlertTriangle, Smartphone, ShieldCheck, Mail, Loader2 } from 'lucide-react';
+import { User, Wallet, Clock, CheckCircle2, Circle, AlertCircle, ChevronRight, Edit3, Save, X, CalendarDays, Zap, Activity, LogOut, AlertTriangle, Smartphone, ShieldCheck, Mail, Loader2, Gift, Copy } from 'lucide-react';
 import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import type { User as FirebaseUser } from 'firebase/auth';
@@ -19,6 +19,8 @@ import { ApiKeysCard } from './ApiKeysCard';
 import { panelWidth, panelColumns, type DeviceMode } from '../../lib/panelWidth';
 import { maskPhone } from '../../lib/phoneNumber';
 import { VerifyPhoneSheet } from '../VerifyPhoneSheet';
+import { ReferralEarningsSheet } from '../ReferralEarningsSheet';
+import { useReferralProgress } from '../../hooks/useReferralProgress';
 import { auth as firebaseAuth } from '../../lib/firebase';
 import { sendVerificationEmail, linkGithubAccount, isGithubLinked, describeLinkGithubError } from '../../lib/accountVerificationActions';
 
@@ -144,6 +146,12 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
   // re-reads the auth record rather than showing a state this component invented.
   const [verifyOpen, setVerifyOpen] = useState(false);
 
+  // Referral code + the "Earning" list of who has used it. `useReferralProgress` is the SAME source
+  // ReferralPanel already reads (Billing → Refer a Friend) — Android-only by construction, so this
+  // card is silent on the website exactly as the rest of the referral surface already is.
+  const referral = useReferralProgress(user?.uid);
+  const [earningsOpen, setEarningsOpen] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
   // ── Verifications card (admin 2026-09-16: "3 verification button add karo — email, phone, github,
   // jo referral system me use ho") ─────────────────────────────────────────────────────────────────
   // `emailVerified` / `providerData` live ON the Firebase `user` object; these two mirror them into
@@ -476,6 +484,44 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
           </div>
         </div>
 
+        {/* ── Referral Code ────────────────────────────────────────────────── */}
+        {referral.enabled && (
+          <div className="bg-[#161b22] border border-amber-500/20 rounded-3xl p-6 space-y-3.5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Gift className="w-4 h-4 text-amber-400" />
+                <h2 className="text-xs font-black text-white uppercase tracking-widest">Your Referral Code</h2>
+              </div>
+              <button
+                onClick={() => setEarningsOpen(true)}
+                className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3.5 py-1.5 text-[10px] font-black uppercase tracking-widest text-black transition-all hover:bg-amber-600"
+              >
+                Earning
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between gap-4 rounded-xl border border-white/10 bg-[#0d1117] px-5 py-3.5">
+              <span className="font-mono text-base font-black tracking-widest text-amber-400">{referral.code ?? '—'}</span>
+              <button
+                disabled={!referral.code}
+                onClick={() => {
+                  navigator.clipboard?.writeText(referral.shareMessage || referral.code || '');
+                  setCodeCopied(true);
+                  setTimeout(() => setCodeCopied(false), 2000);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-white/5 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white transition-all hover:bg-white/10 disabled:opacity-40"
+              >
+                <Copy className="h-3 w-3" /> {codeCopied ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+
+            <p className="text-[11px] font-bold text-[#8b949e]">
+              Earned so far: <span className="text-emerald-400">₹{referral.earnedRupees}</span> of ₹{referral.capRupees}
+              {referral.capReached && <span className="ml-1 text-amber-400">— you have reached the maximum.</span>}
+            </p>
+          </div>
+        )}
+        <ReferralEarningsSheet userId={user.uid} open={earningsOpen} onClose={() => setEarningsOpen(false)} />
         {/* ── Verifications (admin 2026-09-16) ────────────────────────────────
             One real button per step — click it, the verification actually starts, and a step already
             done shows as done. Verifying all three (plus applying a friend's referral code, in the

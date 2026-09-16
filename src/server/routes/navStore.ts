@@ -39,9 +39,10 @@ import { scanFile, isScanningConfigured, MAX_SCANNABLE_BYTES} from '../lib/malwa
 import { githubTokenFromRequest } from '../lib/mobileShipAuth';
 import {
   isStorageConfigured, putApk, getApk, getApkStream, deleteApk, saveApp, getApp, updateApp,
-  listApps, listAppsByUid, toPublic,
+  listApps, listAppsByUid, toPublic, findRepublishTarget,
   type StoreApp, type SubmissionStatus,
 } from '../lib/navStoreStore';
+import { notifyStoreApproval } from '../lib/storeApprovalNotify';
 import {
   evaluateWebPublish, hashAppPassword, verifyAppPassword, toPublicWebApp, newWebAppId,
   saveWebApp, getWebApp, getWebAppFiles, listListedWebApps, listMyWebApps, listUnlistedWebApps,
@@ -217,8 +218,24 @@ async function ingestApkSubmission(
       return { httpStatus: 503, body: { error: `Your app could not be scanned, so it was not uploaded. ${scan.reason || ''}`.trim() } };
     }
 
-    // 3) Store the bytes and the record. PENDING — an admin decides from here.
-    const id = `${facts.sha256.slice(0, 16)}_${Date.now().toString(36)}`;
+    // RE-PUBLISH = SAME LISTING, A NEW REVIEW (2026-09-16, mirrors saveWebApp's "one app id per
+    // (owner, workspace)" rule in navStoreWeb.ts, applied to the APK store's own identity). Without
+    // this, editing an app in its own repo and sending it for review again created a SECOND,
+    // unrelated store record: an already-approved app kept its old listing live while a brand-new
+    // 'pending' one queued up beside it, and an admin working the queue had no way to know the two
+    // were the same app. See findRepublishTarget for the matching rule (uid + provenance.repo,
+    // excluding a real takedown).
+    //
+    // Status ALWAYS resets to 'pending' here, even replacing an 'approved' submission — a NEW BINARY
+    // needs its OWN scan and its OWN human look; silently carrying an old approval forward onto
+    // different bytes is exactly the shortcut this store's safety model (rule 3, top of this file)
+    // exists to refuse. The previously-live app is therefore off the public store the instant an
+    // update is sent for review, until an admin looks again — the honest reading of "the old app is
+    // replaced", not "two versions run at once under one listing".
+    const priorSubmissions = await listAppsByUid(uid);
+    const existing = findRepublishTarget(priorSubmissions, provenance.repo);
+    const id = existing?.id ?? `${facts.sha256.slice(0, 16)}_${Date.now().toString(36)}`;
+
     try {
       const storagePath = await putApk(facts.sha256, bytes);
       const record: StoreApp = {
@@ -250,11 +267,19 @@ async function ingestApkSubmission(
         scanReportUrl: scan.reportUrl,
         scanReason: scan.reason,
         storagePath,
-        downloads: 0,
+        // A re-publish carries the app's lifetime download count forward — the same continuity rule
+        // saveWebApp already applies to `runs`/`remixes`. A brand-new submission starts at zero.
+        downloads: existing?.downloads ?? 0,
         submittedAt: Date.now(),
         ...(provenance ? { provenance } : {}),
       };
       await saveApp(record);
+      // The PREVIOUS version's bytes are no longer referenced by any record once this save lands —
+      // clean them up. Best-effort: a failed delete leaves an orphaned blob, never a broken submission.
+      if (existing?.storagePath && existing.storagePath !== storagePath) {
+        await deleteApk(existing.storagePath).catch(() => {});
+      }
+      const suspicious = scan.verdict === 'suspicious';
       return { httpStatus: 200, body: {
         ok: true,
         id,
@@ -262,9 +287,13 @@ async function ingestApkSubmission(
         scanVerdict: scan.verdict,
         enginesChecked: scan.enginesTotal,
         highRisk: facts.highRisk,
-        message: scan.verdict === 'suspicious'
-          ? 'Your app was uploaded, but one security engine flagged it — a reviewer will look closely before it goes live.'
-          : 'Your app was uploaded and passed the malware scan. A reviewer will check it before it appears in the store.',
+        message: existing
+          ? (suspicious
+            ? 'Your updated app was uploaded, but one security engine flagged it — a reviewer will look closely before it replaces the version on the store.'
+            : 'Your updated app was uploaded and passed the malware scan. A reviewer will check it before it replaces the version already on the store.')
+          : (suspicious
+            ? 'Your app was uploaded, but one security engine flagged it — a reviewer will look closely before it goes live.'
+            : 'Your app was uploaded and passed the malware scan. A reviewer will check it before it appears in the store.'),
       } };
     } catch {
       return { httpStatus: 502, body: { error: 'Your app could not be saved. Nothing was published — please try again.' } };
@@ -557,6 +586,9 @@ export function registerNavStoreRoutes(app: Express): void {
       if (!found) return res.status(404).json({ error: 'No such app.' });
 
       const status = String(decision) as SubmissionStatus;
+      // Fires only on the TRANSITION into 'approved' — re-clicking an already-approved app (or a
+      // decision that was not 'approved' at all) must never re-congratulate the creator.
+      const enteringApproved = status === 'approved' && found.status !== 'approved';
       await updateApp(appId, {
         status,
         reviewedAt: Date.now(),
@@ -584,6 +616,10 @@ export function registerNavStoreRoutes(app: Express): void {
       }
 
       res.json({ ok: true, id: appId, status });
+      // Congratulate the creator AFTER the response — the same "side effects after the response"
+      // discipline web/publish's bake already uses below, so a slow/unconfigured email provider can
+      // never hold up the admin's review screen.
+      if (enteringApproved) void notifyStoreApproval(found.uid, found.appName, 'apk');
     } catch {
       res.status(502).json({ error: 'Could not save that decision.' });
     }
@@ -1346,6 +1382,9 @@ export function registerNavStoreRoutes(app: Express): void {
     try {
       const found = await getWebApp(id);
       if (!found) return res.status(404).json({ error: 'No such app.' });
+      // Fires only on the TRANSITION into 'listed' — a re-publish that was already listed and stays
+      // listed (see navStoreWeb.ts's saveWebApp) must never re-congratulate the creator.
+      const enteringListed = decision === 'listed' && found.status !== 'listed';
       if (decision === 'removed') {
         // Before the snapshot is deleted, while the files can still be hashed.
         await recordTakedown({
@@ -1365,6 +1404,9 @@ export function registerNavStoreRoutes(app: Express): void {
         await updateWebApp(id, { status: 'listed', reviewedAt: Date.now(), reviewedBy: me?.email || 'admin' });
       }
       res.json({ ok: true, id, status: decision });
+      // Congratulate the creator AFTER the response — same discipline as web/publish's bake above,
+      // so a slow/unconfigured email provider can never hold up the admin's review screen.
+      if (enteringListed) void notifyStoreApproval(found.uid, found.name, 'web');
     } catch (e) {
       logStoreError('web/admin review', e);
       res.status(502).json({ error: 'Could not save that decision.' });

@@ -22,6 +22,7 @@ import { isModelUnavailableError } from './providerErrorClass';
 import { isStarvedBudgetError } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
 import { isBudgetEndedError } from './turnDeadline';
+import { typecheckEvidenceFromCommands } from './TscGate';
 
 export type IssuePhase =
   | 'sandbox' | 'provider' | 'plan' | 'tool' | 'build' | 'readiness' | 'preview' | 'autofix' | 'deploy';
@@ -752,6 +753,17 @@ export class BuildDiagnostics {
       autoResolved: !failed,
       detail: failed ? capTail(rec.stderr || rec.stdout, 400) : undefined,
     });
+  }
+
+  /**
+   * Release-gate fallback evidence (2026-09-16): did a real typecheck already run somewhere in this
+   * build's OWN command history, even though the deterministic post-build gate never ran one? See
+   * `typecheckEvidenceFromCommands` in `./TscGate` for the full reasoning and the exact report that
+   * surfaced the gap. `undefined` means "found nothing to go on" — callers should leave their own
+   * evidence at whatever default they already had, never invent a pass.
+   */
+  typecheckEvidenceFromAgentCommands(): 'passed' | 'failed' | undefined {
+    return typecheckEvidenceFromCommands(this.commands);
   }
 
   /**

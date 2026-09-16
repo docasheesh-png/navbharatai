@@ -15149,6 +15149,16 @@ async function noteBuildOutcome(
         }
         if (check.verified) gateEvidence.typecheck = check.ok ? 'passed' : 'failed';
       }
+      // Fallback (production build report, 2026-09-16): the deterministic gate above only runs when
+      // the build is already marked `ok` at this point, so a build not yet called successful never
+      // even attempts it and this evidence stays 'not-run' — even when the AGENT ITSELF already ran a
+      // real `tsc --noEmit` earlier in its own turn. That build's report showed exactly this: two clean
+      // agent-run typechecks sitting in its own `commands` log, and the release gate still telling the
+      // user "the typecheck did not run". Only fills a gap; never overrides real G3 evidence above.
+      if (gateEvidence.typecheck === 'not-run') {
+        const fromAgent = buildDiag.typecheckEvidenceFromAgentCommands();
+        if (fromAgent) gateEvidence.typecheck = fromAgent;
+      }
 
       // MISSING-FILES GATE for the AGENTIC path (deep-test App #4 — Instagram, 2026-07-13). The fast
       // lane already runs findUnresolvedLocalImports before verify (Fix 38c), but the AGENTIC build (the

@@ -4,6 +4,7 @@ import {
   canAddAccount, addAccountLabel, accountLabel, accountInitial, MAX_ACCOUNTS,
   type RosterAccount, type RosterStore,
   switchRequiresSignOutFirst, SIGN_IN_HINT_KEY, SWITCH_ACCOUNT_LABEL, accountRows,
+  googleNativeCustomParameters,
 } from './accountRoster';
 
 /**
@@ -217,5 +218,32 @@ describe('the menu says what it is', () => {
   it('at the cap it still explains the limit rather than going silently dead', () => {
     const full = Array.from({ length: 5 }, (_, i) => ({ uid: `u${i}`, email: '', name: '', photo: '', provider: '', lastUsed: 0 }));
     expect(addAccountLabel(full)).toMatch(/remove one/i);
+  });
+});
+
+// 🔴 ROOT CAUSE (admin 2026-09-16, "easy one tap swich nahi ho raha"): the web sign-in path has
+// carried a switch-to `login_hint` since 2026-08-22 (`GoogleAuthProvider.setCustomParameters`), but
+// AuthComponent's NATIVE branch calls the Capacitor plugin's own `signInWithGoogle()` and never read
+// that provider object at all — so on a real phone, every switch showed Google's generic account
+// list (or, for an account never cached natively, a full fresh login) instead of landing on the
+// account that was tapped. This is the one piece that makes a switch feel like the promised "one tap
+// with Google", so it is pinned here rather than left to be re-broken by a refactor that touches only
+// the web path.
+describe('googleNativeCustomParameters — the fix that makes a native switch actually land on one tap', () => {
+  it('asks Google for exactly the account that was tapped', () => {
+    expect(googleNativeCustomParameters('priyanka@gmail.com')).toEqual([{ key: 'login_hint', value: 'priyanka@gmail.com' }]);
+  });
+
+  it('trims stray whitespace rather than sending a hint Google would reject', () => {
+    expect(googleNativeCustomParameters('  priyanka@gmail.com  ')).toEqual([{ key: 'login_hint', value: 'priyanka@gmail.com' }]);
+  });
+
+  it('adds nothing for an ordinary sign-in (no switch in progress) — undefined, not an empty array', () => {
+    // A caller spreads this into an options object; `undefined` means "nothing to add" the same way
+    // switchBannerText returns '' for "nothing to show" — an empty array would still shadow the
+    // plugin's own default customParameters if one were ever added upstream.
+    for (const v of [undefined, null, '', '   ']) {
+      expect(googleNativeCustomParameters(v)).toBeUndefined();
+    }
   });
 });

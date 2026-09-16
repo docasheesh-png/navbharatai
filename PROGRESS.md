@@ -58158,3 +58158,91 @@ test:bundle · boot:check · `vitest run` → **1699 files, 23,850 passed, 1 ski
 - **The underlying starvation is untouched.** `glm-5.3-flash` still burns its ceiling on reasoning for
   complex files. This change stops us paying for that discovery repeatedly; it does not stop the first
   occurrence. That remains open.
+
+## 2026-09-16 — The acceptance gate's UNKNOWN state had no teeth: a build nobody proved shipped as a success
+
+**Admin changed the optimization objective**: first-pass correctness over latency, explicitly accepting
+extra seconds/minutes. Asked for a full audit of the build → verify → repair → accept pipeline before any
+change. This entry is the audit's one implemented finding; the rest is recorded as P1/P2, not built.
+
+### What the audit found (verified in code, not intent)
+
+The verification machinery is far more complete than the symptom suggests: the fast lane runs an
+unresolved-local-import gate, a deterministic mispath auto-fix, an in-process esbuild parse gate and
+`tsc`, then up to **3 repair rounds** (`SimpleBuilder` verify → repair → re-verify). Post-build there is
+platform-published preview proof (`deliveryProof.ts`), page-render checks, a real-browser user journey
+(fill → submit → **reload** → confirm persisted), console/runtime error capture with a bounded repair
+(`AGENTV3_AUTOFIX`), the app's own test suite (`AGENTV3_VACCINE`), adversarial input fuzzing
+(`AGENTV3_REDTEAM`), and a four-state release gate. `ADVISORY_CAP_MS` (120 s) was checked and does **not**
+bound any of this — it is armed at line ~17808, *after* the gate, and covers only genuinely advisory
+post-work (reviewer, reflection, GitHub push).
+
+🔴 **The gap is the acceptance gate's enforcement, and it is structural.** `releaseGate.ts` computes four
+states and its own header calls UNKNOWN — *"nothing failed and nothing was PROVEN — we cannot tell you
+this works"* — "the most important state in this file". But `gate.state` was consumed in exactly **three**
+places in the entire server, all in one block of `routes/agentv3.ts`:
+
+1. the severity of the admin diagnostic (17503)
+2. its `autoResolved` flag (17506)
+3. the `red && gateBlockers > 0` verdict flip (17535)
+
+**UNKNOWN had no consequence anywhere** — not on `ok`, not on the user's summary, not on what got
+re-checked. And because every runtime proof is gated on a preview URL, those checks skip *together*,
+precisely when an app is most broken. So the exact case the admin described — "appears built while still
+having functional/runtime problems" — ended with an ordinary success message. This is the 2026-08-12
+dukaan lie in its other costume: fixed for RED, never extended to the state meaning "we did not look".
+
+### The P0 shipped
+
+When the gate lands UNKNOWN on an otherwise-successful build: record a first-class
+**`RELEASE_GATE_UNPROVEN`** finding (severity warning, **not** auto-resolved), and append an honest line
+to the **user's own summary** — they are the one about to open the app, and the diagnostics report is
+admin-gated (Fix 68).
+
+🔒 **It deliberately does NOT touch `ok`, and that restraint is the point.** Flipping an unproven build to
+failed would make it FREE (the "working app or free" guard keys on `!result.ok`), which autopsy
+`4efab9d7` is the admin's standing ruling against: *"app bani = preview chala… to aise to mai barbad ho
+jaunga."* **Not proven ≠ proven broken.** Nothing about the verdict, the bill, timeouts, streaming,
+routing or hedging changes.
+
+🔎 **It is also the measurement that must come first.** Nobody can say today how often a build ships
+unproven, because nothing counted it. As a first-class finding it is now countable by the Failure Category
+panel (#2973) — and only that number can justify a stronger rule.
+
+**Tests:** `tests/releaseGateUnproven.test.ts` (11) — gate semantics (nothing-proven ⇒ UNKNOWN; static
+cleanliness can never earn a pass; one real proof leaves UNKNOWN; a genuine failure stays RED) plus wiring
+(finding recorded, not auto-resolved, reaches the user's summary, **never** sets `ok: false`, names no
+provider). **Proven by reversion: removing the branch fails 3.**
+
+⚠️ **One existing test had to be repaired, and the reason is worth recording.**
+`releaseGateVerdict.test.ts`'s "the correction itself can never break a build" sliced `at + 700` chars to
+find the enclosing `catch` — asserting a *distance*, not a relationship. Adding a sibling branch pushed
+the catch past 700 and failed a test that should not have cared. That is precisely the trap
+`buildCostCeiling.test.ts` already documents (*"an anchor cannot drift with the length of what sits
+between"*). Re-anchored on the next statement; **what it protects is unchanged** — the correction is still
+proven to sit inside the gate's try/catch, and it now additionally proves no `try {` re-opens in between.
+
+**Gate, run last on the final state:** typecheck · typecheck:server · noUnusedImports · build ·
+test:bundle · boot:check · `vitest run` → **1700 files, 23,861 passed, 1 skipped, 0 FAIL.**
+
+### Proposed next, NOT built (evidence-ranked)
+
+- **P1 — give UNKNOWN a retry, not just a label.** When the gate would land UNKNOWN and build budget
+  remains, spend it attempting the proof that was skipped rather than ending. The machinery exists
+  (`deliveryProof` already starts the dev server when the agent published no preview); what is missing is
+  a second attempt when the first yielded nothing. This is where the admin's "accept more latency" trade
+  actually converts into correctness.
+- **P2 — patch-based editing for EDIT builds.** The fast lane is 100% whole-file (`<<<FILE …>>>`, *"Write
+  the COMPLETE, real file"*); zero `edit_file`/`replace_symbol` calls appeared in either sampled report.
+  For fresh builds this is correct and carries no stale-file risk. For edits it risks silent loss of
+  unrelated existing code and is also the dominant output-token cost. Needs an EDIT-build report to
+  justify — both samples were fresh builds, so the evidence for this is not yet in hand.
+
+### Still open (rule 6)
+
+- **How often UNKNOWN actually ships is unmeasured** — that is what this change begins counting. No claim
+  about the rate is made here.
+- **The gate cannot prove integrations** (auth, real database writes against a user-owned Supabase). The
+  journey check deliberately downgrades to a non-writing submit against a user's real database, so
+  "integration correctness" remains structurally unprovable by the platform.
+- **UNKNOWN still ships.** This change makes it honest and countable; it does not stop it.

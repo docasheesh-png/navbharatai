@@ -59,6 +59,7 @@ import { capSessionReports } from '../AgentV3/BuildDiagnostics';
 import { firstPassStatsFromMeta, firstPassHeadline, FIRST_PASS_TARGET } from '../../lib/firstPassQuality';
 import { licenceExposures, licenceExposureHeadline, activeExposureCount } from '../../lib/licenceExposure';
 import { builderScorecard, scorecardHeadline } from '../../lib/builderMetrics';
+import { categorizeBuildFailures } from '../lib/buildFailureCategory';
 import { selectStaleDevices, canBroadcast, cohortSummary, updateBroadcastPayload } from '../lib/updateBroadcast';
 import { deviceTokenStore } from '../lib/DeviceTokenStore';
 import { sendPushToUser } from '../lib/PushNotificationService';
@@ -1053,6 +1054,37 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       res.json({ ...card, headline: scorecardHeadline(card), window: limit, reportsRead: reports.length });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to compute the builder scorecard.' });
+    }
+  });
+
+  /**
+   * FAILURE CATEGORY (admin 2026-09-16, verbatim: "jitne bhi build reports admin penal me hai, wah ek
+   * alag analysis laga do. jisme sabhi failed build ko catagorise kiya jaye. kis type ki apps nahi ban
+   * pa rahi hai. kya koi specific prkar hai, ya rendom.").
+   *
+   * Reads the SAME durable, comprehensive source the All-Builds browser reads — `listAllDiagnostics`,
+   * every workspace's LATEST build report, across every user — rather than the user-submitted inbox
+   * (`listAdminBuildReports`), which is only the builds someone bothered to click Report on and would
+   * answer a different, biased question. `categorizeBuildFailures` (buildFailureCategory.ts) does the
+   * actual grouping: by APP TYPE (the same domain classifier a build prompt is already analysed with)
+   * and by FAILURE REASON (keyword-matched against the engine's own real message text). Both tables
+   * carry their real sample size and cap, never a rate presented as if it covered everything.
+   */
+  app.get('/api/admin/failure-categories', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '500'), 10) || 500, 1), 500);
+      const dateFilter = parseDateFilter(req.query.date);
+      const all = await listAllDiagnostics(limit, sinceMsFor(dateFilter));
+      const report = categorizeBuildFailures(all.map((b) => ({ workspaceId: b.workspaceId, ok: b.ok ?? null, prompt: b.prompt, rootCause: b.rootCause })));
+      res.json({
+        ...report,
+        window: limit,
+        reportsRead: all.length,
+        capped: all.length >= limit,
+        sampleNote: 'Each row is the LATEST build of one project (workspace), not every build ever run — the current state of everything on the platform, not a full history. A count at the fetch limit is a lower bound: narrow the date range to look further back.',
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to categorise build failures.' });
     }
   });
 

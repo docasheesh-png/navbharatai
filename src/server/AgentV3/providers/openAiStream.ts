@@ -221,10 +221,14 @@ export function streamHardCapMs(env: NodeJS.ProcessEnv = process.env): number {
 /**
  * Is streamed reading on?
  *
- * ⚠️ DEFAULT OFF, and that is not timidity — this is the code path that carries every build on the
- * cheap floor, and it has never run against a live provider. Unset means today's behaviour to the
- * byte: one non-streaming call, the total clock, the existing ceiling. An env var is the switch
- * precisely so it reverts with no deploy (the same reasoning `AGENTV3_STREAMING_PREVIEW` shipped on).
+ * ⚠️ THE CODE DEFAULT IS OFF, and that is not timidity — this is the path that carries every build on
+ * the cheap floor. Unset means the pre-change behaviour to the byte: one non-streaming call, the total
+ * clock, the existing ceiling. An env var is the switch precisely so it reverts with no deploy (the
+ * same reasoning `AGENTV3_STREAMING_PREVIEW` shipped on).
+ *
+ * ⚠️ WHETHER IT IS ON IN PRODUCTION IS NOT A FACT THIS COMMENT MAY STATE — a deployment claim in a
+ * source comment is unverifiable here and goes stale silently (`tsc` and `vitest` cannot read a
+ * comment). The CLAUDE.md env registry is the one place that records it.
  */
 export function buildStreamingEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return String(env.AGENTV3_STREAM_BUILD_CALLS ?? '').trim().toLowerCase() === 'on';

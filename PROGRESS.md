@@ -57578,3 +57578,36 @@ The env values themselves (idle/cap tuning against a REAL slow build's measured 
 ladder reorder, and whether a faster vendor plan is worth buying. And the root question the code cannot
 answer: no failed build report has been read yet for this complaint — these numbers are sized from the
 engine's own budgets, not from the traffic that is actually timing out.
+
+---
+
+## 2026-09-16 — `AGENTV3_STREAM_BUILD_CALLS` is LIVE (admin set it `on` in Cloud Run)
+
+The admin set the master switch the same day the change merged (#2966, `9e9aa9bb`), and left both
+tunables UNSET so the code defaults govern (idle 60 s, hard cap 300 s). Recorded here and in the
+CLAUDE.md env registry in the same session, hand-to-hand, per that registry's own rule — the entry
+had said "NOT live yet / UNSET", which is exactly the doc-vs-reality drift this repo has already paid
+for twice (the idle-minutes default, the E2B rate).
+
+**So every GLM/Kimi build call is now bounded by SILENCE rather than duration**, and a stall keeps
+what already arrived instead of destroying the call. This is the first time that path has ever run
+against a live provider; the flag exists so it reverts with no deploy.
+
+### 🔴 What must be read off the first real builds — and it is not "did it get faster"
+
+1. **Streamed turns reporting 0 input / 0 output tokens.** A stream carries no usage unless Z.ai and
+   Moonshot honour `stream_options.include_usage`. We ask; only a real call settles it. Zero is the
+   HONEST outcome (never an invented number — THE ONE-WALLET LAW), so no user is over-billed, but our
+   own cost report would under-state itself, and the mid-build cost ceiling reads that same ledger.
+   **If the zeros appear, the flag comes back off** and the honest-but-unmeasured path goes with it.
+2. **A `length` / truncated turn that was previously a dead timeout.** That is the fix working, not a
+   regression — the truncation guard names the cut-off file and the next turn rewrites it. "One file
+   short" is the intended better half of the trade.
+3. **Any rung benched for OUR budget ending.** `turnDeadline`'s wording exists to prevent exactly that;
+   a healthy provider benched because the lane ran out would be the change's own failure mode.
+
+### Still open, unchanged by the flag going on
+
+**No failed build report has been read for this complaint.** Every number in the fix — the 60 s idle
+bound, the 300 s cap — is sized from the engine's own budgets, not from the traffic that is actually
+timing out. A report ID is what turns the tuning from reasoning into measurement.

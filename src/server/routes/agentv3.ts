@@ -30,7 +30,8 @@ import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary }
 import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
 import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote } from '../AgentV3/etaEvidence';
-import { tierLadder, healLadder, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
+import { decideComplexity } from '../AgentV3/complexityRouting';
+import { tierLadder, healLadder, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
 import { describeRunnerChain, chainProviders, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction } from '../AgentV3/AuthenticityAnalysis';
@@ -3011,6 +3012,12 @@ function unavailableTierRunner(level: PowerLevel, ladderText: string, missingKey
  *
  * `tier`         the resolved power level (through clampPowerForUser → toPowerLevel).
  * `heal`         a repair pass: the ladder minus its leading flash rung (admin 2026-08-13).
+ * `complex`      a BIG app: the same ladder minus the same cheap opener, so KIMI writes the first file
+ *                (admin 2026-09-17: "kimi ko bade aur complex task dedo… starting me bhi"). It shares
+ *                `withoutCheapFlashLead` with `heal` on purpose — same rung, same rule, one function —
+ *                while staying a separate FLAG, because "this is a repair" and "this is a big app" are
+ *                different questions that happen to have the same answer today. See complexityRouting.ts
+ *                for how the verdict is reached, and why a model is asked only on a borderline score.
  * `fromProvider` ESCALATION: start the SAME ladder at this rung ("bring in a stronger engine" means
  *                higher up this tier's own ladder, never another tier's model).
  * `noClaude`     the weak-module guard — enforceNoClaude strips every Sonnet/Opus rung from the FINAL
@@ -3022,7 +3029,7 @@ function unavailableTierRunner(level: PowerLevel, ladderText: string, missingKey
  * build when the floor was off, which is exactly what the rule forbids. A 429-storm on rung 1 now costs
  * one failed call per cooldown window (the shared bench still sidelines the rung), not a reorder.
  */
-export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void;
+export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; complex?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void;
   /** Retired-rung memory owned by the CALLER, so it can span several runner instances — the fast
    *  lane's per-file runners share ONE build's map. Omitted ⇒ each runner keeps its own, as before.
    *  See MultiProviderOptions.deadRungs for why this is caller-owned and never a singleton. */
@@ -3031,7 +3038,9 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
   const level = toPowerLevel(opts.tier as PowerLevel | boolean | string | undefined | null);
   const parsed = tierLadder(level);
   if (parsed.rejected) console.warn(`[AGENTV3] ${parsed.rejected}`);
-  let rungs: LadderRung[] = opts.heal ? healLadder(parsed.rungs) : [...parsed.rungs];
+  // `heal` and `complex` are different questions with the same answer: skip the cheap flash opener.
+  // ONE function answers both (tierLadder.withoutCheapFlashLead), so they can never drift apart.
+  let rungs: LadderRung[] = (opts.heal || opts.complex) ? withoutCheapFlashLead(parsed.rungs) : [...parsed.rungs];
   if (opts.fromProvider) {
     const from = ladderFrom(rungs, opts.fromProvider);
     if (from.length > 0) rungs = from;
@@ -11546,6 +11555,29 @@ async function noteBuildOutcome(
           `[AGENTV3] cost-ladder: ${analysis.reasoning} → build model ${tierToGeminiBuildModel(analysis.startTier)}`,
         );
       }
+      /**
+       * 🧠 A BIG APP DOES NOT OPEN ON THE CHEAPEST RUNG (admin 2026-09-17: "kimi ko bade aur complex
+       * task dedo, kabhi bhi — starting me bhi de sakte ho"). A `complex` verdict makes the build skip
+       * the cheap flash opener, so on Weak and Normal the FIRST engine to see the app is KIMI.
+       *
+       * The score is the deterministic one `analyzeRequest` already computed a few lines above — free,
+       * instant, and the same number the report records. A model is asked ONLY when that score sits
+       * within ±3 of the decision line, i.e. when its answer could actually change the routing; a
+       * clear calculator and a clear social network both cost nothing extra. See complexityRouting.ts.
+       *
+       * 🔒 It cannot delay or break a build: the call is raced at 6s, every failure falls back to the
+       * deterministic verdict, and the whole feature reverts with AGENTV3_COMPLEX_TO_KIMI=off.
+       * ⚠️ `isEditMode` is not known yet here — deliberately. This only decides which rung OPENS a
+       * build, and an edit that reaches this point is routed by the same ladder as any other turn.
+       */
+      const complexityDecision = await decideComplexity(
+        { prompt, score: analysis?.complexityScore ?? 0 },
+        (p) => AIRouterManager.getRouter('free')
+          .route(p, 'You are a classifier. Reply with one word only.')
+          .then((r) => r.response.content),
+      );
+      const buildIsComplex = complexityDecision.verdict === 'complex';
+      console.log(`[AGENTV3] complexity: ${complexityDecision.reason} → ${complexityDecision.verdict} (${complexityDecision.source})`);
       // LARGE-PROJECT ROUTING (admin 2026-07-05: "badi apps direct Sonnet"): list the existing
       // project ONCE up-front (edit/import mode only — a fresh build has nothing to list). The
       // listing is REUSED further down for the edit-mode prompt, so this adds no extra sandbox
@@ -13697,6 +13729,10 @@ async function noteBuildOutcome(
         // runner that spreads baseRunnerOpts (escalation/retry/heal/fix/critFix) so all their tokens
         // are billed even when their `result` is later discarded.
         usageSink: buildUsage,
+        // 🧠 A complex app skips the cheap flash opener, so KIMI writes its first file (admin
+        // 2026-09-17). Spread into every runner that shares these opts, so an escalation or heal
+        // pass inherits the same judgement instead of re-deriving it.
+        complex: buildIsComplex,
         // 🔴 Autopsy 2026-09-16 (alarm-app build). A user cancelled seconds after the fast lane
         // (SimpleBuilder) timed out and salvaged one file into the workspace — before this loop had
         // run a single turn of its own. Its abort message read `writtenFiles` only through its own

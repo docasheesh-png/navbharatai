@@ -58834,3 +58834,73 @@ as OPEN yesterday), and PR **#2985** the slow-rung throughput bench. Per the con
 cause another PR names as its work is taken. Neither touches ladder composition, so there is no overlap.
 
 **Gate, run last on the final state:** see the commit.
+
+## 2026-09-17 — Complexity routing: a big app opens on KIMI, and a model is asked only when the code cannot tell (item 2 of the admin's build list)
+
+Admin, verbatim: *"kimi ko bade aur complex task dedo, kabhi bhi — starting me bhi de sakte ho, beech
+me bhi! task chota/bada/mild/complex hai code se pata na lage to gptnano se puchwa lo!!"* Two
+instructions in one sentence; `src/server/AgentV3/complexityRouting.ts` is both halves.
+
+### The hook was already in the codebase, unused — which is why this is small
+
+`RequestAnalyser.analyzeRequest` has scored every request deterministically since the cost-ladder work
+(0-100, plus a `taskType`), and **its own docblock says it "marks the genuinely ambiguous ones
+(`ambiguous: true`) so a caller MAY refine them with a cheap LLM analyser".** Nothing ever read that
+flag: the refinement half was designed and never built. So no new scoring concept was invented, and
+none competes with the existing one — the admin's instruction turned out to name a gap the code had
+already described and left open.
+
+### What it does
+
+- **`complex` ⇒ the build skips the cheap flash opener**, which on Weak and Normal makes KIMI the first
+  engine to see the app. "Starting me bhi" is literal: Kimi is no longer only a fallback.
+- **The line is 40 — `RequestAnalyser`'s own top tier boundary**, not a second invented threshold. For
+  scale, that module scores `simple_app` ≤20 (capped), `coding` 30, `debugging` 45, `complex_app` 58,
+  `architecture` 80. A clear calculator and a clear social network are both decided for free.
+- **A model is asked ONLY within ±3 of that line** — the same margin `isNearBoundary` uses.
+
+### 💸 Deliberately narrower than the flag it builds on, and the difference is money
+
+`ambiguous` marks a score near EITHER of the analyser's boundaries (20 and 40), because it was written
+for a three-tier ladder. This decision is binary, so **only the 40 line can change it**: asking a model
+about a score of 18 would spend a call to move a verdict from `simple` to `simple`. "Kharcha kam se
+kam" applies to the classifier too — a question whose answer cannot change the outcome is not asked.
+Test-locked (`needsSecondOpinion(20) === false`).
+
+### 🔒 It cannot break, hang, or mislead a build
+
+The call is raced at 6s; a throw, a timeout, an empty reply and an unparseable reply all fall back to
+the deterministic verdict that was already computed for free — never to a guess. `parseComplexityAnswer`
+returns `null` on anything it was not asked for, and `null` means "no answer", not a coin toss. Kill
+switch `AGENTV3_COMPLEX_TO_KIMI=off` restores the pre-change behaviour exactly, and costs nothing while
+off (it returns before the call is made). Every one of these paths has its own test.
+
+### One definition of "the cheap opener", shared with healLadder
+
+`withoutCheapFlashLead` is now exported from `tierLadder.ts` and used by BOTH `healLadder` and this
+router, and `buildTurnRunner` applies it for `heal || complex`. They are separate FLAGS — "this is a
+repair" and "this is a big app" are different questions — that happen to have the same answer about the
+same rung today. Two regexes agreeing on the day they were written is exactly how this repo's drifts
+have started; a test asserts the two paths produce identical ladders on all three tiers.
+
+### 💸 What it costs, stated plainly
+
+On Weak — the tier NavBharatAI pays for itself — a complex build now opens on `kimi-k2.7-code`
+($0.95/$4.00) instead of `glm-4.7-flashx` ($0.07/$0.40): roughly **13× the input price for those
+builds**. The bet is the admin's own and it is the same one the ladder note makes in the other
+direction: a cheap rung that fails is paid twice, once in the wasted call and once in the heal. It is
+only worth taking where it is likely to pay, which is why `simple` is the default on every doubt —
+including a NaN score, a disabled flag, and an unavailable model.
+
+### 🔌 The wiring is test-locked against the real route source
+
+Three cases read `routes/agentv3.ts` itself and assert the decision is made, `await`ed (a bare promise
+would route every build as simple), and handed to the runner. This repo has shipped correct-but-unread
+code more than once — `AGENTV3_CACHE_PREFIX`'s dropped re-apply line, `EmbeddingSearch`'s never-read
+index, and `ambiguous` itself. A pure module nobody calls is the failure mode, so the wiring is pinned
+rather than assumed.
+
+**Still to come from the admin's list:** the Hindi→English prompt normalisation (measure first, per the
+earlier turn), and the milestone-building audit.
+
+**Gate, run last on the final state:** see the commit.

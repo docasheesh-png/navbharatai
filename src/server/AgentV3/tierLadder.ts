@@ -202,8 +202,25 @@ export function tierLadder(level: PowerLevel | string | boolean | null | undefin
  * would otherwise have changed heal behaviour by ACCIDENT of a pattern written for a different model.
  * A rule this file depends on may not rest on a coincidence.
  */
-function isCheapFlashRung(model: string): boolean {
+export function isCheapFlashRung(model: string): boolean {
   return /4[.\-]?7[-.]?flash/i.test(model);
+}
+
+/**
+ * The ladder with its cheap leading flash rung removed — the ONE way to say "skip the cheap opener".
+ *
+ * Exported because TWO callers need exactly this and must never drift apart: `healLadder` (a repair
+ * may not begin on the model that wrote the broken file) and complexity routing (a big app should not
+ * open on the cheapest rung either — admin 2026-09-17: "kimi ko bade aur complex task dedo… starting
+ * me bhi"). Both mean the same thing about the same rung, so they share the same function rather than
+ * two regexes that agree today.
+ *
+ * Never returns an empty ladder: a one-rung ladder keeps its only rung, because "start higher" cannot
+ * mean "have nowhere to start".
+ */
+export function withoutCheapFlashLead(rungs: readonly LadderRung[]): LadderRung[] {
+  if (rungs.length > 1 && isCheapFlashRung(rungs[0].model)) return rungs.slice(1);
+  return [...rungs];
 }
 
 /**
@@ -221,8 +238,7 @@ function isCheapFlashRung(model: string): boolean {
  * this line.
  */
 export function healLadder(rungs: readonly LadderRung[]): LadderRung[] {
-  if (rungs.length > 1 && isCheapFlashRung(rungs[0].model)) return rungs.slice(1);
-  return [...rungs];
+  return withoutCheapFlashLead(rungs);
 }
 
 /**

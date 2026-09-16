@@ -2677,6 +2677,37 @@ is now **`src/server/AgentV3/tierLadder.ts`**, and the build chain is built from
 | Normal (paid economy) | `off` | GLM `glm-4.7-flashx` → KIMI `kimi-k2.7-code-highspeed` → GLM `glm-5.3` → Claude Sonnet | Sonnet |
 | Strong (paid premium) | `mini` | GLM `glm-5.3` → KIMI `kimi-k3` → Claude Sonnet → Claude **Opus** | Opus (its last rung) |
 
+🧠 **A BIG APP DOES NOT OPEN ON THE CHEAPEST RUNG (admin 2026-09-17, verbatim: "kimi ko bade aur
+complex task dedo, kabhi bhi — starting me bhi de sakte ho, beech me bhi! task chota/bada/mild/complex
+hai code se pata na lage to gptnano se puchwa lo!!").** `AGENTV3_COMPLEX_TO_KIMI` — ⚠️ **NOT set, and
+the code default is ON**; `off` restores the pre-change behaviour exactly (every build opens on rung 1)
+and costs nothing while off. Read by `src/server/AgentV3/complexityRouting.ts`; applied through
+`buildTurnRunner`'s new `complex` flag.
+
+- **A `complex` verdict skips the cheap flash opener**, so on Weak and Normal the first engine to see
+  the app is **KIMI**. Strong has no flash rung and is untouched. "Starting me bhi" is literal.
+- **The line is 40 — `RequestAnalyser`'s OWN top tier boundary**, not a second invented threshold
+  (`simple_app` ≤20 capped, `coding` 30, `debugging` 45, `complex_app` 58, `architecture` 80).
+- 🔑 **THE HOOK WAS ALREADY THERE, UNUSED.** `analyzeRequest`'s docblock has said since the cost-ladder
+  work that it "marks the genuinely ambiguous ones (`ambiguous: true`) so a caller MAY refine them with
+  a cheap LLM analyser" — and nothing ever read that flag. This is that half, so no new scoring concept
+  competes with the existing one.
+- 💸 **A model is asked ONLY within ±3 of the line**, deliberately narrower than `ambiguous` itself
+  (which marks BOTH the 20 and 40 boundaries, because it was written for a three-tier ladder). Only the
+  40 line can flip this binary decision, so asking about a score of 18 would spend a call to move a
+  verdict from `simple` to `simple`. **"Kharcha kam se kam" applies to the classifier too.**
+- 🔒 **It cannot break, hang or mislead a build**: the call is raced at 6 s, and a throw, a timeout, an
+  empty reply and an unparseable reply ALL fall back to the deterministic verdict — never to a guess.
+  `simple` is the default on every doubt, including a NaN score.
+- ⚠️ **What it costs, plainly:** on Weak (which NavBharatAI pays for itself) a complex build opens on
+  `kimi-k2.7-code` ($0.95/$4.00) instead of `glm-4.7-flashx` ($0.07/$0.40) — ~13× the input price for
+  THOSE builds. The bet is that a cheap rung which fails is paid twice, once in the wasted call and
+  once in the heal. **Watch: the share of builds routed complex, and whether their heal count drops.**
+- 🔗 `healLadder` and this router share ONE definition of "the cheap opener"
+  (`withoutCheapFlashLead`), applied by `buildTurnRunner` for `heal || complex`. They stay separate
+  FLAGS — "this is a repair" and "this is a big app" are different questions with the same answer
+  today — and a test asserts the two produce identical ladders so they cannot drift.
+
 🔴 **THE LEAD RUNG CHANGED 2026-09-17 — `glm-5.3-flash` IS OFF EVERY LADDER** (admin, verbatim: *"glm
 5.3 flash ko hata do!"*, with the FlashX price read off docs.z.ai on their own screen). It is replaced,
 on Weak and Normal and as the PLAN rung of both, by **`glm-4.7-flashx` — $0.07 in / $0.40 out / $0.01

@@ -2635,8 +2635,11 @@ known-weak 4.7-flash.
   Opus rate inside that. A stored 'medium'/'max' maps UP to 'mini' (never down to Normal).
 - **Env keys (names only):** `AGENTV3_LADDER_WEAK` / `_NORMAL` / `_STRONG` (override one tier's ladder,
   `PROVIDER:model,…`, applied whole or refused with the reason in the `TIER_LADDER` report line);
-  `OPENAI_API_KEY` (⚠️ **NOT set** — the admin said they will buy it; until then the gpt-5.4 rung yields
-  nothing and changes no build) and `OPENAI_BASE_URL`, `AGENTV3_OPENAI_TIMEOUT_MS`; `RATE_GLM53_FLASH_IN`
+  `OPENAI_API_KEY` (the admin **bought a key on 2026-09-15** and asked what to name it; whether it is
+  yet set in Cloud Run is unconfirmed here. ⚠️ **On its own it still changes NO build** — no tier
+  ladder names OPENAI, so the rung yields nothing. **READ THE `AGENTV3_FILE_EMBEDDINGS` ENTRY BELOW
+  BEFORE SETTING IT**: until 2026-09-15 that key alone silently switched on an unmetered,
+  never-read embedding spend on every build) and `OPENAI_BASE_URL`, `AGENTV3_OPENAI_TIMEOUT_MS`; `RATE_GLM53_FLASH_IN`
   / `_OUT` / `_CACHE` (**code default now the admin's real price, 2026-09-14: $0.15 / $0.50, cache
   $0.0375** — an earlier placeholder priced it at the glm-5 line, ~10× too high, for a few hours, on
   no user's bill); non-flash **GLM-5.3 is $1.40 / $4.40 = the existing glm-5 line**, no new row;
@@ -2648,8 +2651,54 @@ known-weak 4.7-flash.
   `AGENTV3_BUILD_ALLOW_GEMINI`, `AGENTV3_VERTEX_PEER`, `AGENTV3_FLOOR_BALANCE`, `AGENTV3_FREE_KIMI_LEAD`,
   `AGENTV3_WEAK_FLAGSHIP_HEAL`, `GLM_MODEL` / `KIMI_MODEL` / `AGENTV3_FREE_*_MODEL` (the ladders name their
   models; those envs still feed the legacy `cheapBuildFloorRunners`, which only tests call now).
-- ⚠️ **Not yet done, said plainly:** the OpenAI rung is untested against a real response (no key); the
+- **🔴 `AGENTV3_FILE_EMBEDDINGS` — the flag that stops a PROVIDER KEY being a FEATURE SWITCH (shipped
+  2026-09-15). ⚠️ NOT set, and unset means exactly today's behaviour: zero calls, zero cost.**
+  `EmbeddingSearch` (AgentV3's per-file vector index) used to have NO flag at all — its only gate was
+  the PRESENCE of `OPENAI_API_KEY`. Found on the day the admin bought an OpenAI key and asked only
+  what to name it, so nothing had been spent.
+  **What the key alone would have started, none of it visible:** `ToolDispatcher` calls `addFile()` on
+  EVERY write, EVERY batched file and EVERY edit (three call sites), so an ordinary build fires dozens
+  of `text-embedding-ada-002` calls — on every tier, **free included**, on NavBharatAI's own account.
+  They are made with the OpenAI SDK directly, so they never pass `captureTurnUsage`: **in no build
+  ledger, in no rate card (`providerRates.ts` prices no embedding model), invisible to
+  `AGENTV3_BUILD_COST_CEILING_USD`, and never billed to the user.** That is the money audit's own
+  class — a paid call with no governance — reached through a credential rather than a ladder.
+  🔴 **AND IT BOUGHT NOTHING: `search()` — the only reader of the index — is called from no live code
+  path.** Embed, persist to Firestore, never read. Recorded as an **OPEN root cause** rather than
+  quietly wired up, because "make semantic retrieval real" is a separate decision with its own cost
+  (`ContextReranker.ts` has described the path as dormant all along).
+  🔒 **BOTH are required now, flag FIRST:** `getClient()` returns null unless the flag is on AND a key
+  exists, checked at call time so switching it off in Cloud Run bites without a deploy. An unreadable
+  value means OFF, never ON. Test-locked in `tests/fileEmbeddingsAreOptIn.test.ts`, whose last case is
+  a **reversion guard** asserting the ORDER out of the source (comments stripped) — proven to fail when
+  the flag line is deleted, because the behavioural tests alone would not.
+  ⚠️ **If it is ever turned on, price it first.** `text-embedding-3-small` is ~5× cheaper than ada-002
+  and scores better; the swap is free TODAY only because nothing is stored yet — once vectors exist,
+  changing the model silently mixes incompatible embeddings at the same 1536 dimensions, which
+  `cosineSimilarity`'s length check cannot catch.
+- ⚠️ **Not yet done, said plainly:** the OpenAI rung is untested against a real response; the
   chat router (`AIRouterManager`) has no OpenAI provider — that is slice 3, only if GPT should serve chat.
+- 🔴 **`OPENAI_API_KEY` IS SET IN CLOUD RUN (admin, 2026-09-15) — AND IT WOKE A PATH OUTSIDE THIS POLICY.**
+  The three ladders are unchanged (no tier names OPENAI, so no build routes to GPT). But
+  `src/server/routes/build.ts:130` — the LEGACY `/api/build` chain, live at `server.ts:739` — carries
+  `{ name: 'openai', run: () => callOpenAI(...) }` as **rung 6** (claude → grok → aiRouter → gemini →
+  groq → **openai** → deepseek → openrouter). `callOpenAI` runs **`gpt-4o-mini`**, and
+  `resolveApiKey('openai')` falls through to the generic `process.env['OPENAI_API_KEY']` branch
+  (`aiClients.ts:67`). **That rung threw "OpenAI API Key not available" and fell through until the key
+  was set; it is now a real billable call on NavBharatAI's account**, from a provider this policy never
+  approved, costed by `estimateTokens` rather than the real-cost ledger. Rare (five rungs must fail
+  first) and it does add genuine resilience — which is exactly why it is recorded as an ADMIN DECISION
+  here rather than silently gated or silently left. ⚠️ Anyone auditing "what does this key switch on?"
+  must check BOTH the ladders AND this legacy chain; reasoning that stops at `tierLadder.ts` misses it.
+- ⚠️ **FOUR COMMENTS SAID GPT WAS ON THE WEAK LADDER, AND THE ADMIN CAUGHT IT BY READING THE CODE
+  (2026-09-15).** They were true of the admin's FIRST list on 2026-09-14 and stale within the same day.
+  The table was updated; `providerRates.ts`, `routes/agentv3.test.ts` (×2) and `routes/agentv3.ts` were
+  not. **`tsc` and `vitest` cannot read a comment**, so nothing failed. **THE RULE: do not restate
+  another module's fact — point at the module that owns it.** `TIER_LADDERS` is the only place a rung
+  exists. Pinned by `tests/ladderClaimsMatchTheTable.test.ts`, which DERIVES the invariant from the table
+  (so adding GPT for real silences it automatically) and is proven by reversion. `routes/agentv3.ts` is
+  listed in its `OWNED_BY_ANOTHER_PR` set because PR #2957 was live in that region — remove that entry
+  once #2957 lands.
 
 **THE AGENT × TIER TABLE (admin-approved 2026-09-14, aims verbatim: "user ki app best of best bane — 1 try
 me" · "mera kharcha kam se kam ho").** Test-locked in `tests/agentRolesPerTier.test.ts`.

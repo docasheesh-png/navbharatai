@@ -56641,3 +56641,278 @@ as an open item rather than half-swept.
 
 **Test-locked** in `tests/apkReportDownload.test.ts` (11 tests — the filename rules, both download
 paths, the shared-helper funnel, the honest empty/loading refusals, and the link's ownership note).
+## 2026-09-15 — THE PUBLISH CEILING FIX WAS BUILT, MERGED AND SWITCHED OFF BY ONE EMPTY STRING
+
+**The report.** The admin's notification panel read: *"Hosting channels are filling up: 36 of about 50
+in use, 14 left. 28 can be reclaimed right now."* They forwarded a ChatGPT prompt asking for an audit
+of ~33 hosting providers, a provider pool and a resell model. Per the external-suggestion rule that was
+treated as raw material, not an order — and the real codebase answered the question before the research
+would have started.
+
+**What the audit found: nothing was missing.** `bucketPublish.ts` (mirror every publish into Cloud
+Storage), `bucketOnlyPublish.ts` (skip Firebase entirely — the thing that actually removes the ceiling)
+and `infra/cloudflare/mitrify-apps-worker.js` (serve from the bucket, fall back to Firebase) had all
+shipped green weeks earlier. The bucket `navbharatai-published-apps` had existed in
+`gen-lang-client-0866594388` since 2026-08-23 with `allUsers → Storage Object Viewer` already granted,
+and `mitrify.in`'s wildcard DNS was already live and proxied through Cloudflare (verified by resolving
+`test.mitrify.in` and `v3-abc.mitrify.in`, not assumed).
+
+**The whole ceiling was held open by `const APPS_BUCKET = '';` on line 66 of the Worker.** With it
+empty, `if (APPS_BUCKET && cacheable)` is never true and the entire bucket origin below it is
+unreachable code. No provider is needed, no architecture change, no new spend.
+
+🔴 **AND A TEST WAS HOLDING IT EMPTY.** `bucketPublish.test.ts` asserted
+`expect(worker).toMatch(/const APPS_BUCKET = '';/)` under the heading *"ships with the bucket origin
+EMPTY, so behaviour is unchanged until it is set"*. That was correct when written — a pre-filled name
+would have switched the origin the moment the Worker was redeployed, **before the bucket existed**. Once
+the bucket existed and was public, the same assertion stopped protecting anything and started enforcing
+the off state, while the capacity card climbed toward a cap that stops publishing for **every user at
+once**. Nothing failed the whole time, which is exactly why it went unnoticed.
+
+**The class, named so it is recognised again: a guard that encodes a PRECONDITION rather than an
+INVARIANT becomes a lock the day the precondition is met.** "Not activated yet" is a state, not a
+property of the code — and a test is the wrong place to keep a state, because a state has no way to
+notice that it changed. The two are distinguishable by asking what would have to be true for the
+assertion to be wrong: for a real invariant, nothing.
+
+**Fixed.** `APPS_BUCKET = 'navbharatai-published-apps'`; the stale assertion is REMOVED with the reason
+recorded in place rather than silently flipped; and the invariant now runs the other way in
+`tests/workerBucketOrigin.test.ts`, which owns it alone so the two files cannot disagree about its
+direction. It asserts the name is set and bucket-shaped, that the Worker's `APP_PREFIX` equals the
+server's exported one (two files, two languages, no import between them — a mismatch would 404 every app
+at the edge and fall through to Firebase, looking like "the bucket path just isn't working" rather than
+a typo), that the Firebase fallback survives (every app published before the bucket must keep working),
+and that the SPA deep-link rewrite survives. Verified to bite by emptying the constant and watching it
+fail.
+
+**STILL OPEN — the ceiling is not removed until three Cloud Run keys are set, and the ORDER is not a
+preference.** The remaining work is admin console work, and the admin asked to be guided through it
+rather than have it assumed:
+
+1. `PUBLISHED_APPS_BUCKET = navbharatai-published-apps` and `PUBLISHED_APP_DOMAIN = mitrify.in`
+2. the Worker redeployed from this file (Cloudflare dashboard paste — this file is the only record of
+   what is running, which is why the value belongs here and not only in the console)
+3. a real publish confirmed loading at `https://<sub>.mitrify.in`
+4. **only then** `PUBLISHED_APPS_BUCKET_ONLY=on`
+
+`bucketOnlyPublishEnabled()` ANDs all three and never warns, so any missing precondition disables the
+path silently and correctly — but setting the flag with a Worker that is not serving hands users dead
+links. Until step 4, a publish still consumes a channel.
+
+⚠️ **Recorded honestly: "delete all 36" is not what the panel offers, and the admin was told so rather
+than obeyed.** Of the 36, **28** are waste (`stale` + `unknown`) and reclaimable; the other 8 are LIVE
+apps belonging to real users, and the site's own `default` channel is never counted or deletable.
+Reclaiming the 28 takes usage from 36/50 to 8/50 with nothing lost. Removing the 8 is a takedown, is a
+different decision, and was put back to the admin with the list offered first.
+
+---
+
+## 2026-09-15 — A Play bundle build that could not have succeeded now says so before it starts
+
+**From the same failure report.** A user pressed "Google Play bundle"; the run died in about a minute
+with `Missing signing secret(s): ANDROID_KEYSTORE_BASE64 …`, and that was the first they heard of it.
+
+**Nothing was broken, and that is the point.** The generated workflow's own pre-flight did exactly the
+right thing, and refusing to hand back an unsigned bundle is correct — Play rejects one anyway. What was
+wrong is that the press **could not have succeeded**, and only GitHub knew. `.apk` (debug-signed, zero
+setup) works on the first press for everyone; `.aab` cannot work for anybody until they install Java,
+run `keytool`, base64 the file and paste four secrets into GitHub.
+
+**What shipped:** `GET /api/mobile-ship/signing-status` asks GitHub which secret NAMES the repository
+has — the API never returns values, which is exactly what makes it safe to ask on the user's behalf —
+and `StoreBuildPanel` checks it BEFORE dispatching, but only for the workflow that needs a key.
+
+🔒 **ONLY A VERDICT BLOCKS.** A failed lookup is `unknown`, never `missing`: our own inability to check
+is not evidence about the user's repository, and a check that blocked the build on a GitHub hiccup would
+be a worse failure than the one it exists to prevent. The asymmetry sets every default here — a wrong
+"your key is missing" costs one press; a build that cannot succeed costs a run, several minutes, and the
+belief that the app builder is broken.
+
+⚠️ **A half-configured key is named exactly** (`ANDROID_KEY_ALIAS is still missing`) — that is the case
+nobody can debug from a generic message. And the refusal always names what works right now: a message
+that only says "no" leaves someone who wanted to try their app with nothing to press.
+
+**The drift guard that earned its place immediately:** a test asserts this module's four names against
+the names `mobileShipKit` really generates into the workflow — and it failed on its first run, because
+my own regex `ANDROID_[A-Z_]+` stopped at `ANDROID_KEYSTORE_BASE`, digits being outside the class. A
+guard that could not have caught a real rename would have been decoration.
+
+**Test-locked** in `tests/signingReadiness.test.ts` (11 tests). `AppKnowledgeBase` updated, so every AI
+in the app can tell a user this check exists. **Next: the auto half** — NavBharatAI generating the
+upload key and writing the four secrets itself, so the Play bundle is one press too.
+
+---
+
+## 2026-09-15 — NavBharatAI makes the user's Android upload key, so a Play bundle is one press
+
+**The second half of the admin's option 3.** The warning half stops a build that could not have
+succeeded; this half removes the reason it could not. Until today a Play Store bundle required the user
+to install a JDK, run `keytool` with six flags, base64 the file, and paste four secrets into GitHub —
+the wall where most people stop, and the same wall every competitor has.
+
+### 🔴 The objection that stood for years, and why it no longer holds
+
+`mobileSetup.ts` states it in writing: *"A signing key IS the app's permanent identity — if we held it
+and lost it, their app could never be updated again."* **That is true of the APP SIGNING key and false
+of this one.** Every new app on Play uses Play App Signing (mandatory for the `.aab` format): Google
+holds the app signing key, and what the developer holds is an **upload key**, which Google can **reset**
+if it is lost. The worst case is a support request, not a dead app.
+
+🔒 **And we still do not hold it.** The key is sealed into the user's OWN repository as GitHub Actions
+secrets and handed to their browser once to save. No vault row, no Firestore document, no log line — a
+test asserts the route contains no `encrypt(`, no store call and no `console.log`. Both old comments
+were corrected in place rather than deleted, so the original reasoning stays visible beside the reason
+it changed.
+
+### ✅ Verified with Java's own tooling, not assumed
+
+This sandbox has a JDK, so the generated PKCS#12 was read back by the real `keytool` rather than
+reasoned about:
+- `keytool -list -v` → *"Keystore type: PKCS12 · Alias name: upload · Entry type: PrivateKeyEntry ·
+  SHA256withRSA · 2048-bit RSA · valid until 2056"*, and the printed SHA-256 matched
+  `sha256Fingerprint` byte for byte.
+- `keytool -importkeystore` → **exit 0**, which only succeeds if the private key genuinely unlocks with
+  the password we generated.
+
+A hostile app name (`Shiv Medical Store, "Ltd" <test>`) came back as a valid distinguished name — a
+comma or a quote inside an X.509 DN is a syntax error, not a character.
+
+### The decisions that are not obvious
+
+- **PKCS#12, one password, two secrets.** A PKCS#12 keystore protects its key entry with the STORE
+  password, so `ANDROID_KEY_PASSWORD` must EQUAL `ANDROID_KEYSTORE_PASSWORD`. Different values produce
+  "Cannot recover key" at build time — the exact failure `mobileBuildRepair` already classifies.
+- **30-year validity.** Play rejects an upload certificate that expires before 22 Oct 2033, and by the
+  time that error appears the key is already in the user's repository — fixing it then is a key reset,
+  not an edit.
+- **RSA keygen on Node's NATIVE crypto**, not node-forge's pure-JS one, which would block the event
+  loop for seconds inside a request. forge does only the certificate and the PKCS#12 wrapper.
+- 🔴 **It will NEVER replace a key that is already there** without `replace: true` said explicitly. A
+  user who has published once is tied to that upload key; replacing it silently makes their next update
+  unpublishable, and no amount of convenience is worth that.
+- 🔒 **A repository we could not READ is never written to.** The key we cannot see is exactly the one at
+  risk, so a failed listing returns before a key is generated — test-locked by ordering, not by comment.
+- ⚠️ **A partial write is named, never swallowed.** Four secrets go up one at a time; if the third
+  fails the user is told which landed. It does **not** roll back — deleting what it managed to set could
+  delete a secret that was already there and correct.
+
+**Two new dependencies**, both verified through the repo's own gates (`audit:gate` ✅ 0 high/critical,
+`license:gate` ✅ no un-allowlisted copyleft): `node-forge` for the X.509 certificate and PKCS#12
+container, `libsodium-wrappers` for the `crypto_box_seal` that GitHub requires before a secret may be
+posted. There is no dependency-free route: Node has X25519 but neither XSalsa20-Poly1305 nor blake2b at
+the digest length a sealed box needs, and hand-rolling PKCS#12 ASN.1 would be the fragile choice.
+
+**Test-locked** in `tests/androidKeystore.test.ts` (10) and `tests/githubSecretWrite.test.ts` (10) —
+including that a sealed value really decrypts back with the matching secret key, that two seals of one
+value differ, and that a GitHub error body is never echoed to the screen. `AppKnowledgeBase` updated so
+every AI can explain the new button, what it will not do, and that a lost key is recoverable.
+## 2026-09-15 — A PROVIDER KEY WAS A FEATURE SWITCH: `OPENAI_API_KEY` alone started an unmetered, never-read embedding spend
+
+**How it was found.** The admin bought an OpenAI key and asked one question: *"claude run me kis naam se
+save karu?"* Answering it meant verifying the name against live code rather than against `CLAUDE.md`
+(safeguard #1 applied to a doc claim), and the grep for `OPENAI_API_KEY` returned more than the tier
+ladder. Nothing had been spent yet — the key was not set.
+
+**The name is `OPENAI_API_KEY`**, verified at `src/server/AgentV3/tierLadder.ts:238`
+(`case 'OPENAI': return 'OPENAI_API_KEY';`) and consumed at `src/server/routes/agentv3.ts:2951`.
+Companions: `OPENAI_BASE_URL`, `AGENTV3_OPENAI_TIMEOUT_MS`.
+
+**What the same grep exposed, and it is the real finding.** `src/server/AgentV3/EmbeddingSearch.ts` had
+**no flag of any kind** — its only gate was `this.apiKey = apiKey ?? process.env.OPENAI_API_KEY ?? ''`.
+Three consequences, each verified from code rather than reasoned about:
+
+1. **It runs on every build, on every tier.** `ToolDispatcher` calls `getEmbeddingStore(...).addFile()`
+   at three sites — single write (2416), batched write (2568), edit (2636). A normal build fires dozens
+   of `text-embedding-ada-002` calls, free tier included, on NavBharatAI's own account.
+2. **It is unmetered by construction.** The calls go through the OpenAI SDK directly, never through
+   `captureTurnUsage`. So they are in no build ledger, in no rate card (`providerRates.ts` prices no
+   embedding model at all), invisible to `AGENTV3_BUILD_COST_CEILING_USD`, and never billed to the
+   user. This is precisely the class the 2026-09-12 money audit named — a paid call with nothing
+   governing it — reached through a credential instead of through a ladder.
+3. 🔴 **And it bought nothing.** `EmbeddingStore.search()` — the only thing that READS the index — is
+   called from no live code path. `getEmbeddingStore` is imported in exactly one module
+   (`ToolDispatcher`) and only ever for `addFile`. Embed, persist to Firestore, never read.
+
+**The fix is the class, not the instance (fourth absolute rule, step 2).** The bug is not "embeddings
+are expensive"; it is that **a provider credential was doing the job of a feature switch**, which
+breaks this repo's own repeated law that a key must not be the single input that changes behaviour and
+that unset means today's behaviour exactly. `AGENTV3_FILE_EMBEDDINGS` (default OFF) now gates it:
+`getClient()` returns null unless the flag is on **and** a key exists, the flag is read at call time so
+Cloud Run bites without a deploy, and an unreadable value means OFF rather than ON.
+
+**Test-locked** in `tests/fileEmbeddingsAreOptIn.test.ts` (9 cases). The last one is a **reversion
+guard**: the behavioural tests alone would still pass with the flag line deleted, because a real call
+with a fake key fails and is caught, returning null either way — so the ORDER (flag before key) is
+asserted out of the source with comments stripped. Proven by deleting the line and watching only that
+test go red, then restoring it.
+
+**STILL OPEN, deliberately not closed here:**
+- **Semantic retrieval is dormant and is not being woken by this change.** Wiring `search()` into the
+  build is a separate decision with its own cost, and doing it inside a change whose purpose is to
+  STOP an ungoverned spend would be the widening the rules forbid. `ContextReranker.ts` has said the
+  path is dormant all along; it still is.
+- **If embeddings are ever switched on, price them first.** `text-embedding-3-small` is ~5× cheaper
+  than ada-002 and benchmarks better. The swap is free only while nothing is stored — once vectors
+  exist, changing the model mixes incompatible embeddings at the same 1536 dimensions, which
+  `cosineSimilarity`'s length check cannot detect.
+- **GPT is still on no tier ladder** (`TIER_LADDERS` names GLM / KIMI / CLAUDE only), and the chat
+  router has no OpenAI provider. So the key, once set, changes no build. `RATE_GPT_IN` / `_OUT` /
+  `_CACHE` remain unknown and bounded at the Sonnet line — margin-safe, but the admin's cost view
+  would over-state GPT until the real prices are set.
+
+## 2026-09-15 (later) — the admin read the code and said GPT was on the weak tier. He was right about the TEXT and the table was right about the BEHAVIOUR
+
+**What happened.** Told that "no tier ladder names OPENAI", the admin replied *"wapas se dekho weak mode
+me hai."* Both statements were true, which is the defect:
+
+| Source | Claim | Truth |
+|---|---|---|
+| `tierLadder.ts` `TIER_LADDERS` (what `buildTurnRunner` maps) | weak = GLM `glm-5.3-flash` → KIMI `kimi-k2.6` → GLM `glm-5.3` → Haiku. `OPENAI` count **0** | ✅ this is what runs |
+| `providerRates.ts:77` | *"OpenAI (GPT) — the last rung of the WEAK ladder"* | ❌ stale |
+| `routes/agentv3.test.ts:1916, 1938` | *"the admin's weak ladder puts GPT-5.4 after Haiku"* | ❌ stale |
+| `routes/agentv3.ts:2936` | same | ❌ stale |
+
+The claim was true of the admin's FIRST list on 2026-09-14 and was superseded the SAME DAY once the real
+GLM prices were known (`CLAUDE.md`: *"gpt-5.4 is OUT of every ladder … Nothing to buy from OpenAI"*). The
+table was updated; four comments were not.
+
+🔴 **Nothing could have caught it.** `tsc` and `vitest` cannot read a comment, so the code was correct and
+self-contradicting for a day, and the only reader who noticed was a human being.
+
+**THE CLASS FIX — do not restate another module's fact; point at the module that owns it.** A sentence
+that asserts nothing cannot go stale. `providerRates.ts` now carries only the PRICE (its own business) and
+points at `tierLadder.ts` for the rung. `tests/ladderClaimsMatchTheTable.test.ts` **derives** the
+invariant from `TIER_LADDERS`, so the day GPT is genuinely added the guard stops complaining by itself —
+it encodes the invariant, never the current answer. Proven by reversion: re-inserting the exact shipped
+sentence fails it; a comment that merely points at the table does not.
+
+⚠️ `routes/agentv3.ts:2936` carries the same stale sentence and is **deliberately NOT fixed** — PR #2957
+(another live session) is editing that very chain-assembly region, and racing it to a comment produces a
+conflict whoever is right. It is named in the guard's `OWNED_BY_ANOTHER_PR` set with that reason; remove
+the entry when #2957 lands.
+
+### The admin then set `OPENAI_API_KEY` in Cloud Run — and it woke TWO things, not one
+
+My earlier answer to him named only the first. Recorded as a correction, not quietly amended:
+
+1. **`EmbeddingSearch`** — as documented in this file's previous entry. **Measured** rather than asserted:
+   `buildEmbedText` is hard-capped (path + ≤10 export names + 300 chars = **451 chars ≈ 113 tokens**), so
+   at ~60 calls per build and ~1,260 builds/month it is **≈ $0.85 ≈ ₹74/month**, plus ~75,600 Firestore
+   writes ≈ $0.14. **The earlier entry was right about the class and silent about the magnitude** — it is
+   ~₹86/month, not a large leak, and the admin makes decisions on numbers. Still buys nothing: `search()`
+   has no live caller.
+2. 🔴 **`/api/build`'s legacy fallback chain, rung 6.** `routes/build.ts:130` lists
+   `{ name: 'openai', run: () => callOpenAI(...) }`; `callOpenAI` runs **`gpt-4o-mini`** and
+   `resolveApiKey('openai')` falls through to the generic `process.env['OPENAI_API_KEY']` branch
+   (`aiClients.ts:67`). Registered live at `server.ts:739` → `/api/build` and `/api/build-stream`.
+   **That rung threw "OpenAI API Key not available" and fell through until today; it is now a real
+   billable call on NavBharatAI's account.** It is rung SIX (claude → grok → aiRouter → gemini → groq →
+   openai), so it is rare — but it is a provider the Model Routing Policy never approved, and its cost is
+   recorded from `estimateTokens`, not from the real-cost ledger.
+   **Deliberately NOT changed here.** `CLAUDE.md` marks the routing policy *"⚠️ CONFIRM WITH ADMIN BEFORE
+   CHANGING"*, and "should a new provider be allowed to serve a build?" is exactly that question. Put to
+   the admin rather than decided.
+
+🔴 **STILL OPEN — the flag is not live.** PR #2958 gates `EmbeddingSearch`, and it is green but **not
+merged**, so on production `main` the key is currently ungated and item 1 is spending now. The remedy is
+the admin merging #2958 (or unsetting the key); it is his call under the standing merge-hold rule.

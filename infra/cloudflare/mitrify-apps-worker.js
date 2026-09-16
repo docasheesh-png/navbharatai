@@ -52,7 +52,18 @@ const APEX = 'mitrify.in';
 //
 // The bucket must allow public reads on these objects (Storage Object Viewer for allUsers), because
 // this Worker fetches them anonymously. They are published apps — public by definition.
-const APPS_BUCKET = '';                       // e.g. 'navbharatai-published-apps'
+//
+// ✅ FILLED IN 2026-09-15. The bucket exists in `gen-lang-client-0866594388` (created 2026-08-23,
+// asia-southeast1) and the admin confirmed `allUsers → Storage Object Viewer` on its Permissions tab,
+// which is the one precondition this constant carries. Until then this line was an empty string and
+// the whole bucket origin below was unreachable code — the ceiling fix was BUILT but never switched
+// on, and the Publish Capacity card reached 36 of about 50 channels while it sat here.
+//
+// ⚠️ THIS VALUE MUST EQUAL Cloud Run's `PUBLISHED_APPS_BUCKET`. The server mirrors a publish INTO
+// that bucket and this Worker reads OUT of this one; they are two separate settings in two separate
+// consoles with no link between them, so a mismatch is silent — every app 404s at the edge and falls
+// through to Firebase, which looks like "the bucket path just isn't working" rather than a typo.
+const APPS_BUCKET = 'navbharatai-published-apps';
 const APP_PREFIX = 'published-apps';          // must match bucketPublish.APP_PREFIX on the server
 
 // ── BUCKET-ONLY APPS: `a-…` SUBDOMAINS HAVE NO FIREBASE CHANNEL AT ALL ────────────────────────────

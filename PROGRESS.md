@@ -58591,3 +58591,145 @@ Nothing is measured yet — this makes measurement possible. The data accrues fr
 older reports carry no `requestAnalysis` and read as unavailable rather than being back-filled from a
 truncated prompt. **The 50–100 build analysis is deliberately NOT started**, per the admin, and no
 GLM/Kimi routing change is made.
+
+---
+
+## 2026-09-16 — AUTOPSY dd1f5f60: a provider that ANSWERS is not a provider that WORKS (the throughput bench)
+
+**Trigger.** The admin forwarded a build-diagnostics report alongside a support ticket from the same
+user (`sohamd838@gmail.com`, uid `o3H5GzHtxmZOaUZaTqCIHBDw5rA2`): *"I put everything but cannot launch
+app it is notresponding tried thrice"*. The ticket is timestamped ~20 h BEFORE this build, so the two
+are probably different attempts by the same person — which makes it worse, not better: he was still
+hitting it a day later.
+
+⚠️ **A wrong diagnosis was given first and is recorded rather than quietly replaced.** The ticket also
+carried a client error string `PlayBilling.then() is not implemented on android`, and that was
+diagnosed as the cause with no evidence behind it. The report says otherwise. The Play Billing string
+is incidental; the build is the complaint.
+
+### Step 1 — the ledger: 9 ❌ · 9 🥵 · 2 🔀 · 5 ⏭️ · 4 ✅
+
+❌ **Still broken:** build stopped at the 1740 s cap with 4 of 17 planned steps done · release gate RED
+· **no live preview ever came up, so nothing was proven to run** (this is what the user feels) ·
+`AuthPage.tsx` created but never mounted · **the typecheck never ran** — the model's last recorded
+action was *"fixing my Google types … then typechecking"* and it ran out of clock first, so a rewritten
+`src/lib/auth.ts` full of hand-written Google interfaces has never been compiled once · accessibility
+92/100 (1 unlabelled field, one of the three things the user explicitly asked for) · design consistency
+50/100 (D) · the Share button and the list pagination the user asked for were never built.
+
+🥵 **Struggle:** 11 model calls · **29.5 min of the 30.1 min wall clock was inside a provider call
+(98%)** · **our own engine's total work was 7.9 seconds** · four calls at or near the 300 s streaming
+ceiling (302 s / 298 s / 278 s / 248 s) · **first file written at minute 26 of 29** · ~21 file-read
+tool calls across 8 turns, with `CheckInDialog.tsx` named in two separate read batches 12 minutes
+apart · the ETA said *"still working out how big this one is"* twelve times over 28 minutes and only
+produced a number (*"~9 min to go"*) one minute before the cap killed it · the sandbox was up 30.3 min
+and **idle 30.2 min (100%)**, costing $0.083 against the model's $0.050 — the VM cost more than the AI.
+
+🔀 **Workaround:** the tier ladder never left rung 1 across 11 consecutive GLM calls, with KIMI one
+step away the whole time · the budget-pressure nudges fired ("half the time is used", "time is short")
+and the model kept reading files for five more minutes, because they are advisory text and not a
+constraint.
+
+⏭️ **Skipped:** typecheck, page-render check, user journey, test suite (none exists), and 0 of the 3
+queued user requests delivered.
+
+✅ **Self-healed (and each one is a red flag under the 50/50 law, not a win):** the honesty layer
+corrected a reported success to `OUTCOME_RELEASE_GATE_RED` · the unverified turn was KEPT rather than
+rolled back, with the last good snapshot intact · the build was correctly billed **₹0** · incremental
+detection correctly saw 39/41 files unchanged.
+
+### Step 2 — the missing subsystem: THERE IS NO THROUGHPUT GOVERNOR
+
+The engine measures whether a provider **answers**. It has never measured how **fast**. Verified three
+ways against the code, not inferred from the report:
+
+1. `FLOOR_MS_PER_OUTPUT_TOKEN_DEFAULT` (30 ms/token ⇒ ~33 tok/s) — the rate `floorBudget.ts` calls
+   the point past which a provider is *"one we would rather fall past than sit behind"* — is read by
+   **no file except the one that defines it and its own test**. It sizes a request and judges nothing.
+2. **Every** escalation path in `MultiProviderTurnRunner` (timeout bench, 429 bench, shared cooldown,
+   dead-rung memory, rung advance) lives inside a `catch`. **All eleven calls returned `ok: true`.**
+3. This build ran at **8.65 tok/s — 26% of that declared floor** — for half an hour, and not one
+   mechanism in the resilience stack could observe it.
+
+🔴 **AND STREAMING WIDENED THE HOLE, on the day it was switched on.** `AGENTV3_STREAM_BUILD_CALLS`
+(admin, 2026-09-16) is the right change and it removed the only accidental guard. It bounds a call by
+SILENCE (60 s) and raises the per-call ceiling from 150 s to **300 s**. It reasoned about two kinds of
+provider — healthy and stalled. This build was a **third kind: steadily slow.** It never went quiet, so
+the idle bound never fired; it always had an answer, so reaching the 300 s ceiling returned a
+**truncated SUCCESS** rather than a failure. `floorBudget.ts`'s own comment already conceded the
+arithmetic ("2 × 300 s = 600 s against a 480 s turn — there is no 180 s reserve left") and judged it
+safe on the two-case reasoning. The third case is the one that cost the build.
+
+📌 **Two facts settled by this report, worth recording because both were open questions.**
+(a) **Streaming was genuinely ON** — four calls exceeded the 150 s non-streaming cap and would have
+been killed under it; 302.5 s is the 300 s ceiling plus overhead. (b) **Z.ai DOES honour
+`stream_options.include_usage`** — real per-call input/output/cache token counts came back on every
+streamed call. `CLAUDE.md` listed that as "a fact only a real call can settle". It is settled: it works.
+
+### Step 3/5 — the DNA fix, and the condition behind it (the 50/50 law)
+
+**`src/server/AgentV3/slowRungBench.ts` (new, pure) + the success path of `MultiProviderTurnRunner`.**
+A successful turn is now judged against the time our own budget arithmetic already sized it at —
+`FLOOR_CALL_OVERHEAD_MS + tokens × floorMsPerOutputToken()`, the same two measured constants, **no new
+threshold invented**. Per rung it accumulates, and a rung that is cumulatively ≥ 2.5× slower over ≥ 3
+measured calls and ≥ 90 s of real time is retired for the rest of that build so the ladder advances.
+
+On the reference build's own numbers the verdict lands **at call 3, 5.8 minutes in**, leaving 23
+minutes on KIMI. That build ships.
+
+The **other 50%** — why the condition existed at all — is that slowness was not a FACT the engine
+carried. It is now a first-class one, held in state rather than at a call site:
+
+- **Keyed by FAMILY + MODEL.** Family, like the timeout streak, so a 50-key pool accumulates one
+  verdict instead of fifty. Model, like the dead-rung memory, so `glm-5.3-flash` being slow never
+  retires `glm-5.3`, a *later rung of the same weak ladder*.
+- **The verdict is LATCHED in the state, and a failing test is why.** Recomputed instantaneously it
+  FLICKERS on the real data: 3.43× at call 3, **2.46× at call 4** (one better-than-usual response,
+  just under the line), then 3.5× and up. The runner happened to latch it in a `Set`, so the bug was
+  invisible — an invariant held by one call site instead of by the thing that owns it, which is
+  exactly how this repo's drifted-copy failures start. `SlowRungState.tooSlow` now makes it monotone
+  for every caller that will ever exist.
+- **An unmeasured turn is DISCARDED, never guessed at.** A stream without `include_usage` reports 0
+  tokens; counted, a 300 s call would score 60× and retire a healthy vendor on a number nobody
+  measured. Same law the wallet obeys. Honest cost, stated: if a provider stops reporting usage this
+  governor goes silent for it — the safe direction.
+- 🔒 **Slowness may never empty the ladder** (`canBenchAnother`): at least one rung is always kept
+  whatever its throughput, because a slow app beats no app. Every other bench retires a rung that
+  CANNOT answer; this one retires a rung that CAN. When the last engine is judged slow the report says
+  so once, explicitly — the admin must be able to see that we knew and kept it anyway.
+- **Configuration fails toward KEEPING a provider.** `AGENTV3_SLOW_RUNG_RATIO` ≤ 1 is refused (at 1.0
+  it would retire every provider on earth, the backstop included) and falls back to the default.
+
+**Reversion-proven in both halves:** deleting the skip ⇒ 2 behavioural tests fail; deleting the latch
+⇒ 2 different tests fail. 26 cases in `tests/slowRungBench.test.ts`, built on the report's verbatim
+eleven `(outputTokens, latencyMs)` pairs.
+
+### Already fixed on `main` between this build and this autopsy — checked, not assumed
+
+The ❌ "typecheck never ran" item has its root cause addressed by **`37eaa55` (merged 19:36 UTC,
+~3 h AFTER this build ran at 16:36 UTC)** — the protected correction reserve, which stops generation
+consuming 100% of the budget and leaving every post-build check false at once. Recorded so nobody
+re-fixes it.
+
+### OPEN ROOT CAUSES — named, not silently closed (rule 6)
+
+1. **The budget affords ~6 model turns and nothing in the engine knows that.** 1740 s ÷ a 300 s
+   per-call ceiling ≈ 5.8 calls; the architect planned 17 steps and spent its first 8 turns reading.
+   The budget-pressure nudges are TEXT IN A PROMPT, not a constraint, and this build ignored them for
+   five minutes. A real fix makes the plan budget-aware — a separate change to the architect loop.
+2. **Exploration is unbounded: 24 of 29 minutes were spent reading, first write at minute 26.** ~21
+   read calls, with at least one file named in two batches 12 minutes apart. No first-write deadline
+   exists.
+3. **The ETA is useless for exactly the builds that need it.** Twelve identical *"still working out how
+   big this one is"* messages over 28 minutes, then a number one minute before the kill. This is what
+   makes a user press the button three times — it is the direct cause of "tried thrice".
+4. **A 100%-idle sandbox still bills.** 30.2 idle minutes at $0.083 — more than the model cost — with
+   every second of it spent waiting on a provider, not on the VM.
+5. **Mid-build scope explosion is unguarded.** Three further feature requests arrived during a build
+   already failing and were folded into the plan.
+
+### What was NOT touched
+
+No ladder, model id, timeout, streaming bound, `max_tokens`, billing, release gate, or routing change.
+The governor only ever moves a build to the next rung; it cannot fail a build, shorten a call, or
+change what any provider is asked for. `AGENTV3_SLOW_RUNG_BENCH=off` reverts it with no deploy.

@@ -17,7 +17,7 @@ import {
   AuthProvider,
   UserCredential,
 } from 'firebase/auth';
-import { SIGN_IN_HINT_KEY, SIGN_IN_PROVIDER_KEY, switchBannerText } from '../lib/accountRoster';
+import { SIGN_IN_HINT_KEY, SIGN_IN_PROVIDER_KEY, switchBannerText, googleNativeCustomParameters } from '../lib/accountRoster';
 import { Capacitor } from '@capacitor/core';
 import { raceNativeAuth, settleWithinOrProceed, preLoginWebSignOutAllowed } from '../lib/nativeAuthGuard';
 import { normalizePhone } from '../lib/phoneNumber';
@@ -562,7 +562,19 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
   //  • 'error'    — a real failure → surfaced honestly.
   // (Previously cancel/double-tap ALSO force-navigated the whole page to Google — the
   // "login is not smooth" jolt the admin reported.)
-  const socialSignIn = async (provider: AuthProvider, onCredential?: (r: UserCredential) => void): Promise<'ok' | 'cancelled' | 'redirecting'> => {
+  const socialSignIn = async (
+    provider: AuthProvider,
+    onCredential?: (r: UserCredential) => void,
+    /**
+     * The account this call is switching TO, e.g. `handleGoogleSignIn`'s `signInHint` — the SAME value
+     * it already put on the web `GoogleAuthProvider` via `setCustomParameters`. Threaded through
+     * explicitly rather than re-read from `SIGN_IN_HINT_KEY` here, because the web path already
+     * consumed (and cleared) that key before this function runs; reading it a second time would
+     * always see it empty. See `googleNativeCustomParameters` for why the NATIVE branch needs its own
+     * copy of it at all.
+     */
+    signInHint?: string,
+  ): Promise<'ok' | 'cancelled' | 'redirecting'> => {
     // FORCE-LOGOUT THE OLD SESSION FIRST (admin 2026-07-18: "jab koi user kisi bhi id se login kare, to
     // old session automatic force logout ho jana chahiye"). Every login — any account, any method — starts
     // by clearing a lingering/half-dead session that could wedge the WEB popup. WEB ONLY: on the native app
@@ -587,11 +599,16 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
         let credential;
         if (isGoogle) {
           mark('opening Google sign-in…');
+          // THE ONE-TAP SWITCH (admin 2026-09-16: "easy one tap swich nahi ho raha"). Without this,
+          // every native switch opened Google's sign-in sheet with NO idea which account was wanted —
+          // the exact hint the web path already sends via `GoogleAuthProvider.setCustomParameters`,
+          // dropped the moment the flow reached a real phone. See `googleNativeCustomParameters`.
+          const googleParams = googleNativeCustomParameters(signInHint);
           // raceNativeAuth (2026-07-17): a wiring/SDK fault once left this promise PENDING FOREVER
           // (the redirect URL never reached GIDSignIn) — the user saw an infinite spinner. The bridge
           // now always answers within the window or the user gets an honest, retryable error.
           const nativeResult = await raceNativeAuth(
-            FirebaseAuthentication.signInWithGoogle(),
+            FirebaseAuthentication.signInWithGoogle(googleParams ? { customParameters: googleParams } : undefined),
             'Google sign-in timed out — please try again.',
           );
           const idToken = nativeResult.credential?.idToken;
@@ -765,7 +782,10 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       ? { prompt: 'select_account', login_hint: signInHint }
       : { prompt: 'select_account' });
     try {
-      const outcome = await socialSignIn(provider);
+      // The web provider above already carries this hint via setCustomParameters; the native branch
+      // inside socialSignIn cannot see that (it never touches `provider`), so the same value is
+      // passed through explicitly too — one hint, read once, honoured on both paths.
+      const outcome = await socialSignIn(provider, undefined, signInHint);
       // The user's own cancel: just re-enable the buttons — no error banner, no navigation.
       if (outcome === 'cancelled') setLoading(false);
     } catch (err: any) {

@@ -60,6 +60,24 @@ describe('the state that had no teeth', () => {
 describe('the wiring — UNKNOWN now has a consequence', () => {
   const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
 
+  /**
+   * THE BLOCK THIS SUITE PROTECTS, LOCATED BY WHAT IS UNIQUE TO IT.
+   *
+   * ⚠️ These three tests used to anchor on `gate.state === 'unknown' && result.ok` — the branch's own
+   * condition — which stopped identifying the branch the moment a SIBLING guarded by the same condition
+   * was added above it (the last-chance proof pass). `indexOf` then returned the sibling and the slice
+   * contained none of what is asserted here. Same trap as `releaseGateVerdict.test.ts`'s `at + 700`, one
+   * step earlier: an anchor must name the thing, not a property several things share. The finding CODE is
+   * unique to this block, and the end is the gate's own catch rather than a character count.
+   */
+  const unprovenBlock = (): string => {
+    const at = route.indexOf("code: 'RELEASE_GATE_UNPROVEN'");
+    expect(at).toBeGreaterThan(0);
+    const end = route.indexOf('catch { /* the gate reports on the build; a fault HERE must never affect it */ }', at);
+    expect(end).toBeGreaterThan(at);
+    return route.slice(at, end);
+  };
+
   it('records RELEASE_GATE_UNPROVEN when the gate is UNKNOWN on a successful build', () => {
     expect(route).toContain("gate.state === 'unknown' && result.ok");
     expect(route).toContain('RELEASE_GATE_UNPROVEN');
@@ -68,29 +86,22 @@ describe('the wiring — UNKNOWN now has a consequence', () => {
   it('the finding is NOT auto-resolved — nothing resolved it', () => {
     // Anchored on the CODE occurrence, not the first mention — the doc comment above names it too,
     // and slicing from there never reached the record (caught by this test failing first).
-    const at = route.indexOf("code: 'RELEASE_GATE_UNPROVEN'");
-    expect(at).toBeGreaterThan(0);
-    expect(route.slice(at, at + 400)).toContain('autoResolved: false');
+    expect(unprovenBlock().slice(0, 400)).toContain('autoResolved: false');
   });
 
   it('the notice reaches the USER’s summary, not only the admin report', () => {
-    const at = route.indexOf("gate.state === 'unknown' && result.ok");
-    const block = route.slice(at, at + 1800);
+    const block = unprovenBlock();
     expect(block).toContain('result.summary');
     expect(block).toMatch(/could not verify this one end to end/i);
   });
 
   it('🔒 it does NOT touch ok — an unproven build is not a failed build, and must not become free', () => {
-    const at = route.indexOf("gate.state === 'unknown' && result.ok");
-    const block = route.slice(at, at + 1800);
     // The RED flip sets `ok: false`; this branch must not. Proven by absence within the block.
-    expect(block).not.toContain('ok: false');
+    expect(unprovenBlock()).not.toContain('ok: false');
   });
 
   it('🔒 the user-facing line names no provider (White-Label Law)', () => {
-    const at = route.indexOf("gate.state === 'unknown' && result.ok");
-    const block = route.slice(at, at + 1800);
-    expect(block).not.toMatch(/\b(GLM|Kimi|Claude|Sonnet|Opus|Gemini|Grok|Moonshot|Z\.ai|Anthropic|OpenAI)\b/);
+    expect(unprovenBlock()).not.toMatch(/\b(GLM|Kimi|Claude|Sonnet|Opus|Gemini|Grok|Moonshot|Z\.ai|Anthropic|OpenAI)\b/);
   });
 
   it('the RED flip is still exactly as it was — this change adds a branch, it does not alter one', () => {

@@ -56583,6 +56583,64 @@ generous clock, and two new tests prove the clamp fires on the exact 4efab9d7 pa
 
 ---
 
+## 2026-09-15 — The APK Reports inbox can now leave the screen (admin: "apk build report download ka option hi nahi banaya aapne?")
+
+**The admin was right, and the answer is not "look again under a different name".** I searched by
+filename and by three vocabularies (`download` / `export` / `saveJson`, `blob` / `createObjectURL`,
+`copy`) across the whole repo before concluding anything. The admin panel has THREE report inboxes.
+**Build Reports** and **User Reports** have had Download and Copy since the day each shipped, both
+funnelling through one `saveJsonFile` helper. **APK Reports**, added on 2026-09-14 as the third page,
+shipped with neither — it could be read on screen and nothing else, with the failing step's log inside a
+`max-h-64` scrolling box. That is why the admin's own capture of the page came back with the log excerpt
+cut off: there was no way to take it off the screen intact.
+
+**What shipped, all of it through the helpers that already existed:**
+- **Download** and **Copy** on an open report — the record in hand IS the whole stored report, so
+  nothing is re-fetched that could differ from what was read.
+- **Download all** beside Clear all — `listApkReports` returns full records, so the inbox file is not a
+  summary.
+- `src/lib/apkReportFile.ts` is the only part with real logic: `owner` and `repo` come from a USER's
+  GitHub account, so a slash or a quote in a filename is a browser refusing to write the file. Same
+  sanitising reason as `apkReportId` on the server, and it falls back to the report id and then to a
+  bare name — a download is never blocked by an unusual repository name.
+
+🔴 **THE HONESTY FIX THAT MATTERS MORE THAN THE BUTTON: "Open the full run on GitHub" is not a link the
+admin can necessarily open.** `mobileShip.ts` takes `owner`/`repo` from the user's OWN connected GitHub
+account, so the run lives in THEIR repository — private in the ordinary case. The page presented it as
+where the complete log lives, sending the one person who has to fix the failure to a 404. It now says
+whose account it is and that everything below it is stored here, and the excerpt's heading states how
+many lines it holds (`reportLogExcerpt` keeps the last 120 of the failed step) instead of leaving
+"truncated" to be guessed at.
+
+### 🔎 The sibling hunt found a DEAD GUARD, and it had been dead silently
+
+Chasing rule 3 across the repo turned up something worth more than the button. **88 test files strip
+comments with `replace(/\/\*[\s\S]*?\*\//g, '')`, which treats `/*` as a comment opener wherever it
+appears — including inside ordinary strings** such as `accept="image/*"` and `'**/*.ts'`. It then runs
+to the next `*/`, hundreds of lines later, deleting real code.
+
+- It bit me first, in the new test: two assertions failed against JSX that was already correct.
+- **Then a scripted sweep of every `not.toContain` guard against every source file the naive strip
+  over-deletes found ONE genuinely dead:** `tests/appMart.test.ts` asserts
+  `AppKnowledgeBase.ts` carries no user-visible "Nav App Store". The naive strip deletes essentially
+  that whole file (583,991 characters), so the guard was passing on an empty string — **and a real
+  user-visible "Nav App Store" had survived the rename in the text every AI reads aloud.** Renamed to
+  App Mart, and the guard re-checked by re-injecting the old string and watching the test fail.
+- The three `not.toContain('Math.random')` game-runtime guards were checked the same way and are
+  genuinely alive (the generated files contain no inline `/*`) — reported as checked, not assumed.
+
+**The lesson, and it is the one this file already teaches about capped search output:** an assertion
+that something is ABSENT proves nothing until you have proved the text was present to be found. A
+negative guard needs a re-injection test the way a positive one does not.
+
+⚠️ **OPEN, deliberately not swept:** the other ~87 files carry the same naive stripper. None is
+currently dead — that was measured, not assumed — but each is one `not.toContain` away from becoming
+so. Centralising a single shared stripper would touch 88 unrelated test files in one diff, which is its
+own risk; the precise detector is noisy in CI (it matched 6 candidates for 1 real defect). Recorded here
+as an open item rather than half-swept.
+
+**Test-locked** in `tests/apkReportDownload.test.ts` (11 tests — the filename rules, both download
+paths, the shared-helper funnel, the honest empty/loading refusals, and the link's ownership note).
 ## 2026-09-15 — THE PUBLISH CEILING FIX WAS BUILT, MERGED AND SWITCHED OFF BY ONE EMPTY STRING
 
 **The report.** The admin's notification panel read: *"Hosting channels are filling up: 36 of about 50
@@ -56647,6 +56705,107 @@ apps belonging to real users, and the site's own `default` channel is never coun
 Reclaiming the 28 takes usage from 36/50 to 8/50 with nothing lost. Removing the 8 is a takedown, is a
 different decision, and was put back to the admin with the list offered first.
 
+---
+
+## 2026-09-15 — A Play bundle build that could not have succeeded now says so before it starts
+
+**From the same failure report.** A user pressed "Google Play bundle"; the run died in about a minute
+with `Missing signing secret(s): ANDROID_KEYSTORE_BASE64 …`, and that was the first they heard of it.
+
+**Nothing was broken, and that is the point.** The generated workflow's own pre-flight did exactly the
+right thing, and refusing to hand back an unsigned bundle is correct — Play rejects one anyway. What was
+wrong is that the press **could not have succeeded**, and only GitHub knew. `.apk` (debug-signed, zero
+setup) works on the first press for everyone; `.aab` cannot work for anybody until they install Java,
+run `keytool`, base64 the file and paste four secrets into GitHub.
+
+**What shipped:** `GET /api/mobile-ship/signing-status` asks GitHub which secret NAMES the repository
+has — the API never returns values, which is exactly what makes it safe to ask on the user's behalf —
+and `StoreBuildPanel` checks it BEFORE dispatching, but only for the workflow that needs a key.
+
+🔒 **ONLY A VERDICT BLOCKS.** A failed lookup is `unknown`, never `missing`: our own inability to check
+is not evidence about the user's repository, and a check that blocked the build on a GitHub hiccup would
+be a worse failure than the one it exists to prevent. The asymmetry sets every default here — a wrong
+"your key is missing" costs one press; a build that cannot succeed costs a run, several minutes, and the
+belief that the app builder is broken.
+
+⚠️ **A half-configured key is named exactly** (`ANDROID_KEY_ALIAS is still missing`) — that is the case
+nobody can debug from a generic message. And the refusal always names what works right now: a message
+that only says "no" leaves someone who wanted to try their app with nothing to press.
+
+**The drift guard that earned its place immediately:** a test asserts this module's four names against
+the names `mobileShipKit` really generates into the workflow — and it failed on its first run, because
+my own regex `ANDROID_[A-Z_]+` stopped at `ANDROID_KEYSTORE_BASE`, digits being outside the class. A
+guard that could not have caught a real rename would have been decoration.
+
+**Test-locked** in `tests/signingReadiness.test.ts` (11 tests). `AppKnowledgeBase` updated, so every AI
+in the app can tell a user this check exists. **Next: the auto half** — NavBharatAI generating the
+upload key and writing the four secrets itself, so the Play bundle is one press too.
+
+---
+
+## 2026-09-15 — NavBharatAI makes the user's Android upload key, so a Play bundle is one press
+
+**The second half of the admin's option 3.** The warning half stops a build that could not have
+succeeded; this half removes the reason it could not. Until today a Play Store bundle required the user
+to install a JDK, run `keytool` with six flags, base64 the file, and paste four secrets into GitHub —
+the wall where most people stop, and the same wall every competitor has.
+
+### 🔴 The objection that stood for years, and why it no longer holds
+
+`mobileSetup.ts` states it in writing: *"A signing key IS the app's permanent identity — if we held it
+and lost it, their app could never be updated again."* **That is true of the APP SIGNING key and false
+of this one.** Every new app on Play uses Play App Signing (mandatory for the `.aab` format): Google
+holds the app signing key, and what the developer holds is an **upload key**, which Google can **reset**
+if it is lost. The worst case is a support request, not a dead app.
+
+🔒 **And we still do not hold it.** The key is sealed into the user's OWN repository as GitHub Actions
+secrets and handed to their browser once to save. No vault row, no Firestore document, no log line — a
+test asserts the route contains no `encrypt(`, no store call and no `console.log`. Both old comments
+were corrected in place rather than deleted, so the original reasoning stays visible beside the reason
+it changed.
+
+### ✅ Verified with Java's own tooling, not assumed
+
+This sandbox has a JDK, so the generated PKCS#12 was read back by the real `keytool` rather than
+reasoned about:
+- `keytool -list -v` → *"Keystore type: PKCS12 · Alias name: upload · Entry type: PrivateKeyEntry ·
+  SHA256withRSA · 2048-bit RSA · valid until 2056"*, and the printed SHA-256 matched
+  `sha256Fingerprint` byte for byte.
+- `keytool -importkeystore` → **exit 0**, which only succeeds if the private key genuinely unlocks with
+  the password we generated.
+
+A hostile app name (`Shiv Medical Store, "Ltd" <test>`) came back as a valid distinguished name — a
+comma or a quote inside an X.509 DN is a syntax error, not a character.
+
+### The decisions that are not obvious
+
+- **PKCS#12, one password, two secrets.** A PKCS#12 keystore protects its key entry with the STORE
+  password, so `ANDROID_KEY_PASSWORD` must EQUAL `ANDROID_KEYSTORE_PASSWORD`. Different values produce
+  "Cannot recover key" at build time — the exact failure `mobileBuildRepair` already classifies.
+- **30-year validity.** Play rejects an upload certificate that expires before 22 Oct 2033, and by the
+  time that error appears the key is already in the user's repository — fixing it then is a key reset,
+  not an edit.
+- **RSA keygen on Node's NATIVE crypto**, not node-forge's pure-JS one, which would block the event
+  loop for seconds inside a request. forge does only the certificate and the PKCS#12 wrapper.
+- 🔴 **It will NEVER replace a key that is already there** without `replace: true` said explicitly. A
+  user who has published once is tied to that upload key; replacing it silently makes their next update
+  unpublishable, and no amount of convenience is worth that.
+- 🔒 **A repository we could not READ is never written to.** The key we cannot see is exactly the one at
+  risk, so a failed listing returns before a key is generated — test-locked by ordering, not by comment.
+- ⚠️ **A partial write is named, never swallowed.** Four secrets go up one at a time; if the third
+  fails the user is told which landed. It does **not** roll back — deleting what it managed to set could
+  delete a secret that was already there and correct.
+
+**Two new dependencies**, both verified through the repo's own gates (`audit:gate` ✅ 0 high/critical,
+`license:gate` ✅ no un-allowlisted copyleft): `node-forge` for the X.509 certificate and PKCS#12
+container, `libsodium-wrappers` for the `crypto_box_seal` that GitHub requires before a secret may be
+posted. There is no dependency-free route: Node has X25519 but neither XSalsa20-Poly1305 nor blake2b at
+the digest length a sealed box needs, and hand-rolling PKCS#12 ASN.1 would be the fragile choice.
+
+**Test-locked** in `tests/androidKeystore.test.ts` (10) and `tests/githubSecretWrite.test.ts` (10) —
+including that a sealed value really decrypts back with the matching secret key, that two seals of one
+value differ, and that a GitHub error body is never echoed to the screen. `AppKnowledgeBase` updated so
+every AI can explain the new button, what it will not do, and that a lost key is recoverable.
 ## 2026-09-15 — A PROVIDER KEY WAS A FEATURE SWITCH: `OPENAI_API_KEY` alone started an unmetered, never-read embedding spend
 
 **How it was found.** The admin bought an OpenAI key and asked one question: *"claude run me kis naam se
@@ -56824,3 +56983,126 @@ hand-calculation of that case was wrong.
 
 **STILL OPEN:** the `/api/build` legacy `openai` rung (`gpt-4o-mini`) is untouched — it is a routing-policy
 question for the admin, recorded in the previous entry.
+---
+
+## 2026-09-16 — Z.ai's and Moonshot's own price pages, saved verbatim; four live rates were wrong, all under-counting OUR cost
+
+The admin sent both vendors' pricing pages in full and asked for them to be saved before the next
+routing change ("mai apko other AI ke price bhejunga, fir ek sath me pura module badlenge"). Both tables
+now live in `providerRates.ts` — the module that OWNS prices — dated and sourced, so the coming change
+argues from quoted numbers instead of remembered ones.
+
+### What was wrong, and the pattern behind it
+
+| row | was | is (published) | why it was wrong |
+|---|---|---|---|
+| `glm-5.3-flash` cache | $0.0375 | **$0.03** | a ≈25%-of-input CONVENTION, not a quote |
+| `glm-5.x` cache | $0.35 | **$0.26** | same convention |
+| `glm-4.x` cache | $0.15 | **$0.11** | same convention |
+| `kimi-k2.7` cache | $0.24 | **$0.19** | same convention |
+| `kimi-k3` | $0.95 / $4.00 | **$3.00 / $15.00** | a PLACEHOLDER mirroring k2.7 "because the price is not verifiable here". It is **exactly Sonnet's price** |
+| `kimi-k2.6` | $0.60 / $2.50 | **$0.95 / $4.00** | it shared the cheap line with k2.5 on the assumption that an older rung is a cheaper one |
+
+🔎 **THE CLASS: a DERIVED number and a PLACEHOLDER number both look exactly like a measured one once
+they are in a table.** The file's own header called the convention "their published cache-hit lines" —
+it was neither published nor checked. Nothing could fail, because a price only proves itself against the
+invoice, and nobody had put the invoice next to the table.
+
+⚠️ **Every one of the six ran the same way — UNDER-stating our cost.** That is the direction that eats
+the admin's margin rather than over-charging a user, which is exactly why none of it ever surfaced as a
+complaint or a failing test. Two of them bite where it matters most: `kimi-k2.6` is the WEAK ladder's
+second rung and weak builds are paid for by NavBharatAI, so every free build has cost ~58% more input
+and 60% more output than the dashboard showed; and `kimi-k3` is the family CEILING for any unrecognised
+Kimi id.
+
+🔒 **The tests caught all of it, which is the point of pinning a price.** Seven assertions failed —
+including one whose title *named the convention* ("cache at the Z.ai 25% convention") — so the change
+could not land quietly. `kimi-k2.6` now has its own row and its own branch in the matcher.
+
+### Also recorded, for the module change the admin has planned
+
+`GLM-4.6V-Flash` (what vision already leads with) is **FREE**; `GLM-OCR` $0.03/MTok; `GLM-ASR-2512`
+~$0.0024/minute; `GLM-Image` $0.015/image; `GLM-4.7-FlashX` $0.07/$0.40. One thing NOT to do: Z.ai's
+built-in **Web Search is $0.01 per use, twice Brave's $0.005** — switching to it would cost more.
+⚠️ "Cached Input Storage" is **Limited-time Free** on every Z.ai line — a promotion, not a price.
+
+🔴 **`kimi-k2.5` is DISCONTINUED (2026-08-31), and the first thing checked was whether anything still
+calls it.** Nothing does: removed from the free ladder on 2026-09-04 after two build reports showed
+*"404 Not found the model kimi-k2.5 or Permission denied"* on this account. Its row stays on purpose —
+old telemetry names it and a report must be able to price what it recorded — now labelled historical.
+**So it is NOT a candidate for the build failures below**; verified by grep, not assumed.
+
+⚠️ **These cache rates still do not bite today.** The header records that cache-hit tokens are not
+tracked separately, so cached input is billed at the full cache-MISS rate. The corrected numbers matter
+the moment that tracking lands — and that is a real lever, because Z.ai's cache-hit price is ~5× cheaper
+than fresh input on the two models every build leads with.
+
+🔴 **OPEN, and far larger than anything above: the admin reports ~80% of app builds are FAILING.**
+No fix is proposed here because no evidence has been read yet. Recorded so the next session does not
+mistake a pricing commit for the state of the engine.
+
+## 2026-09-16 — The three ladders' Kimi rungs, revised on the admin's explicit per-tier instruction
+
+Admin, verbatim: *"free wale me kimi 2.6 ki jagah kimi code 2.7 kar de! normal wale me kimi code 2.7
+highspeed karo strong me kimi k3 bhi add karo."* This is the explicit per-tier routing confirmation the
+Model Routing Policy requires before `TIER_LADDERS` changes — three moves, all in
+`src/server/AgentV3/tierLadder.ts`:
+
+- **Weak's Kimi rung: `kimi-k2.6` → `kimi-k2.7-code`.** Moonshot's own price table (saved above,
+  2026-09-16) already showed these at the SAME price ($0.95/$4.00 in/out) — k2.7-code is Moonshot's
+  dedicated coding model, so this is a straight quality upgrade at no extra cost to the builds
+  NavBharatAI absorbs 100% of.
+- **Normal's Kimi rung: `kimi-k2.7-code` → `kimi-k2.7-code-highspeed`.** Same model family, ~2x
+  tokens/sec, and Moonshot prices it at EXACTLY 2x k2.7-code across every column ($1.90/$8.00/$0.38
+  cache — no quality difference, only speed). The admin was told this cost tradeoff before asking for
+  it (in an earlier turn this session) and proceeded anyway; it lands on Normal, a tier the USER pays
+  for, so the extra cost is priced into their bill rather than absorbed.
+- **Strong gains a Kimi rung for the first time: `kimi-k3`**, placed as the SECOND rung (after
+  `glm-5.3`, before Sonnet). Priced at exactly Sonnet parity ($3.00/$15.00), so this costs nothing extra
+  over what the ladder already assumed for its escalation path — it just gives Strong a third
+  independent vendor family to absorb a GLM outage before climbing all the way to Claude. "Opus sirf
+  zarurat par" is unaffected: Opus is still the last rung.
+
+🔴 **A real under-billing defect was found and fixed in the same change, not left for later.** Adding
+`kimi-k2.7-code-highspeed` to a ladder exposed that `providerRates.ts`'s `realRateFor()` Kimi matcher had
+**no branch for the `-highspeed` suffix at all** — it would have fallen through to the plain
+`return card['kimi-k2.7']` line and silently billed this model at HALF its real price, forever, on every
+Normal-tier build that reached it. Fixed with a dedicated `'kimi-k2.7-highspeed'` rate row
+($1.90/$8.00/$0.38, env-tunable via `RATE_KIMI27HS_IN`/`_OUT`/`_CACHE`) and a matcher branch checked
+BEFORE the k3/k2.6/k2.5/fallback chain. Verified by the re-injection method this repo's own rules
+require: the branch was deleted, `providerRates.test.ts`'s new pinned-price test was confirmed to FAIL
+(received $0.95/$4.00/$0.19 instead of the expected $1.90/$8.00/$0.38), then the fix was restored and
+the test re-confirmed green.
+
+**Test files updated to match the new `TIER_LADDERS` table** (all reversion-checked, none left
+asserting a value that happened to already be true): `tests/tierLadder.test.ts` (ladder sequences, the
+"kimi-k3 is on no ladder" assertion rewritten to "kimi-k3 is on Strong alone", the second-vendor
+assertion for Strong, `availableRungs`/`describeLadder`/`planLadder` expectations),
+`tests/tierChainFidelity.test.ts` (stale ordering in two test titles fixed per the "point at the owning
+module" lesson; the "Strong without a GLM key has no Kimi rung by design" test's premise was now FALSE
+and was rewritten with a new companion test covering the still-real "neither GLM nor Kimi keyed" case;
+the `enforceNoClaude`-on-Strong test now expects `['GLM', 'KIMI']` instead of `['GLM']`).
+`tests/freeKimiLadder.test.ts` and `tests/weakHealLadder.test.ts` were confirmed (again) to test the
+separate, documented-as-legacy `cheapBuildFloorRunners`/`kimiDefault` code path in `routes/agentv3.ts`,
+not `TIER_LADDERS` — left untouched, matching prior investigation.
+
+🔎 **One more sibling only the FULL suite run caught, confirming why the gate runs on the final state and
+not mid-way:** `src/server/routes/agentv3.test.ts`'s `planRunnerChainNames` tests asserted Strong's plan
+chain as `['GLM', 'CLAUDE', 'CLAUDE_OPUS']` (no Kimi) — a third place deriving from `planLadder('mini')`
+that the sibling-hunt grep for `kimi-k2.6`/`kimi-k2.7-code` literals did not surface, because it names no
+Kimi model at all in its old form. Updated to `['GLM', 'KIMI', 'CLAUDE', 'CLAUDE_OPUS']`, and the
+weak-guard test's `['GLM']` → `['GLM', 'KIMI']` (the guard strips Claude rungs only; it never touches
+GLM/Kimi).
+
+Full verification gate run on the final merged state (this branch was rebased onto PR #2963's GLM/Kimi
+price-correction commit before these edits, so both changes ship together and neither drifts from the
+other): `npm run typecheck` · `node scripts/noUnusedImports.mjs` · `npm run typecheck:server` ·
+`npm run build` · `npm run test:bundle` · `npm run boot:check` · `npx vitest run` (Tests line read
+directly, not a truncated tail).
+
+CLAUDE.md's "THREE TIERS, THREE LADDERS" table and its per-tier rationale paragraph updated in the same
+change to match — the ladder is meant to be a single source of truth and the doc must not drift from it.
+
+⚠️ **Still open, unchanged by this work:** the admin's ~80% build-failure claim (no evidence supplied
+yet) and the second, unsent batch of AI provider prices ("ek sath me pura module badlenge") the admin
+said would follow the GLM/Kimi corrections.

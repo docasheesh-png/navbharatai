@@ -32,10 +32,32 @@ describe('the free Kimi ladder no longer leads with a model that cannot answer',
     expect(kimiDefaultLine).toContain("['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6']");
   });
 
-  it('costs nothing: the rung now leading is priced identically to the one removed', () => {
-    // This is what settled "remove vs re-enable". If these ever diverge, the trade-off changes and
-    // the decision deserves revisiting — so it is asserted rather than left in a comment.
-    expect(realRateFor('KIMI', 'kimi-k2.6')).toEqual(realRateFor('KIMI', 'kimi-k2.5'));
+  /**
+   * 🔴 THIS ASSERTION FIRED ON 2026-09-16, EXACTLY AS IT WAS DESIGNED TO — and the premise it guarded
+   * turned out to be false. It used to read *"costs nothing: the rung now leading is priced identically
+   * to the one removed"*, with the note: *"This is what settled remove vs re-enable. If these ever
+   * diverge, the trade-off changes and the decision deserves revisiting."*
+   *
+   * They diverged. Moonshot's own price table prices **k2.6 at $0.95 / $4.00** — the same as k2.7-code,
+   * NOT the $0.60 / $2.50 the rate card had been lumping it at with the retired k2.5. So dropping k2.5
+   * did not cost nothing: it raised the weak ladder's real cost by ~58% on input and ~60% on output,
+   * and NavBharatAI pays for weak builds itself. The price was wrong; the reasoning was sound.
+   *
+   * ⚠️ THE DECISION STILL STANDS, and for the reason that was always the real one: k2.5 returned
+   * "404 Not found the model kimi-k2.5 or Permission denied" on this account, so there was never a
+   * cheaper working rung to keep. "It costs nothing" was a supporting argument built on a number nobody
+   * had checked against an invoice — which is the whole reason a price belongs in a test.
+   */
+  it('k2.6 is NOT the same price as the retired k2.5 — the swap really did cost more', () => {
+    const k26 = realRateFor('KIMI', 'kimi-k2.6');
+    const k25 = realRateFor('KIMI', 'kimi-k2.5');
+    expect(k26).not.toEqual(k25);
+    expect(k26.inputPerMTok).toBeGreaterThan(k25.inputPerMTok);
+    expect(k26.outputPerMTok).toBeGreaterThan(k25.outputPerMTok);
+    // Moonshot prices k2.6 exactly like the coder rung the paid ladder uses.
+    const k27 = realRateFor('KIMI', 'kimi-k2.7-code');
+    expect(k26.inputPerMTok).toBe(k27.inputPerMTok);
+    expect(k26.outputPerMTok).toBe(k27.outputPerMTok);
   });
 
   it('the rate card KEEPS k2.5 — an older build\'s telemetry must still price correctly', () => {

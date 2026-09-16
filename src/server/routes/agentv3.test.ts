@@ -1975,13 +1975,14 @@ describe('planRunnerChainNames — the plan phase respects WEAK ⇒ NO CLAUDE (a
     expect(names).not.toContain('GROK');
   });
 
-  it('normal plans on glm-5.3-flash first; strong on glm-5.3 first with Opus last', () => {
+  it('normal plans on glm-5.3-flash first; strong on glm-5.3 first, Kimi k3 second, Opus last', () => {
+    // Strong's ladder gained a Kimi rung (kimi-k3) on 2026-09-16, second after glm-5.3.
     expect(planRunnerChainNames(false, 'off')).toEqual(['GLM', 'KIMI', 'GLM', 'CLAUDE']);
-    expect(planRunnerChainNames(false, 'mini')).toEqual(['GLM', 'CLAUDE', 'CLAUDE_OPUS']);
+    expect(planRunnerChainNames(false, 'mini')).toEqual(['GLM', 'KIMI', 'CLAUDE', 'CLAUDE_OPUS']);
   });
 
   it('the guard still strips every Claude rung from a weak plan whatever the ladder said', () => {
-    expect(planRunnerChainNames(true, 'mini')).toEqual(['GLM']);
+    expect(planRunnerChainNames(true, 'mini')).toEqual(['GLM', 'KIMI']);
   });
 });
 

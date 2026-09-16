@@ -236,8 +236,25 @@ export function previewBridgeSource(source: 'in-browser' | 'live'): string {
   // back/forward chevrons in the Code Studio panel were removed as fake). It CAN be done from in
   // here, because this script runs inside the app itself. So the app reports where it is, and obeys
   // real history calls; nothing is simulated and nothing is faked.
+  //
+  // 🔴 A srcdoc DOCUMENT HAS NO PATH, AND PRINTING ITS PATHNAME SHOWS THE USER THE WORD "srcdoc"
+  // (admin screenshot 2026-09-14: the address bar read literally "srcdoc").
+  //
+  // The in-browser preview is an about:srcdoc iframe, whose location.pathname is the string
+  // "srcdoc" — the path half of that opaque URL, and nothing to do with the app. The navigation half
+  // was already correct (the handler below routes this mode by HASH, because a srcdoc document cannot
+  // be navigated), so the bar genuinely worked while displaying an address that was never real.
+  //
+  // In this mode the app's route IS the hash, so that is what is reported: "#/dashboard" → "/dashboard",
+  // and no hash yet → "/". The live-server preview is untouched — there pathname is the real path.
   function currentPath() {
-    try { return location.pathname + location.search + location.hash; } catch (e) { return '/'; }
+    try {
+      if (SOURCE === 'in-browser' || location.protocol === 'about:') {
+        var h = String(location.hash || '');
+        return h.indexOf('#/') === 0 ? h.slice(1) : (h.length > 1 ? '/' + h.slice(1) : '/');
+      }
+      return location.pathname + location.search + location.hash;
+    } catch (e) { return '/'; }
   }
   function reportRoute() { post({ __nbaiPreviewRoute: true, source: SOURCE, path: currentPath() }); }
   // A SPA changes route WITHOUT firing popstate — pushState is a silent history mutation, which is

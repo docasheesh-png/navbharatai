@@ -94,7 +94,14 @@ export type EmptyBuildCause =
   /** The engine tried and could not finish — the case this message was written for. */
   | 'engine'
   /** There was never an instruction to build from (a bare link, an empty prompt). Not our engine's fault, and not the user's to pay for. */
-  | 'no-instruction';
+  | 'no-instruction'
+  /**
+   * OUR OWN configuration was wrong — a ladder rung rejecting every call with the same permanent
+   * error (a malformed request, a bad key, a model id that does not answer). Not an engine limit,
+   * not the app's difficulty, and emphatically not something to charge for. See
+   * `providerFailuresLookMisconfigured`.
+   */
+  | 'our-configuration';
 
 /**
  * The message shown when a free-tier (cheap-only) build could not deliver.
@@ -110,6 +117,17 @@ export type EmptyBuildCause =
  * Displayed to end users, so it stays provider-agnostic (white-label law §2 — no model names).
  */
 export function freeTierUpsellMessage(cause: EmptyBuildCause = 'engine'): string {
+  if (cause === 'our-configuration') {
+    // 🔒 NO ASK FOR MONEY, AND NO BLAME ANYWHERE ELSE (build report 58fe8254, 2026-09-15: one rung
+    // rejected 279 calls with the same hard 400 and the user was invited to buy credits). Credits
+    // would not have changed a single one of those calls. It does not name a provider or a model —
+    // white-label law §2 — and it does not blame the user's wording either, because the wording was
+    // never the problem.
+    return (
+      'That one is on us — our build engine hit a problem on our side, not with your app. '
+      + 'Nothing you have done is lost. Please try again in a moment; I have logged it so we can fix it.'
+    );
+  }
   if (cause === 'no-instruction') {
     // 🔒 NO ASK FOR MONEY. Credits would not have helped, and charging the user's attention for our
     // own gap is how a product loses trust it cannot buy back.

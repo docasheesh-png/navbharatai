@@ -18,6 +18,7 @@ import { pacerEnabled, getSharedPacer } from '../RateLimitPacer';
 import { parseEnvFlag } from '../../lib/envFlag';
 import { isModelUnavailableError } from '../providerErrorClass';
 import { isBudgetEndedError } from '../turnDeadline';
+import { isStarvedBudgetError } from '../floorBudget';
 
 export interface NamedRunner {
   /** Bench/identity name, e.g. 'GROK', 'CLAUDE'. UNIQUE per rung — the timeout/429 bench keys on it,
@@ -525,7 +526,9 @@ export function makeMultiProviderTurnRunner(
    * per call into a build with no Kimi at all.
    */
   const deadKeyFor = (entry: NamedRunner, err: unknown): string =>
-    (isModelUnavailableError(err) && entry.modelId) ? `${entry.name}::${entry.modelId}` : entry.name;
+    ((isModelUnavailableError(err) || isStarvedBudgetError(err)) && entry.modelId)
+      ? `${entry.name}::${entry.modelId}`
+      : entry.name;
   /**
    * 🔴 THE TIMEOUT STREAK IS KEYED BY PROVIDER FAMILY, NOT BY KEY (autopsy 4efab9d7, 2026-09-15).
    *
@@ -646,7 +649,23 @@ export function makeMultiProviderTurnRunner(
             const reason1 = err instanceof Error ? err.message : String(err);
             throw new Error(`This build's time budget ended before the step could finish (${reason1}). No provider failed — the work was stopped by our own deadline.`);
           }
-          if (isFatalProviderError(err) || isModelUnavailableError(err)) {
+          if (isFatalProviderError(err) || isModelUnavailableError(err) || isStarvedBudgetError(err)) {
+            // 🔴 A STARVED RUNG IS RETIRED ON ITS FIRST OCCURRENCE, AND THE ARGUMENT IS NOT "PROBABLY"
+            // (autopsy ee20478d, 2026-09-15). The authorised budget is a CONSTANT for the whole run —
+            // 4,833 tokens, derived from a fixed cap and a fixed rate — and an agentic transcript only
+            // ever GROWS. So a rung that could not begin an answer on turn 1 has strictly less room on
+            // turn 2, and re-proving that costs ~97 s of the user's build every single turn. That
+            // build spent three of them, back to back, on the same doomed call.
+            //
+            // It is keyed on the MODEL via `deadKeyFor`, exactly like model-unavailable and for the
+            // same reason: this is a fact about one rung's model at this budget, never about the
+            // provider. The other GLM rungs, the other vendors and the Claude/Haiku backstop are all
+            // untouched — and a run in which every rung starves still ends at the honest "all
+            // providers failed" throw below rather than silently.
+            //
+            // ⚠️ It must NOT be treated as a timeout: the provider answered, quickly and correctly,
+            // inside its clock. Benching the family for our own ceiling would take a healthy vendor
+            // off the ladder for the rest of the build.
             // A MODEL-NOT-FOUND is as deterministic as a revoked key and was, until this report, the one
             // permanent failure with no memory anywhere in the chain: it is neither a timeout nor a 429,
             // so it hit no bench and fell through to the next rung on EVERY call, forever. Build faa98da9

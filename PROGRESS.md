@@ -56916,3 +56916,127 @@ My earlier answer to him named only the first. Recorded as a correction, not qui
 🔴 **STILL OPEN — the flag is not live.** PR #2958 gates `EmbeddingSearch`, and it is green but **not
 merged**, so on production `main` the key is currently ungated and item 1 is spending now. The remedy is
 the admin merging #2958 (or unsetting the key); it is his call under the standing merge-hold rule.
+
+---
+
+## 2026-09-16 — Z.ai's and Moonshot's own price pages, saved verbatim; four live rates were wrong, all under-counting OUR cost
+
+The admin sent both vendors' pricing pages in full and asked for them to be saved before the next
+routing change ("mai apko other AI ke price bhejunga, fir ek sath me pura module badlenge"). Both tables
+now live in `providerRates.ts` — the module that OWNS prices — dated and sourced, so the coming change
+argues from quoted numbers instead of remembered ones.
+
+### What was wrong, and the pattern behind it
+
+| row | was | is (published) | why it was wrong |
+|---|---|---|---|
+| `glm-5.3-flash` cache | $0.0375 | **$0.03** | a ≈25%-of-input CONVENTION, not a quote |
+| `glm-5.x` cache | $0.35 | **$0.26** | same convention |
+| `glm-4.x` cache | $0.15 | **$0.11** | same convention |
+| `kimi-k2.7` cache | $0.24 | **$0.19** | same convention |
+| `kimi-k3` | $0.95 / $4.00 | **$3.00 / $15.00** | a PLACEHOLDER mirroring k2.7 "because the price is not verifiable here". It is **exactly Sonnet's price** |
+| `kimi-k2.6` | $0.60 / $2.50 | **$0.95 / $4.00** | it shared the cheap line with k2.5 on the assumption that an older rung is a cheaper one |
+
+🔎 **THE CLASS: a DERIVED number and a PLACEHOLDER number both look exactly like a measured one once
+they are in a table.** The file's own header called the convention "their published cache-hit lines" —
+it was neither published nor checked. Nothing could fail, because a price only proves itself against the
+invoice, and nobody had put the invoice next to the table.
+
+⚠️ **Every one of the six ran the same way — UNDER-stating our cost.** That is the direction that eats
+the admin's margin rather than over-charging a user, which is exactly why none of it ever surfaced as a
+complaint or a failing test. Two of them bite where it matters most: `kimi-k2.6` is the WEAK ladder's
+second rung and weak builds are paid for by NavBharatAI, so every free build has cost ~58% more input
+and 60% more output than the dashboard showed; and `kimi-k3` is the family CEILING for any unrecognised
+Kimi id.
+
+🔒 **The tests caught all of it, which is the point of pinning a price.** Seven assertions failed —
+including one whose title *named the convention* ("cache at the Z.ai 25% convention") — so the change
+could not land quietly. `kimi-k2.6` now has its own row and its own branch in the matcher.
+
+### Also recorded, for the module change the admin has planned
+
+`GLM-4.6V-Flash` (what vision already leads with) is **FREE**; `GLM-OCR` $0.03/MTok; `GLM-ASR-2512`
+~$0.0024/minute; `GLM-Image` $0.015/image; `GLM-4.7-FlashX` $0.07/$0.40. One thing NOT to do: Z.ai's
+built-in **Web Search is $0.01 per use, twice Brave's $0.005** — switching to it would cost more.
+⚠️ "Cached Input Storage" is **Limited-time Free** on every Z.ai line — a promotion, not a price.
+
+🔴 **`kimi-k2.5` is DISCONTINUED (2026-08-31), and the first thing checked was whether anything still
+calls it.** Nothing does: removed from the free ladder on 2026-09-04 after two build reports showed
+*"404 Not found the model kimi-k2.5 or Permission denied"* on this account. Its row stays on purpose —
+old telemetry names it and a report must be able to price what it recorded — now labelled historical.
+**So it is NOT a candidate for the build failures below**; verified by grep, not assumed.
+
+⚠️ **These cache rates still do not bite today.** The header records that cache-hit tokens are not
+tracked separately, so cached input is billed at the full cache-MISS rate. The corrected numbers matter
+the moment that tracking lands — and that is a real lever, because Z.ai's cache-hit price is ~5× cheaper
+than fresh input on the two models every build leads with.
+
+🔴 **OPEN, and far larger than anything above: the admin reports ~80% of app builds are FAILING.**
+No fix is proposed here because no evidence has been read yet. Recorded so the next session does not
+mistake a pricing commit for the state of the engine.
+
+## 2026-09-16 — The three ladders' Kimi rungs, revised on the admin's explicit per-tier instruction
+
+Admin, verbatim: *"free wale me kimi 2.6 ki jagah kimi code 2.7 kar de! normal wale me kimi code 2.7
+highspeed karo strong me kimi k3 bhi add karo."* This is the explicit per-tier routing confirmation the
+Model Routing Policy requires before `TIER_LADDERS` changes — three moves, all in
+`src/server/AgentV3/tierLadder.ts`:
+
+- **Weak's Kimi rung: `kimi-k2.6` → `kimi-k2.7-code`.** Moonshot's own price table (saved above,
+  2026-09-16) already showed these at the SAME price ($0.95/$4.00 in/out) — k2.7-code is Moonshot's
+  dedicated coding model, so this is a straight quality upgrade at no extra cost to the builds
+  NavBharatAI absorbs 100% of.
+- **Normal's Kimi rung: `kimi-k2.7-code` → `kimi-k2.7-code-highspeed`.** Same model family, ~2x
+  tokens/sec, and Moonshot prices it at EXACTLY 2x k2.7-code across every column ($1.90/$8.00/$0.38
+  cache — no quality difference, only speed). The admin was told this cost tradeoff before asking for
+  it (in an earlier turn this session) and proceeded anyway; it lands on Normal, a tier the USER pays
+  for, so the extra cost is priced into their bill rather than absorbed.
+- **Strong gains a Kimi rung for the first time: `kimi-k3`**, placed as the SECOND rung (after
+  `glm-5.3`, before Sonnet). Priced at exactly Sonnet parity ($3.00/$15.00), so this costs nothing extra
+  over what the ladder already assumed for its escalation path — it just gives Strong a third
+  independent vendor family to absorb a GLM outage before climbing all the way to Claude. "Opus sirf
+  zarurat par" is unaffected: Opus is still the last rung.
+
+🔴 **A real under-billing defect was found and fixed in the same change, not left for later.** Adding
+`kimi-k2.7-code-highspeed` to a ladder exposed that `providerRates.ts`'s `realRateFor()` Kimi matcher had
+**no branch for the `-highspeed` suffix at all** — it would have fallen through to the plain
+`return card['kimi-k2.7']` line and silently billed this model at HALF its real price, forever, on every
+Normal-tier build that reached it. Fixed with a dedicated `'kimi-k2.7-highspeed'` rate row
+($1.90/$8.00/$0.38, env-tunable via `RATE_KIMI27HS_IN`/`_OUT`/`_CACHE`) and a matcher branch checked
+BEFORE the k3/k2.6/k2.5/fallback chain. Verified by the re-injection method this repo's own rules
+require: the branch was deleted, `providerRates.test.ts`'s new pinned-price test was confirmed to FAIL
+(received $0.95/$4.00/$0.19 instead of the expected $1.90/$8.00/$0.38), then the fix was restored and
+the test re-confirmed green.
+
+**Test files updated to match the new `TIER_LADDERS` table** (all reversion-checked, none left
+asserting a value that happened to already be true): `tests/tierLadder.test.ts` (ladder sequences, the
+"kimi-k3 is on no ladder" assertion rewritten to "kimi-k3 is on Strong alone", the second-vendor
+assertion for Strong, `availableRungs`/`describeLadder`/`planLadder` expectations),
+`tests/tierChainFidelity.test.ts` (stale ordering in two test titles fixed per the "point at the owning
+module" lesson; the "Strong without a GLM key has no Kimi rung by design" test's premise was now FALSE
+and was rewritten with a new companion test covering the still-real "neither GLM nor Kimi keyed" case;
+the `enforceNoClaude`-on-Strong test now expects `['GLM', 'KIMI']` instead of `['GLM']`).
+`tests/freeKimiLadder.test.ts` and `tests/weakHealLadder.test.ts` were confirmed (again) to test the
+separate, documented-as-legacy `cheapBuildFloorRunners`/`kimiDefault` code path in `routes/agentv3.ts`,
+not `TIER_LADDERS` — left untouched, matching prior investigation.
+
+🔎 **One more sibling only the FULL suite run caught, confirming why the gate runs on the final state and
+not mid-way:** `src/server/routes/agentv3.test.ts`'s `planRunnerChainNames` tests asserted Strong's plan
+chain as `['GLM', 'CLAUDE', 'CLAUDE_OPUS']` (no Kimi) — a third place deriving from `planLadder('mini')`
+that the sibling-hunt grep for `kimi-k2.6`/`kimi-k2.7-code` literals did not surface, because it names no
+Kimi model at all in its old form. Updated to `['GLM', 'KIMI', 'CLAUDE', 'CLAUDE_OPUS']`, and the
+weak-guard test's `['GLM']` → `['GLM', 'KIMI']` (the guard strips Claude rungs only; it never touches
+GLM/Kimi).
+
+Full verification gate run on the final merged state (this branch was rebased onto PR #2963's GLM/Kimi
+price-correction commit before these edits, so both changes ship together and neither drifts from the
+other): `npm run typecheck` · `node scripts/noUnusedImports.mjs` · `npm run typecheck:server` ·
+`npm run build` · `npm run test:bundle` · `npm run boot:check` · `npx vitest run` (Tests line read
+directly, not a truncated tail).
+
+CLAUDE.md's "THREE TIERS, THREE LADDERS" table and its per-tier rationale paragraph updated in the same
+change to match — the ladder is meant to be a single source of truth and the doc must not drift from it.
+
+⚠️ **Still open, unchanged by this work:** the admin's ~80% build-failure claim (no evidence supplied
+yet) and the second, unsent batch of AI provider prices ("ek sath me pura module badlenge") the admin
+said would follow the GLM/Kimi corrections.

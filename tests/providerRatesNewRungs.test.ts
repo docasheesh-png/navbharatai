@@ -20,8 +20,22 @@ describe('glm-5.3-flash is priced as a 5.x model, not as the $0 4.7-flash', () =
     // …while the genuine 4.7-flash still prices at its own $0 line.
     expect(realRateFor('GLM', 'glm-4.7-flash')).toEqual(realRateCard()['glm-flash']);
   });
-  it('defaults to the admin-supplied price: $0.15 in / $0.50 out, cache at the Z.ai 25% convention', () => {
-    expect(realRateFor('GLM', 'glm-5.3-flash')).toEqual({ inputPerMTok: 0.15, outputPerMTok: 0.5, cacheReadPerMTok: 0.0375 });
+  /**
+   * ⚠️ THE CACHE FIGURE CHANGED ON 2026-09-16, AND THIS TEST IS WHY IT WAS NOTICED. It pinned
+   * $0.0375 — a ≈25%-of-input CONVENTION this repo had assumed for Z.ai — and the admin's own copy of
+   * docs.z.ai/pricing puts the published cache-hit rate at **$0.03**. The convention was over-stating
+   * our cost on every cached GLM token, and a bill is the real cost × markup, so it was over-stating
+   * the USER's bill too. The same correction moved glm-5.x ($0.35 → $0.26) and glm-4.x ($0.15 → $0.11).
+   * Input and output were already right. A price is now a QUOTED number, never a derived one.
+   */
+  it('defaults to the published Z.ai price: $0.15 in / $0.50 out, cache-hit $0.03', () => {
+    expect(realRateFor('GLM', 'glm-5.3-flash')).toEqual({ inputPerMTok: 0.15, outputPerMTok: 0.5, cacheReadPerMTok: 0.03 });
+  });
+
+  /** The other two rows the same correction touched, pinned so the convention cannot creep back. */
+  it('the glm-5.x and glm-4.x cache-hit rates are the published ones too', () => {
+    expect(realRateFor('GLM', 'glm-5.3').cacheReadPerMTok).toBe(0.26);
+    expect(realRateFor('GLM', 'glm-4.7').cacheReadPerMTok).toBe(0.11);
   });
   it('the non-flash glm-5.3 prices on the glm-5 line ($1.40 / $4.40) — the same number the admin gave', () => {
     expect(realRateFor('GLM', 'glm-5.3')).toEqual(realRateCard()['glm-5']);
@@ -59,7 +73,9 @@ describe('gpt-5.4 / OPENAI is priced at the conservative upper bound until the k
     expect(realRateFor('OPENAI', 'gpt-5.4')).not.toEqual(realRateFor('OPENAI', 'gpt-5.4-nano'));
   });
   it('does not swallow unrelated ids: kimi/glm/gemini still price on their own lines', () => {
-    expect(realRateFor('KIMI', 'kimi-k2.6')).toEqual(realRateCard().kimi);
+    // ⚠️ k2.6 moved to its OWN row on 2026-09-16 (Moonshot prices it at the k2.7-code rate), so the
+    // point here is that it prices on ITS line — not that it shares the retired k2.5 one.
+    expect(realRateFor('KIMI', 'kimi-k2.6')).toEqual(realRateCard()['kimi-k2.6']);
     expect(realRateFor('GEMINI', 'gemini-2.5-pro')).toEqual(realRateCard()['gemini-pro']);
   });
 });

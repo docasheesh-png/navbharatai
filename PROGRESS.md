@@ -58412,3 +58412,99 @@ hardcoded, never populated anywhere) — Android package identity is not tracked
 `provenance.repo` was used instead as this app's real identity key because it is the only stable value
 that already exists on every submission; a real `packageName` extracted from the APK's manifest would
 be a cleaner, more standard key and is a separate, future improvement.
+
+---
+
+## 2026-09-16 — P0: a protected CORRECTION RESERVE, so verify → repair → re-verify has a budget of its own
+
+**The admin's objective, verbatim:** *"FIRST-BUILD CORRECTNESS > MINIMUM LATENCY… I am willing to let a
+build take longer if that materially increases the probability that the final application is actually
+working."* #2976 made an unproven build say so; #2978 gave it one last look. Neither gave correction a
+budget. This does.
+
+### The audit, traced from code (no guesses)
+
+| Question | Answer, with the line |
+|---|---|
+| Where is the budget created? | `maxBuildSeconds()` (`routes/agentv3.ts:1668`, default **1800 s**) → `scaleBuildSeconds(…, depth)` (`PipelineDepth.ts:55`, ×2.0 for `deep`, ceiling 3600 s) → `effectiveBuildSeconds` → `deadlineMs`. |
+| Is it a hard wall all stages respect? | **Yes.** `setTimeout(finalizeOnDeadline, deadlineMs)` finalizes the response; `ADVISORY_CAP_MS` (120 s) is armed only **after** the gate, so it does not eat the correction window. |
+| Where do the repair rounds come from? | `autoFixMaxAttempts()` (`AutoFix.ts:143`) — **default 1**, hard-capped at 3, via `AGENTV3_AUTOFIX_ATTEMPTS`. Not three by default. |
+| Is repair budget reserved, or leftovers? | 🔴 **Leftovers, entirely.** ~25 post-build checks each ask `Date.now() - buildStartedAt < effectiveBuildSeconds*1000 - X` with X = 30 s (render rescue), 45 s (page check, last-chance proof), 60 s (heal floor), 90 s (preview verify + heal, journeys, review) and 120 s (red-team). **Not one of them reserves anything.** |
+| Can generation consume the whole budget? | 🔴 **Yes, by construction.** `baseRunnerOpts.maxBuildMs = effectiveBuildSeconds * 1000` — the *whole* clock — and `buildTimedOut` stops the runner only at 100%. |
+| What happens when verification finds a real error with no budget left? | The gates are never entered at all: they all fail their headroom test **together**, so verify → repair → re-verify is skipped in silence. That is the mechanism behind the UNKNOWN gate. |
+| Can a reserve be introduced without touching provider timeouts? | **Yes** — it is a split of the build's own wall clock; no provider timeout, stream bound or ceiling is involved. |
+| Fast lane? | **Not the problem.** `SimpleBuilder` is independently hard-bounded at `overallTimeoutMs ?? 240_000` and the route passes no override. Only the agentic path could eat the budget. |
+
+🔎 **One discovery that changed the design:** `AgentRunner` sets `buildStartMs = Date.now()` **inside
+`run()`**, so `maxBuildMs` is a **per-runner** cap, not a build-wide one. Every heal/escalation runner
+therefore gets a *fresh* full-length clock today. A reserve that only bounded the main runner would be
+spent by the first escalation.
+
+### The change
+
+New `src/server/AgentV3/correctionReserve.ts`. `generationBudgetMs(totalMs, elapsedMs)` is handed to
+the **three generation-shaped runners only** — the main build, the escalation, the empty-build retry.
+Every heal runner keeps `baseRunnerOpts`' full ceiling, because **they are the ones that spend the
+reserve.**
+
+🔑 **The fraction is DERIVED, not chosen.** `CORRECTION_RESERVE_FRACTION = 1 - BUDGET_STAGE_AT.final`
+= **10%**. `buildBudgetSteer` has told the model since the f04421ef autopsy that past 90% it must
+*"stop all work now except saving what you have and writing an honest summary"* — **advisory, and
+nothing enforced it.** The reserve is that same line, enforced. It takes no time the engine had not
+already declared spent, which is why no new number had to be invented. If that threshold moves, this
+moves with it.
+
+**The band makes one fraction safe at every cap:** floor **120 s** (the preview-verify gate needs
+*more* than 90 s of headroom to be entered — a 90 s reserve would cost generation time and still leave
+every check skipping), ceiling **300 s** (a deep build's 10% is six minutes; correction is a bounded
+repair round, not a second build), share **25%** (on a short cap the floor would otherwise take 40%).
+Default 1800 s → **180 s**. Deep 3600 s → 300 s. Short 300 s → 75 s, and the honest consequence is
+stated rather than hidden: a five-minute total budget cannot afford a repair round and does not
+pretend to reserve one.
+
+🔒 **`MIN_GENERATION_MS` exists to stop a cap of zero, which would be the opposite of a cap.**
+`buildTimedOut` treats `maxBuildMs <= 0` as *"no watchdog configured"* and never stops the runner — so
+a reserve computation that reached 0 would silently **remove** the wall-clock guard from the very
+build it bounds. A positive floor makes that arithmetically impossible, and a test asserts the cap
+really fires at every input.
+
+**Telemetry:** one `CORRECTION_BUDGET` finding per build — `total`, `reserve`, `generationCap`,
+`elapsedAtGate`, `leftAtGate`, `gate`. Admin-only, `info`, wrapped: an accounting line must never fail
+the build it accounts for.
+
+**Kill switch:** `AGENTV3_CORRECTION_RESERVE=off` → generation keeps the whole budget, byte-identical
+to today, no deploy.
+
+### The honest trade, stated rather than buried
+
+**Generation now stops 10% earlier.** For a build that would have used its last 10% productively, that
+is a real loss. Two things make it the right trade, and neither is an assumption:
+
+1. **That population was already getting no verification.** A build finishing at 95% leaves 90 s, and
+   the verify gate needs *more* than 90 s — so it was skipped anyway. Cutting at 90% does not cost
+   those builds their verification; it costs them 10% of generation and **buys** them the verification
+   they were never getting.
+2. **The 90% line is the engine's own existing policy**, not a new restriction invented here.
+
+⚠️ **What I could NOT measure, and did not pretend to:** how often generation actually runs to the
+wall. No telemetry existed for it — which is exactly why `CORRECTION_BUDGET` is in this change. If
+`leftAtGate` turns out to be large on most builds, the reserve is costing generation time it did not
+need, and the band should shrink. **That is a measurement to take, not a claim being made here.**
+
+### Not done, deliberately (P1/P2, not implemented)
+
+- **P1 — targeted repair context.** `buildPreviewRepairPrompt` (`PreviewVerify.ts:321`) passes the
+  analyzer's problems and up to 15 console errors, then says *"read the relevant files first"* — so
+  file selection is the model's job and costs turns. The admin's richer bundle (stack trace, error
+  category, network error, affected file/location) is a real improvement and a separate change.
+- **P2 — repair-model routing (GLM for simple, Kimi for hard).** `healRunnerOpts()` already returns a
+  tier-shaped option object, so `tierLadder.ts`'s `healLadder` could carry a difficulty hint cleanly.
+  **Not required by the reserve**, so it is not in it — and the admin explicitly said not to redesign
+  the ladder for this task.
+- **Raising the repair rounds above 1.** Deliberately untouched: the default is 1, and raising it
+  without first seeing whether round 1 even runs would be spending a budget on an unmeasured problem.
+
+**Gate, run last on the final state:** typecheck · typecheck:server · noUnusedImports · build ·
+test:bundle · boot:check · `vitest run` → **1704 files, 23,935 passed, 1 skipped, 0 FAIL.**
+`tests/correctionReserve.test.ts` — 32 cases over the 16 required properties, reversion-proven
+(2 fail when the wiring is removed).

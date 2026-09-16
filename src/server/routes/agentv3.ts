@@ -3021,7 +3021,12 @@ function unavailableTierRunner(level: PowerLevel, ladderText: string, missingKey
  * build when the floor was off, which is exactly what the rule forbids. A 429-storm on rung 1 now costs
  * one failed call per cooldown window (the shared bench still sidelines the rung), not a reorder.
  */
-export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void }): TurnRunner {
+export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void;
+  /** Retired-rung memory owned by the CALLER, so it can span several runner instances — the fast
+   *  lane's per-file runners share ONE build's map. Omitted ⇒ each runner keeps its own, as before.
+   *  See MultiProviderOptions.deadRungs for why this is caller-owned and never a singleton. */
+  deadRungs?: Map<string, string>;
+}): TurnRunner {
   const level = toPowerLevel(opts.tier as PowerLevel | boolean | string | undefined | null);
   const parsed = tierLadder(level);
   if (parsed.rejected) console.warn(`[AGENTV3] ${parsed.rejected}`);
@@ -3054,6 +3059,7 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
     },
     ...(opts.onTurnComplete ? { onTurnComplete: opts.onTurnComplete } : {}),
     ...(opts.onProviderBenched ? { onProviderBenched: opts.onProviderBenched } : {}),
+    ...(opts.deadRungs ? { deadRungs: opts.deadRungs } : {}),
   });
 }
 
@@ -11888,9 +11894,38 @@ async function noteBuildOutcome(
       // the caller the ACTUAL delivering provider so the build report records the truth (rule 5), never a
       // fixed 'anthropic'. Token/billing accounting stays in each caller's existing sink (no onTurnComplete
       // here — avoids double-counting the fast lane's own buildUsage.add).
+      /**
+       * THE FAST LANE'S RETIRED-RUNG MEMORY — ONE map, THIS build, every per-file call.
+       *
+       * 🔴 THE DEFECT IT CLOSES (Panchang build `16cabab2`, 2026-09-16). `makeFastTextRunner()` is called
+       * FRESH inside `fastGenerateOnce`, i.e. once per FILE, so every file got a runner with an empty
+       * dead-rung map and re-discovered the same starved GLM rungs from zero. That build wrote two files
+       * cheaply (21.9 s, 58.6 s) and then spent **812.9 s on `muhurat.ts` and 1,397.3 s on `astro.ts`** —
+       * 92.6% of all its model time — paying the identical GLM output-budget starvation over again, while
+       * KIMI sat one rung down the ladder and was never reached on either file (`providerDelivery:
+       * {GLM: 5}`, `providerFailures: {GLM: 108}`, of which 89 were output-budget).
+       *
+       * The retirement logic itself was already correct and already built (MultiProviderTurnRunner's
+       * `deadForRun`); it was simply scoped to one runner, which is right for the agentic `client` below
+       * (constructed ONCE, reused every turn) and wrong for a lane that constructs one runner per file.
+       * So this is a LIFETIME fix, not new behaviour: nothing about what gets retired, or when, changes.
+       *
+       * 🔒 LIFETIME, stated exactly because the safety argument is entirely about lifetime: this `const`
+       * lives in the per-request build scope, alongside `buildDiag` and the ledgers. It is created when
+       * this build starts and becomes garbage when it ends. A second build — same user or not — runs this
+       * line again and gets its own empty map, so a rung retired here can never be skipped in anyone
+       * else's build. It is deliberately NOT a module-level singleton, which is the one shape that would
+       * turn "slow for this build" into "blacklisted for everybody".
+       */
+      const fastLaneDeadRungs = new Map<string, string>();
       const makeFastTextRunner = (onUsed?: (used: string) => void): TurnRunner => buildTurnRunner({
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
+        // Shared across every per-file runner this lane builds — the whole point of the change above.
+        // A fresh runner per call is KEPT on purpose: `onUsed` must stay per-call, because the fast lane
+        // generates files CONCURRENTLY (SimpleBuilder's mapWithConcurrency) and one shared callback would
+        // attribute the wrong provider to a file. Only the MEMORY is shared; the callbacks stay private.
+        deadRungs: fastLaneDeadRungs,
         onProviderUsed: (used) => { try { onUsed?.(used); } catch { /* caller callback best-effort */ } captureProvider(used); },
         // OBSERVATION ONLY — captureShadowUsage feeds the shadow ledger, never the billing one. This is
         // what makes the fast-lane billing question answerable without answering it by accident.

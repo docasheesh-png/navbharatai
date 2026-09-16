@@ -73,6 +73,25 @@ export interface MultiProviderOptions {
   cooldowns?: RateLimitCooldowns;
   /** Clock override for tests (defaults to Date.now). */
   now?: () => number;
+  /**
+   * The retired-rung memory (dead key → reason), supplied by the CALLER so it can outlive this one
+   * runner instance. Omit it and the runner keeps its own private map — byte-identical to before.
+   *
+   * 🔴 WHY IT IS AN OPTION RATHER THAN ALWAYS-PRIVATE (autopsy of the Panchang build `16cabab2`,
+   * 2026-09-16). The retirement below is scoped to ONE runner instance, which is exactly right for the
+   * agentic path: `routes/agentv3.ts` builds `client` once and reuses it for every turn, so a rung that
+   * starved on turn 1 is skipped on turns 2..n. **The FAST lane builds a NEW runner for every file it
+   * generates**, so that memory was thrown away between files and each file re-discovered the same dead
+   * rungs from scratch. In that build `muhurat.ts` spent 812.9 s and `astro.ts` spent 1,397.3 s doing so
+   * — 92.6% of the whole build's model time — and KIMI, one rung further down the ladder, was never
+   * reached on either.
+   *
+   * 🔒 IT IS A MAP THE CALLER OWNS, NOT A MODULE SINGLETON, and that is the whole safety argument: its
+   * lifetime is exactly the lifetime of whatever created it. One per build ⇒ it cannot outlive the build
+   * and cannot be seen by another build or another user. A process-wide singleton would do the opposite
+   * and is deliberately NOT offered here.
+   */
+  deadRungs?: Map<string, string>;
 }
 
 /**
@@ -514,7 +533,9 @@ export function makeMultiProviderTurnRunner(
   // life (one runner instance = one build). A transient failure (overload/timeout/5xx) is NOT
   // remembered — EXCEPT the timeout BENCH (admin design 2026-07-07): 2 CONSECUTIVE timeouts bench
   // the provider for the rest of the run, so a degraded GLM/KIMI evening can't grind every turn.
-  const deadForRun = new Map<string, string>(); // dead-key → the fatal reason
+  // Caller-supplied when the memory must outlive this instance (the fast lane's per-file runners —
+  // see MultiProviderOptions.deadRungs); otherwise private to this runner, exactly as before.
+  const deadForRun = opts.deadRungs ?? new Map<string, string>(); // dead-key → the fatal reason
   /**
    * The key a rung is retired under once it fails PERMANENTLY.
    *

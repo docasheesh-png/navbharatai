@@ -178,6 +178,33 @@ export const SIGN_IN_HINT_KEY = 'nbai:sign-in-hint';
  */
 export const SIGN_IN_PROVIDER_KEY = 'nbai:sign-in-provider';
 
+/**
+ * The `customParameters` to hand Google's NATIVE sign-in for a switch-to hint. PURE.
+ *
+ * ROOT CAUSE this closes (admin 2026-09-16, "easy one tap switch nahi ho raha"): the web sign-in path
+ * already puts this hint on `GoogleAuthProvider.setCustomParameters({ login_hint, prompt:
+ * 'select_account' })` (2026-08-22) — but on the NATIVE app, `socialSignIn` takes a completely
+ * different branch that calls the `@capacitor-firebase/authentication` plugin's own
+ * `signInWithGoogle()`, which never read that `GoogleAuthProvider` object at all. So the ONE thing
+ * that makes a switch feel like "one tap" — telling Google which account the chooser should land on —
+ * was captured, stored, then silently dropped the moment the flow reached a real phone. Every native
+ * switch showed the generic account list (or, worse, no cached session for that account at all),
+ * which is indistinguishable from "have to log in again".
+ *
+ * `login_hint` is a real customParameter the plugin passes straight through to Google's native
+ * sign-in sheet (its own docs use exactly this key as the example) — this was always wireable, just
+ * never wired past the web-only code path.
+ *
+ * Returns `undefined` (not `[]`) with no hint, so a caller can spread it into an options object and
+ * add nothing when there is nothing to add — `{ ...(x && { customParameters: x }) }` shaped call
+ * sites read cleanest that way, and it matches how `switchBannerText` returns `''` rather than a
+ * placeholder for "nothing to show".
+ */
+export function googleNativeCustomParameters(hint: string | null | undefined): { key: string; value: string }[] | undefined {
+  const h = String(hint ?? '').trim();
+  return h ? [{ key: 'login_hint', value: h }] : undefined;
+}
+
 /** Human name for a Firebase provider id, for the switch banner. '' when we should not name one. */
 export function providerLabel(providerId: string | null | undefined): string {
   switch (String(providerId ?? '').trim()) {

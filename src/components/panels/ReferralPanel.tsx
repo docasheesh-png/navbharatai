@@ -5,6 +5,9 @@ import { normalizeReferralCodeClient } from '../../lib/referralCodeClient';
 import { STEP_ORDER, type RewardStep } from '../../lib/referralStepNames';
 import { authedHeaders } from '../../lib/authHeaders';
 import type { ChecklistRow } from '../../lib/referralChecklist';
+import { auth as firebaseAuth } from '../../lib/firebase';
+import { sendVerificationEmail, linkGithubAccount, describeLinkGithubError } from '../../lib/accountVerificationActions';
+import { VerifyPhoneSheet } from '../VerifyPhoneSheet';
 
 /**
  * REFER A FRIEND — the screen where the four steps are actually claimed.
@@ -35,14 +38,51 @@ export const ReferralPanel: React.FC<{
   githubLinked: boolean;
   onRefresh: () => void;
   onToast: (msg: string, kind?: 'success' | 'error') => void;
-  /** Opens the existing phone-verification sheet. */
-  onVerifyPhone?: () => void;
 }> = (props) => {
   const { userId, enabled, code, shareMessage, rows, earnedRupees, capRupees, capReached, referred } = props;
   const [platform, setPlatform] = useState<string>('web');
   const [busy, setBusy] = useState<RewardStep | 'redeem' | null>(null);
   const [codeInput, setCodeInput] = useState('');
   const [notice, setNotice] = useState<{ kind: 'ok' | 'bad'; text: string } | null>(null);
+
+  // ── The three verification actions, real (admin 2026-09-16) ────────────────────────────────────
+  // 🔴 ROOT CAUSE this replaces: a blocked row used to render "Verify your email address first" /
+  // "Connect your GitHub account first" as PLAIN TEXT, and this component's own `onVerifyPhone` prop
+  // was declared and never called by anything — three buttons that only ever rendered as words.
+  // `emailVerified` / `phoneVerified` / `githubLinked` are the SERVER's answer (useReferralProgress,
+  // itself reading the same Firebase Admin facts `stepIsProven` claims against), so nothing here needs
+  // to derive them client-side — completing an action and calling `props.onRefresh()` re-fetches the
+  // real state, the same as every other change on this screen already does.
+  const [phoneSheetOpen, setPhoneSheetOpen] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
+
+  const verifyEmail = useCallback(async () => {
+    const user = firebaseAuth.currentUser;
+    if (!user?.email) { setNotice({ kind: 'bad', text: 'No email on this account.' }); return; }
+    setBusy('email'); setNotice(null);
+    try {
+      await sendVerificationEmail(user);
+      setEmailSent(true);
+      setNotice({ kind: 'ok', text: `We sent a link to ${user.email}. Open it, then press Refresh below.` });
+    } catch (e) {
+      setNotice({ kind: 'bad', text: e instanceof Error ? e.message : 'Could not send the verification email.' });
+    } finally {
+      setBusy(null);
+    }
+  }, []);
+
+  const connectGithub = useCallback(async () => {
+    setBusy('github'); setNotice(null);
+    try {
+      const outcome = await linkGithubAccount(firebaseAuth);
+      if (outcome === 'ok') props.onRefresh();
+      // 'cancelled' (closed popup) and 'redirecting' (page navigates away) need no message here.
+    } catch (e) {
+      setNotice({ kind: 'bad', text: describeLinkGithubError(e) });
+    } finally {
+      setBusy(null);
+    }
+  }, [props]);
 
   useEffect(() => {
     let alive = true;
@@ -126,6 +166,17 @@ export const ReferralPanel: React.FC<{
 
   return (
     <div className="space-y-6">
+      {/* Portals to document.body, so its position in this tree doesn't matter. Reuses the SAME sheet
+          ProfilePage does, rather than a second copy — see accountVerificationActions.ts's own note
+          on why phone stays out of that file. */}
+      <VerifyPhoneSheet
+        auth={firebaseAuth}
+        open={phoneSheetOpen}
+        onClose={() => setPhoneSheetOpen(false)}
+        reason="A verified number is one of your three referral steps, worth ₹100."
+        onVerified={() => { setPhoneSheetOpen(false); props.onRefresh(); }}
+        onSignInInstead={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { signIn: 'phone' } }))}
+      />
       {/* Your code — shareable EVERYWHERE, including the website. Only claiming is Android-only. */}
       <div className="rounded-2xl border border-amber-500/20 bg-black/30 p-6">
         <h4 className="text-[10px] font-black uppercase tracking-widest text-[#8b949e]">Your Referral Code</h4>
@@ -171,6 +222,13 @@ export const ReferralPanel: React.FC<{
         <ul className="mt-4 space-y-2.5">
           {ordered.map((row) => {
             const blocked = blockedBy(row.step);
+            // The real click-to-verify action for a blocked step. `referral-code` has none here on
+            // purpose — applying a code is the box below, not a one-tap action.
+            const action: { label: string; onClick: () => void } | null =
+              row.step === 'email' ? (emailSent ? { label: 'Refresh', onClick: () => props.onRefresh() } : { label: 'Verify', onClick: () => void verifyEmail() })
+              : row.step === 'mobile' ? { label: 'Verify', onClick: () => setPhoneSheetOpen(true) }
+              : row.step === 'github' ? { label: 'Connect', onClick: () => void connectGithub() }
+              : null;
             return (
               <li key={row.step} className="flex items-center justify-between gap-3 rounded-xl border border-white/5 bg-[#0d1117] px-4 py-3">
                 <span className="flex min-w-0 items-center gap-2">
@@ -183,7 +241,21 @@ export const ReferralPanel: React.FC<{
                 </span>
                 {!row.claimed && isAndroid && (
                   blocked
-                    ? <span className="shrink-0 text-[10px] font-bold text-amber-400/80">{blocked}</span>
+                    ? (
+                      <span className="flex shrink-0 items-center gap-2">
+                        <span className="text-[10px] font-bold text-amber-400/80">{blocked}</span>
+                        {action && (
+                          <button
+                            onClick={action.onClick}
+                            disabled={busy !== null}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white transition-all hover:bg-indigo-500 disabled:opacity-40"
+                          >
+                            {busy === row.step && <Loader2 className="h-3 w-3 animate-spin" />}
+                            {action.label}
+                          </button>
+                        )}
+                      </span>
+                    )
                     : (
                       <button
                         onClick={() => claim(row.step)}

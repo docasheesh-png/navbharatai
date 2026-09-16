@@ -100,6 +100,28 @@ describe('🔑 reconcileFloorBudget — never authorise more output than the clo
       }
     }
   });
+
+  // 🔴 THE CASE THE TEST ABOVE EXCLUDES IS THE ONLY ONE PRODUCTION EVER RUNS (autopsy ee20478d).
+  //
+  // `if (clock < FLOOR_TIMEOUT_CAP_MS)` skips every ask big enough to reach the cap — and the build
+  // loop's ask is 32,000, which reaches it by a factor of six. So the pair was proven self-consistent
+  // on five sizes the engine never asks for, and the one it asks for on every single build went
+  // unmeasured. This test states that real number out loud instead: whatever the cap and the rate are,
+  // the production ask IS clamped, and to WHAT. If someone retunes either constant, the number here
+  // changes and they have to look at it — which is all this test is for.
+  it('🔴 the PRODUCTION pair is clamped, and this is the constant every floor rung actually gets', () => {
+    const ask = 32_000; // buildMaxTokensPerTurn()'s default — the loop's real ask
+    const clock = floorTimeoutForTokens(ask);
+    const budget = reconcileFloorBudget(ask, clock);
+
+    expect(clock).toBe(FLOOR_TIMEOUT_CAP_MS); // the derived clock is pinned by the cap, not by the ask
+    expect(budget.clamped).toBe(true);
+    expect(budget.requested).toBe(ask);
+    // 145,000 ms of usable clock ÷ 30 ms/token. The number that appeared six times across two vendors
+    // and two nights of reports before anyone recognised it as ours.
+    expect(budget.maxTokens).toBe(4_833);
+    expect(ask / budget.maxTokens).toBeGreaterThan(6); // the ask is cut by ~85% on EVERY floor call
+  });
 });
 
 describe('🔒 the wiring — the two numbers can never drift apart again', () => {

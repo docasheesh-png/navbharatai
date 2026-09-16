@@ -127,6 +127,30 @@ describe('a workaround is never counted as a self-heal (rule 5, in the data)', (
 
 describe('🔒 the guards that stop this coming back', () => {
   const ROUTE_SRC = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
+  /**
+   * The route with whole-line comments blanked out, so a proximity check measures CODE distance.
+   *
+   * Only lines whose first non-space characters are `//` or a block-comment body are removed — never a
+   * trailing comment and never anything mid-line — so no string literal (`https://…`) can be touched.
+   * Line COUNT is preserved by keeping the newlines, and `codeAt` maps a source offset to this text's
+   * offset, so `sites` can go on being found in the real source.
+   */
+  const commentLine = (line: string): boolean => /^\s*(?:\/\/|\*|\/\*)/.test(line);
+  const CODE_LINES = ROUTE_SRC.split('\n').map((l) => (commentLine(l) ? '' : l));
+  const CODE_ONLY = CODE_LINES.join('\n');
+  const SRC_LINES = ROUTE_SRC.split('\n');
+  const codeAt = (offset: number): number => {
+    // How many characters of code precede the source line this offset falls on.
+    let srcSeen = 0;
+    let codeSeen = 0;
+    for (let i = 0; i < SRC_LINES.length; i++) {
+      const next = srcSeen + SRC_LINES[i].length + 1;
+      if (offset < next) return codeSeen + (CODE_LINES[i] ? offset - srcSeen : 0);
+      srcSeen = next;
+      codeSeen += CODE_LINES[i].length + 1;
+    }
+    return codeSeen;
+  };
 
   // THE MOST DAMAGING BUG IN THE REPORT was not the failed build — it was asking the user to pay for
   // it. A future edit that adds a second upsell site, or drops the check from this one, would bring
@@ -144,8 +168,24 @@ describe('🔒 the guards that stop this coming back', () => {
       .filter((at) => !/^import /.test(ROUTE_SRC.slice(ROUTE_SRC.lastIndexOf('\n', at) + 1, at)));
     expect(sites.length).toBeGreaterThan(0);
     for (const at of sites) {
-      const around = ROUTE_SRC.slice(Math.max(0, at - 900), at + 200);
+      // ⚠️ THE WINDOW IS MEASURED ON CODE, NOT ON SOURCE TEXT, AND THAT IS THE POINT (2026-09-15).
+      //
+      // It was 900, then 1800, and was about to need a third widening — not because the decision moved
+      // away from the call site, but because each autopsy adds a paragraph of rationale ABOVE it. The
+      // window was measuring comment volume. So it now measures the stripped code, where the real
+      // distance has stayed small and constant, and a fourth reason can be documented as fully as it
+      // deserves without anyone having to re-tune a number that was never about documentation.
+      const around = CODE_ONLY.slice(Math.max(0, codeAt(at) - 900), codeAt(at) + 200);
       expect(around, 'an upsell with no degraded-provider check next to it').toContain('providerFailuresLookDegraded');
+      // 🔴 THE SECOND WAY WE CAN BE THE PROBLEM (build report 58fe8254): a rung that rejects every call
+      // with the same PERMANENT error. `degraded` is deliberately false for it — it is not transient —
+      // so before this predicate existed 279 identical bad-requests still ended in "Add credits".
+      expect(around, 'an upsell with no our-configuration check next to it').toContain('providerFailuresLookMisconfigured');
+      // 🔴 THE THIRD (build report ee20478d): every rung ANSWERED, inside its clock, and produced
+      // nothing, because OUR output ceiling was spent before the answer began. It is in no failure
+      // class at all — the calls returned HTTP 200 — so both predicates above are false for it, and
+      // the user was asked to buy a ceiling that is identical on every tier we sell.
+      expect(around, 'an upsell with no output-budget check next to it').toContain('buildStarvedItsOutputBudget');
     }
   });
 

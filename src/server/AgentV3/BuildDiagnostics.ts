@@ -19,6 +19,7 @@ import { sandboxCost, describeSandboxCost } from './sandboxCost';
 import { redactProvidersText } from '../lib/providerRedaction';
 import { costAlertAdvisory, costAlertThresholdUsd } from './costAlert';
 import { isModelUnavailableError } from './providerErrorClass';
+import { isStarvedBudgetError } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
 import { isBudgetEndedError } from './turnDeadline';
 
@@ -1014,7 +1015,16 @@ export class BuildDiagnostics {
         severity: rec.ok ? 'warning' : 'error',
         code: rec.ok ? 'LLM_TRUNCATED' : 'LLM_CALL_FAILED',
         message: rec.ok
-          ? `Model response hit the token limit (${rec.model ?? 'model'}, finish=${rec.finishReason}) — output may be truncated.`
+          // 🔴 "MAY BE TRUNCATED" WAS TOO KIND BY HALF (autopsy ee20478d, 2026-09-15). This warning
+          // fired three times in a build that produced ZERO output — 4,833 tokens spent, 0 response
+          // characters, 0 tool calls, every time — and the hedged wording read like a caveat on an
+          // answer that arrived. The platform had the evidence in its hand (`responseChars` and
+          // `toolCalls` are on this very record) and described a total loss as a possible trim.
+          // Nothing downstream acted, because nothing downstream was told anything had gone wrong.
+          ? (!rec.responseChars && !rec.toolCalls
+              ? `A model turn spent its ENTIRE output allowance (${rec.outputTokens ?? 0} tokens) and produced NOTHING — no text, no tool call (${rec.model ?? 'model'}, finish=${rec.finishReason}). `
+                + 'This is our own output ceiling being smaller than the answer needed, not a provider fault and not the app: see floorBudget.ts.'
+              : `Model response hit the token limit (${rec.model ?? 'model'}, finish=${rec.finishReason}) — output may be truncated.`)
           : turnTimedOutUnanswered
             ? `A model turn timed out with no provider answering (${rec.error})`.slice(0, 400)
             : `Model call failed (${rec.model ?? 'model'}): ${rec.error ?? 'unknown error'}`.slice(0, 400),
@@ -1358,6 +1368,8 @@ export class BuildDiagnostics {
    */
   /** Providers already flagged for a dead ladder rung — one warning each, never 55. */
   private readonly deadRungFlagged = new Set<string>();
+  /** Providers already flagged for a starved output budget — one warning each. */
+  private readonly starvedBudgetFlagged = new Set<string>();
 
   recordProviderFailure(name: string, reason?: unknown): void {
     if (!name) return;
@@ -1391,6 +1403,31 @@ export class BuildDiagnostics {
           message: `A model in the ${name} fallback ladder is UNREACHABLE on this account and fails every time it is tried — "${detail}". `
             + 'This is a configuration defect, not a provider outage: every call burns a wasted request on it before falling through '
             + 'to the next rung, on every build, until the model id is corrected against the provider\'s live model list.',
+          autoResolved: false,
+        });
+      }
+
+      // OUR OWN OUTPUT CEILING STARVED A HEALTHY RUNG (autopsy ee20478d, 2026-09-15).
+      //
+      // Raised on the FIRST occurrence, unlike the dead-rung warning above which waits for a second:
+      // a dead rung needs a repeat to prove it is systematic rather than unlucky, whereas this one is
+      // arithmetic — the authorised budget is a constant for the run, so one starved call proves every
+      // later call on that rung would starve too. That is exactly why the rung is retired on first
+      // sight in MultiProviderTurnRunner, and this finding is the admin-facing half of that decision.
+      //
+      // It exists because the failure it names is INVISIBLE to every other signal: the provider
+      // returned HTTP 200, so before this bucket existed nothing appeared in this ledger at all, and
+      // every honesty check the platform owns reads this ledger.
+      if (bucket === 'output-budget' && !this.starvedBudgetFlagged.has(name)) {
+        this.starvedBudgetFlagged.add(name);
+        const detail = (reason instanceof Error ? reason.message : String(reason ?? '')).split('\n')[0].slice(0, 200);
+        this.record({
+          phase: 'provider',
+          severity: 'warning',
+          code: 'OUTPUT_BUDGET_STARVED',
+          message: `The ${name} rung answered inside its clock and produced nothing, because our own output ceiling was spent before the answer began — "${detail}". `
+            + 'This is NOT a provider outage and NOT the user\'s prompt: a reasoning model bills its thinking to the same ceiling, so a ceiling below its thinking returns a truncated reply with no text and no tool call. '
+            + 'The ceiling is FLOOR_TIMEOUT_CAP_MS / AGENTV3_FLOOR_MS_PER_TOKEN (see floorBudget.ts); the rung was retired for the rest of this build so the ladder could reach a vendor that fits.',
           autoResolved: false,
         });
       }
@@ -1974,6 +2011,13 @@ export function classifyProviderFailure(reason: unknown): string {
   // here only, which is precisely how the platform ended up able to NAME this defect in a report while
   // the runner that could have acted on it had never heard of the class.
   if (isModelUnavailableError(text)) return 'model-unavailable';
+  // OUR OWN CEILING, not the provider's (autopsy ee20478d, 2026-09-15). The rung answered — quickly,
+  // correctly, inside its clock — and we had authorised so little output that the answer never began.
+  // It gets its own bucket because every other reading of it is wrong and leads somewhere useless:
+  // `timeout` benches a healthy vendor for our arithmetic, `context-length` blames the user's prompt
+  // for a cap on the reply, and `other:` is where this class hid for two nights across two vendors.
+  // Checked here, above the generic tests, so a future reword of the marker cannot fall through them.
+  if (isStarvedBudgetError(text)) return 'output-budget';
   if (/\b429\b|rate.?limit|too many requests|quota/.test(t)) return 'rate-limit';
   if (/timeout|timed out|etimedout|deadline/.test(t)) return 'timeout';
   if (/\b401\b|\b403\b|unauthor|forbidden|invalid api key|authentication/.test(t)) return 'auth';
@@ -1993,6 +2037,49 @@ export function classifyProviderFailure(reason: unknown): string {
  * tomorrow. They get their own, louder treatment.
  */
 const DEGRADED_BUCKETS = new Set(['timeout', 'rate-limit', 'server-error', 'network']);
+
+/**
+ * Buckets that mean OUR OWN REQUEST OR LADDER IS WRONG — they never come right on a retry.
+ *
+ * 🔴 THE COMMENT ABOVE PROMISED THESE "their own, louder treatment", AND FOR THE USER THERE WAS NONE
+ * (build report 58fe8254, 2026-09-15). One free build recorded `GLM: 279 bad-request` — every call to
+ * the first rung of its ladder rejected with the same hard 400, because we asked a model that always
+ * reasons to stop reasoning. `providerFailuresLookDegraded` correctly said "not degraded" (it is not
+ * transient), `deadLadderRung` matches only `model-unavailable` so it said nothing — and the user was
+ * shown **"Your app needs our strongest engine to finish cleanly. Add credits."**
+ *
+ * We asked someone for money because our own request was malformed. That is worse than the 2026-09-13
+ * outage case this file already fixed, not better: an outage at least might have passed on a retry.
+ *
+ * `auth` is here for the same reason and had the identical hole; `model-unavailable` had an ADMIN line
+ * and still reached the upsell. One predicate now covers all three.
+ */
+const OUR_CONFIGURATION_BUCKETS = new Set(['model-unavailable', 'auth', 'bad-request']);
+
+/**
+ * Did this build fail because of OUR configuration rather than the engine's ability or the app's
+ * difficulty? Reads the SAME recorded buckets the admin's report shows, so the two cannot disagree.
+ *
+ * ⚠️ Requires a REPEAT (≥ `minCount`), deliberately. A single 400 can be one odd prompt hitting one
+ * rung's schema, and suppressing an honest outcome on one stray failure would be its own dishonesty.
+ * A bucket that repeats is a rung that cannot work — which is the thing worth being loud about. PURE.
+ */
+export function providerFailuresLookMisconfigured(
+  reasons: Record<string, string> | null | undefined,
+  minCount = 3,
+): boolean {
+  const rows = Object.values(reasons ?? {});
+  if (!rows.length) return false;
+  return rows.some((row) => String(row)
+    .split(',')
+    .some((part) => {
+      // Each part reads like " 279 bad-request" — the count and the bucket name.
+      const m = /^\s*(\d+)\s+(.+?)\s*$/.exec(part);
+      if (!m) return false;
+      const n = Number(m[1]);
+      return Number.isFinite(n) && n >= minCount && OUR_CONFIGURATION_BUCKETS.has(m[2]);
+    }));
+}
 
 /**
  * Codes that mean "we went around it", not "we fixed it". See the tally in `report()`.
@@ -2032,6 +2119,28 @@ export function providerFailuresLookDegraded(
     .split(',')
     .map((part) => part.trim().replace(/^\d+\s*/, ''))
     .some((bucket) => DEGRADED_BUCKETS.has(bucket)));
+}
+
+/**
+ * Did this build fail because OUR OWN output ceiling starved a healthy rung? PURE.
+ *
+ * 🔴 WHY IT IS A SEPARATE PREDICATE, AND WHY ONE OCCURRENCE IS ENOUGH (autopsy ee20478d, 2026-09-15).
+ * `providerFailuresLookMisconfigured` needs three of a bucket before it will call our configuration
+ * wrong, because a single `bad-request` can be a one-off the next call gets right. This bucket cannot:
+ * the authorised budget is a constant for the run, so one starved call is a proof about every call.
+ * Requiring three would mean burning three ~97-second turns to earn the right to say so — the precise
+ * waste the retirement in MultiProviderTurnRunner exists to stop, which would make the two halves of
+ * one fix contradict each other.
+ *
+ * Reads the RECORDED buckets, so it can never disagree with the report the admin is looking at.
+ */
+export function buildStarvedItsOutputBudget(
+  reasons: Record<string, string> | null | undefined,
+): boolean {
+  return Object.values(reasons ?? {}).some((row) => String(row)
+    .split(',')
+    .map((part) => part.trim().replace(/^\d+\s*/, ''))
+    .includes('output-budget'));
 }
 
 /**

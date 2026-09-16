@@ -55601,6 +55601,43 @@ this session's other open PR (#2933, an unrelated AgentV3 fix) to keep the two c
 reviewable. PR #2937 opened; per the standing merge-hold rule, driven to green CI but not merged
 without the admin's explicit go-ahead.
 
+### 2026-09-14 — the preview address bar said "srcdoc"
+
+**Admin screenshot + question:** *"preview me yeh 'srcdoc' jis type box me likha hai — is srcdoc box ka
+kya kaam hai? isko delete kar dene se navbharatai par kya fark padega?"*
+
+**What the box is:** a real address bar for pages *inside the user's app* (`PreviewSurface.tsx`,
+`routeBar`) — ‹ › step the app's **own** history, and typing `/dashboard` + Enter performs a real
+navigation. Its docblock is explicit that it renders only once the app reports its location, *"so a
+preview that cannot drive itself never shows a dead control"*.
+
+🔴 **So it was not dead — it was mislabelled, and the guard could not tell.** The in-browser preview is
+an `about:srcdoc` iframe, and `location.pathname` of that URL is the literal string **`"srcdoc"`**. The
+app therefore *did* report — it reported garbage — so the `routePath ?` guard passed and the bar
+advertised an address that was never real.
+
+**The navigation half was already correct**, which is what makes deletion the wrong answer: the
+handler routes this mode by **hash** precisely because *"a srcdoc document cannot be navigated at
+all"*. Back, forward and Enter genuinely work. Only the display was wrong.
+
+`currentPath()` now reports the hash route in that mode (`#/dashboard` → `/dashboard`, no hash → `/`),
+keyed on `SOURCE === 'in-browser'` **or** `location.protocol === 'about:'` — the mode alone is
+sufficient (the in-browser preview rewrites BrowserRouter to HashRouter), and the protocol check is
+the belt for any future opaque document. **The live-server preview is byte-identical** — there
+`pathname` is the real path.
+
+**Answer to "delete kar dein?": no.** On the live preview this is a genuinely working feature that VS
+Code and Cursor both have and NavBharatAI lacked until 2026-09-10. Deleting the bar to remove one
+wrong word would have cost the feature on the mode where it is real.
+
+`tests/previewAddressBarSrcdoc.test.ts` — 9 tests, run against the **emitted bridge source** rather
+than a description of it. **Proven by reversion: 4 fail** when the mode guard is removed. Full gate
+green on the final state: **1665 files · 23,293 passed · 0 FAIL**.
+
+⚠️ **Noticed in the same screenshot, NOT fixed, recorded so it is not lost:** the preview header read
+**`4456m 8s`** — 74 hours — beside a build stamped `b:09-14 11:33`. That elapsed figure is almost
+certainly measuring from the wrong origin (a workspace's first build rather than this turn's start).
+Not investigated; raised as an open item.
 ---
 
 ## 2026-09-14 — 🔴 WHITE-LABEL BREACH: the provider's name was on a user screen. The one the admin found was not the worst one.
@@ -55900,6 +55937,93 @@ first rows will mostly be re-priced from call logs, and the ones at the cap will
 The card gets exact from the first build after deploy. Sandbox cost is shown as its own column and is
 ₹0 unless `AGENTV3_BILL_SANDBOX` + `E2B_USD_PER_HOUR` are set — it is not folded into the token cost.
 
+## 2026-09-15 — AUTOPSY `58fe8254`: the first rung of every ladder could not succeed
+
+**Prompt:** *"Continue the build from where it left off and finish the remaining steps."*
+**Outcome:** 0 files · `RELEASE_GATE: RED` · `providerFailures: { GLM: 280 }` · billed ₹0 (absorbed).
+
+### The five-bucket ledger (45 entries)
+
+| | n | |
+|---|---|---|
+| ✅ self-healed | **0** | `autoResolved: 0`. Nothing was fixed |
+| 🔀 worked around | **10** | every one a fallback around a rung that could never work |
+| ⏭️ skipped | **5** | page-render · user journey · typecheck · test suite · preview (all "no live preview") |
+| ❌ still broken | **6 unresolved** | 4× `LLM_TRUNCATED`, `FASTLANE_CONTINUATION_FAILED`, `RELEASE_GATE` RED |
+| 🥵 struggled | **4** | **280 GLM failures** · 3 identical continuations (~160 s each) · 81 s first call · **11.3 min sandbox, 97% idle** |
+
+### 🔴 1 · `glm-5.3-flash` rejected every call — and it leads two ladders. FIXED.
+
+Every one of the 280 failures was the same hard 400:
+
+> *"This model always engages in thinking and cannot be disabled; please use low, high, or max"*
+
+`OpenAiToolRunner` sent `thinking: { type: 'disabled' }` whenever the app-level toggle was off. The
+**2026-09-14 ladder change** made `glm-5.3-flash` the first rung of Weak and Normal, `glm-5.3` the
+first of Strong, and GLM the **plan rung of all three** — so since that day **every build on every tier
+opened on a rung that could not answer**, and fell through it `GLM → GLM#2 → … and 80 more`.
+
+🔎 **The class was already root-caused here, for the other vendor, and the sibling was never hunted.**
+`models.ts`'s `modelSupportsAdaptiveThinking` exists because of the *identical* failure on Anthropic
+(2026-07-05, a Haiku turn sending `thinking: {type:'adaptive'}` that "burned the ENTIRE
+provider-fallback chain"). Its docblock already states the cure: *"a MISSING thinking/effort param
+never 400s … whereas an UNSUPPORTED one is a fatal request error."* The guard went on the Claude
+client and not on the OpenAI-compatible one. Note too that `ClaudeClient` only ever sends the param to
+turn thinking **on** — it never asks a model to turn it off. The GLM path did.
+
+`glmThinking.ts` applies the same rule, **default-deny on an unknown id**, with a numeric version test
+so `glm-5.4` and later are covered before they exist. A test sweeps every GLM rung of every ladder
+**and the plan rung**, read from `tierLadder.ts` itself.
+
+### 🔴 2 · Kimi thought for 4,833 tokens and returned 0 characters — three times. FIXED.
+
+`outputTokens: 4833, responseChars: 0, finish=max_tokens`, identically, three times. `parseOpenAiCompletion`
+read only `message.content`, so a reasoning model that spends its whole budget thinking was
+**indistinguishable from one that said nothing**. The adapter now reads `reasoning_content` and reports
+`reasoningOnly` — and **never puts reasoning in the transcript**; it is evidence, not the answer.
+
+**The money was burned one layer up:** `shouldContinue(stopReason, attempts)` saw a truncated stop and
+continued — from an empty string, so `continuationPrompt('')` re-issued *the same call*, three times,
+~160 s each. A truncation is worth resuming because a **partial** answer exists; nothing is partial
+about zero characters. That is the retry-loop-around-a-deterministic-failure the fourth absolute rule
+forbids. The third argument is opt-in, so no unread lane changes silently.
+
+### 🔴 3 · We asked the user for money for our own misconfiguration. FIXED.
+
+After 279 bad-requests **we caused**, the user was shown *"Your app needs our strongest engine to
+finish cleanly. Add credits."* Not one of those calls would have gone differently with a fuller wallet.
+
+The guard existed and could not see it. `DEGRADED_BUCKETS`' own comment promises that
+`model-unavailable` and `auth` get *"their own, louder treatment"* — **and for the user there was
+none**: `providerFailuresLookDegraded` correctly excludes them (they are not transient),
+`deadLadderRung` writes an **admin** line only, and the upsell fired anyway. So all three of
+`model-unavailable`, `auth` and `bad-request` reached "add credits".
+
+`providerFailuresLookMisconfigured` closes the class for all three, requiring a **repeat** (≥3) so one
+stray 400 cannot suppress an honest outcome. The message blames neither the user's wallet nor their
+wording, and names no vendor (white-label §2).
+
+⚠️ **The existing guard in `laneFailure.test.ts` caught my own change** — it requires the evidence
+check beside the upsell and my comment pushed it out of its 900-char window. Re-measured to 1800 **and
+strengthened**: it now requires *both* predicates, so a future edit cannot drop either.
+
+### Recorded as open, not fixed
+
+- 🔴 **The summary said *"Stopped, as you asked"*** to a user whose prompt was *"Continue the build"*.
+  Nobody stopped it; the budget ran out. Not traced to its source in this change.
+- 🔴 **Provider traffic continued 5.5 minutes past `endedAt`** (issues to `…789369`, build ended
+  `…460124`) — the abandoned-in-flight-call root cause already open from the cost-ceiling work.
+- 🔴 **`AGENT_STEP` claimed "1/5 file(s) unchanged (0 changed, 4 new)"** on a build that produced
+  **zero** files — the evidence-ledger class from `697b38ee`, a fourth witness.
+- 🟡 **97% sandbox idle** (11.3 min up, 0.3 min working). Fourth report running.
+- 🟡 **ETA "~2–4 min"** at `confidence 0.4` against a build that ran ~10 min. Fifth report running.
+
+### Verification
+
+`tests/thinkingParamAndReasoningOnly.test.ts` — **26 tests** built from the report's real numbers.
+**Proven by reversion:** removing the version guard fails 3; the continuation guard fails 1; the
+misconfiguration buckets fail 2. Full gate green on the final state: **1675 files · 23,465 passed ·
+0 FAIL**.
 ---
 
 ## 2026-09-14 — Offline AI removed permanently ("koi trace na bache")
@@ -56581,6 +56705,117 @@ the reasoning cannot rot) and `OpenAiToolRunner.test.ts`. ⚠️ `'uses the turn
 default'` encoded the OLD contract (the ask always passes through) — updated to the new rule with a
 generous clock, and two new tests prove the clamp fires on the exact 4efab9d7 pair.
 
+## 2026-09-15 — AUTOPSY `ee20478d`: 4,833 was never a model's number. It was ours.
+
+**Prompt:** *"Make the whole app fully responsive and comfortable to use on a mobile phone
+(touch-friendly, no horizontal scroll)."* — an EDIT of an existing 1-source-file app, on the Weak
+ladder. **Result: 0 files, RELEASE_GATE RED, ~5 minutes, and the user was asked to buy credits.**
+
+### The finding, and it is arithmetic
+
+Three model calls, all `ok: true`, all HTTP 200, all inside their clock:
+
+| | outputTokens | responseChars | toolCalls | finishReason | latency |
+|---|---|---|---|---|---|
+| call 1 | **4833** | 0 | 0 | max_tokens | 97,369 ms |
+| call 2 | **4833** | 0 | 0 | max_tokens | 95,776 ms |
+| call 3 | **4833** | 0 | 0 | max_tokens | 104,488 ms |
+
+`outputTokens: 4833` also appears **three times on KIMI** in report `58fe8254`, the night before, on a
+different model. Two vendors cannot independently stop at the same number.
+
+`FLOOR_TIMEOUT_CAP_MS` (150,000) − `FLOOR_CALL_OVERHEAD_MS` (5,000) = 145,000 ms ÷ 30 ms/token =
+**4,833**. It is a CONSTANT — the most any floor rung can ever be authorised, on every build, whatever
+it asks for. The build loop asks for 32,000; the clamp cuts ~85% of it away on every single call.
+
+**Why that is fatal rather than merely small:** `floorBudget.ts` justifies the clamp in writing —
+*"TRUNCATION: the files written so far COME BACK"*. That is true of a model that emits tool calls as it
+goes. It is **false of a reasoning model**, whose thinking is billed to the same `max_tokens` and
+emitted BEFORE any content. `glm-5.3-flash` — the first rung of the Weak AND Normal ladders since
+2026-09-14, and the plan rung for all three tiers — is exactly that, proved by the 400 in the previous
+autopsy (*"This model always engages in thinking and cannot be disabled"*). So the clamp produced the
+total loss it was written to prevent, by the mechanism it was written to use.
+
+### 🔴 THE MISSING SUBSYSTEM, named: nothing anywhere asks "did this call produce anything?"
+
+Every honesty gate the platform owns reads the **provider-FAILURE** ledger. These three calls succeeded.
+So they were in no ledger, no bucket, no predicate — `providerFailuresLookDegraded` false,
+`providerFailuresLookMisconfigured` false, `providerFailures` key absent from the report entirely — and
+the free-tier upsell fired. **A fuller wallet would have changed nothing: the ceiling is a constant of
+ours, identical on every tier we sell.**
+
+The platform DID see it, three times, and hedged: `LLM_TRUNCATED — "output may be truncated"`. The
+record carrying that warning also carries `responseChars: 0` and `toolCalls: 0`. It described a total
+loss as a possible trim, and nothing downstream was told anything had gone wrong.
+
+### The five buckets
+
+- ✅ **Self-healed: 0.** The report's own `autoResolved` count for the failure is 0. Correct, for once.
+- 🔀 **Worked around: 0** — and that is the defect. There WAS a working rung one step down
+  (`KIMI kimi-k2.6`, not a forced-thinking model) and the ladder never reached it.
+- ⏭️ **Skipped: 4.** 3 × `LLM_TRUNCATED` seen and not acted on; 1 × the empty turn appended to the
+  transcript and nudged as if it had been a reply.
+- ❌ **Still broken: 3.** Zero files; `"the model replied without building"` (it never replied); the
+  upsell.
+- 🥵 **Struggle: ~5 minutes**, of which ~4.9 were three identical doomed calls. `SANDBOX_SESSION`:
+  7.7 min up, **7.3 idle (95%)**.
+
+### DNA-level fixes (all shipped in this change)
+
+1. **`floorBudget.ts` — `turnStarvedItsBudget` / `starvedBudgetError` / `STARVED_BUDGET_MESSAGE`.**
+   A turn that produced no text and no tool call and was cut at the ceiling is a **failure of that
+   rung**, never an answer from it. Deliberately provider-INDEPENDENT (truncated OR reasoning-only),
+   because keying it on GLM's `reasoning_content` is how the class hid across two vendors.
+2. **`OpenAiToolRunner` THROWS it** instead of returning a turn nobody can use, so the chain falls to
+   the next rung — a different vendor, usually not forced-thinking — and the build proceeds.
+3. **`MultiProviderTurnRunner` retires the starved rung for the run**, keyed on the MODEL (like
+   model-unavailable), never on the provider. First occurrence is enough and the argument is not
+   "probably": the budget is a constant for the run and an agentic transcript only GROWS, so a rung
+   that could not begin an answer on turn 1 has strictly less room on turn 2. ⚠️ It is explicitly NOT
+   a timeout — benching a healthy vendor for our own arithmetic would be the wrong repair.
+4. **New failure bucket `output-budget`** + `OUTPUT_BUDGET_STARVED` (raised on FIRST sight, once per
+   provider) + `buildStarvedItsOutputBudget`. This is what puts an HTTP-200-that-produced-nothing into
+   the ledger every honesty check already reads.
+5. **The upsell is suppressed** (reason **(e)**), with a suppression note that says the true thing —
+   *"every rung ANSWERED and produced nothing… a fuller wallet buys a different model, not a different
+   ceiling"* — rather than the existing "the engine did not respond", which would send the next reader
+   to a provider status page.
+6. **`AgentRunner` stops nudging a model that never got to answer**, stops appending the empty turn
+   (which made the next prompt LONGER and so even less likely to fit), and tells the user the truth:
+   *"our engine ran out of room to answer before it began. This is our limit, not your app."*
+7. **`LLM_TRUNCATED` says what happened** when nothing was produced, instead of "may be truncated".
+
+### Step 5 — the 50/50 law: why it could arise at all
+
+`tests/floorBudget.test.ts` had a round-trip test asserting the clock derived from an ask can carry
+that ask — guarded by **`if (clock < FLOOR_TIMEOUT_CAP_MS)`**. That `if` excludes every ask big enough
+to reach the cap, and the loop's real ask (32,000) reaches it by a factor of six. **The pair was proven
+self-consistent on five sizes the engine never asks for, and the one size it asks for on every single
+build went unmeasured.** Replaced with a test that states the production number out loud — clamped,
+4,833, an 85% cut — so a retune of either constant has to be looked at.
+
+The same shape bit `tests/laneFailure.test.ts`, whose proximity window went 900 → 1800 and was about to
+need a third widening. It was measuring **comment volume**, not code distance: each autopsy adds a
+paragraph above the call site. It now measures the stripped CODE, where the real distance is small and
+constant. Verified to still bite (removing the check fails it).
+
+### ⚠️ OPEN ROOT CAUSES — recorded honestly, not patched
+
+1. **The floor can never emit a large answer in one turn, and no fix here changes that.** 32,000 tokens
+   at 30 ms/token is 16 minutes; a build turn has 480 s. `FLOOR_TIMEOUT_CAP_MS` is deliberately 150 s
+   so that two consecutive timeouts (300 s) still leave 180 s for the next vendor — raising it without
+   re-checking that sum is how a slow provider eats a whole turn. **Not touched.**
+2. **`AGENTV3_FLOOR_MS_PER_TOKEN = 30` is ~50% conservative against this very report.** 4,833 tokens in
+   (97,369 − 5,000) ms is **19.1 ms/token**. At 20 the same 150 s clock would afford ~7,250 tokens.
+   Deliberately NOT changed: the 30 was measured on a visibly degraded night and is documented as "the
+   rate we are still willing to WAIT for" — lowering it converts truncations back into timeouts, which
+   is the failure mode that returns nothing. It is a real lever and it is the admin's call.
+3. **`glm-5.3-flash` leads the Weak and Normal ladders and is the plan rung for all three tiers**, and
+   it cannot disable thinking. The ladder is admin-mandated policy (2026-09-14) and was NOT changed —
+   the fixes above make the ladder work as written by falling to the rung behind it. But two consecutive
+   autopsies, two nights, have now ended at zero files on this rung. Flagged for the admin.
+4. **Gemini's runner does not set `truncated`**, so the AgentRunner net would not fire for it. Out of
+   scope here: Gemini is not a BUILD rung on any tier ladder since 2026-09-14.
 ---
 
 ## 2026-09-15 — The APK Reports inbox can now leave the screen (admin: "apk build report download ka option hi nahi banaya aapne?")
@@ -56917,6 +57152,89 @@ My earlier answer to him named only the first. Recorded as a correction, not qui
 merged**, so on production `main` the key is currently ungated and item 1 is spending now. The remedy is
 the admin merging #2958 (or unsetting the key); it is his call under the standing merge-hold rule.
 
+## 2026-09-16 — The admin's two open questions, answered from the code (and the answer to both is the same line)
+
+The admin asked, of the two items the `ee20478d` autopsy left open: *"sabhi question ke best solution
+code se dhund ke batao"*. Both were investigated against the source rather than reasoned about, and
+**both turn out to have the same cause, which is neither of the two levers that were on the table.**
+
+### The finding: we read half of the provider's error message
+
+The 400 that produced `glmThinking.ts` reads, in full:
+
+> *"This model always engages in thinking and cannot be disabled; **please use low, high, or max**"*
+
+The first clause was acted on. The second was not. PR #2957 stopped sending `{type:'disabled'}` and
+sent **nothing at all** — and sending no field does not mean "think less", it means **"use your DEFAULT
+effort"**, which is the MOST reasoning, not the least. That default is what spent the entire
+4,833-token ceiling on three consecutive turns and wrote no files.
+
+**"Cannot be disabled" is not "cannot be reduced."** The provider named its three accepted levels in
+the same sentence and we never tried one.
+
+### Q1 — should `AGENTV3_FLOOR_MS_PER_TOKEN` go 30 → 20? **No, and the number is worth recording.**
+
+- The rate decides the budget: `(150,000 − 5,000) ÷ rate`. At 30 that is **4,833**; at 20 it would be
+  **7,250**.
+- ⚠️ **Where 30 came from is weaker than it looks.** It is a two-point fit over outputs of **111 and
+  182 tokens** (build 4efab9d7) extrapolated **175×** to the loop's 32,000-token ask. `ee20478d` is the
+  only measurement ever taken in the real regime — three points at 4,833 tokens — and it gives
+  **≈19.7 ms/token** against the same ~4.1 s intercept. So the constant probably IS conservative.
+- **It is still the wrong lever, for two reasons.** (1) It does not address the cause: if a model's
+  default reasoning is unbounded, 7,250 tokens is just a bigger number to spend on thinking. (2) The
+  30 is documented as *"the rate we are still willing to WAIT for"* — lowering it converts TRUNCATIONS
+  into TIMEOUTS, and a timeout returns nothing at all, which is the failure the clamp exists to avoid.
+- The two measurements are also from **different models**, so they are not strictly comparable. The
+  instrument to settle it properly already exists — every call records `outputTokens` and `latencyMs`
+  in `llmCalls` — so a per-model measured rate is a real future slice, not a guess to take today.
+
+**Decision: 30 stays. Recorded here so the next session does not re-derive the 19.7 and act on it
+blind.**
+
+### Q2 — should `glm-5.3-flash` move down the ladder? **No — and the code says why the move would buy nothing.**
+
+Checked every Weak rung against `glmCanDisableThinking`:
+
+| rung | can thinking be turned off? |
+|---|---|
+| `glm-5.3-flash` | **no** (proved by the 400) |
+| `kimi-k2.6` | **no** — and `thinkingControl` is set only on the GLM rung (`routes/agentv3.ts`), so Kimi is never sent the field at all |
+| `glm-5.3` | **no** (5.3 family) |
+| `haiku` | n/a — the only non-reasoning rung, and it is last and dearest |
+
+**Three of Weak's four rungs are always-thinking models.** Report `58fe8254` is the confirmation:
+there the GLM rung was 400ing, the chain fell to KIMI, and Kimi returned `4833 output tokens / 0
+characters` three times — the identical starvation, one rung down. Moving flash down the ladder walks
+into the same defect at a higher price (`glm-5.3` is ~9× flash's input rate), which is the opposite of
+both of the admin's stated aims.
+
+**Decision: the ladder is untouched. It is admin policy (2026-09-14) and it was never the problem.**
+
+### What shipped instead
+
+1. **`glmThinkingParam` now sends `{ thinking: { type: 'low' } }`** where `disabled` is not accepted —
+   the provider's own lowest named level — instead of an empty object. `GLM_REDUCED_THINKING` is the
+   one constant.
+2. **The bet checks itself on first contact, so it can never become another 280-failure build.** The
+   level names come from an error message, not a document this session could read, so the field's
+   shape is a reasoned bet. `isThinkingParamRejection` + a one-shot retry drop the field and re-issue
+   the SAME request when a model rejects it; the model is then remembered **process-wide**
+   (`modelRejectsThinkingParam`) so the wasted round-trip is paid at most once per model, not once per
+   call — a per-runner memo would re-pay it on every build, since a runner is constructed per rung per
+   build. Worst case is byte-identical to the behaviour before this change.
+3. ⚠️ **The retry is narrow on purpose**, and only fires when we actually SENT the field: re-issuing a
+   genuinely bad request unchanged would be a retry loop around a deterministic failure, which the
+   fourth absolute rule forbids by name. Test-locked both ways in `tests/glmReducedThinking.test.ts`
+   (11 cases), including that a 429 and an invalid tool schema are never retried.
+4. **#2957's own tests were updated, not flipped.** They pinned the old REMEDY (`toEqual({})`); the
+   INVARIANT they exist for — never send `disabled` to a model that rejects it — is what they assert
+   now, so they still bite on the regression that actually cost 280 calls.
+
+⚠️ **STILL OPEN, and it is the honest bound on all of this:** whether `low` leaves enough of the 4,833
+tokens for a real answer is unmeasured — it needs one live build. If the next report still shows
+`finish_reason: max_tokens` with zero output on that rung, the starvation net from the `ee20478d`
+autopsy catches it (the rung fails over instead of repeating), and the remaining levers are the rate
+(Q1) and a per-model measured throughput.
 ---
 
 ## 2026-09-16 — Z.ai's and Moonshot's own price pages, saved verbatim; four live rates were wrong, all under-counting OUR cost

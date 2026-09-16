@@ -22,9 +22,37 @@
 // model ('sonnet' / 'opus' / 'haiku') that the route resolves through models.ts, so a Claude id bump
 // never touches this file.
 //
-//   WEAK   (free)      GLM glm-5.3-flash → KIMI kimi-k2.7-code → GLM glm-5.3 → HAIKU
-//   NORMAL (economy)   GLM glm-5.3-flash → KIMI kimi-k2.7-code-highspeed → GLM glm-5.3 → CLAUDE sonnet
+//   WEAK   (free)      GLM glm-4.7-flashx → KIMI kimi-k2.7-code → GLM glm-5.3 → HAIKU
+//   NORMAL (economy)   GLM glm-4.7-flashx → KIMI kimi-k2.7-code-highspeed → GLM glm-5.3 → CLAUDE sonnet
 //   STRONG (premium)   GLM glm-5.3 → KIMI kimi-k3 → CLAUDE sonnet → CLAUDE_OPUS opus
+//
+// 🔴 THE LEAD RUNG CHANGED 2026-09-17: glm-5.3-flash is OFF every ladder, replaced by glm-4.7-flashx
+// (admin, verbatim: "glm 5.3 flash ko hata do!" — the per-tier routing confirmation the Model Routing
+// Policy requires). This REVERSES part of the 2026-09-14 decision, which chose 5.3-flash on the
+// reasoning that "a $0 rung that fails costs more than a $0.15 rung that succeeds". That reasoning was
+// right and its PREMISE turned out to be false: 5.3-flash does not succeed. Three autopsies in three
+// days measured it —
+//   • ee20478d (09-15): 280 hard 400s in ONE build — every call on every tier opened on a rung that
+//     could not succeed, because 5.3-flash cannot be told to stop reasoning (see glmThinking.ts).
+//   • b3a2c81e (09-16): 68 GLM failures, 52 of them OUTPUT_BUDGET_STARVED — the model's own mandatory
+//     thinking spent the whole authorised output ceiling before writing a single character.
+//   • dd1f5f60 (09-16): 8.65 tokens/second sustained — 29.5 of a 30-minute build inside one call.
+//
+// 🔑 WHY FLASHX IS NOT JUST "THE CHEAPER ONE" — it is the one where that entire failure class cannot
+// happen. `glmCanDisableThinking` is a NUMERIC family test: 5.3-and-newer always reason, 4.x can be
+// told not to. FlashX is 4.7, so the turn sends `thinking: disabled` and the FULL output budget goes
+// to code instead of to reasoning nobody reads. The defect is designed out, not tuned around.
+//   Price (Z.ai's own page, 2026-09-17): $0.07 in / $0.40 out / $0.01 cached — under HALF of
+//   5.3-flash's $0.15 / $0.50 / $0.03. Cheaper AND structurally immune, which is why this is not a
+//   trade-off between the two aims.
+//
+// ⚠️ THE HONEST RISK, stated rather than discovered later: FlashX's CODING quality is unmeasured here.
+// Z.ai's "X" suffix denotes the faster, paid variant of a Flash model, and this file's own 09-14 entry
+// calls the free glm-4.7-flash "weak at coding" — FlashX may share that brain. What has changed is the
+// comparison: a model that reasons well but delivers nothing (three autopsies) is worse than one that
+// is plainer but answers. Watch the first real builds for heal COUNT, not for cost.
+// 🔒 REVERT WITH NO DEPLOY, both tiers: AGENTV3_LADDER_WEAK / AGENTV3_LADDER_NORMAL, e.g.
+//   AGENTV3_LADDER_WEAK=GLM:glm-5.3-flash,KIMI:kimi-k2.7-code,GLM:glm-5.3,HAIKU
 //
 // 🔴 REVISED 2026-09-16 (admin, verbatim: "free wale me kimi 2.6 ki jagah kimi code 2.7 kar de! normal
 // wale me kimi code 2.7 highspeed karo strong me kimi k3 bhi add karo") — this is the explicit
@@ -88,13 +116,13 @@ export interface LadderRung {
 
 export const TIER_LADDERS: Readonly<Record<PowerLevel, readonly LadderRung[]>> = {
   weak: [
-    { provider: 'GLM', model: 'glm-5.3-flash' },
+    { provider: 'GLM', model: 'glm-4.7-flashx' },
     { provider: 'KIMI', model: 'kimi-k2.7-code' },
     { provider: 'GLM', model: 'glm-5.3' },
     { provider: 'CLAUDE_HAIKU', model: 'haiku' },
   ],
   off: [
-    { provider: 'GLM', model: 'glm-5.3-flash' },
+    { provider: 'GLM', model: 'glm-4.7-flashx' },
     { provider: 'KIMI', model: 'kimi-k2.7-code-highspeed' },
     { provider: 'GLM', model: 'glm-5.3' },
     { provider: 'CLAUDE', model: 'sonnet' },
@@ -166,15 +194,34 @@ export function tierLadder(level: PowerLevel | string | boolean | null | undefin
 }
 
 /**
- * The ladder a HEAL pass runs on. The 2026-08-13 rule ("a repair must not begin on the model that
- * produced the failing app") was written when the leading rung was glm-4.7-flash — a model too weak
- * to repair what it broke. That rung is on no ladder now; glm-5.3-flash leads, and repairing on the
- * same strong model WITH the error in hand is the ordinary, cheapest path. So a heal drops the
- * leading rung only when it is that known-weak 4.7-flash (an env override could still put it there);
- * otherwise the heal ladder IS the tier ladder.
+ * Is this the 4.7-flash FAMILY — the tier's cheap lead, `glm-4.7-flash` or `glm-4.7-flashx`?
+ *
+ * Deliberately matches BOTH, because the 2026-08-13 rule is about the ROLE the model plays (the cheap
+ * rung that wrote the broken app), not about one id. The `x?` is the whole point of naming this:
+ * before 2026-09-17 the same regex matched only the free flash, and FlashX becoming the lead rung
+ * would otherwise have changed heal behaviour by ACCIDENT of a pattern written for a different model.
+ * A rule this file depends on may not rest on a coincidence.
+ */
+function isCheapFlashRung(model: string): boolean {
+  return /4[.\-]?7[-.]?flash/i.test(model);
+}
+
+/**
+ * The ladder a HEAL pass runs on — the tier ladder minus its cheap leading flash rung.
+ *
+ * The 2026-08-13 rule, admin-mandated: "a repair must not begin on the model that produced the
+ * failing app". Between 2026-09-14 and 2026-09-17 this was effectively DORMANT — glm-5.3-flash led,
+ * the pattern did not match it, and every heal restarted on the very rung whose output needed
+ * repairing. With glm-4.7-flashx leading (2026-09-17) the rule applies again by design: a weak-tier
+ * heal opens on KIMI kimi-k2.7-code, a genuinely different vendor holding the error.
+ *
+ * 💸 It costs more per heal ($0.95/$4.00 against FlashX's $0.07/$0.40) and that is the intended trade:
+ * heals are meant to be RARE, and a cheap repair that fails buys a second heal, which is dearer than
+ * one that works. If heal COUNT rises after the lead-rung change, that is the signal to look at — not
+ * this line.
  */
 export function healLadder(rungs: readonly LadderRung[]): LadderRung[] {
-  if (rungs.length > 1 && /4[.\-]?7[-.]?flash/i.test(rungs[0].model)) return rungs.slice(1);
+  if (rungs.length > 1 && isCheapFlashRung(rungs[0].model)) return rungs.slice(1);
   return [...rungs];
 }
 
@@ -238,8 +285,8 @@ export function escalationPathForTier<T extends string>(level: PowerLevel | stri
  * back to another tier's model either.
  */
 export const PLAN_RUNG: Readonly<Record<PowerLevel, LadderRung>> = {
-  weak: { provider: 'GLM', model: 'glm-5.3-flash' },
-  off: { provider: 'GLM', model: 'glm-5.3-flash' },
+  weak: { provider: 'GLM', model: 'glm-4.7-flashx' },
+  off: { provider: 'GLM', model: 'glm-4.7-flashx' },
   mini: { provider: 'GLM', model: 'glm-5.3' },
 };
 

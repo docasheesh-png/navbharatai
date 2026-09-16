@@ -5,10 +5,17 @@
 //
 //     "This model always engages in thinking and cannot be disabled; please use low, high, or max"
 //
-// `glm-5.3-flash` is the FIRST rung of the Weak and Normal ladders and the PLAN rung of all three
-// (tierLadder.ts), and `glm-5.3` is the first rung of Strong. So this was not an edge case: since the
-// 2026-09-14 ladder change, **every build on every tier opened on a rung that could not succeed**, and
-// the chain spent its whole budget falling through it — `GLM → GLM#2 → … and 80 more` on one build.
+// At the time, `glm-5.3-flash` LED the Weak and Normal ladders and `glm-5.3` led Strong, so this was
+// not an edge case: **every build on every tier opened on a rung that could not succeed**, and the
+// chain spent its whole budget falling through it — `GLM → GLM#2 → … and 80 more` on one build.
+//
+// ⚠️ THAT SENTENCE IS HISTORY, NOT THE CURRENT LADDER — and it is written in the past tense for a
+// reason this repo has already paid for (2026-09-15: four comments claiming GPT was on the Weak ladder
+// stayed true for one day and wrong for weeks, because `tsc` and `vitest` cannot read a comment). The
+// lead rung moved to `glm-4.7-flashx` on 2026-09-17 — partly BECAUSE of this very defect, since 4.x
+// can be told not to reason and 5.3 cannot. **`TIER_LADDERS` in tierLadder.ts is the only place a rung
+// exists; do not restate it here.** This module needs no ladder knowledge at all: `glmCanDisableThinking`
+// is a numeric family test, so a rung added later is covered the day it ships.
 //
 // 🔎 THE CLASS WAS ALREADY ROOT-CAUSED HERE, FOR THE OTHER VENDOR, AND THE SIBLING WAS NEVER HUNTED.
 // `models.ts`'s `modelSupportsAdaptiveThinking` exists because of the identical failure on Anthropic

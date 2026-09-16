@@ -58762,3 +58762,75 @@ does.
 
 Still open, unchanged from yesterday: the classifier's broader Devanagari blindness (every keyword array
 itself, not just the confidence gate around them) remains a separate, larger, deliberately-deferred item.
+
+## 2026-09-17 — The lead rung: glm-5.3-flash off every ladder, glm-4.7-flashx in (item 1 of the admin's build list)
+
+Admin gave a direct instruction — *"glm 5.3 flash ko hata do!"* — and then supplied the missing fact
+this had been blocked on: a screenshot of **docs.z.ai → Pricing** confirming **GLM-4.7-FlashX is real,
+at $0.07 in / $0.40 out / $0.01 cached**. (In an earlier turn I had declined to act on "flashx" without
+the exact id, because a wrong model id fails silently here. The screenshot settled it.)
+
+### Why this reverses a decision made three days ago, and why that is correct
+
+The 2026-09-14 ladder chose `glm-5.3-flash` on the rule *"a $0 rung that fails costs more than a $0.15
+rung that succeeds"*. **The rule holds; its premise did not.** Three autopsies in three days measured
+5.3-flash failing as a lead rung: `ee20478d` (280 hard 400s in one build), `b3a2c81e` (68 GLM failures,
+52 of them `OUTPUT_BUDGET_STARVED`), `dd1f5f60` (8.65 tok/s; 29.5 of 30.1 minutes inside one call).
+
+**The decisive fact is not price — it is that the failure class cannot occur on FlashX.**
+`glmCanDisableThinking` is a numeric family test: 5.3-and-newer always reason, 4.x can be told not to.
+FlashX is 4.7, so its turns send `thinking: disabled` and the whole output budget goes to code instead
+of to mandatory reasoning that never reaches the file. Cheaper *and* structurally immune — the two aims
+("kharcha kam", "app best bane") point the same way here, which is rare enough to state.
+
+### What changed
+
+- `tierLadder.ts` — Weak and Normal lead rung, and the `PLAN_RUNG` of both, 5.3-flash → 4.7-flashx.
+  Strong untouched (it never carried a flash rung). Rungs 2-4 of every tier unchanged.
+- `providerRates.ts` — a new `glm-4.7-flashx` row and a matcher branch placed BEFORE both the generic
+  `flash` rule and the `/glm-?4/` coder rule.
+- `healLadder` — the predicate is now a named `isCheapFlashRung`, matching the 4.7-flash FAMILY.
+
+### 💸 The billing half had to ship in the same commit — the third time this trap was set
+
+`glm-4.7-flashx` trips TWO existing rules that would each price it wrongly: it contains "flash" (→ the
+FREE `glm-flash` $0 line) and it matches `/glm-?4/` (→ $0.60/$2.20, 8.6× its real input). A $0 real cost
+bills the USER ₹0 — the bill is real cost × markup — while we pay Z.ai for every token. Identical in
+shape to `kimi-k2.7-code-highspeed` and `glm-5.3-flash`, both caught on 2026-09-16. **The rule this
+makes explicit: a model may not join a ladder until its price is on the rate card.**
+
+### 🔁 A dormant rule woke up, and it was found by a failing test rather than in production
+
+`healLadder`'s pattern matched only `4.7-flash`. Between 09-14 and 09-17, with 5.3-flash leading, it
+matched nothing — so every heal restarted on the exact rung whose output needed repairing, silently.
+FlashX matches it, so the 2026-08-13 rule ("a repair must not begin on the model that produced the
+failing app") applies again: Weak and Normal heals now open on KIMI. Costs more per heal ($0.95/$4.00
+against $0.07/$0.40) and that is the intended trade — a cheap repair that fails buys a second one.
+`tests/tierChainFidelity.test.ts` caught this as a failure the moment the lead rung changed; its case
+had been NAMED "5.3-flash leads and can repair its own work", which is exactly the assumption that
+expired. Rewritten to assert the heal chain opens on a DIFFERENT VENDOR, pinned explicitly so a future
+lead-rung change that happens to keep GLM first fails there rather than quietly reinstating the old
+behaviour.
+
+### ⚠️ Open risk, stated rather than discovered later
+
+FlashX's CODING quality is unmeasured here. Z.ai's "X" suffix is the faster PAID variant of a Flash
+model (GLM-4.5-X and -AirX are both dearer than their bases), and this repo's own 09-14 entry calls the
+free `glm-4.7-flash` "weak at coding" — FlashX may share that brain. What changed is the comparison, not
+the estimate: a model that reasons well and delivers nothing is worse than a plainer one that answers.
+**Watch heal COUNT on the first real builds, not cost.** Revert is one env var, no deploy:
+`AGENTV3_LADDER_WEAK=GLM:glm-5.3-flash,KIMI:kimi-k2.7-code,GLM:glm-5.3,HAIKU` (and `_NORMAL` likewise).
+
+A second honest unknown: the exact API id. The page prints "GLM-4.7-FlashX"; `glm-4.7-flashx` follows
+the vendor's own lower-case convention (`glm-4.7-flash`, `glm-5.3-flash`). If it is wrong the rung
+errors and the chain falls through to KIMI — safe, but one wasted round-trip per turn until the env
+override corrects it. The rate matcher accepts every casing/separator variant, so billing cannot drift
+on that question (test-locked).
+
+### Not touched, deliberately — other sessions own them
+
+PR **#2983** is building the in-flight-provider-cancellation fix (the ~52-minute zombie chain I recorded
+as OPEN yesterday), and PR **#2985** the slow-rung throughput bench. Per the concurrency rule, a root
+cause another PR names as its work is taken. Neither touches ladder composition, so there is no overlap.
+
+**Gate, run last on the final state:** see the commit.

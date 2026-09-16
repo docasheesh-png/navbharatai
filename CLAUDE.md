@@ -2673,9 +2673,50 @@ is now **`src/server/AgentV3/tierLadder.ts`**, and the build chain is built from
 
 | Tier (UI) | Internal | The ladder (first → last) | Escalation cap |
 |---|---|---|---|
-| Weak (free) | `weak` | GLM `glm-5.3-flash` → KIMI `kimi-k2.7-code` → GLM `glm-5.3` → Claude **Haiku** | never escalates (NavBharatAI pays) |
-| Normal (paid economy) | `off` | GLM `glm-5.3-flash` → KIMI `kimi-k2.7-code-highspeed` → GLM `glm-5.3` → Claude Sonnet | Sonnet |
+| Weak (free) | `weak` | GLM `glm-4.7-flashx` → KIMI `kimi-k2.7-code` → GLM `glm-5.3` → Claude **Haiku** | never escalates (NavBharatAI pays) |
+| Normal (paid economy) | `off` | GLM `glm-4.7-flashx` → KIMI `kimi-k2.7-code-highspeed` → GLM `glm-5.3` → Claude Sonnet | Sonnet |
 | Strong (paid premium) | `mini` | GLM `glm-5.3` → KIMI `kimi-k3` → Claude Sonnet → Claude **Opus** | Opus (its last rung) |
+
+🔴 **THE LEAD RUNG CHANGED 2026-09-17 — `glm-5.3-flash` IS OFF EVERY LADDER** (admin, verbatim: *"glm
+5.3 flash ko hata do!"*, with the FlashX price read off docs.z.ai on their own screen). It is replaced,
+on Weak and Normal and as the PLAN rung of both, by **`glm-4.7-flashx` — $0.07 in / $0.40 out / $0.01
+cached**, against 5.3-flash's $0.15 / $0.50 / $0.03. Strong is untouched (it never carried a flash rung).
+
+**This REVERSES half of the 2026-09-14 decision, and the reversal is evidence-led rather than a change
+of mind.** That decision picked 5.3-flash on the rule *"a $0 rung that fails costs more than a $0.15
+rung that succeeds"* — the rule is still right; its premise was false. Three autopsies in three days:
+- **`ee20478d` (09-15)** — 280 hard 400s in ONE build. Every tier opened on a rung that could not
+  succeed, because 5.3-flash cannot be told to stop reasoning.
+- **`b3a2c81e` (09-16)** — 68 GLM failures, 52 `OUTPUT_BUDGET_STARVED`: the model's mandatory thinking
+  spent the whole authorised output ceiling before writing one character.
+- **`dd1f5f60` (09-16)** — 8.65 tokens/second sustained; 29.5 of a 30.1-minute build inside one call.
+
+🔑 **FLASHX IS NOT MERELY CHEAPER — THE FAILURE CLASS CANNOT OCCUR ON IT.** `glmCanDisableThinking`
+(`glmThinking.ts`) is a NUMERIC family test: 5.3-and-newer always reason; 4.x can be told not to. FlashX
+is 4.7, so the turn sends `thinking: disabled` and the entire output budget goes to code rather than to
+reasoning nobody reads. Cheaper AND structurally immune — so this is not a trade between the two aims.
+
+💸 **THE BILLING HALF HAD TO SHIP IN THE SAME COMMIT, and it is the third time this exact trap was set.**
+`glm-4.7-flashx` contains "flash" (→ the FREE `glm-flash` line) and matches `/glm-?4/` (→ the $0.60
+coder line). Either would have been wrong, and a $0 real cost bills the USER ₹0 while we pay Z.ai —
+identical in shape to `kimi-k2.7-code-highspeed` and `glm-5.3-flash`, both caught on 09-16. It now has
+its own row (`RATE_GLM47_FLASHX_IN` / `_OUT` / `_CACHE`) matched BEFORE both rules. **A model may not
+join a ladder until its price is on the card.**
+
+🔁 **A HEAL NOW DROPS THE LEAD RUNG AGAIN — a dormant rule woke up.** `healLadder`'s pattern matched
+only `4.7-flash`, so between 09-14 and 09-17 (while 5.3-flash led) every heal restarted on the very
+rung whose output needed repairing. FlashX matches it, so the 2026-08-13 rule (*"a repair must not begin
+on the model that produced the failing app"*) applies again: a Weak/Normal heal opens on KIMI. It costs
+more per heal ($0.95/$4.00 vs $0.07/$0.40) — intended, because a cheap repair that fails buys a second
+one. The predicate is now the named `isCheapFlashRung`, so this can never again turn on a coincidence.
+
+⚠️ **THE HONEST RISK, recorded rather than discovered later: FlashX's CODING quality is unmeasured here.**
+Z.ai's "X" suffix is the faster, paid variant of a Flash model (GLM-4.5-X, -AirX are all dearer than
+their base), and this file's own 09-14 entry calls the free `glm-4.7-flash` *"weak at coding"* — FlashX
+may share that brain. What changed is the comparison, not the estimate: a model that reasons well and
+delivers nothing is worse than a plainer one that answers. **Watch heal COUNT on the first real builds,
+not cost.** 🔒 Revert with no deploy:
+`AGENTV3_LADDER_WEAK=GLM:glm-5.3-flash,KIMI:kimi-k2.7-code,GLM:glm-5.3,HAIKU` (and `_NORMAL` likewise).
 
 🔴 **KIMI RUNGS REVISED 2026-09-16** (admin, verbatim: *"free wale me kimi 2.6 ki jagah kimi code 2.7 kar
 de! normal wale me kimi code 2.7 highspeed karo strong me kimi k3 bhi add karo"*): Weak's Kimi rung moved

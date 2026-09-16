@@ -339,6 +339,21 @@ export interface BuildDiagnosticsReport {
   providerChain?: string;
   /** The distinct provider families in that chain, for lining up against providerDelivery. */
   providerChainNames?: string[];
+  /**
+   * What the request analyser concluded about THIS prompt, recorded so a model's performance can be
+   * correlated with the difficulty of the work it was given (modelPerformance.ts).
+   *
+   * 🔴 IT IS STORED RATHER THAN RE-DERIVED, AND THE DIFFERENCE IS NOT COSMETIC. `analyzeRequest` is
+   * pure, so a reader could in principle re-run it on the stored prompt — but the stored prompt is
+   * TRUNCATED (HISTORY_PROMPT_MAX = 200 chars) and the score has explicit length bands (+5 over 300,
+   * +10 over 800) plus `fileCount` and `historyTurns` inputs that are not stored at all. Re-deriving
+   * would therefore produce a DIFFERENT number from the one the build actually routed on, and print
+   * it as if it were the same fact. A legacy report carries nothing here and must read as unavailable.
+   *
+   * Observability only: written once at build start from a value the route already computed, read by
+   * nothing in the build path.
+   */
+  requestAnalysis?: { taskType: string; complexityScore: number; startTier: string };
   liveTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
   /** The cache-hit input tokens seen so far, paired with `liveTokens`. Same unreconciled status. */
   liveCacheReadInputTokens?: number;
@@ -458,6 +473,7 @@ export class BuildDiagnostics {
   private readonly issues: BuildIssue[] = [];
   /** provider → failure bucket → count. See recordProviderFailure. */
   private readonly providerFailureReasons = new Map<string, Map<string, number>>();
+  private requestAnalysis?: { taskType: string; complexityScore: number; startTier: string };
   private readonly meta: BuildDiagnosticsMeta;
   private readonly now: () => number;
   private readonly startedAt: number;
@@ -1475,6 +1491,20 @@ export class BuildDiagnostics {
   }
 
   /** Record the ordered engine chain this build was given. Best-effort; a blank value records nothing. */
+  /**
+   * Record what the analyser concluded about this request. Called once, at build start, with a value
+   * the route has already computed — no work is done here and nothing in the build reads it back.
+   */
+  setRequestAnalysis(a: { taskType?: string; complexityScore?: number; startTier?: string } | null | undefined): void {
+    const taskType = typeof a?.taskType === 'string' ? a.taskType.trim() : '';
+    const startTier = typeof a?.startTier === 'string' ? a.startTier.trim() : '';
+    const score = a?.complexityScore;
+    // All three or none: a half-recorded analysis would read as a real measurement with a missing
+    // half, which is the shape `USAGE_NOT_REPORTED` exists to keep out of this report.
+    if (!taskType || !startTier || typeof score !== 'number' || !Number.isFinite(score)) return;
+    this.requestAnalysis = { taskType, complexityScore: score, startTier };
+  }
+
   setProviderChain(chain: string, names?: string[]): void {
     const text = typeof chain === 'string' ? chain.trim() : '';
     if (!text) return;
@@ -1736,6 +1766,7 @@ export class BuildDiagnostics {
       builtBy: dominantDeliveryProvider(this.providerDelivery),
       providerFailures: this.providerFailures.size ? Object.fromEntries(this.providerFailures) : undefined,
       providerFailureReasons: this.providerFailureReasons.size ? this.providerFailureBreakdown() : undefined,
+      requestAnalysis: this.requestAnalysis,
       providerTokens: this.providerTokens,
       shadowFastLaneTokens: this.shadowFastLaneTokens,
       providerChain: this.providerChain,

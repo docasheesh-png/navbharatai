@@ -11631,6 +11631,16 @@ async function noteBuildOutcome(
         },
       });
       buildDiagRef = buildDiag; // expose to the outer catch so a build crash is captured too
+      // OBSERVABILITY ONLY (2026-09-16) — record what the request analyser concluded above, so a
+      // model's measured performance can be correlated with the DIFFICULTY of the work it was handed
+      // (modelPerformance.ts). The value was computed long before this line; this only stores it, and
+      // nothing in the build ever reads it back.
+      //
+      // ⚠️ Stored rather than re-derived at read time: the report keeps only the FIRST 200 characters
+      // of the prompt, while `analyzeRequest` scores explicit length bands (+5 over 300, +10 over 800)
+      // and takes `fileCount`/`historyTurns` that are not stored at all. A re-derived score would be a
+      // different number printed as the same fact.
+      try { buildDiag.setRequestAnalysis(analysis); } catch { /* observation only — never a build's problem */ }
       // A clean sheet, so "healed twice" means twice in THIS build — see HealLedger.
       resetHealLedger(workspaceId);
 

@@ -58508,3 +58508,86 @@ need, and the band should shrink. **That is a measurement to take, not a claim b
 test:bundle · boot:check · `vitest run` → **1704 files, 23,935 passed, 1 skipped, 0 FAIL.**
 `tests/correctionReserve.test.ts` — 32 cases over the 16 required properties, reversion-proven
 (2 fail when the wiring is removed).
+
+---
+
+## 2026-09-16 — The evidence layer: model performance aggregated across builds (branch `claude/model-performance-telemetry`)
+
+**Admin approved the audit's recommendation: telemetry first, routing later.** *"Every optimization must
+be evidence-driven."* This is the evidence.
+
+### The gap, restated from the audit
+
+Every build's report already carries `llmCalls` (`LlmCallRecord`: model, latency, in/out tokens,
+`finishReason`, `ok`, `error`) and an accurate per-provider failure ledger (`providerFailures` /
+`providerFailureReasons`, bucketed by `classifyProviderFailure`). But `listAllDiagnostics` — the ONLY
+cross-build index — projected metadata alone. **So "is Kimi better than GLM on complex files?" could be
+answered only by opening reports one at a time, and the single real observation anyone had was n = 1.**
+
+### What shipped
+
+`src/server/AgentV3/modelPerformance.ts` (new, PURE — no clock, no env, no I/O) summarises one report
+into per-`(provider, model)` rows plus per-provider failures plus build-level dimensions.
+`listAllDiagnostics` projects it. **It costs no extra I/O**: that query already reads each whole
+document to project `ok`/`summary`, so `llmCalls` is already in memory — summarising is a walk over at
+most `MAX_LLM_CALLS` (300) records per row, and the output is one row per MODEL, never per call.
+
+### 🔒 The four integrity rules, each forced by something real in the data
+
+1. **A FAILED CALL'S MODEL ID IS NOT THE MODEL THAT FAILED.** `AgentRunner`'s failure path
+   (`AgentRunner.ts:586`) reports the *requested* model — a Claude id — because the chain threw before
+   any rung said which one it was; only the success path carries `turn.model ?? model`. Attributing
+   failures per model would file **every GLM starvation under `claude-haiku`**. So per-model stats come
+   from successful calls, failures are reported per PROVIDER from the ledger, and the failed calls are
+   counted honestly as `unattributedFailedCalls` rather than dropped.
+2. **"Not reported" is never zero.** No usage ⇒ `outputTokens: null`, plus `usageReportedCalls` so an
+   analysis knows how many calls a total is built from. Averaging a missing value as 0 would have
+   under-stated a model's real output by a third in the mixed case (test 10).
+3. **Failure buckets are READ, never re-derived.** `output-budget` and `timeout` come from the ledger
+   the runner filled with the SAME predicates it routed on. A second regex here would be a second
+   opinion, and the two would drift. Test-locked by asserting the module (comments stripped) contains
+   no such regex.
+4. **NO first-pass-success flag is invented.** The admin asked for an authoritative field "if one
+   exists". **None does**: `ok` means the runner returned a result (a build healed three times is still
+   `ok: true`), the release gate answers a different question and its `unknown` is by design neither
+   pass nor fail, and nothing records "no repair was needed". The three components are exposed and
+   `FIRST_PASS_NOTE` states the limitation in the code.
+
+### The one field that was not already on the document
+
+`taskType` / `complexityScore` / `startTier` went only to `agentV3CostTelemetry`, a separate store. So
+`BuildDiagnostics.setRequestAnalysis()` records them on the report — called once, after `buildDiag`
+exists, with a value the route computed long before, wrapped, and **read by nothing in the build**.
+
+⚠️ **Stored rather than re-derived, and that is not a preference.** `analyzeRequest` is pure, so a
+reader could re-run it on the stored prompt — but the report keeps only the FIRST **200** characters
+(`HISTORY_PROMPT_MAX`) while the score has explicit length bands (+5 over 300, +10 over 800) and takes
+`fileCount`/`historyTurns` that are not stored at all. A re-derived score would be **a different number
+printed as the same fact**. A legacy report reads `null`, never a re-derivation.
+
+`repairCount` is exposed as `previewRepairAttempts`, named precisely: `PREVIEW_NOT_RENDERED` is recorded
+once per preview-heal iteration, immediately before the heal runner runs, so it counts that loop's
+model-backed attempts exactly — and NOT the deterministic heals (syntax, import-path, tsconfig) that
+spend no model call. Those are all in `issueCodeCounts`, unaggregated, so a later question needs no code
+change. (`REAL_HEAL` was checked and is a test-only fixture code, not production.)
+
+### Build behaviour is unchanged
+
+**65 insertions, 0 deletions.** The only executable line on the build path is the wrapped
+`setRequestAnalysis` call. Verified untouched: `tierLadder.ts`, `correctionReserve.ts`,
+`releaseGate.ts`, `floorBudget.ts`, `MultiProviderTurnRunner.ts`, `openAiStream.ts`, `AgentRunner.ts`,
+`SimpleBuilder.ts`. No ladder, model id, timeout, streaming, max-tokens, billing, gate, reserve,
+`deadForRun` or routing change; no new model call; no new route. Authorization is unchanged — the
+projection rides an existing `verifyAdminToken` listing.
+
+**Gate, run last on the final state:** typecheck · typecheck:server · noUnusedImports · build ·
+test:bundle · boot:check · `vitest run` → **1705 files, 23,969 passed, 1 skipped, 0 FAIL.**
+`tests/modelPerformance.test.ts` — 34 cases over the 17 required properties, reversion-proven in both
+halves (projection removed ⇒ 1 fails; recorder removed ⇒ 2 fail).
+
+### What it does NOT yet answer, said plainly
+
+Nothing is measured yet — this makes measurement possible. The data accrues from the next build onward;
+older reports carry no `requestAnalysis` and read as unavailable rather than being back-filled from a
+truncated prompt. **The 50–100 build analysis is deliberately NOT started**, per the admin, and no
+GLM/Kimi routing change is made.

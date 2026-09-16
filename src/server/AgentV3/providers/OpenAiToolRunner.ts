@@ -23,6 +23,14 @@ import {
   type OpenAiMessage,
   type OpenAiTool,
 } from './OpenAiToolAdapter';
+import {
+  OpenAiStreamAccumulator,
+  buildStreamingEnabled,
+  streamHardCapMs,
+  streamIdleMs,
+  type OpenAiStreamChunkLike,
+  type StreamStopCause,
+} from './openAiStream';
 
 /** The narrow slice of an OpenAI-compatible SDK the runner needs (DI/tests). */
 export interface OpenAiChatClient {
@@ -40,9 +48,30 @@ export interface OpenAiChatClient {
          * rung), so standard OpenAI providers (Grok, etc.) never receive it.
          */
         thinking?: { type: GlmThinkingLevel };
-      }): Promise<OpenAiCompletionLike>;
+        /** Streamed read (see openAiStream.ts). Only ever sent when the stream flag is on. */
+        stream?: true;
+        /** Ask the provider to put token usage on the final chunk — a stream carries none otherwise. */
+        stream_options?: { include_usage: true };
+      }): Promise<OpenAiCompletionLike | OpenAiChatStream>;
     };
   };
+}
+
+/**
+ * What an OpenAI-compatible SDK hands back for `stream: true` — an async iterable of chunks, with an
+ * abort controller attached. Structural, so any SDK (or a test double) satisfies it.
+ *
+ * `controller.abort()` matters as much as the iteration does: when OUR clock stops waiting, the
+ * provider is still generating and still billing. `turnDeadline.ts` records the build that logged
+ * provider traffic **148 seconds after the build had ended** for exactly this reason — racing a
+ * promise stops the waiting, not the call.
+ */
+export interface OpenAiChatStream extends AsyncIterable<OpenAiStreamChunkLike> {
+  controller?: { abort(): void };
+}
+
+function isChatStream(v: unknown): v is OpenAiChatStream {
+  return Boolean(v) && typeof (v as AsyncIterable<unknown>)[Symbol.asyncIterator] === 'function';
 }
 
 /** Reject a promise if it does not settle within `ms`. Portable (no SDK/AbortController dependency),
@@ -57,6 +86,76 @@ function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> 
       (e) => { clearTimeout(timer); reject(e); },
     );
   });
+}
+
+/**
+ * Read a streamed turn, bounded by SILENCE rather than by duration.
+ *
+ * Each `next()` races two clocks: the idle bound (no chunk for `idleMs` ⇒ the provider has stopped)
+ * and the absolute ceiling (`endAt`, already reconciled with the lane's deadline). Whichever fires,
+ * the stream is ABORTED — a call nobody will read must stop generating and stop billing — and what
+ * has already arrived is kept.
+ *
+ * Returns why it stopped; the accumulator holds what was received. Never throws for a stall: a stall
+ * with content is a truncated answer, and a stall with nothing is the caller's decision to make
+ * (it has to be a provider failure, so the bench can see it).
+ */
+async function readStream(
+  stream: OpenAiChatStream,
+  acc: OpenAiStreamAccumulator,
+  opts: { idleMs: number; endAt: number; onText?: (t: string) => void; now?: () => number },
+): Promise<StreamStopCause> {
+  const now = opts.now ?? (() => Date.now());
+  const iterator = stream[Symbol.asyncIterator]();
+  const abort = () => { try { stream.controller?.abort(); } catch { /* best-effort */ } };
+
+  try {
+    for (;;) {
+      const msToCeiling = opts.endAt - now();
+      if (msToCeiling <= 0) { abort(); return 'deadline'; }
+      const waitMs = Math.min(opts.idleMs, msToCeiling);
+
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const stalled = Symbol('stalled');
+      const tick = new Promise<typeof stalled>((resolve) => {
+        timer = setTimeout(() => resolve(stalled), waitMs);
+      });
+
+      const advance = iterator.next();
+      let step: IteratorResult<OpenAiStreamChunkLike> | typeof stalled;
+      try {
+        step = await Promise.race([advance, tick]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+
+      if (step === stalled) {
+        // 🔴 THE ABANDONED PROMISE MUST BE DISARMED. We stop waiting on `advance`, but it is still
+        // live — and aborting the stream is precisely what makes it reject a moment later. With no
+        // handler attached that is an unhandled rejection in the build server, from a path that
+        // exists to make builds MORE reliable. Swallowed deliberately: the value can no longer be
+        // read by anybody, and the stall is already being reported by the return below.
+        advance.catch(() => { /* abandoned by our clock — see above */ });
+        abort();
+        // Which clock ran out decides the caller's wording — and a provider must never be blamed
+        // for our budget (turnDeadline.ts). `waitMs` was the ceiling only when it was the smaller.
+        return msToCeiling <= opts.idleMs ? 'deadline' : 'idle';
+      }
+      if (step.done) return 'complete';
+
+      const before = acc.textSoFar().length;
+      acc.push(step.value);
+      // REAL incremental text now, not one block at the end: the loop's onText contract finally
+      // receives the answer as it is written, which is what a user watching a build sees.
+      if (opts.onText) {
+        const delta = acc.textSoFar().slice(before);
+        if (delta) opts.onText(delta);
+      }
+    }
+  } catch (err) {
+    abort();
+    throw err;
+  }
 }
 
 export interface OpenAiToolRunnerOptions {
@@ -144,9 +243,15 @@ export class OpenAiToolRunner implements TurnRunner {
       ? glmThinkingParam(thinkingModel, params.thinking)
       : {};
 
-    // The caller's remaining budget, if it gave us one, reconciled with this runner's own bound. With
-    // no deadline this is `this.opts.timeoutMs` unchanged — see turnDeadline.ts for why that matters.
-    const bound = turnDeadline(this.opts.timeoutMs ?? 120_000, params.deadlineAt);
+    // 🔴 HOW WE READ DECIDES WHICH CLOCK BOUNDS THE CALL (admin 2026-09-16: "kimi aur glm slow hai,
+    // time out ho jata hai"). Non-streaming keeps the TOTAL bound it has always had, because with one
+    // opaque request that is the only hang signal available. Streaming replaces it with the hard
+    // ceiling and measures SILENCE instead — see openAiStream.ts for why a proxy became a direct
+    // measurement. The lane's deadline still wins whenever it is nearer; `turnDeadline` stays the
+    // authority on the budget either way, and with the flag off this line is the old one exactly.
+    const streaming = buildStreamingEnabled();
+    const configuredMs = streaming ? streamHardCapMs() : (this.opts.timeoutMs ?? 120_000);
+    const bound = turnDeadline(configuredMs, params.deadlineAt);
     // 🔴 REFUSE BEFORE SPENDING. The lane that asked has already run out of clock, so this call's answer
     // can no longer be read by anybody. Starting it would buy nothing and bill for it — which is exactly
     // the 148 seconds of post-mortem provider traffic in the report that produced this contract.
@@ -171,6 +276,11 @@ export class OpenAiToolRunner implements TurnRunner {
         ...(tools.length ? { tools, tool_choice: 'auto' as const } : {}),
         max_tokens: budget.maxTokens,
         ...thinking,
+        // `include_usage` is what puts token counts on the final chunk. Without it a stream carries
+        // NONE, and the ONE-WALLET LAW forbids inventing them — so an unmeasured turn would be billed
+        // at zero and our own cost report would under-state itself. Asking is all the code can do;
+        // whether a given provider honours it is a fact only a real call can settle.
+        ...(streaming ? { stream: true as const, stream_options: { include_usage: true as const } } : {}),
     };
     // 🔒 THE BET CHECKS ITSELF ON FIRST CONTACT, so it can never become another 280-failure build.
     //
@@ -184,7 +294,7 @@ export class OpenAiToolRunner implements TurnRunner {
     // one optional field and nothing else: re-sending a genuinely bad request unchanged would be a
     // retry loop around a deterministic failure, which the fourth absolute rule forbids by name. And
     // the retry happens only when we actually SENT the field — never on a call that had no opinion.
-    const call = async (): Promise<OpenAiCompletionLike> => {
+    const call = async (): Promise<OpenAiCompletionLike | OpenAiChatStream> => {
       try {
         return await this.client.chat.completions.create(request);
       } catch (err) {
@@ -194,17 +304,47 @@ export class OpenAiToolRunner implements TurnRunner {
         return this.client.chat.completions.create(withoutThinking);
       }
     };
-    const completion = await withTimeout(
-      call(),
-      timeoutMs,
-      // WHOSE CLOCK RAN OUT DECIDES THE WORDING, and it is not a detail. "timed out" is matched by
-      // MultiProviderTurnRunner's isTimeout, which benches a rung after two in a row — correct when the
-      // PROVIDER was slow, and a lie when we handed it eight seconds because the LANE had eight seconds
-      // left. A provider must never be benched for our budgeting.
-      bound.source === 'deadline'
-        ? BUDGET_REACHED_MESSAGE
-        : `OpenAI-compatible call (GLM/Kimi) timed out after ${timeoutMs}ms`,
-    );
+
+    // WHOSE CLOCK RAN OUT DECIDES THE WORDING, and it is not a detail. "timed out" is matched by
+    // MultiProviderTurnRunner's isTimeout, which benches a rung after two in a row — correct when the
+    // PROVIDER was slow, and a lie when we handed it eight seconds because the LANE had eight seconds
+    // left. A provider must never be benched for our budgeting.
+    const clockMessage = (ms: number) => (bound.source === 'deadline'
+      ? BUDGET_REACHED_MESSAGE
+      : `OpenAI-compatible call (GLM/Kimi) timed out after ${ms}ms`);
+
+    const idleMs = Math.min(streamIdleMs(), timeoutMs);
+    const startedAt = Date.now();
+    // The response OBJECT must still arrive promptly even when streaming: a provider that has not
+    // answered the request at all inside the idle window is hung before it has begun.
+    const raw = await withTimeout(call(), streaming ? idleMs : timeoutMs, clockMessage(streaming ? idleMs : timeoutMs));
+
+    let completion: OpenAiCompletionLike;
+    let streamedText = false;
+    if (streaming && isChatStream(raw)) {
+      streamedText = true;
+      const acc = new OpenAiStreamAccumulator();
+      const stop = await readStream(raw, acc, {
+        idleMs,
+        endAt: startedAt + timeoutMs,
+        onText: params.onText,
+      });
+
+      // 🔑 THE POINT OF THE WHOLE CHANGE. A stall used to destroy the call; now it keeps the answer
+      // that had already arrived and reports it as TRUNCATED — the one vocabulary the engine already
+      // handles well (the adapter salvages the cut file's path, the truncation guard names it, the
+      // next turn rewrites it). "One file short" instead of "no app".
+      //
+      // With NOTHING salvageable it must still be a provider failure, not a quiet empty answer:
+      // thrown so the chain falls to the next vendor AND `isTimeout` can bench a rung that keeps
+      // stalling. Reasoning alone is not salvageable — see `hasAnswer`.
+      if (stop !== 'complete' && !acc.hasAnswer()) {
+        throw new Error(stop === 'deadline' ? BUDGET_REACHED_MESSAGE : clockMessage(idleMs));
+      }
+      completion = acc.toCompletion(stop);
+    } else {
+      completion = raw as OpenAiCompletionLike;
+    }
 
     const result = parseOpenAiCompletion(completion);
 
@@ -224,9 +364,9 @@ export class OpenAiToolRunner implements TurnRunner {
     // vendor and usually not a forced-thinking one, and the build proceeds instead of ending empty.
     if (turnStarvedItsBudget(result)) throw starvedBudgetError(budget.maxTokens, budget.requested);
 
-    // Stream the visible text to the caller in one shot if a callback was provided
-    // (this runner is non-streaming; the loop's onText contract still gets the text).
-    if (params.onText && result.text) params.onText(result.text);
+    // Hand the visible text to the caller in one shot — unless the streamed path already delivered it
+    // delta by delta, in which case repeating it here would print the answer twice.
+    if (!streamedText && params.onText && result.text) params.onText(result.text);
 
     return result;
   }

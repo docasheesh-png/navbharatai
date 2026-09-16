@@ -1394,6 +1394,44 @@ the code (it is actually read somewhere) on 2026-07-11.
   🔴 **STILL OPEN:** an abandoned provider call is not cancelled by this stop — the loop ends between
   turns, so a call already in flight runs to completion on the provider's side and is paid for.
 
+- **🐢 THE SLOW-PROVIDER FIX — streamed build calls (built 2026-09-16, NOT live yet):**
+  `AGENTV3_STREAM_BUILD_CALLS` (the master switch — ⚠️ **UNSET, and unset means today's behaviour to
+  the byte**: one non-streaming request, the total clock, the existing ceiling). Tunables, both with
+  working code defaults: `AGENTV3_STREAM_IDLE_MS` (**60 s** — silence after which a provider counts as
+  stalled) and `AGENTV3_STREAM_HARD_CAP_MS` (**300 s** — the absolute ceiling on one streamed call).
+  Read by `src/server/AgentV3/providers/openAiStream.ts`; applied in `OpenAiToolRunner` and in
+  `openAiCompatRunners` (`routes/agentv3.ts`).
+  **WHY (admin 2026-09-16: "kimi aur glm slow hai, time out ho jata hai").** The GLM/Kimi rung sends ONE
+  opaque request bounded by a TOTAL wall clock (`floorBudget.ts`: 5 s + 30 ms × tokens, capped 150 s).
+  A total clock cannot tell a HUNG provider from a merely SLOW one and kills both — **and when it
+  fires, nothing comes back**: the files that answer had already written are lost with it. The output
+  ceiling is sized from the same clock (~4,800 tokens), so a big file needs more turns, each of which
+  can be killed the same way.
+  🔑 **THE CHANGE: the bound becomes SILENCE, not duration.** A provider emitting tokens is not hung
+  however slow it is. So a streamed turn is killed only after `AGENTV3_STREAM_IDLE_MS` of total quiet —
+  and a stall **keeps what already arrived**, returned as a TRUNCATED turn, which is the one shape the
+  engine already recovers from (the adapter salvages the cut file's path, the truncation guard names
+  it, the next turn rewrites it). "One file short" instead of "no app".
+  ⚠️ **TWO THINGS RIDE THIS ONE FLAG, and the second is not obvious from its name.** (1) The SDK client
+  is constructed with the stream's hard cap instead of the floor bound — otherwise the SDK would abort
+  a healthy stream at 150 s and defeat the whole change. (2) `reconcileFloorBudget` sizes the token ask
+  from whatever clock bounds the call, so a 300 s ceiling authorises ~9,800 output tokens instead of
+  ~4,800 — **fewer turns per file**, which is the second half of the speed win. That is coherent rather
+  than incidental: the clamp exists because a timeout used to lose everything, and under streaming it
+  no longer does.
+  🔴 **THE ONE HONEST COST, stated rather than discovered later: a stream carries NO token usage unless
+  the provider honours `stream_options.include_usage`.** The request asks for it; whether Z.ai and
+  Moonshot answer it is a fact only a real call can settle. If they do not, `usage` is **zero** — never
+  an invented number (THE ONE-WALLET LAW forbids estimating tokens from text length), so the USER is
+  never over-billed, but OUR cost report under-states itself. **What to watch on the first real builds:
+  streamed turns showing 0 input/0 output tokens in the admin build report.** If they do, unset the
+  flag and the honest-but-unmeasured path goes away with it.
+  🔒 Nothing else changes: the lane deadline still wins whenever it is nearer (`turnDeadline` remains
+  the authority on the budget), our clock ending still reads as OUR budget and never benches a
+  provider, a stall with only reasoning and no answer is still a rung FAILURE (the chain falls to the
+  next vendor), and an abandoned read is aborted so a call nobody will read stops generating and stops
+  billing. Test-locked in `openAiStream.test.ts` (the accumulator, pure) and `openAiStreamRunner.test.ts`
+  (the behaviour), both proven by reversion.
 - **The referral welcome gift — four earned steps (built 2026-09-15, NOT live yet):**
   `REFERRAL_REWARDS` (the master switch — ⚠️ **UNSET, and unset means today's behaviour exactly**:
   no code is minted, no money moves, and not one document is written). Tunables, all with working

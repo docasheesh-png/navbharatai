@@ -62504,6 +62504,66 @@ today — and was rewritten to anchor on the block's closing `catch`.
 3. 🥵 Sandbox 87% idle across 26.6 minutes; 115 s to the first model call — unchanged here.
 ---
 
+## 2026-09-17 — THE BUILD'S ETA WAS ASSERTED AT t=0 AND NEVER RECONCILED (open root cause #6, closed)
+
+**Branch `claude/the-eta-is-measured-against-the-clock`. Purely additive: 144 insertions, 0 deletions.**
+
+### What was wrong
+
+A build report carried `ETA ~2–4 min` and, in the **same document**, a `startedAt` and an `endedAt`
+**16.7 minutes apart**. Both facts were recorded. Nothing ever put them side by side.
+
+So every autopsy that wanted to know whether the estimate holds did the arithmetic by hand, and the
+admin's panels could not count ETA accuracy at all — which is the one number that says whether the
+ETA work of **2026-08-11** (learn from real past builds) and **2026-09-14** (show a number only where
+it is measured) actually landed. This is rule 5's honesty step applied to our own promise: the report
+already knew, and did not say.
+
+### The fix
+
+- **`etaAccuracy(promise, startedAt, endedAt)`** — a pure reconciler. Returns the ratio, whether the
+  build landed inside the band the user was shown, and one honest sentence.
+- **`setEtaPromise()`** — one call site, beside the `ETA_BASIS` record that already computes the
+  estimate. The numbers are stored **structured**, not parsed back out of that line's prose: reading
+  our own sentences to recover facts we had in hand is the mistake `buildFailureCategory.ts`
+  documents at length (*"`listAllDiagnostics` projects `rootCause` and drops the issue codes"*).
+- **Derived at serialization**, in `report()`, so **no ending path can forget it** — the same
+  reasoning `endedWithoutOutcome` already uses one level down. `report()` stays pure and safe to call
+  repeatedly mid-build.
+- Surfaced as `ETA      : …` in the `.txt` report, on the line directly under `Duration`, and as
+  `etaRatio` / `etaWithinBand` / `etaEvidenced` in the admin-inbox meta — the surface the admin
+  actually reads, projected field-by-field so a legacy row stays `undefined` ("not known") rather
+  than landing a `NaN` a later average would silently swallow.
+
+### ⚠️ Two decisions that are the whole reason it is safe
+
+1. **It is a MEASUREMENT, not a defect, and is deliberately NOT recorded as an issue.** A missed
+   estimate is no fault of the user's app — and this repo has repeatedly watched a measurement
+   recorded as a warning become the headline `rootCause` of a SUCCESSFUL build (`POST_ANSWER_TIMING`
+   and `TIME_TO_FIRST_CALL` are both in `NEVER_ROOT_CAUSE` for exactly that). A derived field keeps
+   it out of `counts`, out of the cause pick, and out of the user's bill.
+2. **An UNEVIDENCED estimate is said to be one.** Since 2026-09-14 a build with no history shows the
+   user a PHASE, not a number, so scoring its hidden midpoint as a broken promise would invent a
+   promise nobody made. The ratio is still computed — it is what teaches the estimator — but the line
+   says plainly that no figure was shown.
+
+### Tests — `tests/theEtaIsMeasuredAgainstTheClock.test.ts` (18 cases)
+
+Proven by reversion: **16 of 18 fail** with the three source files reverted, all pass restored.
+Includes the reported case verbatim (`~2–4 min` vs 16.7 min → 5.6×), the inside-band and
+faster-than-band cases, seven no-claim cases (no estimate, zero-length build, ended-before-started,
+NaN), a purity check on repeated `report()` calls, and a reversion guard reading CODE with comments
+stripped that pins the structured hand-over and asserts nothing regexes our own ETA sentence.
+
+⚠️ **My first draft of the class tests used a FROZEN clock** (`now: () => 1`), which makes
+`startedAt === endedAt` and correctly yields **no accuracy at all** — so the tests measured nothing
+and the code was right. Fixed with a moving clock; recorded because it is the same "a test that
+cannot fail is not a test" lesson this repo keeps paying for.
+
+**Full CI gate green on the final state of THIS branch** (re-run after the change was re-anchored off
+PR #3025's content and moved onto a fresh branch from `main`): `typecheck` · `noUnusedImports` ·
+`typecheck:server` · `vitest run` (**24,621 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` ·
+`boot:check` · `deps:server-gate`.
 ## 2026-09-17 — A SUCCESSFUL BUILD'S VERDICT CONTRADICTED ITS OWN COUNTS, AND NAMED A CAUSE FOR A FAILURE THAT NEVER HAPPENED (autopsy fdd59ef8, second half)
 
 **Branch `claude/a-verdict-that-contradicts-its-own-counts`. Root cause fixed in
@@ -63168,6 +63228,49 @@ document from a failed read.
 `noUnusedImports` · `typecheck:server` · `vitest run` (**24,659 passed, 1 skipped, 0 failed**) ·
 `build` · `test:bundle` · `boot:check` · `deps:server-gate`.
 
+### 🔎 SIBLING SWEEP (rule 3) — the SAME root cause had already defeated the guard written for it
+
+`WorkspaceFileStore.saveWorkspaceFiles` carries a SHRINK GUARD added on 2026-07-07 for the admin's own
+report — *"49 files thi! 3 rah gayi kyu?!"* — a save that would shrink an established path index to
+under half its size is merged instead of replacing it. It read the existing index like this:
+
+```ts
+const guardMeta = await root.get().catch(() => null);
+const existingPaths = guardMeta?.exists && Array.isArray(...) ? ... : [];
+if (savePlanForFileSet(existingPaths.length, entries.length) === 'merge') { ... }
+```
+
+**The identical collapse.** A read that FAILED and a document that does not EXIST both produce `null`,
+so `existingPaths.length` is `0`, `0 <= 3` returns `'replace'`, and the write that follows is
+`{ merge: false }`. **One transient Firestore blip during a VISUAL EDIT (which saves ONE file) or the
+reviewer's critical-fix pass (~3 files) wiped the entire path index** — the precise wipe the guard
+exists to prevent, arriving through the one failure mode it could not see.
+
+🔴 **AND IT DID NOT SHIP IN THE SAME CHANGE, THOUGH IT WAS WRITTEN FOR IT — recorded because the
+reason is a real hazard of concurrent sessions, not a detail.** This fix was committed onto PR #3029's
+branch and pushed, but the push was rejected (another actor had merged `main` into that branch), and
+in the ~90 seconds it took to merge, re-gate and re-push, **#3029 was merged at the commit BEFORE
+it**. The fix landed on a branch whose PR had just closed. Verified against `main` rather than
+assumed: `git show origin/main:…/WorkspaceFileStore.ts | grep -c guardRead` returned **0** while the
+memory half returned **2**. Restarted from the current `main` as its own PR, per the rule that a
+merged PR is finished and follow-up work is a fresh change.
+
+⚠️ **THE GENERAL LESSON: "I pushed it to that branch" is not "it is in `main`."** With several sessions
+merging, a push and a merge can cross. After any push that raced a merge, re-read the merged tree for
+the symbol you added — not the PR, not the branch.
+
+The fix itself: `savePlanForFileSet` takes `number | 'unknown'`, and `'unknown'` can never
+authorise a replace. Merging can never wipe; its only cost is that a genuine full rebuild leaves some
+stale paths, which `removeWorkspaceFiles` already handles. **The asymmetry is the whole argument — a
+stale path is a tidy-up, a wiped index is the user's project gone.**
+
+⚠️ **AND THE TEST FOR IT SAYS HONESTLY WHAT IT DOES NOT PROVE.** Reverting `WorkspaceFileStore.ts`
+makes only ONE of the three new cases fail. Under the old numeric signature `'unknown' <= 3` is
+`false` (a NaN comparison) and `newCount >= 'unknown'/2` is `false` too, so the old code returned
+`'merge'` for that input **by accident**. The defect was never in that function — the call site never
+passed `'unknown'`, it passed `0`. The case that goes red is the source guard on the call site's read,
+and the test comment says so rather than implying a stronger proof than exists.
+
 ### 🔎 Open item #5 — searched for, NOT found (safeguard #6's wording, deliberately)
 
 The 2026-09-17 re-autopsy's open item #5 reads *"a step-capped sub-agent's scratch files stay in the
@@ -63286,3 +63389,59 @@ other uncommitted work it silently takes the rest with it.
   wrappers. The most promising, `AbuseDetector.recordAbuse`, turned out to be a leftover wrapper —
   the real detector (`assessPrompt` + `evaluateAbuse`, hard-block at 3 attempts, fail-open) **is fully
   wired and live**. No defect.
+## 2026-09-17 — THE CLASS, SWEPT: a read whose FAILURE is indistinguishable from an EMPTY result, feeding a write that REPLACES the document
+
+**Branch `claude/a-failed-read-is-not-an-empty-history`. Third instance of one class found today; the
+sweep across every `{ merge: false }` write in the server is recorded below, including what was safe.**
+
+### The class, named so it is recognised the fourth time
+
+Each instance reads as ordinary defensive code — `catch { return []; }` — and each turns a transient
+Firestore blip into **permanent data loss**, because *"there is nothing there"* and *"I could not see"*
+produce the same value and **only one of them licenses an overwrite**.
+
+| # | where | what one failed read destroyed |
+|---|---|---|
+| 1 | `FirestoreWorkspaceMemoryStore` (#3029, merged) | a workspace's entire episode history + project graph, on one Planner chat turn |
+| 2 | `WorkspaceFileStore`'s shrink guard (#3032) | the whole path index — the guard saw an empty index and authorised the wipe it exists to prevent |
+| 3 | `migrationHistory.ts` (**this change**) | a project's whole migration history, replaced by the single run in flight |
+
+### This instance
+
+`loadMigrationHistory` answers `[]` for both *"this project has no history"* and *"the read failed"*.
+`recordMigrationRun` folds that answer into a new list and writes it back with `{ merge: false }`.
+The history exists so the agent can see what it already migrated (`summarizeMigrationHistory` feeds a
+read-back block in `ToolDispatcher`), so losing it can make it repeat a migration on a user's database.
+
+**Fixed:** `loadMigrationHistoryResult()` returns `{ ok: true, runs } | { ok: false }` — an absent
+document (and an unconfigured Firestore) is a real answer; a thrown read is not. `recordMigrationRun`
+**returns before the write** when the read was not ok. The collapsing wrapper survives, documented
+`READ-ONLY CALLERS ONLY`, because an empty read-back block is honest for the one caller that displays it.
+
+⚠️ **NOT "switch the write to merge".** The fold already produces the complete, capped list, so a merge
+would leave capped-off runs behind for ever. The READ gate is the correct fix; the write mode is right.
+
+### 🔎 What the sweep checked and found SAFE — recorded so nobody re-checks it
+
+Every `{ merge: false }` write under `src/server` was read. These are **not** this class:
+
+- **`UserLessonBrain.recordBuildLessons`** and **`MistakeLedger.recordBuild`** — the read is INSIDE the
+  same `try` as the write, so a throwing read skips the write entirely.
+- **Every `tx.set` site** (`AgentV3CostTelemetry`, `adrMemory`, `UserPreferenceStore`, `FailureLedgerStore`,
+  `BuildQueueStore`, `monitorAlerts`, `UserCostStore`, `AssistantSpendStore`, `HostingUsageStore`,
+  `AppAiRegistryStore`) — inside a Firestore transaction, where a failed read aborts the transaction.
+- **`DecisionTraceManager`**, **`MegaRoadmapStore`**, **`IncrementalBuildCache`**, and the record-writers
+  (`BotStore`, `ApiKeyStore`, `AdminNotificationStore`, `CodeReviewStore`, `TeamLibraryStore`,
+  `MentionNotificationStore`, `DiagnosticsStore`, `AdminBuildReportStore`, `LiveChannel`) — they write
+  state the caller already owns, rather than folding a read into it.
+
+### Tests — `tests/aFailedReadIsNotAnEmptyHistory.test.ts` (10 cases)
+
+Proven by reversion: **5 of 10 fail** with `migrationHistory.ts` reverted, all pass restored. The
+reversion guard reads CODE with comments stripped and asserts the writer uses the result-returning
+read, that the `!ok` return comes **before** the write rather than after it, and that the write is
+still a full replace (the gate is what makes that safe).
+
+**Full CI gate green on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` ·
+`vitest run` (**24,810 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
+`deps:server-gate`.

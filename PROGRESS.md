@@ -64739,3 +64739,53 @@ technical logs **90 days**, safety-check and removal records **180 days**, post-
 four weeks old, so the admin may have set it since. Recorded as an open question with the one-line
 check rather than asserted either way. The dialect fix above is what makes the key *settable the way
 the admin actually sets keys*, which is a precondition for answering it at all.
+
+### And a third, in the guard on an ABSOLUTE rule — plus the one I nearly shipped as decoration
+
+Two guards found narrow, so the method was turned on the rest: **30 tree-scanning guard tests, does
+each one's walk match its claim?** The three with the highest stakes were checked first, and the
+honest result is mixed — **worth recording as-is rather than as a clean sweep:**
+
+| Guard | Claim vs walk | Live instance outside? |
+|---|---|---|
+| `serverDbCentralization` | *"NO server source file"* vs `src/server` — root `server.ts` IS one | **none** (scanned root, `scripts/`, `infra/`, `functions/`) |
+| `ledgerWritersUseAppender` | server ledger writers vs `src/server` | **none**, and it already carries its own non-vacuity check |
+| `whiteLabelClientSurfaces` | *"no NEW user-facing surface"* vs `components`/`lib`/`hooks` | **none** — all 16 vendor mentions in the unwalked trees are comments, internal object keys, or the permitted BYOK surface |
+
+So the sweep produced **no further live defects**, and mechanically widening thirty guards would be
+diffuse work of the kind already declined for the 304-window sweep. **One was widened** — the
+white-label guard, because the rule is ABSOLUTE and the gap included `src/content`: the Privacy
+Policy, Terms and DPA, read by users and by Google's and Meta's reviewers.
+
+**Widening it exposed two real flaws in the detector itself, which matter more than the scope did:**
+
+1. 🔴 **`{2,200}` could not match an EMPTY literal, so the matcher paired the wrong quotes.** In
+   `{ gemini: '', groq: '' }` it skipped quote 1, paired quotes 2 and 3, and reported the *source
+   between them* (`, groq: `) as a user-facing string — three such false positives in `App.tsx`.
+   The worse half: every pairing after a mis-pair is shifted by one, so a genuine vendor literal
+   further down the same file could be read as the gap BETWEEN two literals and never tested.
+2. 🔴 **The 200-character ceiling silently skipped any longer literal** — i.e. every piece of
+   long-form user-facing text there is.
+
+🔴 **AND THEN THE PART THAT MATTERS MOST: MY FIRST VERSION OF THIS WIDENING WAS DECORATION, AND ONLY
+THE REVERSION PROBE CAUGHT IT.** With both bounds corrected and `src/content` in the walk, a probe
+reading *"built by Claude Sonnet"* was appended to `privacyPolicy.ts` — **and the guard passed.**
+The file was in the walk and the file was read. **A regex literal-matcher cannot read prose at
+all:** that policy carries **27 apostrophes** (*"the user's data"*, *"Google's own"*), each of which
+a regex reads as a quote, so the pairing shifts and the real text becomes the gap between
+mis-paired literals. Had I trusted the green, I would have reported new coverage of the legal text
+and delivered none. **This is the fourth time in two days that "a test that cannot fail is not a
+test" had to be paid for, and the first where the vacuity was in the SUBJECT rather than the
+assertion.**
+
+`src/content` is therefore swept **WHOLE** instead, which is sound exactly there and nowhere else:
+long-form text with no provider identifiers to false-positive on (verified to contain none today).
+Re-proven with the same probe — it now fails naming `privacyPolicy.ts: names "Claude"`.
+
+🔴 **OPEN ROOT CAUSE (rule 6) — the apostrophe flaw still affects the CODE trees.** A component
+holding `"the user's app"` shifts its own quote pairing the same way, so a vendor literal further
+down that file can be missed by the literal sweep. Min-0 keeps the pairing aligned where empty
+literals were the cause; an apostrophe inside text is a different cause and a wider regex cannot fix
+it. Reading it correctly needs a real tokenizer over the client sources — **a decision with a real
+cost, not a lint**, and it sits under an absolute rule, so it is recorded here rather than guessed
+at. What is true today: no vendor string is present in any swept tree, prose or code.

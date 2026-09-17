@@ -142,8 +142,19 @@ describe('🔒 the wiring — every half of this fix, pinned where it lives', ()
     // first recorded in the learned-capability memo (`rememberStarvedWhileClamped`) so this model is
     // never clamped again in this process. The behaviour this case guards — throw, never return an
     // unusable turn — is unchanged, and the two lines are pinned together so neither can be dropped.
+    // ⚠️ Updated a THIRD time on 2026-09-17 (autopsy d98dae01): the call gained a fourth argument —
+    // the LANE's remaining clock, when that is what bounded the call rather than this engine's own
+    // cap. Without it the report blamed FLOOR_TIMEOUT_CAP_MS for a 2,314-token ceiling that the fast
+    // lane's 90 s plan cap had decided, sending the next autopsy to fix arithmetic that was already
+    // correct. The behaviour this case guards is STILL unchanged: throw, never return an unusable
+    // turn. Pinned whole, for the reason the note above gives.
     expect(runner).toContain('if (!budget.reasoningUnclamped) rememberStarvedWhileClamped(thinkingModel);');
-    expect(runner).toContain('throw starvedBudgetError(budget.maxTokens, budget.requested, budget.reasoningUnclamped);');
+    expect(runner).toContain(`throw starvedBudgetError(
+        budget.maxTokens,
+        budget.requested,
+        budget.reasoningUnclamped,
+        bound.source === 'deadline' ? timeoutMs : undefined,
+      );`);
     expect(runner).toContain('if (turnStarvedItsBudget(result)) {');
   });
 

@@ -136,15 +136,50 @@ export function isThinkingParamRejection(error: unknown): boolean {
  * QUESTION. That helper answers "may we send `disabled`?" and deliberately denies on anything it does
  * not recognise — a Kimi id, a Grok id, a typo — because sending an unsupported field is a hard 400.
  * Denial-on-unknown is the safe answer THERE and the wrong answer HERE: negating it would assert
- * "kimi-k2.7-code always reasons", which is a claim about a vendor this module has never tested, made
- * only because the id failed a `startsWith('glm-')` check.
+ * "every Kimi and Grok id always reasons", which is a claim about vendors this module has never tested,
+ * made only because an id failed a `startsWith('glm-')` check.
+ *
+ * ⚠️ `kimi-k2.7-code` WAS that example until 2026-09-17, and it is now in `MEASURED_ALWAYS_REASONS` —
+ * on four starvations across two admin reports, which is evidence rather than a negated prefix test.
+ * The principle is unchanged and is what admits it: a MEASURED id may be listed; a vendor may not be
+ * assumed.
  *
  * So this is a POSITIVE test with the same numeric family rule, and it is FALSE for everything it does
  * not positively know — including every non-GLM vendor. A false answer costs today's behaviour
  * exactly; a wrongly-true one would hand an unbounded budget to a model on nothing but a guess.
  */
+/**
+ * Non-GLM model ids OBSERVED to spend a clamped output budget entirely on reasoning.
+ *
+ * 🔴 THIS IS A MEASUREMENT OF A MODEL, NOT A CLAIM ABOUT A VENDOR — which is the exact distinction the
+ * docblock below draws, and the reason this set is a list of ids rather than a `kimi-` prefix rule.
+ * Two independent admin build reports, on different nights:
+ *   • `58fe8254` (2026-09-15) — `outputTokens: 4833` three times, the constant ceiling of a clamped
+ *     floor rung, no text and no tool call.
+ *   • `d98dae01` (2026-09-17) — authorised 2,314 (cut down from 8,000 by the fast lane's own plan
+ *     deadline) and spent every one of them before the answer began, twice in one build.
+ * That is four starvations of one model across two reports. `modelStarvedWhileClamped` in
+ * `OpenAiToolRunner` learns the same fact at runtime and would have caught the SECOND of them; this set
+ * is what stops paying for the FIRST on every fresh process, on the rung that opens a complex Weak or
+ * Normal build.
+ *
+ * ⚠️ `-highspeed` IS THE SAME MODEL. Moonshot's highspeed variant is `kimi-k2.7-code` served faster (and
+ * at twice the price — see CLAUDE.md's rate-card entry), so a prefix match on the measured base id
+ * covers it deliberately rather than by accident. `kimi-k3` is NOT here: nobody has measured it, and
+ * guessing is what this whole comment exists to avoid.
+ *
+ * 🔒 Being wrong here cannot make the worst case worse — the clock still bounds the call, and under
+ * streaming a clock cut keeps whatever arrived. See REASONING_UNCLAMP_OFF in floorBudget.ts for the
+ * full argument, and note that `glm-5.3` — the rung directly BELOW this one on both ladders — is
+ * already unclamped by the family rule, so this only makes two adjacent rungs behave alike.
+ */
+export const MEASURED_ALWAYS_REASONS: readonly string[] = ['kimi-k2.7-code'];
+
 export function modelAlwaysReasons(model: string | undefined | null): boolean {
   const m = String(model ?? '').toLowerCase().trim();
+  if (!m) return false;
+  // Measured ids first: the family rule below is GLM-only by design and would deny these.
+  if (MEASURED_ALWAYS_REASONS.some((id) => m === id || m.startsWith(`${id}-`))) return true;
   if (!m.startsWith('glm-')) return false;             // another vendor → we have not measured it → no claim
   const version = /^glm-(\d+)(?:\.(\d+))?/.exec(m);
   if (!version) return false;                          // unparseable → no claim

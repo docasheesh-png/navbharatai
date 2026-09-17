@@ -64804,6 +64804,74 @@ fix, and is recorded here as an **open root cause**.
   kills a rung; the asymmetry itself is left as is, and named here.
 
 **Gate on the final state:** see the PR.
+## 2026-09-17 — AUTOPSY e706e068, FOURTH pass: the one finding in it nobody could act on
+
+The admin re-sent the School ERP report (*"app banne ke bad tut gayi?"*). **It has now been autopsied
+three times** — PRs #3009, #3020/#3023/#3025/#3031, and #3043 (its own title says "residue") — and
+`main` was re-read rather than trusted: its ledger is genuinely closed, and **two of the three open root
+causes that #3043 recorded have since been closed by other sessions**:
+
+| #3043's open item | State on `main` today |
+|---|---|
+| The first `tsc` ran after 20 files, then a 7-minute grind | **CLOSED** by #3048 — `writeTimeTypecheck.ts`, the compiler answers after every TypeScript write |
+| The abandoned planner call keeps running on the provider side | **CLOSED** by #3044's futility breaker for the *build*; the in-flight provider call itself is still the standing mid-build-cost-stop item |
+| The scaffolded E2E suite can never run here | **STILL OPEN** — infra: `@playwright/test` is not baked into the E2B images. Needs a template rebuild (`infra/e2b/build.mjs`), an admin action; not coded blind |
+
+### What was left, and it was hiding in plain sight
+
+Two of that report's unresolved warnings were **findings nobody could act on**:
+
+```
+ACCESSIBILITY      45/100 (D) … 14 form field(s) with no label … 7 button/link with no accessible name
+DESIGN_CONSISTENCY 50/100 (D) … 58 distinct colours … 14 spacing values off the 4px grid
+```
+
+Across a **31-file** app, naming **no file and no line**. A user cannot fix "14 form fields"; neither can
+a repair pass. Both shipped as permanent unresolved warnings, and the a11y one matters: `A11yLinter`'s own
+module comment says *"tsc, ESLint, the CSS consistency check and the reviewer are all blind to every one
+of those"* — so this is the ONLY thing in the stack that looks at accessibility, and its output was
+unusable.
+
+🔑 **The same report proves it was not inevitable.** `DESIGN_PAGE_INCONSISTENT` named its files
+(*"worst: src/pages/Attendance.tsx"*). **Two quality linters in one document, one actionable and one
+not** — because `lintBuiltApp` JOINS every file into one string before linting, so by the time a
+violation exists the file it came from has already been thrown away.
+
+### The fix
+
+`lintBuiltApp` now returns `offenders` — violation `type` → the files carrying the most of it, worst
+first (top 3). The summaries append `Worst: src/pages/Students.tsx (4), src/pages/Teachers.tsx (2).`
+
+🔒 **The score is unchanged.** Attribution is a second pass over the **same selected files**, in the same
+loop, so the headline number still comes from the joined text exactly as before and the two can never
+disagree about which files were judged — the existing 12 cases pass untouched. Cost is one more regex
+scan over the same characters, on a build that has already succeeded.
+
+⚠️ **A distinctness rule is attributed honestly.** For "58 distinct colours" or "3 font families" the
+per-file counts deliberately do **not** sum to the app-wide total (two files can share the same one-off
+colour). The word used is **"worst"**, which is true of every rule; nothing claims a share of the total,
+and a test asserts the sum differs for `color-count` precisely so nobody later "fixes" it into a lie.
+For a counting rule (`input-label`, `control-name`, `img-alt`) the per-file numbers DO add up, and a
+test asserts that too.
+
+Bounded (3 files per type, so a defect in fifty pages names three), deterministic, no model call, and
+`offenders` missing degrades to the old sentence instead of throwing.
+
+**Tests:** `tests/qualityFindingsNameTheirFiles.test.ts` (7), proven by reversion in both halves —
+dropping the summary call fails 2, returning an empty map fails 4.
+
+### Still open from this report, unchanged and not guessed at
+
+- **The E2E suite cannot run here** (infra, above).
+- **Accessibility is detected and never REPAIRED.** Naming the files is what makes a repair possible;
+  building one is a separate decision with its own cost. `input-label` on a field that already has a
+  `placeholder` is deterministically fixable (`aria-label` from the placeholder, zero guessing); an
+  icon-only button's name is not — a machine cannot invent what the button means. Recorded rather than
+  half-built.
+- **The abandoned in-flight provider call** — the standing mid-build cost-stop item.
+
+**Gate on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` · **25,254 tests
+passed** · `build` · `test:bundle` · `boot:check` · `deps:server-gate` — all green.
 ### Same day — the sibling sweep the admin asked for: "screenshot script me bhi check karo"
 
 Admin, on the PR above: *"#3053 me PLAYWRIGHT_BROWSERS_PATH wala fix screenshot script me bhi check karo"*.
@@ -64844,3 +64912,86 @@ invocation that lacks the path or carries `2>/dev/null`, and on a browse block t
 `.catch(() => null)`. Comments are stripped before the scan — the first version of that assertion was
 defeated by the fix's own comment, which names the lossy spelling it replaced. Proven by reversion
 both ways.
+
+## 2026-09-17 — AUTOPSY `baa0b3c7` ("Make an VPN App") — a report from 25 DAYS AGO, and one bug in it is still live today
+
+Admin forwarded a build report. **First finding, because it reframes everything else: this build ran on
+2026-08-23, not today.** Three independent sources agree — `startedAt` 08:28:48Z, `reportedAt` 08:47:30Z,
+and an npm debug-log path from inside the sandbox (`2026-08-23T08_44_59_995Z-debug-0.log`). It was also
+submitted **while still running** (`inFlight: true`, 18m 42s in), so it carries no verdict, no cost and no
+duration; everything in it is a snapshot of work in progress, and the five-bucket tally below says so.
+
+**Ledger (the whole report):** ✅ self-healed 5 (missing import ×3, duplicate `main.tsx` import ×2) plus a
+batch repair that honestly reverted itself; 🔀 workarounds 4 (`cp tsconfig.json tsconfig.build.json`;
+installing `@types/react` by hand; fast lane → full builder; `rm Dashboard.tsx` to silence errors);
+⏭️ skipped 3 (2 dependency vulnerabilities left, 1 high; `ConnectionLog` importing a type that does not
+exist; an emptied `Dashboard/` directory); ❌ shipped-imperfect 2 at report time (`npm run build` still
+failing, the vulnerabilities); 🥵 struggles 7 (83 s on a `cd` into a directory that does not exist; 76 s on
+an install our own code corrupted; six `tsc` runs rewriting a CORRECT `ErrorBoundary.tsx`; a batch repair
+that took 4 errors to 41; four "repeated step is not making progress" nudges; 54 s of fast-lane planning
+then abandonment; 18m 42s elapsed on "Make an VPN App").
+
+**✅ ALREADY FIXED, AND THIS REPORT IS WHY — verified in the template on today's `main`, not assumed.**
+The dominant failure was `Property 'setState'/'props'/'state' does not exist on type 'ErrorBoundary'`,
+repeated six times. Without React's types `React.Component` has no members, so a perfectly correct class
+loses `this.props`. `ViteReactProviderContents.ts` now ships `@types/react` + `@types/react-dom` and its
+comment names **this build**: *"On 2026-08-23 a real user hit it, the model rewrote ErrorBoundary.tsx four
+times… the response was to add a banner to that file. That banner treated the SYMPTOM."* Fixed 2026-08-24.
+`tsconfig.build.json` likewise ships now, and its comment quotes this build's prompt verbatim.
+
+**🔴 STILL LIVE ON MAIN 25 DAYS LATER, FIXED HERE — our own code corrupted a dependency install.**
+
+`isDevServerInvocation` matches a bare `dev`, and `-` is a word boundary, so **`--save-dev` contains the
+word "dev"**. `npm install --save-dev @types/react @types/react-dom` was therefore classified as a
+dev-server start, routed through the managed boot, and `ensureHostBinding` appended its flag:
+
+    npm install --save-dev @types/react @types/react-dom -- --host 0.0.0.0
+
+npm reads `--host` as a package name. The real build got `404 Not Found - GET
+https://registry.npmjs.org/--host` and `'--host@*' is not in this registry`, after **76 seconds** inside
+the full boot sequence. The model retried as `-D`, which the pattern never matched, and that install
+finished in **0.9 s** — an accident that is the only reason the build ever got its React types.
+
+⚠️ **The split is the worst one available:** `--save-dev` is npm's own documented spelling, so this fires
+on the COMMON form and spares the short one, and the error names a package nobody asked for, pointing
+nowhere near us. **Reproduced on current `main` before changing a line**, and again after.
+
+- **Guard 1, the classifier:** `PM_ONE_SHOT_SUBCOMMAND` — a package-manager subcommand that installs,
+  inspects or modifies a dependency tree and exits is never a server, whatever flags follow. Checked
+  first, inside `isDevServerInvocation` so a future caller inherits it. `exec`/`dlx`/`run` are
+  deliberately absent: `npx vite` and `npm run dev` really do start servers.
+- **Guard 2, the mangler:** `ensureHostBinding` returns such a command untouched however it arrived.
+  One guard makes the misclassification rare; two make the damage impossible (50/50 law).
+
+**🔎 FOUND BY THE TEST WRITTEN FOR THAT BUG: `npm start` was never routed at all.** Every alternative
+demanded the literal word `run`, so the bare form took the FOREGROUND path and blocked to the command
+timeout — the exact failure this file's own note describes for `npm run server` (2026-08-12), one spelling
+away, never hunted. The repo already treats `start` as a first-class dev script: `resolveDevRunCommand`
+returns `npm start` for a project whose package.json names it, which is the CoreUI case in that note.
+
+**🔎 THE HONESTY HALF (rule 5): "no recognisable error" was said over a log that named the error.** The
+first failing command was `cd vpn-app && npm install && npm run dev …` in a workspace with no `vpn-app`
+directory. The log said `/bin/bash: line 1: cd: vpn-app: No such file or directory`;
+`classifyDevServerFailure` matched none of it, so the user was told the log had no recognisable error, the
+identical command was restarted **twice**, and 83 seconds later: *"Automatic recovery is exhausted."* Every
+word true, none of it the reason — the same shape as the CoreUI wrong-script case in that file's header.
+A failed `cd` is now a `code_error` (recovery `code_fix`, so it short-circuits the retry loop rather than
+burning it) that names the directory. A genuinely unreadable log still says so — test-locked.
+
+**Proven by reversion, three ways:** removing the classifier guard fails the install case; removing the
+`ensureHostBinding` guard fails the mangling case; both suites also assert that every REAL dev server
+(`npm run dev`, `npx vite`, `npm run preview`, `npm run server`, `tsx watch`, `ng serve`, `next dev`,
+chained `install && run dev`) is routed exactly as before — a fix that quietly stopped managing dev
+servers would have passed the new tests and broken every preview in the product.
+
+**OPEN ROOT CAUSES (rule 6), recorded rather than coded blind:**
+- **`rm src/components/Dashboard/Dashboard.tsx`** — the builder DELETED a component to make its compile
+  errors go away, leaving an empty directory and `ConnectionLog` still importing a type that does not
+  exist. Deleting the user's feature is not a repair. There is no guard against a destructive "fix", and
+  designing one (which deletions are legitimate?) is a decision, not a patch.
+- **The batch repair took 4 errors to 41** and was reverted. The revert is honest and worked; the pass
+  that made it eight times worse is unexplained on this evidence alone.
+- **The "repeated step is not making progress" nudge fired four times and changed nothing.** It detects
+  the loop and does not break it, because it cannot say WHAT to do differently — here the answer was one
+  install away and nothing in the engine knew that `Property 'props' does not exist on a React class`
+  means missing React types. That mapping is the missing subsystem this report names.

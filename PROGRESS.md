@@ -60695,6 +60695,78 @@ Tests: `tests/autopsyFdd59ef8Remainder.test.ts` (10 cases), each proven by rever
 
 ---
 
+## 2026-09-17 — Autopsy `e706e068` (School ERP): "3 build-breaking blockers" on an app that had one
+
+**The screenshot the admin sent is the whole finding**: the School ERP login page rendering in the
+preview pane, beside *"Your app is built and saved, but 3 things are still broken… You have NOT been
+charged for this build."* 26.8 minutes, free Weak engine, 40 model calls.
+
+### The timeline, in its own timestamps
+
+| t+ | |
+|---|---|
+| 1251s | `READINESS_BLOCKER` — *1 unresolved import(s) — **the build will fail**: App.tsx -> ./components/TransportRequest* |
+| 1251s | `READINESS_BLOCKER` — *2 fake/incomplete code issue(s)* |
+| 1298s | `TOOL_ERROR` — the agent tries to read `TransportRequest.tsx`; it does not exist |
+| 1406s | `tsc --noEmit` → **exit 0** (the eighth clean typecheck of the run) |
+| **1440s** | `READINESS_BLOCKER` — **the SAME import sentence, byte-identical, recorded a second time** |
+| 1440s | `RENDER_RESCUE` — the live preview renders cleanly, real-browser verified |
+| **1512s** | **`PROD_BUILD_OK` — "The production build succeeded — this app is ready to publish and to package."** |
+| 1593s | `RELEASE_GATE: RED — 3 build-breaking blocker(s)` → `OUTCOME_RELEASE_GATE_RED` → ₹0 |
+
+### Two independent defects produced that "3". The honest number was ONE.
+
+**1 · The same blocker, counted twice.** `record()` collapses only a BACK-TO-BACK repeat — it compares
+against `issues[issues.length - 1]`. These two sat 189 seconds and many entries apart, so both
+survived and `shippingIssueCount` counted both.
+
+**2 · A prediction outlived its own refutation.** *"the build will fail"* is a forecast about
+`npm run build`, derived from the import graph. Seventy-two seconds later the platform RAN that build
+and it SUCCEEDED, on the same tree with no writes in between. Nothing reconciled them, so the falsified
+forecast went on to turn the gate RED and make a rendering, publishable app free.
+
+🔑 **THE RULE: when we have RUN the thing a finding merely predicted, the run wins.** One named door of
+the EVIDENCE LEDGER class (autopsy `697b38ee`), which stays open.
+
+### The fixes
+
+`buildFailurePrediction.ts` (new, pure) + `BuildDiagnostics.resolveBuildFailurePredictions()`, called
+from the prod-build gate with `judgeProdBuild`'s own verdict. Narrow in three independent ways: only a
+claim ABOUT `npm run build`; only a build that genuinely RAN and exited 0; only predictions recorded
+BEFORE it ran. `shippingIssueCount` de-duplicates by `phase|code|message` — every record stays on the
+timeline, only the COUNT changes.
+
+### 🔴 The guard that caught a defect in this very change
+
+`engineEventsNeverBlock.test.ts` has a case named *"the release gate and the health card count with ONE
+predicate"*. It failed on the first attempt — and investigating it produced a third finding:
+
+**it never checked a count.** It asserted both surfaces use the same FILTER EXPRESSION. They did, and
+they still disagreed: `buildHealthCard`'s `messages()` has always de-duplicated by message text, while
+`shippingIssueCount` did not. So on this build the card listed two distinct blocker lines while the
+gate's headline said three. The guard is now behavioural — record the same finding twice, and the gate
+and the card must return the same number.
+
+⚠️ The old assertion pinned the exact `issues.filter(...)` formatting, so it broke when the body
+changed shape even though the predicate was untouched. It now asserts the three-part predicate as a
+conjunction, which is what it was always for.
+
+### Still open (rule 6 — recorded, not rushed)
+
+1. 🔴 **THE NEXT ONE, with fresh evidence: `8b3dca5c` (JEE mock test, same day).** Its ONLY blocker was
+   *"readiness score 38/100 is below the 50/100 bar — **9 component(s) created but never used**:
+   Counter.tsx, FilterBar.tsx, Header.tsx…"* — and those nine are **debris from our OWN abandoned fast
+   lane**, which built a generic Counter/TaskList/ThemeToggle app, failed its typecheck, and handed off
+   to the full builder that then built the real JEE app. `tsc` clean, dev server up, `PROD_BUILD_OK`,
+   `ACCESSIBILITY 100/100`, render verified — RED and ₹0 because of files our own engine orphaned.
+   ⚠️ This is the #2997 open item ("the readiness SCORE is still whole-workspace") with a sharper
+   cause, and it is NOT covered by the authorship fix: the fast lane's files genuinely ARE ours.
+   The upstream (50/50) fix is for an abandoned lane's files not to survive the handoff; the score
+   floor itself exists *because* of orphan components (2026-07-05), so it must not simply be loosened.
+2. 🔴 `PAGE_RENDER_FAILED` says the check "could not be completed for 6 routes", while `RELEASE_GATE`
+   in the same report says it "needs a running app and was skipped" — on a build whose preview was
+   published and render-verified. Two wrong statements in one sentence.
+3. 🥵 Sandbox **87% idle** across 26.6 minutes; 115s before the first model call.
 ## 2026-09-17 — Autopsy of build `af3a3f7f`: a SUCCESSFUL build reported "STOPPED" as its root cause
 
 **The report** (user rajeshkumar00077890@, free tier, 6.8 min, ₹80.50 billed, weak ladder, built by KIMI
@@ -61040,6 +61112,138 @@ to today.
    screen, not their own change of mind. Whether a cancellation inside the first model call, with no
    preview ever shown, should cost anything is an ADMIN decision, not mine to change unasked.
 2. **Design consistency C on the shipped golden scaffold** — our own template scores 68/100.
+## 2026-09-17 — "Download app" sent every visitor to a page they could not open
+
+Admin: *"navbharatai.com par jab koi user sidebar menu me 'download app' button par click karta hai, to
+pata nahi kahan redirect ho jata hai."*
+
+### Root cause — a default that outlived its premise
+
+`src/lib/appDownload.ts` set `DEFAULT_LISTING_URL = INTERNAL_TEST_URL`
+(`https://play.google.com/apps/internaltest/4701220640641478442`). The reasoning beside it was correct
+**at the time it was written**: *"The app is currently in INTERNAL TESTING, so the PUBLIC store listing
+does not exist yet (a public visitor would get 'item not found')."*
+
+The app reached **production on Play on 2026-08-25** (release 91 — `ANDROID_LATEST_VERSION_CODE`). The
+premise changed; the default did not. An internal-test opt-in link opens for nobody except the ≤100
+testers the admin added by hand, so every ordinary visitor tapping the button landed somewhere useless —
+exactly the "pata nahi kahan" the admin saw.
+
+### ⚠️ The escape hatch the old comment promised could not be used
+
+It said the migration needed *"no code change — just point `VITE_PLAY_LISTING_URL` at the public
+listing"*. **That was false.** `import.meta.env.VITE_*` is frozen when the Docker image is BUILT, and
+**neither `VITE_PLAY_LISTING_URL` nor `VITE_APK_DOWNLOAD_URL` is passed as a build `ARG`** — verified
+against `Dockerfile` and `cloudbuild.yaml`, which pass only `VITE_PREVIEW_ORIGIN`. Setting either in
+Cloud Run changes NOTHING, with no error anywhere to reveal it: the same silent-drift class this file
+already records for `VITE_META_PIXEL_ID`.
+
+So the **code default is the only value that can reach a user today**, which is why the fix is the
+default itself rather than a configuration note. Wiring an override up later is a deliberate four-line
+change (an `ARG`+`ENV` pair in `Dockerfile`, a `--build-arg` and a substitution in `cloudbuild.yaml`),
+named in the module header so nobody re-derives it — and so nobody "fixes" this again by setting a Cloud
+Run variable that cannot reach the browser.
+
+### The fix
+
+`DEFAULT_LISTING_URL = PUBLIC_LISTING_URL`
+(`https://play.google.com/store/apps/details?id=com.navbharat.ai`), and **`INTERNAL_TEST_URL` is DELETED
+rather than demoted** — a constant sitting one assignment away from being the default again is how this
+bug returns (the 50/50 law: make the wrong branch impossible, not merely unchosen).
+
+`AppKnowledgeBase.ts` needed no edit: it already told every AI that the button *"opens the Google Play
+listing (com.navbharat.ai)"*. That description was **wrong before this change and is true after it** —
+another quiet instance of the docs describing intended behaviour while the code did something else.
+
+### Tests
+
+`src/lib/appDownload.test.ts` — 10 cases. The guard asserts the **source**, not just the export:
+re-introducing an internal-test URL anywhere in the module fails CI even if nothing assigns it to the
+default yet, and every `play.google.com` URL in the module must be the public listing. Comments are
+stripped first, so the header may keep explaining the incident. Proven by reversion: restoring the old
+default fails 4 of the 10.
+
+## 2026-09-17 — autopsy `e4ebcb5f`: the agent quoting the user's own error became a "problem"
+
+First fix from the two-report autopsy the admin asked for. Investigated with an adversarial fan-out
+(one investigator plus two challengers per finding) precisely because of the standing rule that a fix
+must never trade one problem for another — and on this finding the investigation overturned two of my
+own readings.
+
+### The incident
+
+The user's prompt was *"Fix this error and continue building the app: network error"*. The agent's
+ordinary narration — *"Let me check the current app structure and identify the network error:"* —
+landed in the report's `problems[]` as a WARNING.
+
+Walked boolean by boolean and confirmed by RUNNING the real class: `statusLike` true; the compound
+stripper leaves "network error" alone (it is anchored on "error" FIRST, so a pre-modified noun phrase
+can never match it); `problemWord` true via `\berror\b`; `failureVerb` false; `remediationIntent`
+false (the verbs are "check" and "identify"). So the line was recorded `severity: 'warning'`.
+
+### 🔴 The damage was never cosmetic — three consequences, each now asserted directly
+
+1. **A PHANTOM SELF-HEAL in the admin's first-pass-quality tally.** `AGENT_NOTE` is recorded
+   `autoResolved: true`, and the heal count takes autoResolved warnings (INFO was excluded by the
+   mitrify 2026-08-04 fix — *"a heal tally that counts heartbeats is a green number wearing a lie"* —
+   and WARNING was left in). One sentence of prose was reported as one self-heal on a build that
+   healed nothing. Under the fifth absolute rule a future autopsy would have chased it.
+2. **It could HEADLINE a failed build.** `deriveRootCause`'s `resolvedOnly` fallback is
+   autoResolved-inclusive and fires whenever `ok !== true`, and `AGENT_NOTE` is in neither
+   never-root-cause list. Verified end to end: the rootCause became the agent announcing it was about
+   to look at something.
+3. **It DELETED the line from the user's reopened conversation.** The reopen digest rebuilds the
+   assistant turn from `AGENT_STEP` only — a partial return of the 2026-07-07 *"na chat recover hui"*
+   bug. The more the agent discussed the user's own reported error, the more of the story vanished.
+
+✅ **No billing or release-gate impact**, checked rather than assumed: `shippingIssueCount` requires
+`!autoResolved`, and `AGENT_NOTE` is `autoResolved: true` unconditionally.
+
+### The fix — the structural signal was already wired and never read
+
+`meta.prompt` (the user's own words, set at construction, `readonly`) was consulted only during
+serialisation. `narrationEchoesPromptSymptom(text, prompt)` asks whether EVERY problem word in the
+narration is one the user themselves wrote, and the classifier now skips such a line — gated on
+`!failureVerb` exactly as `remediationIntent` already is, so *"The dev server FAILED to start — port
+5173 error."* stays an error even when the prompt says "error".
+
+`every`, not `some`: a mixed line ("the network error is back and the preview is not responding")
+carries a word the user never wrote and stays a problem.
+
+### ⛔ Two traps found by measurement, both pinned by tests
+
+1. **DO NOT add `s?` to the problem-word list.** `\berror\b` does not match "errors", so the verdict
+   flips on grammatical number — almost certainly accidental (the stripper one line below writes
+   `errors?[- ]`). But six realistic narration lines were measured against the widened list and ALL
+   SIX newly flagged as problems. The plural blindness is currently a noise filter suppressing roughly
+   half this class. Widening it is a separate change needing its own evidence.
+2. **`.test()` on a `/g` regex is STATEFUL** — measured true/false/true on one string. The hoisted
+   word list therefore yields TWO regexes: a non-global one for the classifier's `.test()` and a
+   global one used only via `.match()` inside the helper.
+
+### The honest cost, stated rather than omitted
+
+If the user's prompt happens to contain the same problem word as a genuine engine failure that carries
+no failure verb, that failure is downgraded to a step. Bounded by three things — no failure verb,
+EVERY word must be one the user wrote, and the engine's real failures are recorded independently by
+the structured recorders (`BUILD_ERROR`, `TOOL_ERROR`, `SANDBOX_CMD_FAILED`, `PROVIDER_FALLBACK`),
+none of which this touches. Worth it, but it is a trade.
+
+Also out of scope, honestly: the prompt is per-turn, so a user who reports the error once and then
+types only "continue" is not covered.
+
+### Tests
+
+`tests/narrationEchoesPrompt.test.ts` — 12 cases; the existing 169 in `BuildDiagnostics.test.ts` are
+untouched and still pass. Four guards proven by reversion: deleting the clause (5 fail), `some`
+instead of `every` (2), the global regex at the classifier (1), adding `s?` (1).
+
+⚠️ **The stateful-regex guard took THREE attempts, and the first two are recorded because they are the
+lesson.** Draft 1 exercised only the helper (which uses `.match()`, never stateful) and passed with the
+bug installed. Draft 2 sent the same line three times — identical narrations DEDUPE into one issue with
+`repeatCount: 3`, so it failed against correct code as well. Only after measuring the real behaviour
+(three DISTINCT lines → three separate notes) did it bite. **A guard written from a guess is not a
+guard; it has to be measured against the code it guards.**
 ## 2026-09-17 — Every link every AI gives a user now opens in the real browser on Android
 
 Admin asked what else was worth upgrading. Measured rather than guessed: **45 bare `target="_blank"`

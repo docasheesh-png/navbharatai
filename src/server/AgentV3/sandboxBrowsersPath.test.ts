@@ -10,7 +10,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { withSandboxBrowsers, SANDBOX_BROWSERS_PATH } from './testRunner';
-import { TOOLS_DIR } from './PageRouteCheck';
+import { TOOLS_DIR, pageCheckScript } from './PageRouteCheck';
+import { deriveJourneys, journeyScript } from './journeyDerivation';
 
 describe('withSandboxBrowsers — hand the existing browser to the suite that needs one', () => {
   it('a Playwright suite is pointed at the browser the sandbox already downloaded', () => {
@@ -64,5 +65,50 @@ describe('the path is ONE fact, not two copies', () => {
     expect(src).toContain('playwright install chromium');
     expect(src).toContain('PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers');
     expect(src).toContain("const TOOLS_DIR = '/home/user/.e-tools'");
+  });
+});
+
+// 🔴 THE HALF THIS FILE ASSERTED FOR A MONTH WITHOUT ASSERTING (2026-09-17).
+//
+// Everything above pins the CONSTANT and the hand-off to the USER's suite. Nothing pinned the scripts
+// the PLATFORM itself runs — and this very file's header names "journey runs" as one of them. The
+// journey runner's command was
+//
+//     node /tmp/nbai-journey.mjs 2>&1 | grep '^NBAI_JOURNEY ' || true
+//
+// with no PLAYWRIGHT_BROWSERS_PATH at all, so chromium.launch() threw on every build since the check
+// shipped, and the `grep … || true` on the same line guaranteed the error never reached a report. It
+// is the same shape as the complexity flag fixed in #3043: the decision was tested, the chain was not.
+// These assertions read the REAL generated command, so a third script added later cannot repeat it.
+describe('every browser script the PLATFORM runs carries the path too', () => {
+  const journeys = deriveJourneys({
+    files: { 'src/pages/Todo.tsx': '<form onSubmit={add}><input name="title" placeholder="Task" /><button type="submit">Add</button></form>' },
+    routes: ['/'],
+    marker: 'nbai-test',
+  });
+
+  it('the journey runner — the check that proves an app really SAVES data', () => {
+    expect(journeys.length).toBeGreaterThan(0);   // guarding the guard: an empty list proves nothing
+    const script = journeyScript('https://x.e2b.app/', journeys, 'nbai-test');
+    const runLine = script.split('NBAI_EOF').pop() as string;
+    expect(runLine).toContain(`PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers`);
+  });
+
+  it('the page-render check', () => {
+    const runLine = pageCheckScript('https://x.e2b.app/', ['/a']).split('NBAI_EOF').pop() as string;
+    expect(runLine).toContain(`PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers`);
+  });
+
+  it('neither module builds its own run line any more — one helper, so they cannot drift again', () => {
+    for (const f of ['src/server/AgentV3/journeyDerivation.ts', 'src/server/AgentV3/PageRouteCheck.ts']) {
+      const src = readFileSync(f, 'utf8');
+      expect(src, `${f} builds its own node run line`).not.toMatch(/node \/tmp\/nbai-[\w.-]+\.mjs\s/);
+      expect(src, `${f} does not use the shared builder`).toContain('browserScriptRunLine(');
+    }
+  });
+
+  it('a failed script can no longer go quiet — the run line asks it what happened', () => {
+    const runLine = pageCheckScript('https://x.e2b.app/', ['/a']).split('NBAI_EOF').pop() as string;
+    expect(runLine).toContain('NBAI_DIAG:');
   });
 });

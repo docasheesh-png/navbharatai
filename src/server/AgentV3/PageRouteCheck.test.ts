@@ -101,8 +101,18 @@ describe('pageCheckScript — cheap by construction', () => {
     expect(script).toContain('waitForTimeout');
   });
 
-  it('cannot fail the step — the command ends in a tolerant filter', () => {
-    expect(script.trim().endsWith('|| true')).toBe(true);
+  it('cannot fail the step — the command always ends successfully', () => {
+    // The PROPERTY, not one spelling of it. This used to assert the literal trailing `|| true` of the
+    // hand-written pipeline; the run line now comes from the shared builder and ends in `; true`,
+    // which is the same guarantee: a probe that found nothing must never look like a failed command.
+    expect(script.trim().endsWith('true')).toBe(true);
+    expect(script).not.toMatch(/\|\| false\s*$/);
+  });
+
+  it('asks a silent script what happened instead of discarding it', () => {
+    // The other half of the old pipeline: `2>&1 | grep … || true` folded stderr in and then threw it
+    // away, so a script that died at line 1 and one that ran clean produced the same empty string.
+    expect(script).toContain('NBAI_DIAG:');
   });
 });
 
@@ -312,6 +322,18 @@ describe('a check that produced NOTHING is not a clean result', () => {
     expect(s.ok).toBe(false);
     expect(s.summary).toContain('could not be completed for 3 routes');
     expect(s.summary).toContain('nothing about those pages was verified');
+  });
+
+  it('and says WHY, when the runner left a reason', () => {
+    const s = summarizePageCheck([], 2, "NBAI_DIAG:Error: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium-1148/chrome-linux/chrome");
+    expect(s.ok).toBe(false);
+    expect(s.summary).toContain('sandbox browser could not be launched');
+    expect(s.summary).toContain("Executable doesn't exist");
+  });
+
+  it('carries no reason when there was none — a good run stays quiet', () => {
+    expect(summarizePageCheck([], 2).summary).not.toContain('could not be launched');
+    expect(summarizePageCheck([], 2, 'NBAI_PAGE:{"route":"/"}').summary).not.toContain('could not be launched');
   });
 
   it('genuinely having no routes is still good news', () => {

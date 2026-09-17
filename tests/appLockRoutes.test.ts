@@ -384,6 +384,91 @@ describe('🔒 PUT /areas — the route that makes the App Lock more than a pref
   });
 });
 
+describe('🔒 POST /pin/change — a new PIN needs the CURRENT one, right now (admin 2026-09-17)', () => {
+  const change = () => handler('POST /api/app-lock/:userId/pin/change');
+  const liveTicket = () => ({ [UNLOCK_TICKET_HEADER]: mintUnlockTicket(UID, Date.now(), unlockSecret()) });
+  const NEW = '5931';
+
+  it('changes the PIN with a live ticket AND the right current PIN, and hands back a fresh ticket', async () => {
+    seedPin();
+    const res = mockRes();
+    await (await change())(mockReq({ params: { userId: UID }, headers: liveTicket(), body: { currentPin: PIN, newPin: NEW } }), res);
+    expect(res.statusCode).toBe(200);
+    expect(verifyUnlockTicket(res.body.ticket, UID, Date.now(), unlockSecret())).toEqual({ method: 'pin' });
+    expect(AUDIT.some((a) => a.action === 'pin-changed')).toBe(true);
+    // The store now opens on the NEW pin and refuses the old one.
+    const unlock = await handler('POST /api/app-lock/:userId/unlock');
+    const withNew = mockRes();
+    await unlock(mockReq({ params: { userId: UID }, body: { pin: NEW } }), withNew);
+    expect(withNew.statusCode).toBe(200);
+    const withOld = mockRes();
+    await unlock(mockReq({ params: { userId: UID }, body: { pin: PIN } }), withOld);
+    expect(withOld.statusCode).toBe(401);
+  });
+
+  it('🔴 REFUSES on a ticket alone — the current PIN must be typed', async () => {
+    // A ticket proves the PIN was entered in the last five minutes; a phone handed over four minutes
+    // later still holds it. Without this check that person could lock the owner out of their own app.
+    seedPin();
+    const res = mockRes();
+    await (await change())(mockReq({ params: { userId: UID }, headers: liveTicket(), body: { newPin: NEW } }), res);
+    expect(res.statusCode).toBe(401);
+    // And the attempt is COUNTED, so this route is not a cheaper place to guess than /unlock.
+    expect(readPinRecord(STORE).failCount).toBe(1);
+    expect(res.body.attemptsLeft).toBe(MAX_PIN_ATTEMPTS - 1);
+  });
+
+  it('refuses without a ticket, before comparing anything', async () => {
+    seedPin();
+    const res = mockRes();
+    await (await change())(mockReq({ params: { userId: UID }, body: { currentPin: PIN, newPin: NEW } }), res);
+    expect(res.statusCode).toBe(401);
+    expect(res.body.needsUnlock).toBe(true);
+    expect(readPinRecord(STORE).failCount).toBe(0);
+  });
+
+  it('a weak new PIN costs NO attempt — it is refused before the current PIN is compared', async () => {
+    seedPin();
+    const res = mockRes();
+    await (await change())(mockReq({ params: { userId: UID }, headers: liveTicket(), body: { currentPin: '0000', newPin: '1234' } }), res);
+    expect(res.statusCode).toBe(400);
+    expect(readPinRecord(STORE).failCount).toBe(0);
+  });
+
+  it('refuses the same PIN as the current one', async () => {
+    seedPin();
+    const res = mockRes();
+    await (await change())(mockReq({ params: { userId: UID }, headers: liveTicket(), body: { currentPin: PIN, newPin: PIN } }), res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toContain('same');
+  });
+
+  it('five wrong current PINs lock the vault exactly like five wrong unlocks', async () => {
+    seedPin();
+    const h = await change();
+    for (let i = 1; i < MAX_PIN_ATTEMPTS; i++) {
+      const res = mockRes();
+      await h(mockReq({ params: { userId: UID }, headers: liveTicket(), body: { currentPin: '1357', newPin: NEW } }), res);
+      expect(res.statusCode, `attempt ${i}`).toBe(401);
+    }
+    const last = mockRes();
+    await h(mockReq({ params: { userId: UID }, headers: liveTicket(), body: { currentPin: '1357', newPin: NEW } }), last);
+    expect(last.statusCode).toBe(429);
+    expect(readPinRecord(STORE).lockedUntilMs).toBeGreaterThan(Date.now());
+    // And while locked out, even the RIGHT current PIN changes nothing.
+    const during = mockRes();
+    await h(mockReq({ params: { userId: UID }, headers: liveTicket(), body: { currentPin: PIN, newPin: NEW } }), during);
+    expect(during.statusCode).toBe(429);
+  });
+
+  it('tells the screen to set one up when there is no PIN yet', async () => {
+    const res = mockRes();
+    await (await change())(mockReq({ params: { userId: UID }, headers: liveTicket(), body: { currentPin: PIN, newPin: NEW } }), res);
+    expect(res.statusCode).toBe(409);
+    expect(res.body.needsSetup).toBe(true);
+  });
+});
+
 describe('the status route reports the areas both ways', () => {
   it('sends what was ticked AND what is in force', async () => {
     seedPin('8274', { locked_areas: ['api_keys', 'billing'] });

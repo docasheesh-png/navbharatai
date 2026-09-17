@@ -24,6 +24,7 @@ import { isStarvedBudgetError, isUnclampedStarvation } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
 import { isBudgetEndedError } from './turnDeadline';
 import { typecheckEvidenceFromCommands } from './TscGate';
+import { predictsBuildFailure, prodBuildOverrulesPredictions, overruledByRealBuildMessage } from './buildFailurePrediction';
 import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
 import { agentRunEvidence as readAgentRunEvidence, type AgentRunEvidence } from './agentRunEvidence';
 
@@ -66,6 +67,58 @@ const PROCESS_ONLY_CODES = new Set([
  *
  * Pure. Never throws.
  */
+/**
+ * The words that make a narration line READ like a problem. Hoisted so the classifier and
+ * `narrationEchoesPromptSymptom` can never disagree about what counts as one.
+ *
+ * ⚠️ SINGULAR ONLY, AND THAT IS LOAD-BEARING RATHER THAN AN OVERSIGHT TO TIDY UP. `\berror\b` does
+ * not match "errors" — the trailing "s" kills the word boundary — so "let me check the console
+ * errors" is a step today while "the network error" is a problem. The asymmetry is almost certainly
+ * accidental (the stripper one line below writes `errors?[- ]`, so the author handled plurals there
+ * and forgot them here), but it is currently acting as a NOISE FILTER that suppresses roughly half
+ * this class. Adding `s?` was measured against six realistic narration lines — "Let me verify there
+ * are no TypeScript errors:", "Now let me handle the API errors gracefully:" and four more — and ALL
+ * SIX newly flagged as problems. Widening this needs its own change and its own evidence; a test
+ * pins the current behaviour so it cannot be "completed" by accident.
+ */
+const PROBLEM_WORD_SOURCE =
+  "(error|failed|cannot|could not|not responding|isn'?t available|unavailable|retry|retrying"
+  + '|stuck|timed out|blocked request|closed port|won\'?t come up|no files|warning)';
+/** Non-global: `.test()` on a `/g` regex is STATEFUL (measured true/false/true on one string). */
+const PROBLEM_WORD_RE = new RegExp(`\\b${PROBLEM_WORD_SOURCE}\\b`, 'i');
+/** Global, used ONLY via `.match()`, which does reset `lastIndex`. */
+const PROBLEM_WORD_RE_G = new RegExp(`\\b${PROBLEM_WORD_SOURCE}\\b`, 'gi');
+
+/**
+ * Is every problem word in this narration one the USER THEMSELVES wrote?
+ *
+ * 🔴 THE DEFECT THIS ANSWERS (build e4ebcb5f, 2026-09-17). The prompt was *"Fix this error and
+ * continue building the app: network error"*, and the agent's ordinary narration — *"Let me check
+ * the current app structure and identify the network error:"* — was recorded as a PROBLEM. It is the
+ * agent quoting the symptom it was asked to investigate, which is the most normal thing an agent
+ * does on a "fix this error" turn.
+ *
+ * 🔑 THE CLASS, and why no keyword list can express it: the classifier asks *"does this sentence
+ * contain a scary word?"* when the question it exists to answer is *"did the ENGINE fail?"* Four
+ * separate patches (2026-07-07 ×3, ShopKhata 2026-07-17, PaisaTrack 2026-07-21) have narrowed this
+ * predicate and not one has widened it — a rule that has only ever been walked back is one whose
+ * default answer is wrong. The structural signal was already present and simply never consulted:
+ * `meta.prompt` is the user's own words, set at construction, so it cannot be gamed by the model.
+ *
+ * `every`, not `some`: a line mixing the user's word with a NEW one ("the network error is back and
+ * the preview is not responding") carries a word the user never wrote, so it stays a problem.
+ *
+ * PURE. Never throws. No prompt ⇒ false ⇒ today's behaviour exactly.
+ */
+export function narrationEchoesPromptSymptom(text: string, prompt: string | undefined | null): boolean {
+  const asked = String(prompt ?? '');
+  if (!asked) return false;
+  const said = (String(text ?? '').match(PROBLEM_WORD_RE_G) ?? []).map((w) => w.toLowerCase());
+  if (said.length === 0) return false;
+  const known = new Set((asked.match(PROBLEM_WORD_RE_G) ?? []).map((w) => w.toLowerCase()));
+  return said.every((w) => known.has(w));
+}
+
 export function isAppFinding(issue: Pick<BuildIssue, 'phase' | 'code'>): boolean {
   if (!issue) return false;
   if (issue.phase === 'provider') return false;
@@ -1292,7 +1345,7 @@ export class BuildDiagnostics {
         // failure phrase can classify a narration as a problem.
         const tForMatch = t.replace(/\berrors?[- ](boundar(?:y|ies)|handling|handlers?|messages?|states?|pages?|toasts?|ui|display)\b/gi, '')
           .replace(/\bwarnings?[- ](messages?|banners?|badges?|toasts?)\b/gi, '');
-        const problemWord = /\b(error|failed|cannot|could not|not responding|isn'?t available|unavailable|retry|retrying|stuck|timed out|blocked request|closed port|won'?t come up|no files|warning)\b/i.test(tForMatch);
+        const problemWord = PROBLEM_WORD_RE.test(tForMatch);
         // A genuine FAILURE VERB (not the bare noun "error") is what makes a note a real problem — and an
         // ERROR-severity one. "error"/"errors" as a NOUN the agent is working on is not itself a failure.
         const failureVerb = /\b(failed|cannot|could not|unavailable|timed out)\b/i.test(tForMatch);
@@ -1302,7 +1355,13 @@ export class BuildDiagnostics {
         // note is the agent fixing/removing/resolving something and carries NO real failure verb, it is a
         // build STEP, not a problem.
         const remediationIntent = /\b(fix(?:ing|ed|es)?|remov(?:e|es|ing|ed)|resolv(?:e|es|ing|ed)|correct(?:s|ing|ed)?|clean(?:s|ing|ed)?\s+up|delet(?:e|es|ing|ed))\b/i.test(tForMatch);
-        if (statusLike && problemWord && !(remediationIntent && !failureVerb)) {
+        // ECHOING THE USER'S OWN REPORTED SYMPTOM IS NOT THE ENGINE STRUGGLING (build e4ebcb5f).
+        // Gated on `!failureVerb` exactly as `remediationIntent` is, so a genuine failure ("The dev
+        // server FAILED to start — port 5173 error.") stays an error even when the prompt says "error".
+        const echoesPrompt = narrationEchoesPromptSymptom(tForMatch, this.meta.prompt);
+        if (statusLike && problemWord
+          && !(remediationIntent && !failureVerb)
+          && !(echoesPrompt && !failureVerb)) {
           this.record({ phase: 'build', severity: failureVerb ? 'error' : 'warning', code: 'AGENT_NOTE', message: t.slice(0, 400), autoResolved: true });
         } else {
           this.record({ phase: 'build', severity: 'info', code: 'AGENT_STEP', message: t.slice(0, 400), autoResolved: true });
@@ -1714,9 +1773,58 @@ export class BuildDiagnostics {
    * practice, which is the same as not having it. Anything already resolved is likewise not a caveat.
    */
   shippingIssueCount(severity: IssueSeverity): number {
-    return this.issues.filter(
-      (i) => i.severity === severity && !i.autoResolved && isAppFinding(i),
-    ).length;
+    // 🔴 THE SAME DEFECT, COUNTED TWICE (autopsy e706e068, 2026-09-17). The readiness gate ran at
+    // t+1251s and again at t+1440s, and both runs recorded the byte-identical blocker
+    // `1 unresolved import(s) — the build will fail: App.tsx -> ./components/TransportRequest`.
+    // `record()` collapses only a BACK-TO-BACK repeat (it compares against the last entry), and 189
+    // seconds of timeline sat between these two — so both survived and both were counted. The user
+    // was told "3 build-breaking blocker(s)" about an app that had TWO, and the release gate's
+    // headline named that inflated number.
+    //
+    // One defect is one defect however many times we observed it. Two genuinely different problems
+    // never share a message, so this can only ever remove a double-count — it can never hide a
+    // distinct finding. The timeline keeps every entry; only the COUNT is de-duplicated.
+    const seen = new Set<string>();
+    for (const i of this.issues) {
+      if (i.severity !== severity || i.autoResolved || !isAppFinding(i)) continue;
+      seen.add(`${i.phase} ${i.code} ${i.message}`);
+    }
+    return seen.size;
+  }
+
+  /**
+   * A real production build SUCCEEDED, so any readiness finding that merely PREDICTED it would fail
+   * is superseded. Returns how many were cleared (0 when there were none).
+   *
+   * See `buildFailurePrediction.ts` for the incident and for why this is narrow in three separate
+   * ways. The caller's obligation: pass `ran`/`code` straight from `judgeProdBuild`, never a guess.
+   *
+   * ⚠️ `before` bounds it to predictions made BEFORE the build ran. A finding recorded afterwards is
+   * describing a tree this build never compiled, so a later blocker still stands on its own.
+   *
+   * Pure over the recorded issues; never throws.
+   */
+  resolveBuildFailurePredictions(opts: { ran: boolean; code: string; before: number }): number {
+    if (!prodBuildOverrulesPredictions(opts?.code, opts?.ran === true)) return 0;
+    const cutoff = Number.isFinite(opts?.before) ? opts.before : Infinity;
+    let cleared = 0;
+    for (const issue of this.issues) {
+      if (issue.code !== 'READINESS_BLOCKER' || issue.autoResolved === true) continue;
+      if (issue.ts > cutoff) continue;
+      if (!predictsBuildFailure(issue.message)) continue;
+      issue.autoResolved = true;
+      cleared++;
+    }
+    if (cleared > 0) {
+      this.record({
+        phase: 'readiness',
+        severity: 'info',
+        code: 'BUILD_PREDICTION_OVERRULED',
+        message: overruledByRealBuildMessage(cleared),
+        autoResolved: true,
+      });
+    }
+    return cleared;
   }
 
   /**
@@ -2401,6 +2509,44 @@ export function outcomeCodeOf(
 ): string {
   const last = [...(issues ?? [])].reverse().find((i) => typeof i?.code === 'string' && i.code.startsWith('OUTCOME_'));
   return last?.code ?? '';
+}
+
+/**
+ * The SEVERITY the build's last `OUTCOME_*` was recorded at, or null when it recorded none.
+ *
+ * Sits beside `outcomeCodeOf` because the two are only useful together: one code can carry opposite
+ * meanings (`OUTCOME_STOPPED` at `warning` is the advisory cap on an app that WAS built; at `error`
+ * it is a build that never converged). A reader given the code alone cannot tell those apart, which
+ * is exactly how a successful build came to be filed as "incomplete". PURE.
+ */
+export function severityOfOutcome(
+  issues: ReadonlyArray<{ code: string; severity?: string }> | null | undefined,
+): string | null {
+  const last = [...(issues ?? [])].reverse().find((i) => typeof i?.code === 'string' && i.code.startsWith('OUTCOME_'));
+  return last && typeof last.severity === 'string' ? last.severity : null;
+}
+
+/**
+ * DID ANYONE ACTUALLY SEE THIS APP RUN? — the one fact that separates "the engine failed" from "we
+ * told the user it failed while their app worked". PURE.
+ *
+ * 🔴 WHY IT IS NEEDED (admin 2026-09-17, the 40.8% panel). This repo has TWICE shipped a verdict that
+ * called a working app broken: autopsy 697b38ee (a build that typechecked, built, rendered and passed
+ * its own Playwright suite told the user *"The build produced no files"*) and autopsy 4efab9d7 (a
+ * provider timeout counted as an app blocker → release gate RED → "working app or free" → ₹0). Both
+ * were fixed forward, but every record written BEFORE those fixes keeps its old verdict — and those
+ * records are what the failure panel reads today. Without this, a failure rate cannot be told apart
+ * from a mislabelling rate.
+ *
+ * ⚠️ ONLY BROWSER-CONFIRMED EVIDENCE COUNTS, deliberately. `GREEN_GUARD_SAVE` is recorded only after
+ * the app was opened in a real browser and seen rendering, and `PREVIEW_PUBLISHED` only after a URL
+ * was really served. A clean typecheck or a green unit suite proves the CODE is fine and says nothing
+ * about whether anything rendered, which is the distinction `deliveryProof.ts` was built on.
+ */
+export function appWasSeenRunning(
+  issues: ReadonlyArray<{ code: string }> | null | undefined,
+): boolean {
+  return (issues ?? []).some((i) => i?.code === 'GREEN_GUARD_SAVE' || i?.code === 'PREVIEW_PUBLISHED');
 }
 
 export function deriveRootCause(input: {

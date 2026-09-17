@@ -62271,6 +62271,84 @@ no guard: it teaches the next reader that the thing it measures is noisy. Same l
 6. **The build's ETA is asserted at t=0 and never reconciled** — *"ETA ~2–4 min"* on a 16.7-minute
    build, in the same document that carries both timestamps.
 
+---
+
+## 2026-09-17 — 🔴 THE FLAT GIFT IS RETIRED. ₹475 IS THE MOST ONE USER MAY EVER COST.
+
+**Admin, verbatim:** *"nahi welcom bonus ₹500 band karna hai! sirf refer aur verification wale ₹400
+dene hai. matlab mera(admin) ek user ke liye maximum= ₹475. isse 1 paisa jyada nahi."* and
+*"weekly reward, welcome reward yeh sab hatao."*
+
+### What was actually wrong — it was not one number, it was FOUR modules that could not see each other
+
+The payouts lived in four places with no shared ceiling: `welcomeBonus.ts` (the legacy flat gift),
+`giftPlan.ts` (the v2 ₹250/₹500, through TWO separate decisions), `weeklyTopUp.ts` (₹200 a rung to a
+₹650 lifetime cap) and `referralRewards.ts` (₹400 + ₹75). **The rule that they must not stack existed
+only as a COMMENT inside the last one.** A real account could collect ₹650 of flat-and-weekly gifts AND
+₹400 of referral steps — over ₹1,050 — with nothing failing and no screen showing a wrong number.
+
+That is the same class this file already records four times this week: **the code was correct and a
+sentence was lying.** A comment is not an enforcement.
+
+### What shipped
+
+- **`src/server/lib/giftPolicy.ts` (new)** — the whole policy as code. `flatWelcomeGiftAllowed()` and
+  `weeklyTopUpAllowed()` both return **false**; `capSelfGift` / `capReferrerPerFriend` clamp against
+  `MAX_SELF_GIFT_TOKENS` (₹400) and `MAX_REFERRER_PER_FRIEND_TOKENS` (₹75).
+- 🔒 **THE CEILING IS APPLIED TO THE TOTAL, NEVER ASSUMED FROM THE PARTS.** "4 steps × ₹100 = ₹400"
+  holds until somebody types `REFERRAL_STEP_TOKENS=200` in a console, at which point the same four
+  steps pay ₹800 and nothing objects. The cap reads the account's real `freeGiftedTokens`, in the same
+  transaction that credits it, so no tunable can raise its own ceiling.
+- 🔑 **THE THREE RETIREMENTS ARE GATED AT THE ROUTE, NOT INSIDE THE DECISIONS — and that was a REVERSAL
+  of my first attempt.** Gating inside `giftPlan.ts` / `weeklyTopUp.ts` / `welcomeBonus.ts` broke **37
+  tests**, all of them the 836 lines of proven anti-abuse logic (the Gmail-alias leak, the ₹750
+  two-door hole, the one-number-many-spellings case). Those decisions are the thing worth keeping. All
+  four grant functions have exactly ONE money-moving caller — `routes/wallet.ts` — so the stand-down
+  lives there, the anti-abuse suites stay green and true, and re-enabling is one function with proven
+  code behind it. A caller-count guard answers CLAUDE.md's "tenth caller" objection.
+
+### The half that is easy to miss: the SCREEN had to stand down with the money
+
+Stopping the grant alone would have left `FreeGiftBanner` drawing a **"Claim ₹500"** card whose button
+calls a route that now refuses — a promise the product cannot keep, shown at the exact moment a user is
+looking at an empty balance. Worse than the old policy, not better. Three honesty fixes, each proven by
+reversion:
+
+1. `v2GiftSummary` defers to `retiredGiftSummary`, whose **`capTokens: 0`** is what makes the banner
+   render **nothing**. A retired programme disappears; it does not describe itself in zeroes
+   ("₹0 of ₹500 received — ₹500 still to come" is a promise, not a status).
+2. `phoneBonusClaimable` is **0**. It is the single field that draws the claim card.
+3. `phoneVerifiedGift` is stamped only when `welcomeTokens > 0`. A wallet carrying that flag with no
+   gift behind it is a **false receipt** — it reads back as "this person has had theirs".
+
+Also: a legacy wallet's summary is labelled `plan: 'retired'`, never `'v2'` — it was never on plan v2,
+and telling the client it was would be a wrong fact dressed as a status.
+
+### The promise that survives
+
+**Nothing is clawed back.** An old ladder account sitting at ₹650 keeps every rupee; only new grants
+stop. Proven against a real wallet in `giftPlanV2Behavior.test.ts`.
+
+### Honest, and stated rather than discovered later
+
+`decideReferrerReward` values the steps already paid for a friend at **today's** rate — the only figure
+a pure function is given. A rate RAISED since makes it over-state what was paid and pay less; lowered,
+it under-states and pays slightly more, bounded by ₹75 either way. Under-paying a referrer is a support
+message; passing ₹475 is what the admin said must not happen, so the error leans that way deliberately.
+
+A refusal at the ceiling now reports **`cap-reached`**, not `already-paid` — two different facts about
+a real person, and an admin reading "already paid" for a step nobody was paid for is reading a wrong
+answer to the question they asked.
+
+**Gate:** `typecheck` · `noUnusedImports` · `typecheck:server` · **24,620 tests passed** · `build` ·
+`test:bundle` · `boot:check` · `deps:server-gate` — all green on the final state.
+
+⚠️ **PR #3021 (the conditional welcome-gift exclusion) MERGED to `main` while this was in flight**, so
+the two now coexist — deliberately, as two nets at different heights. `welcomeGiftExclusion.ts` answers
+a CONDITIONAL question ("is the referral ladder paying instead?") inside `welcomeBonus.ts` and
+`giftPlan.ts`; `giftPolicy.ts` answers an UNCONDITIONAL one at the route. If the flat gift is ever
+re-enabled, that module still stops it stacking with the ladder. Neither is a duplicate of the other,
+and `giftPolicy.ts`'s header says so, so neither gets deleted as one.
 ## 2026-09-17 — Autopsy `e706e068`, second half: the three doors that were still open after #3009
 
 **The admin's instruction, verbatim:** *"aapko teeno a b c karne hai! aur itna strong solve karo ki app
@@ -62419,6 +62497,90 @@ cannot fail is not a test" lesson this repo keeps paying for.
 PR #3025's content and moved onto a fresh branch from `main`): `typecheck` · `noUnusedImports` ·
 `typecheck:server` · `vitest run` (**24,621 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` ·
 `boot:check` · `deps:server-gate`.
+## 2026-09-17 — A clean console and an unread one were the same observable, so `RUNTIME_VERIFIED` was unreachable
+
+From the deep re-autopsy of `9cca1fd5`. **Verified myself, and the verification changed the fix twice.**
+
+### What I nearly built, and why it would have been wrong
+
+The workflow reported: *"the `console_errors` tool discards the actuator's `captured` flag."* Reading the
+code showed something more interesting:
+
+1. **`captured` already exists and is already correct** — the live `E2BActuator`
+   (`src/server/AgentV3/sandbox/...`, the one `actuatorFactory` uses) returns it, `LocalActuator`
+   returns it with a comment saying exactly the right thing, and `ActuatorPort` documents it:
+   *"`errors` means 'could NOT check', NOT 'clean'; omitted = unknown."*
+2. **The route already reads it correctly** — `runtimeCaptureAvailable` feeds `claimAudit`, and the
+   choice between `runtimeVerifiedRecord()` and `runtimeUncheckedRecord()` is honest.
+3. ⚠️ **But the flag could never be TRUE for a clean app**, because the sandbox browser daemon's only
+   writer is `rec()`, which fires **only on an error**. A perfectly clean app left no console log, the
+   read threw, and `getConsoleErrors` returned `captured: false` — *"we never looked"*.
+
+So had I only made the tool read the flag, **every clean build would have started reporting "the console
+could not be read"** — a brand-new false negative, worse than the thing I was fixing. Second time today
+the investigation stopped a fix that would have traded one problem for another.
+
+### The actual root cause is one line in the daemon
+
+```js
+const browser = await chromium.launch({...});
+try { fs.appendFileSync(LOG, ''); } catch (e) {}   // ← this
+```
+
+Placed **immediately after the launch**, so the file exists *if and only if a browser session genuinely
+existed* — which is precisely what `captured` is supposed to mean. **Append, never write**, so a resumed
+daemon cannot erase what the previous one recorded. Wrapped in `try`, because the browser matters more
+than the bookkeeping.
+
+**One line makes an entire existing, correct subsystem start working.** `RUNTIME_VERIFIED` has been
+effectively unreachable from the console path: proving a clean run needs `captured === true`, and a
+clean run never produced the file.
+
+### The second half: what the model is told
+
+`console_errors` destructured only `{ errors }` and answered *"the page ran clean"* on an EMPTY result —
+including when nothing had been read. That matters because the model **acts on this string**: told the
+page ran clean, it writes that into its summary. `claimAudit.ts` exists because of exactly that sentence
+— a build claiming "no console errors" in the same report that recorded `RUNTIME_UNCHECKED`.
+
+Three answers now, not two: read-and-clean · could-not-read (with what to do about it) · `undefined` ⇒
+the old wording, as the port's own back-compat rule requires.
+
+🔒 **NEITHER HALF WORKS ALONE**, and a test says so: the tool alone gives every clean build a false
+negative; the daemon alone changes nothing, because nothing reads the flag.
+
+🔒 **Direction check — this can only make verdicts MORE favourable.** `captureAvailable` becomes true
+more often, so `runtimeVerifiedRecord()` fires where `runtimeUncheckedRecord()` used to, and a warning
+becomes a clean verdict. `renderRescueConfirmsSuccess` reads `consoleErrs.length` only and is untouched
+— deliberately, because making that gate stricter would turn working apps into ₹0 builds, which is the
+harm this whole week of autopsies has been about.
+
+⚠️ **One transitional cost, stated rather than discovered later:** a sandbox RESUMED from before this
+change is running a daemon without the touch, so a clean app there still reports "could not be read".
+That is the honest answer for such a sandbox, it is already worded gracefully
+(`runtimeUncheckedRecord({previewRendered:true})` is `autoResolved`), and the 6-minute sandbox lifetime
+ages it out quickly.
+
+`tests/aCleanConsoleIsNotAnUnreadOne.test.ts` — 12 cases. **Proven by reversion:** removing the daemon
+line fails 3; making the tool ignore `captured` fails 5.
+
+### 🔴 The FOURTH self-measuring guard in one day — and this one was mine, minutes old
+
+The daemon guard asserts the script never truncates the log. Its first draft ran over the raw source
+slice and **failed on the word "truncate" inside the comment I had just written explaining that it must
+never truncate.**
+
+| # | guard | measured, instead of the claim |
+|---|---|---|
+| 1 | `engineEventsNeverBlock` | the exact `issues.filter(...)` formatting |
+| 2 | the arity guard in #3019 | commas — including commas inside a doc comment |
+| 3 | `buildOutcomeWiring` | a byte offset from a function header |
+| 4 | this one | a word inside its own explanatory comment |
+
+**Four in one day is not coincidence, it is a class.** The rule that would have prevented all four:
+**a source-reading guard must parse the CODE — strip comments, bound by real syntax (braces,
+parentheses), and assert the claim — never a byte window, a formatting shape, or a bare substring.**
+All four are now fixed that way.
 ## 2026-09-17 — Developer Tools → NavBharatAI API: the keys are real now, every scope opens a door, and a user can run their own AI on a NavBharatAI key
 
 **Admin, on seeing the API Keys card at the bottom of My Profile:** *"'other' -> 'developer tools' —
@@ -62666,3 +62828,84 @@ sees on day one**, and it is the admin's call.
 
 Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1741 files, 24611 passed, 0 failed** ·
 build · test:bundle · boot:check.
+
+---
+
+## 2026-09-17 — ONE PLANNER CHAT TURN COULD DELETE A WORKSPACE'S ENTIRE MEMORY
+
+**Branch `claude/a-chat-turn-must-not-erase-the-project`. Root cause fixed as a CLASS, in
+`FirestoreWorkspaceMemoryStore.ts` + `WorkspaceMemory.ts`; five call sites converted.**
+
+### What was wrong
+
+The Planner/Advisor role-chat lane (`routes/agentv3.ts` ~9362) did this, under a comment claiming it
+persisted *"exactly like the plain-chat lane"*:
+
+```ts
+const mem = getWorkspaceMemory(roleWorkspaceId);
+mem.recordRequest(prompt);
+void saveWorkspaceMemory(roleWorkspaceId, mem.snapshot());
+```
+
+The plain-chat lane has **one more line**, and its own comment says why: *"ensure durable episodes
+are loaded first"*. Without it, on a **COLD instance** — after every deploy, and after any 2-hour
+memory-cache eviction — `getWorkspaceMemory` returns an EMPTY object, `recordRequest` gives it
+exactly one episode, and `saveWorkspaceMemory` writes that over the durable document with
+**`{ merge: false }`**.
+
+**So one Planner chat turn destroyed the workspace's whole episode history AND its persisted project
+graph** — every recorded error, fix, note and request, plus the `PLAN_STATE` note that
+`routes/agentv3.ts` reads back (at ~3574 and ~13028) to resume an unfinished todo list on a
+"continue". `roleWorkspaceId` is derived identically to `intentWorkspaceId` and `chatWsId`, so it is
+the *same* workspace the build lane later reopens; and the role-chat branch returns long before the
+intent-time restore at ~9781 ever runs.
+
+### A SECOND defect in the same path, found while fixing the first
+
+`loadWorkspaceMemory` answers `null` for BOTH *"there is no snapshot"* and *"the read failed"* — its
+`catch` swallows the difference. Paired with a `{ merge: false }` write, a **transient Firestore blip
+is indistinguishable from an empty workspace**, and "start fresh" becomes "delete everything". That
+one needed no cold instance at all.
+
+### The fix — as a class, because a rule written into one caller is one the next caller never hears
+
+- **`loadWorkspaceMemoryResult()`** — `{ ok: true, snapshot } | { ok: false }`. An **absent** document
+  is `ok: true` (a real answer: there is nothing to lose); a **thrown** read is `ok: false`, and is
+  never a licence to overwrite. No Firestore configured at all is also a known state, not a failure.
+- **`WorkspaceMemory.isHydrationConfirmed()`** — a flag separate from `isHydrated()`, and the
+  difference is the whole point. `isHydrated()` is marked **before** the read, deliberately, as a
+  re-entrancy guard so two concurrent restores cannot replay the same episodes twice. It is not an
+  answer to *"do I hold the durable history?"* — and a 3-second timeout race leaves it set while the
+  read never landed. Only a genuine read sets the new one.
+- **`saveWorkspaceMemoryFor(workspaceId, mem)`** — hydrates first, and **refuses to write** when the
+  read is still unconfirmed. Losing one turn's episode is strictly better than deleting every earlier
+  one, and the next turn on a healthy instance persists it anyway.
+- **All five save sites converted** (role-chat, plain-chat, suggestions, import, build-end), and the
+  raw `saveWorkspaceMemory` now documents plainly what it does. The route calls it nowhere.
+
+### Tests — `tests/aChatTurnMustNotEraseTheProject.test.ts` (9 cases)
+
+Proven by reversion: **8 of 9 fail** with the four source files reverted, all pass restored.
+
+The store's real path needs Firestore, which is stubbed under VITEST, so the load-bearing facts are
+asserted **structurally, on source with comments stripped**: the route never calls the raw write, all
+five sites were converted, the refusal comes **before** the write rather than after it, confirmation
+is set **after** the `ok` check rather than before it, and the load really does distinguish an absent
+document from a failed read.
+
+**Full CI gate green on the final state** (branch cut from the current `main`): `typecheck` ·
+`noUnusedImports` · `typecheck:server` · `vitest run` (**24,659 passed, 1 skipped, 0 failed**) ·
+`build` · `test:bundle` · `boot:check` · `deps:server-gate`.
+
+### 🔎 Open item #5 — searched for, NOT found (safeguard #6's wording, deliberately)
+
+The 2026-09-17 re-autopsy's open item #5 reads *"a step-capped sub-agent's scratch files stay in the
+user's project — nothing reconciles what a killed child left behind."* Searching `ToolCatalog.ts`,
+`SubAgent.ts` and `AgentRunner.ts` for a scratch/temporary-file concept returns **one match, and it
+is the word "scratch" inside an unrelated comment**. There is no scratch-file mechanism to reconcile.
+
+So: **I could not find it** — which is a different claim from "it does not exist", and the honest one.
+The charitable reading (a capped child leaves half-written REAL files) is not sub-agent-specific: the
+architect's own capped turn leaves the same state, and `tsc` catches the syntactic half for both.
+Recorded here rather than acted on, because building a reconciler for a mechanism nobody can point at
+is exactly the speculative fix rule 6 forbids.

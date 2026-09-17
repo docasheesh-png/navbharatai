@@ -83,8 +83,13 @@ describe('gift plan v2 — off by default, and genuinely inert while off', () =>
     }
   });
 
-  it('falls back to the exact legacy grant when v2 is off', () => {
-    expect(SRC).toMatch(/const welcomeTokens = v2Grant[\s\S]{0,120}: welcomeGrantTokens\(alreadyGranted\);/);
+  it('falls back to the exact legacy grant when v2 is off — behind the retirement gate', () => {
+    // 🔴 CHANGED 2026-09-17. The flat welcome gift is retired ("welcome reward yeh sab hatao"), so
+    // the FIRST thing this expression asks is whether a flat gift may be paid at all. What the test
+    // still pins is the half that has to survive the retirement: if it is ever re-enabled, the v2-off
+    // path must fall back to the EXACT legacy grant, not to some new number invented on the way.
+    expect(SRC).toMatch(/const welcomeTokens = !flatWelcomeGiftAllowed\(\) \? 0/);
+    expect(SRC).toMatch(/const welcomeTokens =[\s\S]{0,200}: welcomeGrantTokens\(alreadyGranted\);/);
   });
 });
 
@@ -155,8 +160,15 @@ describe('gift plan v2 — the identity lookup fails CLOSED', () => {
 });
 
 describe('gift plan v2 — nobody who was promised a weekly credit loses it', () => {
-  it('the ladder is retired ONLY for wallets stamped v2', () => {
-    expect(SRC).toMatch(/const ladderRetired = data\.giftPlan === 'v2';/);
+  it('the ladder is retired for EVERY wallet, and the v2 stamp still retires its own', () => {
+    // 🔴 CHANGED 2026-09-17. This used to assert `=== 'v2'` ALONE, because a pre-switch wallet had
+    // been shown a next-credit date and taking it away would break a promise made on screen. The
+    // admin retired the ladder for everyone; the promise that survives is the money — nothing is
+    // clawed back — which `giftPlanV2Behavior.test.ts` proves against a real wallet.
+    //
+    // The v2 clause is deliberately KEPT rather than replaced: it is what makes re-enabling the
+    // ladder a one-function change that still leaves v2 wallets correctly excluded.
+    expect(SRC).toMatch(/const ladderRetired = !weeklyTopUpAllowed\(\) \|\| data\.giftPlan === 'v2';/);
     expect(SRC).toMatch(/if \(ladderRetired\) throw new SkipLadder\(\);/);
   });
 

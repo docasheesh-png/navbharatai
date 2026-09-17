@@ -445,7 +445,7 @@ import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHones
 import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings } from '../AgentV3/ReviewerAgent';
 import { salvageReview, formatPartialReview } from '../AgentV3/partialReview';
 import {
-  saveWorkspaceMemory,
+  saveWorkspaceMemoryFor,
   restoreWorkspaceMemory,
   loadWorkspaceMemory,
   deleteWorkspaceMemory,
@@ -6127,7 +6127,7 @@ async function noteBuildOutcome(
           await restoreWorkspaceMemory(cid, mem).catch(() => null); // ensure durable episodes are loaded first
           const removed = mem.removeLastRequestTurn();
           if (removed.length > 0) {
-            await saveWorkspaceMemory(cid, mem.snapshot()).catch(() => { /* best-effort */ });
+            await saveWorkspaceMemoryFor(cid, mem).catch(() => { /* best-effort */ });
             purgedMemory = true;
           }
         } catch { /* memory purge is best-effort — never fail the unsend */ }
@@ -9379,7 +9379,13 @@ async function noteBuildOutcome(
         try {
           const mem = getWorkspaceMemory(roleWorkspaceId);
           mem.recordRequest(prompt);
-          void saveWorkspaceMemory(roleWorkspaceId, mem.snapshot()).catch(() => {});
+          // 🔴 THIS LANE USED TO CALL `saveWorkspaceMemory` DIRECTLY, and the comment above claimed it
+          // persisted "exactly like the plain-chat lane". That lane has one more line — *"ensure
+          // durable episodes are loaded first"* — and without it, on a COLD instance this saved a
+          // one-episode empty memory over the durable document with `{ merge: false }`, deleting the
+          // workspace's whole history and project graph. `saveWorkspaceMemoryFor` hydrates first and
+          // refuses to write when it could not read.
+          void saveWorkspaceMemoryFor(roleWorkspaceId, mem).catch(() => {});
         } catch { /* best-effort */ }
         try {
           await raceTimeout(upsertConversationTurn(getConversationStore(), {
@@ -10048,7 +10054,9 @@ async function noteBuildOutcome(
           const chatWsId = deriveWorkspaceId(userId, req.body?.sessionId);
           const chatMem = getWorkspaceMemory(chatWsId);
           chatMem.recordRequest(prompt);
-          void saveWorkspaceMemory(chatWsId, chatMem.snapshot()).catch(() => {});
+          // Hydration at intent-time is a 3-second RACE, so it can be marked done while the read never
+          // landed — `saveWorkspaceMemoryFor` checks the read itself, not the re-entrancy flag.
+          void saveWorkspaceMemoryFor(chatWsId, chatMem).catch(() => {});
         } catch { /* memory is best-effort — never blocks a reply */ }
         // Surface the reply EXACTLY like a normal build narration — no provider
         // name, no note — then close out the stream the same way a build does.
@@ -10470,7 +10478,7 @@ async function noteBuildOutcome(
         const mem = getWorkspaceMemory(workspaceId);
         mem.recordNote(`Imported an existing app from ${opts.source}: ${written.length} files, framework ${framework}.`);
         for (const [p, c] of Object.entries(importedFiles).slice(0, 300)) mem.indexFile(p, c);
-        void saveWorkspaceMemory(workspaceId, mem.snapshot()).catch(() => {});
+        void saveWorkspaceMemoryFor(workspaceId, mem).catch(() => {});
       } catch { /* memory is best-effort */ }
       // The AI turn must work WITH the landed app — never scaffold over it, and answer a plain
       // "read/analyze my app" ask with an honest survey of the real files.
@@ -19068,7 +19076,7 @@ async function noteBuildOutcome(
           const planText = formatPlanState(state.snapshot().todos);
           if (planText) getWorkspaceMemory(workspaceId).recordNote(`PLAN_STATE\n${planText}`);
         } catch { /* plan-state capture is best-effort */ }
-        saveWorkspaceMemory(workspaceId, getWorkspaceMemory(workspaceId).snapshot()).catch(() => {});
+        saveWorkspaceMemoryFor(workspaceId, getWorkspaceMemory(workspaceId)).catch(() => {});
       } catch { /* memory persist is best-effort */ }
 
       // DURABLE FILE SAVE: persist the build's source so it never vanishes. Start from the files

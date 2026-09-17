@@ -62849,3 +62849,62 @@ The charitable reading (a capped child leaves half-written REAL files) is not su
 architect's own capped turn leaves the same state, and `tsc` catches the syntactic half for both.
 Recorded here rather than acted on, because building a reconciler for a mechanism nobody can point at
 is exactly the speculative fix rule 6 forbids.
+
+---
+
+## 2026-09-17 — THE CLASS, SWEPT: a read whose FAILURE is indistinguishable from an EMPTY result, feeding a write that REPLACES the document
+
+**Branch `claude/a-failed-read-is-not-an-empty-history`. Third instance of one class found today; the
+sweep across every `{ merge: false }` write in the server is recorded below, including what was safe.**
+
+### The class, named so it is recognised the fourth time
+
+Each instance reads as ordinary defensive code — `catch { return []; }` — and each turns a transient
+Firestore blip into **permanent data loss**, because *"there is nothing there"* and *"I could not see"*
+produce the same value and **only one of them licenses an overwrite**.
+
+| # | where | what one failed read destroyed |
+|---|---|---|
+| 1 | `FirestoreWorkspaceMemoryStore` (#3029, merged) | a workspace's entire episode history + project graph, on one Planner chat turn |
+| 2 | `WorkspaceFileStore`'s shrink guard (#3032) | the whole path index — the guard saw an empty index and authorised the wipe it exists to prevent |
+| 3 | `migrationHistory.ts` (**this change**) | a project's whole migration history, replaced by the single run in flight |
+
+### This instance
+
+`loadMigrationHistory` answers `[]` for both *"this project has no history"* and *"the read failed"*.
+`recordMigrationRun` folds that answer into a new list and writes it back with `{ merge: false }`.
+The history exists so the agent can see what it already migrated (`summarizeMigrationHistory` feeds a
+read-back block in `ToolDispatcher`), so losing it can make it repeat a migration on a user's database.
+
+**Fixed:** `loadMigrationHistoryResult()` returns `{ ok: true, runs } | { ok: false }` — an absent
+document (and an unconfigured Firestore) is a real answer; a thrown read is not. `recordMigrationRun`
+**returns before the write** when the read was not ok. The collapsing wrapper survives, documented
+`READ-ONLY CALLERS ONLY`, because an empty read-back block is honest for the one caller that displays it.
+
+⚠️ **NOT "switch the write to merge".** The fold already produces the complete, capped list, so a merge
+would leave capped-off runs behind for ever. The READ gate is the correct fix; the write mode is right.
+
+### 🔎 What the sweep checked and found SAFE — recorded so nobody re-checks it
+
+Every `{ merge: false }` write under `src/server` was read. These are **not** this class:
+
+- **`UserLessonBrain.recordBuildLessons`** and **`MistakeLedger.recordBuild`** — the read is INSIDE the
+  same `try` as the write, so a throwing read skips the write entirely.
+- **Every `tx.set` site** (`AgentV3CostTelemetry`, `adrMemory`, `UserPreferenceStore`, `FailureLedgerStore`,
+  `BuildQueueStore`, `monitorAlerts`, `UserCostStore`, `AssistantSpendStore`, `HostingUsageStore`,
+  `AppAiRegistryStore`) — inside a Firestore transaction, where a failed read aborts the transaction.
+- **`DecisionTraceManager`**, **`MegaRoadmapStore`**, **`IncrementalBuildCache`**, and the record-writers
+  (`BotStore`, `ApiKeyStore`, `AdminNotificationStore`, `CodeReviewStore`, `TeamLibraryStore`,
+  `MentionNotificationStore`, `DiagnosticsStore`, `AdminBuildReportStore`, `LiveChannel`) — they write
+  state the caller already owns, rather than folding a read into it.
+
+### Tests — `tests/aFailedReadIsNotAnEmptyHistory.test.ts` (10 cases)
+
+Proven by reversion: **5 of 10 fail** with `migrationHistory.ts` reverted, all pass restored. The
+reversion guard reads CODE with comments stripped and asserts the writer uses the result-returning
+read, that the `!ok` return comes **before** the write rather than after it, and that the write is
+still a full replace (the gate is what makes that safe).
+
+**Full CI gate green on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` ·
+`vitest run` (**24,810 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
+`deps:server-gate`.

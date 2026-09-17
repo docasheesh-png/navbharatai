@@ -60167,3 +60167,93 @@ Tests: `tests/autopsyFdd59ef8Remainder.test.ts` (10 cases), each proven by rever
    reported a C as a problem of the user's app.
 5. **`rootCause` contradicts `counts` in the same document**: it says "NO unresolved problem was
    recorded" while `counts.unresolved` is 2.
+
+## 2026-09-17 — Autopsy 2c61f648: "Can I use it. Or how to create apk" built an app for 7.3 minutes
+
+Admin sent build report `2c61f648` (user `vasanthakumar9813@gmail.com`, weak tier, `ok: true`,
+release gate YELLOW, and the user immediately reached for Diagnose/Restart).
+
+### What the user asked, and what they got
+
+The prompt was **`"Can I use it. Or how to create apk"`** — a question about a project they ALREADY
+had (51 source files, a React+Vite trading app with a Flask backend). What ran was a full agentic
+build: **438.7 s wall clock**, ~104 provider calls, 28 deliveries, 569k input tokens, 3 of the user's
+own files rewritten (`index.html`, `README.md`, `tsconfig.json`), and the project left **failing
+`tsc`** (`OUTCOME_TYPECHECK_FAILED` — "type errors remained after the agentic build and one repair
+pass"). Sandbox: 7.3 min up, **6.7 min idle (92%)**.
+
+### 🔴 Root cause — and it is a sibling that was named in this file ONE DAY EARLIER
+
+`readsAsQuestion` only ever examined the message's **opening**:
+
+```
+if (text.endsWith('?')) return true;
+if (WH_OPENERS.test(text)) return true;                     // ^-anchored
+if (AUX_OPENERS.test(text)) return AUX_ASKS_US.test(text);  // ^-anchored, and an EARLY RETURN
+return MIDSENTENCE_KYA_QUESTION.test(text);
+```
+
+For this message: no `?`; `WH_OPENERS` is `^`-anchored so the **"how" in the second sentence was
+invisible**; `AUX_OPENERS` matched the leading "can", and the early `return` handed back
+`AUX_ASKS_US` ("can i" ≠ "can you") — **false** — without any later test running. One sentence
+decided the whole message.
+
+Both halves classify as `chat` on their own. Joined they became **`new_build` at HIGH confidence**,
+and HIGH returns from `classifyIntentSmart` **before the LLM intention reader is ever asked** — the
+exact hard lock the 2026-09-13 "read the mood first" rule exists to remove.
+
+🔴 **`MIDSENTENCE_KYA_QUESTION`'s own comment, written 2026-09-16, states the defect verbatim:**
+*"Every other line in `readsAsQuestion` requires the message to OPEN with a question word."* That
+autopsy unanchored the **Hindi** pattern and stopped; the English siblings were never hunted. This is
+that sibling, failing in production the next day. **Third instance of this meta-pattern in this file's
+history** (cf. `a38c6fef`, `4efab9d7`).
+
+**Fixed structurally, not with another special case:** the openers are applied per CLAUSE
+(`CLAUSE_BOUNDARY`, `clauseReadsAsQuestion`), with leading connectives stripped ("or how…" is the same
+question as "how…"), so no future pattern has to remember to be unanchored. The `AUX_OPENERS` early
+`return` became `&&`, which also made yesterday's Hindi rule reachable for every message opening
+"can i / should i / do i" — it had been dead code for that whole shape.
+
+⚠️ Orders are untouched and verified: "build a notes app", "create apk", "ek billing app banao" stay
+`new_build` HIGH; **"do it again" is still a retry**, not small talk.
+
+### 🔴 The second finding: a prompt rule is a suggestion once the loop is running
+
+`systemPrompt.ts` already carries, verbatim: *"If the user asks how to get their app as a real Android
+file … **answer them, do NOT start building**"* and *"**NEVER** tell them to install Android Studio,
+**use the Capacitor CLI**, or set up GitHub Actions themselves."*
+
+The build ran `npm install @capacitor/core @capacitor/cli @capacitor/android`, `npx cap init`,
+`npx cap add android`, `npx cap sync android` — then discovered at 250 s that **Java is not installed**
+and gave up. At **207.8 s** the model had already said *"NavBharatAI has a built-in APK Builder that
+does exactly this for you"* — it recited the rule and violated it in the same sentence.
+
+**The instruction was correct, present and emphatic, and it lost — because routing had already decided
+the turn was a build.** A loop whose job is to act cannot be talked out of acting by a prompt line.
+This is the 50/50 law's other half: the upstream fix IS the routing fix, and that prompt line should
+never have had to fire.
+
+### The ledger (5 buckets)
+
+- ✅ **Self-healed (2):** `update_todo` malformed call; 4 `<script>` tags without SRI.
+- 🔀 **Worked around (4):** GLM benched at 161 s for answering **4.5× slower than budgeted** (139 s of
+  work our clock sizes at 31 s, over 4 calls) → fell to Kimi; APK built by hand → abandoned, notes
+  written instead; Playwright `COULD NOT RUN` (browsers absent); `npm audit fix` exit 1.
+- ⏭️ **Skipped (5):** journey not derived (no form); e2e scaffold skipped; console not captured
+  (`RUNTIME_UNCHECKED`); peak memory unavailable; page-render check skipped.
+- ❌ **Still broken (4):** typecheck fails; design consistency **50/100 (D)** (31 colours, 37 off-grid
+  spacings); 5 dependency vulnerabilities (1 high); release gate **YELLOW**.
+- 🥵 **Struggles:** the whole build; the 42-second Capacitor detour; ~104 calls for a question; 92%
+  sandbox idle.
+
+### Step 2 — the missing subsystem, named
+
+**There is no SANDBOX CAPABILITY CONTRACT.** The agent spent 208–250 s discovering by trial and error
+three FIXED properties of our own image — no Capacitor, no Java, no Android SDK — that the platform
+knows at build time. Nothing tells the builder what the machine cannot do, so infrastructure limits are
+learned by running commands and failing. Recorded as an OPEN root cause (rule 6): the fix is a
+machine-readable capability block injected into the build prompt, naming both the absent toolchain and
+the PLATFORM FEATURE that covers it.
+
+Tests: `tests/questionReadsEveryClause.test.ts` (16), both halves of the fix proven by reversion.
+Existing `IntentClassifier.test.ts` (73) and every classifier-adjacent suite (497 total) pass unchanged.

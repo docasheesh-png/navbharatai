@@ -64617,3 +64617,39 @@ generate-all → verify → repair loop; this is the agentic builder's path.
 its first checkpoint — the endgame's "N compile errors left" should drop toward zero, and
 `REPEATED_READS`/edit loops with it. Tests: `tests/writeTimeTypecheck.test.ts` (note wording on the real
 ERP tsc output, path normalisation, caps, queue coalescing, summary, dispatcher + route wiring).
+
+### 2026-09-17 — 🇮🇳 "dukaan" is now a shop: the domain regexes learn Hindi, and `billing` stops selecting a domain
+
+Admin: *"dukaan wala bhi banao"* — the open item recorded an hour earlier while wiring Plan mode.
+
+**The gap, measured rather than asserted.** Across 11 realistic Hinglish prompts the analyser classified
+**2 correctly**. `"dukaan"`, `"mareez"`, `"naukri"`, `"makan"`, `"shaadi"`, `"maal"` matched **nothing** —
+every headline regex in the file was English-only. So a shopkeeper describing their shop in their own
+language got the generic feature set, while the same sentence in English got payments, inventory and
+orders. On a Hindi-first product that is the moat leaking.
+
+**Two fixes, and they are different classes.**
+
+1. **Hindi/Hinglish keywords in ten domains** (healthcare, ecommerce, restaurant, education, fintech,
+   real-estate, jobs, logistics, events, fitness). Every one is `\b`-anchored, exactly like the English
+   narrowings this file already carries — the "photoshop" → `shop` lesson applies identically to a
+   Romanised Hindi stem, and anchoring is what keeps it from firing inside an unrelated word.
+2. 🔴 **`billing` REMOVED from the `saas` and `restaurant` HEADLINE regexes** (it remains a FEATURE regex
+   in both, untouched). **This is what made `"ek dukaan ka billing app banao"` a SaaS app.** A shop bills,
+   a restaurant bills, a clinic bills, a freelancer bills — **a word shared by five domains cannot select
+   one.** It is the same class as `cart`/`shop`/`friend` one level up: not a stem hiding inside another
+   word, but a word that belongs to everybody. `"a billing app"` now honestly resolves to `general`.
+
+**Result: 2/11 → 9/11, with the existing 48-case English corpus untouched** and the genuine cases still
+correct (`"a SaaS with subscription billing and team workspaces"` → saas; `"a restaurant POS with menu,
+KOT and GST billing"` → restaurant). 15 new tests, reversion-proven in both halves.
+
+🔴 **STILL OPEN (rule 6), and now stated exactly instead of vaguely.** Two of the eleven are a SCORING
+tie, not a keyword gap: `"dhaba ke liye khana order karne ka app"` → `ecommerce`, and
+`"udhaar khata app dukandar ke liye"` → `ecommerce`. Measured: **both candidate domains score 1**
+(ecommerce's *order management* and restaurant's *table / order management* both match "order"), and
+`domainFeatureScore`'s `>=` tie-break keeps the EARLIER domain in array order — ecommerce sits at index 1,
+restaurant at 7. The principled fix is a tie-break that prefers the domain whose headline matched a
+SPECIFIC word (`dhaba`) over a GENERIC one (`order`), but that changes the tie-break for every domain
+pair and therefore what real builds produce. It needs its own change and its own corpus sweep — not a
+rider on this one.

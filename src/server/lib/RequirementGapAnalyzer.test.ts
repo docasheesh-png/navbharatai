@@ -309,3 +309,56 @@ describe('game domain', () => {
     expect(g.domain).toBe('game');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// 🇮🇳 THE HINDI HALF (admin, 2026-09-17: "dukaan wala bhi banao").
+//
+// Found while wiring the domain knowledge into Plan mode: **"ek dukaan ka billing app banao"
+// classified as `saas`, and "dukaan" matched no domain at all.** Every headline regex in this file was
+// English-only, on a Hindi-first product — so a shopkeeper describing their shop in their own language
+// got the generic feature set, while the same sentence in English got payments, inventory and orders.
+//
+// Two fixes, and they are different classes:
+//   1. Hindi/Hinglish keywords added to ten domains. Every one is \b-anchored, exactly like the English
+//      narrowings above — the lesson of "photoshop" → shop applies identically here.
+//   2. `billing` REMOVED from the `saas` and `restaurant` HEADLINE regexes (it stays a feature regex in
+//      both). A shop bills, a restaurant bills, a clinic bills, a freelancer bills: a word shared by
+//      five domains cannot select one. That is what made a dukaan a SaaS.
+describe('Hindi/Hinglish domain classification — a shop described in Hindi is still a shop', () => {
+  const cases: Array<{ prompt: string; domain: string }> = [
+    { prompt: 'ek dukaan ka billing app banao GST ke sath', domain: 'ecommerce' },
+    { prompt: 'kirana store ke liye inventory app', domain: 'ecommerce' },
+    { prompt: 'mareez ka record rakhne wala aspatal app', domain: 'healthcare' },
+    { prompt: 'dawai ki dukaan ke liye stock app', domain: 'healthcare' },
+    { prompt: 'naukri dhundhne ka app banao', domain: 'jobs' },
+    { prompt: 'makan kiraya par dene ka app', domain: 'real-estate' },
+    { prompt: 'coaching ke chhatra ki hazri ka app', domain: 'education' },
+    { prompt: 'shaadi ka planning app', domain: 'events' },
+    { prompt: 'maal delivery track karne ka app', domain: 'logistics' },
+    { prompt: 'gym ke liye vyayam tracker', domain: 'fitness' },
+    { prompt: 'thali aur nashta ka rate card wala app', domain: 'restaurant' },
+  ];
+  for (const c of cases) {
+    it(`${c.prompt} → ${c.domain}`, () => {
+      expect(analyzeRequirementGaps(c.prompt).domain).toBe(c.domain);
+    });
+  }
+});
+
+describe('`billing` is a feature word, not a domain word', () => {
+  it('a bare billing app is honestly "general" — we do not know whose billing it is', () => {
+    expect(analyzeRequirementGaps('a billing app').domain).toBe('general');
+  });
+  it('a REAL SaaS still classifies as saas — the narrowing removed a false positive only', () => {
+    expect(analyzeRequirementGaps('a SaaS with subscription billing and team workspaces').domain).toBe('saas');
+    expect(analyzeRequirementGaps('a multi-tenant B2B platform with per-seat pricing').domain).toBe('saas');
+  });
+  it('a REAL restaurant still classifies as restaurant, GST billing and all', () => {
+    expect(analyzeRequirementGaps('a restaurant POS with menu management, KOT for the kitchen and GST billing').domain).toBe('restaurant');
+  });
+  it('billing survives as a FEATURE — this narrowed detection, it did not delete knowledge', () => {
+    const g = analyzeRequirementGaps('a restaurant app with menu and kitchen tickets');
+    expect([...g.mentioned, ...g.likelyMissing].join(' | ')).toMatch(/billing & GST invoice/);
+  });
+});
+

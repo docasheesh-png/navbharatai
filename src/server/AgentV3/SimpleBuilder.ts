@@ -13,6 +13,7 @@
 // Side-effects (model call, file writes, preview) are INJECTED so the manifest/parse/prompt logic is
 // fully unit-testable without a sandbox.
 
+import { posix } from 'node:path';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { deadlineFromBudget } from './turnDeadline';
 import { judgeRepair } from './repairAcceptance';
@@ -338,10 +339,34 @@ export function contractUserPrompt(prompt: string, manifest: SimpleFileSpec[]): 
   ].join('\n');
 }
 
-/** Render the shared contract as the prompt block injected into every per-file + repair call. */
-export function contractBlock(contract: string | undefined): string {
+/**
+ * Render the shared contract as the prompt block injected into every per-file + repair call.
+ *
+ * With `at`, the contract is ALSO a real file at `at.path` (see `contractModule`), and the block says
+ * so — with the exact import specifier from `at.from` when that is known — so the isolated per-file
+ * call has somewhere to import the shared symbols from instead of a paragraph to guess a path for.
+ */
+export function contractBlock(contract: string | undefined, at?: { path: string; from?: string }): string {
   const trimmed = (contract || '').trim();
   if (!trimmed) return '';
+  if (at?.path) {
+    const spec = at.from ? contractImportSpecifier(at.from, at.path) : '';
+    return [
+      '',
+      `SHARED CONTRACT — ALREADY WRITTEN to \`${at.path}\` as real, exported declarations. Every enum,`,
+      'interface and type below EXISTS in that file: IMPORT it from there'
+        + (spec ? ` (from this file the specifier is \`${spec}\`)` : ' (relative path from the importing file)')
+        + ' — never redeclare it in',
+      'another file, never import it from any other path, and never invent a `types/` folder or file for',
+      'it. Utility/helper SIGNATURES listed here are implemented in the file the file list names for them,',
+      'not in the contract file. These symbols are FROZEN and SHARED across files: use these EXACT names,',
+      'enum members, types, util signatures, and component prop interfaces. Do NOT rename, re-case,',
+      'or invent variants; do NOT import a symbol that is not declared here:',
+      '```ts',
+      trimmed.slice(0, 12_000),
+      '```',
+    ].join('\n');
+  }
   return [
     '',
     'SHARED CONTRACT — these symbols are FROZEN and SHARED across files. Use these EXACT names,',
@@ -351,6 +376,178 @@ export function contractBlock(contract: string | undefined): string {
     trimmed.slice(0, 12_000),
     '```',
   ].join('\n');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// THE CONTRACT IS A FILE, NOT A PARAGRAPH (autopsy 57875eb3, 2026-09-17).
+//
+// 🔴 THE DEFECT. The shared contract above was handed to every per-file call as PROSE — "these
+// symbols are FROZEN, do NOT import a symbol that is not declared here" — and never told the file
+// WHERE those symbols live, because they lived nowhere: the manifest planned no file for them. Eleven
+// isolated calls then each guessed a home. In the car-racing build that produced this section, the
+// same `GameStatus` / `PlayerProps` contract was imported from `../types/game`, `../types/note`,
+// `./types/game` and `./App` — four invented paths for one paragraph, plus one file that re-declared
+// the interfaces inline. Not one of those modules existed, so `tsc` failed on file one, the repair
+// pass was needed at all, and that pass is where the build then spent twenty-seven minutes.
+//
+// 🔑 THE FIX IS UPSTREAM (the 50/50 law): give the symbols a real home BEFORE any file is written.
+// `contractModule` turns the contract text into an actual TypeScript module of exported enums,
+// interfaces and type aliases; the lane writes it at `contractFilePath` as the first produced file,
+// lists it in every per-file prompt, and `contractBlock` tells each file the exact relative
+// specifier to import it from. A file can no longer invent a path, because the path is given.
+//
+// ⚠️ What is deliberately NOT put in the file: utility/helper SIGNATURES. The contract declares them
+// as bodiless signatures (`export function extractEmbedUrl(url: string): string`), which is valid in
+// a declaration context and a compile error in a module. They stay in the prose block, and are
+// implemented by the file the manifest names — exactly as before.
+//
+// 🔒 SAFE BY CONSTRUCTION. A contract that yields no exportable declaration produces no file (today's
+// behaviour, byte-identical); a framework this cannot be right for (Python, a plain Node script)
+// produces no file; and `AGENTV3_CONTRACT_FILE=off` restores today's behaviour without a deploy.
+// The deterministic import reconciler already re-points a named import at a symbol's unique owner —
+// so once the owner EXISTS, even a file that still guesses is corrected for free before `tsc` runs.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** Kill switch — `off` restores the prose-only contract exactly. Default ON. */
+export function contractFileEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return String(env.AGENTV3_CONTRACT_FILE ?? '').trim().toLowerCase() !== 'off';
+}
+
+/**
+ * Can a TypeScript contract module be a real file of this project? Pure.
+ *
+ * Positive list of the bundler/TS frameworks the fast lane actually builds (Vite resolves a `.ts`
+ * import from a `.jsx` file, so a JavaScript React app is fine). Anything unrecognised — Python,
+ * Rails, a bare Node script that runs without a bundler — gets today's prose-only behaviour: a wrong
+ * answer here would ADD a file that cannot be loaded, so unknown means no.
+ */
+export function frameworkSupportsContractFile(framework: string | undefined): boolean {
+  const fw = String(framework ?? '').toLowerCase();
+  if (!fw) return false;
+  if (/python|fastapi|flask|django|rails|ruby|php|laravel|\bgo\b|golang|rust|java\b|spring|dotnet|\.net/.test(fw)) return false;
+  return /react|vite|next|remix|gatsby|vue|nuxt|svelte|astro|solid|qwik|angular|typescript|\bts\b/.test(fw);
+}
+
+/** Where the contract module lives: beside the app's sources when they are under `src/`. Pure. */
+export function contractFilePath(manifest: ReadonlyArray<{ path: string }>): string {
+  return manifest.some((f) => f.path.startsWith('src/')) ? 'src/types.ts' : 'types.ts';
+}
+
+/** The relative import specifier for `contractPath` from inside `fromPath` (no extension). Pure. */
+export function contractImportSpecifier(fromPath: string, contractPath: string): string {
+  let rel = posix.relative(posix.dirname(fromPath), contractPath).replace(/\.tsx?$/, '');
+  if (!rel.startsWith('.')) rel = `./${rel}`;
+  return rel;
+}
+
+export interface ContractModule {
+  /** The module source — exported enums, interfaces and type aliases only. */
+  source: string;
+  /** The exported symbol names, in declaration order. */
+  symbols: string[];
+}
+
+const CONTRACT_HEAD = /^(?:export\s+)?(?:declare\s+)?(?:const\s+)?(enum|interface|type)\s+([A-Za-z_$][\w$]*)/;
+/** A line that begins a new top-level statement — used to end a statement that has no `;`. */
+const TOP_LEVEL_START = /^(?:export|declare|import|enum|interface|type|function|const|let|var|class|abstract|namespace|module)\b/;
+
+/**
+ * Split TypeScript source into its top-level statements. Tracks brace/paren/bracket depth and skips
+ * strings, template literals and comments; a statement ends at a `;` at depth 0, or at a line break at
+ * depth 0 when the next non-blank line starts another top-level statement (or the text ends). Pure;
+ * never throws on any input.
+ */
+export function topLevelStatements(text: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = -1;
+  let i = 0;
+  const n = text.length;
+  const nextLineStartsStatement = (from: number): boolean => {
+    // Skip whitespace and any comments that lead the next statement — a statement that opens with a
+    // comment is still a statement.
+    let rest = text.slice(from);
+    for (;;) {
+      const before = rest;
+      rest = rest.replace(/^\s+/, '').replace(/^\/\/[^\n]*\n?/, '').replace(/^\/\*[\s\S]*?\*\//, '');
+      if (rest === before) break;
+    }
+    return rest === '' || TOP_LEVEL_START.test(rest);
+  };
+  const flush = (end: number) => {
+    if (start >= 0) {
+      const st = text.slice(start, end).trim();
+      if (st) out.push(st);
+    }
+    start = -1;
+  };
+  while (i < n) {
+    const c = text[i];
+    const next = text[i + 1];
+    // Comments: skip whole, but keep them inside a statement's span (they are harmless in output).
+    if (c === '/' && next === '/') { const e = text.indexOf('\n', i); i = e < 0 ? n : e; continue; }
+    if (c === '/' && next === '*') { const e = text.indexOf('*/', i + 2); i = e < 0 ? n : e + 2; continue; }
+    if (c === '"' || c === "'" || c === '`') {
+      if (start < 0) start = i;
+      let j = i + 1;
+      while (j < n && text[j] !== c) { if (text[j] === '\\') j++; j++; }
+      i = j + 1;
+      continue;
+    }
+    if (start < 0) {
+      if (/\s/.test(c)) { i++; continue; }
+      start = i;
+    }
+    if (c === '{' || c === '(' || c === '[') depth++;
+    else if (c === '}' || c === ')' || c === ']') depth = Math.max(0, depth - 1);
+    else if (c === ';' && depth === 0) { flush(i + 1); i++; continue; }
+    else if (c === '\n' && depth === 0 && nextLineStartsStatement(i + 1)) { flush(i); i++; continue; }
+    i++;
+  }
+  flush(n);
+  return out;
+}
+
+/**
+ * Turn the contract paragraph into a real TypeScript module, or null when there is nothing to write.
+ *
+ * Kept: `enum` / `interface` / `type` declarations (exported, `declare` stripped, `const enum`
+ * demoted to `enum` because `isolatedModules` cannot import an ambient const enum) and any `import`
+ * lines the contract itself carries. Dropped: everything else — bodiless function signatures,
+ * `declare function`, bare `const x: T;` — because those are declarations, not module code. A
+ * contract that uses the `React.` namespace without importing it gets a type-only import added, since
+ * `@types/react`'s UMD global is not reachable from a module. Pure.
+ */
+export function contractModule(contract: string | undefined): ContractModule | null {
+  let text = String(contract ?? '').replace(/\r\n?/g, '\n');
+  text = text.replace(/^[ \t]*```[a-zA-Z]*[ \t]*$/gm, ''); // fences the prompt asked it not to add
+  const kept: string[] = [];
+  const imports: string[] = [];
+  const symbols: string[] = [];
+  const seen = new Set<string>();
+  for (const st of topLevelStatements(text)) {
+    if (/^import\b/.test(st)) { imports.push(st.endsWith(';') ? st : `${st};`); continue; }
+    const head = CONTRACT_HEAD.exec(st);
+    if (!head) continue;
+    const name = head[2];
+    if (seen.has(name)) continue; // a duplicate declaration is a compile error; first one wins
+    seen.add(name);
+    // Normalise the head: one `export`, no `declare`, no `const enum`.
+    const body = st.replace(/^(?:export\s+)?(?:declare\s+)?(?:const\s+)?/, '');
+    kept.push(`export ${body}`);
+    symbols.push(name);
+  }
+  if (kept.length === 0) return null;
+  const joined = kept.join('\n\n');
+  if (/\bReact\.[A-Za-z]/.test(joined) && !imports.some((l) => /['"]react['"]/.test(l))) {
+    imports.unshift("import type * as React from 'react';");
+  }
+  const header = [
+    '// Shared contract — the enums, interfaces and types every file of this app imports from here.',
+    '// Written by NavBharatAI before any other file, so all files agree on these names by construction.',
+  ];
+  const source = `${[...header, ...(imports.length ? ['', ...imports] : []), '', joined].join('\n')}\n`;
+  return { source, symbols };
 }
 
 /**
@@ -378,13 +575,18 @@ export function blueprintAdvisoryBlock(manifest: SimpleFileSpec[], contract?: st
   return parts.join('\n');
 }
 
-export function fileUserPrompt(prompt: string, file: SimpleFileSpec, manifest: SimpleFileSpec[], contract?: string, deps?: string): string {
-  const fileList = manifest.map((f) => `  - ${f.path}${f.purpose ? ` — ${f.purpose}` : ''}`).join('\n');
+export function fileUserPrompt(prompt: string, file: SimpleFileSpec, manifest: SimpleFileSpec[], contract?: string, deps?: string, contractPath?: string): string {
+  const listed = manifest.map((f) => `  - ${f.path}${f.purpose ? ` — ${f.purpose}` : ''}`);
+  // The contract file is a real file of the app: list it, so "the complete file list" is complete.
+  if (contractPath && !manifest.some((f) => f.path === contractPath)) {
+    listed.unshift(`  - ${contractPath} — SHARED CONTRACT (already written): the enums, interfaces and types below`);
+  }
+  const fileList = listed.join('\n');
   return [
     `App being built:\n${prompt}`,
     '',
     `The app's complete file list (so your imports line up):\n${fileList}`,
-    contractBlock(contract),
+    contractBlock(contract, contractPath ? { path: contractPath, from: file.path } : undefined),
     deps || '',
     '',
     `Now write THIS file in full:\n  ${file.path}${file.purpose ? `\n  Purpose: ${file.purpose}` : ''}`,
@@ -479,11 +681,12 @@ export function repairUserPrompt(
   files: OneShotFile[],
   contract?: string,
   strategy: RepairStrategy = 'contract-full',
+  contractPath?: string,
 ): string {
   const dump = files.map((f) => `<<<FILE ${f.path}>>>\n${f.content}\n<<<ENDFILE>>>`).join('\n\n');
   const lines = [
     `App being built:\n${prompt}`,
-    contractBlock(contract),
+    contractBlock(contract, contractPath ? { path: contractPath } : undefined),
     '',
     `The build FAILED with these compiler errors:\n${errors.slice(0, 6000)}`,
     '',
@@ -543,7 +746,7 @@ export interface SimpleBuildDeps {
    * when verify fails, up to `maxRepairs` times. A single isolated per-file generation often produces
    * a contract mismatch (hook vs consumer); this is what closes that gap automatically.
    */
-  repair?: (errors: string, files: OneShotFile[], contract?: string, strategy?: RepairStrategy) => Promise<OneShotFile[]>;
+  repair?: (errors: string, files: OneShotFile[], contract?: string, strategy?: RepairStrategy, contractPath?: string) => Promise<OneShotFile[]>;
   /** Max auto-repair attempts before handing off to the full builder (default 2). */
   maxRepairs?: number;
   /**
@@ -673,6 +876,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   //     it continues from real files instead of rebuilding from an empty tree.
   let lapsed = false;
   const generatedSoFar: OneShotFile[] = [];
+  // The contract module (see `contractModule`) — '' / null when the contract stays prose-only.
+  let contractPath = '';
+  let contractFile: OneShotFile | null = null;
   // How many files this lane's own manifest planned. Hoisted OUT of the closure for the same reason
   // `generatedSoFar` is: it is the lane's most valuable measurement of how big the app really is, and
   // on the failure path the closure's locals are gone before the caller can ask. See
@@ -751,6 +957,24 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       } else if (shareContract) {
         deps.log?.('⏭️ Skipping the shared-contract pass — planning used the time it needed, so the remaining budget goes to writing your files.');
       }
+      // THE CONTRACT IS A FILE, NOT A PARAGRAPH — see `contractModule` for the build that proved it.
+      // Decided BEFORE file one so every per-file prompt can name the path, and written FIRST so the
+      // dependency context of every tier carries its export surface like any other produced file.
+      if (contract && contractFileEnabled() && frameworkSupportsContractFile(deps.framework)) {
+        const mod = contractModule(contract);
+        if (mod) {
+          contractPath = contractFilePath(manifest);
+          const planned = manifest.findIndex((f) => f.path === contractPath);
+          if (planned >= 0) {
+            // The planner wanted a types file at this exact path. The contract IS that file — generating
+            // a second, drifting version of it in an isolated call is the defect this section removes.
+            manifest.splice(planned, 1);
+          }
+          contractFile = { path: contractPath, content: mod.source };
+          generatedSoFar.push(contractFile); // salvageable on a timeout, like any finished file
+          deps.log?.(`📐 Wrote the shared contract as ${contractPath} — ${mod.symbols.length} shared symbol(s) every file imports from one place.`);
+        }
+      }
       deps.log?.(`Building ${manifest.length} file(s) — one focused pass each…`);
       // REAL per-file progress: the chat used to go silent between "Building N file(s)…" and "Built
       // your app…" while N individual model calls ran (each taking real time) — the only signal
@@ -783,7 +1007,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           // Anchoring every file call to the SAME absolute instant the lane's own race is bound by means
           // an abandoned closure's next attempt hits `bound.expired` and REFUSES BEFORE SPENDING — see
           // OpenAiToolRunner.runTurn — instead of starting another multi-minute call nobody will read.
-          const text = await deps.generate(fileSystemPrompt(deps.framework), fileUserPrompt(deps.prompt, spec, manifest, contract, depBlock), { deadlineAt: laneStartedAt + overallMs });
+          const text = await deps.generate(fileSystemPrompt(deps.framework), fileUserPrompt(deps.prompt, spec, manifest, contract, depBlock, contractPath || undefined), { deadlineAt: laneStartedAt + overallMs });
           if (lapsed) return null; // timed out while this call was in flight — discard, don't log
           const blocks = parseFileBlocks(text);
           const match = blocks.find((b) => b.path === spec.path) ?? blocks[0];
@@ -818,7 +1042,10 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         // timeout was going to perform, minutes earlier and without burning the budget to reach it.
         throw new Error(`simple-build ${preambleBailReason({ preambleCallMs: planCallMs, tiers: populatedTiers, elapsedMs: Date.now() - laneStartedAt, overallMs })}`);
       }
-      const written: OneShotFile[] = [];
+      // The contract file is produced, not generated: it leads `written` so every tier's dependency
+      // context includes it, and is excluded from the "did the model generate enough?" counts below.
+      const written: OneShotFile[] = contractFile ? [contractFile] : [];
+      const generatedCount = () => written.length - (contractFile ? 1 : 0);
       for (let ti = 0; ti < tiers.length; ti++) {
         const tier = tiers[ti];
         const specs = depOrder ? manifest.filter((s) => generationTier(s.path) === tier) : manifest;
@@ -835,11 +1062,11 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         const tiersRemaining = tiers.length - 1 - ti;
         const progress = { tiersRemaining, lastTierMs: Date.now() - tierStartedAt, elapsedMs: Date.now() - laneStartedAt, overallMs };
         if (!canFinishRemainingTiers(progress)) {
-          if (written.length >= minFiles) break; // enough files to be a real app — finish this build honestly
+          if (generatedCount() >= minFiles) break; // enough files to be a real app — finish this build honestly
           throw new Error(`simple-build ${earlyBailReason(progress)}`);
         }
       }
-      if (written.length < minFiles) throw new Error('too_few_files_generated');
+      if (generatedCount() < minFiles) throw new Error('too_few_files_generated');
       // DETERMINISTIC IMPORT SELF-HEAL before the files are written/previewed (jungle-game report
       // 104f5b09 + fae70e42): (1) fix unambiguous named<->default import mismatches; (2) ADD a
       // forgotten shared-symbol import — a value used but never imported (e.g. Background.ts using
@@ -1108,7 +1335,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         if (drift) repairErrors = `${drift}\n\n${verdict.errors}`;
       } catch { /* drift report is best-effort — never blocks repair */ }
       let fixed: OneShotFile[] = [];
-      try { fixed = await deps.repair(repairErrors, [...byPath.values()], contract, strategy); } catch { fixed = []; }
+      try { fixed = await deps.repair(repairErrors, [...byPath.values()], contract, strategy, contractPath || undefined); } catch { fixed = []; }
       fixed = fixed.filter((f) => f && f.path && f.content);
       if (!fixed.length) break;
       // PREVENTION BY CONSTRUCTION, not by persuasion. A repair aimed at a file we own and that has one

@@ -148,7 +148,12 @@ describe('🔒 the wiring — every half of this fix, pinned where it lives', ()
   });
 
   it('the chain retires the starved rung by MODEL, so sibling rungs and the backstop survive', () => {
-    expect(chain).toContain('(isModelUnavailableError(err) || isStarvedBudgetError(err)) && entry.modelId');
+    // ⚠️ Updated 2026-09-17 (autopsy 57875eb3): the starvation key moved from `${name}::${model}` to
+    // provider FAMILY + model (`starvedKeyFor`), because a 51-key pool re-proved one model's
+    // starvation key by key for 26 minutes. The property this case guards — retirement is by MODEL,
+    // never by the whole bench name — is unchanged: the family key still carries the model id.
+    expect(chain).toContain('if (isStarvedBudgetError(err)) return starvedKeyFor(entry);');
+    expect(chain).toContain('const starvedKeyFor = (entry: NamedRunner): string => `${entry.reportAs ?? entry.name}::${entry.modelId ?? \'\'}`;');
     expect(chain).toContain('isFatalProviderError(err) || isModelUnavailableError(err) || isStarvedBudgetError(err)');
   });
 

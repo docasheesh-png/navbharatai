@@ -707,6 +707,7 @@ describe('runSimpleBuild — shared contract wiring', () => {
 
   it('designs a contract once and injects it into EVERY per-file generation prompt', async () => {
     const perFilePrompts: string[] = [];
+    const written: OneShotFile[] = [];
     let contractCalls = 0;
     const r = await runSimpleBuild(deps({
       generate: async (_s: string, user: string) => {
@@ -716,11 +717,18 @@ describe('runSimpleBuild — shared contract wiring', () => {
         const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'src/App.tsx';
         return `<<<FILE ${path}>>>\nok\n<<<ENDFILE>>>`;
       },
+      writeFiles: async (f: OneShotFile[]) => { written.push(...f); },
     }));
     expect(r.ok).toBe(true);
     expect(contractCalls).toBe(1); // exactly ONE contract call, up front
-    expect(perFilePrompts).toHaveLength(3);
+    // ⚠️ Was 3 until 2026-09-17 (autopsy 57875eb3). The contract is now a real FILE at src/types.ts
+    // (see `contractModule`), so the planned `src/types.ts :: types` is that file — written from the
+    // contract, not generated a second time in an isolated call that could drift from it. The two
+    // files that ARE generated still receive the contract in their prompts.
+    expect(perFilePrompts).toHaveLength(2);
     for (const p of perFilePrompts) expect(p).toContain('enum MediaType { YouTube, Vimeo }');
+    const types = written.find((f) => f.path === 'src/types.ts');
+    expect(types?.content).toContain('export enum MediaType { YouTube, Vimeo }');
   });
 
   it('a failed contract call NEVER fails the build (best-effort, falls back to contract-free)', async () => {

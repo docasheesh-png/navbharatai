@@ -571,7 +571,22 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         } finally {
           clearInterval(heartbeat);
         }
+        // 🔴 A TRUNCATED ANSWER PRESENTED AS A COMPLETE ONE IS THE DISHONESTY THIS REPO FORBIDS.
+        // #3035 gave a stalled stream a way to END; without this line it ends SILENTLY — the reply
+        // stops mid-sentence, `[DONE]` follows, and the user cannot tell whether the assistant
+        // finished or whether to ask again. One sentence is the whole difference, and it is the same
+        // reasoning `AdminBuildReportStore` states for an in-flight build: "say the obvious thing".
+        //
+        // 🔒 WHITE-LABEL LAW: branded, and it names no provider and no reason beyond our own engine.
+        // ⚠️ Only on `stalled`. A clean finish must never carry a caveat, and a turn where NOTHING was
+        // delivered took the honest "temporarily busy" line from the ladder itself, so adding one here
+        // would say it twice.
         if (!res.writableEnded) {
+          if (outcome?.reason === 'stalled') {
+            res.write(`data: ${JSON.stringify({
+              c: '\n\n_(NavBharatAI\u2019s engine went quiet before finishing this answer, so it stops here. Ask again and it will pick the thread back up.)_',
+            })}\n\n`);
+          }
           res.write('data: [DONE]\n\n');
           res.end();
         }

@@ -99,6 +99,54 @@ describe('wiring — the policy actually governs the router, and the outcome rea
   });
 });
 
+describe('🔴 a truncated answer must not be presented as a complete one', () => {
+  const chatSrc = readFileSync(join(__dirname, '../src/server/routes/chat.ts'), 'utf8');
+  const chatCode = chatSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  it('a stalled stream tells the user it stopped short, before [DONE]', () => {
+    // Without this, the reply just stops mid-sentence and `[DONE]` follows: the user cannot tell
+    // whether the assistant finished or whether to ask again.
+    expect(chatCode).toContain("outcome?.reason === 'stalled'");
+    expect(chatCode).toContain('went quiet before finishing this answer');
+    const notice = chatCode.indexOf('went quiet before finishing this answer');
+    const done = chatCode.indexOf("data: [DONE]", notice);
+    expect(notice).toBeGreaterThan(-1);
+    expect(done).toBeGreaterThan(notice); // the notice must precede the close, or nobody sees it
+  });
+
+  it('🔒 it names NO provider — the White-Label Law applies to a caveat too', () => {
+    const at = chatSrc.indexOf('went quiet before finishing');
+    expect(at).toBeGreaterThan(-1); // ⚠️ or the slice below is junk and every assertion is vacuous
+    const line = chatSrc.slice(at - 200, at + 200);
+    for (const vendor of ['GLM', 'Z.ai', 'Kimi', 'Moonshot', 'Claude', 'Anthropic', 'Gemini', 'Vertex', 'Grok', 'OpenAI']) {
+      expect(line).not.toContain(vendor);
+    }
+    expect(line).toContain('NavBharatAI');
+  });
+
+  it('a CLEAN finish carries no caveat — the notice is gated on the stall alone', () => {
+    // The guard that matters: if this were unconditional, every successful answer would end with an
+    // apology for something that did not happen.
+    const at = chatCode.indexOf('went quiet before finishing');
+    // ⚠️ ASSERT THE ANCHOR FIRST. Without this, `at` is -1, `slice(0, -1)` is the whole file, and the
+    // assertion below passes or fails for reasons that have nothing to do with the claim. THREE of
+    // the guards in this describe block were written that way and passed with the code REVERTED —
+    // the third time in one session that "a test that cannot fail is not a test" had to be paid for.
+    expect(at).toBeGreaterThan(-1);
+    const before = chatCode.slice(Math.max(0, at - 400), at);
+    expect(before).toContain("outcome?.reason === 'stalled'");
+  });
+
+  it('is professional ENGLISH, per the 2026-09-14 language standard', () => {
+    const at = chatSrc.indexOf('went quiet before finishing');
+    expect(at).toBeGreaterThan(-1); // ⚠️ a `not.toMatch` on an empty slice is the emptiest guard there is
+    const line = chatSrc.slice(at - 300, at + 300);
+    // Devanagari in a client-facing string is what the admin caught on the voice-consent popup:
+    // "south india wale kaise padhenge isko??"
+    expect(line).not.toMatch(/[\u0900-\u097F]/);
+  });
+});
+
 /**
  * The `{ … }` object literal that CONTAINS `from` — brace-matched, so it is the whole row however
  * many fields it grows. Replaces a fixed character window, which measures formatting rather than the

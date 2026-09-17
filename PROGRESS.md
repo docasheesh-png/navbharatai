@@ -63516,6 +63516,30 @@ state.
 and grep for the symbol you added. "I pushed it to that branch" is not "it is in `main`". Both times
 the merged tree answered in one command; both times it would otherwise have gone unnoticed.
 
+### Fix 3 — a truncated answer must not be presented as a complete one
+
+#3035 gave a stalled stream a way to END. Without this it ends **silently**: the reply stops
+mid-sentence, `[DONE]` follows, and the user cannot tell whether the assistant finished or whether to
+ask again. One branded sentence is the whole difference — the same reasoning `AdminBuildReportStore`
+states for an in-flight build: *"say the obvious thing."*
+
+🔒 It names no provider (White-Label Law applies to a caveat too), it is professional **English** per
+the 2026-09-14 standard, and it is gated on `stalled` alone — a clean finish must never end with an
+apology for something that did not happen, and a turn that delivered NOTHING already took the
+ladder's own honest "temporarily busy" line, so a second notice would say it twice.
+
+### ⚠️ THREE OF MY OWN NEW GUARDS WERE VACUOUS, AND REVERSION IS WHAT CAUGHT THEM
+
+Reverting `chat.ts` failed only **2 of 5** new cases. The other three did
+`src.indexOf(needle)` → `-1`, then sliced from it, and asserted against junk: a `not.toMatch` on an
+empty slice is the emptiest guard there is, and `slice(0, -1)` is the whole file. They passed with the
+code REVERTED.
+
+Each now asserts `expect(at).toBeGreaterThan(-1)` before slicing. Reversion moved from 2 failures to
+4. **Third time in one session that "a test that cannot fail is not a test" had to be paid for** —
+written here because the pattern is now unmistakable: an anchor found by `indexOf` must be asserted
+before it is used.
+
 **Full CI gate green on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` ·
-`vitest run` (**24,926 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
+`vitest run` (**24,930 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
 `deps:server-gate`.

@@ -64001,6 +64001,96 @@ close it: a prompt whose every word is a placeholder OR a creation verb names no
 bug** — it encoded my incomplete reading of the report, not anything a user needs. Moved into the
 category-word block and corrected, with the reason recorded beside it rather than silently deleted.
 
+### 2026-09-17 (same day) — the intention reader gets its fourth answer: `unclear`
+
+Admin, after the two fixes above: *"user ka har woh message jo ek limit se chota hai ya unclear hai,
+hamesha LLM call karo — woh bata dega."*
+
+**The honest finding, reported back before building anything: that call was ALREADY being made**, on
+every low-confidence message, on the free chain at ₹0, bounded at 6 s — report `d6d664e6` is the proof
+that it ran for `"Bnao"`. **What was missing was somewhere to put the answer.** The reader is handed
+three choices (`chat` / `build` / `edit`) and answered `build`, which is not even wrong: *"make it"* IS
+an order to build. *"They have not told me WHAT"* was not on the menu.
+
+- `classifyIntentSmartDetailed` returns `{ intent, unclear }` and the reader's menu now carries a
+  fourth answer. `classifyIntentSmart` is that function with the flag discarded — **delegating, not
+  duplicating**, the same pattern `classifyIntent` already uses.
+- 🔒 **`intent` deliberately stays at the KEYWORD result when `unclear` is true.** A caller that
+  ignores the flag is byte-identical to before. The flag adds an option; it removes none.
+- The route ORs it with the deterministic `'no-object'` half and sends **both through the same four
+  narrowing conditions** (empty workspace, no earlier request, no attachment/import, not an edit).
+  A second opinion that can only make the gate NARROWER cannot introduce a new way to refuse a real
+  prompt.
+
+⚠️ **What was deliberately NOT done, and why (rule 3, no sycophancy).** The instruction as written —
+*call the LLM on every short message* — would add a provider round trip to `"hi"`, `"ok"`, `"thanks"`,
+`"haan"`: HIGH-confidence messages with no doubt in them, answered instantly and free today. That
+slows the app's most common turn for no gain. The existing design already asks **only when it is
+genuinely unsure**, which is both better and cheaper; a test now pins that a HIGH-confidence message
+never reaches the reader at all. Also recorded: `glm-4.5-flash` is on none of this repo's ladders —
+free chat leads with `glm-4.7-flashx` (₹0), which is already the cheapest rung, and pinning a model id
+in code is the churn Decision A exists to avoid.
+
+🔎 **The bigger lever, named and not yet taken:** the recurring failure is the OPPOSITE shape — a
+**HIGH-confidence hard lock that skips the reader entirely**. Three autopsies now (`5abad374`,
+`cc8c9075`, and `d6d664e6`'s sibling). PR #3040 (another session) is working that seam; this change
+deliberately stays out of `clauseReadsAsQuestion` and `userAskedForAnAppToBeBuilt` so the two do not
+race in one file.
+
+**Tests:** `tests/intentReaderCanSayUnclear.test.ts` (9) + the reader block in
+`objectlessBuildAsks.test.ts`. Reversion-proven in **both** halves — deleting the `unclear` mapping
+fails the reader suite, deleting `|| readerSaysUnclear` fails the route suite. Two source-scanning
+tests had their needles updated (`classifyIntentSmartDetailed`, the widened route window): the symbol
+and the window moved, **the assertions did not**.
+---
+
+## 2026-09-17 — A KEY COUNT IS NOT AN ATTEMPT COUNT: the bare `×N` that bought a phantom root cause
+
+**Branch `claude/a-key-count-is-not-an-attempt-count`. One word of label, in
+`runnerChainSummary.ts`.**
+
+### What it closes, and it is not a bug in the bench
+
+#3039's autopsy of build `d6d664e6` recorded an open item titled **"a bench that does not bench"**:
+`PROVIDER_BENCHED` fired three times saying *"benched for the rest of this build"* while the report's
+chain line read `GLM(glm-4.7-flashx) ×51`. Fifty-one reads as fifty-one **attempts**, so the two
+statements looked like a flat contradiction and an engine defect was recorded.
+
+**Reading the code disproved it. The bench was working; the LABEL was ambiguous.** `describeRunnerChain`
+collapses consecutive same-family, same-model rungs and its own doc comment already says what the
+number means — *"the count still says how many keys stood there"* — but the rendered line never said
+"keys". A reader had to know the module's internals to read its output correctly, and a careful reader
+(another session, mid-autopsy) reasonably did not.
+
+**A phantom open root cause is not free:** it sends the next session to read code that is already
+correct, and it sits in `PROGRESS.md` looking like debt.
+
+### The fix
+
+`×51` → **`×51 keys`**, and only where that is true.
+
+🔑 **The discriminator is real, not a guess.** A pool rung carries its own `name` (`GLM#2`) under a
+shared `reportAs` (`GLM`) — exactly what `isPoolMember` keys off in `MultiProviderTurnRunner`. So a
+collapsed group whose rungs had **distinct names** is a key pool and says so; a group of genuinely
+identical rungs keeps today's bare `×N`. A test pins both halves.
+
+### ⚠️ The existing test's own title carried the same imprecision
+
+It read *"a key pool reports HOW MANY keys were **tried**"*. The chain records what was **BUILT** —
+that is this module's first line — so three rungs means three keys **standing there**, whether the run
+reached one of them or all three. Retitled, and the reason recorded beside it, because that sentence
+is the misreading in miniature.
+
+Two existing assertions pinned the exact old string and were updated; a new case reproduces the
+reported `×51` and asserts the bare reading is no longer available (`not.toMatch(/×51(?! keys)/)`).
+
+### Tests — `tests/runnerChainSummary.test.ts` (16 cases, +3)
+
+Proven by reversion: **3 of 16 fail** with `runnerChainSummary.ts` reverted.
+
+**Full CI gate green on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` ·
+`vitest run` (**25,011 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
+`deps:server-gate`.
 ### 2026-09-17 (autopsy d98dae01, half 1 of 2) — a request none of our signals can read is not a greeting
 
 The prompt was Telugu: a text-to-speech app with voice cloning. `RequestAnalyser` scored it **5** — the

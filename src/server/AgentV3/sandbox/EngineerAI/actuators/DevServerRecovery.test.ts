@@ -840,3 +840,44 @@ describe('the reported failure is now diagnosed instead of retried blindly', () 
     expect(d.recovery).toBe('code_fix');
   });
 });
+
+// 🔴 A SHELL THAT NEVER REACHED THE PROJECT IS NOT AN UNKNOWN FAILURE.
+//
+// Autopsy "Make an VPN App" (2026-08-23). The builder ran `cd vpn-app && npm install && npm run dev`
+// in a workspace with no `vpn-app` directory. The log named the cause in as many words; this
+// classifier matched none of it, so the user got "the log had no recognisable error", the identical
+// command was restarted twice, and 83 seconds later: "Automatic recovery is exhausted."
+describe('a failed cd is a command error, not an unknown one ("Make an VPN App", 2026-08-23)', () => {
+  const REAL_LOG = [
+    '',
+    '[health-check] installing dependencies (package.json changed)… done.',
+    '/bin/bash: line 1: cd: vpn-app: No such file or directory',
+    '000Server not ready yet',
+  ].join('\n');
+
+  it('names the directory instead of saying nothing was recognisable', () => {
+    const d = classifyDevServerFailure(REAL_LOG);
+    expect(d.detail).toContain('vpn-app');
+    expect(d.detail).not.toContain('no recognisable error');
+  });
+
+  it('does NOT burn recovery attempts — a restart cannot conjure a directory', () => {
+    const d = classifyDevServerFailure(REAL_LOG);
+    expect(d.cause).toBe('code_error');
+    expect(d.recovery).toBe('code_fix');
+  });
+
+  it('matches the plain `sh` phrasing too, not just bash', () => {
+    expect(classifyDevServerFailure('sh: 1: cd: can\'t cd to build\n').detail).not.toContain('vpn-app');
+    const d = classifyDevServerFailure('/bin/sh: cd: frontend: No such file or directory\n');
+    expect(d.cause).toBe('code_error');
+    expect(d.detail).toContain('frontend');
+  });
+
+  it('a genuinely unrecognisable log still says so honestly', () => {
+    // Guarding the guard: this must not become a catch-all that mislabels every unknown failure.
+    const d = classifyDevServerFailure('\nsomething inscrutable happened\n');
+    expect(d.cause).toBe('unknown');
+    expect(d.detail).toContain('no recognisable error');
+  });
+});

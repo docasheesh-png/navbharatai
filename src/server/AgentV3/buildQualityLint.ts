@@ -46,6 +46,22 @@ const GENERATED = /(\.min\.(css|js)|\.bundle\.js|-lock\.json)$/i;
  */
 export const MAX_LINT_CHARS = 400_000;
 
+/** One file's own count of a single violation type. */
+export interface FileOffence {
+  path: string;
+  /**
+   * That FILE's own count when the linter is run over it alone.
+   *
+   * ⚠️ For a DISTINCTNESS rule ("58 distinct colours", "3 font families") these counts deliberately do
+   * NOT sum to the app-wide total — two files can each use the same one-off colour. The word used in
+   * the report is "worst", which is true of every rule; nothing claims a share of the total.
+   */
+  count: number;
+}
+
+/** How many files each violation names. Three is enough to start; a longer list is a wall of text. */
+export const OFFENDERS_PER_TYPE = 3;
+
 export interface BuildQualityLint {
   design: DesignLintResult;
   a11y: A11yLintResult;
@@ -53,6 +69,26 @@ export interface BuildQualityLint {
   fileCount: number;
   /** True when the cap above cut the input short, so the caller can say so rather than imply full coverage. */
   truncated: boolean;
+  /**
+   * Violation `type` → the files carrying the most of it, worst first.
+   *
+   * 🔴 WHY THIS EXISTS (autopsy e706e068, the School ERP). That build's report said *"Accessibility
+   * 45/100 (D) … 14 form field(s) with no label … 7 button/link with no accessible name"* and
+   * *"Design consistency 50/100 (D) … 58 distinct colours"* — across a 31-file app, naming **no file
+   * and no line**. Neither the user nor any repair pass could act on a single one of them, so both
+   * findings shipped as permanent unresolved warnings.
+   *
+   * The same report carried `DESIGN_PAGE_INCONSISTENT`, which DOES name its files (*"worst:
+   * src/pages/Attendance.tsx"*) — two quality linters in one document, one actionable and one not.
+   * The reason is structural, not an oversight: `lintBuiltApp` JOINS every file into one string before
+   * linting, so by the time a violation exists the file it came from has already been thrown away.
+   *
+   * 🔒 THE SCORE IS UNCHANGED. Attribution is a SECOND pass over the SAME selected files, in the same
+   * loop, so the headline number still comes from the joined text exactly as before and the two can
+   * never disagree about which files were judged. Cost is one more regex scan over the same
+   * characters, on a build that has already succeeded.
+   */
+  offenders: Record<string, FileOffence[]>;
 }
 
 /**
@@ -66,11 +102,14 @@ export function lintBuiltApp(files: Record<string, string>): BuildQualityLint | 
   let truncated = false;
   let fileCount = 0;
 
+  const selected: Array<[string, string]> = [];
+
   for (const [path, content] of Object.entries(files || {})) {
     if (typeof path !== 'string' || typeof content !== 'string') continue;
     if (!LINTABLE.test(path) || NOT_APP_DESIGN.test(path) || GENERATED.test(path)) continue;
     if (total + content.length > MAX_LINT_CHARS) { truncated = true; continue; }
     parts.push(content);
+    selected.push([path, content]);
     total += content.length;
     fileCount++;
   }
@@ -80,18 +119,63 @@ export function lintBuiltApp(files: Record<string, string>): BuildQualityLint | 
   if (fileCount === 0) return null;
 
   const joined = parts.join('\n');
-  return { design: lintDesign(joined), a11y: lintA11y(joined), fileCount, truncated };
+  return {
+    design: lintDesign(joined),
+    a11y: lintA11y(joined),
+    fileCount,
+    truncated,
+    offenders: attributeOffenders(selected),
+  };
+}
+
+/**
+ * Which FILES carry each violation type — the linters re-run over one file at a time.
+ *
+ * Only files that genuinely contributed to the score are attributed (the same `selected` list the
+ * join was built from), so a file skipped by the size cap is never named for a violation it was not
+ * measured for. Total on its inputs: a linter that throws on one file costs that file's attribution,
+ * never the whole result.
+ */
+function attributeOffenders(selected: ReadonlyArray<readonly [string, string]>): Record<string, FileOffence[]> {
+  const byType = new Map<string, FileOffence[]>();
+  for (const [path, content] of selected) {
+    let found: Array<{ type: string; count: number }> = [];
+    try {
+      found = [...lintDesign(content).violations, ...lintA11y(content).violations]
+        .map((v) => ({ type: v.type, count: v.count }));
+    } catch { continue; }
+    for (const { type, count } of found) {
+      if (!(count > 0)) continue;
+      const list = byType.get(type) ?? [];
+      list.push({ path, count });
+      byType.set(type, list);
+    }
+  }
+  const out: Record<string, FileOffence[]> = {};
+  for (const [type, list] of byType) {
+    // Worst first; ties broken by path so the same app always produces the same sentence.
+    list.sort((a, b) => (b.count - a.count) || a.path.localeCompare(b.path));
+    out[type] = list.slice(0, OFFENDERS_PER_TYPE);
+  }
+  return out;
+}
+
+/** " Worst: a.tsx (4), b.tsx (2)." for one violation type, or '' when nothing could be attributed. */
+export function offenderNote(r: BuildQualityLint, type: string): string {
+  const files = r.offenders?.[type];
+  if (!files || files.length === 0) return '';
+  return ` Worst: ${files.map((o) => `${o.path} (${o.count})`).join(', ')}.`;
 }
 
 /** One line for the build report — the score plus the count, never a bare grade with no evidence. */
 export function designLintSummary(r: BuildQualityLint): string {
   const v = r.design.violations.length;
-  return `Design consistency ${r.design.score}/100 (${r.design.grade}) across ${r.fileCount} file(s)${r.truncated ? ', partially scanned' : ''}. ${designSummary(r.design)}${v ? ` ${r.design.violations.map((x) => x.message).join(' ')}` : ''}`.trim();
+  return `Design consistency ${r.design.score}/100 (${r.design.grade}) across ${r.fileCount} file(s)${r.truncated ? ', partially scanned' : ''}. ${designSummary(r.design)}${v ? ` ${r.design.violations.map((x) => `${x.message}${offenderNote(r, x.type)}`).join(' ')}` : ''}`.trim();
 }
 
 /** One line for the build report, listing the real WCAG criteria rather than a score alone. */
 export function a11yLintSummary(r: BuildQualityLint): string {
   const v = r.a11y.violations;
   if (v.length === 0) return `Accessibility ${r.a11y.score}/100 (${r.a11y.grade}) — no common WCAG failures found across ${r.fileCount} file(s).`;
-  return `Accessibility ${r.a11y.score}/100 (${r.a11y.grade}) across ${r.fileCount} file(s)${r.truncated ? ', partially scanned' : ''}. ${v.map((x) => `WCAG ${x.wcag}: ${x.message}`).join(' ')}`;
+  return `Accessibility ${r.a11y.score}/100 (${r.a11y.grade}) across ${r.fileCount} file(s)${r.truncated ? ', partially scanned' : ''}. ${v.map((x) => `WCAG ${x.wcag}: ${x.message}${offenderNote(r, x.type)}`).join(' ')}`;
 }

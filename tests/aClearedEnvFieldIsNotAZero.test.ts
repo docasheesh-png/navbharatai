@@ -187,13 +187,22 @@ describe('the shape cannot come back (prevention)', () => {
    */
   // The lookbehind is load-bearing: `parseEnvNumber(` and `rawNumber(` both CONTAIN `Number(`,
   // so without it this guard flags its own fix. It did, on the first run.
-  const BAD = /(?<![A-Za-z0-9_$])(?:Number|parseFloat)\(\s*(?:process\.)?env[.[][^)\n]*\)[\s\S]{0,200}?>=\s*0/g;
+  //
+  // `import.meta.env` is in the alternation because that is how CLIENT code reads env, and a guard
+  // that only understood `process.env` would have been blind to half the repo — the exact "I searched
+  // `src/` and it was in `server.ts`" mistake this codebase has already paid for.
+  const BAD = /(?<![A-Za-z0-9_$])(?:Number|parseFloat)\(\s*(?:process\.|import\.meta\.)?env[.[][^)\n]*\)[\s\S]{0,200}?>=\s*0/g;
+
+  /** Every root that carries live code. `server.ts` sits at the repo ROOT, not under `src/`. */
+  const ROOTS = ['src', 'scripts', 'infra', 'server.ts'];
 
   const walk = (dir: string, out: string[] = []): string[] => {
+    if (statSync(dir).isFile()) { out.push(dir); return out; }
     for (const name of readdirSync(dir)) {
+      if (name === 'node_modules') continue;
       const p = join(dir, name);
       if (statSync(p).isDirectory()) { walk(p, out); continue; }
-      if (/\.tsx?$/.test(p) && !/\.test\.tsx?$/.test(p)) out.push(p);
+      if (/\.(tsx?|m?js|cjs)$/.test(p) && !/\.test\.(tsx?|m?js)$/.test(p)) out.push(p);
     }
     return out;
   };
@@ -204,6 +213,9 @@ describe('the shape cannot come back (prevention)', () => {
     expect(sample.match(BAD)).not.toBeNull();
     const sample2 = 'const n = Number(env.SOME_LIMIT);\nif (Number.isFinite(n) && n >= 0) return n;';
     expect(sample2.match(new RegExp(BAD.source, 'g'))).not.toBeNull();
+    // The client shape. `Number('')` is 0 in a browser too.
+    const sample3 = 'const n = Number(import.meta.env.VITE_SOME_LIMIT);\n  return n >= 0 ? n : 5;';
+    expect(sample3.match(new RegExp(BAD.source, 'g'))).not.toBeNull();
   });
 
   it('and it clears the safe shape, so it is not just matching everything', () => {
@@ -213,9 +225,13 @@ describe('the shape cannot come back (prevention)', () => {
     expect(alsoGood.match(new RegExp(BAD.source, 'g'))).toBeNull();
   });
 
-  it('no server file reads an env number in a shape a blank value turns into zero', () => {
+  it('NO file in the repo reads an env number in a shape a blank value turns into zero', () => {
     const offenders: string[] = [];
-    for (const file of walk(join(process.cwd(), 'src/server'))) {
+    const files = ROOTS.flatMap((r) => walk(join(process.cwd(), r)));
+    // A scan that found no files would pass vacuously, which is the failure mode this repo keeps
+    // paying for — so assert it really walked the tree before trusting an empty offender list.
+    expect(files.length).toBeGreaterThan(500);
+    for (const file of files) {
       // Comments stripped: the docblock in `envNumber.ts` quotes the bad shape on purpose.
       const hits = codeOnly(readFileSync(file, 'utf8')).match(new RegExp(BAD.source, 'g'));
       if (hits) offenders.push(`${file.replace(process.cwd() + '/', '')} — ${hits.length}`);

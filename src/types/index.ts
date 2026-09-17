@@ -93,6 +93,9 @@ export type SettingsScreen =
   // tests/settingsScreenReachable.test.ts fails CI if any member below lacks a navigator or a
   // renderer. Add a member only together with both.
   | 'root' | 'general' | 'secrets' | 'database' | 'connections'
+  // App Lock's own screen (admin 2026-09-17: "'app lock' button banao … press kare to yeh option dikhe").
+  // Opened ONLY from the App Lock row on General; always behind the PIN.
+  | 'app_lock'
   | 'github_repos' | 'logs' | 'metrics'
   // "Your Website" hub (admin 2026-07-29): the real-website essentials, brought into App Settings.
   // 'hosting' was merged into 'cloudeploy' as a duplicate (2026-07-29); 'cloudeploy' itself was then

@@ -63462,6 +63462,50 @@ still a full replace (the gate is what makes that safe).
 `vitest run` (**24,810 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
 `deps:server-gate`.
 
+## 2026-09-17 — APP LOCK GETS ITS OWN DOOR: a button on General, a PIN-gated screen, and Change PIN
+
+Admin, from the live site, verbatim: *"app lock aapne setting me aise hi bahar bana diya, 'app lock'
+button banao. jab user setting ja kar app lock option press kare to yeh option dikhe. sath me change lock
+ka bhi option dikhe. aur is app lock ko open karne ke liye bhi lock chahiye. aap isko aur acche se banao."*
+
+**What was wrong, precisely.** The App Lock checklist (2026-09-13) rendered INLINE on Settings → General.
+Saving needed the PIN — that half was right — but the LIST was readable by anyone holding the phone, and
+it carried its own "Enter your PIN to save" box because it sat on an open screen. A user with no PIN was
+sent on a detour ("open Secrets & API Keys once to create it"). And there was no way to change a PIN you
+still knew: the only door was "Forgot PIN" (emailed code).
+
+**What changed (all wired, all tested):**
+- **`AppLockRow`** (`settings/AppLockSettings.tsx`) — the button on General. One line of status from the
+  shared cache (`appLockRowSubtitle`: "No PIN yet — tap to set one up" / "PIN set · 2 of 6 optional areas
+  locked"), a chevron, never a tick box. Navigates to the new **`settingsScreen === 'app_lock'`**
+  (`SettingsScreen` union in `types/index.ts`; both doorway and room exist, so
+  `settingsScreenReachable.test.ts` stays green).
+- **The screen is ALWAYS behind the PIN.** `AppLockGate` gained `always` (skip the per-area question),
+  `label` (the card names "App Lock" rather than an area) and `banner` (the re-lock countdown + Lock now,
+  because every save spends the ticket). No PIN yet ⇒ the same gate shows the CREATE-PIN form, so the PIN
+  is made where it is managed. When "Settings" itself is ticked, the outer gate collected the PIN already
+  and the shared unlock opens this one straight through — one PIN, never two.
+- **`AppLockSettings`** lost its own PIN box (the door is the PIN); a lapsed ticket now `clearUnlock()`s
+  so the gate asks again instead of leaving a Save that keeps failing.
+- **Change PIN** — `POST /api/app-lock/:userId/pin/change` (`routes/appLock.ts`), client `changePin()`
+  (`lib/appLock.ts`), `ChangePinCard` on the screen. 🔒 **Needs BOTH a live ticket AND the current PIN
+  typed now** — a ticket alone proves the PIN was entered in the last five minutes, and a phone handed
+  over four minutes later still holds it. A wrong current PIN is counted by the SAME counter as a wrong
+  unlock (five ⇒ the same escalating lock-out), so this route is not a cheaper place to guess. A weak new
+  PIN is refused BEFORE the current one is compared (costs no attempt); same-as-current is refused; success
+  mints a fresh ticket so the screen stays open. Audit action `pin-changed`. "Forgot PIN" (emailed code)
+  stays the only other way a PIN changes.
+- **A failed status read on an `always` screen is now honest** — "Could not check your app lock" with a
+  Try again button, instead of "One moment…" for ever (a locked door with no handle).
+- The `settings` area hint no longer claims ticking it is what protects the list.
+- `AppKnowledgeBase`: `settings_app_lock` path/description/howToUse and `settings_general` updated.
+
+**Tests:** `appLockRoutes.test.ts` +7 (change route: happy path proves the store opens on the NEW pin and
+refuses the old; ticket-only refused AND counted; no ticket refused before any compare; weak new PIN costs
+no attempt; same PIN refused; five wrong ⇒ 429 and the right PIN is refused during the hold; no PIN ⇒ 409).
+`appLockWiring.test.ts` rewritten for the new contract (button on General, one `<AppLockSettings>` only on
+the app_lock screen, `always` + `banner` on its gate, no PIN box in the screen, Change PIN present, row
+draws no checkbox).
 ## 2026-09-17 — AUTOPSY e706e068 (School ERP, weak/free-list, 26.8 min, NOT ok, ₹0) — the RESIDUE after PRs #3020/#3023/#3025/#3031
 
 Admin sent the report with *"app banne ke bad tut gayi?"*. **Honest answer: no.** The app rendered in a

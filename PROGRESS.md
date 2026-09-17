@@ -61572,3 +61572,65 @@ recents section, that the knowledge base promises neither behaviour — and that
 
 Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1730 files, 24432 passed, 0 failed** ·
 build · test:bundle · boot:check.
+
+---
+
+## 2026-09-17 — CORRECTION to the `8b3dca5c` autopsy above: the workspace was EMPTY, so the authorship fix does not clear that build
+
+**I asserted, in the entry above and in PR #3014's description, that "several of the nine [orphan
+components] belong to an EARLIER build in the same workspace". That is FALSE, and the report says so in
+a field I had not read:**
+
+```
+SETUP_TIMING — "Project checked in 1s — nothing needed restoring"
+  detail: durable read 73ms (0 file(s)) · sandbox scan 973ms
+```
+
+**Zero files.** Corroborated by `Personal context … applied: none (new user or first build)` and by
+`priorFailedBuilds: 0`. The workspace held nothing but the scaffold when the turn began.
+
+**What follows, and all of it is against my own claim:**
+
+- `intent = 'new_build'` was **correct**, and `rebuildGuardFlipsToEdit` correctly did NOT fire — its
+  `durableSourceCount` was genuinely 0, not an infra hiccup. That guard is fine; I had it under suspicion.
+- **All nine orphan components were written by THIS build**: four by the fast lane
+  (`Counter`, `Header`, `TaskList`, `ThemeToggle` — all ten of its files are still in the final tree) and
+  five by the full builder (`FilterBar`, `QuestionForm`, `QuestionList`, `SectionHeader`, `StatusBadge`).
+- Therefore **the authorship-scoped score changes this build's number by nothing at all.** Every orphan
+  is ours. PR #3014's line *"It is fix 2 that clears it"* is wrong.
+
+**The honest arithmetic, corrected:**
+
+| | score | verdict |
+|---|---|---|
+| as it shipped | 100 − 9×6 − 8 = **38** | RED |
+| + honouring the deleted `Counter.tsx` | 100 − 8×6 − 8 = **44** | **still RED** |
+| + not charging "No tests at all" | 100 − 8×6 = **52** | **GREEN** |
+
+**So neither fix in PR #3014 would have saved this build.** The deletion fix is real and verified — the
+`rm` is in the command log and the file was still being charged for 121 seconds later — and the
+authorship scoping is a real fix for the class it was written for (`e4ebcb5f`, a user's own 516-file
+repository, which is exactly the case #2997 opened). Both belong. Neither is *this* report's cure.
+
+🔑 **What this reprioritises: open item 3 is not a nice-to-have, it is the other half.** The pair that
+clears this build is *the deleted file* + *"No tests at all"*, and the second is the one I deferred as
+"not a reordering to do in passing". It is worth doing properly:
+
+```
+t+909s  READINESS_WARNING      "No tests at all"                          ← −8 of a 100-point budget
+t+912s  E2E_SCAFFOLDED         playwright.config.ts, e2e/smoke.spec.ts    ← written BY US
+t+916s  TEST_SUITE_UNVERIFIED  "This project HAS a Playwright test suite…"
+```
+
+Every first build of a new app has no tests until we add them seconds later, and the charge for that
+default state is 8% of a budget whose floor fails the build.
+
+⚠️ **NOT changed on my own initiative**, because zeroing a quality charge is a gate-loosening judgement
+with a real trade-off (for an IMPORTED project "no tests at all" IS a genuine statement about the user's
+code), and three PRs are already in flight. Put to the admin instead.
+
+🔒 **The lesson, and it is this repo's own:** I reasoned from the orphan NAMES — `Counter`, `TaskList`,
+`ThemeToggle` look like leftovers — instead of from the one field that measures it. `CLAUDE.md` calls
+this out twice already: *"a conclusion drawn from a capped result set is not a verified fact"* and
+*"'not invented' is a weaker standard than 'checked'"*. A plausible story about an artefact is not a
+reading of it.

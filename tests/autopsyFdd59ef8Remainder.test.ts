@@ -92,14 +92,30 @@ describe('3 · the report no longer contradicts its own count', () => {
 });
 
 describe('4 · a design grade needs a user app to grade', () => {
-  it('🔴 nothing written AND nothing saved ⇒ everything present is OUR scaffold', () => {
-    expect(route).toContain('const hasUserApp = Object.keys(storeFiles).length > 0 || writtenFiles.size > 0;');
+  it('🔴 nothing AUTHORED ⇒ everything present is OUR scaffold, and is not graded', () => {
+    // ⚠️ THIS ASSERTION WAS REWRITTEN ON 2026-09-17, BECAUSE THE FIX IT PINNED WAS NOT ENOUGH.
+    //
+    // It used to demand the literal `Object.keys(storeFiles).length > 0 || writtenFiles.size > 0`.
+    // That guard held here only because THIS build's durable store happened to be empty. Six hours
+    // later, report 2b0a3ed5 graded our own Calculator template 68/100 (C) and filed it against a
+    // user who had written nothing — because the golden-scaffold pre-seed does `writtenFiles.set(...)`
+    // for all twelve of its files and persists them, making BOTH halves of that test true by itself.
+    //
+    // The CONTRACT is unchanged and is what is asserted below: a project containing only our scaffold
+    // must not be graded. What changed is that the question is now "did anyone AUTHOR anything?"
+    // rather than "is there anything here?" — see platformAuthored.ts. Strictly stronger, so this is
+    // a re-anchor on the intent, not a relaxation: deleting the guard still fails this test.
+    expect(route).toContain('const hasUserApp = projectHasUserCode(integrityFiles);');
     expect(route).toContain('const quality = hasUserApp ? lintBuiltApp(integrityFiles) : null;');
+    expect(route).not.toContain('const hasUserApp = Object.keys(storeFiles).length > 0');
   });
 
   it('🔒 a CONTINUE build still grades the whole app — the 2026-08-15 fix is untouched', () => {
-    // hasUserApp is true whenever the durable store has files, so whole-app coverage on a continue
-    // build is unchanged; this only silences the case where the user has no app at all.
+    // ⚠️ This sentence used to read "hasUserApp is true whenever the durable store has files" — no
+    // longer true, and left uncorrected it is exactly the stale claim this repo keeps paying for. The
+    // guarantee that matters is unchanged: `integrityFiles` is still the WHOLE app (durable store ∪
+    // this build's writes), so a continue build is graded in full. What is silenced is narrower than
+    // before — only a project in which nothing but our own scaffold exists.
     expect(route).toContain('const integrityFiles: Record<string, string> = { ...storeFiles, ...Object.fromEntries(writtenFiles) };');
   });
 });

@@ -27,6 +27,10 @@
  *  'new_build'     — creating a fresh app / feature from scratch
  *  'edit_existing' — modifying / fixing / refactoring something that already exists
  */
+// The ONE dependency this otherwise self-contained classifier takes: a pure, I/O-free constants
+// module shared with the client, so the platform's own generated prompt has a single definition.
+import { isPlatformFixRequest, looksLikeMachineError } from '../../lib/platformFixRequest';
+
 export type BuildIntent = 'chat' | 'new_build' | 'edit_existing';
 
 // ── Signal arrays ─────────────────────────────────────────────────────────────
@@ -702,6 +706,15 @@ export function userAskedForAnAppToBeBuilt(message: string): boolean {
   // they happen to contain.
   if (matchesSignal(lower, CONTINUATION_SIGNALS)) return false;
   if (matchesSignal(lower, PROBLEM_SIGNALS)) return false;
+  // 🔴 NavBharatAI composed this message ITSELF — the preview "Fix error" button. A request we wrote
+  // is never a request for a new app, and it must not be guessed at: the template and this test share
+  // one string (lib/platformFixRequest.ts), so they cannot drift. Autopsy f5351721 — our own wording
+  // ("failed to BUILD … so the app BUILDS and runs") matched no PROBLEM_SIGNAL and read as new_build
+  // at HIGH confidence, so a correct zero-file answer was called a failure and the whole build re-ran:
+  // 23 wasted minutes on top of the 12 it had already finished in.
+  if (isPlatformFixRequest(message)) return false;
+  // The same class typed by hand — pasted toolchain output. PROBLEM_SIGNALS is human prose only.
+  if (looksLikeMachineError(message)) return false;
   return classifyIntentWithConfidence(withoutNounisedBuildWords(message)).intent === 'new_build';
 }
 

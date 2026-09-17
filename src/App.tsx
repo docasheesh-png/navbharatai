@@ -1,4 +1,5 @@
 import UpdateBanner from './components/UpdateBanner';
+import { platformFixRequestPrompt } from './lib/platformFixRequest';
 import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 // Native GitHub OAuth return — the deep-link parse and the resume decision, kept pure and tested.
 import { tokenFromDeepLink, ticketFromDeepLink, redeemGithubTicket, resumeOutcome, RESUME_GRACE_MS, GITHUB_CANCELLED_MESSAGE } from './lib/githubOauthReturn';
@@ -3860,7 +3861,7 @@ export default function App() {
             effectiveDeviceMode={effectiveDeviceMode}
             v3Preview={v3Preview}
             previousFiles={previousFiles}
-            onV3FixError={(errText) => setV3PendingFix({ text: `The in-browser preview failed to build with this error:\n\n${errText}\n\nPlease find the cause in the project files and fix it so the app builds and runs.`, nonce: Date.now() })}
+            onV3FixError={(errText) => setV3PendingFix({ text: platformFixRequestPrompt(errText), nonce: Date.now() })}
             onBuildViaV5Prompt={(text) => { setV3PendingFix({ text, nonce: Date.now() }); toggleTab('nbi_pro_chat'); }}
             /* Code Studio's "Preview" button (admin 2026-09-15: "ide me koi user preview press kare to
                navbharatai pro, open hi preview wala page"). Same shape as the AI button beside it —

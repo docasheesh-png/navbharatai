@@ -8,12 +8,17 @@
 // in a SEPARATE collection and survives wallet recreation), NOT against the recreatable wallet doc.
 
 import { TOKENS_PER_RUPEE, welcomeBonusTokens } from './payments';
+import { flatWelcomeGiftSuppressed } from './welcomeGiftExclusion';
 
 /**
  * How many welcome-bonus tokens to grant when (re)creating a wallet: the configured bonus ONLY if the user
  * has NEVER received it (no durable marker), else 0. Pure — the caller supplies the marker-exists flag.
  */
-export function welcomeGrantTokens(alreadyGranted: boolean): number {
+export function welcomeGrantTokens(alreadyGranted: boolean, env: NodeJS.ProcessEnv = process.env): number {
+  // The referral ladder REPLACES the flat bonus rather than adding to it (welcomeGiftExclusion.ts).
+  // This is the LEGACY surface — live whenever WALLET_GIFT_V2 is off — and it needs the same guard as
+  // the v2 plan, because whichever one is active, the ladder would otherwise stack on top of it.
+  if (flatWelcomeGiftSuppressed(env)) return 0;
   return alreadyGranted ? 0 : welcomeBonusTokens();
 }
 

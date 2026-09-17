@@ -19,6 +19,32 @@ import { isComplexAppPrompt } from '../lib/appComplexitySignals';
 
 export type StartTier = 'gemini' | 'haiku' | 'sonnet' | 'opus';
 
+/**
+ * What a `StartTier` actually MEANS, in words a reader can act on.
+ *
+ * 🔴 THE NAMES ARE HISTORICAL AND THE REPORT WAS PRESENTING THEM AS FACTS (autopsy 2b0a3ed5,
+ * 2026-09-17). A build report carried `requestAnalysis.startTier: "gemini"` — and since the
+ * three-ladder rewrite (2026-09-14) **Gemini is on no build ladder at all**. Nothing routed to
+ * Gemini; nothing could have. An admin reading that line is being told a provider served a build it
+ * never touched, which is the same class of wrong label as a timeout filed against the planned model
+ * id on a build that never called it (4efab9d7).
+ *
+ * ⚠️ THE VALUES ARE DELIBERATELY NOT RENAMED. They are a COMPLEXITY BAND, and they are real: the
+ * one-shot and simple lanes branch on them (`classifyForOneShot`, `classifyForSimpleLane`), and the
+ * cost telemetry has months of rows keyed by these exact strings — renaming would split that history
+ * into before and after for no gain. What was wrong is that a band was printed where a provider name
+ * was expected. So the band keeps its key and gains a label, and the report prints the label.
+ */
+export function startBandLabel(tier: StartTier | string | null | undefined): string {
+  switch (String(tier ?? '').trim()) {
+    case 'gemini': return 'cheapest band';
+    case 'haiku': return 'light band';
+    case 'sonnet': return 'standard band';
+    case 'opus': return 'heaviest band';
+    default: return 'unknown band';
+  }
+}
+
 export type TaskType =
   | 'chat'
   | 'translate'

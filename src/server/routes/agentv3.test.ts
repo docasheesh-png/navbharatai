@@ -2331,7 +2331,16 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
   const SRC = readFileSync(fileURLToPath(new URL('./agentv3.ts', import.meta.url)), 'utf8');
 
   it('has exactly the audited set of writtenFiles.set call sites', () => {
-    const count = (SRC.match(/writtenFiles\.set\(/g) ?? []).length;
+    // ⚠️ COMMENTS STRIPPED BEFORE COUNTING (2026-09-17). This census counts WRITERS, and it used to
+    // count the raw source — so autopsy 2b0a3ed5, which added two comments EXPLAINING that the
+    // golden-scaffold pre-seed calls `writtenFiles.set(...)` (the root cause of a build grading our
+    // own template as the user's app), read as two new unaudited writers. A census that cannot tell
+    // a writer from a sentence about a writer punishes exactly the note a later reader needs.
+    // Deleting or adding a real call site still fails this, which is all it must catch.
+    const code = SRC
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+    const count = (code.match(/writtenFiles\.set\(/g) ?? []).length;
     // Audited 2026-07-27 — each site is one of:
     //   1× the AGENT'S OWN tool write (onFileWrite) — deliberately NOT gated: if the model writes a
     //      file, the report must honestly say so; gating it would make the summary lie.

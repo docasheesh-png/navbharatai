@@ -79,6 +79,15 @@ export interface SlowRungState {
    * so a provider having a bad hour is never remembered against it tomorrow.
    */
   readonly tooSlow: boolean;
+  /**
+   * Did the latch fire on a single STALLED turn rather than on a trend? Optional, so every existing
+   * caller and test that builds a state literal keeps working.
+   *
+   * It exists only so the report can say which of the two happened. "Answered 9.6× slower than
+   * budgeted over 1 calls" is arithmetically true of a stall and reads like a statistics error;
+   * "burned 56s and returned 27 tokens" is the same fact in the form that lets a reader act on it.
+   */
+  readonly stalled?: boolean;
 }
 
 export const EMPTY_SLOW_RUNG_STATE: SlowRungState = { calls: 0, observedMs: 0, expectedMs: 0, tooSlow: false };
@@ -124,7 +133,11 @@ export function recordSlowSample(
     tooSlow: prev.tooSlow,
   };
   // Latched, never cleared — see `SlowRungState.tooSlow` for the call-4 dip that proved it necessary.
-  return next.tooSlow ? next : { ...next, tooSlow: crossesSlowThresholds(next, env) };
+  // A STALL latches on its own single sample (see `SLOW_RUNG_STALL_MS`); the trend test is unchanged
+  // and still needs its three calls, so this adds a second way in rather than weakening the first.
+  if (next.tooSlow) return next;
+  const stalled = isStalledTurn(sample, env);
+  return { ...next, tooSlow: stalled || crossesSlowThresholds(next, env), ...(stalled ? { stalled: true } : {}) };
 }
 
 /**
@@ -177,6 +190,91 @@ export const SLOW_RUNG_MIN_CALLS = 3;
  * their build rather than a rounding artefact.
  */
 export const SLOW_RUNG_MIN_OBSERVED_MS = 90_000;
+
+/**
+ * 🔴 THE FIRST CALL HAD NO WATCHDOG AT ALL, AND IT IS THE ONE THE USER SITS THROUGH (autopsy
+ * 2b0a3ed5, 2026-09-17).
+ *
+ * A calculator build spent **55.7 seconds on its first model call and got back 27 output tokens** —
+ * 0.48 tokens/second, against the ~33/s this engine's own budget arithmetic assumes. The model said
+ * *"I'll quickly check the existing calculator template and finish it up"*, read one file, and that
+ * was the whole visible build. The user pressed Stop at 66 seconds. They were right to.
+ *
+ * ⚠️ EVERY ESCALATION PATH MISSED IT, EACH FOR A DIFFERENT STRUCTURAL REASON — which is what makes
+ * this a class rather than a gap:
+ *   • the timeout bench needs a THROW; the call succeeded
+ *   • the 429 bench needs a 429
+ *   • the stream idle bound needs 60 s of TOTAL silence; tokens trickled, and the call ended at 55.7 s
+ *   • the stream hard cap is 300 s, nowhere near
+ *   • and THIS bench needs 3 calls and 90 s of wall clock — it had 1 and 55.7
+ *
+ * So a build abandoned during its first call could not reach any of them, by construction. The
+ * ordinary bench is about a TREND and rightly refuses to judge one call. A STALL is not a trend: a
+ * turn that burned most of a minute and produced almost nothing is unambiguous on its own evidence,
+ * and waiting for two more of them costs the user two more minutes to learn what the first already
+ * showed.
+ *
+ * 🔒 WHY THIS CANNOT MISFIRE. The two conditions together imply a ratio of at least 45 s / 11 s ≈ 4×,
+ * far past the 2.5 a trend must clear — so no third knob is needed and none is added. A productive
+ * turn is never caught: 200 tokens is a sentence, not a file, and any real generation blows through
+ * it long before the clock. And what it DOES is identical to the ordinary bench — move to the next
+ * rung — so it can never fail a build, never shorten a call, and never bench the last engine.
+ */
+export const SLOW_RUNG_STALL_MS = 45_000;
+
+/** Output tokens at or below which a turn has produced nothing worth a 45-second wait. */
+export const SLOW_RUNG_STALL_TOKENS = 200;
+
+/**
+ * ⚠️ A BLANK VALUE MEANS UNSET, NOT ZERO — and this file was written with that bug and caught by its
+ * own test the same hour.
+ *
+ * `Number('')` is **0**, not NaN. So a key present-but-empty in Cloud Run (a cleared field, a dropped
+ * paste) reads as a deliberate zero — which on the token ceiling below means "disable this guard for
+ * ever", with the console showing the key as configured and nothing failing anywhere. It is the exact
+ * trap the referral tunables already record, and the first draft here fell into it: with the env
+ * absent, `AGENTV3_SLOW_RUNG_STALL_TOKENS ?? ''` produced 0 and stall detection never ran at all.
+ *
+ * An explicit `0` is still honoured — nobody types a zero by accident.
+ */
+function rawNumber(value: string | undefined): number | null {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  const n = Number(text);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** The configured stall clock. Junk, blank, or anything below 20 s falls back — see `SLOW_RUNG_STALL_MS`. */
+export function slowRungStallMs(env: NodeJS.ProcessEnv = process.env): number {
+  const n = rawNumber(env.AGENTV3_SLOW_RUNG_STALL_MS);
+  return n !== null && n >= 20_000 ? n : SLOW_RUNG_STALL_MS;
+}
+
+/**
+ * The configured stall token ceiling. Junk or blank falls back; an explicit `0` DISABLES stall
+ * detection while leaving the trend bench running, because zero tokens is already handled as an empty
+ * turn elsewhere and can never satisfy this test.
+ */
+export function slowRungStallTokens(env: NodeJS.ProcessEnv = process.env): number {
+  const n = rawNumber(env.AGENTV3_SLOW_RUNG_STALL_TOKENS);
+  return n !== null && Number.isInteger(n) && n >= 0 ? n : SLOW_RUNG_STALL_TOKENS;
+}
+
+/**
+ * Is this ONE turn a stall — a long wall clock for essentially no output? Pure.
+ *
+ * Judged on a single sample on purpose; see `SLOW_RUNG_STALL_MS`. An UNMEASURED turn is never a
+ * stall, by the same law the trend bench obeys: a stream without `include_usage` reports zero tokens,
+ * and scoring that as "produced nothing" would retire a healthy vendor on a number nobody measured.
+ */
+export function isStalledTurn(sample: SlowRungSample, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (!sample || sample.measured === false) return false;
+  const ceiling = slowRungStallTokens(env);
+  if (ceiling <= 0) return false;
+  const tokens = Number.isFinite(sample.outputTokens) ? sample.outputTokens : -1;
+  const observed = Number.isFinite(sample.observedMs) ? sample.observedMs : 0;
+  return tokens >= 0 && tokens <= ceiling && observed >= slowRungStallMs(env);
+}
 
 /** Kill switch. Default ON; `AGENTV3_SLOW_RUNG_BENCH=off` restores the pre-2026-09-16 behaviour exactly. */
 export function slowRungBenchEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -239,6 +337,14 @@ export function describeSlowRung(
   const tail = outcome === 'skipped'
     ? '— skipped for the rest of this build so the ladder can reach the next engine'
     : '— KEPT anyway: it is the last engine left on this ladder, and a slow app beats no app';
+  // A stall gets its own sentence. The trend wording is arithmetically true of it and useless to a
+  // reader — "9.6× slower than budgeted over 1 calls" invites an argument about the sample size,
+  // when the fact that matters is that a user watched a spinner for most of a minute for nothing.
+  if (state.stalled === true) {
+    return `${what}STALLED — ${s(state.observedMs)} of wall clock for almost no output `
+      + `(our own clock sizes that work at ${s(state.expectedMs)}) `
+      + tail;
+  }
   return `${what}answered ${slownessRatio(state).toFixed(1)}× slower than budgeted `
     + `(${s(state.observedMs)} spent on work our own clock sizes at ${s(state.expectedMs)}, over ${state.calls} calls) `
     + tail;

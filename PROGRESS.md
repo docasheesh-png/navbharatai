@@ -61197,6 +61197,148 @@ copying a code work regardless; only CLAIMING money is gated.**
 
 Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1733 files, 24521 passed, 0 failed** ·
 build · test:bundle · boot:check. `tests/shareReferral.test.ts`, 16 cases.
+## 2026-09-17 — AUTOPSY 2b0a3ed5: the calculator build a user stopped after 66 seconds, and was right to
+
+**The run.** Weak tier, free, a starter-chip calculator prompt. 7 s of setup, then ONE model call that
+took **55.7 seconds and returned 27 output tokens — 0.48 tokens/second**, against the ~33/s this
+engine's own budget arithmetic assumes. What it produced in that minute was the sentence *"I'll quickly
+check the existing calculator template and finish it up"* and a single `read_file`. **63 of the 66
+seconds showed the user nothing at all.** They pressed Stop. Sandbox 98% idle; the VM cost 8.4× the
+model cost; ₹0.65 billed.
+
+Measured against the 🫰 bar — *"chutkiyon ka kaam"* — this build did not come close, and no gate in the
+engine noticed.
+
+### The ledger — 13 items
+
+| bucket | n |
+|---|---|
+| ✅ self-healed | 0 |
+| 🔀 worked around | 1 |
+| ⏭️ skipped / ignored | 5 |
+| ❌ still broken | 4 |
+| 🥵 struggle points | 3 |
+
+### 1 · 🔴 THE FIX FROM THE PREVIOUS AUTOPSY, SIX HOURS OLD, DID NOT HOLD
+
+fdd59ef8 (the same morning) closed *"DESIGN_CONSISTENCY graded 3 files on a build that wrote 0 — it
+scored the scaffold and reported a C as a problem of the user's app"* with:
+
+```ts
+const hasUserApp = Object.keys(storeFiles).length > 0 || writtenFiles.size > 0;
+```
+
+This report carries **`Design consistency 68/100 (C) across 8 file(s)`** on a build whose model wrote
+zero files. The guard held only because *that* build's durable store happened to be empty. It asks
+**"is there anything in this project?"** when the question is **"did anyone AUTHOR anything?"** — and
+the golden-scaffold pre-seed does `writtenFiles.set(gp, gc)` for all twelve of its files and then
+persists them, making BOTH halves true by itself. **The instance was fixed; the class was not.**
+
+🔎 **THE CLASS, named: `writtenFiles` conflates "the model wrote this" with "the platform seeded
+this", and three subsystems now depend on telling them apart.**
+
+1. the quality lint ("is there a user app to grade at all?")
+2. **`setAuthoredFiles(() => writtenFiles.keys())`** — the authorship set added by the readiness-gate
+   fix (#2997) **the same day**, whose own module header states *"SCAFFOLD FILES ARE NOT IN THE
+   AUTHORED SET"*. True of the actuator's boilerplate, which never goes through a write tool; **false**
+   of the golden scaffold, which explicitly does. So that gate would have blamed a build for a
+   placeholder in NavBharatAI's own template. Sibling hunted, per rule 3.
+3. the stop message *"Your files so far are saved"*, said to a user whose files were all ours.
+
+**`platformAuthored.ts`** answers it **by CONTENT, not by a flag** — deliberately. A flag set at seed
+time answers only for the request that did the seeding; the very next turn ("continue") loads the same
+twelve files out of the durable store with no flag anywhere and grades the template again. A file whose
+bytes are exactly what we seed is our template; the moment the model changes one byte, it is the user's.
+🔒 The safe direction is always "the user's": anything unrecognised — an unregistered template, a
+renamed path, a customised scaffold file — keeps today's behaviour.
+
+### 2 · 🔴 A READ IS NOT BUILDING
+
+`builtSomethingNow()` was `totalToolUses > 0`, and the only tool call in this build was `read_file`.
+`toolUseCouldProduceWork` now separates the two. ⚠️ Deliberately **not** `!isParallelSafeToolUse(tu)`:
+that function answers *"can this run concurrently?"*, and under `AGENTV3_PARALLEL_BUILD` it calls a
+`frontend` sub-agent parallel-safe — which WRITES. Negating it would make a real builder's work read as
+no work, on exactly the flag that is on in production.
+
+### 3 · 🔴 A BUILD THE USER STOPPED IS NOT A BUILD THAT FAILED
+
+- `rootCause` said *"Build did not succeed, but no specific error was captured"* while the same document
+  carried `USER_STOPPED_BUILD` and `CANCELLED_BUILD_CHARGED`. "No specific error was captured" is the
+  sentence that sends the next autopsy hunting a bug that does not exist. `stoppedByUser()` reads it off
+  the timeline — the `toolWasUsed` discipline, so it cannot drift from what the report shows — and
+  ⚠️ an ENGINE-initiated stop is excluded, because filing one under "the user abandoned it" is the
+  misattribution `isUserInitiated` exists to prevent.
+- `RELEASE_GATE` said *"RED — Not shippable — the build did not succeed."* **The verdict stays RED** —
+  nothing was proven, so nothing may be shipped — but the sentence stops blaming the app for a decision
+  a person made. RED is the state that means *go and look*; spending it on a deliberate cancellation is
+  how a reader learns to discount it.
+
+### 4 · 🔴 THE MISSING SUBSYSTEM: THE FIRST CALL HAD NO WATCHDOG, AND IT IS THE ONE THE USER SITS THROUGH
+
+**Every escalation path missed this build, each for a different structural reason** — which is what
+makes it a class rather than a gap:
+
+| defence | why it could not fire |
+|---|---|
+| timeout bench | needs a THROW; the call succeeded |
+| 429 bench | needs a 429 |
+| stream idle bound | needs 60 s of TOTAL silence; tokens trickled and the call ended at 55.7 s |
+| stream hard cap | 300 s, nowhere near |
+| slow-rung bench | needs **3 calls** and **90 s** of wall clock; it had 1 and 55.7 s |
+
+`isStalledTurn` adds a second way into the existing latch: **one turn that burned ≥45 s and returned
+≤200 output tokens**. A stall is not a trend — the ordinary bench rightly refuses to judge one call,
+but a turn that spent most of a minute producing nothing is unambiguous on its own evidence, and
+waiting for two more costs the user two more minutes to learn what the first already showed. The two
+conditions together imply a ratio ≥ ~4×, well past the 2.5 a trend must clear, so no third knob exists.
+It can only move to the next rung — never fail a build, never bench the last engine — and an UNMEASURED
+turn is never a stall. New keys: `AGENTV3_SLOW_RUNG_STALL_MS` (45000), `AGENTV3_SLOW_RUNG_STALL_TOKENS`
+(200, explicit `0` disables). Both unset today; the code defaults govern.
+
+⚠️ **A bug I wrote and my own test caught the same hour:** `Number('')` is **0**, not NaN, so the first
+draft read an absent `AGENTV3_SLOW_RUNG_STALL_TOKENS` as a deliberate zero — a guard that looked
+configured and never ran. The blank-means-unset rule is now pinned by a test.
+
+### 5 · Report honesty — three fields that named things that were not true
+
+- **`providerChain` listed 104 GLM pool keys** and the line ENDED inside the pool (*"…and 80 more"*),
+  so KIMI and CLAUDE_HAIKU were in the chain and invisible. That is `runnerChainSummary`'s OWN question
+  — *"was the rung there, or never there?"* — failing on its own line. Consecutive same-family,
+  same-model rungs now collapse to `GLM(glm-4.7-flashx) ×104`: the count keeps the original intent
+  (*"three keys tried is not one attempt"*) and the rest of the ladder becomes visible. Only
+  CONSECUTIVE runs collapse, so the weak ladder's second visit to GLM still shows.
+  *(Closes an open root cause carried from fdd59ef8.)*
+- **`plannedModel: claude-haiku-4-5-…`** on a build delivered by `glm-4.7-flashx`. Haiku is the weak
+  ladder's LAST rung — the backstop — so the field named the engine we hope never to reach as the one
+  we intended to use. `selectBuildModel` predates the three-ladder rewrite and still answers in the old
+  Haiku/Sonnet vocabulary; `firstRungLabel(chain)` is the ladder's own answer. A LABEL only — no routing
+  changes.
+- **`startTier: "gemini"`**, and Gemini has been on no build ladder since 2026-09-14. The values are a
+  complexity BAND and are real (`classifyForOneShot` branches on them, and months of cost telemetry is
+  keyed by these exact strings, so renaming would split that history). The key is kept; `startBandLabel`
+  records what it MEANS, and the report prints that.
+
+### 🔴 OPEN ROOT CAUSES (rule 6 — recorded, not patched)
+
+1. **The 56 seconds themselves are still spent.** The stall bench acts AFTER the call returns, so this
+   user would still have waited 56 s and only the REST of the build would have moved to KIMI. The
+   complete fix is a mid-stream throughput floor in `readStream` — abort a stream that has produced
+   almost nothing after N seconds. **Not shipped, and the reason is specific rather than caution:**
+   a forced-reasoning model (GLM 5.3+, which always reasons) emits reasoning tokens BEFORE any content,
+   so a naive throughput floor would abort healthy turns on exactly the tier that reasons most. Doing it
+   right needs reasoning-aware accounting the accumulator does not expose today. A wrong abort costs a
+   user a good turn; the post-call bench costs nothing and already removes the recurrence.
+2. **The user saw no progress for 56 seconds.** The ETA was withheld correctly (a prompt-word heuristic
+   is not evidence), and the scaffold narration fired at 6.7 s — then silence. There is no "still
+   working" heartbeat during a long model call. Cheap to add and deliberately not bundled into an
+   autopsy PR that already spans eight modules.
+3. **Sandbox 98% idle on a 66-second build**, VM cost 8.4× the model cost. Inherent to a build this
+   short; the 5-minute idle sweep is already the lever and there is nothing further to take here.
+
+**Tests:** `tests/autopsy2b0a3ed5.test.ts` (32 cases). Three core fixes proven by reversion — restoring
+the presence-based `hasUserApp`, dropping the stall from the latch, and deleting the stopped-by-user
+branch each fail it. `tests/runnerChainSummary.test.ts` gained the 104-key case; its pool assertion
+changed SHAPE and not CONTRACT (the count still says how many keys were tried) and says so in place.
 ## 2026-09-17 — Autopsy 2b0a3ed5: the working calculator the user never saw
 
 Admin sent build report `2b0a3ed5`. Prompt: *"Build a calculator app with the standard operations

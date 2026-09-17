@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
+import ts from 'typescript';
 import { resolve, join, relative } from 'node:path';
 import { publicTierLabel, namesAProvider, PUBLIC_ENGINE_NAME, PROVIDER_IDENTITY_RE } from '../src/lib/engineLabels';
 
@@ -131,23 +132,110 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 
 /**
- * 🔴 PROSE NEEDS A DIFFERENT DETECTOR, AND FINDING THAT OUT IS WHY THIS EXISTS.
+ * Every string a USER could be shown in one file, read from the TypeScript AST.
  *
- * The sweep below reads STRING LITERALS, because in code an identifier or a type name cannot reach
- * a screen. That detector **cannot read prose at all**, and it fails silently. Proven, not assumed:
- * a probe reading "built by Claude Sonnet" was appended to `privacyPolicy.ts`, the file was in the
- * walk, and the sweep passed. The policy carries **27 apostrophes** ("the user's data", "Google's
- * own"), each of which a regex reads as a quote — so the pairing shifts and real text ends up
- * treated as the gap BETWEEN two literals, never tested.
+ * 🔴 THIS REPLACED A REGEX, AND THE REGEX WAS WRONG IN THREE WAYS AT ONCE. It paired quote
+ * characters itself, so: an EMPTY literal could not match and shifted every later pairing; a
+ * literal over 200 characters was skipped; and — the one that actually hid a planted vendor name —
+ * an APOSTROPHE inside ordinary text ("the user's data") reads as a quote, so prose shifted the
+ * pairing and real text became the gap BETWEEN two literals, never tested.
  *
- * So `src/content` is swept WHOLE instead. That is sound precisely here and nowhere else: these
- * files are long-form text shown to users — the Privacy Policy, Terms, DPA, Security note — with no
- * provider identifiers to false-positive on. They contain none today (verified before this landed).
+ * ⚠️ I recorded that as an open root cause needing "a real tokenizer — a decision with a real cost".
+ * That was WRONG, and the correction belongs here rather than in a note: `typescript` is already a
+ * dependency of this repo and already imported by four existing tests. The parser costs one import.
  *
- * ⚠️ THE SAME APOSTROPHE FLAW STILL AFFECTS THE CODE TREES, and it is recorded rather than papered
- * over: a component holding `"the user's app"` shifts its own pairing too, so a vendor literal
- * further down that file can be missed. Reading it correctly needs a real tokenizer, not a wider
- * regex — a decision, not a lint, and recorded as an open root cause in `PROGRESS.md`.
+ * What counts as user-facing: a string literal, a template literal (its literal spans — an
+ * interpolation is code, and its own literals are visited separately), and JSX text. An identifier,
+ * a property name and a type name cannot reach a screen, and the AST tells them apart by KIND
+ * rather than by punctuation, so `{ claude: '' }` is a property name and can never be mistaken for
+ * text again.
+ */
+function userFacingStrings(file: string): string[] {
+  return userFacingStringsIn(file, readFileSync(file, 'utf8'));
+}
+
+/** The same extraction, pure, so the cases that defeated the regex can be pinned inline below. */
+function userFacingStringsIn(file: string, source: string): string[] {
+  const out: string[] = [];
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true,
+    /\.tsx$/.test(file) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const visit = (node: ts.Node): void => {
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+      // A property NAME is not text: `{ claude: 'x' }` and `{ 'claude': 'x' }` both name a key.
+      const parent = node.parent;
+      const isKey = (ts.isPropertyAssignment(parent) || ts.isPropertySignature(parent)
+        || ts.isEnumMember(parent)) && parent.name === node;
+      // An import/export path is not text either.
+      const isModulePath = ts.isImportDeclaration(parent) || ts.isExportDeclaration(parent);
+      if (!isKey && !isModulePath) out.push(node.text);
+    } else if (ts.isTemplateExpression(node)) {
+      out.push(node.head.text);
+      for (const span of node.templateSpans) out.push(span.literal.text);
+    } else if (ts.isJsxText(node)) {
+      out.push(node.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return out;
+}
+
+describe('the extractor reads what a SCREEN would show, and nothing else', () => {
+  const flagged = (src: string): string[] =>
+    userFacingStringsIn('probe.tsx', src).filter((t) => namesAProvider(t));
+
+  it("🔴 catches a vendor string that follows an APOSTROPHE — the exact case the regex could not", () => {
+    // The regex read the apostrophe in "user's" as a quote, shifted every later pairing, and never
+    // tested the vendor literal below it. Proven against the real file, not in theory: a probe
+    // reading "built by Claude Sonnet" was appended to privacyPolicy.ts and the old sweep PASSED.
+    expect(flagged(`const a = "the user's data stays put";\nconst c = "Powered by Claude Sonnet";`))
+      .toEqual(['Powered by Claude Sonnet']);
+  });
+
+  it('catches an EMPTY-literal neighbourhood correctly — no mis-pairing, no phantom string', () => {
+    // `{ gemini: '', groq: '' }` made the regex report the SOURCE between quotes (`, groq: `) as
+    // user-facing text. Here the keys are property NAMES by AST kind and nothing is invented.
+    expect(flagged(`const b = { gemini: '', groq: '', claude: '' };`)).toEqual([]);
+    expect(userFacingStringsIn('probe.tsx', `const b = { gemini: '', claude: '' };`))
+      .toEqual(['', '']);
+  });
+
+  it('catches a literal far past the old 200-character ceiling', () => {
+    const long = 'Filler to clear any two-hundred-character ceiling. '.repeat(6);
+    expect(flagged(`const d = \`${long}Your engine is Gemini.\`;`)).toHaveLength(1);
+  });
+
+  it('reads JSX text, which no string-literal scan ever saw at all', () => {
+    expect(flagged('const E = () => <p>Built with Claude</p>;')).toEqual(['Built with Claude']);
+  });
+
+  it('does NOT flag what cannot reach a screen: keys, module paths, identifiers, types', () => {
+    expect(flagged("import { x } from './claude/helpers';")).toEqual([]);
+    expect(flagged("const k = { 'claude': 1, gemini: 2 };")).toEqual([]);
+    expect(flagged('interface P { claude: string; gemini: number }')).toEqual([]);
+    expect(flagged('const claudeCount = grokLimit + 1;')).toEqual([]);
+  });
+
+  it('reads the literal SPANS of an interpolated template, not just its head', () => {
+    expect(flagged('const t = `engine ${name} is Sonnet today`;')).toEqual([' is Sonnet today']);
+  });
+});
+
+/**
+ * 🔴 A SECOND, PARSER-INDEPENDENT NET OVER THE LEGAL TEXT.
+ *
+ * The sweep below now reads the AST, which is correct — but it is correct only while the file
+ * PARSES. A content file that failed to parse would yield no literals and the sweep would pass in
+ * silence, which is the one failure mode this whole file keeps paying for.
+ *
+ * So the legal text gets a second look that depends on no parser at all: scan it WHOLE. That is
+ * sound precisely here and nowhere else — these files are long-form text shown to users (the
+ * Privacy Policy, Terms, DPA, Security note) with no provider identifiers to false-positive on, and
+ * they are read by Google's and Meta's reviewers as well as by users. They contain none today.
+ *
+ * ⚠️ Deliberately overlapping with the sweep below on the same files. Two cheap guards on an
+ * ABSOLUTE rule is not duplication; it is the one place in this repo where a silent pass has
+ * already happened twice.
  */
 describe('🔒 long-form user-facing TEXT may not name a vendor', () => {
   it('sweeps src/content whole, because a literal matcher cannot read prose', () => {
@@ -183,8 +271,10 @@ describe('🔒 no NEW user-facing surface may name a vendor', () => {
       ...walk(resolve(root, 'src/components')),
       ...walk(resolve(root, 'src/lib')),
       ...walk(resolve(root, 'src/hooks')),
-      // `src/content` is deliberately NOT here — see the prose sweep below. A regex literal
-      // matcher cannot read prose, and putting it here would have looked like coverage.
+      // `src/content` IS here now. It was excluded while the detector was a regex, which could not
+      // read prose at all; the AST reads a template literal of legal text exactly as it reads any
+      // other string, so excluding it would now be the thing that looks like a decision and is not.
+      ...walk(resolve(root, 'src/content')),
       ...walk(resolve(root, 'src/config')),
       ...walk(resolve(root, 'src/services')),
       ...walk(resolve(root, 'src/types')),
@@ -199,25 +289,7 @@ describe('🔒 no NEW user-facing surface may name a vendor', () => {
     for (const full of files) {
       const rel = relative(root, full).replace(/\\/g, '/');
       if (ALLOWED[rel]) continue;
-      const text = renderableText(readFileSync(full, 'utf8'));
-      // Only STRING LITERALS can reach a screen; an identifier or a type name cannot.
-      //
-      // ⚠️ TWO BOUNDS CORRECTED 2026-09-17, both found by widening the walk above.
-      //
-      // `{2,200}` required at least TWO characters, so an EMPTY literal could not match — and the
-      // matcher then paired the wrong quotes. In `{ gemini: '', groq: '' }` it skipped quote 1,
-      // paired quotes 2 and 3, and reported the source between them (`, groq: `) as a user-facing
-      // string. Worse than the false positive: every pairing after a mis-pair is shifted by one, so
-      // a genuine vendor literal further down the same file could be read as the gap BETWEEN two
-      // literals and never tested. `{0,...}` keeps the pairing aligned; an empty string names no
-      // vendor, so admitting it costs nothing.
-      //
-      // The 200-character ceiling silently skipped any literal longer than that — which is EVERY
-      // piece of long-form user-facing text in `src/content`, the Privacy Policy and Terms
-      // included. Widening the walk to reach those files would have achieved nothing while this
-      // cap stood: the file would be read and then wholly ignored.
-      for (const m of text.matchAll(/(['"`])((?:(?!\1)[^\\]|\\.){0,20000}?)\1/g)) {
-        const lit = m[2];
+      for (const lit of userFacingStrings(full)) {
         if (namesAProvider(lit)) offenders.push(`${rel}: ${lit.slice(0, 90)}`);
       }
     }

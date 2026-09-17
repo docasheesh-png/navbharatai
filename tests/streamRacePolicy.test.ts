@@ -74,8 +74,49 @@ describe('wiring — the policy actually governs the router, and the outcome rea
   });
 
   it('🔒 it says "we do not know" about tokens rather than writing a zero', () => {
+    // ⚠️ THIS GUARD USED A FIXED 700-CHARACTER WINDOW AND BROKE ON CORRECT CODE (2026-09-17) — the
+    // seventh brittle fixed-window guard to do so in this repo in one day. Adding the `stalled` field
+    // to the SAME object pushed `usageMeasured: false` past character 700, so a guard about HONEST
+    // TOKEN REPORTING failed over an unrelated field's byte offset. A guard must measure the claim it
+    // is named for; `usageMeasured` lives in this object however many fields the object grows, so the
+    // OBJECT is what to read. Same reasoning `tests/helpers/sourceSlice.ts` exists for.
     const at = chat.indexOf('streamed: true');
-    expect(chat.slice(at, at + 700)).toContain('usageMeasured: false');
-    expect(chat.slice(at, at + 700)).not.toContain('inputTokens: 0');
+    expect(at).toBeGreaterThan(-1);
+    const row = objectLiteralAround(chat, at);
+    expect(row).toContain('usageMeasured: false');
+    expect(row).not.toContain('inputTokens: 0');
+  });
+
+  it('🔴 a STALL is logged under its own field, never as a failureReason', () => {
+    // #3035 introduced `reason: 'stalled'` on a turn that ANSWERED (ok: true, real text on screen).
+    // This line used to write every reason into `failureReason`, so a successful turn would have been
+    // filed as a failure by any reader that trusts the field's name.
+    expect(chat).toContain("outcome?.reason === 'stalled'");
+    expect(chat).toContain('{ stalled: true }');
+    expect(chat).not.toMatch(/\.\.\.\(outcome\?\.reason \? \{ failureReason/);
+    // …and a genuine failure reason still lands in the field that means failure.
+    expect(chat).toContain('{ failureReason: outcome.reason }');
   });
 });
+
+/**
+ * The `{ … }` object literal that CONTAINS `from` — brace-matched, so it is the whole row however
+ * many fields it grows. Replaces a fixed character window, which measures formatting rather than the
+ * claim under test.
+ */
+function objectLiteralAround(src: string, from: number): string {
+  let open = src.lastIndexOf('{', from);
+  // Walk back past any nested literal that closed before `from` (a spread's `{ latencyMs: … }`).
+  while (open > 0) {
+    const between = src.slice(open, from);
+    if ((between.match(/\}/g) ?? []).length <= (between.match(/\{/g) ?? []).length - 1) break;
+    open = src.lastIndexOf('{', open - 1);
+  }
+  if (open < 0) return '';
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}') { depth--; if (depth === 0) return src.slice(open, i + 1); }
+  }
+  return src.slice(open);
+}

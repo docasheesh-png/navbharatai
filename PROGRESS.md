@@ -63461,3 +63461,61 @@ still a full replace (the gate is what makes that safe).
 **Full CI gate green on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` ·
 `vitest run` (**24,810 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
 `deps:server-gate`.
+
+---
+
+## 2026-09-17 — A STALL IS NOT A FAILURE (the two review fixes #3035 merged without — the SECOND push/merge race today)
+
+**Branch `claude/a-stall-is-not-a-failure`, restarted from `main`.**
+
+### 🔴 The race repeated, and this time it left a LIVE defect in `main`
+
+Both fixes below were found in review of **#3035**, written onto its branch, and pushed — and the push
+raced the merge for the second time today. #3035 merged at commit `2944973f3`; my fixes were in
+`b27b80175`, pushed minutes later onto a branch whose PR had just closed.
+
+Verified against the merged tree rather than assumed, exactly as the #3029 lesson requires:
+
+```
+watchdog module in main            → yes
+stalled: true in main chat.ts      → 0      ← the honesty fix did NOT land
+objectLiteralAround in main test   → 0      ← the guard fix did NOT land
+```
+
+So unlike #3032 (a missing improvement), **this one left `main` actively writing a wrong thing**:
+`reason: 'stalled'` goes into `failureReason` on a turn that answered.
+
+### Fix 1 — a stall must not be filed as a failure
+
+#3035 added `reason: 'stalled'`: the provider went quiet mid-stream and we stopped waiting, so
+**`ok` stays TRUE and the text the user was shown stands**. The usage row wrote every reason into
+`failureReason`, so an ANSWERED turn was filed under a field whose name says it failed — and any
+panel counting a present `failureReason` as a failure would have agreed with the name.
+
+**That is the exact class `isAppFinding` and `NEVER_ROOT_CAUSE` exist for, arriving through a FIELD
+NAME rather than a code.** A stall now writes `stalled: true`; a genuine failure reason still lands
+in the field that means failure.
+
+### Fix 2 — the guard that broke was the guard (the SEVENTH brittle window today)
+
+`tests/streamRacePolicy.test.ts` asserted `usageMeasured: false` inside a fixed **700-character**
+window from `streamed: true`. Adding one field to the same object pushed it past character 700, so a
+guard about HONEST TOKEN REPORTING failed over an unrelated field's byte offset.
+
+**Fixed the guard, not the code:** it brace-matches the object literal containing the field, so the
+row can grow any number of fields and the guard still measures the claim it is named for.
+
+### 🔴 THE PUSH/MERGE RACE HAS NOW HAPPENED TWICE IN ONE SESSION — treat it as the normal condition
+
+Both times the sequence was identical: push rejected (another actor had merged `main` into the
+branch) → merge, re-gate (~5 minutes of full suite) → push → **the PR had merged in between**. The
+five-minute gate is exactly the window, and it is not shortenable: the gate must run on the final
+state.
+
+**The rule, and it is cheap:** after any push that was rejected and retried, `git show origin/main:<file>`
+and grep for the symbol you added. "I pushed it to that branch" is not "it is in `main`". Both times
+the merged tree answered in one command; both times it would otherwise have gone unnoticed.
+
+**Full CI gate green on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` ·
+`vitest run` (**24,926 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
+`deps:server-gate`.

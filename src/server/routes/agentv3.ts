@@ -1147,6 +1147,39 @@ export function emptyBuildFailureSummary(
 }
 
 /**
+ * THE MACHINE FACT THE EMPTY-BUILD FLIP NEVER RECORDED (the "Top failure patterns" autopsy, 2026-09-17).
+ *
+ * Every other verdict flip in this route records an `OUTCOME_*` issue beside its `ok:false` —
+ * `OUTCOME_PREVIEW_COMPILE`, `OUTCOME_SYNTAX_ERROR`, `OUTCOME_REVIEW_CRITICAL` — and `deriveRootCause`
+ * reads that code before anything else. The empty-build flip (`emptyBuildFailureSummary`) flipped the
+ * verdict and recorded NOTHING, so the report had no fact to name and fell to the loudest recorded
+ * warning. On the admin's card that produced three "failure patterns" that were one build's own
+ * sentence each: the model's summary narration (*"🔍 I analyzed your project — no files were
+ * changed"*), a provider diagnostic (*"The GLM rung answered inside its clock and produced nothing"*),
+ * and a tool error (*"Tool call failed: edit_file: old_string not found"*). All three were empty
+ * builds; none of the three sentences was the reason.
+ *
+ * Two codes, because the two causes are different work: a sandbox that could not be set up is
+ * infrastructure (the same distinction `isInfra` already draws for `SANDBOX_UNAVAILABLE`), while a
+ * build that had a sandbox and still wrote nothing is the engine's. Both are mapped in
+ * `src/lib/failureReason.ts` and `BuildRetrospectiveEngine.ts` (drift-guarded by
+ * `tests/failureNaming.test.ts`). Pure + exported for testing.
+ */
+export function emptyBuildOutcomeIssue(
+  sandboxUnavailable: boolean,
+): { phase: 'build'; severity: 'error'; code: 'OUTCOME_EMPTY_BUILD' | 'OUTCOME_SANDBOX_UNAVAILABLE'; message: string; autoResolved: false } {
+  return sandboxUnavailable
+    ? {
+      phase: 'build', severity: 'error', code: 'OUTCOME_SANDBOX_UNAVAILABLE', autoResolved: false,
+      message: 'Build outcome: SANDBOX_UNAVAILABLE — the build sandbox could not be set up, so no file could be created, installed or verified. Infrastructure condition, not the app or the prompt.',
+    }
+    : {
+      phase: 'build', severity: 'error', code: 'OUTCOME_EMPTY_BUILD', autoResolved: false,
+      message: 'Build outcome: EMPTY — the build expected to produce files and wrote none, and the app was not seen rendering. Nothing to run, nothing to verify.',
+    };
+}
+
+/**
  * The honest SUCCESS summary for a turn that changed nothing because nothing needed changing — and
  * PROVED it.
  *
@@ -19214,7 +19247,12 @@ async function noteBuildOutcome(
           // nothing. The app keeps whatever summary the turn actually produced, and a zero-file build is
           // free either way (`effectiveBilledUsd = 0` a few hundred lines below, unconditionally).
           const emptyFail = emptyBuildFailureSummary(expectsArtifacts, writtenFiles.size, sandboxUnavailable, buildObs.previewRendered);
-          if (emptyFail) result = { ...result, ok: false, summary: emptyFail };
+          if (emptyFail) {
+            // THE FLIP RECORDS ITS OWN OUTCOME (2026-09-17) — see `emptyBuildOutcomeIssue`. Without it
+            // the report named whatever warning happened to be loudest as this build's root cause.
+            try { buildDiag.record(emptyBuildOutcomeIssue(sandboxUnavailable)); } catch { /* best-effort */ }
+            result = { ...result, ok: false, summary: emptyFail };
+          }
         }
       }
 

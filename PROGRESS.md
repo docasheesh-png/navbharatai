@@ -64759,3 +64759,76 @@ invocation that lacks the path or carries `2>/dev/null`, and on a browse block t
 `.catch(() => null)`. Comments are stripped before the scan — the first version of that assertion was
 defeated by the fix's own comment, which names the lossy spelling it replaced. Proven by reversion
 both ways.
+
+## 2026-09-17 — "Top failure patterns": three of four "patterns" were one build's own sentence
+
+**The card the admin pasted** (`4 failed of 51 report(s)`, four rows at 25% each):
+
+```
+🔍 I analyzed your project — no files were changed. Overview:                          1 · 25%
+Sandbox / preview did not come up                                                      1 · 25%
+The GLM rung answered inside its clock and produced nothing, because our own output …  1 · 25%
+Tool call failed: edit_file: old_string not found in <file>. The string you supplied … 1 · 25%
+```
+
+Rows 1, 3 and 4 are not patterns — they are the model's own recap, a provider diagnostic and a tool
+error, each printed verbatim as a category. A panel whose rows are one-off sentences can never say
+"this class recurs": every novel sentence is its own 25%.
+
+### Three root causes, all read out of the code rather than guessed
+
+**1. 🔴 The card had its OWN classifier, and its fallback used the sentence AS THE LABEL.**
+`src/lib/buildReportAnalytics.ts` carried a nine-rule regex list (`CATEGORY_RULES`) and, for anything
+unmatched, `normalizeSignature()` — the first line of `rootCause` with numbers and file names stripped —
+became the bucket. It was the SECOND classifier of the same `rootCause` vocabulary:
+`buildFailureCategory.ts` had root-caused the "Other" flood that morning by reading the build's own
+`OUTCOME_*` code before its prose, and its header recorded, in writing, that the two lists were
+deliberately left apart *"as an open item"*. Row 2 is the same list's bare-word rule `/port/i` — which
+also matches "re**port**", "im**port**", "sup**port**" and "ex**port**" — so an unresolved-import failure could be
+filed as a sandbox one.
+
+**2. 🔴 The empty-build verdict flip recorded NO outcome — the only flip in the route that did not.**
+`OUTCOME_PREVIEW_COMPILE`, `OUTCOME_SYNTAX_ERROR` and `OUTCOME_REVIEW_CRITICAL` are each recorded beside
+their `ok:false`; `emptyBuildFailureSummary`'s flip (`routes/agentv3.ts`) recorded nothing. So
+`deriveRootCause` — which reads the last `OUTCOME_*` first — had no fact and fell to the loudest recorded
+warning. All three raw-sentence rows are empty builds: a recap note, an `OUTPUT_BUDGET_STARVED`
+diagnostic, a `TOOL_ERROR`. None of the three sentences was the reason the build failed.
+
+**3. 🔴 The platform's OWN recap sentence was keyword-matched into a "problem".** `BuildDiagnostics`
+flags a short narration as a WARNING when it contains a problem word; `no files` is on that list (it
+catches "no files were produced"). `ProjectSummary`'s analysis-only headline BEGINS with "no files were
+changed", so on a small project (recap ≤ 300 chars) the platform's own honest deliverable was recorded
+as a struggle — and, per (2), became the root cause.
+
+### The fix, at the class
+
+- **ONE classifier**, `src/lib/failureReason.ts` (isomorphic, so the client-side card can import it):
+  code-first with severity, grounded text patterns, and an unmatched reason is a STABLE `other` whose
+  raw sentence rides in the row's `sample`, never its label. `buildFailureCategory.ts` re-exports it
+  (every import path and `tests/failureNaming.test.ts` unchanged); `buildReportAnalytics.ts` reads it and
+  its regex list + signature fallback are DELETED. The advisory-cap predicates moved to
+  `src/lib/advisoryCapOutcome.ts` with a re-export shim at the old server path.
+- **New codes `OUTCOME_EMPTY_BUILD` / `OUTCOME_SANDBOX_UNAVAILABLE`**, recorded by
+  `emptyBuildOutcomeIssue()` at the flip. Two codes because the two causes are different work (infra vs
+  the engine — the same line `isInfra` already draws). Mapped in `failureReason.ts` and
+  `BuildRetrospectiveEngine.ts`; the drift guard now checks BOTH directions (which surfaced the legacy
+  `OUTCOME_BUILD_FAILED`, now in the retrospective map too).
+- **The filed report's meta carries `outcomeCode` / `outcomeSeverity`** (`AdminBuildReportStore`),
+  projected from the same issue list exactly as `listAllDiagnostics` does — so the card names a failure by
+  the build's own fact. Records written before this field classify by text, honestly, as before.
+- **`isProjectSummaryNarration`** (`ProjectSummary.ts`, matched on the exact headlines that module
+  emits, so a model's prose cannot claim the exemption) — the recap is an `AGENT_STEP`, never a note.
+
+**Tests:** `tests/emptyBuildRecordsItsOutcome.test.ts` (11 — the bug reproduced on `deriveRootCause`
+with the three real sentences, then named once the outcome is recorded; the route wiring; the recap
+predicate against the recap the engine really emits; the meta projection), `src/lib/buildReportAnalytics.test.ts`
+(the card's four rows → stable keys, code beats text, the `/port/` reversion guard), `tests/failureNaming.test.ts`
+(two-way drift guard). Proven by reversion: dropping the narration exemption fails 1, dropping the
+code-first read in the card fails 1.
+
+**Still open, said plainly (rule 6):** a `TOOL_ERROR` for an `edit_file` miss that the model then
+recovered from (a later successful write to the same path) stays `autoResolved: false` on a FAILED build,
+because nothing back-fills tool errors by path the way `recoveredCommands` does for commands. It can no
+longer become a root cause on an empty build (the outcome code wins), but it still inflates the
+unresolved count. Not coded here: it needs the tool-call path carried on the pending map, a separate
+change.

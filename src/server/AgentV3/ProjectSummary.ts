@@ -71,6 +71,31 @@ function runHint(stack: string, previewLive: boolean): string {
  * graph (no files) so the caller never shows an empty summary.
  */
 /** Engine-written setup files (dev env/config) — changes the PIPELINE made, never the user's source. */
+/** The first line of an analysis-only recap — no files were changed. */
+export const ANALYSIS_ONLY_HEADLINE = '🔍 I analyzed your project — no files were changed. Overview:';
+/** The first line of a fresh-build recap. */
+export const BUILT_HEADLINE = "✅ Here's what I built:";
+
+/**
+ * Is this narration the project recap THIS MODULE wrote — a deliverable, not a struggle?
+ *
+ * 🔴 WHY (the "Top failure patterns" autopsy, 2026-09-17). `BuildDiagnostics` keyword-matches short
+ * narrations for problem words so the report can show where the agent struggled, and "no files" is on
+ * that list (it catches "no files were produced"). The analysis-only recap above BEGINS with "no files
+ * were changed" — the platform's own honest sentence about a turn that had nothing to change — so on a
+ * small project (recap under 300 chars) it was recorded as a WARNING-severity problem note, and on an
+ * empty build that note became the report's root cause and the admin card's top "failure pattern".
+ * The recap is what we told the user, never what went wrong. Matched on the exact first lines this
+ * module emits, so nothing a MODEL writes can claim the exemption. PURE.
+ */
+export function isProjectSummaryNarration(text: string | null | undefined): boolean {
+  const first = String(text ?? '').trimStart().split('\n')[0].trim();
+  return first === ANALYSIS_ONLY_HEADLINE
+    || first === BUILT_HEADLINE
+    || /^🔍 I analyzed your project\. Your source files are untouched — I only wrote /.test(first)
+    || /^✅ Done — I changed \d+ files? in your project/.test(first);
+}
+
 /**
  * Files the ENGINE writes to make an imported app runnable here — never the user's source.
  *
@@ -126,13 +151,13 @@ export function summarizeProject(graph: ProjectGraph, request: string, opts?: { 
   const named = paths.length > 0 && paths.length <= 3 ? ` (${paths.join(', ')})` : '';
   const onlyEngineConfig = paths.length > 0 && paths.every((p) => ENGINE_CONFIG_PATH.test(p));
   if (analysisOnly) {
-    lines.push('🔍 I analyzed your project — no files were changed. Overview:');
+    lines.push(ANALYSIS_ONLY_HEADLINE);
   } else if (editRun && onlyEngineConfig) {
     lines.push(`🔍 I analyzed your project. Your source files are untouched — I only wrote ${paths.length === 1 ? 'a setup file' : `${paths.length} setup files`}${named} so the app can run here. Overview:`);
   } else if (editRun) {
     lines.push(`✅ Done — I changed ${changed} file${changed === 1 ? '' : 's'} in your project${named}. Overview:`);
   } else {
-    lines.push("✅ Here's what I built:");
+    lines.push(BUILT_HEADLINE);
   }
   lines.push(`Stack: ${stack}`);
 

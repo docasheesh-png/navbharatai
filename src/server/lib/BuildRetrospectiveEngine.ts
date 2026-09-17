@@ -8,6 +8,8 @@
 // HONESTY: classification and root cause are derived from the actual error text. When the error
 // doesn't match any known pattern it is honestly `unknown` — no confident-but-wrong label.
 
+import { isAdvisoryCapOutcome } from '../AgentV3/advisoryCapOutcome';
+
 export type FailureCategory =
   | 'syntax' | 'type' | 'dependency' | 'runtime' | 'network' | 'timeout' | 'test' | 'build'
   // v5's own real failure shapes. Added 2026-09-12 with the failure ledger, because the eight
@@ -67,6 +69,18 @@ export const OUTCOME_TO_CATEGORY: Readonly<Record<string, { category: FailureCat
  */
 export function classifyFailure(error: string, outcomeCode?: string | null): { category: FailureCategory; hint: string } {
   const code = clean(outcomeCode);
+  /**
+   * 🔴 THE ADVISORY CAP IS NOT A FAILURE (report af3a3f7f, 2026-09-17). Its outcome used to share the
+   * code `OUTCOME_STOPPED` with the genuine wall-clock stop, so this map called a fully built,
+   * browser-verified app "incomplete — the run ended before it finished". Both shapes are recognised
+   * because every build recorded before the split still carries the legacy one.
+   */
+  if (isAdvisoryCapOutcome({ code, message: error })) {
+    return {
+      category: 'unknown',
+      hint: 'Not a failure — the app was built and only the optional post-build checks hit their 2-minute cap.',
+    };
+  }
   const mapped = code ? OUTCOME_TO_CATEGORY[code] : undefined;
   if (mapped) return mapped;
   const e = clean(error);

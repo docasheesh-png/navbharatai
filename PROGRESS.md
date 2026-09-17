@@ -58591,6 +58591,74 @@ Nothing is measured yet — this makes measurement possible. The data accrues fr
 older reports carry no `requestAnalysis` and read as unavailable rather than being back-filled from a
 truncated prompt. **The 50–100 build analysis is deliberately NOT started**, per the admin, and no
 GLM/Kimi routing change is made.
+
+
+---
+
+## 2026-09-17 — THE PUBLISH CEILING IS GONE. Verified end to end on a real app, and the failure that hid it for five weeks was a NAMESERVER, not code.
+
+**The admin published TaskLite and it opened at `https://a-e3638646f0794cd0da543c9d.mitrify.in`** —
+bucket-only, no Firebase preview channel consumed. ROADMAP §10.3 step 4 is DONE in production, which
+means publishing is no longer capped at ~50 apps per site. That cap had reached 36 of about 50.
+
+### The whole chain, and which link was actually broken
+
+Every piece of this had shipped and been tested. Six were already correct on the day it failed:
+
+| Link | State when it failed |
+|---|---|
+| The server mirrors a publish into the bucket | ✅ (`index.html` 24 KB + `assets/`, fetched at the exact object URL the Worker builds — HTTP 200) |
+| `PUBLISHED_APPS_BUCKET_ONLY=on` skips Firebase entirely | ✅ (the URL came back `a-…`, the bucket-only shape, so no channel was created) |
+| `PUBLISHED_APP_DOMAIN=mitrify.in` | ✅ |
+| The Worker file in the repo | ✅ (`APPS_BUCKET` filled in on 2026-09-15, PR #2956) |
+| The Worker route `*.mitrify.in/*` | ✅ attached to `mitrify-apps-worke` |
+| `*.mitrify.in` resolved to Cloudflare | ✅ (104.21.88.5 / 172.67.149.223) |
+| **The Cloudflare ZONE** | 🔴 **`Pending Nameservers` — and a Worker route does not run on a pending zone.** |
+
+The registrar held `hasslo` + `teagan`; the zone in the account that owns the route had been assigned
+`houston` + `naya`. Two Cloudflare nameserver pairs, both real, neither matching — so the zone never
+activated, the route never fired, and Cloudflare passed the request to the DNS origin instead, which
+answered with **Firebase's "Site Not Found"**. Changing the pair at Hostinger fixed it; the public NS
+now read `houston.ns.cloudflare.com` / `naya.ns.cloudflare.com`.
+
+Two real misconfigurations were corrected on the way, both by the admin:
+- `*.mitrify.in` A records pointed at **Cloudflare's own anycast IPs** (a resolved IP pasted back in as
+  an origin). Replaced with the single documented placeholder, `A * → 192.0.2.1`, Proxied.
+- The Worker deployed at the edge was an older paste than the repo file.
+
+### 🔴 THE ROOT CAUSE THAT MATTERS IS NOT THE NAMESERVER — it is that NOTHING COULD SAY WHICH COPY WAS LIVE
+
+The nameserver was a typo-class mistake, fixed in one screen. What cost an hour was that **five
+explanations fitted the identical symptom** — empty bucket name, missing route, wrong DNS, stale edge
+cache, un-mirrored objects — and not one of them could be ruled out from outside, because this Worker is
+deployed by PASTING a file into the Cloudflare dashboard and had no way to report what it was. Each
+candidate had to be eliminated by a separate investigation, and the admin pasted and re-pasted while the
+real blocker was somewhere neither of us was looking.
+
+**Fixed in PR #2980 (merged, `264caa9`):** `GET /__nbai` on any app host returns the Worker's version, the
+bucket it is reading from, and the exact object URL it looks an app's `index.html` up at. It answers
+BEFORE the edge cache and is `no-store`, because a stale diagnostic is worse than none; `appsBucket` is
+`null` rather than `''` so "Firebase only" and "misconfigured" are distinguishable at a glance. The guard
+is the other half: `WORKER_VERSION` is pinned against a hash of the file excluding its own version line,
+so changing the Worker without bumping it fails CI rather than producing a version string that lies.
+Both proven by reversion (`tests/workerBucketOrigin.test.ts`, 7 cases).
+
+### 🔴 OPEN ROOT CAUSE — this is HALF the cure, and saying so is the point (rule 6)
+
+CI cannot prove what is deployed at the edge, and PR #2980 does not claim to. **The complete fix is
+deploying the Worker from CI with Wrangler so pasting is not a step at all** — which needs
+`CLOUDFLARE_API_TOKEN` as a GitHub repo secret (the token already exists in Cloud Run). Until that
+exists, the repo file remains the only record of what runs, and the class can return — the version
+endpoint only makes it visible in one second instead of an hour.
+
+### Also recorded from this session, because it is the same shape
+
+A session (mine) built the admin's requested "Refer & Earn" Profile card in full — server route, hook,
+card, tests, full gate green — and only then discovered PR #2972 had already shipped exactly that
+feature to `main`. The duplicate was deleted and nothing was pushed. The cause was safeguard #1 applied
+sloppily: `git fetch` was run and the SHA read, but the work began from a branch whose TREE predated it,
+so every search answered a question about a stale `main`. **Fetching is not the check; working from the
+fetched state is.**
 ## 2026-09-16 — MANDATORY AUTOPSY: IPL Cricket game build (Bengali prompt). A ~2-hour orphaned zombie chain, root-caused and killed.
 
 Fifth absolute rule, triggered by an admin-attached build-diagnostics report (workspace

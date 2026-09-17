@@ -61020,3 +61020,85 @@ re-introducing an internal-test URL anywhere in the module fails CI even if noth
 default yet, and every `play.google.com` URL in the module must be the public listing. Comments are
 stripped first, so the header may keep explaining the incident. Proven by reversion: restoring the old
 default fails 4 of the 10.
+
+## 2026-09-17 — autopsy `e4ebcb5f`: the agent quoting the user's own error became a "problem"
+
+First fix from the two-report autopsy the admin asked for. Investigated with an adversarial fan-out
+(one investigator plus two challengers per finding) precisely because of the standing rule that a fix
+must never trade one problem for another — and on this finding the investigation overturned two of my
+own readings.
+
+### The incident
+
+The user's prompt was *"Fix this error and continue building the app: network error"*. The agent's
+ordinary narration — *"Let me check the current app structure and identify the network error:"* —
+landed in the report's `problems[]` as a WARNING.
+
+Walked boolean by boolean and confirmed by RUNNING the real class: `statusLike` true; the compound
+stripper leaves "network error" alone (it is anchored on "error" FIRST, so a pre-modified noun phrase
+can never match it); `problemWord` true via `\berror\b`; `failureVerb` false; `remediationIntent`
+false (the verbs are "check" and "identify"). So the line was recorded `severity: 'warning'`.
+
+### 🔴 The damage was never cosmetic — three consequences, each now asserted directly
+
+1. **A PHANTOM SELF-HEAL in the admin's first-pass-quality tally.** `AGENT_NOTE` is recorded
+   `autoResolved: true`, and the heal count takes autoResolved warnings (INFO was excluded by the
+   mitrify 2026-08-04 fix — *"a heal tally that counts heartbeats is a green number wearing a lie"* —
+   and WARNING was left in). One sentence of prose was reported as one self-heal on a build that
+   healed nothing. Under the fifth absolute rule a future autopsy would have chased it.
+2. **It could HEADLINE a failed build.** `deriveRootCause`'s `resolvedOnly` fallback is
+   autoResolved-inclusive and fires whenever `ok !== true`, and `AGENT_NOTE` is in neither
+   never-root-cause list. Verified end to end: the rootCause became the agent announcing it was about
+   to look at something.
+3. **It DELETED the line from the user's reopened conversation.** The reopen digest rebuilds the
+   assistant turn from `AGENT_STEP` only — a partial return of the 2026-07-07 *"na chat recover hui"*
+   bug. The more the agent discussed the user's own reported error, the more of the story vanished.
+
+✅ **No billing or release-gate impact**, checked rather than assumed: `shippingIssueCount` requires
+`!autoResolved`, and `AGENT_NOTE` is `autoResolved: true` unconditionally.
+
+### The fix — the structural signal was already wired and never read
+
+`meta.prompt` (the user's own words, set at construction, `readonly`) was consulted only during
+serialisation. `narrationEchoesPromptSymptom(text, prompt)` asks whether EVERY problem word in the
+narration is one the user themselves wrote, and the classifier now skips such a line — gated on
+`!failureVerb` exactly as `remediationIntent` already is, so *"The dev server FAILED to start — port
+5173 error."* stays an error even when the prompt says "error".
+
+`every`, not `some`: a mixed line ("the network error is back and the preview is not responding")
+carries a word the user never wrote and stays a problem.
+
+### ⛔ Two traps found by measurement, both pinned by tests
+
+1. **DO NOT add `s?` to the problem-word list.** `\berror\b` does not match "errors", so the verdict
+   flips on grammatical number — almost certainly accidental (the stripper one line below writes
+   `errors?[- ]`). But six realistic narration lines were measured against the widened list and ALL
+   SIX newly flagged as problems. The plural blindness is currently a noise filter suppressing roughly
+   half this class. Widening it is a separate change needing its own evidence.
+2. **`.test()` on a `/g` regex is STATEFUL** — measured true/false/true on one string. The hoisted
+   word list therefore yields TWO regexes: a non-global one for the classifier's `.test()` and a
+   global one used only via `.match()` inside the helper.
+
+### The honest cost, stated rather than omitted
+
+If the user's prompt happens to contain the same problem word as a genuine engine failure that carries
+no failure verb, that failure is downgraded to a step. Bounded by three things — no failure verb,
+EVERY word must be one the user wrote, and the engine's real failures are recorded independently by
+the structured recorders (`BUILD_ERROR`, `TOOL_ERROR`, `SANDBOX_CMD_FAILED`, `PROVIDER_FALLBACK`),
+none of which this touches. Worth it, but it is a trade.
+
+Also out of scope, honestly: the prompt is per-turn, so a user who reports the error once and then
+types only "continue" is not covered.
+
+### Tests
+
+`tests/narrationEchoesPrompt.test.ts` — 12 cases; the existing 169 in `BuildDiagnostics.test.ts` are
+untouched and still pass. Four guards proven by reversion: deleting the clause (5 fail), `some`
+instead of `every` (2), the global regex at the classifier (1), adding `s?` (1).
+
+⚠️ **The stateful-regex guard took THREE attempts, and the first two are recorded because they are the
+lesson.** Draft 1 exercised only the helper (which uses `.match()`, never stateful) and passed with the
+bug installed. Draft 2 sent the same line three times — identical narrations DEDUPE into one issue with
+`repeatCount: 3`, so it failed against correct code as well. Only after measuring the real behaviour
+(three DISTINCT lines → three separate notes) did it bite. **A guard written from a guess is not a
+guard; it has to be measured against the code it guards.**

@@ -65,6 +65,58 @@ const PROCESS_ONLY_CODES = new Set([
  *
  * Pure. Never throws.
  */
+/**
+ * The words that make a narration line READ like a problem. Hoisted so the classifier and
+ * `narrationEchoesPromptSymptom` can never disagree about what counts as one.
+ *
+ * ⚠️ SINGULAR ONLY, AND THAT IS LOAD-BEARING RATHER THAN AN OVERSIGHT TO TIDY UP. `\berror\b` does
+ * not match "errors" — the trailing "s" kills the word boundary — so "let me check the console
+ * errors" is a step today while "the network error" is a problem. The asymmetry is almost certainly
+ * accidental (the stripper one line below writes `errors?[- ]`, so the author handled plurals there
+ * and forgot them here), but it is currently acting as a NOISE FILTER that suppresses roughly half
+ * this class. Adding `s?` was measured against six realistic narration lines — "Let me verify there
+ * are no TypeScript errors:", "Now let me handle the API errors gracefully:" and four more — and ALL
+ * SIX newly flagged as problems. Widening this needs its own change and its own evidence; a test
+ * pins the current behaviour so it cannot be "completed" by accident.
+ */
+const PROBLEM_WORD_SOURCE =
+  "(error|failed|cannot|could not|not responding|isn'?t available|unavailable|retry|retrying"
+  + '|stuck|timed out|blocked request|closed port|won\'?t come up|no files|warning)';
+/** Non-global: `.test()` on a `/g` regex is STATEFUL (measured true/false/true on one string). */
+const PROBLEM_WORD_RE = new RegExp(`\\b${PROBLEM_WORD_SOURCE}\\b`, 'i');
+/** Global, used ONLY via `.match()`, which does reset `lastIndex`. */
+const PROBLEM_WORD_RE_G = new RegExp(`\\b${PROBLEM_WORD_SOURCE}\\b`, 'gi');
+
+/**
+ * Is every problem word in this narration one the USER THEMSELVES wrote?
+ *
+ * 🔴 THE DEFECT THIS ANSWERS (build e4ebcb5f, 2026-09-17). The prompt was *"Fix this error and
+ * continue building the app: network error"*, and the agent's ordinary narration — *"Let me check
+ * the current app structure and identify the network error:"* — was recorded as a PROBLEM. It is the
+ * agent quoting the symptom it was asked to investigate, which is the most normal thing an agent
+ * does on a "fix this error" turn.
+ *
+ * 🔑 THE CLASS, and why no keyword list can express it: the classifier asks *"does this sentence
+ * contain a scary word?"* when the question it exists to answer is *"did the ENGINE fail?"* Four
+ * separate patches (2026-07-07 ×3, ShopKhata 2026-07-17, PaisaTrack 2026-07-21) have narrowed this
+ * predicate and not one has widened it — a rule that has only ever been walked back is one whose
+ * default answer is wrong. The structural signal was already present and simply never consulted:
+ * `meta.prompt` is the user's own words, set at construction, so it cannot be gamed by the model.
+ *
+ * `every`, not `some`: a line mixing the user's word with a NEW one ("the network error is back and
+ * the preview is not responding") carries a word the user never wrote, so it stays a problem.
+ *
+ * PURE. Never throws. No prompt ⇒ false ⇒ today's behaviour exactly.
+ */
+export function narrationEchoesPromptSymptom(text: string, prompt: string | undefined | null): boolean {
+  const asked = String(prompt ?? '');
+  if (!asked) return false;
+  const said = (String(text ?? '').match(PROBLEM_WORD_RE_G) ?? []).map((w) => w.toLowerCase());
+  if (said.length === 0) return false;
+  const known = new Set((asked.match(PROBLEM_WORD_RE_G) ?? []).map((w) => w.toLowerCase()));
+  return said.every((w) => known.has(w));
+}
+
 export function isAppFinding(issue: Pick<BuildIssue, 'phase' | 'code'>): boolean {
   if (!issue) return false;
   if (issue.phase === 'provider') return false;
@@ -1273,7 +1325,7 @@ export class BuildDiagnostics {
         // failure phrase can classify a narration as a problem.
         const tForMatch = t.replace(/\berrors?[- ](boundar(?:y|ies)|handling|handlers?|messages?|states?|pages?|toasts?|ui|display)\b/gi, '')
           .replace(/\bwarnings?[- ](messages?|banners?|badges?|toasts?)\b/gi, '');
-        const problemWord = /\b(error|failed|cannot|could not|not responding|isn'?t available|unavailable|retry|retrying|stuck|timed out|blocked request|closed port|won'?t come up|no files|warning)\b/i.test(tForMatch);
+        const problemWord = PROBLEM_WORD_RE.test(tForMatch);
         // A genuine FAILURE VERB (not the bare noun "error") is what makes a note a real problem — and an
         // ERROR-severity one. "error"/"errors" as a NOUN the agent is working on is not itself a failure.
         const failureVerb = /\b(failed|cannot|could not|unavailable|timed out)\b/i.test(tForMatch);
@@ -1283,7 +1335,13 @@ export class BuildDiagnostics {
         // note is the agent fixing/removing/resolving something and carries NO real failure verb, it is a
         // build STEP, not a problem.
         const remediationIntent = /\b(fix(?:ing|ed|es)?|remov(?:e|es|ing|ed)|resolv(?:e|es|ing|ed)|correct(?:s|ing|ed)?|clean(?:s|ing|ed)?\s+up|delet(?:e|es|ing|ed))\b/i.test(tForMatch);
-        if (statusLike && problemWord && !(remediationIntent && !failureVerb)) {
+        // ECHOING THE USER'S OWN REPORTED SYMPTOM IS NOT THE ENGINE STRUGGLING (build e4ebcb5f).
+        // Gated on `!failureVerb` exactly as `remediationIntent` is, so a genuine failure ("The dev
+        // server FAILED to start — port 5173 error.") stays an error even when the prompt says "error".
+        const echoesPrompt = narrationEchoesPromptSymptom(tForMatch, this.meta.prompt);
+        if (statusLike && problemWord
+          && !(remediationIntent && !failureVerb)
+          && !(echoesPrompt && !failureVerb)) {
           this.record({ phase: 'build', severity: failureVerb ? 'error' : 'warning', code: 'AGENT_NOTE', message: t.slice(0, 400), autoResolved: true });
         } else {
           this.record({ phase: 'build', severity: 'info', code: 'AGENT_STEP', message: t.slice(0, 400), autoResolved: true });

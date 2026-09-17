@@ -13066,6 +13066,22 @@ async function noteBuildOutcome(
         // Billing accounting fix (THE big leak): the Architect delegates all app code to sub-agents,
         // so most of a build's tokens are spent here. Feed the build-level sink so they are billed.
         usageSink: buildUsage,
+        // ── AND THE REST OF WHAT THE PARENT HAS (deep re-autopsy of 9cca1fd5) ─────────────────────
+        // Each of these was already computed for the architect and simply never handed to the child.
+        // See `SubAgentDeps` for what each one's absence cost; the count is now test-locked.
+        framework,
+        onCommand: (c) => { try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ } },
+        onLlmCall: (c: Parameters<NonNullable<typeof buildDiag.recordLlmCall>>[0]) => {
+          try { buildDiag.recordLlmCall(c); } catch { /* diagnostics are best-effort */ }
+        },
+        signal: abort.signal,
+        // The time THIS BUILD has left, asked at spawn — never the build's total (see remainingBuildMs).
+        // `0` means the operator disabled the wall clock, and that must stay "no deadline", not "none left".
+        remainingBuildMs: () => (effectiveBuildSeconds > 0
+          ? effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt)
+          : 0),
+        // A thunk: `expectsArtifacts` is decided further down, and `intent` can still change before it.
+        expectsArtifacts: () => expectsArtifacts,
       });
       // Layer 84 (Multi-Model Ensemble): the Architect can call second_opinion to
       // get an independent cross-model review from the NON-Claude free router

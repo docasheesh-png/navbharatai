@@ -16,6 +16,8 @@ import { shouldRaceStreams } from './streamRacePolicy';
  * exact shape (the model pin and Vertex's hardcoded stream model) — the streaming path in this repo
  * has a habit of being forgotten.
  */
+import { watchdogLimits, runWatchedStream, mayTryNextRung, awaitWithIdleBound } from './streamWatchdog';
+
 export interface StreamOutcome {
   ok: boolean;
   /** The provider that actually delivered, when one did. */
@@ -25,7 +27,12 @@ export interface StreamOutcome {
   latencyMs?: number;
   /** Did this turn pay for a second model to save latency? */
   raced?: boolean;
-  reason?: 'aborted' | 'no-provider' | 'all-failed';
+  /**
+   * ⚠️ `stalled` is NOT a failure of the answer the user received. It means the provider went silent
+   * mid-stream and we stopped waiting, so `ok` stays true and whatever was delivered stands. A reader
+   * that treats every non-empty `reason` as an error would report a partially-answered turn as broken.
+   */
+  reason?: 'aborted' | 'no-provider' | 'all-failed' | 'stalled';
 }
 
 // P1.3 — per-provider state is now backed by a real CircuitBreaker (CLOSED / OPEN /
@@ -264,7 +271,38 @@ export class AIRouter {
       if (!this.acquire(p.name)) continue;
       const t = Date.now();
       try {
-        await p.executeStream(prompt, systemPrompt, onChunk);
+        // 🔴 THE ONLY THING THAT COULD END A STREAMED TURN WAS THE CLIENT DISCONNECTING (2026-09-17).
+        // This `await` had no bound of any kind, so a provider that accepted the connection and then
+        // never spoke stalled the turn for ever — and chat.ts's 20-second keepalive ping held the dead
+        // turn open. The bound is SILENCE, not duration (see streamWatchdog.ts), so a slow provider
+        // that is still emitting is never cut off. `CHAT_STREAM_WATCHDOG=off` restores this exact line.
+        const limits = watchdogLimits();
+        if (!limits) {
+          await p.executeStream(prompt, systemPrompt, onChunk);
+        } else {
+          const watched = await runWatchedStream(
+            (cb) => p.executeStream!(prompt, systemPrompt, cb),
+            onChunk,
+            limits,
+          );
+          if (watched.verdict === 'failed') throw watched.error ?? new Error('stream failed');
+          if (mayTryNextRung(watched)) {
+            // Nothing reached the user, so the next rung can answer with nothing duplicated. The
+            // provider is benched: it accepted a request and did not answer, which is a real failure
+            // however it looks from the outside.
+            setCooldown(p.name, cooldownSeconds(new Error(watched.verdict)));
+            recordProviderLatency(p.name, 0, true);
+            console.warn(`[STREAM] ${p.name} ${watched.verdict} — next rung`);
+            continue;
+          }
+          if (watched.verdict !== 'completed') {
+            // Text is already on screen. A second rung would repeat itself, so the turn ends here with
+            // what was delivered — partial and honest beats duplicated.
+            recordProviderLatency(p.name, Date.now() - t, false);
+            console.warn(`[STREAM] ${p.name} ${watched.verdict} after delivering — ending the turn`);
+            return { ok: true, provider: p.name, model: p.pinnedModel, latencyMs: Date.now() - t, raced: false, reason: 'stalled' };
+          }
+        }
         recordProviderLatency(p.name, Date.now() - t, false);
         return { ok: true, provider: p.name, model: p.pinnedModel, latencyMs: Date.now() - t, raced: false };
       } catch (err: any) {
@@ -309,6 +347,7 @@ export class AIRouter {
 
     // Race p1 and p2
     const raceStartedAt = Date.now();
+    let lastChunkAt = raceStartedAt;
     let committed: string | null = null;
     let commitResolve!: () => void;
     const commitPromise = new Promise<void>(res => { commitResolve = res; });
@@ -318,6 +357,7 @@ export class AIRouter {
       const t = Date.now();
       return p.executeStream!(prompt, systemPrompt, (chunk) => {
         if (signal?.aborted) return;
+        lastChunkAt = Date.now(); // the moving target the idle bound below watches
         if (!committed) {
           committed = p.name;
           console.log(`[RACE_STREAM] ${p.name} (p${index+1}) won — committing`);
@@ -351,11 +391,27 @@ export class AIRouter {
       return await this.streamSequential(rest, prompt, systemPrompt, onChunk, signal);
     }
 
-    // Wait for the committed provider to finish its stream
-    if (committed === p1.name) await s1.catch(() => {});
-    else await s2.catch(() => {});
+    // 🔎 SIBLING (rule 3): the 12-second COMMIT timeout above only asks "did anyone start speaking?".
+    // This final await used to be as unbounded as the sequential path's, so a provider that spoke one
+    // word and then hung stalled a PRO/PROFESSIONAL turn for ever. Bounded by SILENCE, same rule.
     const winner = committed === p1.name ? p1 : p2;
-    return { ok: true, provider: winner.name, model: winner.pinnedModel, latencyMs: Date.now() - raceStartedAt, raced: true };
+    const committedStream = committed === p1.name ? s1 : s2;
+    const raceLimits = watchdogLimits();
+    let stalled = false;
+    if (!raceLimits) {
+      await committedStream.catch(() => {});
+    } else {
+      const verdict = await awaitWithIdleBound(committedStream, () => lastChunkAt, raceStartedAt, raceLimits);
+      if (verdict !== 'completed') {
+        stalled = true;
+        console.warn(`[RACE_STREAM] ${winner.name} ${verdict} after committing — ending the turn`);
+      }
+    }
+    return {
+      ok: true, provider: winner.name, model: winner.pinnedModel,
+      latencyMs: Date.now() - raceStartedAt, raced: true,
+      ...(stalled ? { reason: 'stalled' as const } : {}),
+    };
   }
 
   private async execute(prompt: string, schema?: any, systemPrompt?: string, images?: string[], modelOverride?: string): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {

@@ -60695,6 +60695,88 @@ Tests: `tests/autopsyFdd59ef8Remainder.test.ts` (10 cases), each proven by rever
 
 ---
 
+## 2026-09-17 — Autopsy of build `af3a3f7f`: a SUCCESSFUL build reported "STOPPED" as its root cause
+
+**The report** (user rajeshkumar00077890@, free tier, 6.8 min, ₹80.50 billed, weak ladder, built by KIMI
+after GLM was benched on 2 timeouts). Prompt: *"Fix this error and continue building the app: network error"*.
+
+### The five-bucket ledger
+
+- ✅ **Self-healed — 1.** GLM timed out twice, was benched for the run, KIMI took the build. The 2026-09-16
+  throughput/bench machinery did its job.
+- 🔀 **Workarounds — 2.** `npm audit fix` applied the compatible security fixes; **3 high/critical
+  vulnerabilities survive** and need major-version upgrades (deferred root cause, honestly reported).
+- ⏭️ **Skipped — 3.** `JOURNEY_NOT_DERIVED` (no form in the app — legitimate), `E2E_SCAFFOLD_SKIPPED`
+  (project already had e2e tests — legitimate), **`RUNTIME_UNCHECKED` — the browser console could not be
+  captured**, so console errors went unchecked on a build that otherwise rendered.
+- ❌ **Shipped imperfect — 2.** 6 dependency vulnerabilities (2 critical, 1 high);
+  **`DESIGN_CONSISTENCY` grade D (50/100)** — 42 distinct colours, 15 off-4px-grid spacing values.
+- 🥵 **Struggles — 5.** 2 GLM timeouts → bench; `TIME_TO_FIRST_CALL` 12s of dead wait; the post-build
+  review **overran its 126 s budget** and was saved by the 30 s grace; the advisory pass **hit its
+  2-minute cap**; the sandbox session was **84% idle**.
+
+### 🔴 The defect this PR fixes: ONE CODE, TWO OPPOSITE MEANINGS
+
+The build succeeded — `ok: true`, opened in a real browser and rendered, `vitest 6/6 PASS`,
+`PROD_BUILD_OK`, `GREEN_GUARD_SAVE`, release gate YELLOW ("It runs and renders"). Its recorded
+`rootCause` was:
+
+> *"Build outcome: STOPPED — the app was built; the post-build advisory pass was cut short by its
+> 2-minute cap."*
+
+Nothing stopped. `ADVISORY_CAP_MS = 120_000` is a DESIGNED ceiling on the optional post-build extras —
+this file's own flag registry records it as the intended hard cap on ALL post-build work — so reaching
+it is the system working, not failing.
+
+**The emitting code knew the two cases differ** (`routes/agentv3.ts`: *"they mean opposite things to the
+person waiting"*) and encoded the difference in the MESSAGE and the SEVERITY while recording both under
+the single code `OUTCOME_STOPPED`. Every reader keyed on the code therefore saw one meaning where there
+are two, and all three got it wrong in a different way:
+
+| Reader | What it did with a built, browser-verified app |
+|---|---|
+| `deriveRootCause` | returned the outcome message before any other rule → "STOPPED" as the root cause |
+| `OUTCOME_TO_CATEGORY` | filed it `incomplete` — *"the run ended before it finished"* |
+| Admin Failure Category panel | no keyword matched → **`other` (verified by running the real string through it)** |
+
+**Fixed at the class:** a dedicated code `OUTCOME_ADVISORY_CAPPED`, with one shared pure predicate
+(`advisoryCapOutcome.ts`) that all three readers use. **The legacy shape is still recognised by message**,
+because every build recorded before today carries `OUTCOME_STOPPED` with the advisory wording — and those
+are what the admin's panels actually read.
+
+⚠️ **THE TRAP THIS FIX HAD TO AVOID, and it would have been worse than the bug.** The outcome pick runs
+BEFORE every other guard in `deriveRootCause`, so naively skipping the advisory cap hands the same
+successful build the most severe remaining warning — which on this very report was
+`PROVIDER_FALLBACK: Provider GLM failed`. That is precisely the provider-error-as-app-blocker class
+autopsy 4efab9d7 closed. So when the advisory cap is the ONLY outcome of a SUCCESSFUL build, the honest
+answer is that there is **no root cause at all**. A build that did NOT succeed still falls through
+exactly as before, because we owe it an explanation. Test-locked explicitly, and proven by reversion
+(3 of 11 fail when the old two-line pick returns).
+
+### What was investigated and deliberately NOT changed
+
+- **The "`.js` imports" theory.** The build's own summary says the app imported `.js` files that do not
+  exist in a TypeScript project. **No measurement in the report supports it** — the recorded commands
+  show `npm install`, `npm install -D vitest @vitest/ui`, clean `tsc --noEmit`, clean `npm run build`,
+  and no import rewrite. Vite also *does* resolve `.js`→`.ts` for TS projects, which contradicts the
+  stated cause. `ImportExportAnalysis.resolveLocalTarget` deliberately forgives that exact pattern
+  (CollabDesk/SvelteKit autopsy). **Building a "fix" on an LLM's prose about its own work is the thing
+  rule 4 step 1 forbids** — recorded as an OPEN question, not patched.
+- **Test files importing packages the project lacks.** Chased because `npm install -D vitest` was needed
+  for *"the existing test skeletons"*. Already root-caused on 2026-08-24 — `e2eTypecheck.ts` exists for
+  exactly this. Not re-litigated.
+
+### Still open
+
+1. **`RUNTIME_UNCHECKED` — the console could not be captured** on a build that rendered fine. Cause not
+   determinable from this report; it means console errors are unverified on an unknown share of builds.
+2. **`tests/buildOutcomeWiring.test.ts` slices a fixed 9,000-character window** out of `routes/agentv3.ts`
+   and asserts inside it. A six-line COMMENT added in that region pushed the code it looks for past the
+   window and failed the suite — with no behaviour change at all. A guard that breaks on comment length
+   is a guard someone will eventually weaken to get green. Left alone here (touching an unrelated guard
+   inside this PR is its own hazard), recorded so it is fixed deliberately.
+3. **3 high/critical dependency vulnerabilities** survive `npm audit fix` and need major-version upgrades.
+4. **Design consistency grade D** on a shipped app — 42 colours, 15 off-grid spacing values.
 ## 2026-09-17 — The admin dashboard tells you where the work is, and the AI Engines page stops lying
 
 **Admin, in their own words:** *"us sub header me naam ke sath number bhi chahiye … jisse admin ko ek
@@ -60922,3 +61004,39 @@ unchanged.
 ⚠️ **Still open:** the remaining ~43 bare `target="_blank"` sites (admin panels, settings, the store,
 the Pro panel). Lower traffic and mostly admin-facing, so they stay a recorded sweep rather than a
 rushed one.
+---
+
+## 2026-09-17 — "Continue where you left off" REMOVED from the home screen (admin, same day it shipped)
+
+**Admin, urgently:** *"yeh aaj banaya gaya hai, isko abhi hatao. jaldi delete karo!!! … maine kaha tha,
+jab koi user navbharatai free, navbharatai pro koi chat open kare to use last chat jahan se chori thi
+wahi se dikhna chahiye … homepage se isko pura hatao."*
+
+**PR #2996 shipped TWO things under one title** — *"the app reopens your conversation, and your
+conversations are on Home"*. Only the first was asked for. The second put a list of every past
+conversation on the front page of the product, which is not what "open a chat and see where you left
+off" means, and the admin saw it the day it landed.
+
+**Removed (the home list):** `components/home/RecentConversations.tsx`, `lib/recentConversations.ts`,
+`tests/recentConversations.test.ts`, the `HomeView` section and its two props, and the `homeRecents` /
+`openRecentConversation` block in `App.tsx`. Four now-unused imports went with them —
+`readProfessionalHistory`, `resumeArchived`, `readPlaceActivity`, `buildHistoryIndex` — because an
+unused import keeps its whole module on the load path (`scripts/noUnusedImports.mjs` caught all four).
+
+**KEPT, deliberately — this is the half the admin actually asked for:** `lib/lastPlace.ts` and
+`lib/freeChatResume.ts` are untouched, so reopening NavBharatAI still puts the user back in the
+conversation they were last in. `tests/lastPlace.test.ts`, `tests/freeChatResume.test.ts` and the rest
+of `tests/resumeWiring.test.ts` still cover it — 58 tests, green.
+
+⚠️ **`AppKnowledgeBase.ts` was corrected in the same commit, and that matters more than it looks.**
+Three entries told every AI in the product that a "Continue where you left off" list is on the home
+screen. Leaving them would have made every assistant confidently direct users to a section that no
+longer exists — the same stale-capability class this repo has now paid for twice in one week (the four
+ladder comments on 2026-09-15, and "NavBharatAI cannot add your signing key" on 2026-09-17). Users are
+now pointed at History, which is real.
+
+**The test block asserting the home list was REPLACED WITH A NOTE, not deleted**, so a later session
+reading the history does not "restore" a feature that was removed on purpose.
+
+Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1728 files, 24432 passed, 0 failed** ·
+build · test:bundle · boot:check.

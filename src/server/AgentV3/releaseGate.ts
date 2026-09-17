@@ -68,6 +68,21 @@ export interface RuntimeEvidence {
    */
   previewUrlPublished?: boolean;
   /**
+   * Does this project HAVE a test suite, even though it was not run here?
+   *
+   * The `previewUrlPublished` sibling, for the check that had the same defect and was never hunted
+   * (autopsy 8b3dca5c). `tests: 'not-run'` was explained as *"the app has no test suite that could be
+   * run here"* — a claim about the PROJECT — in a report whose very next line said *"This project has
+   * a Playwright test suite but `@playwright/test` is not installed here, so it was NOT run"*. Two
+   * statements about the same suite, seven seconds apart, and the false one was in the headline.
+   *
+   * Like its sibling it ONLY changes how an unproven check is EXPLAINED, never the verdict: a suite
+   * that exists and did not run is exactly as unproven as one that does not exist. Optional, so an
+   * omitted value keeps the original wording.
+   */
+  testSuitePresent?: boolean;
+
+  /**
    * Was this build STOPPED BY THE USER rather than failed?
    *
    * 🔴 ROOT CAUSE (autopsy 2b0a3ed5, 2026-09-17). A user pressed Stop 66 seconds into a calculator
@@ -133,11 +148,16 @@ export interface GateVerdict {
  * in step by hand: adding `previewUrlPublished` to RuntimeEvidence broke all of them at once, which was
  * the good outcome. A sixth non-check field added by someone in a hurry would otherwise be a silent
  * demand for five new label strings that mean nothing.
+ *
+ * ⚠️ The exclusion list is MANUAL on purpose, and it did its job again when `testSuitePresent` was
+ * added: three maps failed to compile until it was named here. Do not "tidy" this into a structural
+ * filter over the CheckOutcome fields — that would let the next explanatory flag slip in silently,
+ * which is precisely what this alias exists to prevent.
  */
 // ⚠️ Every field added to RuntimeEvidence that is NOT a runtime CHECK must be excluded here, or it
 // silently becomes a row the gate tries to label and grade. tsc catches the omission, which is
 // how `stoppedByUser` was caught the moment it was added.
-type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'stoppedByUser'>;
+export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'testSuitePresent' | 'stoppedByUser'>;
 
 /** What a PASS means. Phrased as a completed fact, because that is what `proven` is a list of. */
 const RUNTIME_LABEL: Record<CheckKey, string> = {
@@ -185,6 +205,50 @@ const WHY_MISSING: Record<CheckKey, string> = {
 };
 
 /**
+ * WHY a check is unproven, given everything the gate already knows.
+ *
+ * 🔴 THIS IS A CLASS, NOT THREE SPECIAL CASES (autopsies 4efab9d7 → e706e068 → 8b3dca5c).
+ *
+ * `WHY_MISSING` states each reason as an absolute — "there was never a preview", "there is no running
+ * app", "the app has no test suite". Every one of those is a claim about the PROJECT, and the gate
+ * frequently holds evidence that contradicts it. The first of the three was found on 2026-08-27 and
+ * fixed in place with an inline `else if`; its two siblings were never hunted, and both went on to
+ * print a falsehood in the same sentence that disproved it:
+ *
+ *     Proven:          the app came up and rendered; the project typechecks
+ *     NOT established: the page-render check needs a running app and was skipped
+ *
+ * That is one `RELEASE_GATE` message, verbatim, from a build whose preview had been opened in a real
+ * browser and screenshotted. So the reasoning lives in ONE function that reads the evidence, and a
+ * fourth case is added here rather than as a fourth `else if` — which is what let the first two hide.
+ *
+ * 🔒 IT CANNOT CHANGE A VERDICT. Every branch returns a string and every string lands in `unproven`.
+ * A check explained more accurately is exactly as unproven as before: saying "we did not look" instead
+ * of "there was nothing to look at" is an admission, not partial credit. That separation is the whole
+ * reason `previewUrlPublished` was safe to add, and it holds identically for these two.
+ *
+ * Pure; never throws.
+ */
+export function whyMissing(key: CheckKey, ev: RuntimeEvidence): string {
+  const e = ev ?? ({} as RuntimeEvidence);
+  // A preview DID come up — we simply never confirmed it rendered. Say that, rather than the
+  // stronger and false claim that nothing was ever there. See previewUrlPublished for why.
+  if (key === 'preview' && e.previewUrlPublished) {
+    return 'a live preview came up but was never confirmed to render, so nothing here was proven to RUN';
+  }
+  // The app WAS running — this gate's own `proven` list says so — so "needs a running app" is false.
+  // What is true is narrower and more useful: nobody drove its individual routes.
+  if (key === 'pages' && (e.preview === 'passed' || e.previewUrlPublished)) {
+    return 'the app came up, but its individual page routes were never render-checked here';
+  }
+  // The suite exists; our sandbox could not run it. That is OUR gap, not the project's.
+  if (key === 'tests' && e.testSuitePresent) {
+    return 'this project HAS a test suite, but it could not be run here — so nothing about it passed or failed';
+  }
+  return WHY_MISSING[key];
+}
+
+/**
  * The checks that, between them, constitute proof that the app RUNS.
  *
  * Typecheck and tests are deliberately NOT in this list. A project can typecheck perfectly and still
@@ -230,11 +294,7 @@ export function releaseGate(
       // NOT a gap: the app has no data-entry flow to drive, so there was no journey to prove. Naming it as
       // a missing capability is the category error this branch exists to prevent (a game "saves" nothing).
       unproven.push('this app has no data-entry flow, so there was no user journey to prove (not a defect)');
-    } else if (key === 'preview' && ev.previewUrlPublished) {
-      // A preview DID come up — we simply never confirmed it rendered. Say that, rather than the
-      // stronger and false claim that nothing was ever there. See previewUrlPublished for why.
-      unproven.push('a live preview came up but was never confirmed to render, so nothing here was proven to RUN');
-    } else unproven.push(WHY_MISSING[key]);
+    } else unproven.push(whyMissing(key, ev));
   }
   // A game / dashboard / landing page with no data-entry surface at all: there is genuinely no "save"
   // journey to prove, so the YELLOW headline must not imply one is missing.

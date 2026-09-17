@@ -174,12 +174,103 @@ export interface EndgameVerdict {
   clean: boolean;
   /** True when the batch LLM repair INCREASED the error count and was rolled back (CrewHub 59→67). */
   llmReverted?: boolean;
+  /**
+   * Files the batch repair proposed at paths the project does not have and nothing imports — NOT
+   * written (autopsy e706e068; see `resolveRepairTarget`). Omitted when there were none.
+   */
+  llmFilesRejected?: number;
 }
 
 const NO_ATTEMPT: EndgameVerdict = {
   attempted: false, errorsBefore: 0, errorsAfterDeterministic: 0, errorsAfter: 0,
   deterministicFixes: [], llmFilesWritten: 0, clean: true,
 };
+
+// === A REPAIR MAY FIX FILES; IT MAY NOT ADD STRAY ONES (autopsy e706e068, 2026-09-17) ============
+//
+// The School ERP build's real app lived under `src/` (`index.html → src/main.tsx → src/App.tsx`) and
+// was rendering in a real browser. Three files then appeared at the ROOT of the project — `App.tsx`,
+// `hooks/useStudents.ts`, `types/student.ts` — all timestamped inside the batch repair's window and
+// named in none of the model's own tool calls. The batch call had been handed `src/App.tsx` and
+// returned its corrected content under the path `App.tsx`: the `src/` prefix dropped in transit, and
+// this loop wrote whatever path came back. Nothing imported the copies, `npm run build` never saw
+// them, so the app kept working — while the readiness gate read the WHOLE tree, found an unresolved
+// import and placeholder data in the strays, called the build "not ready", and made it free.
+//
+// The rule, stated once: the batch pass exists to REPAIR the files it was given. A returned path is
+// written only when it is one of three things —
+//   1. an EXISTING project file (the ordinary case);
+//   2. a path that names exactly ONE existing file by its tail (`App.tsx` → `src/App.tsx`) — the
+//      dropped-prefix case above, remapped to the file the model was actually repairing;
+//   3. a path the erroring code already IMPORTS (a TS2307 "Cannot find module './x'" resolved from
+//      the importing file) — the one kind of new file that can only ever be part of the app.
+// Anything else is a stray: it is skipped, counted in `llmFilesRejected`, and named in the log.
+// Rejecting is the safe direction — a fix that is not written costs one more repair round; a stray
+// that is written costs the build its verdict.
+
+/** Extensions a bare module specifier may resolve to, so `./x` matches `x.ts`, `x.tsx`, `x/index.ts`… */
+const MODULE_EXTS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'];
+
+function normalizeRel(p: string): string {
+  const parts: string[] = [];
+  for (const seg of p.replace(/\\/g, '/').split('/')) {
+    if (!seg || seg === '.') continue;
+    if (seg === '..') { parts.pop(); continue; }
+    parts.push(seg);
+  }
+  return parts.join('/');
+}
+
+/** Strip a code extension and a trailing `/index` so `src/a/index.tsx` and `src/a.ts` both key as `src/a`. */
+function moduleKey(p: string): string {
+  let k = normalizeRel(p);
+  for (const ext of MODULE_EXTS) {
+    if (k.endsWith(ext)) { k = k.slice(0, -ext.length); break; }
+  }
+  if (k.endsWith('/index')) k = k.slice(0, -'/index'.length);
+  return k;
+}
+
+/**
+ * The local modules the compile errors say are MISSING — `Cannot find module './components/X'`
+ * (TS2307) resolved against the importing file. A new file at one of these paths is one the app
+ * already imports, so creating it completes the app rather than littering it. Package specifiers
+ * (`react`, `@x/y`) are not files and are ignored. Pure.
+ */
+export function referencedMissingModules(errors: TscError[]): Set<string> {
+  const out = new Set<string>();
+  for (const e of errors) {
+    if (e.code !== 'TS2307') continue;
+    const m = /Cannot find module '([^']+)'/.exec(e.message);
+    if (!m) continue;
+    const spec = m[1];
+    if (!spec.startsWith('./') && !spec.startsWith('../')) continue;
+    const dir = e.file.includes('/') ? e.file.slice(0, e.file.lastIndexOf('/')) : '';
+    out.add(moduleKey(dir ? `${dir}/${spec}` : spec));
+  }
+  return out;
+}
+
+export type RepairTargetHow = 'existing' | 'remapped' | 'referenced' | 'rejected';
+
+/**
+ * Where, if anywhere, a path returned by the batch repair may be written. Pure. See the block header
+ * for the three admissible cases; everything else is `rejected` with `target: null`.
+ */
+export function resolveRepairTarget(
+  path: string,
+  files: Record<string, string>,
+  referenced: Set<string>,
+): { target: string | null; how: RepairTargetHow } {
+  const p = normalizeRel(String(path ?? ''));
+  if (!p) return { target: null, how: 'rejected' };
+  if (files[p] !== undefined) return { target: p, how: 'existing' };
+  const tail = `/${p}`;
+  const matches = Object.keys(files).filter((k) => k.endsWith(tail));
+  if (matches.length === 1) return { target: matches[0], how: 'remapped' };
+  if (referenced.has(moduleKey(p))) return { target: p, how: 'referenced' };
+  return { target: null, how: 'rejected' };
+}
 
 /**
  * Run the two-layer endgame over injected I/O. Never throws — any I/O failure returns the honest
@@ -199,6 +290,7 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
     const errors2 = parseTscErrors(out2);
     let llmFilesWritten = 0;
     let llmReverted = false;
+    let llmFilesRejected = 0;
     let finalErrors = errors2;
     if (errors2.length > 0 && io.llmRepair) {
       io.log?.(`🔧 ${errors2.length} error(s) need real fixes — one batch repair pass…`);
@@ -208,15 +300,26 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
       // snapshot every file BEFORE the repair overwrites it, so a repair that increases the error count
       // can be rolled back. The pass is then monotone by construction — it helps or does nothing, never harms.
       const preRepair = new Map<string, string | undefined>();
+      const referenced = referencedMissingModules(errors2);
+      const rejected: string[] = [];
       for (const f of fixed) {
         if (!f?.path || typeof f.content !== 'string') continue;
+        // A repair may fix files; it may not add stray ones (block header above).
+        const where = resolveRepairTarget(f.path, files, referenced);
+        if (!where.target) { rejected.push(f.path); continue; }
+        const path = where.target;
+        if (where.how === 'remapped') io.log?.(`↪️ The repair returned '${f.path}' — written to the file it was repairing, '${path}'.`);
         // Blank-overwrite guard: a repair that returns an empty/husk file must not destroy real work.
-        const existing = files[f.path];
+        const existing = files[path];
         if (typeof existing === 'string' && existing.trim().length > 80 && f.content.trim().length < 10) continue;
-        if (!preRepair.has(f.path)) preRepair.set(f.path, existing);
-        await io.writeFile(f.path, f.content).catch(() => {});
-        files[f.path] = f.content;
+        if (!preRepair.has(path)) preRepair.set(path, existing);
+        await io.writeFile(path, f.content).catch(() => {});
+        files[path] = f.content;
         llmFilesWritten++;
+      }
+      if (rejected.length > 0) {
+        llmFilesRejected = rejected.length;
+        io.log?.(`⚠️ The repair proposed ${rejected.length} file(s) at path(s) this project does not have and nothing imports (${rejected.slice(0, 3).join(', ')}${rejected.length > 3 ? ', …' : ''}) — not written: a repair may fix files, not add stray ones.`);
       }
       if (llmFilesWritten > 0) {
         finalErrors = parseTscErrors(await io.runTsc());
@@ -244,6 +347,7 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
       llmFilesWritten,
       clean: finalErrors.length === 0,
       ...(llmReverted ? { llmReverted } : {}),
+      ...(llmFilesRejected > 0 ? { llmFilesRejected } : {}),
     };
   } catch {
     return NO_ATTEMPT; // endgame is best-effort — it must never worsen or hang a build

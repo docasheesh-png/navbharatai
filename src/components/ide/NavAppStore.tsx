@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import { WebAppPlayer } from './WebAppPlayer';
 import { authedHeaders } from '../../lib/authHeaders';
+import { authedFetch } from '../../lib/authedFetch';
+import { LONG_REQUEST_TIMEOUT_MS, isFetchTimeout } from '../../lib/longRequest';
 import { resolveApiHref } from '../../lib/apiBase';
 import { isNativeApp } from '../../lib/mobileNative';
 import { adultBadge } from '../../lib/adultContent';
@@ -297,6 +299,14 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
    * button cannot widen what the store accepts. Its refusals are specific and useful (a hardcoded key
    * with its file and line, "this app needs a server", a size cap) — so they are shown VERBATIM. A
    * generic "publishing failed" here would throw away the one sentence that tells the user what to fix.
+   *
+   * 🔒 A BUTTON THAT CAN SPIN FOREVER IS A BUG, WHATEVER THE SERVER IS DOING (the same class the admin
+   * reported on 2026-08-27 for this exact endpoint — "app mart me publish kar rahe hai, to infinity
+   * loading hoti ja rahi hai"). This is now the ONLY door that publishes to App Mart (the embedded
+   * card that used to live in the "Publish your app" hosting sheet was removed, admin 2026-09-16 — App
+   * Mart is a separate decision from hosting), so the timeout that endpoint's other caller carried
+   * must not be lost with it. `authedFetch` bounds the wait and honestly distinguishes "we stopped
+   * waiting" from "the request never reached the server" — see lib/longRequest.ts.
    */
   const publishChosenApp = useCallback(async () => {
     if (pubBusy || !pickWs) return;
@@ -305,9 +315,9 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
     setPubBusy(true);
     setPubResult(null);
     try {
-      const res = await fetch('/api/nav-store/web/publish', {
+      const res = await authedFetch('/api/nav-store/web/publish', {
         method: 'POST',
-        headers: { ...(await authedHeaders()), 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           workspaceId: pickWs,
           name,
@@ -315,7 +325,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
           ...(pickDesc.trim() ? { description: pickDesc.trim() } : {}),
           ...(pickIcon ? { iconDataUrl: pickIcon } : {}),
         }),
-      });
+      }, LONG_REQUEST_TIMEOUT_MS.storePublish);
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) {
         setPubResult({ ok: false, message: data?.error || 'Publishing failed — nothing was published.' });
@@ -331,8 +341,11 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
           : 'Published! Your link works right now (copied) — the store listing goes live after a quick human review.',
       });
       void loadWebMine();
-    } catch {
-      setPubResult({ ok: false, message: 'Could not reach NavBharatAI — nothing was published.' });
+    } catch (e) {
+      const timedOut = isFetchTimeout(e);
+      setPubResult({ ok: false, message: timedOut
+        ? 'Publishing is taking longer than expected, so we stopped waiting. Check "My apps" below — if it is not there yet, try again.'
+        : 'Could not reach NavBharatAI — nothing was published.' });
     } finally {
       setPubBusy(false);
     }
@@ -512,55 +525,78 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
         {/* ── Half 1: PLAY INSTANTLY (web apps) — tap and it runs ── */}
         {tab === 'browse' && !loading && (webApps.length > 0 || apps.length > 0) && (
           <div className="mb-7">
-            <p className="text-xs font-bold uppercase tracking-wider text-white/40 mb-2 flex items-center gap-1.5">
-              <Play size={12} /> Play instantly — runs in your browser, nothing to install
+            {/* 🔴 A FIRST-TIME VISITOR HAS TO BE ABLE TO READ THIS (admin 2026-09-17). It was
+                `text-white/40` uppercase at 12px — the lowest-contrast text on the screen, carrying
+                the one sentence that explains what the whole section IS. Uppercase tracking makes a
+                label skimmable when you already know what it says and harder to read when you do
+                not, which is exactly backwards for the person this line exists for. */}
+            <p className="text-sm font-bold text-white/85 mb-0.5 flex items-center gap-1.5">
+              <Play size={13} className="text-emerald-400" /> Play instantly
             </p>
+            <p className="text-xs text-white/45 mb-2.5">Tap any app and it opens right here — nothing to install.</p>
             {webApps.length === 0 ? (
               <p className="text-xs text-white/30 py-4 px-3 rounded-xl bg-white/[0.02] border border-white/5">
                 No instant apps yet — the first one can be yours.
               </p>
             ) : (
-            <div className="grid gap-3 sm:grid-cols-2">
+            /* 🔴 TILES, NOT ROWS (admin 2026-09-17, from a phone screenshot: "app aise list me aa rahi
+                hai, dikh hi nahi raha — 1st time user kaise pata lagega kya karna hai").
+
+                The grid said `sm:grid-cols-2`, so the two columns only ever appeared on a TABLET. On
+                the phone every real user is holding it collapsed to ONE column of wide rows, and a
+                row is the worst shape for this content: four apps filled the screen, each showing a
+                single truncated line of a name that is often the creator's raw build prompt. The
+                page read as a settings list, not as a place to play something.
+
+                A tile is the shape every app store uses for the same reason: the icon carries the
+                recognition, the name gets TWO lines instead of one truncated one, and a full-width
+                Open button under each one makes "what do I do here?" answer itself. The description
+                moved to the detail sheet on purpose — keeping it here doubled the tile height and
+                halved how many apps a first-time visitor sees before deciding this place is empty. */
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
               {pagedWebApps.visible.map((a) => (
-                <div key={a.id} className="flex gap-3 p-3 rounded-xl bg-[#161b22] border border-white/10 hover:border-white/25 transition-colors">
+                <div key={a.id} className="flex flex-col rounded-xl bg-[#161b22] border border-white/10 hover:border-white/25 transition-colors">
                   <button
                     onClick={() => void openWebDetail(a)}
-                    className="flex gap-3 min-w-0 flex-1 text-left"
+                    className="flex flex-col items-start gap-2 p-3 pb-2 flex-1 min-w-0 text-left"
                     title="See details & screenshots"
                   >
-                    <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center overflow-hidden flex-shrink-0">
-                      {a.iconDataUrl ? <img src={a.iconDataUrl} alt="" className="w-full h-full object-cover" /> : <Globe size={18} className="text-white/30" />}
+                    <div className="w-14 h-14 rounded-2xl bg-white/5 flex items-center justify-center overflow-hidden flex-shrink-0">
+                      {a.iconDataUrl ? <img src={a.iconDataUrl} alt="" className="w-full h-full object-cover" /> : <Globe size={22} className="text-white/30" />}
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold truncate flex items-center gap-1.5">
-                        {a.name}
-                        {a.requiresPassword && <Lock size={11} className="text-white/40 flex-shrink-0" />}
+                    {/* TWO lines, not one truncated one. Most names here are a fragment of the
+                        creator's prompt, and one line of those is unreadable — see the cap in
+                        publishablePicker.ts for the other half of this fix. */}
+                    <p className="text-sm font-semibold leading-snug line-clamp-2 w-full">{a.name}</p>
+                    {(a.requiresPassword || adultBadge(a.contentClass)) && (
+                      <span className="flex items-center gap-1.5">
+                        {a.requiresPassword && <Lock size={11} className="text-white/40" />}
                         {/* The 18+ badge. Only ever seen by a viewer who turned the setting on — the
                             server filters these out of the list for everyone else, so this labels
                             what they chose to see rather than teasing what they cannot. */}
                         {adultBadge(a.contentClass) && (
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-rose-500/15 text-rose-300 border border-rose-500/30 flex-shrink-0">
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-rose-500/15 text-rose-300 border border-rose-500/30">
                             {adultBadge(a.contentClass)}
                           </span>
                         )}
-                      </p>
-                      <p className="text-xs text-white/50 truncate">{a.description || 'A NavBharatAI-built app'}</p>
-                      <p className="text-[11px] text-white/30 mt-1">
-                        {a.runs} run{a.runs === 1 ? '' : 's'}
-                        {(a.screenshotCount ?? 0) > 0 && <span className="text-white/40"> · {a.screenshotCount} screenshot{a.screenshotCount === 1 ? '' : 's'}</span>}
-                        {(a.priceInr ?? 0) > 0 && <span className="text-emerald-300"> · remix ₹{a.priceInr}</span>}
-                      </p>
-                    </div>
+                      </span>
+                    )}
+                    <p className="text-[11px] text-white/35 leading-tight w-full mt-auto">
+                      {a.runs} run{a.runs === 1 ? '' : 's'}
+                      {(a.priceInr ?? 0) > 0 && <span className="text-emerald-300"> · remix ₹{a.priceInr}</span>}
+                    </p>
                   </button>
                   <button
                     onClick={() => setPlayingId(a.id)}
-                    className="self-center flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex-shrink-0 transition-colors"
+                    className="m-3 mt-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors"
                   >
                     <Play size={12} /> Open
                   </button>
                 </div>
               ))}
-              <LoadMore list={pagedWebApps} label="web apps" />
+              {/* ⚠️ col-span-full or the button becomes a TILE — a grid child is a cell by default,
+                  so without this it would sit squeezed into the next slot beside a real app. */}
+              <LoadMore list={pagedWebApps} label="web apps" className="col-span-full" />
             </div>
             )}
           </div>
@@ -575,35 +611,41 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
         {/* ── Half 2: INSTALL (Android) — real .apk apps, a different product entirely ── */}
         {tab === 'browse' && !loading && (webApps.length > 0 || apps.length > 0) && (
           <div className="mb-6">
-            <p className="text-xs font-bold uppercase tracking-wider text-white/40 mb-2 flex items-center gap-1.5">
-              <Package size={12} /> Install on Android — real .apk apps
+            <p className="text-sm font-bold text-white/85 mb-0.5 flex items-center gap-1.5">
+              <Package size={13} className="text-sky-400" /> Install on Android
             </p>
+            <p className="text-xs text-white/45 mb-2.5">Real apps you download and install on your phone.</p>
             {apps.length === 0 ? (
               <p className="text-xs text-white/30 py-4 px-3 rounded-xl bg-white/[0.02] border border-white/5">
                 No Android apps yet. Every one is scanned and checked by a person before it appears here.
               </p>
             ) : (
-            <div className="grid gap-3 sm:grid-cols-2">
+            /* Same tile as the instant apps above, for the same reason and so the two halves of one
+                page do not read as two different products. The sensitive-permission warning KEEPS its
+                own line and its amber — it is the one thing on this card a person must not miss, and
+                a tile is narrower than the row it replaced. */
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
               {pagedApps.visible.map((a) => (
                 <button
                   key={a.id}
                   onClick={() => setOpenApp(a)}
-                  className="flex gap-3 p-3 rounded-xl bg-[#161b22] border border-white/10 hover:border-white/25 text-left transition-colors"
+                  className="flex flex-col items-start gap-2 p-3 rounded-xl bg-[#161b22] border border-white/10 hover:border-white/25 text-left transition-colors"
                 >
-                  <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center overflow-hidden flex-shrink-0">
-                    {a.iconDataUrl ? <img src={a.iconDataUrl} alt="" className="w-full h-full object-cover" /> : <Store size={18} className="text-white/30" />}
+                  <div className="w-14 h-14 rounded-2xl bg-white/5 flex items-center justify-center overflow-hidden flex-shrink-0">
+                    {a.iconDataUrl ? <img src={a.iconDataUrl} alt="" className="w-full h-full object-cover" /> : <Store size={22} className="text-white/30" />}
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold truncate">{a.appName}</p>
-                    <p className="text-xs text-white/50 truncate">{a.shortDescription}</p>
-                    <p className="text-[11px] text-white/30 mt-1">
-                      {a.developerName} · {fmtSize(a.sizeBytes)}
-                      {a.highRisk.length > 0 && <span className="text-amber-400"> · {a.highRisk.length} sensitive permission{a.highRisk.length === 1 ? '' : 's'}</span>}
+                  <p className="text-sm font-semibold leading-snug line-clamp-2 w-full">{a.appName}</p>
+                  <p className="text-[11px] text-white/35 leading-tight w-full mt-auto">
+                    {a.developerName} · {fmtSize(a.sizeBytes)}
+                  </p>
+                  {a.highRisk.length > 0 && (
+                    <p className="text-[11px] text-amber-400 leading-tight w-full">
+                      {a.highRisk.length} sensitive permission{a.highRisk.length === 1 ? '' : 's'}
                     </p>
-                  </div>
+                  )}
                 </button>
               ))}
-              <LoadMore list={pagedApps} label="apps" />
+              <LoadMore list={pagedApps} label="apps" className="col-span-full" />
             </div>
             )}
           </div>

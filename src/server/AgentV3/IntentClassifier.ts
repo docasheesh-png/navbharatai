@@ -27,6 +27,10 @@
  *  'new_build'     — creating a fresh app / feature from scratch
  *  'edit_existing' — modifying / fixing / refactoring something that already exists
  */
+// The ONE dependency this otherwise self-contained classifier takes: a pure, I/O-free constants
+// module shared with the client, so the platform's own generated prompt has a single definition.
+import { isPlatformFixRequest, looksLikeMachineError } from '../../lib/platformFixRequest';
+
 export type BuildIntent = 'chat' | 'new_build' | 'edit_existing';
 
 // ── Signal arrays ─────────────────────────────────────────────────────────────
@@ -384,6 +388,29 @@ const AUX_OPENERS = /^(?:can|could|would|will|shall|should|do|does|did|is|are|am
 const AUX_ASKS_US = /^(?:can|could|would|will|do|does|did|are)\s+(?:you|u|aap|tum)\b/;
 
 /**
+ * "kya main/mai/aap/tum/hum/hume …" — the Hindi/Hinglish "should I…?" / "may I…?" construction.
+ *
+ * 🔴 UNANCHORED ON PURPOSE (autopsy 2026-09-16). Every other line in `readsAsQuestion` requires the
+ * message to OPEN with a question word — but Hindi places "kya" right before the verb it questions as
+ * often as at the sentence's start, so a long lead-in statement followed by a short trailing question
+ * ("मैं एक अलार्म ऐप बनाना चाहता हूं … क्या मैं prompt डालूं?" — "I want to build an alarm app… should I
+ * paste the prompt?") asks its real question at the END. The old `^`-anchored version could not see
+ * past the declarative opening clause, so the message hard-locked to a build order at HIGH confidence,
+ * skipped the LLM upgrade entirely (see `classifyIntentSmart`), and ran a real, billed weak-tier build
+ * for a question that wanted a one-line "haan, bhej dijiye" in reply.
+ *
+ * Devanagari included deliberately, and — for now — ONLY this one pattern: the reported message was
+ * typed in native script, where every OTHER signal in this file (WH_OPENERS, NEW_BUILD_SIGNALS, …) is
+ * Romanized-only and therefore blind to it (recorded as a separate, larger open item in PROGRESS.md —
+ * this is not a general Devanagari pass). This one phrase is safe to add on its own: Devanagari has no
+ * other reading of "kya main/aap/tum/hum", so the risk of a false positive is the same as the Romanized
+ * form already carried. `\b` is not used around the Devanagari half — under a non-`u` JS regex it does
+ * not fire correctly across non-ASCII script boundaries, so whitespace/string edges do the job instead.
+ */
+const MIDSENTENCE_KYA_QUESTION =
+  /(?:^|[\s,.!])kya\s+(?:aap|tum|main|mai|hum|hume)\b|(?:^|[\s,।!])क्या\s+(?:मैं|मई|आप|तुम|हम|हमें)(?:\s|$|[।,.!?])/;
+
+/**
  * Does this message READ as a question — a request for an answer rather than an order to act? Pure.
  */
 export function readsAsQuestion(lower: string): boolean {
@@ -392,9 +419,7 @@ export function readsAsQuestion(lower: string): boolean {
   if (text.endsWith('?')) return true;
   if (WH_OPENERS.test(text)) return true;
   if (AUX_OPENERS.test(text)) return AUX_ASKS_US.test(text);
-  // "kya aap … sakte ho" — the Hinglish ability question, whose opener is a wh-word anyway but whose
-  // mark is very often missing.
-  return /^kya\s+(?:aap|tum|main|mai)\b/.test(text);
+  return MIDSENTENCE_KYA_QUESTION.test(text);
 }
 
 /**
@@ -415,7 +440,42 @@ export function namesSpecificDeliverable(lower: string): boolean {
   return false;
 }
 
+/**
+ * Does this text contain native Devanagari script (Hindi, Marathi, …)?
+ *
+ * 🔴 THE GUARD THIS FUNCTION EXISTS FOR (autopsy 2026-09-16, alarm-app build). Every keyword array in
+ * this file — `NEW_BUILD_SIGNALS`, `EDIT_SIGNALS`, `BUILD_SIGNALS`, `WH_OPENERS`, `ANSWER_ONLY_PATTERNS`,
+ * `STATE_QUESTION_SIGNALS` — is Romanized-only (confirmed by scanning the whole file for this Unicode
+ * block: zero hits before this change). So a message typed in NATIVE Hindi script cannot earn a
+ * confident classification from ANY of them; the only thing that can make one look confident is an
+ * ACCIDENT — a stray Romanized/English word inside it tripping a keyword array (`BUILD_SIGNALS` matches
+ * "css", "api", "login", …), or the char-count `LONG_MESSAGE_THRESHOLD` (which Devanagari's matras and
+ * conjuncts inflate well past the same sentence's length in Roman script, for no reason connected to
+ * the message's actual complexity).
+ *
+ * The fix is NOT translating every array into Hindi — that is a much larger, riskier project (recorded
+ * separately in PROGRESS.md as an open item) and this file's own keyword approach does not scale to a
+ * language whose question particle can land anywhere in the sentence (see `MIDSENTENCE_KYA_QUESTION`).
+ * Instead: a classifier that cannot read a script must never CLAIM confidence about text in it. Any
+ * message containing Devanagari is capped at LOW confidence below, however it was otherwise classified
+ * — which is what sends it to the LLM upgrade (`classifyIntentSmart`) instead of hard-locking on a
+ * coincidence. A message that mixes scripts (Hindi with an English technical word, the common case) is
+ * still read for whatever Romanized signal it carries — this only ever REMOVES an unearned HIGH, never
+ * invents an intent.
+ */
+export function containsDevanagari(text: string): boolean {
+  return /[ऀ-ॿ]/.test(text);
+}
+
 export function classifyIntentWithConfidence(message: string): IntentWithConfidence {
+  const result = classifyIntentWithConfidenceCore(message);
+  if (result.confidence === 'high' && containsDevanagari(message)) {
+    return { ...result, confidence: 'low' };
+  }
+  return result;
+}
+
+function classifyIntentWithConfidenceCore(message: string): IntentWithConfidence {
   const text = typeof message === 'string' ? message.trim() : '';
   if (!text) return { intent: 'new_build', confidence: 'low' };
 
@@ -646,6 +706,15 @@ export function userAskedForAnAppToBeBuilt(message: string): boolean {
   // they happen to contain.
   if (matchesSignal(lower, CONTINUATION_SIGNALS)) return false;
   if (matchesSignal(lower, PROBLEM_SIGNALS)) return false;
+  // 🔴 NavBharatAI composed this message ITSELF — the preview "Fix error" button. A request we wrote
+  // is never a request for a new app, and it must not be guessed at: the template and this test share
+  // one string (lib/platformFixRequest.ts), so they cannot drift. Autopsy f5351721 — our own wording
+  // ("failed to BUILD … so the app BUILDS and runs") matched no PROBLEM_SIGNAL and read as new_build
+  // at HIGH confidence, so a correct zero-file answer was called a failure and the whole build re-ran:
+  // 23 wasted minutes on top of the 12 it had already finished in.
+  if (isPlatformFixRequest(message)) return false;
+  // The same class typed by hand — pasted toolchain output. PROBLEM_SIGNALS is human prose only.
+  if (looksLikeMachineError(message)) return false;
   return classifyIntentWithConfidence(withoutNounisedBuildWords(message)).intent === 'new_build';
 }
 

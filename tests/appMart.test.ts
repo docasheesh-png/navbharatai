@@ -78,8 +78,15 @@ describe('Browse is two labelled halves, and an empty half never says the store 
   const store = read('src/components/ide/NavAppStore.tsx');
 
   it('both halves are always headed, so neither can be mistaken for the other', () => {
-    expect(store).toContain('Play instantly — runs in your browser, nothing to install');
-    expect(store).toContain('Install on Android — real .apk apps');
+    // ⚠️ REWORDED 2026-09-17, invariant UNCHANGED. The admin sent a phone screenshot of App Mart:
+    // these two lines carried the only sentence explaining what each half IS, and were rendered at
+    // `text-white/40` uppercase — the lowest-contrast text on the screen. They are now a readable
+    // heading plus a plain sub-line. What this test pins is that each half HAS a heading and a
+    // one-line explanation, not the particular words, so the two can never be confused.
+    expect(store).toContain('Play instantly');
+    expect(store).toContain('Tap any app and it opens right here');
+    expect(store).toContain('Install on Android');
+    expect(store).toContain('Real apps you download and install on your phone');
   });
 
   it('THE BUG FROM THE ADMIN\'S SCREENSHOT: "No apps published yet" no longer sits under a listed app', () => {
@@ -97,6 +104,50 @@ describe('Browse is two labelled halves, and an empty half never says the store 
 
   it('the whole-store empty state invites, rather than apologises', () => {
     expect(store).toContain('App Mart is just getting started.');
+  });
+});
+
+/**
+ * THE PHONE LAYOUT, APPLIED TO THE STORE ITSELF (admin 2026-09-17, from a screenshot of App Mart on
+ * a phone: "app aise list me aa rahi hai, dikh hi nahi raha — 1st time user kaise pata lagega kya
+ * karna hai... 2 horizontal, baki sab vertical").
+ *
+ * The Home grid had already been given this treatment (the block above); the store it leads to had
+ * not. Its grid said `sm:grid-cols-2`, so two columns appeared only on a TABLET and every phone got
+ * one column of wide rows — four apps filled the screen, each a single truncated line.
+ *
+ * Verified in a real Chromium at 390px before shipping: two columns, no horizontal overflow, names
+ * wrapping onto two lines, an Open button under each tile.
+ */
+describe('App Mart browse is a 2-up TILE grid on a phone, not a list of rows', () => {
+  const store = read('src/components/ide/NavAppStore.tsx');
+
+  it('both halves are two columns FROM THE PHONE UP, not from sm up', () => {
+    expect(store).toContain('grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4');
+    // The regression itself: `sm:grid-cols-2` meant one column on every phone.
+    expect(store).not.toContain('grid gap-3 sm:grid-cols-2');
+  });
+
+  it('the tile is VERTICAL — a horizontal row cannot survive being halved in width', () => {
+    expect(store).toContain('flex flex-col rounded-xl bg-[#161b22]');
+    expect(store).toContain('flex flex-col items-start gap-2 p-3 pb-2');
+  });
+
+  it('a name gets TWO lines instead of one truncated one', () => {
+    // Most names here are a fragment of the creator's build prompt; one line of that is unreadable.
+    expect(store).toContain('text-sm font-semibold leading-snug line-clamp-2 w-full');
+  });
+
+  it('Load more spans the whole grid, or it renders as a tile beside a real app', () => {
+    // A grid child is a CELL by default. Without col-span-full the button sits in the next app slot.
+    expect(store).toContain('label="web apps" className="col-span-full"');
+    expect(store).toContain('label="apps" className="col-span-full"');
+  });
+
+  it('the sensitive-permission warning keeps its own line in the narrower tile', () => {
+    // It is the one thing on an Android card a person must not miss, and the tile is half the width
+    // of the row it replaced — so it stops sharing a line with the developer name and size.
+    expect(store).toContain('text-[11px] text-amber-400 leading-tight w-full');
   });
 });
 
@@ -205,7 +256,7 @@ describe('the Publish tab can actually publish', () => {
   });
 
   it('it publishes through the SAME server route, which re-checks ownership and the publish gate', () => {
-    expect(store).toContain("fetch('/api/nav-store/web/publish'");
+    expect(store).toContain("authedFetch('/api/nav-store/web/publish'");
     // The picker decides what to OFFER; the server decides what is ALLOWED.
     expect(read('src/server/routes/navStore.ts')).toContain('This workspace does not belong to you.');
   });

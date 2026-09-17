@@ -1436,6 +1436,88 @@ the code (it is actually read somewhere) on 2026-07-11.
   next vendor), and an abandoned read is aborted so a call nobody will read stops generating and stops
   billing. Test-locked in `openAiStream.test.ts` (the accumulator, pure) and `openAiStreamRunner.test.ts`
   (the behaviour), both proven by reversion.
+- **🧠 THE FORCED-REASONING UNCLAMP — our own ceiling was the total loss, not the clock (built
+  2026-09-17, autopsy f5351721). ⚠️ NOT set, and the code default is ON**; `AGENTV3_REASONING_UNCLAMP=off`
+  is the instant, no-deploy revert to the pre-2026-09-17 behaviour exactly. Read by
+  `src/server/AgentV3/floorBudget.ts`; the capability question is answered by `modelAlwaysReasons` in
+  `providers/glmThinking.ts` and asked once in `OpenAiToolRunner`.
+  🔴 **WHY: `floorBudget.ts` clamps a turn's token ask to what the clock can carry, and justifies it on
+  one asymmetry — a ceiling hit returns the files written so far, a clock kill returns nothing. For a
+  model that ALWAYS REASONS both halves are false, in opposite directions.** Its thinking is billed to
+  the same `max_tokens` and emitted BEFORE any content, so running out of CEILING is the total loss
+  (`turnStarvedItsBudget` — no text, no tool call), while running out of CLOCK under streaming keeps
+  whatever arrived. The clamp was trading the recoverable outcome for the unrecoverable one.
+  **The evidence (Strong tier, `glm-5.3`, 30 calls): 3 returned reasoning and nothing else, each
+  authorised exactly 9,833 tokens, and the first finished 131 seconds into a 300-second clock — out of
+  ceiling with 58% of its time unused.** The calls that survived used 8,651 / 9,199 / 9,746 tokens
+  against that 9,833 ceiling, so every first turn was a coin flip decided by how long it happened to think.
+  ⚠️ **THE FIX IS NOT A FASTER RATE CONSTANT — that was measured and REJECTED, and the measurement is
+  the reason this entry exists.** Across 73 real calls in the reports to hand,
+  `FLOOR_MS_PER_OUTPUT_TOKEN_DEFAULT` is well calibrated: kimi-k2.6 aggregates to **30.5 ms/token**
+  against our 30, fleet median 25.1, p90 48.1. Lowering it to suit the one fast model would under-bound
+  every slow one and re-open the class `floorBudget.ts` was written for. The rate is right; applying it
+  to tokens that are not the answer is what was wrong. **Do not "simplify" this by retuning the
+  constant** — a test asserts it stayed at 30.
+  🔒 **IT CANNOT MAKE THE WORST CASE WORSE, which is what made it shippable without touching the
+  admin-mandated ladder.** The clock still bounds the call: a slow forced-reasoning rung is cut at the
+  same moment it is cut today, still with no answer, and still throws to the next rung. Only the case
+  where the answer WOULD have fitted changes. Cost is unchanged on a normal turn — authorising tokens
+  does not spend them.
+  ⚠️ **`modelAlwaysReasons` IS A POSITIVE TEST, NOT `!glmCanDisableThinking`, and the difference is a
+  real bug avoided.** That helper denies on anything it does not recognise, because sending an
+  unsupported field is a hard 400 — denial-on-unknown is right THERE. Negating it would assert
+  "kimi-k2.7-code always reasons" purely because the id failed a `startsWith('glm-')` check, handing an
+  unbounded budget to a vendor nobody has measured. So the new predicate is FALSE for every non-GLM
+  vendor, which keeps today's clamp for them exactly.
+  🔴 **STILL OPEN (rule 6): the Kimi sibling.** Report 58fe8254 shows the same `outputTokens: 4833`
+  starvation three times on Kimi, so the class is not GLM-only — but this repo holds no capability fact
+  for Moonshot's models, and inventing one would be a guess. The honest generic fix (remember a rung
+  that starved and unclamp its NEXT call) needs cross-turn state the per-rung runner construction does
+  not currently carry. Recorded, not guessed at.
+  🔒 **Honesty half:** a rung that starves with the clamp ALREADY LIFTED must not be reported as "our
+  own ceiling" — that sentence would send the next autopsy to fix arithmetic that is already correct.
+  `isUnclampedStarvation` splits the two wordings in `BuildDiagnostics`. Test-locked and proven by
+  reversion in `tests/reasoningBudgetUnclamp.test.ts` (19 cases).
+
+- **🐌 THE THROUGHPUT BENCH — the other half of the entry above (built 2026-09-16, autopsy dd1f5f60).
+  ⚠️ NOT set, and the code defaults govern: the feature is ON.** `AGENTV3_SLOW_RUNG_BENCH` (`off` is
+  the instant, no-deploy revert to the pre-2026-09-16 behaviour exactly), `AGENTV3_SLOW_RUNG_RATIO`
+  (**2.5**) and `AGENTV3_SLOW_RUNG_MIN_CALLS` (**3**). Read by `src/server/AgentV3/slowRungBench.ts`;
+  applied in the SUCCESS path of `MultiProviderTurnRunner`.
+  🔴 **WHY, in one sentence: a free-tier build ran 30 minutes, wrote 2 files, never produced a preview
+  — and every single one of its 11 model calls SUCCEEDED.** GLM delivered 15,330 output tokens in
+  1,771 s = **8.65 tokens/second**, against the ~33 tok/s that `floorBudget.ts` already calls the point
+  past which a provider is *"one we would rather fall past than sit behind"*. 29.5 of the 30.1 minutes
+  were inside a provider call; **our own engine's total work was 7.9 seconds.**
+  🔑 **THE CLASS, named so it is recognised again: EVERY escalation path in `MultiProviderTurnRunner`
+  — timeout bench, 429 bench, shared cooldown, dead-rung memory, rung advance — lives inside a
+  `catch`.** A provider that is merely SLOW throws nothing, so it reached none of them: the ladder
+  never left rung 1 and KIMI sat one step away for twenty-nine minutes. And the 30 ms/token constant
+  that defines "too slow to wait for" was read by **no file except the one that defines it** — it
+  sized requests and judged nothing.
+  ⚠️ **STREAMING WIDENED THIS, and that is not an argument against streaming.** Bounding a call by
+  SILENCE assumed two kinds of provider, healthy and stalled. A **steadily slow** one is a third: it
+  never goes quiet (so the 60 s idle bound never fires) and it always has an answer (so hitting the
+  300 s ceiling returns a truncated SUCCESS, not a failure). The ceiling a single slow rung can hold
+  also doubled, 150 s → 300 s, the same day. Do not reason about streamed calls from the two-case
+  model — there are three.
+  🔒 **FOUR PROPERTIES NOT TO "TIDY UP".** (1) It can ONLY move a build to the next rung — never fail
+  one, never shorten a call, never change what a provider is asked. (2) **It never benches the last
+  engine** (`canBenchAnother`): every other bench retires a rung that CANNOT answer, this one retires
+  a rung that CAN, and a slow app beats no app — when the last one is judged slow the report says so
+  once, explicitly. (3) An **unmeasured** turn is discarded, never guessed: a stream without
+  `include_usage` reports 0 tokens, and counting that would score a 300 s call at 60× and retire a
+  healthy vendor on a number nobody measured. (4) A ratio **≤ 1 is REFUSED** and falls back to 2.5 —
+  at 1.0 it would retire every provider on earth including the backstop, so here the dangerous
+  direction is a SMALLER value, not a larger one.
+  📌 Keyed by **FAMILY + MODEL**: family so a 50-key pool accumulates one verdict, model so
+  `glm-5.3-flash` being slow never retires `glm-5.3` — a LATER rung of the same weak ladder. The
+  verdict is **latched in the state** because on the real data it flickers (3.43× → **2.46×** → 3.5×);
+  the runner happened to latch it in a `Set`, which hid the defect. Test-locked and reversion-proven
+  in both halves in `tests/slowRungBench.test.ts`.
+  ✅ **AND THIS REPORT SETTLED THE STREAMING ENTRY'S ONE OPEN QUESTION: Z.ai DOES honour
+  `stream_options.include_usage`** — real per-call input/output/cache token counts came back on every
+  streamed call. The "0 in / 0 out" risk that entry warns to watch for did not materialise.
 - **The referral welcome gift — four earned steps (built 2026-09-15, NOT live yet):**
   `REFERRAL_REWARDS` (the master switch — ⚠️ **UNSET, and unset means today's behaviour exactly**:
   no code is minted, no money moves, and not one document is written). Tunables, all with working
@@ -1947,6 +2029,26 @@ weeks-long registration) — localStorage/IndexedDB are per-origin from day one,
   sequence is **bucket public-readable → Worker's `APPS_BUCKET` set and deployed → `PUBLISHED_APP_DOMAIN`
   set and a test app confirmed loading → only then `PUBLISHED_APPS_BUCKET_ONLY=on`.** Missing any
   precondition disables the path silently and correctly (today's behaviour, byte-identical).
+  ✅ **LIVE AND VERIFIED ON A REAL APP, 2026-09-17.** All three are SET and a published app (TaskLite)
+  opens at `https://a-e3638646f0794cd0da543c9d.mitrify.in` with no Firebase channel consumed — the
+  ~50-channel publish ceiling is GONE in production. ⚠️ **The last blocker was not any of these keys and
+  not the code: the Cloudflare ZONE for `mitrify.in` sat at `Pending Nameservers`, and a Worker route
+  does not run on a pending zone.** The registrar held `hasslo`+`teagan` while the zone that owns the
+  route had been assigned `houston`+`naya` — two real Cloudflare pairs, neither matching — so every
+  request bypassed the Worker and got Firebase's "Site Not Found". Two further misconfigurations were
+  corrected the same night: `*.mitrify.in` A records pointed at **Cloudflare's own anycast IPs** (a
+  resolved IP pasted back as an origin; now the documented placeholder `A * → 192.0.2.1`, Proxied), and
+  the Worker running at the edge was an older paste than the repo file.
+  🔎 **BEFORE DEBUGGING THIS PATH AGAIN, OPEN `https://<app>.<domain>/__nbai`** (PR #2980). It returns
+  the Worker's `version`, the `appsBucket` it is reading from and the exact object URL it looks an app's
+  `index.html` up at — the one fact that could not be observed from outside, and whose absence turned a
+  one-screen fix into an hour of elimination. JSON back ⇒ that code is live; Firebase's page back ⇒ an
+  older Worker is. `WORKER_VERSION` is CI-pinned against a hash of the file, so a Worker change that
+  forgets to bump it fails the build rather than reporting a version that lies.
+  🔴 **STILL OPEN (rule 6):** the Worker is deployed by PASTING it into the Cloudflare dashboard, so
+  nothing links the repo to the edge and CI cannot prove what is live. The complete fix is a Wrangler
+  deploy from CI, which needs `CLOUDFLARE_API_TOKEN` as a GitHub REPO secret (the token already exists
+  in Cloud Run). Until then the version endpoint makes the drift VISIBLE; it does not make it impossible.
   **Reverting is one key.** Unset `PUBLISHED_APPS_BUCKET_ONLY` and new publishes go back to Firebase
   immediately. Apps ALREADY published bucket-only keep working (the Worker serves them) and stay
   removable — takedown deletes their bucket objects unconditionally, not behind the flag, precisely so
@@ -2673,9 +2775,121 @@ is now **`src/server/AgentV3/tierLadder.ts`**, and the build chain is built from
 
 | Tier (UI) | Internal | The ladder (first → last) | Escalation cap |
 |---|---|---|---|
-| Weak (free) | `weak` | GLM `glm-5.3-flash` → KIMI `kimi-k2.7-code` → GLM `glm-5.3` → Claude **Haiku** | never escalates (NavBharatAI pays) |
-| Normal (paid economy) | `off` | GLM `glm-5.3-flash` → KIMI `kimi-k2.7-code-highspeed` → GLM `glm-5.3` → Claude Sonnet | Sonnet |
+| Weak (free) | `weak` | GLM `glm-4.7-flashx` → KIMI `kimi-k2.7-code` → GLM `glm-5.3` → Claude **Haiku** | never escalates (NavBharatAI pays) |
+| Normal (paid economy) | `off` | GLM `glm-4.7-flashx` → KIMI `kimi-k2.7-code-highspeed` → GLM `glm-5.3` → Claude Sonnet | Sonnet |
 | Strong (paid premium) | `mini` | GLM `glm-5.3` → KIMI `kimi-k3` → Claude Sonnet → Claude **Opus** | Opus (its last rung) |
+
+🧠 **A BIG APP DOES NOT OPEN ON THE CHEAPEST RUNG (admin 2026-09-17, verbatim: "kimi ko bade aur
+complex task dedo, kabhi bhi — starting me bhi de sakte ho, beech me bhi! task chota/bada/mild/complex
+hai code se pata na lage to gptnano se puchwa lo!!").** `AGENTV3_COMPLEX_TO_KIMI` — ⚠️ **NOT set, and
+the code default is ON**; `off` restores the pre-change behaviour exactly (every build opens on rung 1)
+and costs nothing while off. Read by `src/server/AgentV3/complexityRouting.ts`; applied through
+`buildTurnRunner`'s new `complex` flag.
+
+- **A `complex` verdict skips the cheap flash opener**, so on Weak and Normal the first engine to see
+  the app is **KIMI**. Strong has no flash rung and is untouched. "Starting me bhi" is literal.
+- **The line is 40 — `RequestAnalyser`'s OWN top tier boundary**, not a second invented threshold
+  (`simple_app` ≤20 capped, `coding` 30, `debugging` 45, `complex_app` 58, `architecture` 80).
+- 🔑 **THE HOOK WAS ALREADY THERE, UNUSED.** `analyzeRequest`'s docblock has said since the cost-ladder
+  work that it "marks the genuinely ambiguous ones (`ambiguous: true`) so a caller MAY refine them with
+  a cheap LLM analyser" — and nothing ever read that flag. This is that half, so no new scoring concept
+  competes with the existing one.
+- 💸 **A model is asked ONLY within ±3 of the line**, deliberately narrower than `ambiguous` itself
+  (which marks BOTH the 20 and 40 boundaries, because it was written for a three-tier ladder). Only the
+  40 line can flip this binary decision, so asking about a score of 18 would spend a call to move a
+  verdict from `simple` to `simple`. **"Kharcha kam se kam" applies to the classifier too.**
+- 🔒 **It cannot break, hang or mislead a build**: the call is raced at 6 s, and a throw, a timeout, an
+  empty reply and an unparseable reply ALL fall back to the deterministic verdict — never to a guess.
+  `simple` is the default on every doubt, including a NaN score.
+- ⚠️ **What it costs, plainly:** on Weak (which NavBharatAI pays for itself) a complex build opens on
+  `kimi-k2.7-code` ($0.95/$4.00) instead of `glm-4.7-flashx` ($0.07/$0.40) — ~13× the input price for
+  THOSE builds. The bet is that a cheap rung which fails is paid twice, once in the wasted call and
+  once in the heal. **Watch: the share of builds routed complex, and whether their heal count drops.**
+- 🔗 `healLadder` and this router share ONE definition of "the cheap opener"
+  (`withoutCheapFlashLead`), applied by `buildTurnRunner` for `heal || complex`. They stay separate
+  FLAGS — "this is a repair" and "this is a big app" are different questions with the same answer
+  today — and a test asserts the two produce identical ladders so they cannot drift.
+
+🏗️ **`AGENTV3_PROJECT_MODE` — SOFTWARE PROJECT MODE. BUILT, WIRED, TESTED, AND ASLEEP SINCE
+2026-07-04. ⚠️ Recorded here on 2026-09-17 because it was MISSING FROM THIS REGISTRY ENTIRELY** —
+zero mentions in this file, eight in `PROGRESS.md`. That is precisely the drift this registry exists
+to prevent, and it is why the capability is invisible: a session asked to build "milestone building"
+would build a second copy of it, and the admin cannot decide on a feature nobody tells them exists.
+
+**What it is** (`src/server/AgentV3/ProjectPlan.ts`, 592 lines + `ProjectPlanStore.ts`): for a build
+too big for one conversation, the project is decomposed ONCE into modules carrying explicit
+`dependsOn` edges and **frozen export contracts**, persisted durably, and then each turn builds ONE
+module in a FRESH context holding only that module's spec plus the contracts of modules already
+done — never the transcript. Context stays small however big the project is, so size is bounded by
+the plan rather than by the window. It answers the five ceilings by name: context window, the
+80-step cap, the 30–60 min clock, the budget cap, and small-app-tuned verification.
+
+🔒 **The wiring is VERIFIED, not taken from the doc** (`routes/agentv3.ts` ~14272–14356 creates and
+saves the plan and projects the todos, ~18571 marks each module done/failed after its turn, ~19591
+auto-continues to the next buildable module). This is a live path behind a flag, not dead code —
+unlike `EmbeddingSearch`, whose only reader is called from nowhere.
+
+⚠️ **UNSET ⇒ OFF, and every build is byte-identical to today.** The flag takes `on` (everyone),
+`off`/unset (the kill switch), or **anything else as an ALLOWLIST of uids/emails** — built
+deliberately so the admin can enable it for their OWN account and run one real mega-prompt before
+anyone else sees it. Detection (`detectMegaProject`) is HIGH-PRECISION on purpose: an explicit
+"100+ files/pages/screens", or a big-software noun (ERP/CRM/HMS/SaaS platform/marketplace…) with ≥8
+enumerated features, or ≥14 enumerated features. A false positive costs an ordinary app an extra
+planner call; a false negative just builds exactly as it does today. Minimum 3 modules or it falls
+straight back to the normal path.
+
+🔴 **THE STATE IS A PENDING ADMIN DECISION, NOT AN UNFINISHED FEATURE.** `PROGRESS.md` (2026-07-04)
+records it as *"fully built and dormant … ADMIN DECISION NEEDED (asked in chat, safeguard #3)"*,
+with the exact action: set `AGENTV3_PROJECT_MODE=aashishcpmt09@gmail.com` on Cloud Run, send one
+mega-prompt, watch the module plan appear and advance, then `on` for everyone once happy. **That
+question has been open for over two months.** It is recorded here rather than acted on because the
+key lives in a console no session can reach.
+
+⚠️ **Three honest gaps, from that same entry and still open:** an IMPORTED repo never creates a plan
+(creation fires only on a fresh `new_build`); a reopened incomplete plan needs a typed "continue"
+(restore does not re-emit resumable); and contract DRIFT — a module deviating from its own frozen
+contract — is caught only by the whole-workspace `tsc` each turn, not by a dedicated contract check.
+
+🔴 **THE LEAD RUNG CHANGED 2026-09-17 — `glm-5.3-flash` IS OFF EVERY LADDER** (admin, verbatim: *"glm
+5.3 flash ko hata do!"*, with the FlashX price read off docs.z.ai on their own screen). It is replaced,
+on Weak and Normal and as the PLAN rung of both, by **`glm-4.7-flashx` — $0.07 in / $0.40 out / $0.01
+cached**, against 5.3-flash's $0.15 / $0.50 / $0.03. Strong is untouched (it never carried a flash rung).
+
+**This REVERSES half of the 2026-09-14 decision, and the reversal is evidence-led rather than a change
+of mind.** That decision picked 5.3-flash on the rule *"a $0 rung that fails costs more than a $0.15
+rung that succeeds"* — the rule is still right; its premise was false. Three autopsies in three days:
+- **`ee20478d` (09-15)** — 280 hard 400s in ONE build. Every tier opened on a rung that could not
+  succeed, because 5.3-flash cannot be told to stop reasoning.
+- **`b3a2c81e` (09-16)** — 68 GLM failures, 52 `OUTPUT_BUDGET_STARVED`: the model's mandatory thinking
+  spent the whole authorised output ceiling before writing one character.
+- **`dd1f5f60` (09-16)** — 8.65 tokens/second sustained; 29.5 of a 30.1-minute build inside one call.
+
+🔑 **FLASHX IS NOT MERELY CHEAPER — THE FAILURE CLASS CANNOT OCCUR ON IT.** `glmCanDisableThinking`
+(`glmThinking.ts`) is a NUMERIC family test: 5.3-and-newer always reason; 4.x can be told not to. FlashX
+is 4.7, so the turn sends `thinking: disabled` and the entire output budget goes to code rather than to
+reasoning nobody reads. Cheaper AND structurally immune — so this is not a trade between the two aims.
+
+💸 **THE BILLING HALF HAD TO SHIP IN THE SAME COMMIT, and it is the third time this exact trap was set.**
+`glm-4.7-flashx` contains "flash" (→ the FREE `glm-flash` line) and matches `/glm-?4/` (→ the $0.60
+coder line). Either would have been wrong, and a $0 real cost bills the USER ₹0 while we pay Z.ai —
+identical in shape to `kimi-k2.7-code-highspeed` and `glm-5.3-flash`, both caught on 09-16. It now has
+its own row (`RATE_GLM47_FLASHX_IN` / `_OUT` / `_CACHE`) matched BEFORE both rules. **A model may not
+join a ladder until its price is on the card.**
+
+🔁 **A HEAL NOW DROPS THE LEAD RUNG AGAIN — a dormant rule woke up.** `healLadder`'s pattern matched
+only `4.7-flash`, so between 09-14 and 09-17 (while 5.3-flash led) every heal restarted on the very
+rung whose output needed repairing. FlashX matches it, so the 2026-08-13 rule (*"a repair must not begin
+on the model that produced the failing app"*) applies again: a Weak/Normal heal opens on KIMI. It costs
+more per heal ($0.95/$4.00 vs $0.07/$0.40) — intended, because a cheap repair that fails buys a second
+one. The predicate is now the named `isCheapFlashRung`, so this can never again turn on a coincidence.
+
+⚠️ **THE HONEST RISK, recorded rather than discovered later: FlashX's CODING quality is unmeasured here.**
+Z.ai's "X" suffix is the faster, paid variant of a Flash model (GLM-4.5-X, -AirX are all dearer than
+their base), and this file's own 09-14 entry calls the free `glm-4.7-flash` *"weak at coding"* — FlashX
+may share that brain. What changed is the comparison, not the estimate: a model that reasons well and
+delivers nothing is worse than a plainer one that answers. **Watch heal COUNT on the first real builds,
+not cost.** 🔒 Revert with no deploy:
+`AGENTV3_LADDER_WEAK=GLM:glm-5.3-flash,KIMI:kimi-k2.7-code,GLM:glm-5.3,HAIKU` (and `_NORMAL` likewise).
 
 🔴 **KIMI RUNGS REVISED 2026-09-16** (admin, verbatim: *"free wale me kimi 2.6 ki jagah kimi code 2.7 kar
 de! normal wale me kimi code 2.7 highspeed karo strong me kimi k3 bhi add karo"*): Weak's Kimi rung moved

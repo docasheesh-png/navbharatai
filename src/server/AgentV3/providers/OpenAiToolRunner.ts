@@ -13,7 +13,7 @@
 
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 import { turnDeadline, BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE } from '../turnDeadline';
-import { glmThinkingParam, isThinkingParamRejection, type GlmThinkingLevel } from './glmThinking';
+import { glmThinkingParam, isThinkingParamRejection, modelAlwaysReasons, type GlmThinkingLevel } from './glmThinking';
 import { reconcileFloorBudget, turnStarvedItsBudget, starvedBudgetError } from '../floorBudget';
 import {
   toolDefsToOpenAI,
@@ -267,7 +267,21 @@ export class OpenAiToolRunner implements TurnRunner {
     // files it already wrote and names the one that was cut, instead of TIMED OUT, which returns
     // nothing at all. `bound.timeoutMs` (not the configured one) is used deliberately — a lane with
     // thirty seconds left must not authorise a 32,000-token answer either.
-    const budget = reconcileFloorBudget(params.maxTokens ?? this.opts.defaultMaxTokens ?? 8000, timeoutMs);
+    //
+    // 🔴 EXCEPT WHERE THE CLAMP IS INVERTED — a rung that reasons whether we ask it to or not bills that
+    // thinking to this same ceiling and emits it BEFORE any content, so for it the CEILING is the total
+    // loss and the CLOCK is the recoverable one. Autopsy f5351721: three calls on `glm-5.3` returned
+    // reasoning and nothing else at exactly 9,833 tokens, the first of them 131 seconds into a
+    // 300-second clock — out of ceiling with 58% of its time unused. See floorBudget.ts for why a
+    // faster rate constant was measured and rejected, and why unclamping cannot make the worst case
+    // worse. The capability question is asked of the module that owns it; `modelAlwaysReasons` is a
+    // POSITIVE test, so a vendor we have not measured keeps today's clamp exactly.
+    const budget = reconcileFloorBudget(
+      params.maxTokens ?? this.opts.defaultMaxTokens ?? 8000,
+      timeoutMs,
+      process.env,
+      { alwaysReasons: modelAlwaysReasons(thinkingModel) },
+    );
     const request = {
         // The OpenAI-compatible provider has its own model ids, so an explicit option
         // model wins over the Anthropic model id the loop passes for Claude.
@@ -362,7 +376,7 @@ export class OpenAiToolRunner implements TurnRunner {
     //
     // Throwing puts it where it belongs: the chain falls to the NEXT rung, which is a different
     // vendor and usually not a forced-thinking one, and the build proceeds instead of ending empty.
-    if (turnStarvedItsBudget(result)) throw starvedBudgetError(budget.maxTokens, budget.requested);
+    if (turnStarvedItsBudget(result)) throw starvedBudgetError(budget.maxTokens, budget.requested, budget.reasoningUnclamped);
 
     // Hand the visible text to the caller in one shot — unless the streamed path already delivered it
     // delta by delta, in which case repeating it here would print the answer twice.

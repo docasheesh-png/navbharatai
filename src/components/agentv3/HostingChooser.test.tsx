@@ -28,7 +28,6 @@ describe('HostingChooser — the two-path Publish surface', () => {
     expect(html).toContain(ADVANCED_PUBLISH_HINT);    // and readable without opening it
     expect(html).toContain('Publish on NavBharatAI');
     expect(html).toContain('coming soon'); // full-stack honesty
-    expect(html).toContain('Free');
     // Open, it is the same card it always was — both sub-choices, nothing dropped.
     const open = render(BYO_OPEN);
     expect(open).toContain('We deploy to your provider');
@@ -164,34 +163,6 @@ describe('HostingChooser — "Make an Android app" (APK) path', () => {
     })).toContain('Connected: aashish/mitrify');
     // And the default screen really is the collapsed one, or the change did nothing.
     expect(render([P('firebase', 'Firebase Hosting', true)])).not.toContain('We deploy to your provider');
-  });
-});
-
-// ADMIN REPORT 2026-08-19: "app mart me sirf naam aata hai, logo nahi." The App Mart publish form never
-// sent an icon, so every listing fell back to the globe. The form must expose an icon control (which
-// the publish call then sends as iconDataUrl) so a published app can carry its logo.
-describe('HostingChooser — App Mart listing carries an app icon (logo bug fix)', () => {
-  it('the "Put it on App Mart" form offers an app-icon upload', () => {
-    const html = render([P('firebase', 'Firebase Hosting', true)]);
-    expect(html).toContain('Put it on App Mart');
-    expect(html).toContain('Add app icon'); // the upload control that feeds iconDataUrl
-    expect(html).toContain('at least 512'); // honest sizing guidance
-  });
-
-  // ADMIN 2026-08-19: "waha 2 option aur add karo — 1. make icon 2. pest". A user on a phone has no
-  // icon file lying around; the two ways that actually fit that user are the clipboard and making one.
-  it('also offers Paste — the way an icon copied from AI Image Gen gets in', () => {
-    const html = render([P('firebase', 'Firebase Hosting', true)]);
-    expect(html).toContain('Paste');
-  });
-
-  it('shows "Make icon" only when something can actually open AI Image Gen', () => {
-    // Same honesty rule the APK button follows: never render an action that cannot happen.
-    // Matched on the BUTTON's label, not the words "Make icon" — the help text below the row explains
-    // the round trip and says them too, which is exactly what a looser assertion would trip over.
-    const label = 'aria-label="Make icon with AI Image Gen"';
-    expect(render([P('firebase', 'Firebase Hosting', true)])).not.toContain(label);
-    expect(render([P('firebase', 'Firebase Hosting', true)], { onMakeIcon: () => {} })).toContain(label);
   });
 });
 

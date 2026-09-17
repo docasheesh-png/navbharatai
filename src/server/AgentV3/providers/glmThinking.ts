@@ -5,10 +5,17 @@
 //
 //     "This model always engages in thinking and cannot be disabled; please use low, high, or max"
 //
-// `glm-5.3-flash` is the FIRST rung of the Weak and Normal ladders and the PLAN rung of all three
-// (tierLadder.ts), and `glm-5.3` is the first rung of Strong. So this was not an edge case: since the
-// 2026-09-14 ladder change, **every build on every tier opened on a rung that could not succeed**, and
-// the chain spent its whole budget falling through it — `GLM → GLM#2 → … and 80 more` on one build.
+// At the time, `glm-5.3-flash` LED the Weak and Normal ladders and `glm-5.3` led Strong, so this was
+// not an edge case: **every build on every tier opened on a rung that could not succeed**, and the
+// chain spent its whole budget falling through it — `GLM → GLM#2 → … and 80 more` on one build.
+//
+// ⚠️ THAT SENTENCE IS HISTORY, NOT THE CURRENT LADDER — and it is written in the past tense for a
+// reason this repo has already paid for (2026-09-15: four comments claiming GPT was on the Weak ladder
+// stayed true for one day and wrong for weeks, because `tsc` and `vitest` cannot read a comment). The
+// lead rung moved to `glm-4.7-flashx` on 2026-09-17 — partly BECAUSE of this very defect, since 4.x
+// can be told not to reason and 5.3 cannot. **`TIER_LADDERS` in tierLadder.ts is the only place a rung
+// exists; do not restate it here.** This module needs no ladder knowledge at all: `glmCanDisableThinking`
+// is a numeric family test, so a rung added later is covered the day it ships.
 //
 // 🔎 THE CLASS WAS ALREADY ROOT-CAUSED HERE, FOR THE OTHER VENDOR, AND THE SIBLING WAS NEVER HUNTED.
 // `models.ts`'s `modelSupportsAdaptiveThinking` exists because of the identical failure on Anthropic
@@ -120,4 +127,30 @@ export function isThinkingParamRejection(error: unknown): boolean {
   if (!text) return false;
   if (!/\bthinking\b|\breasoning(?:_effort)?\b/.test(text)) return false;
   return /\b400\b|invalid|unsupported|unrecognized|unrecognised|not (?:a )?(?:valid|supported)|bad request|must be one of/.test(text);
+}
+
+/**
+ * Will this model reason whether we ask it to or not? PURE.
+ *
+ * 🔴 WHY THIS IS NOT `!glmCanDisableThinking(model)`, AND THE INVERSION THAT MAKES IT A DIFFERENT
+ * QUESTION. That helper answers "may we send `disabled`?" and deliberately denies on anything it does
+ * not recognise — a Kimi id, a Grok id, a typo — because sending an unsupported field is a hard 400.
+ * Denial-on-unknown is the safe answer THERE and the wrong answer HERE: negating it would assert
+ * "kimi-k2.7-code always reasons", which is a claim about a vendor this module has never tested, made
+ * only because the id failed a `startsWith('glm-')` check.
+ *
+ * So this is a POSITIVE test with the same numeric family rule, and it is FALSE for everything it does
+ * not positively know — including every non-GLM vendor. A false answer costs today's behaviour
+ * exactly; a wrongly-true one would hand an unbounded budget to a model on nothing but a guess.
+ */
+export function modelAlwaysReasons(model: string | undefined | null): boolean {
+  const m = String(model ?? '').toLowerCase().trim();
+  if (!m.startsWith('glm-')) return false;             // another vendor → we have not measured it → no claim
+  const version = /^glm-(\d+)(?:\.(\d+))?/.exec(m);
+  if (!version) return false;                          // unparseable → no claim
+  const major = Number(version[1]);
+  const minor = Number(version[2] ?? 0);
+  if (!Number.isFinite(major) || !Number.isFinite(minor)) return false;
+  // 5.3 is the first GLM family that always reasons; every later one inherits it.
+  return major > 5 || (major === 5 && minor >= 3);
 }

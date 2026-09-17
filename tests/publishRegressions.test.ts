@@ -33,7 +33,10 @@ describe('1 — the SECOND publish must not fail because of the first', () => {
 
 describe('2 — App Mart publish must not hang', () => {
   const route = read('src/server/routes/navStore.ts');
-  const chooser = read('src/components/agentv3/HostingChooser.tsx');
+  // App Mart publish moved OUT of the hosting chooser into its own dedicated screen (admin 2026-09-16
+  // — it is a separate decision from hosting), so the button-side half of this regression now lives
+  // in NavAppStore.tsx, the sole remaining caller of this endpoint.
+  const chooser = read('src/components/ide/NavAppStore.tsx');
 
   it('the page bake happens AFTER the response, never inside the user\'s wait', () => {
     // renderPreview + gzipSync are SYNCHRONOUS and CPU-bound: a timeout could not have rescued this,

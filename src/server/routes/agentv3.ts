@@ -160,7 +160,7 @@ import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
 import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
 import { parseChatRole, roleSystemPrompt, parseProposedSteps, stripStepsBlock, selectRoleContextFiles, formatRoleContext } from '../AgentV3/RoleChats';
-import { summarizeFileTree } from '../AgentV3/systemPrompt';
+import { summarizeFileTree, NAVBHARATAI_UI_MAP } from '../AgentV3/systemPrompt';
 import { weakBuildDisciplineBlock } from '../AgentV3/weakBuildDiscipline';
 import { pickPaletteForPrompt, palettePromptBlock } from '../AgentV3/designPresets';
 import { deadlinePauseMessage } from '../AgentV3/DeadlinePause';
@@ -10074,7 +10074,11 @@ async function noteBuildOutcome(
               LANGUAGE_RULE + '\n\n' + CREDENTIAL_SILENCE_RULE + '\n\n' + CODE_LITERACY_RULE + '\n\n' +
                 "You are NavBharatAI's friendly assistant. Reply briefly and warmly, following the " +
                 "LANGUAGE rule above (match the user's language; never default to Hindi). Do not " +
-                "mention which model you are.\n\n" + CREATOR_IDENTITY + '\n\n' + INDIA_TERRITORIAL_INTEGRITY + '\n\n' + recencyDirective() + '\n\n' + LINK_POLICY + chatWorkspaceContext + chatPreviewHealth + chatSessionRecall +
+                "mention which model you are.\n\n" + CREATOR_IDENTITY + '\n\n' + INDIA_TERRITORIAL_INTEGRITY + '\n\n' + recencyDirective() + '\n\n' + LINK_POLICY +
+                // The builder's own self-awareness (admin 2026-09-17: "preview kaise chalega, batana chahiye").
+                // The SAME constant the architect prompt carries, so a "how do I open it?" that lands
+                // here gets the Preview tab, never `npm run dev`. See NAVBHARATAI_UI_MAP.
+                '\n\n' + NAVBHARATAI_UI_MAP + chatWorkspaceContext + chatPreviewHealth + chatSessionRecall +
                 (clarifyWhatToBuild
                   ? "\n\nThe user has asked for something to be MADE, but their message does not say "
                     + "WHAT to make. Do NOT guess, and do NOT invent an app or a product name from "

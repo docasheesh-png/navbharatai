@@ -553,6 +553,15 @@ export function containsDevanagari(text: string): boolean {
   return /[ऀ-ॿ]/.test(text);
 }
 
+/**
+ * Does the message carry a NEGATION — the one word that can turn a build order into its opposite, or
+ * into a constraint on it ("make a movie app, NOT a quiz app")? Either way a keyword ladder that only
+ * counts verbs cannot tell, so the message goes to the reader. Pure.
+ */
+export function hasNegation(lower: string): boolean {
+  return /\b(?:mat|nahi|nahin|na|don'?t|do\s+not|never|not|no)\b/.test(lower);
+}
+
 export function classifyIntentWithConfidence(message: string): IntentWithConfidence {
   const result = classifyIntentWithConfidenceCore(message);
   if (result.confidence === 'high' && containsDevanagari(message)) {
@@ -629,10 +638,24 @@ function classifyIntentWithConfidenceCore(message: string): IntentWithConfidence
   //       keyword answer still stands. All this buys is that the question gets READ. And an ORDER
   //       ("build a notes app", "ek billing app banao") is not a question, so it stays HIGH and
   //       instant — the common path pays nothing for this.
+  // 🔴 THE READER IS THE DEFAULT; A KEYWORD MAY HARD-LOCK ONLY AN UNMISTAKABLE ORDER (admin
+  // 2026-09-17, after five autopsies in one week — 5abad374, 2c61f648, the alarm app, f5351721,
+  // cc8c9075 — every one of them a message the keyword ladder locked at HIGH so the intention reader
+  // never ran). The admin's ask, verbatim: *"user ka har woh message jo … unclear hai, hamesha llm call
+  // karo"*. This is where "unclear" is decided: a question (see `readsAsQuestion`), or a NEGATION in
+  // the same sentence as the build verb ("don't make it a quiz", "quiz app mat banana"). Either one
+  // costs the verdict its lock, never its intent — so a build order stays a build order if the reader
+  // is slow, and only the hard lock is gone. A plain order ("build a notes app", "ek billing app
+  // banao") has neither, keeps HIGH, and still pays nothing.
+  //
+  // ⚠️ Message LENGTH is deliberately NOT a doubt signal. "build me a todo app" is five words and
+  // unmistakable; the cc8c9075 question was nine words. Length says nothing about clarity, and an
+  // object-less order ("app banana") is already answered downstream by a clarifying question (#3039).
+  const doubt = question || hasNegation(lower);
   const nbSignal = firstSignalWord(lower, NEW_BUILD_SIGNALS);
-  if (nbSignal) return { intent: 'new_build', confidence: question ? 'low' : 'high', signal: nbSignal };
+  if (nbSignal) return { intent: 'new_build', confidence: doubt ? 'low' : 'high', signal: nbSignal };
   const editSignal = firstSignalWord(lower, EDIT_SIGNALS);
-  if (editSignal) return { intent: 'edit_existing', confidence: question ? 'low' : 'high', signal: editSignal };
+  if (editSignal) return { intent: 'edit_existing', confidence: doubt ? 'low' : 'high', signal: editSignal };
   // A comparison/explanation ask ("compare X and Y") → chat, even if it mentions a build-flavored
   // noun in passing. High confidence so length/code-heuristics below can't override it either.
   if (matchesSignal(lower, INFORMATIONAL_SIGNALS)) {
@@ -729,26 +752,37 @@ export async function classifyIntentSmart(
     // already free to OFFER to build — so "chat" is never a refusal, only a faster first response.
     'If they are ASKING something, the answer is "chat" — even when their sentence contains a word like',
     'build, make, create or generate. Choose "build" only when they want an app produced NOW.',
-    'Choose exactly one of three categories:',
+    'Choose exactly one of four categories:',
     '  chat    — plain conversation, a greeting, a question, thanks, or asking how something works',
+    '  help    — asking how to use NAVBHARATAI ITSELF: where a button is, how to open or see their',
+    '            app, how to publish, download, restore or stop (answered, never built)',
     '  build   — create a NEW app / feature / component from scratch',
     '  edit    — fix, modify, add to, or finish something that ALREADY exists',
     ...(ctxLines.length ? ['', ...ctxLines] : []),
     '',
     `User message: "${message.slice(0, 300)}"`,
     '',
-    'Reply with ONLY one word: chat, build, or edit.',
+    'Reply with ONLY one word: chat, help, build, or edit.',
   ].join('\n');
 
   try {
     const raw = (await llmCall(prompt)).trim().toLowerCase().split(/\s/)[0] ?? '';
-    if (raw === 'chat') return 'chat';
+    // "help" is a question about NavBharatAI itself — it takes the chat lane, which now carries
+    // NAVBHARATAI_UI_MAP and can say "press the Preview tab" instead of `npm run dev`.
+    if (raw === 'chat' || raw === 'help') return 'chat';
     if (raw === 'build') return 'new_build';
     if (raw === 'edit') return 'edit_existing';
   } catch {
-    /* LLM call failed — fall back to keyword result */
+    /* LLM call failed — fall through to the honest fallback below */
   }
-  return intent;
+  // 🔴 WHEN THE READER CANNOT ANSWER, A QUESTION IS ANSWERED, NOT BUILT (admin 2026-09-17). This used
+  // to return the keyword verdict unconditionally — deliberately, so "nothing regresses when the
+  // reader is down". But for a message that READS AS A QUESTION the keyword verdict is exactly the
+  // guess this function exists to check, and the two mistakes are not the same size: wrong-toward-chat
+  // is one message (the chat reply already offers to build; "haan" starts it), wrong-toward-build is a
+  // whole build nobody asked for. So a question falls to CHAT; a statement or order keeps the keyword
+  // verdict exactly as before, which is what keeps "add a payment button" an edit when GLM is slow.
+  return readsAsQuestion(message.toLowerCase()) ? 'chat' : intent;
 }
 
 /**

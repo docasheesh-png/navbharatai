@@ -22,6 +22,11 @@ export interface ApiKeyRecord {
   createdAt: number;
   lastUsedAt: number | null;
   revoked: boolean;
+  /**
+   * The most this key may spend in one UTC day, in rupees (developerApi.ts). Absent on keys created
+   * before 2026-09-17; readers treat absence as the default cap, never as "no cap".
+   */
+  dailyCapInr?: number;
 }
 
 /** Display-safe view (no hash) returned to the owner. */
@@ -32,6 +37,8 @@ export interface ApiKeyAuth {
   userId: string;
   keyId: string;
   scopes: string[];
+  /** The key's own daily ₹ ceiling, when the holder set one. */
+  dailyCapInr?: number;
 }
 
 class ApiKeyStore {
@@ -106,9 +113,42 @@ class ApiKeyStore {
       if (snap.empty) return null;
       const rec = snap.docs[0].data() as ApiKeyRecord;
       if (rec.revoked) return null;
-      return { userId: rec.userId, keyId: rec.id, scopes: rec.scopes || [] };
+      return {
+        userId: rec.userId, keyId: rec.id, scopes: rec.scopes || [],
+        ...(typeof rec.dailyCapInr === 'number' ? { dailyCapInr: rec.dailyCapInr } : {}),
+      };
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Change a live key's name, scopes or daily cap — only if it belongs to `userId`.
+   *
+   * A revoked key is never edited back to life: revocation is final, and the holder makes a new key.
+   */
+  async update(
+    userId: string,
+    keyId: string,
+    patch: { name?: string; scopes?: string[]; dailyCapInr?: number },
+  ): Promise<boolean> {
+    const db = this.getDb();
+    if (!db || !userId || !keyId) return false;
+    try {
+      const ref = db.collection('api_keys').doc(keyId);
+      const doc = await ref.get();
+      if (!doc.exists) return false;
+      const rec = doc.data() as ApiKeyRecord;
+      if (rec.userId !== userId || rec.revoked) return false;
+      const fields: Record<string, unknown> = {};
+      if (typeof patch.name === 'string') fields.name = patch.name;
+      if (Array.isArray(patch.scopes)) fields.scopes = patch.scopes;
+      if (typeof patch.dailyCapInr === 'number') fields.dailyCapInr = patch.dailyCapInr;
+      if (Object.keys(fields).length === 0) return true;
+      await ref.update(fields);
+      return true;
+    } catch {
+      return false;
     }
   }
 

@@ -37,7 +37,10 @@
 // an open item rather than guessed at.
 
 import { analyzeRequirementGaps } from './RequirementGapAnalyzer';
-import { textIsAdvisoryCap } from '../AgentV3/advisoryCapOutcome';
+import { textIsAdvisoryCap, isAdvisoryCapOutcome } from '../AgentV3/advisoryCapOutcome';
+
+/** One definition, so the code path and the text path can never describe it differently. */
+const ADVISORY_CAP_REASON = { key: 'advisory-cap', label: 'Not a failure — the app was built; only the post-build checks ran out of time' } as const;
 
 /** The subset of a stored build's data this module needs. Matches AllDiagnosticsEntry by shape. */
 export interface CategorizableBuild {
@@ -45,7 +48,51 @@ export interface CategorizableBuild {
   ok: boolean | null;
   prompt?: string;
   rootCause?: string | null;
+  /** The build's own `OUTCOME_*` code — a machine fact, and the thing to read BEFORE the prose. */
+  outcomeCode?: string | null;
+  /** The severity that outcome was recorded at. One code can mean opposite things without it. */
+  outcomeSeverity?: string | null;
+  /** Was the app SEEN running (real browser render / published preview)? See `appWasSeenRunning`. */
+  appSeenRunning?: boolean | null;
 }
+
+/**
+ * 🔴 WHAT THE BUILD'S OWN OUTCOME CODE MEANS, in the admin's words — the fix for the "Other" flood.
+ *
+ * THE DEFECT (admin 2026-09-17): on a panel covering 385 projects and 151 failures, the top reason for
+ * THIRTEEN OF FIFTEEN app types was "Other (not yet in the known pattern list)" — 92 of the 107 failures
+ * in its largest row. So ~85% of failures had no named cause, and every plan built on that panel would
+ * have been a guess.
+ *
+ * WHY: `REASON_PATTERNS` below reads the PROSE of `rootCause` looking for words like `compilation` or
+ * `cannot find module`. A v5 build does not fail with compiler words — it fails with sentences we wrote
+ * ourselves. Six real outcome messages were run through it and ALL SIX returned `other`, including this
+ * one, verbatim from a real report: *"Build outcome: STOPPED — the app was built; the post-build
+ * advisory pass was cut short by its 2-minute cap."*
+ *
+ * `BuildRetrospectiveEngine.ts` had already root-caused exactly this on 2026-09-12 and written the
+ * remedy down: *"The diagnostic CODE is a machine fact recorded by the build itself. Reading it is not
+ * pattern matching, it is just looking."* That module read the code; this one did not, and its own
+ * header records the decision not to merge the two. This is that merge.
+ *
+ * ⚠️ NOT A SECOND SOURCE OF TRUTH. `tests/failureNaming.test.ts` asserts every code in
+ * `OUTCOME_TO_CATEGORY` also has a label here, so a code added to one and not the other fails CI
+ * rather than quietly reappearing as "Other".
+ */
+const OUTCOME_REASONS: Readonly<Record<string, { key: string; label: string }>> = {
+  OUTCOME_BUILD_TIMEOUT: { key: 'timeout', label: 'Ran out of time before the app was finished' },
+  OUTCOME_STOPPED: { key: 'stopped', label: 'The run ended before it finished' },
+  OUTCOME_SYNTAX_ERROR: { key: 'syntax-error', label: 'The generated code did not parse' },
+  OUTCOME_TYPECHECK_FAILED: { key: 'typecheck-failed', label: 'TypeScript / compile check failed' },
+  OUTCOME_MISSING_FILES: { key: 'missing-files', label: 'Files were imported but never created' },
+  OUTCOME_MISSING_EXPORT: { key: 'missing-export', label: 'A file was imported for something it does not export' },
+  OUTCOME_BUILD_PARTIAL: { key: 'partial', label: 'The build shipped less than it planned' },
+  OUTCOME_PREVIEW_FAILED: { key: 'preview-failed', label: 'The app was produced but never rendered' },
+  OUTCOME_PREVIEW_COMPILE: { key: 'preview-compile', label: 'The preview does not compile — the app would not load' },
+  OUTCOME_REVIEW_CRITICAL: { key: 'review-critical', label: 'The reviewer found something critical that was not repaired' },
+  OUTCOME_RELEASE_GATE_RED: { key: 'release-gate-red', label: 'The release gate found evidence the app does not work' },
+  OUTCOME_BUILD_FAILED: { key: 'build-failed', label: 'The build itself failed' },
+};
 
 /**
  * The engine's own real failure vocabulary, matched by substring/pattern against `rootCause`.
@@ -125,8 +172,32 @@ const REASON_PATTERNS: ReadonlyArray<{ key: string; label: string; test: RegExp 
 ];
 
 /** One build's failure reason, from its stored rootCause text. Pure, exported for direct testing. */
-export function classifyFailureReason(rootCause: string | null | undefined): { key: string; label: string } {
+export function classifyFailureReason(
+  rootCause: string | null | undefined,
+  outcomeCode?: string | null,
+  outcomeSeverity?: string | null,
+): { key: string; label: string } {
   const text = String(rootCause ?? '').trim();
+  /**
+   * THE CODE IS READ FIRST, because it is a fact the build recorded rather than a guess about what its
+   * prose means. The text stays as the fallback for a build that has no code — an imported project, a
+   * crash before any outcome, or a legacy record.
+   *
+   * ⚠️ SEVERITY RIDES WITH IT, and leaving it out would have traded one wrong answer for another:
+   * `OUTCOME_STOPPED` at `warning` is the 2-minute advisory cap on an app that WAS built. Classifying
+   * on the code alone would file every one of those as "the run ended before it finished".
+   */
+  const code = String(outcomeCode ?? '').trim();
+  if (code) {
+    if (isAdvisoryCapOutcome({ code, message: text })
+      || (code === 'OUTCOME_STOPPED' && String(outcomeSeverity ?? '') === 'warning' && textIsAdvisoryCap(text))) {
+      return ADVISORY_CAP_REASON;
+    }
+    const mapped = OUTCOME_REASONS[code];
+    // An UNRECOGNISED code falls through to the text exactly as it would have before this existed, so
+    // a code added later is never silently mis-filed — it simply classifies as it used to.
+    if (mapped) return mapped;
+  }
   if (!text) return { key: 'no-root-cause', label: 'No root cause was recorded' };
   /**
    * 🔴 NOT A FAILURE, AND IT LOOKED LIKE THE BIGGEST ONE (report af3a3f7f, 2026-09-17). The advisory
@@ -135,9 +206,7 @@ export function classifyFailureReason(rootCause: string | null | undefined): { k
    * honest-but-useless `other` bucket. Named here because this module only ever sees the PROSE:
    * `listAllDiagnostics` projects `rootCause` and drops the issue codes.
    */
-  if (textIsAdvisoryCap(text)) {
-    return { key: 'advisory-cap', label: 'Not a failure — the app was built; only the post-build checks ran out of time' };
-  }
+  if (textIsAdvisoryCap(text)) return ADVISORY_CAP_REASON;
   for (const p of REASON_PATTERNS) if (p.test.test(text)) return { key: p.key, label: p.label };
   // Honest, not a guess forced into a bucket it may not belong to — the raw text still rides in the
   // example list, so the admin can read it and decide whether a new pattern is worth adding.
@@ -175,6 +244,58 @@ export interface DomainRow {
   topReasons: ReasonRow[];
 }
 
+/**
+ * PHASE 1 — THE THREE POPULATIONS INSIDE ONE FAILURE RATE (admin 2026-09-17).
+ *
+ * "40.8% failed" is not one thing, and treating it as one makes the target unreachable by definition:
+ * you cannot fix builds that are not broken. Splitting it is what turns a number into work.
+ *
+ * ⚠️ WHAT IS DELIBERATELY MISSING, said plainly rather than guessed: **builds the USER stopped**.
+ * `buildAbortCause.ts` knows the difference (`'user-stop'`, and it refuses to default to it — "an abort
+ * we cannot explain is not a user's fault"), but that cause is NOT persisted into the report, so it
+ * cannot be separated from stored data today. Inventing a rule for it — "short builds are abandoned",
+ * "OUTCOME_STOPPED means cancelled" — would put a guess into the one number meant to end guessing.
+ * Recorded as an open root cause instead.
+ */
+export interface VerdictSplit {
+  /** Judged failed, and the app was never seen running. The real target. */
+  engineFailed: number;
+  /**
+   * 🔴 Judged FAILED while the app was SEEN RUNNING in a real browser. Not a build failure — a wrong
+   * verdict, and every one of these is a user who was told their working app had failed.
+   */
+  builtButJudgedFailed: number;
+  /** Judged ok. */
+  succeeded: number;
+  /** No settled verdict — still running, or a legacy record. */
+  unjudged: number;
+  /**
+   * Failures that could not be checked either way, because the record predates render evidence being
+   * projected. Counted separately so the split is never presented as more certain than it is.
+   */
+  evidenceUnknown: number;
+  /**
+   * PHASE 4 — THE NUMBER THE 90% TARGET IS MEASURED AGAINST, defined once so it cannot drift.
+   *
+   * **Did the user end up with a working app?** = (succeeded + builtButJudgedFailed) ÷ (those + engineFailed).
+   *
+   * 🔑 A BUILD WE WRONGLY CALLED FAILED STILL GAVE THE USER A WORKING APP, so it belongs on the top of
+   * this fraction. That is not letting ourselves off — it is the opposite: it separates "the engine
+   * cannot build apps" from "the engine builds apps and then lies about them", which are different
+   * problems with different fixes, and only the first is what people mean by a failure rate.
+   *
+   * ⚠️ `evidenceUnknown` is EXCLUDED from both halves, deliberately. Those are records written before
+   * render evidence was kept; putting them anywhere would be a guess, and a target measured against a
+   * guess can be hit without anything improving. `null` until at least one build can be judged.
+   */
+  appDeliveredPct: number | null;
+  /**
+   * What we TOLD people: succeeded ÷ the same denominator. The GAP between this and `appDeliveredPct`
+   * is the honesty debt — every point of it is a user shown a failure for an app that worked.
+   */
+  reportedOkPct: number | null;
+}
+
 export interface FailureCategoryReport {
   totalBuilds: number;
   /** Builds excluded because they had no settled verdict (still running / legacy record). */
@@ -187,6 +308,8 @@ export interface FailureCategoryReport {
   byDomain: DomainRow[];
   /** By failure reason, across every domain, sorted by count descending. */
   byReason: ReasonRow[];
+  /** The three populations inside the headline rate — see `VerdictSplit`. */
+  verdictSplit: VerdictSplit;
 }
 
 const MAX_EXAMPLES_PER_REASON = 3;
@@ -204,7 +327,7 @@ function ratePct(part: number, whole: number): number | null {
 function tallyReasons(failedBuilds: readonly CategorizableBuild[]): ReasonRow[] {
   const byKey = new Map<string, { label: string; count: number; examples: ReasonExample[] }>();
   for (const b of failedBuilds) {
-    const { key, label } = classifyFailureReason(b.rootCause);
+    const { key, label } = classifyFailureReason(b.rootCause, b.outcomeCode, b.outcomeSeverity);
     const entry = byKey.get(key) ?? { label, count: 0, examples: [] };
     entry.count += 1;
     if (entry.examples.length < MAX_EXAMPLES_PER_REASON && b.rootCause) {
@@ -252,11 +375,32 @@ export function categorizeBuildFailures(builds: readonly CategorizableBuild[] | 
     }))
     .sort((a, b) => b.failed - a.failed || b.total - a.total);
 
+  /**
+   * The split. A failure whose record carries NO render evidence field at all (written before it was
+   * projected) is `evidenceUnknown`, never silently counted as a genuine engine failure — "we did not
+   * look" and "we looked and saw nothing" are different facts, and only one of them is a bug report.
+   */
+  const engineFailed = failed.filter((b) => b.appSeenRunning === false).length;
+  const builtButJudgedFailed = failed.filter((b) => b.appSeenRunning === true).length;
+  const evidenceUnknown = failed.length - engineFailed - builtButJudgedFailed;
+  // Only builds we can actually judge count — see `appDeliveredPct`.
+  const judgeable = ok.length + engineFailed + builtButJudgedFailed;
+  const verdictSplit: VerdictSplit = {
+    engineFailed,
+    builtButJudgedFailed,
+    succeeded: ok.length,
+    unjudged: rows.length - judged.length,
+    evidenceUnknown,
+    appDeliveredPct: ratePct(ok.length + builtButJudgedFailed, judgeable),
+    reportedOkPct: ratePct(ok.length, judgeable),
+  };
+
   return {
     totalBuilds: rows.length,
     unjudged: rows.length - judged.length,
     ok: ok.length,
     failed: failed.length,
+    verdictSplit,
     overallFailureRatePct: ratePct(failed.length, judged.length),
     byDomain,
     byReason: tallyReasons(failed),

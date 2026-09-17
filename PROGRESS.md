@@ -60060,3 +60060,70 @@ broken behaviour"; the broken behaviour is what was removed.
 3. Post-build review timed out at 210 s on 55 files.
 4. Sandbox 84% idle across a 39.8-minute session.
 5. `AGENTV3_PROJECT_MODE` — admin-only, Cloud Run.
+
+## 2026-09-17 — the project-mode gate never said whether it was on, and that cost a real setup attempt
+
+The admin was asked to canary Software Project Mode on their own account. They set it, in good faith,
+to `doc.asheesh@iclod.com` — one character short of `icloud.com`. `projectModeEnabled` matches EXACTLY
+(lower-cased, no normalisation, no typo tolerance), so that value is `false` for ever.
+
+**The gate recorded NOTHING, on either branch.** So the only way to discover the typo was to send a
+mega-prompt and notice that nothing happened — and that symptom is identical to three other causes:
+
+1. the prompt was below `detectMegaProject`'s deliberately-high threshold,
+2. the mega-app roadmap (default-ON, needs no key) took the build first and project mode stood down,
+3. the feature is broken.
+
+**Four causes, one symptom: silence.** This repo has already paid for that exact shape twice —
+`E2B_USD_PER_HOUR` charged half the real rate for a month with nothing failing anywhere, and
+`ALERT_EMAIL_FROM` read as configured while the provider rejected every send. Both were fixed the same
+way: not by changing the decision, but by making the decision SAY ITSELF.
+
+### The fix
+
+`projectModeDiagnosis()` (`ProjectPlan.ts`, pure) returns one admin-report line naming which of the five
+states the build was in — `not-configured` · `account-not-on-allowlist` · `pre-empted` ·
+`not-a-new-build` · `below-threshold`, or `null` when project mode genuinely took the build. Recorded as
+`PROJECT_MODE` from `routes/agentv3.ts` **before** the gate branches, so a SKIP is explained too — a
+record inside the `if` would only ever explain the branch that ran, i.e. would say nothing in exactly the
+case that needs explaining.
+
+Two details that are not decoration:
+
+- **The identity is MASKED** (`doc***@icloud.com`). `userFacingReport` keeps every issue's `detail`
+  verbatim — it strips provider names and nothing else — so this text can reach the build's own user.
+  That is their own address, so there is no cross-user leak by construction; masking is the second lock.
+  Enough survives to spot a wrong domain, which is the only reason the identity is printed at all.
+- **`enabled` is answered by the REAL gate**, not by a second copy of its rules: `projectModeDiagnosis`
+  calls `projectModeEnabled` with the raw flag. A re-implementation would be free to disagree with the
+  branch the build actually took.
+
+### The 50/50 half — why the problem could arise at all
+
+The thresholds lived only inside `detectMegaProject`, so any explanation of them had to be re-derived.
+`megaProjectSignals()` is now the one place they live and `detectMegaProject` is literally its `fires`
+field, with `MEGA_SCALE_MIN` / `MEGA_BULLETS_WITH_NOUN` / `MEGA_BULLETS_ALONE` named so the report quotes
+the real numbers. **No behaviour change** — a test asserts the two agree across six prompts. This matters
+because four ladder comments in this repo once described a rung that no longer existed, and neither `tsc`
+nor `vitest` can read a comment.
+
+### Tests
+
+`tests/projectModeVisibility.test.ts` — 22 cases, built from the real incident (the `iclod.com` value,
+the admin's own school-ERP test prompt). Three guards proven by REVERSION, each failing exactly one
+targeted test: un-masking the identity, moving the record inside the `if`, and giving `detectMegaProject`
+a drifted second copy of the rules.
+
+⚠️ **Process note, recorded because it cost real work.** Reversion-proving was run on UNCOMMITTED
+changes and `git checkout <file>` discarded them — both source edits had to be rewritten from scratch.
+Safeguard #4 ("commit small, commit often") is not only about credit cutoffs: **commit before testing a
+guard by breaking the code.**
+
+### Still open (rule 6)
+
+1. **The key itself is admin-only.** Nothing here enables project mode — it only makes the gate's answer
+   visible. The recommended value lists both known admin addresses, since the gate reads the SIGN-IN
+   email and an Apple/developer-account address need not be the same one.
+2. **A pre-existing plan is reported as `not-a-new-build`**, which is honest but coarse: telling
+   "a plan exists and is waiting for a continuation" apart from "this is an edit" would need a plan load
+   before the gate, i.e. a Firestore read on every build. Deliberately not paid for.

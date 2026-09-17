@@ -294,7 +294,7 @@ import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanSta
 import { computePlanProgress } from '../AgentV3/PlanProgress';
 import { decideCancelledBuildBill } from '../AgentV3/cancelledBuildBilling';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
-import { projectModeEnabled, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
+import { projectModeEnabled, projectModeDiagnosis, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
@@ -14322,6 +14322,21 @@ async function noteBuildOutcome(
       // Mutually exclusive with the mega-app roadmap (Phase 3): both are "big app" strategies and must
       // never both steer one build. When the roadmap owns this build (step-1 target already set), SPM
       // project mode stays out.
+      // WHY project mode did or did not steer this build — recorded on BOTH branches, admin-only.
+      // The gate is an exact-match allowlist against the SIGN-IN email and used to record nothing at
+      // all, so a mistyped domain and a below-threshold prompt produced the identical symptom:
+      // silence. Advisory string only — it can never enable, block or slow a build.
+      try {
+        const pmDiag = projectModeDiagnosis({
+          flagRaw: process.env.AGENTV3_PROJECT_MODE,
+          identity: { userId, email },
+          preEmptedBy: megaRoadmapActive ? 'mega-roadmap' : planFirst ? 'plan-first' : null,
+          isNewBuild: intent === 'new_build',
+          isEditMode,
+          prompt,
+        });
+        buildDiag.record({ phase: 'plan', severity: 'info', code: pmDiag.code, message: pmDiag.message, detail: pmDiag.detail, autoResolved: true });
+      } catch { /* diagnostics are best-effort and must never touch a build */ }
       if (projectModeEnabled(process.env, { userId, email }) && !planFirst && !megaRoadmapActive) {
         try {
           let pPlan = await loadProjectPlan(workspaceId);

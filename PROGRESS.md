@@ -63180,3 +63180,86 @@ The charitable reading (a capped child leaves half-written REAL files) is not su
 architect's own capped turn leaves the same state, and `tsc` catches the syntactic half for both.
 Recorded here rather than acted on, because building a reconciler for a mechanism nobody can point at
 is exactly the speculative fix rule 6 forbids.
+
+---
+
+## 2026-09-17 — A STREAMED CHAT TURN COULD ONLY END IF THE USER CLOSED THE TAB
+
+**Branch `claude/a-stalled-chat-stream-must-end`. New module
+`src/server/AI/Router/streamWatchdog.ts`; both streaming paths in `AIRouter.ts` bounded.**
+
+### What was wrong
+
+`UniversalAIRouter.routeDetailed` has a wall clock (`TIMEOUT_MS`). **`routeStream` had none**, and
+`AIRouter.streamSequential` awaited `p.executeStream(...)` with **no bound of any kind**. So a
+provider that accepted the connection and then never spoke stalled the turn **for ever** — and
+`chat.ts`'s 20-second `: ping` keepalive, written to stop a proxy closing an IDLE connection,
+actively held the dead turn open. The user watched pings arrive indefinitely.
+
+**The only thing that could end such a turn was `req.on('close')` — the client disconnecting.**
+
+🔴 **AND A CORRECT FIX INTRODUCED IT.** Before the money audit of 2026-09-12 every universe RACED its
+top two providers, and that race carried a 12-second commit timeout. Removing the race for FREE
+(rightly — it was billing two models on every single turn) removed **the only time bound on the path
+most users are on**. That is the *"a fix must never trade one problem for another"* rule caught in the
+act, and it is the third time this session the streaming path turned out to be the forgotten one.
+
+🔎 **SIBLING (rule 3): the race path was unbounded too, and its commit timeout LOOKED like a bound.**
+Those 12 seconds only ask *"did anyone start speaking?"*. Once a provider committed, the final
+`await s1` was as unbounded as the sequential path's — so a PRO/PROFESSIONAL provider that spoke one
+word and then hung stalled that turn for ever as well.
+
+### The fix — bounded by SILENCE, not by duration
+
+This repo already settled that argument on the build side (`AGENTV3_STREAM_IDLE_MS`): a provider
+still emitting tokens is not hung however slow it is, and a total clock cannot tell the two apart.
+So there are **three bounds and they mean different things**:
+
+| bound | default | what it means |
+|---|---|---|
+| **first token** | 30 s | nothing reached the user, so the stall is CLEAN — the rung failed and the ladder tries the next one with nothing duplicated |
+| **idle** | 30 s | text is already on screen, so a second rung would repeat itself — the turn ENDS with what was delivered |
+| **hard cap** | 180 s | an absolute backstop for a provider that dribbles one token for ever |
+
+- `mayTryNextRung()` is the whole retry/end decision, and it turns on **`delivered`**, not on the
+  verdict: partial and honest beats duplicated.
+- A chunk arriving **after** the watchdog gave up is **dropped**, so two rungs can never interleave
+  their text in one answer.
+- A stall keeps **`ok: true`** with `reason: 'stalled'`. A mid-stream stall is not a failed turn — the
+  user has real text — and reporting `ok: false` would make every downstream reader treat a
+  partially-answered turn as broken.
+- Kill switch **`CHAT_STREAM_WATCHDOG=off`** restores the pre-2026-09-17 lines exactly, on BOTH paths
+  (a test counts the two call sites). Tunables `CHAT_STREAM_FIRST_TOKEN_MS`, `CHAT_STREAM_IDLE_MS`,
+  `CHAT_STREAM_HARD_CAP_MS`; each has a floor, so a mistyped env cannot cut off a healthy provider,
+  and an unreadable value falls back to the default rather than to "wait for ever".
+
+⚠️ **WHAT IT CANNOT DO, stated rather than discovered later:** `executeStream` takes no `AbortSignal`,
+so nothing here CANCELS the upstream call — it stops us WAITING on it. The provider may keep
+generating and we may still be billed, exactly the limitation the build-side cost ceiling records for
+an abandoned provider call. Stopping the wait is what the user feels.
+
+### Tests — `tests/aStalledChatStreamMustEnd.test.ts` (22 cases)
+
+Proven by reversion in **both halves**: reverting `AIRouter.ts` alone fails 4 (the wiring guards);
+removing `streamWatchdog.ts` fails the file to import at all. All pass restored.
+
+Every timing case runs on an **injected clock**, so no test waits on a real timeout. The case that
+matters most is *"a SLOW provider that keeps emitting is never cut off"* — that is the whole
+justification for bounding silence rather than duration, and a duration bound would fail it.
+
+**Full CI gate green on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` ·
+`vitest run` (**24,886 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
+`deps:server-gate`.
+
+### 🔎 Two sweeps the same session that found NOTHING — recorded so nobody repeats them
+
+- **Documented money defaults vs code.** `WALLET_OVERDRAFT_FLOOR_INR` (₹50, cap ₹500),
+  `AGENTV3_BUILD_COST_CEILING_USD` ($5, cap $50) and the sandbox idle limit (5 min) all match
+  `CLAUDE.md`. ⚠️ I briefly read the ceiling's explicit-`0` opt-out as broken (`n <= 0` returns the
+  default) — `if (raw === '0') return 0;` stands *above* it. **My incomplete read, not a defect**; the
+  discipline that caught it is reading the whole function before reporting.
+- **"Built but nothing reaches it" in AgentV3.** 73 exports have no production caller outside their
+  own file; reading them, essentially all are test helpers (`__clearXForTests`) or legacy thin
+  wrappers. The most promising, `AbuseDetector.recordAbuse`, turned out to be a leftover wrapper —
+  the real detector (`assessPrompt` + `evaluateAbuse`, hard-block at 3 attempts, fail-open) **is fully
+  wired and live**. No defect.

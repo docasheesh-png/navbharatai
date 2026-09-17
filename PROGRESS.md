@@ -63461,3 +63461,54 @@ still a full replace (the gate is what makes that safe).
 **Full CI gate green on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` ·
 `vitest run` (**24,810 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
 `deps:server-gate`.
+
+## 2026-09-17 — AUTOPSY e706e068 (School ERP, weak/free-list, 26.8 min, NOT ok, ₹0) — the RESIDUE after PRs #3020/#3023/#3025/#3031
+
+Admin sent the report with *"app banne ke bad tut gayi?"*. **Honest answer: no.** The app rendered in a
+real browser, `tsc` was clean, `npm run build` succeeded. What "broke" was three files our own batch
+repair wrote OUTSIDE the app (`App.tsx`, `hooks/useStudents.ts`, `types/student.ts` at the project root);
+the readiness gate read the whole tree, found an unresolved import and placeholder data in those strays,
+and failed a working app. **That whole chain was root-caused and merged by other sessions the same evening
+(#3020 stray-file guard + run-proven verdict + project-planner clock; #3025 verdict-vs-counts; #3031 scan
+only the files the app loads; #2995 provider silence ≠ our budget).** This entry is the residue those PRs
+did NOT reach — verified by reading current `main`, not assumed.
+
+**Ledger (5 buckets, the whole report):** ✅ self-healed 5 (missing import ×2, missing dep, compile batch,
+mockData→Supabase in a STRAY file); 🔀 workarounds 4 (fast lane → full builder after a 60 s silence; E2E
+suite written but not runnable here; RENDER_RESCUE upgrading a not-ok; `PREVIEW_SNAPSHOT_STALE` fallback);
+⏭️ skipped 4 (design heal never ran — `resultOk` was already false on stray-file blockers; page-render check
+"no result" for 6 routes; journey not derived; 3 unused deps installed and never imported); ❌ shipped
+imperfect 3 (the three release-gate blockers, all from strays — fixed on main); 🥵 struggle 6 (45 s silent
+start; 55 s decomposition killed at 60 s; fast-lane manifest silent 60 s; 20 files written before the first
+`tsc`, then a 7-minute compile grind over 21 errors; 8 repeated reads; the heal spending 3 min on a stray).
+
+**🔴 STILL OPEN ON MAIN, FIXED HERE:**
+1. **The "complex apps open on KIMI" flag never reached the chain builder.** `buildIsComplex` (score 63 ⇒
+   COMPLEX) was spread into `baseRunnerOpts` — AgentRunner options, which never read it — and never passed
+   to `buildTurnRunner`. Result: 83 calls on `glm-4.7-flashx`, KIMI one rung away for 26 minutes, and the
+   flash rung's 21-error output ground for seven minutes. Every router test passed because every one tested
+   the DECISION and none the chain. Now `complex: buildIsComplex` is on `makeFastTextRunner` (roadmap
+   planner, project planner, fast-lane manifest) and the main `client`; the decision is RECORDED as
+   `COMPLEXITY_ROUTING`. `tests/complexityRoutingWiring.test.ts` asserts the CONSTRUCTED chain (weak/normal
+   + complex ⇒ first rung KIMI) and pins both runner constructions in the route.
+2. **The mega-roadmap planner was the SIBLING of #3020's project-planner clock.** Flat 45 s race,
+   `recordLlmCall` only on success, outer catch swallowed it — `APP_SCOPE` at +8 ms, `ETA_BASIS` at
+   +45,112 ms, nothing between: forty-five seconds of every large-app build going to a planner nobody could
+   see, while `APP_SCOPE` still said the roadmap was "not yet active" (it has been default-on since
+   2026-08-14). Now it shares `projectPlannerTimeoutMs()` and the planner failure vocabulary
+   (`ROADMAP_PLANNER_TIMED_OUT`, `roadmapPlannerFailedMessage`), records the failed call on the ledger and
+   `MEGA_ROADMAP_FAILED` in the report, clears its timer, and `APP_SCOPE` tells the truth.
+   `tests/roadmapPlannerClock.test.ts`.
+
+**OPEN ROOT CAUSES (rule 6), recorded, not guessed at:**
+- **The E2E suite we scaffold can never run here** — by a deliberate product rule ("we add no packages to
+  your project", after a Next.js build was broken by our own spec file, 2026-08-24). The sandbox template
+  pre-bakes `playwright@1.49.1` in `/home/user/.e-tools` but NOT `@playwright/test`. The complete fix is
+  infra: bake `@playwright/test@1.49.1` into both E2B images beside `playwright` and run OUR scaffolded specs
+  from the tools dir (NODE_PATH), touching nothing in the user's project. Needs a template rebuild
+  (`infra/e2b/build.mjs`) — an admin action this session cannot verify, so it is not coded blind.
+- **The first `tsc` ran after 20 files.** The flash rung's errors were caught 12 minutes in and repaired
+  for 7. The DNA fix is an incremental typecheck after every N writes (or per-file), not at the end —
+  a design change to the write path, proposed to the admin below rather than shipped in an autopsy PR.
+- **The abandoned planner call keeps running on the provider side** (known: PROGRESS 2026-09-13 mid-build
+  cost stop) — same class, still open.

@@ -64090,7 +64090,178 @@ Proven by reversion: **3 of 16 fail** with `runnerChainSummary.ts` reverted.
 
 **Full CI gate green on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` ·
 `vitest run` (**25,011 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
+## 2026-09-17 — THE FUTILITY BREAKER: a build that is going nowhere now stops (open item from #3039, closed)
+
+**Branch `claude/a-build-going-nowhere-must-stop`. New module
+`src/server/AgentV3/futilityBreaker.ts`, one new abort cause, wired at the minute heartbeat.**
+
+### The report
+
+Build `d6d664e6` (autopsy shipped as #3039, which recorded this as an OPEN item): the prompt was one
+word, the build ran the full **29 minutes** to the `BUILD_TIMEOUT` wall clock, wrote **no app**, and
+minutes 4→29 contain nothing but heartbeats and failed provider calls. **Zero files, zero completed
+commands, zero plan steps, for twenty-five consecutive minutes.**
+
+#3039's own words, and they name the gap exactly: *"Cost is bounded, throughput is bounded,
+**pointlessness** is bounded by nothing."*
+
+| bound | what enforces it |
+|---|---|
+| MONEY | `buildCostCeiling.ts` — stops a build past its cost ceiling |
+| THROUGHPUT | `slowRungBench.ts` — retires a provider delivering too few tokens/second |
+| **FUTILITY** | **nothing** — until now |
+
+It is the admin's own bar applied to the clock: *"minutes, and the minutes must be WORKING minutes."*
+
+### 🔑 Progress is what the build PRODUCED, not what it attempted
+
+That distinction is the whole design. A failed provider call records an issue, emits narration and
+burns a minute — counting any of that as activity is exactly what let this build look busy for
+twenty-five minutes. So progress is three things a build can only do by moving forward:
+
+1. a **file** was written (`writtenFiles.size`)
+2. a **command completed** (the route's own `onCommand` hook — which fires on completion)
+3. a **plan step** was done (`etaStepsDone`)
+
+Deliberately NOT progress: a provider call (successful or failed), a narration line, a heartbeat, an
+issue being recorded, a token being spent. Every one of those was happening throughout that build.
+
+### 🔴 Driven from the TIMER, not from the provider-turn hook — the load-bearing choice
+
+The obvious home was `captureTurnUsage`, where the cost ceiling lives. **It would never have run in
+the case it exists for:** that hook fires on a *successful* provider call, and the reported build's
+quiet twenty-five minutes were *failed* ones. The minute heartbeat (`diagHeartbeatTimer`) fires
+regardless of what the providers are doing, so the breaker rides that. A reversion guard asserts the
+tick sits after the heartbeat and *before* `captureTurnUsage` in the file, so it cannot be "tidied"
+into the turn hook later.
+
+### 🔒 It is a STOP, not a kill — and the floor is measured, not guessed
+
+Copied from `buildCostCeiling.ts`: `AgentRunner` ends BETWEEN turns, files already written are
+persisted, and the user is told their work is saved and one message resumes it. So it can only ever
+make a build end **sooner** than the wall clock would have — the worst case is strictly better.
+
+⚠️ **The one risk is a single legitimate operation longer than the window.** Measured rather than
+assumed: the longest **bounded** single operation anywhere in the build path is **5 minutes**
+(`COMMAND_TIMEOUT_MS` in `E2BActuator`, and `AGENTV3_STREAM_HARD_CAP_MS`'s 300 s ceiling on one
+streamed call); next are `import-preview-boot` at 240 s and `vaccine-run-tests` at 180 s. So the
+**floor is 6 minutes** — strictly above every one of them — and the default is **10**, twice the
+longest. A build cannot be broken during an operation still allowed to be running.
+
+`AGENTV3_FUTILITY_MINUTES`: **not set, code default 10**. An explicit `0` (or `off`) disables it;
+anything present-but-unreadable falls back to the default, never to "off". Clamped to 6…30 — past 30
+the wall-clock watchdog owns it.
+
+### Honesty
+
+- New abort cause **`'futile'`**, so the reason is recorded rather than guessed (that module's whole
+  purpose). Its user sentence avoids **"too long"** — that is the watchdog's, and this build may have
+  stopped at minute 12 of a 30-minute budget. It says the build *was not getting anywhere*, names no
+  provider, no model and no cost (White-Label Law), and when files survived it says so and how to
+  continue. When nothing was produced it asks for **a bit more detail** — the same remedy #3039's
+  objectless-order rule gives *before* a build starts; this is the net for when that rule did not
+  catch it.
+- Admin finding **`FUTILITY_BREAKER`**, `autoResolved: false` (the build really did stop — marking it
+  resolved would let a report summarise a halted build as one that healed itself), whose detail names
+  all three counters, because *"nothing happened"* is a claim the reader must be able to check.
+- Fails **OPEN** in every uncertain case: a NaN counter reads as zero, a counter that went backwards
+  counts as progress, a throw inside the tick ends nothing.
+
+### Tests — `tests/aBuildGoingNowhereMustStop.test.ts` (24 cases)
+
+Proven by reversion in **all three parts**: removing the module fails the file to import; reverting
+the route wiring fails 5; reverting the abort cause fails 2.
+
+⚠️ **Two of my own drafts were wrong and the tests caught both.** An assertion expected ten quiet
+ticks to stop a run seeded with a non-zero snapshot — the first tick against it *is* progress, so the
+quiet run begins on the second; **the code was right**. And the "files survived" message test passed
+with the abort case REVERTED, because `default`'s text also contains *"files so far are saved"* and
+*"continue from here"* — it now asserts `stopped making progress`, which only this branch says.
+
+**Full CI gate green on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` ·
+`vitest run` (**24,990 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
 `deps:server-gate`.
+### 2026-09-17 (autopsy d98dae01, half 1 of 2) — a request none of our signals can read is not a greeting
+
+The prompt was Telugu: a text-to-speech app with voice cloning. `RequestAnalyser` scored it **5** — the
+same 5 as the word `"hi"` — and reported **`ambiguous: false`**, i.e. *"I am confident"*.
+
+**Why, in one line: every signal in that module is an ASCII pattern.** `simpleApp`, `coding`,
+`debugging`, `architecture`, `hardSignal`, `greeting` and the shared `isComplexAppPrompt` are all
+English or romanized English, so a request in Devanagari, Telugu, Bengali, Tamil, Gujarati, Kannada,
+Malayalam, Punjabi, Odia, Urdu or Arabic matches none of them, falls through `detectTaskType`'s final
+`return 'chat'`, and lands on `BASE_SCORE.chat`.
+
+🔴 **THE SCORE WAS NOT THE WORST OF IT.** `ambiguous` exists — that file's own opening docblock says so
+— precisely to mark *"a caller MAY refine this with a cheap LLM analyser"*. It was returned **false** in
+the one case where the module had read nothing at all. A confident wrong answer is worse than an
+admitted unknown, and every downstream reader was handed the confident version: the start band, the
+step ceiling (80 vs 150), the one-shot lane, the report's `requestAnalysis`, the `modelPerformance`
+rows.
+
+**What was already fixed, and why it was only half (safeguard #6, and the check paid for itself).**
+`complexityRouting.ts` reached the same finding EARLIER THE SAME DAY and answered it with
+`scorerCouldNotRead` — a private copy of the readability test, consulted by `needsSecondOpinion`, so a
+foreign-script request buys a gpt-nano second opinion whatever it scored. That is a real fix for *that
+module's* question and a workaround for everyone else's: the module that could not read went on
+insisting it could. Building the same thing again would have been PR #1 and PR #4 a third time; listing
+the open PRs and grepping `main` first is what turned a duplicate into the missing half.
+
+**The missing half, and it is the 50/50 law rather than a second opinion.** A second opinion buys a
+better ANSWER; it cannot make the answer we already had honest. When nano is down, rate-limited, or the
+flag is off, `decideComplexity` says *"the score stands"* — and the score was 5, so the biggest app in
+the queue opened on the cheapest flash rung with nothing recording that anything was unknown.
+
+- **The test moved to the module the fact is about.** `signalsCouldNotRead` now lives in
+  `RequestAnalyser.ts` beside the signals it describes; `complexityRouting` imports it and re-exports it
+  under its original name, so every caller and test keeps working. Same shape as the four drifted copies
+  of `safeRelPath` → one shared `workspacePath.ts`.
+- **`analyzeRequest` says what it could not read**: a new `unreadable` field, and `ambiguous` is now
+  `isNearBoundary(score) || unreadable`. 🔒 `taskType`, `startTier` and `escalationPath` are untouched by
+  the flag, so a caller that ignores it behaves exactly as before — the flag adds an option and removes
+  none (the same discipline #3045 used for the reader's `unclear`).
+- **A script-neutral FLOOR makes the deterministic answer honest.** Applied only when
+  `signalsCouldNotRead` is true, so the English/Hinglish path is byte-identical. It counts what can be
+  counted without reading a word — enumerated parts (commas, semicolons, newlines, bullet and numbered
+  markers, all of which mean "and another one" in every script we serve) and prompt length — and floors
+  the score at **`BASE_SCORE.coding` (30)** from `FLOOR_PARTS_FEW` parts or 300 chars, and at
+  **`BASE_SCORE.complex_app` (58)** from `FLOOR_PARTS_MANY` parts or 800 chars. **It only ever raises.**
+  🔒 Both values are existing `BASE_SCORE` bands, which is the whole correctness argument: an unreadable
+  multi-feature spec lands exactly where its ENGLISH equivalent already lands, not on a new path nobody
+  has exercised. A test asserts that equality directly.
+- **`FLOOR_PARTS_MANY = 6` is borrowed, `FLOOR_PARTS_FEW = 3` is chosen, and the difference is stated in
+  the code.** 6 is `BuildTimeEstimator.complexityFromPrompt`'s own floor on a complex-app prompt's
+  `featureCount` — this repo's existing answer to "how many features make an app complex", counted the
+  same way. `ProjectPlan.MEGA_BULLETS_WITH_NOUN` (8) was considered and rejected: it counts BULLET LINES
+  beside a big-software noun, a strictly stronger signal, and a constant borrowed across two different
+  measurements is how a shared number stops meaning one thing.
+- **Honesty half (rule 5):** the admin report now carries `requestAnalysis.signalsCouldNotRead`, written
+  only when true, so a `taskType` of `chat` on such a build is legible as a FALLTHROUGH rather than a
+  classification. Same class of wrong label as `startTier: "gemini"` (2b0a3ed5) — a default printed
+  where a measurement was expected. **No edit to `routes/agentv3.ts`**: it already passes the whole
+  analysis object to `setRequestAnalysis`, so the flag flows on its own (and PRs #3040/#3043/#3045/#3046
+  are live in that file).
+- ⚠️ **A SHORT foreign-script request stays exactly as cheap as it is today.** The floor needs evidence,
+  not a script: `"ఒక సాధారణ కాలిక్యులేటర్ యాప్ తయారు చేయండి"` still scores 5 and still opens on the
+  cheapest band — it simply no longer claims the scorer understood it.
+
+**Tests:** `tests/anUnreadableRequestIsNotAGreeting.test.ts` (24). **Reversion-proven in all four
+parts** — dropping `|| unreadable` fails 2, disabling the floor fails 3 (including one in
+`complexityRouting.test.ts`), dropping the report flag fails 1, and re-inlining a behaviourally
+IDENTICAL copy of the readability test in `complexityRouting` fails the identity assertion, which is the
+only kind of assertion that keeps failing once someone re-inlines a shared helper.
+
+⚠️ **One case in `tests/complexityRouting.test.ts` asserted the hole and that assertion was itself the
+bug**: `expect(a.complexityScore).toBeLessThan(20)` pinned the scorer's claim that a multi-feature
+hospital app was smaller than a calculator. It was an accurate description of the code on the morning it
+was written and the wrong thing to hold still. Corrected with the reason recorded in place, and what the
+case really proves — the SCORE alone never buys a second opinion, reading the script does — is unchanged
+and still asserted.
+
+**Still open from this report (rule 6), unchanged by this half:** a rung abandoned for crawling or a
+timeout still consumes the lane's remaining clock, so the rungs BELOW it are authorised fewer output
+tokens (2,314 instead of ~2,833 on this build) and Kimi was starved by a budget GLM had already spent.
+That is the second half of this autopsy and is next.
 
 ### 2026-09-17 (correction) — three of the four open items from autopsy `d6d664e6` are closed, and ONE OF THEM WAS MY MISTAKE
 

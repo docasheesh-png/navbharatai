@@ -94,6 +94,17 @@ export interface AnalysisResult {
   startTier: StartTier;
   escalationPath: StartTier[]; // startTier → … → opus
   ambiguous: boolean; // near a tier boundary → a caller may LLM-refine
+  /**
+   * The signals could not read this request at all — see `signalsCouldNotRead`. Reported as its own
+   * fact rather than folded into `ambiguous`, because "borderline between two bands" and "written in
+   * a script none of my patterns cover" are different states and a reader may care which.
+   *
+   * 🔒 It ADDS information; it removes none. `taskType`, `startTier` and `escalationPath` are
+   * unchanged by it, so a caller that ignores this field behaves exactly as it did before the field
+   * existed — the score is the only thing an unreadable request moves, and only ever upward, and
+   * only on the script-neutral evidence in `scriptNeutralFloor`.
+   */
+  unreadable: boolean;
   reasoning: string;
   features?: FeatureRanking; // intelligent scoping: prioritized feature list (Phase B)
 }
@@ -143,6 +154,114 @@ const BASE_SCORE: Record<TaskType, number> = {
   complex_app: 58, // Sonnet
   architecture: 80, // Opus
 };
+
+/**
+ * 🔴 EVERY SIGNAL ABOVE IS ASCII — AND THIS MODULE USED TO CLAIM CONFIDENCE ANYWAY.
+ *
+ * `simpleApp`, `coding`, `debugging`, `architecture`, `hardSignal`, `greeting`, and the shared
+ * `isComplexAppPrompt` are all English (or romanized) patterns. A request written in Devanagari,
+ * Telugu, Bengali, Tamil, Gujarati, Kannada, Malayalam, Punjabi, Odia, Urdu or Arabic matches NONE
+ * of them, falls through `detectTaskType`'s final `return 'chat'`, and scores **5** — the same 5 as
+ * the word "hi". A Telugu request for a hospital app with doctor logins, patient records,
+ * appointments and billing was indistinguishable from a greeting.
+ *
+ * ⚠️ THE SCORE WAS NOT THE WORST OF IT. `ambiguous` exists — this file's own opening docblock says
+ * so — precisely to mark "a caller MAY refine this with a cheap LLM analyser". It was returned
+ * **false**, i.e. *"I am confident"*, in the one case where this module had read nothing at all. A
+ * confident wrong answer is worse than an admitted unknown, and every downstream reader of
+ * `analyzeRequest` (the start band, the step ceiling, the one-shot lane, the report's
+ * `requestAnalysis`, the `modelPerformance` rows) was told the confident version.
+ *
+ * 🔒 THE CLAIM BELONGS HERE, WITH THE SIGNALS IT IS ABOUT. `complexityRouting.ts` reached the same
+ * finding on 2026-09-17 and answered it with a private copy of this test, because the module that
+ * could not read was still insisting it could. That fixed ONE reader's question and left the other
+ * five believing the score. This is the same shape as the four drifted copies of `safeRelPath` that
+ * CLAUDE.md records: one shared, tested implementation, owned by the module the fact is about.
+ * `complexityRouting` now imports it from here.
+ */
+export const UNREADABLE_LETTER_SHARE = 0.25;
+
+/** Below this many letters there is nothing to judge a script by — two words are not a sample. */
+export const MIN_LETTERS_TO_JUDGE_SCRIPT = 12;
+
+/**
+ * PURE. Could the signals in `RE` (and `isComplexAppPrompt`) read this request at all?
+ *
+ * True when a real share of the request's LETTERS sit outside the Latin range every pattern above is
+ * written in. Deliberately script-AGNOSTIC rather than a Devanagari test — India is not one script,
+ * and an ASCII regex is equally blind to all of them. Romanized Hinglish stays FALSE on purpose: the
+ * patterns really do read "banao ek todo app", and one Hindi word inside an English sentence
+ * ("call it मेरा ऐप") is not an unread request.
+ */
+export function signalsCouldNotRead(prompt: string): boolean {
+  const letters = String(prompt ?? '').match(/\p{L}/gu) ?? [];
+  if (letters.length < MIN_LETTERS_TO_JUDGE_SCRIPT) return false;
+  const nonLatin = letters.filter((c) => !/[A-Za-z]/.test(c)).length;
+  return nonLatin / letters.length >= UNREADABLE_LETTER_SHARE;
+}
+
+/**
+ * How many separate things the request enumerates — counted WITHOUT reading a single word.
+ *
+ * A comma, a semicolon, a newline and a bullet marker mean "and another one" in every script this
+ * repo serves; the words between them do not have to be understood for the COUNT to be evidence.
+ * This is the only kind of evidence available once `signalsCouldNotRead` is true, so it is the only
+ * kind used.
+ *
+ * Segments shorter than two letters are dropped, so trailing punctuation and "1." style numbering
+ * do not inflate the count.
+ */
+export function enumeratedParts(prompt: string): number {
+  return String(prompt ?? '')
+    .split(/[\n,;·•]|(?:^|\s)[-*]\s|\d{1,3}[.)]\s/u)
+    .filter((part) => (part.match(/\p{L}/gu) ?? []).length >= 2)
+    .length;
+}
+
+/**
+ * How many separately-named things make an app a MULTI-FEATURE app.
+ *
+ * 🔒 NOT A NEW NUMBER, AND IT IS THE SAME MEASUREMENT. `BuildTimeEstimator.complexityFromPrompt`
+ * already floors a complex-app prompt's `featureCount` at **6** — this repo's own existing answer to
+ * "how many features before this is a complex app", counted the same way (list separators). Borrowing
+ * `ProjectPlan.MEGA_BULLETS_WITH_NOUN` (8) was considered and rejected: that one counts BULLET LINES
+ * beside a big-software noun, a strictly stronger signal, and a constant borrowed across two
+ * different measurements is how a shared number stops meaning one thing.
+ */
+export const FLOOR_PARTS_MANY = 6;
+
+/**
+ * ⚠️ THE ONE NUMBER HERE THAT IS CHOSEN RATHER THAN BORROWED, said plainly: half of the line above.
+ * Three separately-named things is more than one screen's worth of app, and the floor it buys is only
+ * `BASE_SCORE.coding` — out of the cheapest band and nowhere near the heaviest, which is also why
+ * getting it slightly wrong is cheap (the light band keeps the one-shot and simple lanes and the same
+ * 80-step ceiling; only the score-58 band changes any of those). Conservative on purpose: too low
+ * sends a real app to the weakest engine, which is paid twice — once in the wasted call, once in the
+ * heal — while too high spends a little more on a small app.
+ */
+export const FLOOR_PARTS_FEW = 3;
+
+/**
+ * PURE. The score an unreadable request deserves on SCRIPT-NEUTRAL evidence alone — 0 when there is
+ * none, in which case nothing is floored and a short foreign-script request stays as cheap as it is
+ * today.
+ *
+ * 🔒 IT LANDS ON BANDS THAT ALREADY EXIST, and that is the whole correctness argument. Both values
+ * are `BASE_SCORE` entries, so an unreadable multi-feature spec is treated EXACTLY as its English
+ * equivalent already is (`complex_app` → standard band) rather than being given a new path nobody
+ * has exercised. No new branch, no new combination of flags.
+ *
+ * ⚠️ IT ONLY EVER RAISES. A floor that could lower a score would let a long foreign-script
+ * ARCHITECTURE request (which `isComplexAppPrompt` may still have caught through a Latin brand name
+ * or a code block) be talked back down by a word count.
+ */
+export function scriptNeutralFloor(prompt: string): number {
+  const text = String(prompt ?? '');
+  const parts = enumeratedParts(text);
+  if (parts >= FLOOR_PARTS_MANY || text.length > 800) return BASE_SCORE.complex_app;
+  if (parts >= FLOOR_PARTS_FEW || text.length > 300) return BASE_SCORE.coding;
+  return 0;
+}
 
 /** Normal-mode tier from score. Tops at Sonnet (Opus is power-only). */
 function scoreToTier(score: number): StartTier {
@@ -262,6 +381,9 @@ export function analyzeRequest(input: AnalyserInput): AnalysisResult {
       startTier: pinned,
       escalationPath: [pinned],
       ambiguous: false,
+      // Recorded honestly even here. A pinned tier bypasses the ladder, so the flag changes no
+      // routing — but a report should not say the scorer read a request it could not read.
+      unreadable: signalsCouldNotRead(prompt),
       reasoning: pinned === 'sonnet'
         ? `STRONG tier → Sonnet pinned 100% (task=${taskType}, ladder bypassed)`
         : `POWER tier → Opus 4.8 pinned (task=${taskType}, ladder bypassed)`,
@@ -307,10 +429,39 @@ export function analyzeRequest(input: AnalyserInput): AnalysisResult {
     reasons.push('capped ≤20 (simple app → Gemini)');
   }
 
+  /**
+   * 🔴 A REQUEST NONE OF THE SIGNALS CAN READ IS NOT A GREETING (autopsy d98dae01, 2026-09-17).
+   *
+   * Applied LAST, after every English-driven adjustment and after the simple-app cap, because it is
+   * a FLOOR on the evidence that survives when there is no readable evidence — not another
+   * adjustment competing with them. It cannot interact with the cap above: `simple_app` is decided
+   * by an ASCII pattern, so a request this test calls unreadable can never have that task type.
+   *
+   * 🔒 A LATIN-SCRIPT PROMPT IS BYTE-IDENTICAL TO BEFORE. `signalsCouldNotRead` is false for
+   * English and for romanized Hinglish, so this whole block is skipped on the common path — no new
+   * cost, no new branch, nothing to regress.
+   */
+  const unreadable = signalsCouldNotRead(prompt);
+  if (unreadable) {
+    const floor = scriptNeutralFloor(prompt);
+    if (floor > score) {
+      score = floor;
+      reasons.push(`floor ${floor} — the signals cannot read this script; ${enumeratedParts(prompt)} enumerated part(s), ${prompt.length} chars`);
+    } else {
+      reasons.push('the signals cannot read this script; no script-neutral size evidence either');
+    }
+  }
+
   score = Math.max(0, Math.min(100, Math.round(score)));
   const startTier = scoreToTier(score);
   const escalationPath = NORMAL_LADDER.slice(NORMAL_LADDER.indexOf(startTier));
-  const ambiguous = isNearBoundary(score);
+  /**
+   * ⚠️ `unreadable` MUST make this true, and this is the half that was a lie rather than a gap. A
+   * caller asking "is it worth buying a second opinion on this?" was told NO for the one request
+   * this module had understood nothing of. The floor above is the honest DETERMINISTIC answer; this
+   * flag is what lets a caller do better than deterministic when a cheap classifier is available.
+   */
+  const ambiguous = isNearBoundary(score) || unreadable;
 
   // Intelligent Scoping (Phase B): rank features by priority for checkpoint loop.
   // Only rank for app builds (not chat/coding) to avoid noise.
@@ -324,6 +475,7 @@ export function analyzeRequest(input: AnalyserInput): AnalysisResult {
     startTier,
     escalationPath,
     ambiguous,
+    unreadable,
     reasoning: `${reasons.join('; ')} → score ${score} → ${startTier}${ambiguous ? ' (borderline)' : ''}`,
     features,
   };

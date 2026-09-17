@@ -63906,3 +63906,76 @@ close it: a prompt whose every word is a placeholder OR a creation verb names no
 ⚠️ **One of my own tests from the PR above asserted `"app banao"` BUILDS, and that assertion was the
 bug** — it encoded my incomplete reading of the report, not anything a user needs. Moved into the
 category-word block and corrected, with the reason recorded beside it rather than silently deleted.
+
+---
+
+## 2026-09-17 — THE NEXT SOURCE-READING GUARD IS RIGHT BY DEFAULT (and I had duplicated an existing helper)
+
+**Branch `claude/the-next-guard-is-right-by-default`. Two helpers added to
+`tests/helpers/sourceSlice.ts`, one duplicate of mine deleted.**
+
+### 🔴 Seven guards broke on correct code in one day, and the class has TWO halves
+
+The fixed-window half was already known (`sourceSlice.ts` has existed since 2026-08-06 for it). The
+other half is subtler and **strictly worse**:
+
+| | what happens | visible? |
+|---|---|---|
+| **fixed window** | `slice(at, at + 700)` fails while the invariant HOLDS, because a field was added | yes — noisy, you go and widen the number |
+| **missing anchor** | `indexOf` returns `-1`, the slice is junk, and the assertion **passes for reasons unrelated to the claim** | **no** |
+
+**Three guards written in one file that day passed with the code REVERTED.** A guard that cannot fail
+is not a guard, and unlike the noisy kind it never tells you.
+
+### What shipped
+
+- **`anchorOf(src, needle)`** — the index, or a **throw**; never `-1`. Throwing is the point: a missing
+  anchor means the test's own assumption about the code has stopped holding, which is a real failure
+  and not a case to slice around. The message names the needle and says **re-anchor, do not widen** —
+  because "widen the number and move on" is how a real regression eventually slips through one of these.
+- **`codeOnly(src)`** — comment stripping, hand-rolled in **six** files that day. Deliberately
+  conservative: block comments and WHOLE-LINE `//` only. ⚠️ A trailing `//` is left alone on purpose —
+  stripping from any `//` would eat the tail of every line containing a `https://` URL, which this
+  codebase is full of, and silently shorten the very text being asserted on. **Under-stripping leaves a
+  guard noisy; over-stripping makes it quietly wrong.**
+
+### ⚠️ AND I HAD DUPLICATED A HELPER THAT ALREADY EXISTED
+
+#3037 added a local **`objectLiteralAround`** to `tests/streamRacePolicy.test.ts`. **`enclosingBlock`
+in `tests/helpers/sourceSlice.ts` already did exactly that** — same walk back to the opening brace,
+same forward match — and it takes a marker string rather than an index, so it reads better at the call
+site. I wrote the helper instead of searching `tests/helpers/`.
+
+**That is safeguard #6's own failure mode**, and the entry it warns about: *"my search found nothing"*
+was never a search. Verified by measurement before replacing — `enclosingBlock(chat, 'streamed: true')`
+returns the same row and satisfies the same three assertions. The duplicate is **deleted**, not kept: a
+second copy of a rule is a second copy free to disagree.
+
+`streamRacePolicy.test.ts` now uses `enclosingBlock`, `anchorOf` and `codeOnly` from the shared module,
+and a guard in the new test file asserts `objectLiteralAround` does not come back.
+
+### 🔒 What this deliberately does NOT do
+
+It does **not** sweep the 152 files / 304 fixed-offset windows measured earlier. That was put to the
+admin and declined on my own initiative for three reasons that still hold: concurrency rule 4 (tests
+are exactly what other sessions touch — #3041 was fixing one of these the same day), a mechanical
+rewrite of 304 assertions could *weaken* guards because each must measure its own claim, and the value
+is diffuse (a window only breaks when someone edits near it — which is when it got fixed, seven times
+that day).
+
+**This is the prevent-don't-heal half instead:** the shared answer now contains what those seven
+failures actually needed, so the next guard is written right rather than fixed later.
+
+### Tests — `tests/sourceSliceHelpers.test.ts` (14 cases)
+
+Proven by reversion: **9 of 14 fail** with `sourceSlice.ts` reverted. The three older helpers are
+pinned too, and one case demonstrates the junk slices `anchorOf` prevents.
+
+⚠️ **My first draft of that demonstration was wrong:** on a 50-character string `slice(-301, 299)`
+clamps to the whole thing rather than to nothing. The vacuous guards ran against a ~30,000-character
+source, where `-301` means "301 back from the end" and the range inverts. **Demonstrated at a real
+file's scale, or the demonstration is not one.**
+
+**Full CI gate green on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` ·
+`vitest run` (**25,079 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
+`deps:server-gate`.

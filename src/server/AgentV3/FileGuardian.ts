@@ -48,6 +48,22 @@ const RECYCLE_FRACTION = 0.5;
  * A file the scanner refused to read is not evidence of absence. Same discipline as `scanned:false`
  * in the UI scan and `captured` in the console-error reader: unknown is never reported as empty.
  */
+/**
+ * The same plan from a LISTING alone — no contents (autopsy 8682b6b1, 2026-09-17).
+ *
+ * `planFileGuardian` decides by membership: a saved path is missing when it is neither a key of
+ * `existing` nor in `skipped`. Contents never enter the decision. So a caller that has only listed the
+ * sandbox (`listWorkspaceFiles`) can hand every listed path over as "seen" and get the identical plan
+ * the read-based call would produce — which is what lets the File Guardian stop reading every file
+ * on every turn. Equivalence is asserted in FileGuardian.test.ts, not assumed.
+ */
+export function planFileGuardianFromListing(
+  saved: Record<string, string>,
+  listing: readonly string[],
+): GuardianPlan {
+  return planFileGuardian(saved, {}, listing);
+}
+
 export function planFileGuardian(
   saved: Record<string, string>,
   existing: Record<string, string>,

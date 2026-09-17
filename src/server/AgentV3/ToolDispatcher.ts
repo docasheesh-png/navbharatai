@@ -61,7 +61,7 @@ import { analyzeSchemaGraph, schemaGraphSummary, analyzeSqlSchema, sqlSchemaSumm
 import { generateSchemaTypes } from './schemaTypeGen';
 import { analyzeCiWorkflow, ciWorkflowSummary, repairCiWorkflow, ciPlatform } from './ciWorkflowAnalysis';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
-import { analyzeArchitecture, architectureSummary, generateArchitectureDoc } from './ArchitectureAnalysis';
+import { analyzeArchitecture, architectureSummary, generateArchitectureDoc, orphanComponentFile } from './ArchitectureAnalysis';
 import { securitySummary } from './SecurityAnalysis';
 import { applyPreviewDomain } from './PreviewDomain';
 import { injectAppSignature, hasAppSignature } from './appSignature';
@@ -140,6 +140,7 @@ import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './E
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
 import { authoredPathSet, splitByAuthorship, preExistingCodeObservation } from './buildAuthorship';
+import { deletionCandidates, deletionReconciledMessage } from './fileDeletion';
 import { analyzeHooksRules, hookViolationWriteNote } from './HooksRulesAnalysis';
 import { dedupeDuplicateImports } from './DuplicateImportGuard';
 import { isReactFamilyFramework } from './frameworkFamily';
@@ -596,6 +597,46 @@ export class ToolDispatcher {
 
   setAuthoredFiles(getter: () => Iterable<string>): void {
     if (typeof getter === 'function') this.authoredFiles = getter;
+  }
+
+  /**
+   * Told when files this build deleted have been dropped from the project map, so the composition
+   * root can stop claiming it wrote them (autopsy 8b3dca5c). A setter, not a constructor parameter:
+   * this class already carries twelve positional ones, and `setAuthoredFiles` above set the pattern.
+   *
+   * Unset ⇒ the graph is still corrected, only the route's write set is not — so a caller that has
+   * not wired it loses nothing it had before.
+   */
+  private fileDeletionSink?: (paths: string[]) => void;
+
+  setFileDeletionSink(sink: (paths: string[]) => void): void {
+    if (typeof sink === 'function') this.fileDeletionSink = sink;
+  }
+
+  /**
+   * Condition (3) of `fileDeletion.ts`: the sandbox must CONFIRM the file is gone before the project
+   * map forgets it. A successful read means it is still there — `rm x || true` exits 0 having deleted
+   * nothing — and that path is left exactly as it was.
+   *
+   * Sequential on purpose: a delete command names one or two files, so the probe is two round trips
+   * in the rare case an `rm` ran at all, and never anything on a normal build.
+   */
+  private async reconcileDeletions(paths: readonly string[]): Promise<void> {
+    if (!paths.length) return;
+    const gone: string[] = [];
+    for (const path of paths) {
+      let stillThere = false;
+      try { await this.actuator.readFile(this.workspaceId, path); stillThere = true; } catch { stillThere = false; }
+      if (stillThere) continue;
+      try { getWorkspaceMemory(this.workspaceId).removeFile(path); } catch { /* graph best-effort */ }
+      gone.push(path);
+    }
+    if (!gone.length) return;
+    try { this.fileDeletionSink?.(gone); } catch { /* the sink is best-effort — the graph is already correct */ }
+    try {
+      getWorkspaceMemory(this.workspaceId).recordAudit(`[DELETED] dropped from the project map: ${gone.join(', ')}`);
+    } catch { /* audit best-effort */ }
+    this.state?.appendTerminal(deletionReconciledMessage(gone));
   }
 
   /**
@@ -2735,8 +2776,14 @@ export class ToolDispatcher {
         // and the app stops building. The project's own import graph already knows who depends on what, so
         // refuse EXACTLY the deletes that would orphan a live importer and allow the rest. Honest cleanup
         // keeps working; a build-killing delete becomes impossible. Kill switch AGENTV3_DELETE_GUARD=off.
+        //
+        // ⚠️ The targets this parser finds are ALSO what tells the project graph a file is gone
+        // (autopsy 8b3dca5c — see `fileDeletion.ts`). They are collected whether or not the guard is
+        // armed, because "this command removes src/x.tsx" is a fact about the command, not a policy;
+        // only the REFUSAL below is flag-gated, exactly as before.
+        const deleteTargets = singleSourceDeleteTargets(command);
         if (process.env.AGENTV3_DELETE_GUARD !== 'off') {
-          for (const target of singleSourceDeleteTargets(command)) {
+          for (const target of deleteTargets) {
             let importers: string[] = [];
             try { importers = getWorkspaceMemory(this.workspaceId).impactRadius(target).direct; } catch { importers = []; }
             if (importers.length > 0) {
@@ -2994,6 +3041,14 @@ export class ToolDispatcher {
         try {
           this.onCommand?.({ command, exitCode, stdout, stderr, durationMs: Date.now() - cmdStartedAt });
         } catch { /* diagnostics capture is best-effort */ }
+        // 🔴 AND NOW TELL THE PROJECT MAP THE FILE IS GONE (autopsy 8b3dca5c). Everything above this
+        // line already knew which source files the command would remove; nothing had ever acted on it
+        // once the command succeeded, so a build that tidied up its own debris was then failed over the
+        // debris. `fileDeletion.ts` carries the evidence and the three conditions.
+        if (deleteTargets.length > 0) {
+          try { await this.reconcileDeletions(deletionCandidates(deleteTargets, exitCode)); }
+          catch { /* reconciliation is best-effort — a failure simply keeps today's stale entry */ }
+        }
         /**
          * SECURITY REMEDIATION (admin 2026-08-12). THIS is where the dukaan build's 8 vulnerabilities
          * came from — the agent's own `npm install react-router-dom @neondatabase/serverless bcryptjs
@@ -3583,7 +3638,41 @@ export class ToolDispatcher {
             extra.push({ severity: 'high', label: `the live preview will not compile — ${entryErr?.file ?? 'entry file'}: ${(entryErr?.message ?? 'compile error').slice(0, 160)}` });
           }
         } catch { /* the preview-compile gate is best-effort — a compiler failure never fabricates a blocker */ }
-        const readiness = assessReadiness(archReport, findings, extra);
+        // 🔴 AN ORPHAN IN CODE WE DID NOT WRITE IS NOT THIS BUILD'S DEFECT (autopsy 8b3dca5c).
+        //
+        // The score is one 100-point budget and an orphan component costs 6 of it, so nine of them is
+        // 54 points — enough on its own to fall under the 50/100 bar, become a blocker, turn the
+        // release gate RED and make a working app free. That build's nine included files written by an
+        // EARLIER build in the same workspace, and files our own abandoned fast lane wrote from a
+        // prompt (`npm install`) that named no app at all.
+        //
+        // This is the open item PR #2997 recorded in its own words — "the readiness SCORE is still
+        // whole-workspace" — closed with that PR's own two primitives rather than a third idea:
+        // `splitByAuthorship` decides, and `observation` is the severity that records without pricing.
+        //
+        // 🔒 NOTHING IS HIDDEN. `archReport` is untouched, so the architecture summary, the build
+        // report and `computeBuildConfidence` still see all of them; only the SCORE is scoped, and the
+        // pre-existing ones are still listed — under the same wording `importTurnObservation` uses.
+        // With no authored set the copy is byte-identical to `archReport`, which is today's behaviour.
+        let scoredArch = archReport;
+        try {
+          const split = splitByAuthorship(
+            archReport.orphanComponents.map((label) => ({ file: orphanComponentFile(label), label })),
+            authoredSet,
+          );
+          if (split.preExisting.length > 0) {
+            scoredArch = { ...archReport, orphanComponents: split.ours.map((o) => o.label) };
+            extra.push({
+              severity: 'observation',
+              label: preExistingCodeObservation(
+                `${split.preExisting.length} component(s) created but never used: `
+                + `${split.preExisting.slice(0, 3).map((o) => o.label).join(', ')}`
+                + `${split.preExisting.length > 3 ? ', …' : ''}`,
+              ),
+            });
+          }
+        } catch { /* attribution is best-effort — a failure keeps the whole-workspace score */ }
+        const readiness = assessReadiness(scoredArch, findings, extra);
         // Stash for the mandatory end-of-build gate (R2 §1.1) — same scan, no divergence.
         this.lastReadiness = readiness;
         const verdict = readinessVerdict(readiness);

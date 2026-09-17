@@ -61342,3 +61342,59 @@ recents section, that the knowledge base promises neither behaviour — and that
 
 Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1730 files, 24432 passed, 0 failed** ·
 build · test:bundle · boot:check.
+
+## 2026-09-17 — the echo guard I had just shipped was itself the forbidden trade (caught before merge)
+
+Two independent adversarial reviewers, run against the narration-echo guard **after it was pushed and
+before it was merged**, found the same real defect. Both were right.
+
+### What was wrong
+
+`said` was built from `tForMatch` — the narration with benign compounds STRIPPED ("error boundary",
+"error handling", "warning banner") — while `known` was built from the **RAW** prompt. Applying the
+stripper to one side only meant an ordinary feature request seeded the whitelist:
+
+> prompt: *"Build a checkout page with proper error handling and a warning banner for overdue items."*
+> → `known = {error, warning}` → every genuine engine struggle for the rest of that build was
+> downgraded to a step.
+
+Measured by the reviewers against the real class: *"The dev server is throwing an error on startup"*,
+*"There is still an error in the console after rebuild"*, *"The production build exits with an error"*,
+*"There is a warning about the port"* — all four flipped from problem to step, in a build that had
+reported no symptom at all.
+
+**That is the same trade in the other direction** — false positives on fix-turns exchanged for false
+NEGATIVES on ordinary builds — which is exactly what the constitution forbids. Money was clean and
+verified clean (`AGENT_NOTE` is always `autoResolved: true`, and every money-touching reader excludes
+it), but the admin's forensic ledger is the input the fifth absolute rule mines, and it was being
+thinned silently.
+
+### Two further corrections from the same review
+
+1. **`meta.prompt` is NOT reliably "the user's own words"**, and my doc comment said it was — a
+   load-bearing sentence for whoever reads it next. `fixErrorAndContinuePrompt` composes the prompt
+   from a PLATFORM prefix plus NavBharatAI's own error notice, so our own wording could whitelist its
+   own vocabulary. `PLATFORM_COMPOSED_PREFIXES` are removed before harvesting.
+2. **The guard must only arm on an actual SYMPTOM REPORT.** `isPlatformFixRequest` /
+   `looksLikeMachineError` (`lib/platformFixRequest.ts`) are this repo's existing answer to "is this
+   message reporting a failure?", already used server-side by `IntentClassifier`. Drawing the line
+   once, there, is what stops *"Build me a dashboard that shows error rates"* silencing a build.
+
+🔴 **STILL OPEN, named rather than covered over:** when the wrapped body is itself NavBharatAI's own
+branded notice (*"The build produced no files. Please try again."*), the guard still arms. That is the
+`fdd59ef8` "our own voice fed back" class and belongs to that fix, not this one.
+
+### Tests
+
+Four new over-correction guards in `tests/narrationEchoesPrompt.test.ts` (16 total). Each correction
+proven by reversion against its OWN test.
+
+⚠️ **Two of my test drafts were wrong again, and the pattern is now unmistakable.** Two unit tests used
+the shorthand prompt `'fix this error'`, which is not a symptom report — the guard correctly refused it
+and the TESTS were wrong, not the code. And the prefix guard first asserted a narration word
+(`"failed"`) that appears in neither the prefix nor the body, so it returned false either way and
+guarded nothing; the discriminating case needs a word that lives ONLY in our own opener.
+
+**Three times in one session a guard has been written from a guess and had to be rewritten after
+measuring.** The rule that keeps being relearned: *a test that cannot fail is not a test* — and the
+only way to know it can fail is to break the code and watch it go red.

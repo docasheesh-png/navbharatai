@@ -97,14 +97,54 @@ describe('over-correction guards — what stops the fix becoming its own bug', (
   });
 });
 
+// 🔴 THE THREE CORRECTIONS ADVERSARIAL REVIEW FORCED, each encoded as the case that caught it.
+// Without these the guard traded false positives on fix-turns for false NEGATIVES on ordinary builds —
+// the same trade in the other direction, which the constitution forbids just as firmly.
+describe('the guard must not silence a build that reported no symptom at all', () => {
+  const FEATURE_REQUEST = 'Build a checkout page with proper error handling and a warning banner for overdue items.';
+  const DASHBOARD = 'Build me a dashboard that shows error rates';
+
+  it('a FEATURE REQUEST naming the vocabulary never arms the guard', () => {
+    expect(narrationEchoesPromptSymptom('the dev server is throwing an error on startup', FEATURE_REQUEST)).toBe(false);
+    expect(narrationEchoesPromptSymptom('there is a warning about the port', FEATURE_REQUEST)).toBe(false);
+    expect(narrationEchoesPromptSymptom('the preview is showing an error', DASHBOARD)).toBe(false);
+  });
+
+  it('and a real engine struggle in such a build stays a problem end-to-end', () => {
+    const d = new BuildDiagnostics({ now: () => 1, prompt: FEATURE_REQUEST });
+    say(d, 'The dev server is throwing an error on startup.');
+    expect(d.report().issues.find((i) => i.code === 'AGENT_NOTE')?.severity).toBe('warning');
+  });
+
+  it('both sides are stripped of benign compounds — not just the narration', () => {
+    // "error handling" in the PROMPT must not whitelist the bare word "error" for the whole build.
+    // This is the asymmetry that shipped in the first draft: `said` was stripped, `known` was not.
+    expect(narrationEchoesPromptSymptom('an error', 'Fix this error and continue building the app: add error handling')).toBe(false);
+  });
+
+  it('the platform\'s OWN composed prefix never seeds the whitelist', () => {
+    // ⚠️ THE DISCRIMINATING CASE, and the first draft of this test was not one: it asserted a
+    // narration word ("failed") that appears in NEITHER the prefix nor the body, so it returned false
+    // whether or not the prefix was stripped and guarded nothing. The word must live ONLY in our own
+    // opener. "Fix this error and continue building the app:" contains "error"; the body here does not.
+    // So with the prefix removed the whitelist is empty and a real "error" narration stays a problem —
+    // which is right: the user reported "something went sideways", not an error.
+    const prefixOnly = 'Fix this error and continue building the app:\n\nsomething went sideways';
+    expect(narrationEchoesPromptSymptom('an error occurred while starting', prefixOnly)).toBe(false);
+  });
+});
+
 describe('narrationEchoesPromptSymptom — the pure helper', () => {
   it('is word-level, every-not-some, and empty-prompt-safe', () => {
-    expect(narrationEchoesPromptSymptom('the network error', 'fix this error')).toBe(true);
-    expect(narrationEchoesPromptSymptom('the preview is not responding', 'fix this error')).toBe(false);
-    expect(narrationEchoesPromptSymptom('error and not responding', 'fix this error')).toBe(false);
+    // ⚠️ The prompt must be a REAL symptom report. An earlier draft of this test passed the shorthand
+    // 'fix this error', which is not one — the guard correctly refused it, and the test was wrong, not
+    // the code. Use the platform's actual composed prompt, which is what production sends.
+    expect(narrationEchoesPromptSymptom('the network error', PROMPT)).toBe(true);
+    expect(narrationEchoesPromptSymptom('the preview is not responding', PROMPT)).toBe(false);
+    expect(narrationEchoesPromptSymptom('error and not responding', PROMPT)).toBe(false);
     expect(narrationEchoesPromptSymptom('the network error', undefined)).toBe(false);
     expect(narrationEchoesPromptSymptom('the network error', '')).toBe(false);
-    expect(narrationEchoesPromptSymptom('all clean', 'fix this error')).toBe(false); // no problem word
+    expect(narrationEchoesPromptSymptom('all clean', PROMPT)).toBe(false); // no problem word
   });
 
   it('never throws on junk', () => {
@@ -119,7 +159,7 @@ describe('narrationEchoesPromptSymptom — the pure helper', () => {
   // depending on how many lines preceded it. This is invisible in a single-call test.
   it('is deterministic across repeated calls (the stateful-/g trap)', () => {
     for (let i = 0; i < 3; i++) {
-      expect(narrationEchoesPromptSymptom('the network error', 'fix this error')).toBe(true);
+      expect(narrationEchoesPromptSymptom('the network error', PROMPT)).toBe(true);
     }
     // ⚠️ THIS IS THE HALF THAT ACTUALLY BITES, and TWO earlier drafts of it did not — both were
     // written from a guess and neither was measured first.

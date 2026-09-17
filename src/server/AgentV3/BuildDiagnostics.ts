@@ -11,6 +11,7 @@
 // events (a provider fallback, a sandbox-create timeout).
 
 import { toolCallDetail } from './toolCallTarget';
+import { isPlatformFixRequest, looksLikeMachineError, PLATFORM_COMPOSED_PREFIXES } from '../../lib/platformFixRequest';
 import type { AgentEvent } from './types';
 import { parseNpmAuditSummary, npmAuditNote, auditSeverity, looksLikeDependencyInstall } from './npmAuditSummary';
 import { manifestSummaryLine, type BuildManifestV1 } from './BuildManifest';
@@ -83,35 +84,77 @@ const PROCESS_ONLY_CODES = new Set([
 const PROBLEM_WORD_SOURCE =
   "(error|failed|cannot|could not|not responding|isn'?t available|unavailable|retry|retrying"
   + '|stuck|timed out|blocked request|closed port|won\'?t come up|no files|warning)';
+/**
+ * Strip the BENIGN COMPOUNDS — "error boundary", "error handling", "warning banner" — that are
+ * ordinary feature work rather than a failure. Hoisted out of the classifier (where it was added by
+ * the ShopKhata autopsy 2026-07-17) so BOTH sides of the echo comparison can use it.
+ *
+ * 🔴 APPLYING IT TO ONE SIDE ONLY WAS A REAL DEFECT, found by adversarial review of this very change
+ * before it merged. `said` came from the stripped narration while `known` came from the RAW prompt, so
+ * an ordinary feature request — *"Build a checkout page with proper error handling and a warning
+ * banner"* — put "error" and "warning" into the whitelist and silenced every genuine engine struggle
+ * for the rest of that build. It traded false positives on fix-turns for false NEGATIVES on ordinary
+ * builds, which is the same trade in the other direction.
+ */
+function stripBenignCompounds(text: string): string {
+  return String(text ?? '')
+    .replace(/\berrors?[- ](boundar(?:y|ies)|handling|handlers?|messages?|states?|pages?|toasts?|ui|display)\b/gi, '')
+    .replace(/\bwarnings?[- ](messages?|banners?|badges?|toasts?)\b/gi, '');
+}
+
 /** Non-global: `.test()` on a `/g` regex is STATEFUL (measured true/false/true on one string). */
 const PROBLEM_WORD_RE = new RegExp(`\\b${PROBLEM_WORD_SOURCE}\\b`, 'i');
 /** Global, used ONLY via `.match()`, which does reset `lastIndex`. */
 const PROBLEM_WORD_RE_G = new RegExp(`\\b${PROBLEM_WORD_SOURCE}\\b`, 'gi');
 
 /**
- * Is every problem word in this narration one the USER THEMSELVES wrote?
+ * Is every problem word in this narration one the USER THEMSELVES reported?
  *
  * 🔴 THE DEFECT THIS ANSWERS (build e4ebcb5f, 2026-09-17). The prompt was *"Fix this error and
- * continue building the app: network error"*, and the agent's ordinary narration — *"Let me check
- * the current app structure and identify the network error:"* — was recorded as a PROBLEM. It is the
- * agent quoting the symptom it was asked to investigate, which is the most normal thing an agent
- * does on a "fix this error" turn.
+ * continue building the app: network error"*, and the agent's ordinary narration — *"Let me check the
+ * current app structure and identify the network error:"* — was recorded as a PROBLEM. It is the agent
+ * quoting the symptom it was asked to investigate, which is the most normal thing an agent does on a
+ * "fix this error" turn.
  *
  * 🔑 THE CLASS, and why no keyword list can express it: the classifier asks *"does this sentence
  * contain a scary word?"* when the question it exists to answer is *"did the ENGINE fail?"* Four
- * separate patches (2026-07-07 ×3, ShopKhata 2026-07-17, PaisaTrack 2026-07-21) have narrowed this
- * predicate and not one has widened it — a rule that has only ever been walked back is one whose
- * default answer is wrong. The structural signal was already present and simply never consulted:
- * `meta.prompt` is the user's own words, set at construction, so it cannot be gamed by the model.
+ * separate patches have narrowed that predicate and not one has widened it.
+ *
+ * ⚠️ THREE CORRECTIONS FOUND BY ADVERSARIAL REVIEW BEFORE THIS MERGED, each of which turned a
+ * plausible guard into a wrong one. They are the reason this function is shaped the way it is:
+ *
+ *  1. **`meta.prompt` is NOT reliably "the user's own words"** — an earlier draft of this comment said
+ *     it was, and that sentence was load-bearing. `fixErrorAndContinuePrompt` (AgentV3Panel) composes
+ *     the prompt from a PLATFORM prefix plus NavBharatAI's own error notice, so our own wording could
+ *     whitelist its own vocabulary for a whole build. The composed prefixes are removed before
+ *     harvesting.
+ *  2. **It must only arm on an actual SYMPTOM REPORT.** Without that, a plain feature request —
+ *     *"Build me a dashboard that shows error rates"* — silenced every later "error" narration in a
+ *     build that reported no symptom at all. `isPlatformFixRequest` / `looksLikeMachineError` are this
+ *     repo's existing answer to "is this message reporting a failure?", so the line is drawn once.
+ *  3. **Both sides must speak the same vocabulary.** `said` was stripped of benign compounds and
+ *     `known` was not, so *"add proper error handling"* put "error" into the whitelist. Both now go
+ *     through `stripBenignCompounds`.
  *
  * `every`, not `some`: a line mixing the user's word with a NEW one ("the network error is back and
- * the preview is not responding") carries a word the user never wrote, so it stays a problem.
+ * the preview is not responding") carries a word the user never reported, so it stays a problem.
  *
- * PURE. Never throws. No prompt ⇒ false ⇒ today's behaviour exactly.
+ * 🔴 STILL OPEN, named rather than covered over: when the wrapped body is itself NavBharatAI's own
+ * branded notice ("The build produced no files. Please try again."), the guard still arms — that is
+ * the fdd59ef8 "our own voice fed back" class, and it belongs to that fix, not this one.
+ *
+ * PURE. Never throws. No prompt, or a prompt that is not a symptom report ⇒ false ⇒ today's behaviour.
  */
 export function narrationEchoesPromptSymptom(text: string, prompt: string | undefined | null): boolean {
-  const asked = String(prompt ?? '');
-  if (!asked) return false;
+  const raw = String(prompt ?? '');
+  if (!raw) return false;
+  // Only a message that REPORTS a failure may whitelist failure vocabulary. A feature request that
+  // merely names the vocabulary must not.
+  if (!isPlatformFixRequest(raw) && !looksLikeMachineError(raw)) return false;
+  // Our own composed opener is not the user reporting anything.
+  let asked = raw;
+  for (const prefix of PLATFORM_COMPOSED_PREFIXES) asked = asked.split(prefix).join(' ');
+  asked = stripBenignCompounds(asked);
   const said = (String(text ?? '').match(PROBLEM_WORD_RE_G) ?? []).map((w) => w.toLowerCase());
   if (said.length === 0) return false;
   const known = new Set((asked.match(PROBLEM_WORD_RE_G) ?? []).map((w) => w.toLowerCase()));
@@ -1358,8 +1401,7 @@ export class BuildDiagnostics {
         // matched inside "error boundary". Building error-UX (boundaries, handling, messages, toasts)
         // is normal work — strip those compounds BEFORE the problem-keyword test so only a genuine
         // failure phrase can classify a narration as a problem.
-        const tForMatch = t.replace(/\berrors?[- ](boundar(?:y|ies)|handling|handlers?|messages?|states?|pages?|toasts?|ui|display)\b/gi, '')
-          .replace(/\bwarnings?[- ](messages?|banners?|badges?|toasts?)\b/gi, '');
+        const tForMatch = stripBenignCompounds(t);
         const problemWord = PROBLEM_WORD_RE.test(tForMatch);
         // A genuine FAILURE VERB (not the bare noun "error") is what makes a note a real problem — and an
         // ERROR-severity one. "error"/"errors" as a NOUN the agent is working on is not itself a failure.

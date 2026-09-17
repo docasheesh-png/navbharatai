@@ -1986,6 +1986,26 @@ weeks-long registration) — localStorage/IndexedDB are per-origin from day one,
   sequence is **bucket public-readable → Worker's `APPS_BUCKET` set and deployed → `PUBLISHED_APP_DOMAIN`
   set and a test app confirmed loading → only then `PUBLISHED_APPS_BUCKET_ONLY=on`.** Missing any
   precondition disables the path silently and correctly (today's behaviour, byte-identical).
+  ✅ **LIVE AND VERIFIED ON A REAL APP, 2026-09-17.** All three are SET and a published app (TaskLite)
+  opens at `https://a-e3638646f0794cd0da543c9d.mitrify.in` with no Firebase channel consumed — the
+  ~50-channel publish ceiling is GONE in production. ⚠️ **The last blocker was not any of these keys and
+  not the code: the Cloudflare ZONE for `mitrify.in` sat at `Pending Nameservers`, and a Worker route
+  does not run on a pending zone.** The registrar held `hasslo`+`teagan` while the zone that owns the
+  route had been assigned `houston`+`naya` — two real Cloudflare pairs, neither matching — so every
+  request bypassed the Worker and got Firebase's "Site Not Found". Two further misconfigurations were
+  corrected the same night: `*.mitrify.in` A records pointed at **Cloudflare's own anycast IPs** (a
+  resolved IP pasted back as an origin; now the documented placeholder `A * → 192.0.2.1`, Proxied), and
+  the Worker running at the edge was an older paste than the repo file.
+  🔎 **BEFORE DEBUGGING THIS PATH AGAIN, OPEN `https://<app>.<domain>/__nbai`** (PR #2980). It returns
+  the Worker's `version`, the `appsBucket` it is reading from and the exact object URL it looks an app's
+  `index.html` up at — the one fact that could not be observed from outside, and whose absence turned a
+  one-screen fix into an hour of elimination. JSON back ⇒ that code is live; Firebase's page back ⇒ an
+  older Worker is. `WORKER_VERSION` is CI-pinned against a hash of the file, so a Worker change that
+  forgets to bump it fails the build rather than reporting a version that lies.
+  🔴 **STILL OPEN (rule 6):** the Worker is deployed by PASTING it into the Cloudflare dashboard, so
+  nothing links the repo to the edge and CI cannot prove what is live. The complete fix is a Wrangler
+  deploy from CI, which needs `CLOUDFLARE_API_TOKEN` as a GitHub REPO secret (the token already exists
+  in Cloud Run). Until then the version endpoint makes the drift VISIBLE; it does not make it impossible.
   **Reverting is one key.** Unset `PUBLISHED_APPS_BUCKET_ONLY` and new publishes go back to Firebase
   immediately. Apps ALREADY published bucket-only keep working (the Worker serves them) and stay
   removable — takedown deletes their bucket objects unconditionally, not behind the flag, precisely so

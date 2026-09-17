@@ -63,6 +63,37 @@ describe('makeSubAgentSpawn — specialist sub-agents', () => {
     expect(events.some((e) => e.type === 'file_changed' && e.agent === 'frontend')).toBe(true);
   });
 
+  it('🔴 THE EXACT REGRESSION (build 9cca1fd5, 2026-09-17): a sub-agent\'s write reaches the parent\'s onFileWrite', async () => {
+    // The Architect delegates ALL app code to sub-agents by design, so a build where the Architect
+    // never writes a file DIRECTLY is the common case, not an edge case. Before this fix, the parent
+    // turn's `writtenFiles` tracking (fed only by `onFileWrite`) never saw a sub-agent's writes — so
+    // `verifiedNoChangeSummary` saw `filesWritten === 0` on a build that had just shipped a real
+    // feature, and told the user "Nothing needed changing… No file was modified" over a splash screen
+    // that had, in fact, just been built. This asserts the callback the parent relies on for that
+    // count is actually invoked when a SUB-AGENT (not the top-level runner) does the writing.
+    const actuator = new FakeActuator();
+    const stream = new AgentEventStream();
+    const state = new WorkspaceState(stream);
+    const client = new ClaudeClient(
+      scriptedClient([
+        {
+          content: [{ type: 'tool_use', id: 's1', name: 'write_file', input: { path: 'Splash.tsx', content: 'x' } }],
+          stop_reason: 'tool_use',
+          usage: { input_tokens: 10, output_tokens: 5 },
+        },
+        { content: [{ type: 'text', text: 'Splash screen done.' }], stop_reason: 'end_turn' },
+      ]),
+    );
+    const seen: Array<{ path: string; content: string }> = [];
+    const spawn = makeSubAgentSpawn({
+      client, actuator, workspaceId: 'ws', state, events: stream, model: 'm',
+      onFileWrite: (path, content) => { seen.push({ path, content }); },
+    });
+    await spawn('frontend', 'Add a splash screen');
+
+    expect(seen).toEqual([{ path: 'Splash.tsx', content: 'x' }]);
+  });
+
   it('injects the live project memory into the specialist\'s instruction', async () => {
     _clearWorkspaceMemory();
     // The Architect has already built something this workspace remembers.

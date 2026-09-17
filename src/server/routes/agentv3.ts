@@ -13003,8 +13003,16 @@ async function noteBuildOutcome(
       // C2 — declared here, BEFORE the spawn factory, so the thunk below can never capture a stale
       // empty list. Filled in a few lines down once the actuator can read the project's ignore file.
       let ignoreRulesForBuild: ReturnType<typeof parseIgnoreFile> = [];
+      // 🔴 ROOT CAUSE FIX (autopsy, build 9cca1fd5, 2026-09-17): sub-agent writes never reached
+      // `writtenFiles` (declared below, near `onFileWrite`) because the spawn factory used to be
+      // built with no file-write callback at all — see SubAgent.ts's `onFileWrite` doc for the full
+      // story. Same forward-reference shape as `ignoreRulesForBuild` above: `onFileWrite` itself
+      // isn't defined until a few hundred lines down, so this holder is reassigned once it is, and
+      // the thunk below is safe because no sub-agent can actually run before that reassignment does.
+      let onFileWriteForSubAgents: ((path: string, content: string) => void) | undefined;
       const spawnSubAgent = makeSubAgentSpawn({
         ignoreRules: () => ignoreRulesForBuild,
+        onFileWrite: (path, content) => onFileWriteForSubAgents?.(path, content),
         client, actuator, workspaceId, state, events, model, onlyOpus,
         // Tier fidelity + honest billing (admin 2026-07-13): sub-agents spend most of a build's
         // tokens — they must bill at the TIER's rate (Strong → Sonnet × 3, not Opus × 2) and run
@@ -13129,6 +13137,9 @@ async function noteBuildOutcome(
           _progressPersistTimer = setTimeout(flushFilesDurably, 3_000);
         }
       };
+      // Arm the sub-agent spawn factory's forward-referenced holder now that the real callback
+      // exists — see its declaration, above `spawnSubAgent`, for why this indirection is needed.
+      onFileWriteForSubAgents = onFileWrite;
       const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite, framework,
         // AI Diagnosis Bundle #3 — capture every sandbox command's raw logs into the build report.
         (c) => { try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ } });

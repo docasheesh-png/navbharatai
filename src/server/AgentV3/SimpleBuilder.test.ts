@@ -160,6 +160,40 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
     expect(elapsed).toBeLessThan(2500); // bailed on the ~40ms plan cap, NOT the 5000ms overall cap
   });
 
+  it('🔴 THE EXACT REGRESSION (build 782da7b7, 2026-09-16): every per-file generation call carries the lane\'s own absolute deadline', async () => {
+    // Root cause: genOne's call to deps.generate passed NO deadlineAt at all, unlike the plan and
+    // contract calls right above it in the source — so an abandoned file-generation closure (and its
+    // own truncation-continuation retries) kept making real provider calls for the better part of TWO
+    // HOURS after this lane had already lost its 240s race and the full builder had taken over. The
+    // fix anchors every file call to the SAME absolute instant the lane's own timeout race is bound
+    // by, so an abandoned closure's NEXT attempt sees an expired deadline and refuses before spending
+    // instead of starting another multi-minute call nobody will ever read.
+    const fileCallOpts: Array<{ deadlineAt?: number } | undefined> = [];
+    const laneStartedBefore = Date.now();
+    const overallTimeoutMs = 5000;
+    await runSimpleBuild(baseDeps({
+      shareContract: false,
+      overallTimeoutMs,
+      generate: async (_s: string, user: string, opts?: { deadlineAt?: number }) => {
+        if (user.includes('Plan the file list')) {
+          return 'src/App.tsx :: root\nsrc/TodoList.tsx :: the list';
+        }
+        fileCallOpts.push(opts);
+        const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'src/App.tsx';
+        return `<<<FILE ${path}>>>\n// ${path}\nexport default function X(){return null}\n<<<ENDFILE>>>`;
+      },
+    }));
+    const laneStartedAfter = Date.now();
+    expect(fileCallOpts.length).toBeGreaterThan(0); // the assertion below must not be vacuous
+    for (const opts of fileCallOpts) {
+      expect(opts?.deadlineAt).toBeDefined();
+      // The deadline must land on the lane's OWN overall budget, not the caller's ambient clock —
+      // bounded generously (±2s) purely for test-clock slack, never for the width of the real budget.
+      expect(opts!.deadlineAt!).toBeGreaterThanOrEqual(laneStartedBefore + overallTimeoutMs - 50);
+      expect(opts!.deadlineAt!).toBeLessThanOrEqual(laneStartedAfter + overallTimeoutMs + 2000);
+    }
+  });
+
   // WIRING TESTS for the budget allocation (admin report 858f6d7b). FastLaneBudget's own unit tests prove
   // the arithmetic; these prove runSimpleBuild actually USES it. Without them the pure functions could be
   // perfect and the lane could still starve its file-generation phase — which is precisely the bug that

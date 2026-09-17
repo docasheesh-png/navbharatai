@@ -240,6 +240,7 @@ html[data-theme] .focus\:border-white\/30:focus { border-color: color-mix(in srg
 html[data-theme] .focus\:text-white:focus { color: var(--text-primary); }
 html[data-theme] .group:hover .group-hover\:text-white { color: var(--text-primary); }
 html[data-theme] .group:hover .group-hover\:text-white\/50 { color: color-mix(in srgb, var(--text-primary) 50%, transparent); }
+html[data-theme] .group:hover .group-hover\:text-white\/60 { color: color-mix(in srgb, var(--text-primary) 60%, transparent); }
 html[data-theme] .group:hover .group-hover\:text-white\/80 { color: color-mix(in srgb, var(--text-primary) 80%, transparent); }
 html[data-theme] .hover\:bg-white:hover { background-color: var(--text-primary); }
 html[data-theme] .hover\:bg-white\/10:hover { background-color: color-mix(in srgb, var(--text-primary) 10%, transparent); }

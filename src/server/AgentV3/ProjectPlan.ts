@@ -112,24 +112,196 @@ export function projectModeEnabled(
   return (!!uid && allow.has(uid)) || (!!email && allow.has(email));
 }
 
+/** The thresholds `detectMegaProject` decides on — named so a report can quote them exactly. */
+export const MEGA_SCALE_MIN = 100;
+export const MEGA_BULLETS_WITH_NOUN = 8;
+export const MEGA_BULLETS_ALONE = 14;
+
+/** The raw signals behind a mega-project verdict, plus the verdict itself. */
+export interface MegaProjectSignals {
+  /** The first "N files/pages/screens/modules" figure in the prompt; 0 when none is stated. */
+  scale: number;
+  /** How many enumerated feature lines the prompt carries. */
+  bullets: number;
+  /** Does the prompt name a big-software category (ERP, CRM, marketplace, social network, …)? */
+  bigNoun: boolean;
+  /** The verdict — exactly what `detectMegaProject` returns. */
+  fires: boolean;
+}
+
 /**
  * Conservative mega-project detection — HIGH precision on purpose. A false positive would route
  * an ordinary app through module decomposition (slower + an extra planner call); a false negative
  * just builds exactly as today. Fires only on a clear signal:
- *   A. an explicit large scale: "N files/pages/screens/modules" with N >= 100, or
- *   B. a big-software category noun (ERP/CRM/management system/SaaS platform/…) AND >= 8
- *      enumerated feature lines, or
- *   C. >= 14 enumerated feature lines (a spec that long is a project, whatever it's called).
+ *   A. an explicit large scale: "N files/pages/screens/modules" with N >= MEGA_SCALE_MIN, or
+ *   B. a big-software category noun (ERP/CRM/management system/SaaS platform/…) AND
+ *      >= MEGA_BULLETS_WITH_NOUN enumerated feature lines, or
+ *   C. >= MEGA_BULLETS_ALONE enumerated feature lines (a spec that long is a project, whatever
+ *      it is called).
+ *
+ * 🔒 THIS IS THE ONE PLACE THE THRESHOLDS LIVE, and `detectMegaProject` is literally this
+ * function's `fires` field — so the explanation printed in a build report can never drift from the
+ * decision the build actually made. That drift is not hypothetical in this repo: four comments
+ * once described a ladder rung that no longer existed, and neither `tsc` nor `vitest` can read a
+ * comment. A report that RE-DERIVES a verdict is a second implementation waiting to disagree.
  * PURE.
  */
-export function detectMegaProject(prompt: string): boolean {
+export function megaProjectSignals(prompt: string): MegaProjectSignals {
   const text = (prompt || '').toLowerCase();
-  const scale = text.match(/(\d{2,6})\s*\+?\s*(?:files?|pages?|screens?|modules?)/);
-  if (scale && Number(scale[1]) >= 100) return true;
+  const scaleMatch = text.match(/(\d{2,6})\s*\+?\s*(?:files?|pages?|screens?|modules?)/);
+  const scale = scaleMatch ? Number(scaleMatch[1]) : 0;
   const bullets = (prompt || '').split('\n').filter((l) => /^\s*(?:[-*•]|\d{1,3}[.)])\s+\S/.test(l)).length;
   const bigNoun = /\b(?:erp|crm|lms|hms|hrms|pos)\b|management system|management software|enterprise|saas platform|multi[- ]tenant|marketplace|social network|super ?app|full[- ](?:fledged|scale)/i.test(text);
-  if (bigNoun && bullets >= 8) return true;
-  return bullets >= 14;
+  const fires = scale >= MEGA_SCALE_MIN
+    || (bigNoun && bullets >= MEGA_BULLETS_WITH_NOUN)
+    || bullets >= MEGA_BULLETS_ALONE;
+  return { scale, bullets, bigNoun, fires };
+}
+
+/** See `megaProjectSignals` — this is its `fires` field, kept as the call sites' short name. PURE. */
+export function detectMegaProject(prompt: string): boolean {
+  return megaProjectSignals(prompt).fires;
+}
+
+/** Why Software Project Mode did not steer this build — `null` means it did. */
+export type ProjectModeSkipReason =
+  | 'not-configured'
+  | 'account-not-on-allowlist'
+  | 'pre-empted'
+  | 'not-a-new-build'
+  | 'below-threshold';
+
+export interface ProjectModeDiagnosis {
+  code: 'PROJECT_MODE';
+  /** `null` when project mode genuinely took this build. */
+  skipReason: ProjectModeSkipReason | null;
+  message: string;
+  detail: string;
+}
+
+/**
+ * An email/uid reduced to something an admin can RECOGNISE but that discloses nothing new.
+ *
+ * ⚠️ NOT decoration: `userFacingReport` keeps every issue's `detail` verbatim (it strips provider
+ * names, nothing else), so whatever this function returns can reach the build's own user. That is
+ * their own address, so there is no cross-user leak by construction — masking is the second lock,
+ * not the first. Enough characters survive to spot a typed-wrong domain, which is the entire
+ * reason the identity is printed at all.
+ */
+function maskIdentity(raw: string | null | undefined): string {
+  const v = String(raw ?? '').trim();
+  if (!v) return 'none';
+  const at = v.lastIndexOf('@');
+  if (at <= 0) return `${v.slice(0, 3)}***`; // a uid, not an address
+  const local = v.slice(0, at);
+  const domain = v.slice(at); // includes '@' — the half a typo hides in
+  return `${local.slice(0, 3)}***${domain}`;
+}
+
+/**
+ * WHY DID SOFTWARE PROJECT MODE NOT RUN? — the line this gate never wrote.
+ *
+ * 🔴 THE DEFECT, and it is one of silence rather than of logic. `projectModeEnabled` is an
+ * ALLOWLIST matched EXACTLY and case-insensitively against the email the account SIGNS IN with.
+ * A one-character domain typo, or the admin's other address, makes it `false` for ever — and the
+ * gate recorded nothing at all, on either branch. So the only way to learn that the key was wrong
+ * was to send a mega-prompt and notice that nothing happened, which is indistinguishable from the
+ * threshold not firing, from the mega-app roadmap taking the build first, and from the feature
+ * being broken. Four different causes, one identical symptom: no output.
+ *
+ * This repo has already paid for exactly this shape. `E2B_USD_PER_HOUR` charged half the real rate
+ * for a month with nothing failing anywhere; `ALERT_EMAIL_FROM` read as configured while the
+ * provider rejected every send. Both were fixed the same way — not by changing the decision, but
+ * by making the decision SAY ITSELF. This is that, for this gate.
+ *
+ * Advisory by construction: it returns a string. It cannot enable, disable, block or slow a build.
+ * PURE — no I/O, no clock, never throws.
+ */
+export function projectModeDiagnosis(args: {
+  /** The raw `AGENTV3_PROJECT_MODE` value, exactly as the environment holds it. */
+  flagRaw?: string | null;
+  identity?: { userId?: string | null; email?: string | null };
+  /** The other big-app strategy, when it has already claimed this build. */
+  preEmptedBy?: 'mega-roadmap' | 'plan-first' | null;
+  isNewBuild?: boolean;
+  isEditMode?: boolean;
+  prompt?: string;
+}): ProjectModeDiagnosis {
+  const flagRaw = String(args.flagRaw ?? '').trim();
+  const identity = args.identity ?? {};
+  const say = (skipReason: ProjectModeSkipReason | null, message: string, detail: string): ProjectModeDiagnosis =>
+    ({ code: 'PROJECT_MODE', skipReason, message, detail });
+
+  if (!flagRaw) {
+    return say(
+      'not-configured',
+      'Software Project Mode is NOT configured — this build used the normal path.',
+      'AGENTV3_PROJECT_MODE is unset, which means OFF for everyone. Set it to "on" for all users, '
+        + 'or to a comma-separated allowlist of sign-in emails to enable it for those accounts only.',
+    );
+  }
+
+  // 🔒 The REAL gate answers this, never a second copy of its rules — a re-implementation here
+  // would be free to disagree with the branch the build actually took.
+  const enabled = projectModeEnabled(
+    { AGENTV3_PROJECT_MODE: flagRaw } as unknown as NodeJS.ProcessEnv,
+    identity,
+  );
+
+  if (!enabled) {
+    const entries = flagRaw.split(/[\s,]+/).filter(Boolean);
+    return say(
+      'account-not-on-allowlist',
+      `Software Project Mode is configured as an allowlist of ${entries.length} `
+        + `${entries.length === 1 ? 'entry' : 'entries'}, and this build's account is not on it — normal path.`,
+      `Checked: email ${maskIdentity(identity.email)}, uid ${maskIdentity(identity.userId)}. `
+        + 'The match is EXACT (case-insensitive only): the value must equal the email this account '
+        + 'signs in with — not a developer-account address, and not one with a mistyped domain. '
+        + 'Several addresses can be listed at once, separated by commas.',
+    );
+  }
+
+  if (args.preEmptedBy) {
+    const who = args.preEmptedBy === 'mega-roadmap' ? 'the mega-app roadmap' : 'plan-first mode';
+    return say(
+      'pre-empted',
+      `Software Project Mode is ON for this account, but ${who} already owns this build.`,
+      'Both are "big app" strategies and they are mutually exclusive by design — two planners must '
+        + 'never steer one build. The mega-app roadmap is default-ON and needs no key, so it is '
+        + 'reached first; project mode stands down rather than competing with it.',
+    );
+  }
+
+  if (!args.isNewBuild || args.isEditMode) {
+    return say(
+      'not-a-new-build',
+      'Software Project Mode is ON for this account; this turn is not a fresh build, so no plan was created.',
+      'A plan is created only on a NEW build. An existing plan advances only on a "continue" message, '
+        + 'so that a real mid-project instruction is answered instead of being steamrolled into "build module N".',
+    );
+  }
+
+  const sig = megaProjectSignals(args.prompt ?? '');
+  const signals = `Signals: ${sig.bullets} enumerated feature ${sig.bullets === 1 ? 'line' : 'lines'}, `
+    + `big-software noun: ${sig.bigNoun ? 'yes' : 'no'}, `
+    + `largest stated scale: ${sig.scale > 0 ? sig.scale : 'none'}. `
+    + `It fires at >= ${MEGA_BULLETS_WITH_NOUN} lines WITH such a noun, >= ${MEGA_BULLETS_ALONE} without, `
+    + `or >= ${MEGA_SCALE_MIN} stated files/pages/screens/modules.`;
+
+  if (!sig.fires) {
+    return say(
+      'below-threshold',
+      'Software Project Mode is ON for this account, but this prompt is not a mega-project — normal path.',
+      `${signals} The threshold is deliberately high: a false positive costs an ordinary app an extra `
+        + 'planner call and slower rounds, while a false negative simply builds exactly as it does today.',
+    );
+  }
+
+  return say(
+    null,
+    'Software Project Mode is ON and this prompt IS a mega-project — decomposing it into modules.',
+    signals,
+  );
 }
 
 /**

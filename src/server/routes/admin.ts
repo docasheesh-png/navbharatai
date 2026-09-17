@@ -99,6 +99,10 @@ import {
   appsProject, appsRegion, buildListServicesRequest, parseServiceList, SERVICES_PER_PROJECT_CAP,
 } from '../AgentV3/cloudRunHosting';
 import { loadBoard, worstLevel, type LoadReadings } from '../lib/loadBoard';
+import { tierLadder, availableRungs, rungHasKey, tierDisplayName, tierEngineAvailable } from '../AgentV3/tierLadder';
+import { readEngineUse, engineUseDayKey } from '../AgentV3/engineUseStore';
+import { reportStatus, openReportCount } from '../AgentV3/reportTriage';
+import { listReports } from '../lib/userReportStore';
 import { readPlatformInstances, platformProjectId } from '../lib/platformInstances';
 import { runHostingPreflight } from '../AgentV3/hostingPreflight';
 import { collectionsNeedingRetention } from '../lib/DataRetentionManager';
@@ -1685,6 +1689,212 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       console.error('[ADMIN] Internal error:', err?.message);
       return res.status(500).json({ error: 'Internal server error.' });
     }
+  });
+
+  // ── TAB BADGES — "kaha kaam abhi karna hai", answered on the tab bar ──────────
+  //
+  // Admin, 2026-09-17: *"us header me naam ke sath number bhi chahiye … jisse admin ko ek nazar me
+  // pata lag jaye, kaha kaam abhi karna hai."* Nine tabs, and nothing on them said which one needed
+  // attention — so every check meant opening all nine.
+  //
+  // 🔴 EVERY SOURCE IS GUARDED INDIVIDUALLY AND DEGRADES TO `null`, NEVER TO `0`. On this bar a zero is
+  // a promise — "I looked, there is no work here" — and the admin acts on it by NOT opening the page.
+  // A Firestore read that failed must therefore render no badge at all rather than a calm zero, which
+  // is why each block below is its own try and why `adminTabBadges.ts` refuses to format a null.
+  //
+  // One route rather than seven: the bar draws once, and seven round trips to decorate a header would
+  // cost more than the pages it points at.
+  app.get('/api/admin/tab-badges', verifyAdminToken, async (_req: Request, res: Response) => {
+    const out: Record<string, unknown> = {};
+
+    // MONITOR — how many capacity ceilings are at warn/critical/full right now. Deliberately NOT the
+    // raw provider error count: that is a since-boot total of this one instance (it can read in the
+    // hundreds and resets on every deploy), so it answers "what happened" rather than "what needs me".
+    // A ceiling in warn is a thing to go and look at, which is what the admin asked the bar to show.
+    // ⚠️ The load board was the first candidate and was REJECTED on cost: building its readings calls
+    // Cloud Monitoring and the sandbox provider, which is the right price for a page the admin opened
+    // and far too much for a header that draws on every visit. `getProviderStats()` is in-memory and
+    // free, and it is the SAME counter the Monitor page's own health score is computed from — so the
+    // badge and the page cannot disagree about how many errors there are.
+    try {
+      const stats = getProviderStats();
+      let errors = 0;
+      for (const st of Object.values(stats || {}) as any[]) errors += Number(st?.errorCount) || 0;
+      out.monitor = { needsAttention: errors };
+    } catch { /* unmeasured ⇒ no badge */ }
+
+    // USERS — people who came TODAY / everyone ever registered, exactly as the admin asked
+    // ("today vister/total registeruser").
+    //
+    // 🔑 BOTH HALVES READ THE SUBSYSTEMS THAT ALREADY OWN THESE WORDS, rather than inventing a third
+    // definition of "active". Today's visitors come from the SAME `site_analytics` day documents the
+    // Monitor's "Who came" card is built on (website + app, one UTC day — `ownAudience` explains why
+    // the day is UTC), and the registered total is the SAME `user_token_wallets` collection the
+    // analytics page counts. A badge that disagreed with the page it points at would be worse than no
+    // badge.
+    //
+    // ⚠️ It deliberately does NOT call Firebase Auth. The audience card's per-person "last signed in"
+    // needs an Auth batch lookup, which is why that card is loaded lazily when the admin opens it —
+    // far too much work for a header that draws on every visit.
+    try {
+      const [web, app_] = await Promise.all([
+        siteAnalyticsStore.summary(OWN_WEBSITE_ID, 1).catch(() => null),
+        siteAnalyticsStore.summary(OWN_APP_ID, 1).catch(() => null),
+      ]);
+      const todayOf = (sum: any): number | null =>
+        sum && sum.available === true && Array.isArray(sum.days) && sum.days.length > 0
+          ? Math.max(0, Number(sum.days[sum.days.length - 1]?.uniques) || 0)
+          : null;
+      const w = todayOf(web);
+      const a = todayOf(app_);
+      // Unreadable on BOTH surfaces ⇒ no numerator. One readable surface is a real, if partial,
+      // count — and the hover text says it is website + app, so a partial number is not a wrong one.
+      const visitors = w === null && a === null ? null : (w ?? 0) + (a ?? 0);
+
+      let total: number | null = null;
+      try {
+        total = (await getDocs(collection(getDb() as never, 'user_token_wallets'))).size;
+      } catch { /* unmeasured ⇒ the pair shows its numerator alone */ }
+
+      if (visitors !== null || total !== null) {
+        out.users = {
+          ...(visitors === null ? {} : { activeToday: visitors }),
+          ...(total === null ? {} : { total }),
+        };
+      }
+    } catch { /* unmeasured ⇒ no badge */ }
+
+    // AI ENGINES — engines that actually served today / engines configured AND holding a key.
+    //
+    // 🔑 BOTH HALVES COME FROM THE SAME UNIVERSE, which is the whole reason this is honest now. The AI
+    // Engines page was built on `ai_usage_logs`, written by the CHAT route only — a build never touches
+    // it — so it showed chat providers and called them the platform's engines. `engineUseStore` records
+    // the BUILD deliveries per day, and `configured` is counted off the same tier ladders those
+    // deliveries come from. Counting a chat-only provider in one half and not the other is exactly the
+    // mismatch that made the old page read as invented.
+    try {
+      const families = new Set<string>();
+      for (const level of ['weak', 'off', 'mini'] as const) {
+        for (const rung of availableRungs(tierLadder(level).rungs)) families.add(rung.provider.split('_')[0]);
+      }
+      const used = await readEngineUse();
+      // `null` means the day could not be READ — different from "nothing ran today", so the badge is
+      // withheld rather than shown as zero.
+      if (used) out.engines = { usedToday: Object.keys(used).length, configured: families.size };
+      else out.engines = { configured: families.size };
+    } catch { /* unmeasured ⇒ no badge */ }
+
+    // REVENUE — today / all time, from the SAME `payment_transactions` + SUCCESS filter the analytics
+    // page totals. Today is bounded on the SERVER's clock; a device clock must never move this number.
+    try {
+      const db = getDb();
+      const txSnap = await getDocs(collection(db as never, 'payment_transactions'));
+      const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+      const from = startOfDay.getTime();
+      let today = 0; let total = 0;
+      txSnap.forEach((d: any) => {
+        const tx = d.data() || {};
+        if (tx.paymentStatus !== 'SUCCESS') return;
+        const amt = Number(tx.amountPaid) || 0;
+        total += amt;
+        const at = Number(tx.createdAt ?? tx.created_at ?? 0);
+        if (Number.isFinite(at) && at >= from) today += amt;
+      });
+      out.revenue = { todayInr: Math.round(today), totalInr: Math.round(total) };
+    } catch { /* unmeasured ⇒ no badge */ }
+
+    // BUILD REPORTS — never opened / not yet marked fixed. `reportTriage` already owns both words
+    // ('new' and openReportCount), test-locked since 2026-08-12; inventing a second vocabulary for the
+    // bar is how the badge and the page start disagreeing.
+    try {
+      const rows = await listAdminBuildReports(500);
+      out.reports = {
+        unopened: rows.filter((r: any) => reportStatus(r) === 'new').length,
+        open: openReportCount(rows as never),
+      };
+    } catch { /* unmeasured ⇒ no badge */ }
+
+    // USER REPORTS — never reviewed / still needing a human. 'reviewed' means somebody looked;
+    // 'actioned' and 'dismissed' are the two endings, so anything else is still work.
+    try {
+      const rows = await listReports({ limit: 500 });
+      out.userreports = {
+        unopened: rows.filter((r) => r.status === 'open').length,
+        open: rows.filter((r) => r.status !== 'actioned' && r.status !== 'dismissed').length,
+      };
+    } catch { /* unmeasured ⇒ no badge */ }
+
+    // APK REPORTS — ⚠️ this store has NO "opened" field, only `fixed`. So the actionable half is
+    // "not fixed", and the total is every report. Stated here and in the badge's own hover text rather
+    // than reported as an unopened count the data cannot support.
+    try {
+      const rows = await listApkReports(500);
+      out.apkreports = {
+        unopened: rows.filter((r: any) => !r?.fixed).length,
+        open: rows.length,
+      };
+    } catch { /* unmeasured ⇒ no badge */ }
+
+    res.json(out);
+  });
+
+  /**
+   * THE REAL BUILD ENGINES — what the AI Engines page had never shown (admin 2026-09-17:
+   * *"ai engine wale page ko bhi update karo, woh fake hai abhi"*). They were right, and the page was
+   * wrong in three separate ways, each fixed here rather than relabelled:
+   *
+   * 1. 🔴 **THE ENGINES IT LISTED ARE NOT THE ENGINES THAT BUILD APPS.** Every card came from
+   *    `getProviderStats()`, the CHAT router's in-memory counter — so GLM and KIMI, which lead the
+   *    first rung of ALL THREE tiers and therefore do nearly all of the platform's work, appeared
+   *    nowhere at all, while chat-only providers were presented as "AI Engines".
+   * 2. 🔴 **THE STATUS WAS THIS INSTANCE, SINCE BOOT**, presented as the platform's. It resets on
+   *    every deploy and never sees the other instances, so a provider with no traffic anywhere read
+   *    as a green "Healthy" and an outage on a sibling instance read as nothing at all.
+   * 3. 🔴 **THE KILL SWITCHES DID NOTHING.** `serverStats.providerEnabled` is read by exactly two
+   *    places in the whole repo — the settings route that echoes it back, and the health check that
+   *    COUNTS it. Not one routing decision consults it. The panel said *"Disable a provider to
+   *    prevent new requests from routing to it. Changes take effect immediately on next request"* and
+   *    the request routed exactly as before. That is the second absolute rule's forbidden state, and
+   *    it is removed rather than left with a softer caption.
+   *
+   * What replaces it is measured, and each half says where it came from: the LADDERS are the real
+   * `TIER_LADDERS` the build chain is constructed from (so this panel cannot drift from what actually
+   * runs), `keyed` is whether that rung's provider key is present in THIS environment, and TODAY is
+   * `agentv3_engine_use` — the per-day record written by the build path itself.
+   */
+  app.get('/api/admin/engines', verifyAdminToken, async (_req: Request, res: Response) => {
+    const out: Record<string, unknown> = {};
+
+    // THE LADDERS — read from the one table the chain is built from, never re-typed here.
+    try {
+      out.tiers = (['weak', 'off', 'mini'] as const).map((level) => {
+        const rungs = tierLadder(level).rungs;
+        return {
+          level,
+          label: tierDisplayName(level),
+          // `available: false` is the honest "this tier cannot build here" — the same predicate the
+          // build route refuses on, so the panel and the refusal can never disagree.
+          available: tierEngineAvailable(level),
+          rungs: rungs.map((r) => ({ provider: r.provider, model: r.model, keyed: rungHasKey(r) })),
+        };
+      });
+    } catch { /* unmeasured ⇒ the client shows "could not read", never an empty ladder */ }
+
+    // WHAT REALLY SERVED TODAY. `null` is "could not read" and the screen says so; `{}` is the real
+    // answer "nothing has built today yet".
+    try {
+      const day = engineUseDayKey();
+      const counts = await readEngineUse(day);
+      out.today = { day, counts, readable: counts !== null };
+    } catch { /* unmeasured */ }
+
+    // THE CHAT ROUTER'S OWN COUNTER, kept — but now labelled for what it is and put BELOW the build
+    // engines instead of standing in for them.
+    try {
+      out.chat = { scope: 'this server instance, since it started', stats: getProviderStats() };
+    } catch { /* unmeasured */ }
+
+    res.json(out);
   });
 
   // ── Provider live status ──────────────────────────────────────────────────

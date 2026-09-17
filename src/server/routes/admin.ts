@@ -92,7 +92,8 @@ import { rotateAllSecrets, getLatestKeyVersion, encrypt, decrypt } from '../lib/
 import { generateTotpSecret, verifyTotp, totpAuthUri } from '../lib/totp';
 import { deploymentStore, isLiveDeployment, type DeploymentStatus } from '../AgentV3/DeploymentStore';
 import { FirebaseHostingDeployer } from '../AgentV3/Deployment';
-import { classifyChannels, channelCeilingVerdict, channelCap } from '../AgentV3/channelInventory';
+import { classifyChannels, channelCeilingVerdict, channelCap, isDefaultChannel } from '../AgentV3/channelInventory';
+import { bucketOnlyPublishEnabled } from '../AgentV3/bucketOnlyPublish';
 import { GoogleAuth } from 'google-auth-library';
 import { classifyHostedServices, hostingCapacity } from '../AgentV3/hostedServiceInventory';
 import {
@@ -2676,8 +2677,17 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       // 🔒 An INCOMPLETE list is not a count. Reporting a partial read as the number would understate
       // exactly the ceiling this tile exists to warn about.
       if (chan.complete) {
-        readings.publishChannels = chan.channels.length;
+        // 🔴 PREVIEW channels only — `channels.length` counted the site's own `live` channel too, and
+        // the cap is not on that one (admin Monitor capture, 2026-09-17: Publish load said 44 / 50
+        // while Published Apps, one panel below, said 43 / 50 from the same list at the same instant).
+        // `channelCeilingVerdict` fixed this exact off-by-one on 2026-09-14 and this reader kept the
+        // old arithmetic. Filtered with `isDefaultChannel`, which is the SAME predicate the verdict's
+        // `state !== 'default'` reduces to — checked purely from the id, so no registry read is added
+        // to a route that must stay cheap.
+        readings.publishChannels = chan.channels.filter((c) => !isDefaultChannel(c?.channelId)).length;
         readings.publishChannelsCap = channelCap();
+        // Whether the ceiling can still GROW, so the tile stops prescribing a switch already thrown.
+        readings.publishBucketOnly = bucketOnlyPublishEnabled();
       }
     } catch { /* unknown */ }
 

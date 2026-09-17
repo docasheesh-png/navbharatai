@@ -597,6 +597,25 @@ export function classifyDevServerFailure(log: string): DevServerDiagnosis {
     return make('out_of_memory', 'The dev server was killed (out of memory) — restarting.');
   }
 
+  // 4.9) THE SHELL NEVER REACHED THE PROJECT. A `cd` into a directory that does not exist fails
+  //      before any dev server is invoked, so there is nothing to restart and nothing to reinstall —
+  //      and restarting the identical command is guaranteed to fail identically.
+  //
+  //      🔴 Autopsy "Make an VPN App" (2026-08-23): the builder ran
+  //          cd vpn-app && npm install && npm run dev -- --host 0.0.0.0 --port 5173
+  //      in a workspace that has no `vpn-app` subdirectory. The log said, in as many words,
+  //          /bin/bash: line 1: cd: vpn-app: No such file or directory
+  //      and this function matched none of it — so the user was told "the log had no recognisable
+  //      error", the identical command was restarted TWICE, and 83 seconds later the verdict was
+  //      "Automatic recovery is exhausted." Every word of that was true and none of it was the
+  //      reason. It is the same shape as the CoreUI case in this file's own header (a wrong script
+  //      name, blindly restarted): the cause was legible in the log and nothing read it.
+  const badCd = text.match(/(?:^|\n)[^\n]*\bcd:\s*([^\n:]+):\s*No such file or directory/i);
+  if (badCd) {
+    const dir = badCd[1].trim();
+    return make('code_error', `The command changed directory into "${dir}", which does not exist in this project — so the dev server was never started (a restart cannot fix it). Run the command from the project root, or create that directory first.`);
+  }
+
   // 5) Generic crash signals — retry once.
   if (/\bELIFECYCLE\b/i.test(text) || /npm ERR!/i.test(text) || /exited with (?:code|signal)/i.test(text) || /\bError:/i.test(text)) {
     const line = (text.match(/[^\n]*(?:npm ERR!|ELIFECYCLE|exited with|Error:)[^\n]*/i) || [''])[0].trim().slice(0, 200);

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon, Smartphone, ExternalLink } from 'lucide-react';
+import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon, Smartphone, ExternalLink, ChevronDown, ChevronRight } from 'lucide-react';
 import { TirangaLoader } from './ui/TirangaLoader';
 import { usePagedList } from '../hooks/usePagedList';
 import { LoadMore } from './common/LoadMore';
@@ -15,6 +15,7 @@ import { summarizeFailurePatterns, summarizeBuildTimes } from '../lib/buildRepor
 import { firstPassHeadline, FIRST_PASS_TARGET, type FirstPassMetaStats } from '../lib/firstPassQuality';
 import { type ExposureRow } from '../lib/licenceExposure';
 import { copyTextToClipboard } from '../lib/copyText';
+import { safeLS } from '../lib/localStorageSafe';
 import { apkReportFilename, apkReportsArchiveFilename } from '../lib/apkReportFile';
 import { reportParts, partJson, partsSummary, ordinal } from './adminReportParts';
 import { MonitorPanels } from './admin/MonitorPanels';
@@ -323,6 +324,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [allBuildsCounts, setAllBuildsCounts] = useState<{ all: number; failed: number; succeeded: number; unknown: number } | null>(null);
   const [allBuildsUsers, setAllBuildsUsers] = useState<Array<{ uid: string; count: number; label: string }>>([]);
   const [allBuildsFetched, setAllBuildsFetched] = useState<{ fetched: number; limit: number } | null>(null);
+  /**
+   * Is the Publish Capacity card unfolded? (admin 2026-09-17: "Publish Capacity ko fold/unfold ka
+   * option do".) The card grows one row per wasted channel — on the capture that prompted this it
+   * carried THIRTY-FOUR of them, each with its own Reclaim button, pushing everything below it off
+   * the screen.
+   *
+   * 🔒 FOLDING MUST NEVER HIDE THE ALARM. The header keeps the level badge and gains a one-line
+   * summary when folded, so a critical ceiling is still visible from a collapsed card — a control
+   * that can silently conceal a warning is worse than a long card.
+   *
+   * Default OPEN, so nothing moves for an admin who never presses it, and the choice is remembered
+   * per browser. A read that throws (private mode, blocked site data) falls back to open rather than
+   * to a folded card the admin did not ask for.
+   */
+  const [publishCardOpen, setPublishCardOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem('admin_publish_capacity_folded') !== '1'; } catch { return true; }
+  });
+  const togglePublishCard = useCallback(() => {
+    setPublishCardOpen((open) => { safeLS('admin_publish_capacity_folded', open ? '1' : '0'); return !open; });
+  }, []);
   const [expandedWorkspace, setExpandedWorkspace] = useState<string | null>(null);
   const [expandedHistory, setExpandedHistory] = useState<Array<{ id: string; startedAt: number; endedAt?: number; ok?: boolean; summary?: string; prompt?: string }>>([]);
   const [expandedLoading, setExpandedLoading] = useState(false);
@@ -1785,18 +1806,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   : channels?.verdict.level === 'critical' ? 'bg-red-500/5 border-red-500/30'
                   : channels?.verdict.level === 'warn' ? 'bg-amber-500/5 border-amber-500/30'
                   : 'bg-[#161b22] border-white/10'}`}>
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-sm font-black text-white uppercase tracking-tight">Publish Capacity</h3>
-                    <span className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-full border ${
-                      channelsError ? 'bg-white/5 border-white/10 text-[#8b949e]'
-                      : channels?.verdict.level === 'critical' ? 'bg-red-500/10 border-red-500/30 text-red-400'
-                      : channels?.verdict.level === 'warn' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-                      : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'}`}>
-                      {channelsError ? 'unknown' : channels?.verdict.level}
-                    </span>
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <button
+                      type="button"
+                      onClick={togglePublishCard}
+                      aria-expanded={publishCardOpen}
+                      aria-controls="publish-capacity-body"
+                      className="flex items-center gap-2 min-w-0 text-left group"
+                    >
+                      {publishCardOpen
+                        ? <ChevronDown className="w-4 h-4 shrink-0 text-[#8b949e] group-hover:text-white" />
+                        : <ChevronRight className="w-4 h-4 shrink-0 text-[#8b949e] group-hover:text-white" />}
+                      <h3 className="text-sm font-black text-white uppercase tracking-tight">Publish Capacity</h3>
+                      <span className="sr-only">{publishCardOpen ? 'Hide the details' : 'Show the details'}</span>
+                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {/* Folded, the numbers still show: a collapsed card must not conceal the ceiling. */}
+                      {!publishCardOpen && channels && (
+                        <span className="text-[10px] font-bold text-[#8b949e] tabular-nums">
+                          {channels.verdict.used} / {channels.verdict.cap} channels
+                          {channels.verdict.reclaimable > 0 ? ` · ${channels.verdict.reclaimable} reclaimable` : ''}
+                        </span>
+                      )}
+                      {!publishCardOpen && channelsError && (
+                        <span className="text-[10px] font-bold text-[#8b949e]">could not be read</span>
+                      )}
+                      <span className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-full border ${
+                        channelsError ? 'bg-white/5 border-white/10 text-[#8b949e]'
+                        : channels?.verdict.level === 'critical' ? 'bg-red-500/10 border-red-500/30 text-red-400'
+                        : channels?.verdict.level === 'warn' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                        : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'}`}>
+                        {channelsError ? 'unknown' : channels?.verdict.level}
+                      </span>
+                    </div>
                   </div>
 
-                  {channelsError ? (
+                  <div id="publish-capacity-body">
+                  {!publishCardOpen ? null : channelsError ? (
                     <p className="text-xs text-[#8b949e] leading-relaxed">{channelsError}</p>
                   ) : channels && (
                     <>
@@ -1838,6 +1884,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       )}
                     </>
                   )}
+                  </div>
                 </div>
               )}
 

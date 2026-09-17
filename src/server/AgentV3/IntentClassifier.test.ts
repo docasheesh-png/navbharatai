@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyIntent, classifyIntentWithConfidence, classifyIntentSmart, wantsFreshStart, isExplicitCompleteBuild } from './IntentClassifier';
+import { classifyIntent, classifyIntentWithConfidence, classifyIntentSmart, wantsFreshStart, isExplicitCompleteBuild, containsDevanagari } from './IntentClassifier';
 
 describe('isExplicitCompleteBuild — a full-app build wins over the non-empty-workspace "treat as edit" rule', () => {
   it('detects the exact report prompt that was wrongly downgraded to an edit (2026-07-07)', () => {
@@ -429,5 +429,66 @@ describe('answer-only override + state questions (admin 2026-07-07: "query ka an
     expect(classifyIntentWithConfidence('ek todo app banao').intent).toBe('new_build');
     expect(classifyIntentWithConfidence('fix the navbar color').intent).toBe('edit_existing');
     expect(classifyIntentWithConfidence('preview nahi chala').intent).toBe('edit_existing'); // problem report stays a fix
+  });
+});
+
+// 🔴 A CLASSIFIER THAT CANNOT READ A SCRIPT MUST NEVER CLAIM CONFIDENCE ABOUT TEXT IN IT (admin asked,
+// 2026-09-17, whether GPT Nano should do this job instead — the answer is: for THIS half, no keyword
+// engineering is the fix, an always-consulted LLM step is, and Nano is already reachable from it).
+//
+// The whole file is Romanized-only, so the only way Devanagari text can ever earn HIGH confidence is by
+// ACCIDENT: a stray English/Romanized word inside it tripping a keyword array, or the raw character
+// count crossing LONG_MESSAGE_THRESHOLD (Devanagari's matras/conjuncts inflate this well past the same
+// sentence's length in Roman script, for reasons that have nothing to do with the message's actual
+// complexity). `containsDevanagari` caps any such accident at LOW confidence, which is what sends the
+// message to the LLM upgrade (`classifyIntentSmart`) instead of hard-locking on a coincidence.
+describe('🔴 Devanagari text can never earn HIGH confidence from a Romanized-only classifier', () => {
+  it('containsDevanagari detects the script, in isolation from any other logic', () => {
+    expect(containsDevanagari('क्या मैं prompt डालूं')).toBe(true);
+    expect(containsDevanagari('mera app banao')).toBe(false);
+    expect(containsDevanagari('build a todo app')).toBe(false);
+    expect(containsDevanagari('')).toBe(false);
+    // Mixed script — the common Hinglish-with-a-Hindi-word case — still counts as Devanagari present.
+    expect(containsDevanagari('mera app banao 🙏 धन्यवाद')).toBe(true);
+  });
+
+  it('a long Devanagari message that ALSO contains English tech words does not hard-lock on them', () => {
+    // 161 chars (crosses LONG_MESSAGE_THRESHOLD) AND contains "css"/"login"/"api" (BUILD_SIGNALS) AND
+    // "banao" (NEW_BUILD_SIGNALS) — every ingredient of an accidental HIGH-confidence match, exactly
+    // the shape that let the alarm-app message hard-lock. The correct intent (new_build) is UNCHANGED;
+    // only the confidence drops, so the smart classifier still gets a say before real money is spent.
+    const msg = 'मुझे एक css वाला login page banao mere liye jisme api integration bhi ho aur bahut '
+      + 'acha design ho, jaldi kar do please yaar kyunki mujhe kal tak submit karna hai';
+    expect(msg.length).toBeGreaterThan(120);
+    const got = classifyIntentWithConfidence(msg);
+    expect(got.intent).toBe('new_build'); // still the right call…
+    expect(got.confidence).toBe('low');   // …but no longer a hard lock on an unverifiable script
+  });
+
+  it('a pure-Romanized order of the same length and content STAYS high-confidence and instant', () => {
+    // The control case: identical signal words, zero Devanagari — this is exactly the "common path pays
+    // nothing" the READ THE MOOD rule protects, and the guard must never touch it.
+    const msg = 'mujhe ek css wala login page banao mere liye jisme api integration bhi ho aur bahut '
+      + 'acha design ho, jaldi kar do please yaar kyunki mujhe kal tak submit karna hai';
+    expect(msg.length).toBeGreaterThan(120);
+    expect(containsDevanagari(msg)).toBe(false);
+    const got = classifyIntentWithConfidence(msg);
+    expect(got.intent).toBe('new_build');
+    expect(got.confidence).toBe('high');
+  });
+
+  it('a Devanagari question that legitimately resolves to LOW chat is unaffected (nothing to downgrade)', () => {
+    // Guards against a lazy implementation that force-downgrades everything to 'low' regardless of
+    // what it already was — the wrapper must only ever touch a 'high' result, never invent one.
+    const got = classifyIntentWithConfidence('क्या मैं prompt डालूं');
+    expect(got.confidence).toBe('low');
+  });
+
+  it('an edit/problem-report signal embedded in Devanagari text also loses its unearned HIGH', () => {
+    const msg = 'मेरा app है, उसमें ek chhota sa issue hai, fix karo please, header thoda tuta hua lag raha hai';
+    expect(containsDevanagari(msg)).toBe(true);
+    const got = classifyIntentWithConfidence(msg);
+    expect(got.intent).toBe('edit_existing'); // the Romanized "fix karo" signal still reads correctly…
+    expect(got.confidence).toBe('low');       // …but is no longer trusted blindly on unread script
   });
 });

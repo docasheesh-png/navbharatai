@@ -129,6 +129,56 @@ describe('the two halves of the mood test', () => {
   });
 });
 
+// 🔴 THE QUESTION AT THE END, NOT THE START (autopsy 2026-09-16, real build).
+//
+// THE REPORT: "मैं एक अलार्म ऐप बनाना चाहता हूं मेरे पास उसका prompt है क्या मैं prompt डालूं" — "I want
+// to build an alarm app, I have its prompt, should I paste it?" Every check above this point requires
+// the message to OPEN with a question word; this one asks its real question ("kya main… daaloon" —
+// "should I…?") only at the very END, after a declarative lead-in that itself contains a build verb.
+// The message hard-locked to new_build at HIGH confidence, skipped the LLM upgrade, and ran a real,
+// billed weak-tier AgentV3 build (68 provider failures, cancelled by the user) for what should have
+// been a one-line "haan, bhej dijiye" reply.
+//
+// It was ALSO typed in native Devanagari, where — unlike every other message in this file — no
+// Romanized signal in the classifier can see it at all. This fix does not translate the whole
+// classifier (see PROGRESS.md for that as a separate, open item); it adds ONLY this one unambiguous
+// "should/may I…?" particle, in both scripts, anywhere in the sentence.
+describe('🔴 a trailing "kya main/hum" asks its question at the END of the sentence, not the start', () => {
+  it('THE EXACT REPORTED PROMPT (Devanagari, alarm app build)', () => {
+    const prompt = 'मैं एक अलार्म ऐप बनाना चाहता हूं मेरे पास उसका prompt है क्या मैं prompt डालूं';
+    expect(readsAsQuestion(prompt)).toBe(true);
+    const got = classifyIntentWithConfidence(prompt);
+    // The headline fix: this must NEVER be high-confidence new_build again — either it answers
+    // directly as chat, or (if namesSpecificDeliverable still misses the Devanagari "एक") it at
+    // least drops to LOW confidence so the intention reader gets a say. Both are strictly better
+    // than the hard lock the report shows; neither is the bug this test guards against.
+    expect(got.confidence).toBe('low');
+    expect(got.intent).not.toBe('edit_existing');
+  });
+
+  it.each([
+    'main ek alarm app banana chahta hoon, mere paas uska prompt hai, kya main prompt daaloon',
+    'ek billing app chahiye, kya main details bhej doon?',
+    'want to build a crm, kya hum call pe baat kar sakte hain',
+  ])('reaches the intention reader instead of hard-locking: %s', (msg) => {
+    expect(readsAsQuestion(msg)).toBe(true);
+    expect(classifyIntentWithConfidence(msg).confidence).toBe('low');
+  });
+
+  it('an order that merely CONTAINS "main" is not swept in by accident', () => {
+    // "main" appears here, but never as "kya main/aap/tum/hum" — must stay an instant, high-confidence
+    // order, exactly like the "an order is not a question" block above.
+    expect(readsAsQuestion('banao ek app jisme main apna kharcha track kar sakoon')).toBe(false);
+  });
+
+  it('a mid-sentence "kya" that is NOT the should-I particle does not falsely fire', () => {
+    // "kya" here questions the following NOUN ("what problem"), not "should I/we" — the existing
+    // WH_OPENERS/SOCIAL/ANSWER-ONLY signals already handle sentences like this; this test only
+    // confirms the NEW mid-sentence check does not overreach into them.
+    expect(/kya\s+(?:aap|tum|main|mai|hum|hume)\b/.test('mat banao, sirf batao kya problem hai')).toBe(false);
+  });
+});
+
 describe('ONE intent ladder, not two that drift', () => {
   // `classifyIntent` used to be a second hand-maintained copy of the same rules that the route ALSO
   // calls, and the two had already drifted (whole-word scanner vs substring matcher). This fix would

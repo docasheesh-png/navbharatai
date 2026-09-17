@@ -44,7 +44,10 @@ describe('🔴 the live tick must not count down from a number we declined to sh
     expect(tick).toBeGreaterThan(-1);
     expect(guard).toBeLessThan(tick);
     const block = route.slice(guard, tick);
-    expect(block).toContain('unevidencedEtaTickLine(elapsedMs)');
+    // STRENGTHENED 2026-09-16 (autopsy dd1f5f60): the budget must reach the line, or it prints the
+    // SAME sentence at minute 2 and minute 28 — the twelve identical ticks that made a real user
+    // press the button three times. Asserting the argument is what stops that silently regressing.
+    expect(block).toContain('unevidencedEtaTickLine(elapsedMs, effectiveBuildSeconds * 1000)');
     expect(block).toContain('return;');
   });
 

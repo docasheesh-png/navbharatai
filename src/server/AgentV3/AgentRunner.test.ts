@@ -59,7 +59,7 @@ function scriptedClient(messages: unknown[], turnDelayMs = 0): MessagesCreateCli
 
 function buildRunner(
   script: unknown[],
-  opts: { maxSteps?: number; maxBudgetUsd?: number; maxBuildMs?: number; signal?: AbortSignal; persistence?: AgentRunnerOptions['persistence']; expectsArtifacts?: boolean; turnDelayMs?: number } = {},
+  opts: { maxSteps?: number; maxBudgetUsd?: number; maxBuildMs?: number; signal?: AbortSignal; persistence?: AgentRunnerOptions['persistence']; expectsArtifacts?: boolean; turnDelayMs?: number; hasExistingFiles?: AgentRunnerOptions['hasExistingFiles'] } = {},
 ) {
   const actuator = new FakeActuator();
   const stream = new AgentEventStream();
@@ -175,6 +175,37 @@ describe('AgentRunner (native tool-use loop)', () => {
     // turns and attributes it to the USER, and that is what is checked.
     expect(result.summary).toMatch(/by the user|as you asked|you stopped/i);
     expect(events.some((e) => e.type === 'done')).toBe(true);
+  });
+
+  it('a stop right after a fast-lane handoff says the salvaged file is saved, not "nothing was lost" (autopsy 2026-09-16)', async () => {
+    // The exact shape of the reported build: the user cancels BEFORE this loop ever calls a tool of
+    // its own (totalToolUses stays 0) — but the fast lane already salvaged a real file into the
+    // workspace before handing off. `hasExistingFiles` is how this loop learns that, since it cannot
+    // see the fast lane's own writes any other way.
+    const controller = new AbortController();
+    abortBuild(controller, 'user-stop');
+    const { runner } = buildRunner(
+      [{ content: [{ type: 'text', text: 'never reached' }], stop_reason: 'end_turn' }],
+      { signal: controller.signal, hasExistingFiles: () => true },
+    );
+    const result = await runner.run('build something big');
+    expect(result.ok).toBe(false); // a user-stop is still not a success — only the wording changes
+    expect(result.summary).not.toMatch(/nothing had been written/i);
+    expect(result.summary).toMatch(/saved/i);
+  });
+
+  it('a stop with nothing salvaged and no tool calls truthfully says nothing was lost', async () => {
+    // The control case: no fast-lane handoff, no prior files — `hasExistingFiles` reports false (its
+    // default when a caller never sets it), so the honest "nothing was lost" wording must still fire.
+    const controller = new AbortController();
+    abortBuild(controller, 'user-stop');
+    const { runner } = buildRunner(
+      [{ content: [{ type: 'text', text: 'never reached' }], stop_reason: 'end_turn' }],
+      { signal: controller.signal },
+    );
+    const result = await runner.run('build something big');
+    expect(result.ok).toBe(false);
+    expect(result.summary).toMatch(/nothing had been written/i);
   });
 
   it('an abort with NO recorded cause never blames the user', async () => {

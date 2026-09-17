@@ -74,15 +74,56 @@ export function unevidencedFirstEtaLine(): string {
 }
 
 /**
+ * How much of a build's own time limit may pass before the tick says, plainly, that this one is
+ * running long.
+ *
+ * 0.6 because a HEALTHY build never reaches it. This line appears only while nothing has been
+ * measured, and a build going normally has handed the line to `measuredEtaText` or `stepEtaText`
+ * minutes earlier. A build still unmeasured at 60% of its cap is genuinely in trouble, so saying so
+ * is information rather than alarm.
+ */
+export const LONG_RUN_BUDGET_SHARE = 0.6;
+
+/**
  * The LIVE line while a build is still running with nothing measured to report.
  *
  * Shows elapsed time, because that is the one number that is never a promise: it has already
- * happened. Deliberately carries no countdown — an unmeasured build has no remaining time to name,
- * and inventing one is the defect this module exists to end.
+ * happened. Deliberately carries no countdown to a FINISH — an unmeasured build has no remaining
+ * time to name, and inventing one is the defect this module exists to end.
+ *
+ * 🔴 BUT THE BUDGET IS NOT A PREDICTION, AND WITHHOLDING IT WAS NOT HONESTY (autopsy dd1f5f60,
+ * 2026-09-16). This line used to be a pure function of `elapsedMs`, so it printed the SAME SENTENCE
+ * at minute 2 and at minute 28. A real user watched TWELVE of them over a 29-minute build that then
+ * failed, and did what anyone would: pressed the button again, three times, then filed a support
+ * ticket saying the app "is not responding". The engine was working the whole time and had no way
+ * to say so — and the one thing that would have told him was already known.
+ *
+ * `maxBuildSeconds` is a FIXED, CONFIGURED number, not an estimate. "18 minutes in, up to 11 more"
+ * is arithmetic over two known quantities, exactly as defensible as elapsed time itself. This
+ * module's law is "show the number wherever it is measured"; a build's own time limit is measured
+ * by definition, so withholding it was never the honest side of that law.
+ *
+ * ⚠️ A `budgetMs` that is absent, 0 or malformed means NO CAP — the `effectiveBuildSeconds === 0`
+ * convention used throughout the route — and returns the original sentence unchanged, so a build
+ * with no limit is never told about a limit that does not exist. Past the cap it also falls back:
+ * a negative remainder is not a number worth inventing a phrase for.
  */
-export function unevidencedEtaTickLine(elapsedMs: number): string {
-  const inTxt = formatEta(Math.max(0, Number(elapsedMs) || 0)).replace('~', '');
-  return `⏱️ Still building… ${inTxt} in · still working out how big this one is — I'll show a time as soon as I can measure it, and tell you the moment it's done.`;
+export function unevidencedEtaTickLine(elapsedMs: number, budgetMs?: number): string {
+  const elapsed = Math.max(0, Number(elapsedMs) || 0);
+  const inTxt = formatEta(elapsed).replace('~', '');
+  const plain = `⏱️ Still building… ${inTxt} in · still working out how big this one is — I'll show a time as soon as I can measure it, and tell you the moment it's done.`;
+  const budget = Number(budgetMs);
+  if (!Number.isFinite(budget) || budget <= 0 || elapsed >= budget) return plain;
+  const leftTxt = formatEta(budget - elapsed).replace('~', '');
+  if (elapsed >= budget * LONG_RUN_BUDGET_SHARE) {
+    // Every clause here is something the engine really does on a timeout: the files written so far
+    // are already persisted, the green guard keeps an unverified turn rather than rolling it back,
+    // and the summary states honestly where it got to. Promising it will FINISH would be the one
+    // thing this module forbids, so it does not.
+    return `⏱️ Still building… ${inTxt} in · this one is taking longer than most. `
+      + `I'll keep working for up to ${leftTxt} more, then save whatever is finished and tell you honestly how far it got — nothing you have is lost.`;
+  }
+  return `⏱️ Still building… ${inTxt} in · up to ${leftTxt} left for this one · still working out how big it is — I'll show a time as soon as I can measure it.`;
 }
 
 /**

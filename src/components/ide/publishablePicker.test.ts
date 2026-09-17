@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { publishableApps, publishBlockedReason, whenLabel, UNTITLED_LABEL } from './publishablePicker';
+import {
+  publishableApps, publishBlockedReason, whenLabel, UNTITLED_LABEL,
+  shortenSuggestedName, MAX_SUGGESTED_NAME,
+} from './publishablePicker';
 
 const NOW = 1_760_000_000_000;
 const min = (n: number) => NOW - n * 60_000;
@@ -93,5 +96,64 @@ describe('publishBlockedReason — no dead buttons', () => {
 
   it('the no-apps case tells the user where to build one', () => {
     expect(publishBlockedReason({ ...base, appCount: 0 })).toMatch(/build one/i);
+  });
+});
+
+/**
+ * THE REAL LISTINGS THIS CAP EXISTS FOR (admin 2026-09-17, from a phone screenshot of App Mart).
+ * A workspace's title is the user's own BUILD PROMPT, the picker pre-filled the name with it
+ * verbatim, and people accept a pre-filled field — so App Mart filled up with listings nobody
+ * browsing could identify.
+ */
+describe('shortenSuggestedName — a prompt is not an app name', () => {
+  const REAL = [
+    'To build a massive, rapidly scaling carpooling platform for Indian cities',
+    'I already have the complete frontend UI for my billing app and I need',
+  ];
+
+  it('cuts the real App Mart titles down to something a tile can show', () => {
+    for (const raw of REAL) {
+      const out = shortenSuggestedName(raw);
+      expect(out.length).toBeLessThanOrEqual(MAX_SUGGESTED_NAME + 1); // +1 for the ellipsis
+      expect(out.endsWith('…')).toBe(true);
+      expect(raw.startsWith(out.slice(0, -1))).toBe(true); // never invents words
+    }
+  });
+
+  it('leaves a name that already fits completely alone', () => {
+    for (const good of ['medicine dose calculator', 'car racing game', 'Untitled app']) {
+      expect(shortenSuggestedName(good)).toBe(good);
+    }
+  });
+
+  it('never ends mid-word, and never ends on trailing punctuation', () => {
+    const out = shortenSuggestedName('To build a massive, rapidly scaling carpooling platform');
+    expect(out).not.toMatch(/[\s,.;:—-]…$/);
+    // the character before the ellipsis belongs to a whole word from the source
+    const body = out.slice(0, -1);
+    expect(body.split(' ').every((w) => w.length > 0)).toBe(true);
+  });
+
+  it('collapses the newlines a pasted multi-line prompt arrives with', () => {
+    expect(shortenSuggestedName('  my   notes\n\napp  ')).toBe('my notes app');
+  });
+
+  it('cuts a single over-long word hard rather than handing back one letter', () => {
+    const out = shortenSuggestedName(`A${'b'.repeat(80)}`);
+    expect(out.length).toBeLessThanOrEqual(MAX_SUGGESTED_NAME + 1);
+    expect(out.endsWith('…')).toBe(true);
+  });
+
+  it('degrades to an empty string rather than throwing, so UNTITLED_LABEL still takes over', () => {
+    for (const bad of ['', '   ', null as never, undefined as never]) {
+      expect(() => shortenSuggestedName(bad)).not.toThrow();
+      expect(shortenSuggestedName(bad) || UNTITLED_LABEL).toBe(UNTITLED_LABEL);
+    }
+  });
+
+  it('the picker applies it, so the pre-filled field is already name-shaped', () => {
+    const [app] = publishableApps([{ id: 'p1', workspaceId: 'w1', title: REAL[0], updatedAt: min(1) }], NOW);
+    expect(app.suggestedName.length).toBeLessThanOrEqual(MAX_SUGGESTED_NAME + 1);
+    expect(app.suggestedName.endsWith('…')).toBe(true);
   });
 });

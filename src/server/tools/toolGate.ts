@@ -32,6 +32,7 @@ import { walletTooEmptyForTurn } from '../professionals/passGate';
 import { readWalletBalanceInr, firestoreWalletReader } from '../AgentV3/WalletBalance';
 import { getServerDb } from '../lib/serverDb';
 
+import { parseEnvNumber } from '../lib/envNumber';
 export type { ToolBucket };
 
 /**
@@ -40,8 +41,8 @@ export type { ToolBucket };
  * allowance is about bounding abuse, not about cost. Env-tunable without a deploy.
  */
 export function aiToolFreeDailyLimit(): number {
-  const n = Number(process.env.AI_TOOL_FREE_DAILY_LIMIT);
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 5;
+  const n = parseEnvNumber(process.env.AI_TOOL_FREE_DAILY_LIMIT);
+  return n !== null && n >= 0 ? Math.floor(n) : 5;
 }
 
 /**
@@ -50,8 +51,8 @@ export function aiToolFreeDailyLimit(): number {
  * an hour — enough for a single account to run up a genuine bill in an afternoon.
  */
 export function imageFreeDailyLimit(): number {
-  const n = Number(process.env.AI_IMAGE_FREE_DAILY_LIMIT);
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 3;
+  const n = parseEnvNumber(process.env.AI_IMAGE_FREE_DAILY_LIMIT);
+  return n !== null && n >= 0 ? Math.floor(n) : 3;
 }
 
 /**
@@ -60,8 +61,8 @@ export function imageFreeDailyLimit(): number {
  * nothing reaches this in production; it is kept so the cap survives if an unlimited tier ever returns.
  */
 export function imagePassDailyLimit(): number {
-  const n = Number(process.env.AI_IMAGE_PASS_DAILY_LIMIT);
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 25;
+  const n = parseEnvNumber(process.env.AI_IMAGE_PASS_DAILY_LIMIT);
+  return n !== null && n >= 0 ? Math.floor(n) : 25;
 }
 
 export function dailyLimitFor(bucket: ToolBucket): number {

@@ -28,12 +28,13 @@
 
 import { TOKENS_PER_RUPEE } from './payments';
 
+import { parseEnvNumber } from './envNumber';
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** One rung of the ladder, in wallet tokens. `WEEKLY_TOPUP_TOKENS=0` switches the ladder off. */
 export function weeklyTopUpTokens(): number {
-  const n = Number(process.env.WEEKLY_TOPUP_TOKENS);
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 200 * TOKENS_PER_RUPEE; // ₹200
+  const n = parseEnvNumber(process.env.WEEKLY_TOPUP_TOKENS);
+  return n !== null && n >= 0 ? Math.floor(n) : 200 * TOKENS_PER_RUPEE; // ₹200
 }
 
 /**

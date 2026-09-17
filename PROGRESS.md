@@ -64593,6 +64593,88 @@ against a *different* `main` and nothing had verified the combination: `277a6769
 no-unused-imports ✅, server typecheck ✅, **25105 passed | 1 skipped, 0 FAIL** ✅, build ✅, bundle ✅,
 boot ✅. The concurrent merges compose cleanly.
 
+---
+
+## 2026-09-17 — `Number('')` is 0: a CLEARED Cloud Run field was impersonating a deliberate zero (12 readers, 9 files)
+
+**Not from a report — from the fourth absolute rule's step 2 applied to something this file already
+shows:** the *"a malformed env value must not fall the dangerous way"* fix has been made here at least
+six separate times (`parseRolloutPercent`, `walletFloor`, `buildCostCeiling`, `referralRewards`,
+`webRiskBudget`, `slowRungBench`'s ratio), each time for one key. **Seven modules literally CITE
+`parseRolloutPercent` in a comment and then hand-implement the rule.** That is the drifted-duplicate
+shape `safeRelPath` → `workspacePath.ts` was centralised for, so the question was whether the copies
+had already diverged. They had.
+
+**The fact behind all of it: `Number('')` is `0`, not `NaN`.** So every reader shaped
+
+```ts
+const n = Number(process.env.X);
+return Number.isFinite(n) && n >= 0 ? n : DEFAULT;   // blank ⇒ 0, never DEFAULT
+```
+
+turns a key that EXISTS and is BLANK into a deliberate zero. An **UNSET** key was always safe
+(`Number(undefined)` is `NaN`) — which is exactly why this never surfaced: **every existing test in
+the repo `delete`s the key rather than emptying it**, so the whole class sat in a blind spot that the
+suites were structurally incapable of entering.
+
+**What a silent zero meant, per site (12 reads, 9 files):**
+
+| Key | A blank value meant |
+|---|---|
+| `WELCOME_BONUS_TOKENS` | the welcome gift is **₹0 for every new account** — and with `AGENTV3_PAID_PUBLIC` on, a ₹0 wallet is REFUSED new builds, so a new user could do **nothing at all** |
+| `WEEKLY_TOPUP_TOKENS` | the weekly gift ladder stops |
+| `AI_TOOL_FREE_DAILY_LIMIT` · `AI_IMAGE_FREE_DAILY_LIMIT` · `AI_IMAGE_PASS_DAILY_LIMIT` | the free daily allowance becomes none |
+| `PROFESSIONAL_FREE_DAILY_LIMIT` | no free professional messages |
+| `AGENTV3_DEPLOY_MAX_MB` | the per-deploy size ceiling is **DISABLED** (0 means off there, by its own comment) |
+| `STORE_FEE_PCT` | the fee split shown on a pack card stops adding up |
+| `MONITOR_SANDBOX_SPIKE_MIN_USD` | every trivial spend is alert-worthy — against the standing 2026-09-12 one-mail-per-episode mandate |
+| `SEMANTIC_MEMORY_MIN_SCORE` | the relevance floor is gone and noise is injected |
+
+🔴 **THE CONDITION IS NOT HYPOTHETICAL IN THIS DEPLOYMENT, and `CLAUDE.md` already records both
+routes to it.** One is the cleared field / dropped paste that `referralRewards.ts` documents. The
+other is worse and is live: **six keys are set TWICE in the running service**, the last row wins, and
+an **empty** last row wins *silently* while the good value sits visible a few rows above it — the
+audit's own sharpest example. So "present but blank" is a state this service can already be in.
+
+**THE FIX IS THE CLASS.** `src/server/lib/envNumber.ts` is the numeric sibling of `envFlag.ts` —
+which exists for the same reason, written the same way, for booleans ("six ways to read an ON flag").
+`parseEnvNumber` returns `number | null` for precisely the reason `parseEnvFlag` returns
+`boolean | null`: **only the caller knows which way its own default falls**, and what range and
+rounding its number has. So each site keeps its own bounds, and none of them keeps its own idea of
+what an empty string means. An explicit `0` is honoured everywhere it is in range — three existing
+suites assert that in words (`walletCredit.test.ts` calls switching the bonus off *"a valid choice"*),
+and those assertions are undisturbed. Nobody types a zero by accident; a cleared box is not a
+decision.
+
+⚠️ **THE EIGHT PUNCTUATION-STRIPPING PARSERS WERE DELIBERATELY LEFT ALONE, and are recorded as
+CHECKED AND SAFE so nobody re-audits them:** `buildCostCeiling`, `walletFloor`, `webRiskBudget`,
+`appAiGateway`, `referralRewards`, `escalationRollout`, `slowRungBench`, `streamWatchdog` all guard
+blank correctly already, and each takes punctuation (`₹`, `$`, `%`, `_`, thousands separators) that
+the shared primitive deliberately does not. Rewriting correct code to share a helper would risk
+weakening a guard for no defect — the same reason the 304-window sweep was declined.
+
+🔴 **ONE FINDING WAS MINE AND WRONG, AND THE CORRECTION IS THE USEFUL PART.** `CaptchaGenerator.ts`
+carried the same shape with the sharpest consequence — a blank floor made the gate `score >= 0`,
+which passes a **certain-bot 0**, inside a function whose own `catch` says *"fail CLOSED"*. I began
+fixing it as NavBharatAI's own bot gate. **It is not ours:** that code lives in a **template literal**
+and is written into the **user's generated app**, which is deliberately dependency-free — NavBharatAI
+has no first-party captcha path at all (verified, not assumed). Importing a server module into
+generated user code would have broken every app built from that recipe, and my backticks broke the
+template outright. Reverted and re-fixed **inline**. An out-of-range value like `5` is left refusing
+everything **on purpose**: that is the safe failure for a bot gate and relaxing it into the default
+would have traded a safe failure for a looser one — the *"a fix must never trade one problem for
+another"* rule, caught inside this very change.
+
+**Tests — `tests/aClearedEnvFieldIsNotAZero.test.ts` (54). Reversion-proven: with the nine files
+reverted, 23 fail.** The prevention half scans for the **SHAPE** rather than a list of files
+(a value read with `Number(env.X)` and accepted at `>= 0` is wrong *whatever it is called*, because
+the blank case is decided before any range test runs), anchored on a **whole-file regex and never on
+a byte window** — this repo has paid for fixed-offset source guards seven times and twice for guards
+that could not fail at all. It therefore carries a case asserting the detector still **FINDS** a
+known-bad sample, because a regex matching nothing would make the sweep pass vacuously. ⚠️ **Its own
+first run flagged its own fix** — `parseEnvNumber(` contains the substring `Number(`, and so does
+`rawNumber(` — which is what the negative lookbehind exists for, and what the "clears the safe shape"
+case caught.
 ### 2026-09-17 (autopsy 57875eb3) — a starved model was retired one KEY at a time, and the contract had no home
 
 **Branch `claude/charming-bell-htxb9u`.** Weak tier, prompt *"Mujhe ek car racing game banakae do …"*,
@@ -64720,6 +64802,94 @@ its first checkpoint — the endgame's "N compile errors left" should drop towar
 `REPEATED_READS`/edit loops with it. Tests: `tests/writeTimeTypecheck.test.ts` (note wording on the real
 ERP tsc output, path normalisation, caps, queue coalescing, summary, dispatcher + route wiring).
 
+### Same day, the BOOLEAN sibling — and the guard that could not see it (rule 3, applied to my own fix)
+
+Fixing the numeric class exposed a gap in **my own** prevention guard: it walked `src/server` only.
+Asking whether the 2026-08-09 boolean sweep's guard had the same scope answered itself —
+`tests/envFlag.test.ts` walks `find src/server`, and **there was a live instance sitting in the gap**.
+
+🔴 **Root `server.ts` gated the P-DATA.4 retention purge on
+`process.env.DATA_RETENTION_PURGE_ENABLED === 'true'`** — the strictest of the six dialects
+`envFlag.ts` was written to abolish. **The admin turns features on by writing `on`**; this file
+records several flags set exactly that way. So `on`, `1`, `yes` and `TRUE` would each have left an
+opt-in **deletion** job switched off, with nothing in any log to say so — and `purgeExpired` has
+exactly ONE caller in the whole repo, this one. Now `envFlag('DATA_RETENTION_PURGE_ENABLED')`.
+
+It is the *"I searched `src/` and the wiring was in `server.ts`"* mistake this file already records
+once, this time inside a test that exists to prevent a class. **A guard is only as wide as its walk**,
+and neither guard's narrowness could fail anything. Both are widened: mine to `src`/`scripts`/`infra`/
+`server.ts` plus the client's `import.meta.env` shape, the boolean one to `src/server`/`scripts`/
+`infra`/`server.ts`, each with a case asserting the walk really reached outside its old scope —
+because a walk that found nothing would pass vacuously. Reversion-proven: restoring `=== 'true'`
+fails the widened guard naming `server.ts:807`.
+
+⚠️ **Client code is deliberately still OUT of the boolean guard's scope, and that is a decision:**
+`envFlag` reads `process.env` and is a server module, so a browser file cannot call it, and a guard
+demanding a fix nobody can write is worse than none. Zero boolean-dialect env reads exist in client
+code today (swept the same day). If one appears it needs a client-side helper first.
+
+🔴 **OPEN, AND NOT MINE TO SETTLE (rule 6) — has the retention purge EVER run?**
+`DATA_RETENTION_PURGE_ENABLED` appears **nowhere in this file**, including in the 84-key audit read
+off the live Cloud Run console on 2026-08-20 — which listed every name on the service. If the key is
+unset, the purge has never run, while the published Privacy Policy states its windows as fact:
+technical logs **90 days**, safety-check and removal records **180 days**, post-deletion erasure
+**30 days**, published-app visitor counts **30 days**. That is the shape of the 2026-09-02 incident
+(the policy said *"we never share your data with advertisers"* while the pixel was being built), and
+`tests/privacyPolicyTruth.test.ts` exists because that drift produced no failure of any kind.
+**It cannot be verified from a Claude session** — Cloud Run is not readable here, and the audit is
+four weeks old, so the admin may have set it since. Recorded as an open question with the one-line
+check rather than asserted either way. The dialect fix above is what makes the key *settable the way
+the admin actually sets keys*, which is a precondition for answering it at all.
+
+### And a third, in the guard on an ABSOLUTE rule — plus the one I nearly shipped as decoration
+
+Two guards found narrow, so the method was turned on the rest: **30 tree-scanning guard tests, does
+each one's walk match its claim?** The three with the highest stakes were checked first, and the
+honest result is mixed — **worth recording as-is rather than as a clean sweep:**
+
+| Guard | Claim vs walk | Live instance outside? |
+|---|---|---|
+| `serverDbCentralization` | *"NO server source file"* vs `src/server` — root `server.ts` IS one | **none** (scanned root, `scripts/`, `infra/`, `functions/`) |
+| `ledgerWritersUseAppender` | server ledger writers vs `src/server` | **none**, and it already carries its own non-vacuity check |
+| `whiteLabelClientSurfaces` | *"no NEW user-facing surface"* vs `components`/`lib`/`hooks` | **none** — all 16 vendor mentions in the unwalked trees are comments, internal object keys, or the permitted BYOK surface |
+
+So the sweep produced **no further live defects**, and mechanically widening thirty guards would be
+diffuse work of the kind already declined for the 304-window sweep. **One was widened** — the
+white-label guard, because the rule is ABSOLUTE and the gap included `src/content`: the Privacy
+Policy, Terms and DPA, read by users and by Google's and Meta's reviewers.
+
+**Widening it exposed two real flaws in the detector itself, which matter more than the scope did:**
+
+1. 🔴 **`{2,200}` could not match an EMPTY literal, so the matcher paired the wrong quotes.** In
+   `{ gemini: '', groq: '' }` it skipped quote 1, paired quotes 2 and 3, and reported the *source
+   between them* (`, groq: `) as a user-facing string — three such false positives in `App.tsx`.
+   The worse half: every pairing after a mis-pair is shifted by one, so a genuine vendor literal
+   further down the same file could be read as the gap BETWEEN two literals and never tested.
+2. 🔴 **The 200-character ceiling silently skipped any longer literal** — i.e. every piece of
+   long-form user-facing text there is.
+
+🔴 **AND THEN THE PART THAT MATTERS MOST: MY FIRST VERSION OF THIS WIDENING WAS DECORATION, AND ONLY
+THE REVERSION PROBE CAUGHT IT.** With both bounds corrected and `src/content` in the walk, a probe
+reading *"built by Claude Sonnet"* was appended to `privacyPolicy.ts` — **and the guard passed.**
+The file was in the walk and the file was read. **A regex literal-matcher cannot read prose at
+all:** that policy carries **27 apostrophes** (*"the user's data"*, *"Google's own"*), each of which
+a regex reads as a quote, so the pairing shifts and the real text becomes the gap between
+mis-paired literals. Had I trusted the green, I would have reported new coverage of the legal text
+and delivered none. **This is the fourth time in two days that "a test that cannot fail is not a
+test" had to be paid for, and the first where the vacuity was in the SUBJECT rather than the
+assertion.**
+
+`src/content` is therefore swept **WHOLE** instead, which is sound exactly there and nowhere else:
+long-form text with no provider identifiers to false-positive on (verified to contain none today).
+Re-proven with the same probe — it now fails naming `privacyPolicy.ts: names "Claude"`.
+
+🔴 **OPEN ROOT CAUSE (rule 6) — the apostrophe flaw still affects the CODE trees.** A component
+holding `"the user's app"` shifts its own quote pairing the same way, so a vendor literal further
+down that file can be missed by the literal sweep. Min-0 keeps the pairing aligned where empty
+literals were the cause; an apostrophe inside text is a different cause and a wider regex cannot fix
+it. Reading it correctly needs a real tokenizer over the client sources — **a decision with a real
+cost, not a lint**, and it sits under an absolute rule, so it is recorded here rather than guessed
+at. What is true today: no vendor string is present in any swept tree, prose or code.
 ### 2026-09-17 — ADMIN DECISION PENDING: `REFERRAL_REWARDS` — asked, answered "not yet", and why
 
 Admin: *"REFERRAL_REWARDS = on kar du? total kitna kharcha hoga mera fir? abhi vs bad me"*, then
@@ -65038,6 +65208,37 @@ because nothing back-fills tool errors by path the way `recoveredCommands` does 
 longer become a root cause on an empty build (the outcome code wins), but it still inflates the
 unresolved count. Not coded here: it needs the tool-call path carried on the pending map, a separate
 change.
+### The same day, correcting the entry above: the "real tokenizer" was one import
+
+The entry immediately above recorded an OPEN root cause — the apostrophe flaw in the code trees —
+and justified leaving it open on the grounds that reading client sources correctly *"needs a real
+tokenizer, not a wider regex — a decision with a real cost, not a lint"*.
+
+🔴 **That cost claim was WRONG, and it is corrected here rather than quietly acted on.**
+`typescript` is already a dependency of this repo and is **already imported by four existing tests**
+(`tests/game3dObjects.test.ts`, `TsconfigGuard.test.ts`, `GameSystemsGenerator.test.ts`,
+`generatedGameCode.test.ts`). The parser costs one import. An estimate that sends a real defect to
+the "open, too expensive" pile is worse than no estimate, because nothing ever revisits it.
+
+**The AST tells text from code by KIND rather than by punctuation**, which retires all three regex
+flaws at once and one more nobody had noticed: string literals, template literals (head plus every
+span — an interpolation is code, and its own literals are visited separately) and **JSX TEXT, which
+a string-literal scan never saw at all**. Property names, module paths, identifiers and type names
+are excluded by kind, so `{ claude: '' }` can never again be read as something a screen shows.
+
+Six inline cases pin it, each one a case the regex got wrong — the apostrophe case, the
+empty-literal neighbourhood, a literal past the old 200-char ceiling, JSX text, the four things
+that cannot reach a screen, and the literal spans of an interpolated template. They run over a
+PURE extractor, so none of them can go vacuous the way the file-level probe did.
+
+`src/content` is folded back into the main sweep (it was excluded only because a regex cannot read
+prose). **The whole-text prose sweep STAYS**, for a reason that is not redundancy: the AST is
+correct only while a file PARSES, and a content file that failed to parse would yield no literals
+and pass in silence — the exact failure mode this file has now paid for twice in one day. Proven to
+overlap: with the probe planted, **BOTH** sweeps fail, not one.
+
+Result: **zero vendor strings across every client tree under correct parsing** — and that is now a
+statement about what the code contains, rather than about what a regex happened to look at.
 ### 2026-09-17 (admin Monitor capture) — the publish ceiling was reported twice with two numbers, its advice named a switch already thrown, and a recurring error had its own fix truncated away
 
 **Branch `claude/charming-bell-htxb9u`.** The admin sent the Monitor page as text and asked for a

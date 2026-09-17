@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { enclosingBlock, anchorOf, codeOnly } from './helpers/sourceSlice';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { shouldRaceStreams } from '../src/server/AI/Router/streamRacePolicy';
@@ -80,9 +81,11 @@ describe('wiring — the policy actually governs the router, and the outcome rea
     // TOKEN REPORTING failed over an unrelated field's byte offset. A guard must measure the claim it
     // is named for; `usageMeasured` lives in this object however many fields the object grows, so the
     // OBJECT is what to read. Same reasoning `tests/helpers/sourceSlice.ts` exists for.
-    const at = chat.indexOf('streamed: true');
-    expect(at).toBeGreaterThan(-1);
-    const row = objectLiteralAround(chat, at);
+    // ⚠️ `enclosingBlock` ALREADY EXISTED and I did not look for it (2026-09-17). #3037 added a local
+    // `objectLiteralAround` doing exactly this — a second copy of a rule, free to disagree with the
+    // first — because I wrote the helper instead of searching `tests/helpers/`. That is safeguard #6's
+    // own failure mode, and the duplicate is deleted rather than kept.
+    const row = enclosingBlock(chat, 'streamed: true');
     expect(row).toContain('usageMeasured: false');
     expect(row).not.toContain('inputTokens: 0');
   });
@@ -101,7 +104,7 @@ describe('wiring — the policy actually governs the router, and the outcome rea
 
 describe('🔴 a truncated answer must not be presented as a complete one', () => {
   const chatSrc = readFileSync(join(__dirname, '../src/server/routes/chat.ts'), 'utf8');
-  const chatCode = chatSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const chatCode = codeOnly(chatSrc);
 
   it('a stalled stream tells the user it stopped short, before [DONE]', () => {
     // Without this, the reply just stops mid-sentence and `[DONE]` follows: the user cannot tell
@@ -115,8 +118,8 @@ describe('🔴 a truncated answer must not be presented as a complete one', () =
   });
 
   it('🔒 it names NO provider — the White-Label Law applies to a caveat too', () => {
-    const at = chatSrc.indexOf('went quiet before finishing');
-    expect(at).toBeGreaterThan(-1); // ⚠️ or the slice below is junk and every assertion is vacuous
+    // `anchorOf` THROWS on a missing needle, so the vacuous version of this guard cannot be written.
+    const at = anchorOf(chatSrc, 'went quiet before finishing');
     const line = chatSrc.slice(at - 200, at + 200);
     for (const vendor of ['GLM', 'Z.ai', 'Kimi', 'Moonshot', 'Claude', 'Anthropic', 'Gemini', 'Vertex', 'Grok', 'OpenAI']) {
       expect(line).not.toContain(vendor);
@@ -138,33 +141,10 @@ describe('🔴 a truncated answer must not be presented as a complete one', () =
   });
 
   it('is professional ENGLISH, per the 2026-09-14 language standard', () => {
-    const at = chatSrc.indexOf('went quiet before finishing');
-    expect(at).toBeGreaterThan(-1); // ⚠️ a `not.toMatch` on an empty slice is the emptiest guard there is
+    const at = anchorOf(chatSrc, 'went quiet before finishing');
     const line = chatSrc.slice(at - 300, at + 300);
     // Devanagari in a client-facing string is what the admin caught on the voice-consent popup:
     // "south india wale kaise padhenge isko??"
     expect(line).not.toMatch(/[\u0900-\u097F]/);
   });
 });
-
-/**
- * The `{ … }` object literal that CONTAINS `from` — brace-matched, so it is the whole row however
- * many fields it grows. Replaces a fixed character window, which measures formatting rather than the
- * claim under test.
- */
-function objectLiteralAround(src: string, from: number): string {
-  let open = src.lastIndexOf('{', from);
-  // Walk back past any nested literal that closed before `from` (a spread's `{ latencyMs: … }`).
-  while (open > 0) {
-    const between = src.slice(open, from);
-    if ((between.match(/\}/g) ?? []).length <= (between.match(/\{/g) ?? []).length - 1) break;
-    open = src.lastIndexOf('{', open - 1);
-  }
-  if (open < 0) return '';
-  let depth = 0;
-  for (let i = open; i < src.length; i++) {
-    if (src[i] === '{') depth++;
-    else if (src[i] === '}') { depth--; if (depth === 0) return src.slice(open, i + 1); }
-  }
-  return src.slice(open);
-}

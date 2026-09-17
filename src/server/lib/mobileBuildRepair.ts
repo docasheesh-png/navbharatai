@@ -57,8 +57,14 @@ export interface BuildFailureDiagnosis {
   autoFixable: boolean;
   /** Repository-relative files the repair needs to read before it can patch them. */
   needs: string[];
-  /** Facts pulled out of the log that the repair depends on (e.g. the directory Capacitor wanted). */
-  detail?: Record<string, string>;
+  /**
+   * Facts pulled out of the log that the repair depends on (e.g. the directory Capacitor wanted).
+   *
+   * ⚠️ Values are strings OR string arrays. The array arrived with `missing` (every signing secret the
+   * repository lacks, not just the first) because the real workflow reports all four at once and
+   * naming one of four is how a user fixes one and fails again on the next.
+   */
+  detail?: Record<string, string | string[]>;
 }
 
 /** What NavBharatAI would generate for this repository today — the source of a refresh repair. */
@@ -104,17 +110,51 @@ export function classifyBuildFailure(rawLog: string, workflowPath: string): Buil
   // prints it is by definition a different step from the one that broke.
   const log = failedStepSection(full);
 
-  // ── The user's own signing key. Never auto-fixable: we do not have it, and must not have it. ──
-  const secretMatch = log.match(/Missing required secret[:\s]+([A-Z_][A-Z0-9_]*)/);
-  if (secretMatch || /keystore.*(not set|missing|empty)|ANDROID_KEYSTORE_BASE64/i.test(log)) {
+  // ── The user's own signing key. ──
+  //
+  // 🔴 THE PHRASE THIS USED TO MATCH IS ONE NO WORKFLOW HAS EVER PRINTED. It looked for
+  // `Missing required secret: X`; every workflow this repo generates prints
+  // `Missing signing secret(s): A B C D` (`mobileShipKit.ts`, and our own `android-aab.yml`).
+  // Grepping the whole repo for "Missing required secret" returns this line and its own tests —
+  // nothing else. So the precise branch was DEAD in production: it never fired for a real user, the
+  // generic fallback below it carried every real failure, and `detail` came back null with the four
+  // missing names sitting in the log excerpt directly beside it. Caught on a real report
+  // (run 34935149896) whose `detail` was `null` while its log named all four secrets.
+  //
+  // THE CLASS, named so it is recognised again: a matcher written against an INVENTED string and
+  // then tested against that same invented string passes for ever without touching the system it is
+  // supposed to read. `signingReadiness.test.ts` already solved this for the secret NAMES by
+  // asserting them against what `mobileShipKit` really generates; `mobileBuildRepair.test.ts` now
+  // does the same for this SENTENCE, so a reword of the workflow fails CI instead of quietly
+  // returning us to a generic message.
+  //
+  // The singular form is kept because it costs nothing and an older workflow may still be in some
+  // user's repository — this module reads logs from repositories we do not control or update.
+  const secretList = log.match(/Missing signing secret\(s\)[:\s]+([A-Z0-9_\s]+?)(?:—|--|\n|$)/);
+  const secretOne = log.match(/Missing required secret[:\s]+([A-Z_][A-Z0-9_]*)/);
+  const missingSecrets = secretList
+    ? secretList[1].trim().split(/\s+/).filter((n) => /^[A-Z_][A-Z0-9_]*$/.test(n))
+    : secretOne ? [secretOne[1]] : [];
+
+  if (missingSecrets.length > 0 || /keystore.*(not set|missing|empty)|ANDROID_KEYSTORE_BASE64/i.test(log)) {
     return {
       code: 'MISSING_SIGNING_SECRET',
-      summary: secretMatch
-        ? `Your Play Store signing key is not on the repository yet — the build needs ${secretMatch[1]}.`
+      summary: missingSecrets.length > 0
+        ? `Your Play Store signing key is not on the repository yet — the build needs ${missingSecrets.join(', ')}.`
         : 'Your Play Store signing key is not on the repository yet.',
+      // ⚠️ STAYS FALSE, and not by oversight. NavBharatAI CAN now create this key (2026-09-16), but
+      // `autoFixable` means "repair the repository's FILES and build again unattended" — and a
+      // signing key is the app's permanent identity, not a file with a mistake in it. Minting one
+      // without the user asking could also land beside a key they already published with, which is
+      // the one outcome the create route's own 409 exists to prevent. The offer belongs in front of
+      // the user, which is where `detail.missing` now puts it.
       autoFixable: false,
       needs: [],
-      detail: secretMatch ? { secret: secretMatch[1] } : undefined,
+      detail: missingSecrets.length > 0
+        // `secret` is kept for callers that read one name; `missing` is the whole truth, and is what
+        // raises the one-press "Create my signing key" button on the build panel.
+        ? { secret: missingSecrets[0], missing: missingSecrets }
+        : undefined,
     };
   }
 
@@ -770,7 +810,10 @@ export function repairFiles(
       return one('package.json', repairBuildScript(current['package.json'] || ''),
         'NavBharatAI: define the build step the packager needs');
     case 'NPM_VERSION_NOT_FOUND': {
-      const pkg = diag.detail?.package;
+      // `detail` values may be a string or a list (see the type). This repair needs ONE package name,
+      // so it accepts only the string form rather than coercing a list into "a,b" and patching a
+      // dependency by that name.
+      const pkg = typeof diag.detail?.package === 'string' ? diag.detail.package : '';
       if (!pkg) return null;
       return one('package.json', repairDependencyVersion(current['package.json'] || '', pkg),
         `NavBharatAI: use a version of ${pkg} that actually exists`);

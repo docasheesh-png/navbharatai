@@ -60060,3 +60060,97 @@ broken behaviour"; the broken behaviour is what was removed.
 3. Post-build review timed out at 210 s on 55 files.
 4. Sandbox 84% idle across a 39.8-minute session.
 5. `AGENTV3_PROJECT_MODE` — admin-only, Cloud Run.
+
+---
+
+## 2026-09-17 — APK build-report autopsy (run 34935149896): the keystore half was already fixed; the report telling the truth was not
+
+**The report.** A user (`jilikabegum454@gmail.com`) pressed "Google Play bundle". The run died in
+**13 seconds** at its FIRST step — the signing pre-flight — with
+`Missing signing secret(s): ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS
+ANDROID_KEY_PASSWORD`.
+
+### ✅ The reported failure itself was fixed 22 hours later — stated plainly rather than re-fixed
+
+The run started `2026-09-15T06:01:49Z`. The pre-flight block (#2960) landed on `main` at
+`2026-09-16T04:15Z` and one-press key creation (#2961) at `04:36Z`. **This user hit the exact wall those
+two PRs were written from, before they existed.** Verified rather than assumed: `StoreBuildPanel` really
+does call `/api/mobile-ship/signing-status` before dispatch and return early on a `missing` verdict, and
+`/api/mobile-ship/signing-key` really does mint a PKCS#12 and write all four secrets. Nothing was
+re-built here. The same press today is stopped before it spends a run, and offered the key in one press.
+
+### ❌ But four things in that report were wrong, and three are still live today
+
+**1. THE REPORT CLAIMED NINE STEPS RAN THAT NEVER RAN.** One step `failed`; the other nine — including
+*"Compiling your Android app"* and *"Packaging your download"* — were `done`, in a 13-second run.
+**Root cause:** GitHub's terminal state for a step that never ran is `status: 'completed'` with
+`conclusion: 'skipped'`. `mapRunSteps` consulted `conclusion` for exactly ONE value (`'failure'`) and
+then fell through to `status === 'completed' ? 'done'`, which every skipped step satisfies the moment
+the job stops — and the `BuildReportStep` union had no state that could mean "never ran", so there was
+nowhere truthful to put them even if the branch had existed. Fixed by making CONCLUSION the authority on
+the outcome and `status` only the authority on how far a step got; `'skipped'` added to the union;
+`cancelled` rides the same branch so pressing Stop cannot leave a row of green ticks.
+🔎 **Sibling closed by the same line (rule 3):** `/api/mobile-ship/run-steps` computes `percent` as
+`done / total` over the SAME shared mapping, so the live progress bar was inflating for every skipped
+step too. One implementation, both readers — which is why the fix reaches both.
+⚠️ Collapsed duplicates now keep the STRONGEST signal via an explicit rank. This is a deliberate change,
+not a refactor: the old rule let a `running` sibling overwrite a `failed` one and hide it.
+
+**2. `detail: null` WHILE THE LOG NAMED ALL FOUR SECRETS — the matcher read a sentence nothing prints.**
+`classifyBuildFailure` looked for `Missing required secret: X`. **Grepping the whole repo for that phrase
+returns the regex and its own tests — nothing else.** Every workflow this repo generates prints
+`Missing signing secret(s): A B C D`. So the precise branch (naming the secret, populating `detail`) was
+**dead in production**: it had never fired for a real user, the generic fallback carried every real
+failure, and the four names sat unparsed in the log excerpt beside a null `detail`.
+🔒 **THE CLASS, named so it is recognised again: a matcher written against an INVENTED string and then
+tested against that same invented string passes for ever while reading nothing.** `tsc` and `vitest`
+cannot tell that a regex describes no real system. `signingReadiness.test.ts` had already solved exactly
+this for the secret NAMES ("asserts this list against the names `mobileShipKit` really generates");
+`tests/apkReportTruth.test.ts` now does it for the SENTENCE, rebuilding the line from the kit's own
+template — so a reword of the workflow fails CI instead of quietly returning us to a generic message.
+Now captures ALL names, because a user who fixes one of four and rebuilds fails on the next.
+
+**3. 🔴 THE MESSAGE ON A FAILED BUILD WENT STALE ONE DAY AFTER IT WAS WRITTEN — the costly kind.**
+`StoreBuildPanel` told the user: *"It has to stay yours, so NavBharatAI cannot add it for you — the guide
+below walks through creating it."* True until 2026-09-16. The key **does** still stay theirs (written to
+their own repository's secrets, no copy kept), but *"NavBharatAI cannot add it for you"* became false the
+day one-press creation shipped — and a user who believed it went off to install a JDK and learn `keytool`
+for nothing, on the one screen where they are already stuck. **Same drift shape as the four stale ladder
+comments the admin caught by reading the code on 2026-09-15: a sentence asserting a neighbouring module's
+capability, left behind when that capability changed.**
+Fixed by RAISING the offer rather than describing it: a `MISSING_SIGNING_SECRET` failure now sets
+`signingGap` from `detail.missing`, so the "Create my signing key" button appears with the message that
+promises it. That also closes the one hole the pre-flight cannot cover — a build dispatched while the
+signing check answered `unknown` (a GitHub hiccup) lands here with no gap set, and used to leave the user
+a dead end plus a manual guide.
+
+**4. `[object Object]` IN THE PROMPT SENT TO REPAIR THE USER'S APP (pre-existing, found while widening
+`detail`).** `failureReport()` built its text with `...(diag.detail ? ['', diag.detail] : [])` — pushing
+the OBJECT into a string array, which `join('\n')` stringified. So the one useful fact (the package that
+does not exist, the directory Capacitor wanted) reached the repair AI as the literal text
+`[object Object]`. TypeScript could not catch it: the array widens to `(string | Record<…>)[]` and `join`
+accepts anything. Now rendered as `key: value` lines.
+
+### What stays FALSE on purpose
+
+`autoFixable` remains `false` for a missing signing key. NavBharatAI can now create one, but that flag
+means "repair the repository's FILES and build again unattended" — and a signing key is the app's
+permanent identity, not a file with a mistake in it. Minting one unattended could also land beside a key
+the user already published with, which is the case the create route's own 409 exists to prevent. The
+offer belongs in front of the person, which is where `detail.missing` now puts it.
+
+### Gate + proof
+
+`tests/apkReportTruth.test.ts` (15 cases), **proven by reversion**: restoring the old ternary and the old
+regex fails 8 of them. Neighbouring suites re-run green (160). Full gate below, on the final state.
+
+### Still open
+
+1. **Only `jobs[0]` is ever read** (`mobileShip.ts`, all three call sites). Every workflow the kit
+   generates is single-job, so it is correct today and would silently report one job's steps for a
+   multi-job workflow. Recorded, not speculatively changed.
+2. **`failure.stage` is `null` for any pre-flight failure** — `failedStage` reads a `NBAI_FAILED_STAGE`
+   marker the workflow prints later, so a step that fails before it has no stage. The observed report
+   showed `"stage": "install"` from an older code path; the honest value is "before any stage".
+3. **No test covers a skipped step in `mobileBuildReport.test.ts`'s own suite** — the new file covers it;
+   the older suite still exercises only `queued` and `in_progress`.

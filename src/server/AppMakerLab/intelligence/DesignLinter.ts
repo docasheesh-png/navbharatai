@@ -63,6 +63,37 @@ export function extractHexColors(code: string): string[] {
   return [...out];
 }
 
+/**
+ * Colours DECLARED as design tokens — `--accent: #4f46e5`, `--bg: #0d0d12`.
+ *
+ * 🔴 WHY THE PALETTE MUST NOT BE COUNTED AGAINST THE PALETTE BUDGET (measured 2026-09-17). Every one
+ * of NavBharatAI's 40 golden scaffolds graded **C or D**, all with the same complaint: *"20 distinct
+ * colours — consolidate into a small palette (≤ 12)"*. Measuring where those colours actually live
+ * settled it: the apps' own `src/App.tsx` scores **100/A**, and **all 19 colours are token
+ * declarations in the shared design kit** — not one is ad-hoc.
+ *
+ * That is not a palette violation. It is a palette. And a design system with a dark mode declares
+ * every token TWICE by construction, so a WELL-BUILT two-theme kit can never satisfy a rule that
+ * counts raw hex values — it fails harder the better it is.
+ *
+ * The rule's real target is app code sprinkling ad-hoc colours, and that target is untouched: a
+ * colour used anywhere other than a token declaration still counts, and `hardcoded-colors` below
+ * still fires for a file with many colours and no tokens at all.
+ */
+export function extractTokenColors(code: string): string[] {
+  const out = new Set<string>();
+  const src = typeof code === 'string' ? code : '';
+  // `--name: <value>` up to the end of the declaration. A token may hold several colours (a gradient,
+  // a two-layer shadow), so every hex inside the value counts as declared.
+  for (const decl of src.matchAll(/--[\w-]+\s*:\s*([^;}\n]+)/g)) {
+    for (const hex of decl[1].match(/#[0-9a-fA-F]{3,8}\b/g) ?? []) {
+      const n = normalizeHex(hex);
+      if (n) out.add(n);
+    }
+  }
+  return [...out];
+}
+
 /** Distinct font-family names declared in the code (CSS `font-family` + Tailwind `font-[...]`). Pure. */
 export function extractFontFamilies(code: string): string[] {
   const out = new Set<string>();
@@ -118,7 +149,11 @@ function scoreToGrade(score: number): 'A' | 'B' | 'C' | 'D' {
  */
 export function lintDesign(code: string): DesignLintResult {
   const src = typeof code === 'string' ? code : '';
-  const colors = extractHexColors(src);
+  const allColors = extractHexColors(src);
+  // The palette itself is not a violation of the palette — see `extractTokenColors`. What the budget
+  // is for is ad-hoc colour, so only colours used OUTSIDE a token declaration are counted against it.
+  const tokenColors = new Set(extractTokenColors(src));
+  const colors = allColors.filter((c) => !tokenColors.has(c));
   const fonts = extractFontFamilies(src);
   const spacing = extractSpacingPx(src);
   const offGrid = offGridSpacing(spacing);
@@ -163,12 +198,16 @@ export function lintDesign(code: string): DesignLintResult {
     });
   }
 
-  if (colors.length > HARDCODE_COLOR_LIMIT && !hasTokens) {
+  // ⚠️ `allColors`, not `colors`. This rule asks a DIFFERENT question — "many colours and no tokens
+  // at all" — so it must see every colour in the file. With `colors` it would be near-unreachable:
+  // a file with no tokens has nothing filtered out, but one that half-adopted tokens would have its
+  // real ad-hoc problem hidden by the very tokens it did declare.
+  if (allColors.length > HARDCODE_COLOR_LIMIT && !hasTokens) {
     penalty += 10;
     violations.push({
       type: 'hardcoded-colors',
       severity: 'info',
-      message: `${colors.length} hardcoded colours and no CSS variables — extract design tokens (\`--brand-*\`) so themes stay consistent.`,
+      message: `${allColors.length} hardcoded colours and no CSS variables — extract design tokens (\`--brand-*\`) so themes stay consistent.`,
       fix: DESIGN_FIX['hardcoded-colors'],
       count: colors.length,
       examples: colors.slice(0, 6),

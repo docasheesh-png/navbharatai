@@ -26,6 +26,7 @@ import { requestedFeatureLabels, renderRequestedFeatureContract } from '../Agent
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
 import { goldenScaffoldForPrompt, goldenScaffoldFiles } from '../AgentV3/goldenScaffolds/registry';
+import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAuthored';
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
 import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
@@ -33,7 +34,7 @@ import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepE
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote } from '../AgentV3/etaEvidence';
 import { decideComplexity } from '../AgentV3/complexityRouting';
 import { tierLadder, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
-import { describeRunnerChain, chainProviders, type ChainRung } from '../AgentV3/runnerChainSummary';
+import { describeRunnerChain, chainProviders, firstRungLabel, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction } from '../AgentV3/AuthenticityAnalysis';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
@@ -333,7 +334,7 @@ import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective, classifyFailure } from '../lib/BuildRetrospectiveEngine';
 import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
-import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMisconfigured, buildStarvedItsOutputBudget } from '../AgentV3/BuildDiagnostics';
+import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMisconfigured, buildStarvedItsOutputBudget, stoppedByUser } from '../AgentV3/BuildDiagnostics';
 import { ADVISORY_CAP_CODE } from '../AgentV3/advisoryCapOutcome';
 import { estimateBuildTime, complexityFromPrompt, liveEtaTick } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
@@ -12038,7 +12039,7 @@ async function noteBuildOutcome(
         // Autopsy f04421ef — see runnerChainSummary.ts. Recorded once (record() collapses an identical
         // repeat), admin-only like every other provider name.
         onChain: (chain) => {
-          try { buildDiag.setProviderChain(describeRunnerChain(chain), chainProviders(chain)); }
+          try { buildDiag.setProviderChain(describeRunnerChain(chain), chainProviders(chain), firstRungLabel(chain)); }
           catch { /* diagnostics are best-effort — never affects a build */ }
         },
       });
@@ -13066,6 +13067,22 @@ async function noteBuildOutcome(
         // Billing accounting fix (THE big leak): the Architect delegates all app code to sub-agents,
         // so most of a build's tokens are spent here. Feed the build-level sink so they are billed.
         usageSink: buildUsage,
+        // ── AND THE REST OF WHAT THE PARENT HAS (deep re-autopsy of 9cca1fd5) ─────────────────────
+        // Each of these was already computed for the architect and simply never handed to the child.
+        // See `SubAgentDeps` for what each one's absence cost; the count is now test-locked.
+        framework,
+        onCommand: (c) => { try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ } },
+        onLlmCall: (c: Parameters<NonNullable<typeof buildDiag.recordLlmCall>>[0]) => {
+          try { buildDiag.recordLlmCall(c); } catch { /* diagnostics are best-effort */ }
+        },
+        signal: abort.signal,
+        // The time THIS BUILD has left, asked at spawn — never the build's total (see remainingBuildMs).
+        // `0` means the operator disabled the wall clock, and that must stay "no deadline", not "none left".
+        remainingBuildMs: () => (effectiveBuildSeconds > 0
+          ? effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt)
+          : 0),
+        // A thunk: `expectsArtifacts` is decided further down, and `intent` can still change before it.
+        expectsArtifacts: () => expectsArtifacts,
       });
       // Layer 84 (Multi-Model Ensemble): the Architect can call second_opinion to
       // get an independent cross-model review from the NON-Claude free router
@@ -13189,7 +13206,13 @@ async function noteBuildOutcome(
       // (which write through `dispatcher.dispatch('write_file')`) and every sub-agent — so it is the
       // only honest answer to "did this build write that file?". Passed as a thunk because the gate
       // asks at the END of the build and the map is empty right now.
-      dispatcher.setAuthoredFiles(() => writtenFiles.keys());
+      // ⚠️ NOT `writtenFiles.keys()` (autopsy 2b0a3ed5). `buildAuthorship.ts`'s own header states
+      // that scaffold files are not in the authored set — true of the actuator's boilerplate, which
+      // never goes through a write tool, and FALSE of the golden scaffold, which explicitly does
+      // `writtenFiles.set(...)`. Left as-is, the readiness gate would blame a build for a placeholder
+      // in NavBharatAI's own template. `modelAuthoredPaths` removes exactly the byte-exact seeded
+      // entries and nothing else, so a template the model has since edited stays ours to answer for.
+      dispatcher.setAuthoredFiles(() => modelAuthoredPaths(writtenFiles));
       // PUBLISHING NEEDS AN ASK (admin 2026-09-01). On a build turn the agent used to decide for
       // itself — a user typed "continue", the build finished, and their app went live on a public URL
       // with nobody having requested it. Consent is read from THIS message only: consent that carries
@@ -13814,7 +13837,11 @@ async function noteBuildOutcome(
         // `writtenFiles` is the same route-level Map the billing decision (`decideCancelledBuildBill`)
         // already trusts — reading it live (not at construction time, since the fast lane salvages
         // AFTER baseRunnerOpts is built) is what keeps this answer and that one from disagreeing.
-        hasExistingFiles: () => writtenFiles.size > 0,
+        // ⚠️ NOT `writtenFiles.size > 0` (autopsy 2b0a3ed5) — the golden-scaffold pre-seed puts its
+        // own twelve files in that map, so a build that wrote nothing still answered "yes, there is
+        // work to resume from" and the user was told their files were saved. Only files the MODEL
+        // authored count as work.
+        hasExistingFiles: () => modelAuthoredPaths(writtenFiles).length > 0,
         system: architectSystem,
         // Built-in tools PLUS anything the user connected. Concatenated with ours FIRST so a
         // connected service can never displace a platform tool in the list the model reads.
@@ -14482,6 +14509,8 @@ async function noteBuildOutcome(
       // template). Best-effort: any failure just falls through to a normal from-scratch build. Kill switch
       // AGENTV3_GOLDEN_SCAFFOLD=off.
       let goldenPreseeded = false;
+      /** Path → the exact content the platform's own template seeded. See the bill note below. */
+      const preseededGolden = new Map<string, string>();
       if (process.env.AGENTV3_GOLDEN_SCAFFOLD !== 'off' && intent === 'new_build' && !projectModuleRef && !isImportTurn) {
         try {
           const golden = goldenScaffoldForPrompt(prompt);
@@ -14496,6 +14525,14 @@ async function noteBuildOutcome(
                 try { getWorkspaceMemory(workspaceId).indexFile(gp, gc); } catch { /* index best-effort */ }
               }
               await saveWorkspaceFiles(workspaceId, goldenFiles).catch(() => {});
+              // 🔴 REMEMBERED FOR THE BILL (autopsy 2b0a3ed5). These 12 files go into `writtenFiles`
+              // above so the rest of the build treats them as present — but they are OUR template, not
+              // the user's app. `decideCancelledBuildBill`'s "nothing delivered, nothing charged" rule
+              // reads that count, so without this a user who stopped before the model produced anything
+              // of their own was billed for twelve files we wrote from a template. Content is kept, not
+              // just the path: a scaffold file the builder REWRITES is genuinely delivered work.
+              for (const [gp, gc] of Object.entries(goldenFiles)) preseededGolden.set(gp, gc);
+
               // 🔴 SHOW IT NOW — autopsy 2b0a3ed5 (2026-09-17). A user asked for a calculator; this
               // pre-seed put a tested, CI-proven, WORKING calculator on disk at second 6.7. They then
               // watched nothing at all for 56 seconds while the first model call returned 27 tokens,
@@ -16146,7 +16183,17 @@ async function noteBuildOutcome(
             // not theirs. This is the same honesty rule from the other direction: that comment
             // refuses to claim we checked when we did not, and this refuses to report a verdict on
             // something the user never wrote.
-            const hasUserApp = Object.keys(storeFiles).length > 0 || writtenFiles.size > 0;
+            // 🔴 CORRECTED THE SAME DAY IT SHIPPED (autopsy 2b0a3ed5). The line above used to be
+            // `Object.keys(storeFiles).length > 0 || writtenFiles.size > 0`, and it held only because
+            // fdd59ef8's durable store happened to be empty. The golden-scaffold pre-seed does
+            // `writtenFiles.set(gp, gc)` for every one of its files and then persists them, so it
+            // makes BOTH halves true by itself — and the very next report graded our own Calculator
+            // template 68/100 and filed the C against a user who had written nothing.
+            //
+            // `projectHasUserCode` asks the question that was meant all along: is there one file here
+            // that is not, byte for byte, something WE seeded? See platformAuthored.ts for why this is
+            // answered by content rather than by a flag (a flag cannot survive the next "continue").
+            const hasUserApp = projectHasUserCode(integrityFiles);
             const quality = hasUserApp ? lintBuiltApp(integrityFiles) : null;
             // `null` means nothing lintable was found. Recording a perfect score there would claim we
             // checked when we did not — the same lie in the other direction.
@@ -17741,6 +17788,11 @@ async function noteBuildOutcome(
           highSeverity: 0,
           warnings: buildDiag.shippingIssueCount('warning'),
         });
+        // A build the USER stopped is not a build that failed — see releaseGate's `stoppedByUser`.
+        // Read off the timeline (the same source `rootCause` uses) rather than threaded through the
+        // ending paths, so the two can never tell the reader different stories about one build.
+        try { gateEvidence.stoppedByUser = stoppedByUser(buildDiag.report().issues); }
+        catch { /* the honest wording is best-effort; the verdict itself is unaffected */ }
         let gate = releaseGate(gateEvidence, gateFindings(), gateQuality);
 
         // ── THE BUDGET LEDGER: where this build's clock actually went ────────────────────────────
@@ -19351,6 +19403,11 @@ async function noteBuildOutcome(
         ? decideCancelledBuildBill({
           abortCause: abortCauseOf(abort.signal),
           filesWritten: writtenFiles.size,
+          // Our own template, untouched, is not the user's app — see `preseededUnchanged`. A scaffold
+          // file the builder REWROTE has different content and so is correctly counted as delivered.
+          // ⚠️ `writtenFiles` itself is deliberately NOT filtered: `shouldRetryEmptyBuild` and the
+          // render rescue both read its size and mean something different by it.
+          preseededUnchanged: [...preseededGolden].filter(([p, c]) => writtenFiles.get(p) === c).length,
           appRendered: buildObs.previewRendered === true,
           decidedBilledUsd: effectiveBilledUsd,
         })

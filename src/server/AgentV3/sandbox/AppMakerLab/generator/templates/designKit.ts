@@ -70,7 +70,7 @@ button, .btn {
   cursor: pointer;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 9px 16px;
+  padding: 8px 16px;
   background: var(--card);
   color: var(--fg);
   transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
@@ -95,7 +95,7 @@ input, textarea, select {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 9px 12px;
+  padding: 8px 12px;
 }
 input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible {
   outline: 2px solid var(--accent);
@@ -145,7 +145,7 @@ small, .muted { color: var(--muted); }
 .alert {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 12px 14px;
+  padding: 12px 16px;
   background: var(--card);
 }
 .alert-success { border-color: var(--success); background: color-mix(in srgb, var(--success) 8%, var(--card)); }
@@ -158,7 +158,7 @@ small, .muted { color: var(--muted); }
 .row   { display: flex; align-items: center; gap: 12px; }
 
 /* Labelled field — vertical label + input spacing so forms read cleanly. */
-.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.field { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
 .field > label { font-size: 0.85rem; font-weight: 600; color: var(--muted); }
 
 /* ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -178,7 +178,7 @@ small, .muted { color: var(--muted); }
    scrolling sideways on a phone (the usual mobile-table defect). Wrap: <div class="nb-table-wrap">. */
 .nb-table-wrap { width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
 .nb-table { width: 100%; border-collapse: collapse; font-size: 0.925rem; }
-.nb-table th, .nb-table td { padding: 10px 14px; text-align: left; white-space: nowrap; }
+.nb-table th, .nb-table td { padding: 12px 16px; text-align: left; white-space: nowrap; }
 .nb-table thead th {
   position: sticky; top: 0; z-index: 1;
   background: var(--card); color: var(--muted);
@@ -202,8 +202,8 @@ small, .muted { color: var(--muted); }
 .nb-shell { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
 .nb-sidebar { border-right: 1px solid var(--border); background: var(--card); padding: 16px 12px; display: flex; flex-direction: column; gap: 4px; }
 .nb-sidebar a, .nb-nav-item {
-  display: flex; align-items: center; gap: 10px;
-  padding: 9px 12px; border-radius: 10px;
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 12px; border-radius: 10px;
   color: var(--muted); font-size: 0.925rem; font-weight: 500; text-decoration: none;
 }
 .nb-sidebar a:hover, .nb-nav-item:hover { background: var(--accent-soft); color: var(--fg); text-decoration: none; }
@@ -248,13 +248,13 @@ small, .muted { color: var(--muted); }
 
 /* Dialog — a modal over a dimmed page. */
 .nb-modal-backdrop { position: fixed; inset: 0; background: rgba(9, 9, 14, 0.55); display: grid; place-items: center; padding: 20px; z-index: 50; }
-.nb-modal { width: 100%; max-width: 460px; max-height: 85vh; overflow-y: auto; padding: 22px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
-.nb-modal-title { font-size: 1.1rem; font-weight: 700; margin: 0 0 6px; }
+.nb-modal { width: 100%; max-width: 460px; max-height: 85vh; overflow-y: auto; padding: 24px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.nb-modal-title { font-size: 1.1rem; font-weight: 700; margin: 0 0 8px; }
 .nb-modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
 
 /* Toolbar — the row above a table or list: title on the left, actions pushed right, wrapping on
    a phone instead of overflowing. */
-.nb-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.nb-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 .nb-toolbar .nb-spacer { margin-left: auto; }
 
 /* Stat tile — the numbers across the top of a dashboard. */

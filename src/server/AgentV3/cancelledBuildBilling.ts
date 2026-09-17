@@ -69,6 +69,24 @@ export interface CancelledBuildFacts {
   abortCause: AbortCause;
   /** How many files the build actually wrote and saved. */
   filesWritten: number;
+  /**
+   * Of those, how many are PLATFORM template files the build never changed.
+   *
+   * 🔴 THE BUG THIS EXISTS TO KILL (autopsy 2b0a3ed5, 2026-09-17). The golden-scaffold pre-seed writes
+   * its template straight into the build's `writtenFiles` map, so `filesWritten` counted 12 files the
+   * user's build never produced. Rule 4 below — *"nothing delivered, nothing charged"* — therefore
+   * could not fire for any prompt that HAS a template, which is precisely the set of builds where a
+   * user may quit before anything of their own exists.
+   *
+   * What it cost: a user asked for a calculator, our tested template landed at second 6.7, the one
+   * model call returned **27 tokens in 55.7 seconds**, they pressed Stop at 64 s having seen no
+   * preview at all — and were billed 50% (₹0.65) for twelve files we wrote from our own template.
+   *
+   * ⚠️ The POLICY was never wrong and is unchanged. The INPUT to it was. Counted here rather than at
+   * the call site so the rule keeps one address; absent means 0, which is exactly today's behaviour
+   * for every caller that has no template.
+   */
+  preseededUnchanged?: number;
   /** Did the platform OPEN the app in a real browser and see it render? */
   appRendered: boolean;
   /** The honest real-cost bill the normal billing model already computed for this build. */
@@ -125,11 +143,17 @@ export function decideCancelledBuildBill(f: CancelledBuildFacts | null | undefin
   }
 
   const decided = money(f.decidedBilledUsd);
-  const files = count(f.filesWritten);
+  const written = count(f.filesWritten);
+  // What the BUILD delivered of the USER's own app — our untouched template is not theirs. Clamped at
+  // 0 so a miscounted caller can only ever be generous, never invent work that was not done.
+  const files = Math.max(0, written - count(f.preseededUnchanged));
 
-  // RULE 4. Nothing delivered, nothing charged — whatever it cost us. A misclick three seconds in
-  // must not produce a bill, and under real-cost billing it would be a rounding error anyway.
-  if (files === 0) {
+  // RULE 4, FIRST HALF — UNCHANGED, and it must stay ahead of everything. Nothing was written AT ALL,
+  // so an `appRendered` flag here is contradictory evidence, and the existing suite pins that a
+  // contradiction lands on the free side ("zero files is free even when the app somehow rendered").
+  // Junk input reaches 0 through `count()` and lands here too, which is also pinned. Neither is mine
+  // to flip: both say "when the evidence disagrees with itself, do not charge".
+  if (written === 0) {
     return {
       billedUsd: 0, discountPct: 100, delivery: 'nothing', applies: true,
       reason: 'user stopped the build before any file was produced — nothing delivered, not charged',
@@ -137,8 +161,15 @@ export function decideCancelledBuildBill(f: CancelledBuildFacts | null | undefin
     };
   }
 
-  // RULE 3 is structural: every branch below starts from `decided`, so the charge can only ever be
-  // reduced. There is no path that computes a number of its own.
+  // 🔴 A RENDERING APP IS BILLED WHATEVER WROTE IT — and this branch must stay ABOVE the
+  // nothing-delivered rule, which is a loophole the moment `files` stops counting the template.
+  // `CLAUDE.md` (autopsy 4efab9d7) settles the case in as many words: *"a zero-write turn that
+  // renders is billed by it"* — the user is holding a working app on screen, and what produced it is
+  // our business, not theirs. Without this ordering, "seed a template → let it render → press Stop"
+  // would be free for ever.
+  //
+  // RULE 3 is structural: every branch from here starts from `decided`, so the charge can only ever
+  // be reduced. There is no path that computes a number of its own.
   if (f.appRendered === true) {
     return {
       billedUsd: round(decided), discountPct: 0, delivery: 'working-app', applies: true,
@@ -146,6 +177,19 @@ export function decideCancelledBuildBill(f: CancelledBuildFacts | null | undefin
       userMessage: decided > 0
         ? 'You stopped this build, and your app was already built and running — it is saved and you can keep using it. You have been charged for the work that was completed, not for a full build.'
         : null,
+    };
+  }
+
+  // RULE 4, SECOND HALF — NEW (autopsy 2b0a3ed5). Files exist, but every one of them is the
+  // platform's own template, untouched, and nothing rendered. That is a real and expected state, not
+  // a contradictory one: the user asked for a calculator, our tested template landed at second 6.7,
+  // and they stopped before the model produced anything of theirs. They are holding nothing they did
+  // not already have by asking, so there is nothing to charge for.
+  if (files === 0) {
+    return {
+      billedUsd: 0, discountPct: 100, delivery: 'nothing', applies: true,
+      reason: 'user stopped the build before any file of their own was produced — only the platform template existed and nothing rendered, so not charged',
+      userMessage: null,
     };
   }
 

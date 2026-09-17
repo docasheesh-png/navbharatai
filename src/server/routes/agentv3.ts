@@ -13067,6 +13067,22 @@ async function noteBuildOutcome(
         // Billing accounting fix (THE big leak): the Architect delegates all app code to sub-agents,
         // so most of a build's tokens are spent here. Feed the build-level sink so they are billed.
         usageSink: buildUsage,
+        // ── AND THE REST OF WHAT THE PARENT HAS (deep re-autopsy of 9cca1fd5) ─────────────────────
+        // Each of these was already computed for the architect and simply never handed to the child.
+        // See `SubAgentDeps` for what each one's absence cost; the count is now test-locked.
+        framework,
+        onCommand: (c) => { try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ } },
+        onLlmCall: (c: Parameters<NonNullable<typeof buildDiag.recordLlmCall>>[0]) => {
+          try { buildDiag.recordLlmCall(c); } catch { /* diagnostics are best-effort */ }
+        },
+        signal: abort.signal,
+        // The time THIS BUILD has left, asked at spawn — never the build's total (see remainingBuildMs).
+        // `0` means the operator disabled the wall clock, and that must stay "no deadline", not "none left".
+        remainingBuildMs: () => (effectiveBuildSeconds > 0
+          ? effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt)
+          : 0),
+        // A thunk: `expectsArtifacts` is decided further down, and `intent` can still change before it.
+        expectsArtifacts: () => expectsArtifacts,
       });
       // Layer 84 (Multi-Model Ensemble): the Architect can call second_opinion to
       // get an independent cross-model review from the NON-Claude free router
@@ -14507,6 +14523,8 @@ async function noteBuildOutcome(
       // template). Best-effort: any failure just falls through to a normal from-scratch build. Kill switch
       // AGENTV3_GOLDEN_SCAFFOLD=off.
       let goldenPreseeded = false;
+      /** Path → the exact content the platform's own template seeded. See the bill note below. */
+      const preseededGolden = new Map<string, string>();
       if (process.env.AGENTV3_GOLDEN_SCAFFOLD !== 'off' && intent === 'new_build' && !projectModuleRef && !isImportTurn) {
         try {
           const golden = goldenScaffoldForPrompt(prompt);
@@ -14521,6 +14539,14 @@ async function noteBuildOutcome(
                 try { getWorkspaceMemory(workspaceId).indexFile(gp, gc); } catch { /* index best-effort */ }
               }
               await saveWorkspaceFiles(workspaceId, goldenFiles).catch(() => {});
+              // 🔴 REMEMBERED FOR THE BILL (autopsy 2b0a3ed5). These 12 files go into `writtenFiles`
+              // above so the rest of the build treats them as present — but they are OUR template, not
+              // the user's app. `decideCancelledBuildBill`'s "nothing delivered, nothing charged" rule
+              // reads that count, so without this a user who stopped before the model produced anything
+              // of their own was billed for twelve files we wrote from a template. Content is kept, not
+              // just the path: a scaffold file the builder REWRITES is genuinely delivered work.
+              for (const [gp, gc] of Object.entries(goldenFiles)) preseededGolden.set(gp, gc);
+
               // 🔴 SHOW IT NOW — autopsy 2b0a3ed5 (2026-09-17). A user asked for a calculator; this
               // pre-seed put a tested, CI-proven, WORKING calculator on disk at second 6.7. They then
               // watched nothing at all for 56 seconds while the first model call returned 27 tokens,
@@ -19391,6 +19417,11 @@ async function noteBuildOutcome(
         ? decideCancelledBuildBill({
           abortCause: abortCauseOf(abort.signal),
           filesWritten: writtenFiles.size,
+          // Our own template, untouched, is not the user's app — see `preseededUnchanged`. A scaffold
+          // file the builder REWROTE has different content and so is correctly counted as delivered.
+          // ⚠️ `writtenFiles` itself is deliberately NOT filtered: `shouldRetryEmptyBuild` and the
+          // render rescue both read its size and mean something different by it.
+          preseededUnchanged: [...preseededGolden].filter(([p, c]) => writtenFiles.get(p) === c).length,
           appRendered: buildObs.previewRendered === true,
           decidedBilledUsd: effectiveBilledUsd,
         })

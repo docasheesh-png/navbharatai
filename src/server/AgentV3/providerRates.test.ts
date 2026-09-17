@@ -215,3 +215,49 @@ describe('realRateFor — an unknown/newer model can never bill at the cheap rat
     expect(realRateFor('GLM', 'glm-4.7-flash').inputPerMTok).toBe(0); // flash still free
   });
 });
+
+// 🔴 THE THIRD TIME THIS TRAP HAS BEEN SET (2026-09-17). `glm-4.7-flashx` became the LEAD rung of Weak
+// and Normal, and its id trips TWO existing rules that would both price it wrongly:
+//   • it contains "flash"  → the generic flash rule returns the FREE ($0) line
+//   • it matches /glm-?4/  → the 4.x coder rule returns $0.60/$2.20, 8.6× its real input price
+// A real cost of $0 bills the USER ₹0 (the bill is real cost × markup) while we pay Z.ai for every
+// token — the identical shape as kimi-k2.7-code-highspeed (09-16) and glm-5.3-flash (09-16).
+describe('glm-4.7-flashx is priced from its own row, not from the free flash line', () => {
+  const flashx = realRateFor('GLM', 'glm-4.7-flashx');
+
+  it('carries Z.ai\'s published price — $0.07 in / $0.40 out / $0.01 cached', () => {
+    expect(flashx.inputPerMTok).toBe(0.07);
+    expect(flashx.outputPerMTok).toBe(0.4);
+    expect(flashx.cacheReadPerMTok).toBe(0.01);
+  });
+
+  it('is NOT free — the bug this row exists to prevent', () => {
+    expect(flashx.inputPerMTok).toBeGreaterThan(0);
+    expect(flashx.outputPerMTok).toBeGreaterThan(0);
+    expect(flashx.inputPerMTok).not.toBe(realRateFor('GLM', 'glm-4.7-flash').inputPerMTok);
+  });
+
+  it('is NOT billed at the 4.x coder rate either', () => {
+    expect(flashx.inputPerMTok).toBeLessThan(realRateFor('GLM', 'glm-4.7').inputPerMTok);
+  });
+
+  it('is genuinely cheaper than the rung it replaced, on every line', () => {
+    const old = realRateFor('GLM', 'glm-5.3-flash');
+    expect(flashx.inputPerMTok).toBeLessThan(old.inputPerMTok);
+    expect(flashx.outputPerMTok).toBeLessThan(old.outputPerMTok);
+    expect(flashx.cacheReadPerMTok as number).toBeLessThan(old.cacheReadPerMTok as number);
+  });
+
+  it('the retired glm-5.3-flash row still prices what old telemetry recorded', () => {
+    // Off every ladder since 2026-09-17, but reports written before that date must still price.
+    expect(realRateFor('GLM', 'glm-5.3-flash').inputPerMTok).toBe(0.15);
+  });
+
+  it('case and separator variants resolve to the same row', () => {
+    // Z.ai's page prints it "GLM-4.7-FlashX"; the API id is lower-case. Neither spelling may fall
+    // through to the free line.
+    for (const id of ['GLM-4.7-FlashX', 'glm-4.7-flashX', 'glm-4.7-flash-x']) {
+      expect(realRateFor('GLM', id).inputPerMTok).toBe(0.07);
+    }
+  });
+});

@@ -58659,3 +58659,782 @@ feature to `main`. The duplicate was deleted and nothing was pushed. The cause w
 sloppily: `git fetch` was run and the SHA read, but the work began from a branch whose TREE predated it,
 so every search answered a question about a stale `main`. **Fetching is not the check; working from the
 fetched state is.**
+## 2026-09-16 — MANDATORY AUTOPSY: IPL Cricket game build (Bengali prompt). A ~2-hour orphaned zombie chain, root-caused and killed.
+
+Fifth absolute rule, triggered by an admin-attached build-diagnostics report (workspace
+`agentv3-q284tbvovsXjcM6AdJkHilxvDof2-8858838e-2698-42eb-b842-d1e68101cbd6`, weak tier, GLM-led). Read
+end to end (2685 lines) before drawing any conclusion.
+
+### The 5-bucket ledger
+
+- ✅ **Self-healed (3):** `npm audit fix` applied the compatible dependency fixes automatically;
+  `SIMPLE_BUILD_FALLBACK` correctly handed off to the full builder when the fast lane timed out at
+  240s; the thinking-param rejection guard correctly avoided re-sending a field GLM had already refused.
+- 🔀 **Worked around (31, per the report's own `workarounds` count):** mostly file-list continuations
+  ("(1/3)", "(2/3)", "(3/3)") papering over responses too long for one call, and repeated GLM
+  output-budget clamp-downs (8000 → 2116 → 1324 authorised tokens) that never actually produced an
+  answer.
+- ⏭️ **Skipped (1):** the post-build completeness review timed out after 90s + grace on 19 files and
+  was recorded as `REVIEW_INCOMPLETE` — its own findings (mid-sentence: "src/App.tsx | **Stub** — renders
+  `<h1>Hello World</h1>` and nothing else") never reached the user's final summary.
+- ❌ **Still broken / shipped imperfect:** the delivered "IPL cricket game" has NO working App.tsx, NO
+  game engine, NO UI — only isolated data files (`types.ts`, `teams.ts`, `constants.ts`, `equipment.ts`,
+  `stadium.ts`, `coins.ts`, `players.ts`) were ever written. `RELEASE_GATE: UNKNOWN` — nothing was ever
+  proven to run (no preview, no page-render, no typecheck, no test suite). The final user-facing summary
+  ("✅ Here's what I built... 18 files") does not mention any of this.
+- 🥵 **Struggle points, the big one:** a background provider-retry chain ran for roughly **two hours**
+  AFTER the build had already been reviewed, billed and reported to the user as finished — see root
+  cause below. One single call inside that chain reported `latencyMs: 5,006,868` (83.4 minutes).
+  `providerFailures.GLM: 101` (85 output-budget-starved, 14 bad-request, 1 budget-exhausted, 1 timeout)
+  against only 31 real GLM deliveries and 1 Kimi delivery in the whole build.
+
+### The missing subsystem
+
+**An abandoned background closure has no way to learn that the work it is doing has become pointless.**
+The fast lane (`SimpleBuilder.runSimpleBuild`) races its whole file-generation phase against a 240-second
+lane timeout — but when that race is lost and control hands off to the full builder, the LOSING side of
+the race is not the same as CANCELLED: JavaScript promises cannot be cancelled, only abandoned, and an
+abandoned closure keeps running, keeps calling real providers, and keeps costing real money, with nothing
+in the system watching it. The plan and shared-contract calls in this same file already carry a real
+absolute deadline for exactly this reason (see the root cause below); the highest-volume call of the
+three — one per file, including that file's own truncation-continuation retries — did not.
+
+### Root-caused and fixed in this change
+
+**`genOne`'s per-file generation call in `SimpleBuilder.ts` never passed a `deadlineAt`.** Two other call
+sites in the SAME file (the plan call, the shared-contract call) already carry this exact fix, with the
+plan call's own comment stating the defect this closes almost verbatim: *"`withTimeout` only races: the
+lane stopped waiting … while the … rung kept running to its own … timeout, so a build could — and did —
+log provider events 148 s after it had ended."* The per-file call — the one made once per file AND
+retried internally by `fastGenerate`'s own truncation-continuation loop — was missed. Because it carried
+no deadline, every hop down to `OpenAiToolRunner.runTurn` saw an unmeasured budget and used its own
+generous internal clock (60–300s per attempt) instead of the lane's real one, so an abandoned closure
+just kept making real provider calls indefinitely — in this report, for the better part of two hours,
+producing content (`EmptyState.tsx`, a generic `App.tsx` referencing `data/teams`/`data/matches` — not
+even related to the actual cricket game) that could never be used, since the full builder had already
+taken over and built something else entirely.
+
+**Fix:** `genOne` now passes `{ deadlineAt: laneStartedAt + overallMs }` — the SAME absolute instant the
+lane's own 240s race is bound by — to every per-file `deps.generate` call. Once that instant passes,
+`OpenAiToolRunner.runTurn`'s existing "refuse before spending" check (`if (bound.expired) throw …`)
+makes an abandoned closure's next attempt fail instantly instead of starting another multi-minute call
+nobody will ever read. Sibling hunt: confirmed there are exactly three `deps.generate` call sites in
+`SimpleBuilder.ts` (plan, contract, per-file) and all three now carry a real deadline.
+
+Regression-locked in `SimpleBuilder.test.ts`: a new case captures every per-file call's `opts.deadlineAt`
+and asserts it lands on the lane's own absolute budget. Proven by reversion — reverting the one-line fix
+fails the new test with `expected undefined to be defined`.
+
+**The 50/50 law:** the reactive half is the fix above. The other half — why can an abandoned closure run
+at all instead of being genuinely cancelled — is a real, larger, NOT-yet-built answer: threading an
+`AbortSignal` through `deps.generate` → `fastGenerate` → `OpenAiToolRunner`/`ClaudeClient` so a lost race
+actually stops the in-flight HTTP request, not just stops new calls after it. The deadline fix closes the
+*follow-on* damage (no more retries after abandonment); it does not stop the ONE call already in flight
+at the exact moment of abandonment from running to completion on the provider's side and being paid for.
+Recorded as an OPEN root cause below rather than attempted here — CLAUDE.md already carries this exact
+gap ("an abandoned provider call is not cancelled by this stop") from the cost-ceiling work, and this
+report is now the most severe evidence yet of how large that gap can get in practice (minutes → ~2 hours).
+
+### Open root causes (rule 6)
+
+- **True cancellation (AbortSignal) for an abandoned closure — not yet built.** The deadline fix in this
+  change stops an abandoned closure from making NEW calls; it cannot stop the ONE call already in flight
+  when the race is lost. Building this needs threading an abort signal through every provider runner,
+  which is a larger, cross-cutting change deserving its own scoped review.
+- **Possible key-pool-vs-deterministic-failure mismatch, named but NOT verified from code.** 21
+  consecutive `OUTPUT_BUDGET_STARVED` failures landed inside a 45-second window for what looks like a
+  single logical call — consistent with (but not confirmed as) the GLM key-pool rotating through every
+  configured key on a failure that is OUR OWN output-ceiling defect and therefore identical on every key
+  in the pool. If confirmed, retrying a deterministic own-side failure across a whole key pool is pure
+  waste (key rotation only helps with per-key problems like rate limits). Not investigated further this
+  session — flagged for whoever next reads the key-pool retry code.
+
+### Billing on this build — checked against TODAY's own standing rule, not re-litigated
+
+This build's `RELEASE_GATE` was **UNKNOWN** and it was still billed 5,214 tokens (₹52.15) from the user's
+free welcome-bonus balance. Before flagging that as a defect, safeguard #1/#2 apply: two OTHER sessions
+today (`claude/correction-reserve`'s audit → #2976, and `claude/unknown-last-chance-proof` → #2978,
+both merged into `main` above this entry) already did a full, admin-directed audit of exactly this
+UNKNOWN/billing intersection, and the admin gave an explicit standing ruling recorded there: *flipping an
+unproven build to failed (and therefore free) is EXPLICITLY WRONG* — "app bani = preview chala… agar
+preview chala gaya to ₹0 charge karoge to aise to mai barbad ho jaunga" (autopsy `4efab9d7`). **"Not
+proven ≠ proven broken" is now a standing rule, not something this autopsy should re-open.**
+
+Checked against that rule rather than against my own first instinct: this build's OWN reviewer pass that
+appeared to have caught the stub was itself `REVIEW_INCOMPLETE` — timed out, cut off mid-sentence, never
+reached a real verdict. Treating an unfinished read as proof of brokenness would be exactly the invented
+verdict the admin's rule forbids. And the brand-new P1 "last chance proof" (`claude/unknown-last-chance-
+proof`, shipped hours before this report) would ALSO have skipped this build — one of its required
+conditions is a published preview URL, and this build's own summary says "the live preview didn't start
+automatically," so no URL ever existed to check. **This build is real, fresh, same-day corroborating
+evidence for that session's own "still open" line** — *"UNKNOWN still ships… when no browser exists"* —
+not a new question. Recorded here as confirmation rather than a duplicate ask.
+
+## 2026-09-16 — Autopsy: the alarm-app build (`b3a2c81e`) — a question that built an app, and the two bugs found chasing it
+
+Admin sent a real build-diagnostics report (workspace `agentv3-myMfCqmTwcd3NmSqTOlrvnFEG1m2-86ca627a…`,
+build `b3a2c81e`). Full forensic autopsy per the fifth absolute rule.
+
+### The ledger, five buckets
+
+- ✅ **Self-healed (2):** the fast lane's timeout handed 1 salvaged file to the full builder instead of
+  losing it (`SIMPLE_BUILD_FALLBACK`/`SIMPLE_BUILD_SALVAGE`); the file-list continuation logic
+  (`1/3, 2/3, 3/3`) recovered from GLM/Kimi `max_tokens` truncation on an oversized response.
+- 🔀 **Worked around (1):** GLM repeatedly failed with `OUTPUT_BUDGET_STARVED` and the ladder fell
+  through to KIMI — the ladder did its job, but at a cost recorded below as a struggle point, not a win.
+- ⏭️ **Skipped (1, now fixed):** the message's real question — "क्या मैं prompt डालूं" ("should I paste
+  the prompt?") — was never read as a question at all. See Root Cause 1.
+- ❌ **Still broken (1, now fixed):** the build's own summary told the user "Nothing had been written
+  yet, so nothing was lost" while, in the SAME response, the billing line correctly charged them 50%
+  for a file it had just denied existed. See Root Cause 2.
+- 🥵 **Struggle points (2):** a 26-attempt GLM retry storm during the shared-contract design step
+  (~84.6s, zero output); a 40-attempt GLM retry storm during file generation whose LOGGED TIMESTAMPS
+  run to **1789590778236 — ~52 minutes AFTER** the build had already been cancelled, billed, and closed
+  (`endedAt: 1789587434781`). This is new, concrete evidence for the OPEN root cause already recorded
+  under `AGENTV3_BUILD_COST_CEILING_USD` ("an abandoned provider call is not cancelled by this stop") —
+  and shows it is not one trailing call but a sustained, unattended retry cascade. **NOT fixed this
+  session** — cancelling an in-flight provider call needs an AbortSignal threaded through the GLM/Kimi
+  HTTP clients themselves, a larger, cross-cutting change that deserves its own dedicated pass rather
+  than a rushed patch under this autopsy's time budget. Recorded here as OPEN (rule 6).
+  🔎 **Cross-reference, not a duplicate:** the `OUTPUT_BUDGET_STARVED` failure THIS build hit — a total
+  wall-clock kill that returns nothing, on the exact prompt/budget shape this report shows — is the
+  named symptom of the **🐢 SLOW-PROVIDER FIX (`AGENTV3_STREAM_BUILD_CALLS`)** that landed in `main` at
+  09:53 UTC the SAME DAY, ~9.7 hours before this build ran at 19:37 UTC. Whether that flag was already
+  live in Cloud Run at 19:37 (and, if so, whether its scope covers the "shared contract" aux call that
+  starved here, not only per-file build calls) is a Cloud Run timeline question this session cannot
+  answer from the repo alone — flagged for whoever is watching that flag's first real builds, not
+  re-diagnosed here. The **post-cancellation persistence** (~52 minutes) is a separate dimension that
+  flag does not touch: it changes how a STALL is detected mid-call, not whether an already-ABORTED
+  build's retry loop stops asking a provider for more.
+
+### Missing subsystem, named
+
+**There is no shared, live "does anything real exist in this workspace right now" answer.** Two
+different code paths in the SAME build — the route's `writtenFiles` Map (billing) and `AgentRunner`'s
+own `totalToolUses` counter (the user-facing summary) — each kept a private, narrower notion of "was
+anything built", and a build that spans a fast-lane handoff is exactly the shape that makes them
+disagree. This is the same class this file already names for the evidence ledger under the "ZERO FILES
+IS NOT NOTHING HAPPENED" entry, one level down: not different SUBSYSTEMS disagreeing, but two READERS
+of the same build disagreeing about a fact neither of them owns.
+
+### Root Cause 1 — a trailing "kya main/hum" asks its real question at the END, and the classifier is Devanagari-blind (FIXED)
+
+`IntentClassifier.readsAsQuestion()` required a question word to OPEN the message. Hindi places "kya"
+right before the verb it questions as often as at the sentence's start — this exact message asked its
+real question ("should I paste the prompt?") only after a declarative lead-in that itself contained a
+build verb ("बनाना चाहता हूं"). Result: HIGH-confidence `new_build`, the LLM upgrade (`classifyIntentSmart`)
+never consulted, a real weak-tier build ran and had to be cancelled by the user.
+
+**Verified separately, and worse: the ENTIRE deterministic classifier has ZERO Devanagari-script
+patterns** (confirmed by scanning the file for the Unicode Devanagari block — none). Every signal array
+(`NEW_BUILD_SIGNALS`, `EDIT_SIGNALS`, `BUILD_SIGNALS`, `WH_OPENERS`, …) is Romanized-only. For a message
+typed in native script, the ENTIRE fast, deterministic layer is blind by construction, and the
+classification rests entirely on one LLM call to the cheapest free-tier model with a one-line prompt.
+
+**Fixed, narrowly:** `readsAsQuestion` now also matches "kya main/mai/aap/tum/hum/hume" (and its
+Devanagari equivalent "क्या मैं/आप/तुम/हम/हमें") ANYWHERE in the sentence, not just at the start. This is
+deliberately the ONE unambiguous pattern added in both scripts — not a general translation of the
+classifier, which would be a much larger, riskier change needing its own dedicated review. Test-locked
+in `tests/capabilityQuestion.test.ts` with the exact reported prompt plus Romanized variants and two
+negative cases (an order containing "main" that isn't the particle; a "kya" that questions a noun, not
+"should I").
+
+🔴 **OPEN ROOT CAUSE, recorded rather than rushed (rule 6):** the classifier's full Devanagari blindness
+is real and larger than this one pattern — `namesSpecificDeliverable`, every signal array, and the
+LONG_MESSAGE_THRESHOLD length check (a Devanagari sentence runs LONGER in UTF-16 code units than the
+same content transliterated, purely from matras/conjuncts, which could bias that threshold against
+native-script users) all deserve a dedicated, carefully-tested pass — NOT a same-day translation
+attempt under this autopsy's time budget. NavBharatAI is an India-first app; this is worth a real slice.
+
+### Root Cause 2 — two different signals answered "did we build anything?", and disagreed (FIXED)
+
+`AgentRunner.ts` decided `builtSomething` at every abort/watchdog/step-cap exit (4 call sites) as
+`totalToolUses > 0` — a counter PRIVATE to that one AgentRunner instance. When the fast lane
+(SimpleBuilder) times out and hands off to the full builder having already salvaged a real file, this
+loop starts with `totalToolUses === 0` even though the workspace genuinely has work to resume from. The
+user cancelled seconds after the handoff and was told "Nothing had been written yet, so nothing was
+lost" — while `CANCELLED_BUILD_CHARGED`, reading the route's own `writtenFiles.size`, correctly billed
+them 50% for "files saved but no app verified running" in the exact same response.
+
+**Fixed at the class, not the instance:** added `hasExistingFiles?: () => boolean` to
+`AgentRunnerOptions` — a LIVE callback (not a value captured at construction, since the fast lane
+salvages files AFTER `baseRunnerOpts` is built), wired once at the route level to
+`() => writtenFiles.size > 0` — the SAME Map the billing decision already trusts. One helper,
+`builtSomethingNow()`, replaces all four `totalToolUses > 0` call sites inside `AgentRunner.ts`, so a
+fifth exit added later inherits the fix by construction instead of needing to remember it. Every OTHER
+`totalToolUses` use (readiness/lint/dep-health/prettier gates, checkpoint nudges) is untouched — those
+legitimately ask "did THIS loop do enough", a different question. Additive: any of the other 15
+`AgentRunner` construction sites that don't pass `hasExistingFiles` behave byte-identically to before.
+Test-locked in `AgentRunner.test.ts` (two new cases: the exact failure shape, and the honest control
+where nothing was salvaged and the "nothing was lost" wording must still fire).
+
+### Proactive layer
+
+**The single highest-value lever here is closing the Devanagari gap properly** — not as a patch, but as
+its own slice: a real transliteration/normalization pass so every existing Romanized signal array works
+for native-script Hindi too, with the same test discipline this fix used (exact reported prompts,
+positive AND negative cases). Until then, EVERY Devanagari-typed ambiguous message pays for a full LLM
+call that a Romanized one would answer in zero-cost regex — a real, structural cost gap between two
+users asking the identical thing in two scripts of the same language, in a product whose whole edge is
+serving India. Proposed as the next slice; not started here (out of this autopsy's safe scope).
+
+**Gate, run last on this change's final state:** `typecheck` clean · `typecheck:server` clean ·
+`noUnusedImports` clean · `npm run build` exit 0 · `test:bundle` within budget · `boot:check` PASS
+("server reached 'Server running'") · `npx vitest run` → **1705 files, 23,980 passed, 1 skipped, 0
+FAIL.**
+
+Branch `claude/build-report-autopsy-tmn3ov`, restarted from `origin/main` this session per the
+merged-PR rule (its prior sole commit had already landed as PR #2947).
+
+## 2026-09-17 — Same autopsy, continued: a classifier that cannot read a script must never claim confidence about it
+
+Admin asked whether GPT Nano should do "these two jobs" (the trailing-question fix and the classifier's
+Devanagari blindness, both from the alarm-app autopsy above). Answer, and what shipped:
+
+**Job 1 (trailing "kya main/hum")** — already fixed for free, by regex, in the previous commit on this
+branch. Routing it through Nano now would spend money and add latency on something that already costs
+₹0 and 0ms. Left untouched.
+
+**Job 2 (the classifier's full Devanagari blindness)** — the admin's instinct was right in spirit
+(GPT Nano's own brief, recorded in `CLAUDE.md`, says it is *for classification/extraction* — intent
+classification is exactly that), but calling an LLM on EVERY message would cost real money on the 90%+
+of messages that are unambiguous Romanized orders, which the "READ THE MOOD FIRST" rule explicitly keeps
+free and instant. Translating every keyword array into Hindi was rejected the same way in yesterday's
+autopsy — too large, too risky to rush.
+
+**What shipped instead: `containsDevanagari()` (`IntentClassifier.ts`).** Every keyword array in this
+file is Romanized-only, so the only way Devanagari text can earn a HIGH-confidence result is by
+ACCIDENT — a stray Romanized/English word inside it tripping a keyword array, or the raw UTF-16 char
+count crossing `LONG_MESSAGE_THRESHOLD` (Devanagari's matras/conjuncts inflate this well past the same
+sentence's length in Roman script, unrelated to actual complexity). `classifyIntentWithConfidence` now
+wraps its own logic and downgrades any `high` result to `low` whenever the input contains Devanagari —
+never invents or removes an intent, only removes an UNEARNED confidence claim, which is what sends the
+message to the LLM upgrade (`classifyIntentSmart`) instead of hard-locking on a coincidence.
+
+**Where Nano actually fits, and where it doesn't.** `classifyIntentSmart`'s LLM call already runs
+through the free chat router, which already includes GPT Nano as a rung (added in PR #2962). This
+change does not hard-pin Nano over that router's own fallback ladder — doing so would trade away the
+resilience the ladder exists for (if Nano is briefly unavailable, GLM-flash still answers). What this
+change DOES do is make sure that LLM step is actually CONSULTED for every Devanagari message, instead of
+being skipped on a false HIGH-confidence match — which is the real gap Nano's presence in the ladder
+could not close on its own.
+
+**The honest cost trade-off, stated plainly:** any message containing Devanagari script — including an
+otherwise-unambiguous Hinglish order with one Hindi word mixed in — now pays one extra free-tier LLM
+call before building, where before (once the trailing-question fix landed) it would have been instant
+for the clear cases. This is the same asymmetry the READ THE MOOD FIRST rule already accepts elsewhere:
+wrong-toward-instant-build costs real money and a cancelled build; one extra cheap classification call
+costs a few hundred milliseconds and, per the admin's own brief, is exactly what Nano is for.
+
+Regression-locked in `src/server/AgentV3/IntentClassifier.test.ts`: `containsDevanagari` in isolation,
+a long mixed-script message with every ingredient of the original hard-lock (length + BUILD_SIGNALS +
+NEW_BUILD_SIGNALS) downgraded to LOW while its Roman-script twin stays HIGH and instant (the control
+case proving the "common path pays nothing" rule is untouched), a Devanagari question already at LOW
+left alone (proving the wrapper only ever removes an unearned HIGH, never invents one), and an
+edit/problem-report signal embedded in Devanagari losing its unearned HIGH the same way a build signal
+does.
+
+**Gate, run last on this change's final state:** `typecheck` clean · `typecheck:server` clean ·
+`noUnusedImports` clean · `npm run build` exit 0 · `test:bundle` within budget · `boot:check` PASS ·
+`npx vitest run` — see the commit for the exact pass count.
+
+Still open, unchanged from yesterday: the classifier's broader Devanagari blindness (every keyword array
+itself, not just the confidence gate around them) remains a separate, larger, deliberately-deferred item.
+
+## 2026-09-17 — The lead rung: glm-5.3-flash off every ladder, glm-4.7-flashx in (item 1 of the admin's build list)
+
+Admin gave a direct instruction — *"glm 5.3 flash ko hata do!"* — and then supplied the missing fact
+this had been blocked on: a screenshot of **docs.z.ai → Pricing** confirming **GLM-4.7-FlashX is real,
+at $0.07 in / $0.40 out / $0.01 cached**. (In an earlier turn I had declined to act on "flashx" without
+the exact id, because a wrong model id fails silently here. The screenshot settled it.)
+
+### Why this reverses a decision made three days ago, and why that is correct
+
+The 2026-09-14 ladder chose `glm-5.3-flash` on the rule *"a $0 rung that fails costs more than a $0.15
+rung that succeeds"*. **The rule holds; its premise did not.** Three autopsies in three days measured
+5.3-flash failing as a lead rung: `ee20478d` (280 hard 400s in one build), `b3a2c81e` (68 GLM failures,
+52 of them `OUTPUT_BUDGET_STARVED`), `dd1f5f60` (8.65 tok/s; 29.5 of 30.1 minutes inside one call).
+
+**The decisive fact is not price — it is that the failure class cannot occur on FlashX.**
+`glmCanDisableThinking` is a numeric family test: 5.3-and-newer always reason, 4.x can be told not to.
+FlashX is 4.7, so its turns send `thinking: disabled` and the whole output budget goes to code instead
+of to mandatory reasoning that never reaches the file. Cheaper *and* structurally immune — the two aims
+("kharcha kam", "app best bane") point the same way here, which is rare enough to state.
+
+### What changed
+
+- `tierLadder.ts` — Weak and Normal lead rung, and the `PLAN_RUNG` of both, 5.3-flash → 4.7-flashx.
+  Strong untouched (it never carried a flash rung). Rungs 2-4 of every tier unchanged.
+- `providerRates.ts` — a new `glm-4.7-flashx` row and a matcher branch placed BEFORE both the generic
+  `flash` rule and the `/glm-?4/` coder rule.
+- `healLadder` — the predicate is now a named `isCheapFlashRung`, matching the 4.7-flash FAMILY.
+
+### 💸 The billing half had to ship in the same commit — the third time this trap was set
+
+`glm-4.7-flashx` trips TWO existing rules that would each price it wrongly: it contains "flash" (→ the
+FREE `glm-flash` $0 line) and it matches `/glm-?4/` (→ $0.60/$2.20, 8.6× its real input). A $0 real cost
+bills the USER ₹0 — the bill is real cost × markup — while we pay Z.ai for every token. Identical in
+shape to `kimi-k2.7-code-highspeed` and `glm-5.3-flash`, both caught on 2026-09-16. **The rule this
+makes explicit: a model may not join a ladder until its price is on the rate card.**
+
+### 🔁 A dormant rule woke up, and it was found by a failing test rather than in production
+
+`healLadder`'s pattern matched only `4.7-flash`. Between 09-14 and 09-17, with 5.3-flash leading, it
+matched nothing — so every heal restarted on the exact rung whose output needed repairing, silently.
+FlashX matches it, so the 2026-08-13 rule ("a repair must not begin on the model that produced the
+failing app") applies again: Weak and Normal heals now open on KIMI. Costs more per heal ($0.95/$4.00
+against $0.07/$0.40) and that is the intended trade — a cheap repair that fails buys a second one.
+`tests/tierChainFidelity.test.ts` caught this as a failure the moment the lead rung changed; its case
+had been NAMED "5.3-flash leads and can repair its own work", which is exactly the assumption that
+expired. Rewritten to assert the heal chain opens on a DIFFERENT VENDOR, pinned explicitly so a future
+lead-rung change that happens to keep GLM first fails there rather than quietly reinstating the old
+behaviour.
+
+### ⚠️ Open risk, stated rather than discovered later
+
+FlashX's CODING quality is unmeasured here. Z.ai's "X" suffix is the faster PAID variant of a Flash
+model (GLM-4.5-X and -AirX are both dearer than their bases), and this repo's own 09-14 entry calls the
+free `glm-4.7-flash` "weak at coding" — FlashX may share that brain. What changed is the comparison, not
+the estimate: a model that reasons well and delivers nothing is worse than a plainer one that answers.
+**Watch heal COUNT on the first real builds, not cost.** Revert is one env var, no deploy:
+`AGENTV3_LADDER_WEAK=GLM:glm-5.3-flash,KIMI:kimi-k2.7-code,GLM:glm-5.3,HAIKU` (and `_NORMAL` likewise).
+
+A second honest unknown: the exact API id. The page prints "GLM-4.7-FlashX"; `glm-4.7-flashx` follows
+the vendor's own lower-case convention (`glm-4.7-flash`, `glm-5.3-flash`). If it is wrong the rung
+errors and the chain falls through to KIMI — safe, but one wasted round-trip per turn until the env
+override corrects it. The rate matcher accepts every casing/separator variant, so billing cannot drift
+on that question (test-locked).
+
+### Not touched, deliberately — other sessions own them
+
+PR **#2983** is building the in-flight-provider-cancellation fix (the ~52-minute zombie chain I recorded
+as OPEN yesterday), and PR **#2985** the slow-rung throughput bench. Per the concurrency rule, a root
+cause another PR names as its work is taken. Neither touches ladder composition, so there is no overlap.
+
+**Gate, run last on the final state:** see the commit.
+
+## 2026-09-17 — Complexity routing: a big app opens on KIMI, and a model is asked only when the code cannot tell (item 2 of the admin's build list)
+
+Admin, verbatim: *"kimi ko bade aur complex task dedo, kabhi bhi — starting me bhi de sakte ho, beech
+me bhi! task chota/bada/mild/complex hai code se pata na lage to gptnano se puchwa lo!!"* Two
+instructions in one sentence; `src/server/AgentV3/complexityRouting.ts` is both halves.
+
+### The hook was already in the codebase, unused — which is why this is small
+
+`RequestAnalyser.analyzeRequest` has scored every request deterministically since the cost-ladder work
+(0-100, plus a `taskType`), and **its own docblock says it "marks the genuinely ambiguous ones
+(`ambiguous: true`) so a caller MAY refine them with a cheap LLM analyser".** Nothing ever read that
+flag: the refinement half was designed and never built. So no new scoring concept was invented, and
+none competes with the existing one — the admin's instruction turned out to name a gap the code had
+already described and left open.
+
+### What it does
+
+- **`complex` ⇒ the build skips the cheap flash opener**, which on Weak and Normal makes KIMI the first
+  engine to see the app. "Starting me bhi" is literal: Kimi is no longer only a fallback.
+- **The line is 40 — `RequestAnalyser`'s own top tier boundary**, not a second invented threshold. For
+  scale, that module scores `simple_app` ≤20 (capped), `coding` 30, `debugging` 45, `complex_app` 58,
+  `architecture` 80. A clear calculator and a clear social network are both decided for free.
+- **A model is asked ONLY within ±3 of that line** — the same margin `isNearBoundary` uses.
+
+### 💸 Deliberately narrower than the flag it builds on, and the difference is money
+
+`ambiguous` marks a score near EITHER of the analyser's boundaries (20 and 40), because it was written
+for a three-tier ladder. This decision is binary, so **only the 40 line can change it**: asking a model
+about a score of 18 would spend a call to move a verdict from `simple` to `simple`. "Kharcha kam se
+kam" applies to the classifier too — a question whose answer cannot change the outcome is not asked.
+Test-locked (`needsSecondOpinion(20) === false`).
+
+### 🔒 It cannot break, hang, or mislead a build
+
+The call is raced at 6s; a throw, a timeout, an empty reply and an unparseable reply all fall back to
+the deterministic verdict that was already computed for free — never to a guess. `parseComplexityAnswer`
+returns `null` on anything it was not asked for, and `null` means "no answer", not a coin toss. Kill
+switch `AGENTV3_COMPLEX_TO_KIMI=off` restores the pre-change behaviour exactly, and costs nothing while
+off (it returns before the call is made). Every one of these paths has its own test.
+
+### One definition of "the cheap opener", shared with healLadder
+
+`withoutCheapFlashLead` is now exported from `tierLadder.ts` and used by BOTH `healLadder` and this
+router, and `buildTurnRunner` applies it for `heal || complex`. They are separate FLAGS — "this is a
+repair" and "this is a big app" are different questions — that happen to have the same answer about the
+same rung today. Two regexes agreeing on the day they were written is exactly how this repo's drifts
+have started; a test asserts the two paths produce identical ladders on all three tiers.
+
+### 💸 What it costs, stated plainly
+
+On Weak — the tier NavBharatAI pays for itself — a complex build now opens on `kimi-k2.7-code`
+($0.95/$4.00) instead of `glm-4.7-flashx` ($0.07/$0.40): roughly **13× the input price for those
+builds**. The bet is the admin's own and it is the same one the ladder note makes in the other
+direction: a cheap rung that fails is paid twice, once in the wasted call and once in the heal. It is
+only worth taking where it is likely to pay, which is why `simple` is the default on every doubt —
+including a NaN score, a disabled flag, and an unavailable model.
+
+### 🔌 The wiring is test-locked against the real route source
+
+Three cases read `routes/agentv3.ts` itself and assert the decision is made, `await`ed (a bare promise
+would route every build as simple), and handed to the runner. This repo has shipped correct-but-unread
+code more than once — `AGENTV3_CACHE_PREFIX`'s dropped re-apply line, `EmbeddingSearch`'s never-read
+index, and `ambiguous` itself. A pure module nobody calls is the failure mode, so the wiring is pinned
+rather than assumed.
+
+**Still to come from the admin's list:** the Hindi→English prompt normalisation (measure first, per the
+earlier turn), and the milestone-building audit.
+
+**Gate, run last on the final state:** see the commit.
+
+---
+
+## 2026-09-17 — Item 6: the answer was NOT translation. The scorer could not READ the request.
+
+The admin delegated this one ("woh aap apne hisab se behtar karo"), and I said I would MEASURE before
+adding cost. I did. **The measurement killed the idea I was about to build, and pointed at a real hole
+next to it.**
+
+### What the seven real build reports actually say
+
+| report | prompt | issues | model calls |
+|---|---|---|---|
+| `58f110de` "Text to image generator app banao asli" | Hinglish | 195 | 23 |
+| `41acada6` "Music player for Android 16" | plain English | **311** | **40** |
+| `e6175ca1` "Can you generate images?" | plain English | 252 | 40 |
+| `1743bdfb` (alarm app) | Devanagari — but a CHAT turn, not a build prompt | 44 | 6 |
+
+- **Not one build prompt in the evidence base is in Devanagari.** The single Devanagari message was a
+  question ("क्या मैं prompt डालूं") misrouted to a build — the defect already fixed this session.
+- The Hinglish build landed **mid-pack on every measure**; the two WORST builds were in plain English.
+- Every Devanagari character in that report is in the model's REPLY. **The generated app's files contain
+  none** — the builder handled a Hinglish request and still wrote an English UI.
+
+**So a translation step would have spent a call and added latency on every non-English build, risked
+losing the user's intent before the builder saw it, and fixed nothing I can find evidence of.** Not built,
+and the reason is recorded here rather than the feature being quietly dropped.
+
+### The real hole, which is the admin's sentence read literally
+
+*"jo language **hamara code** nahi samajh paye"* — the language OUR CODE cannot read. Not the model's.
+
+`RequestAnalyser`'s signals are **all ASCII** — `simpleApp`, `coding`, `debugging`, `architecture`,
+`hardSignal`, and the shared `isComplexAppPrompt` alike. Verified: zero non-Latin characters in the whole
+scoring path. So a Devanagari request for a hospital app with doctor logins, patient records, appointments
+and billing matches nothing, falls to `taskType: 'chat'`, and scores **5**.
+
+🔴 **AND YESTERDAY'S OWN CHANGE MADE THAT WORSE, WHICH IS WHY THIS IS NOT A TIDY-UP.** The complexity
+routing shipped hours earlier asks a second opinion only when the score is within ±3 of the 40 line. A
+score of 5 is not borderline — it is *confidently* simple. So the biggest app in the file would have gone
+to the cheapest rung with **no Kimi and no second opinion**, more silently than the day before.
+
+**Fixed at the class:** `scorerCouldNotRead(prompt)` — script-agnostic, not a Devanagari test, because
+India is not one script (Bengali, Tamil, Telugu, Urdu and the rest are equally unreadable to an ASCII
+regex). It measures the share of LETTERS outside the Latin range (≥25%, min 12 letters), so romanized
+Hinglish stays FALSE — the signals really do read "banao ek todo app" — and one Hindi word inside an
+English sentence is not an unread request. `needsSecondOpinion` now returns true for such a prompt
+**whatever it scored**, and the admin report says WHICH of the two reasons bought the call.
+
+🔒 **It cannot cost more when it fails.** An unread prompt whose second opinion is down falls back to
+`simple` — byte-identical to the behaviour before this change. The ask is the mechanism; the fallback is
+today. Test-locked in `tests/complexityRouting.test.ts` and **proven by reversion** (deleting the one
+guard line fails three cases, confirmed).
+
+### 🔴 TWO OPEN ROOT CAUSES FOUND WHILE HUNTING SIBLINGS (rule 6 — recorded, not patched)
+
+**1. Pipeline DEPTH, the ETA, and the preflight cost estimate have the same blindness — and depth matters
+more than routing.** `complexityFromPrompt` (`BuildTimeEstimator.ts`) counts page/feature words with ASCII
+regexes too. A Devanagari complex app yields `moduleCount 1, featureCount 1` → magnitude 2 → **the FAST
+LANE**, plus a wildly optimistic ETA and a too-low cost estimate. Not fixed here because the fix is a
+thread-through, not a regex: `complexityFromPrompt` runs at route line ~11075 and `estimateBuildCost`
+earlier still, both **before** `decideComplexity` at ~11573. Flooring the counts on "unread" instead would
+send a Devanagari *calculator* down the deep pipeline — wrong in the expensive direction. The real fix is
+to move the one complexity decision earlier and let all three readers share it; that is a design change
+with real blast radius and belongs in its own PR.
+
+**2. 🔴 THE ILLEGAL-CONTENT DETECTION IS BLIND TO DEVANAGARI, AND THIS ONE MUST NOT BE PATCHED CASUALLY.**
+`illegalContentRules.ts` has **zero** Devanagari in its code (comments stripped and re-checked). The Hindi
+in `promptSafety.ts` is the refusal MESSAGE only — the output, not the detection. So the porn ban that
+report `03997004` exists to enforce can be walked past by asking in Hindi.
+**Bounded, not unmitigated:** the models themselves still refuse (that was always the model's virtue, per
+`03997004`), and this session's refusal-is-final and trailing-question fixes stop the retry and the upsell
+that followed. The cost is one build's worth of refusals, **not** a published site.
+**Why it is not fixed in this change:** CLAUDE.md's own ruling is that detection stays PRECISION-FIRST and
+carries an `exempt` stand-down for a sexual-health clinic, a school safety curriculum, a harassment
+reporting tool. Adding Devanagari *subject* patterns without equally careful Devanagari *exempt* patterns
+would show a Hindi-speaking doctor the blunt ban message — the exact harm the admin corrected on
+2026-09-13 ("yeh thoda jyada hi ho gaya"). Both halves ship together or neither does.
+## 2026-09-16 — App Mart decoupled from "Publish your app" (admin: "ab isko band karo — user saperately apni app khud pest kare")
+
+**The ask, verbatim:** publishing an app to NavBharatAI hosting was also offering an immediate App Mart
+listing right inside the same "Publish your app" sheet — a green "Put it on App Mart" card sat beside
+the hosting card, with its own icon/screenshot pickers and a "Publish to the store" button, all reachable
+without leaving the hosting flow. The admin (who built this coupling himself, 2026-09-01) reversed the
+decision: hosting and App Mart submission must be two fully separate, independent user decisions, each
+made on its own screen.
+
+**What was NOT true, checked before touching anything:** the App Mart card was never a true one-click
+auto-publish — it already required its own name field and an explicit "Publish to the store" press
+(`publishConsent.ts`'s own principle: "publishing your app and showing it to strangers are two different
+decisions"). The real defect was PLACEMENT — the two decisions being offered from the same sheet at the
+same moment made them read, and feel, like one action rather than two.
+
+**Fix:** removed the entire embedded "Put it on App Mart" card (icon upload/paste/make, screenshots, name
+field, publish button, and their ~140 lines of state/handlers) from `HostingChooser.tsx` — the "Publish
+your app" hosting sheet now offers only its three hosting/APK paths. The `onMakeIcon` prop (which existed
+solely to open AI Image Gen for this card) was removed from `HostingChooserProps` and its wiring in
+`AgentV3Panel.tsx`.
+
+App Mart submission remains fully available — it already had its OWN separate, dedicated entry point:
+Home → App Mart → Publish (`NavAppStore.tsx`, built 2026-08-26), with a dropdown listing every app the
+user has built, its own icon/description fields, and its own "Publish to App Mart" button. This is now
+the ONLY door. `AppKnowledgeBase.ts`'s `nav_store_instant_apps` entry updated so every AI in NavBharatAI
+gives the new, correct path instead of directing users to the removed card.
+
+**Sibling hunted and fixed (fourth absolute rule):** `NavAppStore.tsx`'s own publish handler used a plain
+`fetch` with no timeout — it had never needed one while `HostingChooser.tsx`'s copy (which DID carry the
+2026-08-27 "spins forever" fix, `LONG_REQUEST_TIMEOUT_MS.storePublish` + `authedFetch` + honest
+timed-out-vs-failed messaging) was the more heavily used door. Now that `NavAppStore.tsx` is the SOLE
+remaining caller of `/api/nav-store/web/publish`, leaving it without that protection would have
+silently reintroduced an already-fixed, admin-reported bug class the moment the other copy was deleted.
+Ported the identical fix (`authedFetch` + `LONG_REQUEST_TIMEOUT_MS.storePublish` + `isFetchTimeout`) into
+`NavAppStore.tsx`'s `publishChosenApp`.
+
+**Regression tests:** `tests/appMartPrompt.test.ts` (tested only the removed embedded card) deleted
+outright — the feature it locked no longer exists. `tests/longRequest.test.ts` and
+`tests/publishRegressions.test.ts`'s "App Mart publish must not hang" checks re-anchored to
+`NavAppStore.tsx` (the new sole caller) instead of `HostingChooser.tsx`, so the "button can never spin
+forever" guarantee still holds on the door that actually ships. `tests/appMart.test.ts` updated for the
+`authedFetch(` call shape. `HostingChooser.test.tsx` and `src/lib/appIcon.test.ts` had their
+App-Mart-specific describe blocks removed; one stale, unrelated `toContain('Free')` assertion (which had
+been passing only because it coincidentally matched the removed card's "Free — for you and for them"
+bullet, not anything the test's own name was about) was also cleaned up.
+
+**Verification:** `tsc --noEmit` × 2, `noUnusedImports`, full `vitest run` (1704 files / 23960 passed, 1
+skipped, 0 FAIL), `npm run build`, `test:bundle`, `boot:check` — all green on the final state.
+
+Branch `claude/appmart-decouple-hosting`, based on latest `main` (`d3d1d480a` at fetch time).
+---
+
+## 2026-09-16 — AUTOPSY dd1f5f60: a provider that ANSWERS is not a provider that WORKS (the throughput bench)
+
+**Trigger.** The admin forwarded a build-diagnostics report alongside a support ticket from the same
+user (`sohamd838@gmail.com`, uid `o3H5GzHtxmZOaUZaTqCIHBDw5rA2`): *"I put everything but cannot launch
+app it is notresponding tried thrice"*. The ticket is timestamped ~20 h BEFORE this build, so the two
+are probably different attempts by the same person — which makes it worse, not better: he was still
+hitting it a day later.
+
+⚠️ **A wrong diagnosis was given first and is recorded rather than quietly replaced.** The ticket also
+carried a client error string `PlayBilling.then() is not implemented on android`, and that was
+diagnosed as the cause with no evidence behind it. The report says otherwise. The Play Billing string
+is incidental; the build is the complaint.
+
+### Step 1 — the ledger: 9 ❌ · 9 🥵 · 2 🔀 · 5 ⏭️ · 4 ✅
+
+❌ **Still broken:** build stopped at the 1740 s cap with 4 of 17 planned steps done · release gate RED
+· **no live preview ever came up, so nothing was proven to run** (this is what the user feels) ·
+`AuthPage.tsx` created but never mounted · **the typecheck never ran** — the model's last recorded
+action was *"fixing my Google types … then typechecking"* and it ran out of clock first, so a rewritten
+`src/lib/auth.ts` full of hand-written Google interfaces has never been compiled once · accessibility
+92/100 (1 unlabelled field, one of the three things the user explicitly asked for) · design consistency
+50/100 (D) · the Share button and the list pagination the user asked for were never built.
+
+🥵 **Struggle:** 11 model calls · **29.5 min of the 30.1 min wall clock was inside a provider call
+(98%)** · **our own engine's total work was 7.9 seconds** · four calls at or near the 300 s streaming
+ceiling (302 s / 298 s / 278 s / 248 s) · **first file written at minute 26 of 29** · ~21 file-read
+tool calls across 8 turns, with `CheckInDialog.tsx` named in two separate read batches 12 minutes
+apart · the ETA said *"still working out how big this one is"* twelve times over 28 minutes and only
+produced a number (*"~9 min to go"*) one minute before the cap killed it · the sandbox was up 30.3 min
+and **idle 30.2 min (100%)**, costing $0.083 against the model's $0.050 — the VM cost more than the AI.
+
+🔀 **Workaround:** the tier ladder never left rung 1 across 11 consecutive GLM calls, with KIMI one
+step away the whole time · the budget-pressure nudges fired ("half the time is used", "time is short")
+and the model kept reading files for five more minutes, because they are advisory text and not a
+constraint.
+
+⏭️ **Skipped:** typecheck, page-render check, user journey, test suite (none exists), and 0 of the 3
+queued user requests delivered.
+
+✅ **Self-healed (and each one is a red flag under the 50/50 law, not a win):** the honesty layer
+corrected a reported success to `OUTCOME_RELEASE_GATE_RED` · the unverified turn was KEPT rather than
+rolled back, with the last good snapshot intact · the build was correctly billed **₹0** · incremental
+detection correctly saw 39/41 files unchanged.
+
+### Step 2 — the missing subsystem: THERE IS NO THROUGHPUT GOVERNOR
+
+The engine measures whether a provider **answers**. It has never measured how **fast**. Verified three
+ways against the code, not inferred from the report:
+
+1. `FLOOR_MS_PER_OUTPUT_TOKEN_DEFAULT` (30 ms/token ⇒ ~33 tok/s) — the rate `floorBudget.ts` calls
+   the point past which a provider is *"one we would rather fall past than sit behind"* — is read by
+   **no file except the one that defines it and its own test**. It sizes a request and judges nothing.
+2. **Every** escalation path in `MultiProviderTurnRunner` (timeout bench, 429 bench, shared cooldown,
+   dead-rung memory, rung advance) lives inside a `catch`. **All eleven calls returned `ok: true`.**
+3. This build ran at **8.65 tok/s — 26% of that declared floor** — for half an hour, and not one
+   mechanism in the resilience stack could observe it.
+
+🔴 **AND STREAMING WIDENED THE HOLE, on the day it was switched on.** `AGENTV3_STREAM_BUILD_CALLS`
+(admin, 2026-09-16) is the right change and it removed the only accidental guard. It bounds a call by
+SILENCE (60 s) and raises the per-call ceiling from 150 s to **300 s**. It reasoned about two kinds of
+provider — healthy and stalled. This build was a **third kind: steadily slow.** It never went quiet, so
+the idle bound never fired; it always had an answer, so reaching the 300 s ceiling returned a
+**truncated SUCCESS** rather than a failure. `floorBudget.ts`'s own comment already conceded the
+arithmetic ("2 × 300 s = 600 s against a 480 s turn — there is no 180 s reserve left") and judged it
+safe on the two-case reasoning. The third case is the one that cost the build.
+
+📌 **Two facts settled by this report, worth recording because both were open questions.**
+(a) **Streaming was genuinely ON** — four calls exceeded the 150 s non-streaming cap and would have
+been killed under it; 302.5 s is the 300 s ceiling plus overhead. (b) **Z.ai DOES honour
+`stream_options.include_usage`** — real per-call input/output/cache token counts came back on every
+streamed call. `CLAUDE.md` listed that as "a fact only a real call can settle". It is settled: it works.
+
+### Step 3/5 — the DNA fix, and the condition behind it (the 50/50 law)
+
+**`src/server/AgentV3/slowRungBench.ts` (new, pure) + the success path of `MultiProviderTurnRunner`.**
+A successful turn is now judged against the time our own budget arithmetic already sized it at —
+`FLOOR_CALL_OVERHEAD_MS + tokens × floorMsPerOutputToken()`, the same two measured constants, **no new
+threshold invented**. Per rung it accumulates, and a rung that is cumulatively ≥ 2.5× slower over ≥ 3
+measured calls and ≥ 90 s of real time is retired for the rest of that build so the ladder advances.
+
+On the reference build's own numbers the verdict lands **at call 3, 5.8 minutes in**, leaving 23
+minutes on KIMI. That build ships.
+
+The **other 50%** — why the condition existed at all — is that slowness was not a FACT the engine
+carried. It is now a first-class one, held in state rather than at a call site:
+
+- **Keyed by FAMILY + MODEL.** Family, like the timeout streak, so a 50-key pool accumulates one
+  verdict instead of fifty. Model, like the dead-rung memory, so `glm-5.3-flash` being slow never
+  retires `glm-5.3`, a *later rung of the same weak ladder*.
+- **The verdict is LATCHED in the state, and a failing test is why.** Recomputed instantaneously it
+  FLICKERS on the real data: 3.43× at call 3, **2.46× at call 4** (one better-than-usual response,
+  just under the line), then 3.5× and up. The runner happened to latch it in a `Set`, so the bug was
+  invisible — an invariant held by one call site instead of by the thing that owns it, which is
+  exactly how this repo's drifted-copy failures start. `SlowRungState.tooSlow` now makes it monotone
+  for every caller that will ever exist.
+- **An unmeasured turn is DISCARDED, never guessed at.** A stream without `include_usage` reports 0
+  tokens; counted, a 300 s call would score 60× and retire a healthy vendor on a number nobody
+  measured. Same law the wallet obeys. Honest cost, stated: if a provider stops reporting usage this
+  governor goes silent for it — the safe direction.
+- 🔒 **Slowness may never empty the ladder** (`canBenchAnother`): at least one rung is always kept
+  whatever its throughput, because a slow app beats no app. Every other bench retires a rung that
+  CANNOT answer; this one retires a rung that CAN. When the last engine is judged slow the report says
+  so once, explicitly — the admin must be able to see that we knew and kept it anyway.
+- **Configuration fails toward KEEPING a provider.** `AGENTV3_SLOW_RUNG_RATIO` ≤ 1 is refused (at 1.0
+  it would retire every provider on earth, the backstop included) and falls back to the default.
+
+**Reversion-proven in both halves:** deleting the skip ⇒ 2 behavioural tests fail; deleting the latch
+⇒ 2 different tests fail. 26 cases in `tests/slowRungBench.test.ts`, built on the report's verbatim
+eleven `(outputTokens, latencyMs)` pairs.
+
+### Already fixed on `main` between this build and this autopsy — checked, not assumed
+
+The ❌ "typecheck never ran" item has its root cause addressed by **`37eaa55` (merged 19:36 UTC,
+~3 h AFTER this build ran at 16:36 UTC)** — the protected correction reserve, which stops generation
+consuming 100% of the budget and leaving every post-build check false at once. Recorded so nobody
+re-fixes it.
+
+### OPEN ROOT CAUSES — named, not silently closed (rule 6)
+
+1. **The budget affords ~6 model turns and nothing in the engine knows that.** 1740 s ÷ a 300 s
+   per-call ceiling ≈ 5.8 calls; the architect planned 17 steps and spent its first 8 turns reading.
+   The budget-pressure nudges are TEXT IN A PROMPT, not a constraint, and this build ignored them for
+   five minutes. A real fix makes the plan budget-aware — a separate change to the architect loop.
+2. **Exploration is unbounded: 24 of 29 minutes were spent reading, first write at minute 26.** ~21
+   read calls, with at least one file named in two batches 12 minutes apart. No first-write deadline
+   exists.
+3. **The ETA is useless for exactly the builds that need it.** Twelve identical *"still working out how
+   big this one is"* messages over 28 minutes, then a number one minute before the kill. This is what
+   makes a user press the button three times — it is the direct cause of "tried thrice".
+4. **A 100%-idle sandbox still bills.** 30.2 idle minutes at $0.083 — more than the model cost — with
+   every second of it spent waiting on a provider, not on the VM.
+5. **Mid-build scope explosion is unguarded.** Three further feature requests arrived during a build
+   already failing and were folded into the plan.
+
+### What was NOT touched
+
+No ladder, model id, timeout, streaming bound, `max_tokens`, billing, release gate, or routing change.
+The governor only ever moves a build to the next rung; it cannot fail a build, shorten a call, or
+change what any provider is asked for. `AGENTV3_SLOW_RUNG_BENCH=off` reverts it with no deploy.
+
+### Same day, same PR — OPEN ROOT CAUSE 3 CLOSED: the twelve identical ticks
+
+The admin asked for every problem fixed at the root, so the item named above as *"the ETA is useless
+for exactly the builds that need it"* is closed here rather than carried.
+
+**What it actually was.** `unevidencedEtaTickLine` was a pure function of `elapsedMs`, so it printed
+**the same sentence at minute 2 and at minute 28** — twelve times in that report, with the only
+changing figure buried mid-sentence. A user skimming it cannot tell *working* from *hung*. That is
+the mechanism behind *"tried thrice"*, and it is the only ledger item the user actually SEES.
+
+**Why the module was right to refuse a number, and wrong to stop there.** `etaEvidence.ts` exists
+because three autopsies caught the build promising "~2–4 min" against 12- and 26-minute runs; its law
+is *"show the number wherever it is measured, and the phase wherever it is not."* That law was applied
+to the ESTIMATE and never to the BUDGET — and `maxBuildSeconds` is not an estimate. It is a fixed,
+configured number, so *"18 minutes in, up to 11 more"* is arithmetic over two known quantities,
+exactly as defensible as elapsed time itself. Withholding it was omission, not honesty.
+
+**The fix.** The tick takes the build's own cap (`effectiveBuildSeconds * 1000`, already in scope at
+the call site) and reports where the build stands inside it. Past `LONG_RUN_BUDGET_SHARE` (0.6) it
+says plainly that this one is running long and states what will happen — *"I'll keep working for up
+to N min more, then save whatever is finished and tell you honestly how far it got — nothing you have
+is lost."* **Every clause is something the engine really does** on a timeout: the files are already
+persisted, `GREEN_GUARD` keeps an unverified turn rather than rolling it back, the summary is honest
+and the build is billed ₹0. It never claims the build WILL finish — the one promise this module
+exists to refuse.
+
+- 🔒 **A healthy build never sees the long-run wording.** This line appears only while NOTHING has
+  been measured, and a normal build has handed the line to `measuredEtaText` / `stepEtaText` minutes
+  earlier — so a build still unmeasured at 60% of its cap is genuinely in trouble.
+- ⚠️ **No cap ⇒ no mention of a cap.** `budgetMs` absent, 0 or malformed is the
+  `effectiveBuildSeconds === 0` convention used throughout the route, and returns the pre-2026-09-16
+  sentence **byte-identical**. Past the cap it also falls back rather than inventing a negative.
+- Display only: it cannot fail, slow, or change a build.
+- `tests/etaEvidenceWiring.test.ts` was STRENGTHENED, not relaxed — it now asserts the budget
+  ARGUMENT reaches the line, so the regression cannot return silently. Reversion-proven: 4 cases fail
+  without the fix.
+
+**Still open from this autopsy (1, 2, 4, 5):** budget-blind planning, unbounded exploration, idle
+sandbox billing, and mid-build scope explosion. Items 1 and 2 are one change to the architect loop —
+where other sessions are active — and are deliberately NOT started here rather than raced.
+
+---
+
+## 2026-09-17 — Item 7: the "Milestone Building" proposal is ALREADY BUILT. Do not build it again.
+
+The admin forwarded a ChatGPT proposal for "Milestone Building" and flagged it under the
+external-suggestion rule ("dont build! text reply only", then "ek ek kar ke sab build karo"). Audited
+it against the real codebase before designing anything, using safeguard #6's method — **filename
+first**, three vocabularies, whole repo. Both halves of the proposal already exist:
+
+**1. Feature-level dependency ordering ⇒ `ProjectPlan.ts` (Software Project Mode), 592 lines.**
+Modules with explicit `dependsOn`, frozen export contracts, dependency-ordered scheduling, durable
+per-module status, todo projection, and a per-module FRESH context carrying only that module's spec
+plus the contracts of finished modules. **Verified wired, not assumed**: `routes/agentv3.ts` ~14272
+creates and saves the plan, ~18571 marks each module done/failed after its turn, ~19591 auto-continues
+to the next buildable module. Gated by `AGENTV3_PROJECT_MODE`, which defaults OFF.
+
+**2. Protect completed milestones ⇒ `greenFreeze.ts`, and it is STRONGER than the proposal.** The
+proposal wanted finished work protected from later passes. Green Freeze already denies post-green
+overwrites **by construction**, deny-by-default with a small explicit allowlist, built on the same
+AsyncLocalStorage idiom as `noClaudeZone` and `aiSpendZone` — so a pass a future session adds is
+refused automatically because it is not on the list. Its own header records why the convention-based
+version ("add `if (previewGreen) skip` twelve times") was rejected: conventions rot. **Default ON,
+already live in production.**
+
+🔴 **SO THE REAL FINDING IS NOT A MISSING FEATURE — IT IS A PENDING ADMIN DECISION, OPEN SINCE
+2026-07-04.** The 2026-07-04 entry above records Software Project Mode as *"fully built and dormant …
+ADMIN DECISION NEEDED (asked in chat, safeguard #3)"* and gives the exact action:
+`AGENTV3_PROJECT_MODE=aashishcpmt09@gmail.com` on Cloud Run, one real mega-prompt, then `on` for all.
+That question was asked and never answered, and the feature has slept for over two months.
+
+🔴 **AND THE REASON NOBODY COULD SEE IT: the flag was MISSING FROM CLAUDE.md's env registry
+entirely** — zero mentions there against eight in this file. The registry exists precisely to stop
+that drift, and this is the same shape as the idle-minutes default that said "NOT taken" eight days
+after it was taken. **Fixed in this change**: a full entry now records what the mode is, that the
+wiring is verified rather than doc-sourced, the allowlist rollout path, the high-precision detection,
+the pending decision, and the three gaps below.
+
+**Three gaps carried forward honestly** (from the 2026-07-04 entry, re-confirmed still open): an
+IMPORTED repo never creates a plan (creation fires only on a fresh `new_build`); a reopened incomplete
+plan needs a typed "continue"; and contract DRIFT is caught only by the whole-workspace `tsc` each
+turn, not by a dedicated contract check.
+
+**What was deliberately NOT done:** the flag was not flipped and no second planner was written. The
+key lives in a console no session can reach, and building a parallel "milestone" system beside a
+working one is exactly the duplicated work safeguard #6 exists to prevent.

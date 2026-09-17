@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote,
-  MIN_HISTORY_WEIGHT_TO_SHOW_A_NUMBER,
+  MIN_HISTORY_WEIGHT_TO_SHOW_A_NUMBER, LONG_RUN_BUDGET_SHARE,
 } from '../src/server/AgentV3/etaEvidence';
 import { estimateBuildTime, complexityFromPrompt, type HistoricalBuild } from '../src/server/lib/BuildTimeEstimator';
 
@@ -119,6 +119,74 @@ describe("the admin's report is never less honest than the screen", () => {
       etaEvidenceNote({ historyWeight: 0, basis: 'heuristic' }),
       etaEvidenceNote({ historyWeight: 0.9, basis: 'historical' }),
     ].join(' ').toLowerCase();
+    for (const vendor of ['glm', 'kimi', 'claude', 'anthropic', 'sonnet', 'opus', 'gemini', 'vertex', 'grok', 'moonshot']) {
+      expect(all).not.toContain(vendor);
+    }
+  });
+});
+
+/**
+ * AUTOPSY dd1f5f60 (2026-09-16) — the twelve identical ticks.
+ *
+ * A 29-minute build that failed printed this line TWELVE times, word for word, because it was a pure
+ * function of elapsed time and the elapsed figure was buried mid-sentence. The user pressed the
+ * button three times and filed a ticket saying the app "is not responding". The build's own time
+ * limit is a FIXED configured number — arithmetic, not a prediction — and it was already known.
+ */
+describe('the live tick knows the build\'s own time limit (autopsy dd1f5f60)', () => {
+  const CAP = 29 * MIN; // the real cap in that report: AGENTV3_MAX_BUILD_SECONDS scaled to 1740s
+
+  it('THE REGRESSION ITSELF: two far-apart ticks of one build must not read the same', () => {
+    const early = unevidencedEtaTickLine(2 * MIN, CAP);
+    const late = unevidencedEtaTickLine(24 * MIN, CAP);
+    expect(early).not.toBe(late);
+    // …and not merely by the elapsed figure — the late one has to SAY something different.
+    expect(late).toMatch(/taking longer than most/i);
+    expect(early).not.toMatch(/taking longer than most/i);
+  });
+
+  it('early in the budget it reports the cap as a cap, never as a finish time', () => {
+    const line = unevidencedEtaTickLine(5 * MIN, CAP);
+    expect(line).toContain('5 min in');
+    expect(line).toContain('24 min left');
+    // The whole law of this module: no countdown to a FINISH for an unmeasured build.
+    expect(line).not.toMatch(/to go/i);
+  });
+
+  it('past the long-run share it says so, and every clause it promises is one the engine really does', () => {
+    const line = unevidencedEtaTickLine(20 * MIN, CAP);
+    expect(line).toMatch(/taking longer than most/i);
+    expect(line).toContain('9 min more');
+    expect(line).toMatch(/save whatever is finished/i);
+    expect(line).toMatch(/nothing you have is lost/i);
+    // It must never claim the build WILL finish — that is the promise this module exists to refuse.
+    expect(line).not.toMatch(/will finish|will be (done|ready)/i);
+  });
+
+  it('a HEALTHY build never sees the long-run wording', () => {
+    for (const m of [0, 1, 4, 10, 17]) {
+      expect(unevidencedEtaTickLine(m * MIN, CAP)).not.toMatch(/taking longer than most/i);
+    }
+    expect(unevidencedEtaTickLine(Math.ceil(CAP * LONG_RUN_BUDGET_SHARE), CAP)).toMatch(/taking longer than most/i);
+  });
+
+  it('NO CAP means no limit is mentioned — the effectiveBuildSeconds === 0 convention', () => {
+    const plain = unevidencedEtaTickLine(4 * MIN);
+    for (const noCap of [undefined, 0, -1, Number.NaN, 'x' as never]) {
+      const line = unevidencedEtaTickLine(4 * MIN, noCap as never);
+      expect(line).toBe(plain); // byte-identical to the pre-2026-09-16 sentence
+      expect(line).not.toMatch(/left for this one|taking longer than most/i);
+    }
+  });
+
+  it('past the cap it falls back rather than inventing a negative remainder', () => {
+    const line = unevidencedEtaTickLine(CAP + 5 * MIN, CAP);
+    expect(line).toBe(unevidencedEtaTickLine(CAP + 5 * MIN));
+    expect(line).not.toMatch(/-\d/);
+  });
+
+  it('still carries no provider or model name at any point in the budget', () => {
+    const all = [0.1, 0.5, 0.7, 0.95].map((f) => unevidencedEtaTickLine(CAP * f, CAP)).join(' ').toLowerCase();
     for (const vendor of ['glm', 'kimi', 'claude', 'anthropic', 'sonnet', 'opus', 'gemini', 'vertex', 'grok', 'moonshot']) {
       expect(all).not.toContain(vendor);
     }

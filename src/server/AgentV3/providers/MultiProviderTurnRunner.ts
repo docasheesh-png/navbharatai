@@ -19,6 +19,10 @@ import { parseEnvFlag } from '../../lib/envFlag';
 import { isModelUnavailableError } from '../providerErrorClass';
 import { isBudgetEndedError } from '../turnDeadline';
 import { isStarvedBudgetError } from '../floorBudget';
+import {
+  EMPTY_SLOW_RUNG_STATE, canBenchAnother, describeSlowRung, isRungTooSlow, recordSlowSample,
+  type SlowRungState,
+} from '../slowRungBench';
 
 export interface NamedRunner {
   /** Bench/identity name, e.g. 'GROK', 'CLAUDE'. UNIQUE per rung — the timeout/429 bench keys on it,
@@ -592,6 +596,27 @@ export function makeMultiProviderTurnRunner(
     poolSizes.set(base, (poolSizes.get(base) ?? 0) + 1);
   }
   const isPoolMember = (entry: NamedRunner): boolean => (poolSizes.get(entry.reportAs ?? entry.name) ?? 0) >= 2;
+  /**
+   * 🔴 THE BENCH FOR A RUNG THAT ANSWERS TOO SLOWLY TO BE WORTH WAITING FOR (autopsy dd1f5f60).
+   *
+   * Every other bench in this file lives inside the `catch` below, because every other bench exists
+   * for a rung that FAILED. This one lives in the SUCCESS path, because the failure it exists for
+   * never throws: eleven consecutive successful GLM calls at 8.65 tokens/second consumed a whole
+   * 29-minute build while KIMI sat one rung away. See `slowRungBench.ts` for the arithmetic.
+   *
+   * Keyed by FAMILY + MODEL, and both halves are load-bearing:
+   *   • FAMILY (`reportAs ?? name`), like the timeout streak — every key of a pool runs the same
+   *     service, so a 50-key GLM pool must accumulate ONE verdict, not fifty separate ones.
+   *   • MODEL, like the dead-rung memory — throughput is a property of the model being called.
+   *     `glm-5.3-flash` being slow says nothing about `glm-5.3`, which is a LATER rung of the same
+   *     weak ladder. Keying on family alone would retire a healthy rung the build may still need.
+   */
+  const slowKeyFor = (entry: NamedRunner): string => `${entry.reportAs ?? entry.name}::${entry.modelId ?? ''}`;
+  const slowRungs = new Map<string, SlowRungState>();
+  const slowBenched = new Set<string>();
+  /** Rungs judged slow but KEPT (the last engine). Remembered only so the report says it once. */
+  const slowKeptAnyway = new Set<string>();
+  const distinctSlowRungs = new Set(chain.map(slowKeyFor)).size;
   return {
     async runTurn(params: RunTurnParams): Promise<TurnResult> {
       const fellBackFrom: string[] = [];
@@ -614,6 +639,13 @@ export function makeMultiProviderTurnRunner(
         }
         if (isPoolMember(chain[i]) && cooldowns.until(`pool:${reportName}`) > now()) {
           fellBackFrom.push(name); // POOL cooldown — the provider SERVICE is saturated; every key skips
+          continue;
+        }
+        if (slowBenched.has(slowKeyFor(chain[i]))) {
+          // Retired for THROUGHPUT earlier in this build — it answers, just far too slowly to finish
+          // the user's app inside the budget. `canBenchAnother` guarantees a rung survives this, so
+          // skipping here can never empty the ladder.
+          fellBackFrom.push(name);
           continue;
         }
         // Retired earlier this run — either the whole provider (account fatal) or just this one model
@@ -652,6 +684,36 @@ export function makeMultiProviderTurnRunner(
               ...(result.usage?.measured === false ? { measured: false as const } : {}),
             }, result.model, result.usage?.cacheReadInputTokens ?? 0);
           } catch { /* telemetry attribution must never disturb the build */ }
+          // 🔴 THE SUCCESS PATH IS WHERE THE SLOW-RUNG VERDICT HAS TO LIVE (autopsy dd1f5f60). This
+          // turn succeeded — so if it was also ruinously slow, this is the ONLY place that can ever
+          // know. Judged against the time our own budget arithmetic sized it at, never against a new
+          // invented threshold; an unmeasured turn is discarded rather than guessed at.
+          //
+          // Best-effort like the attribution above: a throw here must never cost a delivered turn.
+          try {
+            const slowKey = slowKeyFor(chain[i]);
+            const next = recordSlowSample(slowRungs.get(slowKey) ?? EMPTY_SLOW_RUNG_STATE, {
+              outputTokens: result.usage?.outputTokens ?? 0,
+              observedMs: Math.max(0, now() - attemptStartedAt),
+              ...(result.usage?.measured === false ? { measured: false as const } : {}),
+            });
+            slowRungs.set(slowKey, next);
+            if (!slowBenched.has(slowKey) && isRungTooSlow(next)) {
+              if (canBenchAnother(slowBenched.size, distinctSlowRungs)) {
+                slowBenched.add(slowKey);
+                opts.onProviderBenched?.(reportName, describeSlowRung(next, chain[i].modelId, 'skipped'));
+              } else if (!slowKeptAnyway.has(slowKey)) {
+                // 🔒 THE LAST ENGINE IS NEVER RETIRED FOR BEING SLOW. Said out loud in the report
+                // rather than passed over in silence: the admin must be able to see that we KNEW it
+                // was slow and kept it anyway, because a slow app beats no app.
+                //
+                // Announced ONCE — the verdict stays true for every remaining turn of the build, and
+                // a line repeated per call would bury the report it is meant to inform.
+                slowKeptAnyway.add(slowKey);
+                opts.onProviderBenched?.(reportName, describeSlowRung(next, chain[i].modelId, 'kept'));
+              }
+            }
+          } catch { /* throughput bookkeeping must never disturb the build */ }
           return result;
         } catch (err) {
           lastError = err;

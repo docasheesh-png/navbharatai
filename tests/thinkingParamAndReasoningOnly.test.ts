@@ -54,13 +54,42 @@ describe('🔴 1 · the first rung of every ladder could not succeed', () => {
     expect(glmThinkingParam('glm-5.3-flash', 'yes' as unknown as boolean)).toEqual({});
   });
 
-  it('🔑 EVERY GLM rung of EVERY tier — build AND plan — is covered; this is why it was a 100% failure', () => {
+  it('🔑 EVERY GLM rung of EVERY tier — build AND plan — asks the capability question, never assumes', () => {
     // Swept from the real source, so a ladder edited later is checked without anybody remembering to.
+    //
+    // 🔴 THIS CASE CHANGED SHAPE ON 2026-09-17, AND THE REASON MATTERS MORE THAN THE EDIT. It used to
+    // assert that NO rung ever receives `{thinking: disabled}` — correct only while every rung was a
+    // 5.3+ model, which rejects that field with the hard 400 that produced 280 failures in one build
+    // (ee20478d). `glm-4.7-flashx` now leads Weak and Normal, and it is 4.x: sending `disabled` to it
+    // is not the bug, it is THE POINT — the whole output budget then goes to code instead of to
+    // mandatory reasoning. A blanket "never disabled" would have banned the fix.
+    //
+    // So the invariant is restated as what it always really was: the field a rung receives must match
+    // that rung's CAPABILITY. `disabled` only where it is accepted; never where it would 400. Deleting
+    // the assertion would have been the easy way through and would have thrown the guard away with it.
     const rungs = [...Object.values(TIER_LADDERS).flatMap((l) => [...l]), ...Object.values(PLAN_RUNG)];
     const glmRungs = rungs.filter((r) => r.provider === 'GLM');
     expect(glmRungs.length).toBeGreaterThan(0);
     for (const rung of glmRungs) {
-      expect(glmThinkingParam(rung.model, false), rung.model).not.toEqual({ thinking: { type: 'disabled' } });
+      const sent = glmThinkingParam(rung.model, false);
+      if (glmCanDisableThinking(rung.model)) {
+        // A family that accepts it gets it — this is what makes FlashX immune to budget starvation.
+        expect(sent, rung.model).toEqual({ thinking: { type: 'disabled' } });
+      } else {
+        // The original 280-failure guard, preserved exactly for the always-reasoning families.
+        expect(sent, rung.model).not.toEqual({ thinking: { type: 'disabled' } });
+      }
+    }
+  });
+
+  it('🔒 the lead rung of Weak and Normal can be told to stop reasoning — the reason it was chosen', () => {
+    // Pins the PROPERTY rather than the id: whatever leads these two tiers must be a family that
+    // accepts `disabled`, so the OUTPUT_BUDGET_STARVED class (b3a2c81e: 52 of 68 GLM failures) cannot
+    // return through a future lead-rung change that quietly picks an always-reasoning model again.
+    for (const tier of ['weak', 'off'] as const) {
+      const lead = TIER_LADDERS[tier][0];
+      expect(lead.provider, tier).toBe('GLM');
+      expect(glmCanDisableThinking(lead.model), `${tier} lead ${lead.model}`).toBe(true);
     }
   });
 

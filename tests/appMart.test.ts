@@ -205,7 +205,7 @@ describe('the Publish tab can actually publish', () => {
   });
 
   it('it publishes through the SAME server route, which re-checks ownership and the publish gate', () => {
-    expect(store).toContain("fetch('/api/nav-store/web/publish'");
+    expect(store).toContain("authedFetch('/api/nav-store/web/publish'");
     // The picker decides what to OFFER; the server decides what is ALLOWED.
     expect(read('src/server/routes/navStore.ts')).toContain('This workspace does not belong to you.');
   });

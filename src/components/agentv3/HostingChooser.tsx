@@ -21,8 +21,7 @@
 // (static = Free); it is the single place to change when the admin sets real numbers.
 
 import { useEffect, useState, useRef } from 'react';
-import { Rocket, X, Globe, Server, Link2, GitBranch, ExternalLink, AlertCircle, Database, Smartphone, Store, Clipboard, Sparkles, Loader2, Check, ChevronDown } from 'lucide-react';
-import { readStoreIcon, readStoreIconFromClipboard, type IconCheck } from '../../lib/appIcon';
+import { Rocket, X, Globe, Server, Link2, GitBranch, ExternalLink, AlertCircle, Database, Smartphone, ChevronDown } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { NbaiDomainConnect } from './NbaiDomainConnect';
 import { usePublishState } from '../../hooks/usePublishState';
@@ -148,14 +147,6 @@ export interface HostingChooserProps {
   /** Open the APK Builder (Other AI → APK Builder), pre-targeted to this app, to make an Android app. */
   onOpenApkBuilder?: () => void;
   /**
-   * Open AI Image Gen (Other AI) so the user can MAKE a listing icon.
-   *
-   * It opens as its own tab and this sheet stays exactly as it is — the user makes an icon, copies it,
-   * comes back to this same half-filled publish form and presses Paste. Closing the sheet would throw
-   * away the name and screenshots they already entered, which is the opposite of helping.
-   */
-  onMakeIcon?: () => void;
-  /**
    * The machine code from the last publish REFUSAL (see `backendDeployOffer`).
    *
    * The refusal for a full-stack app ends "Use “Deploy backend” to put the whole app somewhere it can
@@ -235,7 +226,7 @@ export function HostingChooser({
   providers, onDeploy, onClose, busy, publishStatus, workspaceId, customDomainsEnabled, customDomainPriceInr,
   liveUrl, onUnpublish, onRollback, onLoadMyApps, onUnpublishApp, siteAnalytics, onLoadSiteAnalytics, onLoadRollbackChoices, onLoadSiteConfig, onSaveSiteConfig,
   ownRepo, githubConnected, onConnectGitHub, onRepoPushed, authedFetch, onOpenDatabaseSettings, onOpenApkBuilder,
-  onMakeIcon, publishRefusalCode, backendKeySource, deployRepo,
+  publishRefusalCode, backendKeySource, deployRepo,
 }: HostingChooserProps) {
   const [view, setView] = useState<'choose' | 'domain' | 'selfhost' | 'myapps'>('choose');
   // VISITOR COUNTS (ROADMAP §13, 1.1): loaded the moment a live app is on screen, because "did
@@ -294,147 +285,6 @@ export function HostingChooser({
   const [rollbackBusy, setRollbackBusy] = useState(false);
   const [unpubBusy, setUnpubBusy] = useState(false);
   const [unpubNote, setUnpubNote] = useState('');
-  // ── Nav App Store one-click publish (Kadam 1, admin: "1 click release/publish … v5 ke publish ke
-  // 'Make an Android app' me kahi adjust kar dena"). The button lives HERE because this modal IS the
-  // publish surface — the store is a fourth destination for the same app, beside hosting and APK.
-  const [storeName, setStoreName] = useState('');
-  const [storeBusy, setStoreBusy] = useState(false);
-  const [storeResult, setStoreResult] = useState<{ ok: boolean; message: string; shareUrl?: string } | null>(null);
-  // App icon for the store LISTING (admin report 2026-08-19: "app mart me sirf naam aata hai, logo nahi").
-  // The publish route already accepts + stores + renders `iconDataUrl` — it was simply never sent. A data
-  // URL under the route's 200KB cap; anything larger is refused inline rather than silently dropped.
-  const [storeIcon, setStoreIcon] = useState('');
-  const [storeIconError, setStoreIconError] = useState('');
-
-  // THREE WAYS TO AN ICON (admin 2026-08-19: "waha 2 option aur add karo — 1. make icon 2. paste").
-  // Upload, Paste, and Make icon — the SAME three the APK Builder already offers, running on the same
-  // shared pipeline (`src/lib/appIcon.ts`) so the two screens can never drift into different answers.
-  //
-  // The old handler refused anything at/over the route's 200KB limit. That reads as reasonable until you
-  // notice what it does to THIS feature: an icon out of AI Image Gen is a 1024×1024 PNG, so "Paste"
-  // would have answered "too large" every single time. The pipeline now FITS the picture instead —
-  // square, shrunk, re-encoded until it is under the cap — so all three ways end in a working icon.
-  const [storeIconBusy, setStoreIconBusy] = useState(false);
-  const acceptStoreIcon = async (run: () => Promise<IconCheck>) => {
-    setStoreIconBusy(true);
-    setStoreIconError('');
-    try {
-      const r = await run();
-      if (!r.ok || !r.dataUrl) { setStoreIconError(r.error || 'That image could not be used.'); return; }
-      setStoreIcon(r.dataUrl);
-    } finally {
-      setStoreIconBusy(false);
-    }
-  };
-  const onStoreIconFile = (file: File | null | undefined) => {
-    if (!file) return;
-    void acceptStoreIcon(() => readStoreIcon(file));
-  };
-
-  // Listing SCREENSHOTS (admin report 2026-08-19): shown inside the App Mart detail so a viewer sees the
-  // app before opening it. Up to 3. Each image is downscaled to ≤1280px and re-encoded as JPEG so it
-  // reliably clears the store's per-screenshot size cap — a raw phone screenshot is otherwise too big.
-  const MAX_STORE_SHOTS = 3;
-  const [storeShots, setStoreShots] = useState<string[]>([]);
-  const [storeShotError, setStoreShotError] = useState('');
-
-  const compressImage = (file: File): Promise<string> => new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const maxDim = 1280;
-        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
-        const w = Math.max(1, Math.round(img.width * scale));
-        const h = Math.max(1, Math.round(img.height * scale));
-        const canvas = document.createElement('canvas');
-        canvas.width = w; canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) { reject(new Error('no canvas')); return; }
-        ctx.drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL('image/jpeg', 0.82));
-      };
-      img.onerror = () => reject(new Error('bad image'));
-      img.src = typeof reader.result === 'string' ? reader.result : '';
-    };
-    reader.onerror = () => reject(new Error('unreadable'));
-    reader.readAsDataURL(file);
-  });
-
-  const onStoreShotFiles = async (files: FileList | null) => {
-    setStoreShotError('');
-    if (!files || files.length === 0) return;
-    const room = MAX_STORE_SHOTS - storeShots.length;
-    if (room <= 0) { setStoreShotError(`You can add up to ${MAX_STORE_SHOTS} screenshots.`); return; }
-    const picked = Array.from(files).filter((f) => f.type.startsWith('image/')).slice(0, room);
-    if (picked.length === 0) { setStoreShotError('Pick image files (PNG or JPG).'); return; }
-    try {
-      const urls = await Promise.all(picked.map(compressImage));
-      const good = urls.filter((u) => u.startsWith('data:image/') && u.length <= 900_000);
-      if (good.length < urls.length) setStoreShotError('One image was too large even after shrinking and was skipped.');
-      setStoreShots((prev) => [...prev, ...good].slice(0, MAX_STORE_SHOTS));
-    } catch {
-      setStoreShotError('Could not read one of those images.');
-    }
-  };
-
-  const publishToStore = async () => {
-    if (storeBusy) return;
-    // The chooser's own standing rule (and its test): NO DEAD BUTTONS. A publish that cannot start
-    // says WHY inline instead of sitting disabled with no explanation.
-    if (!workspaceId || !authedFetch) {
-      setStoreResult({ ok: false, message: 'Build an app first — there is nothing to publish yet.' });
-      return;
-    }
-    const name = storeName.trim();
-    if (!name) { setStoreResult({ ok: false, message: 'Give your app a name first.' }); return; }
-    setStoreBusy(true);
-    setStoreResult(null);
-    // 🔒 A BUTTON THAT CAN SPIN FOREVER IS A BUG, WHATEVER THE SERVER IS DOING.
-    //
-    // The admin's report was "app mart me publish kar rahe hai, to infinity loading hoti ja rahi hai"
-    // (2026-08-27). The server cause is fixed separately — a synchronous page bake was blocking the
-    // response — but this handler had no time limit of its own, so ANY stalled request (a lost mobile
-    // connection, a proxy holding the socket, a future slow path nobody has written yet) leaves the
-    // user staring at "Publishing…" with no result, no error and no way back except reloading the page
-    // and wondering whether their app published.
-    //
-    // A publish that has not answered in 90 seconds has not worked. The user is told exactly that, and
-    // told the safe thing to do — checking before republishing, because a re-publish updates the same
-    // listing rather than creating a second one, so the honest advice is "look first".
-    // ⚠️ RE-ANCHORED 2026-09-07: this used to build its OWN AbortController and pass `signal`, and
-    // `authedFetch` overwrote that signal with its 20-second default — so the 90 seconds promised
-    // above never applied, and the abort arrived as authedFetch's error rather than an AbortError, so
-    // the timed-out branch below never ran either. The ceiling is now passed to authedFetch itself,
-    // and its timeout error is the one thing the catch checks for. See lib/longRequest.ts.
-    try {
-      const res = await authedFetch('/api/nav-store/web/publish', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspaceId, name, visibility: 'public', ...(storeIcon ? { iconDataUrl: storeIcon } : {}), ...(storeShots.length ? { screenshots: storeShots } : {}) }),
-      }, LONG_REQUEST_TIMEOUT_MS.storePublish);
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.ok) {
-        // The gate's refusals are REAL and specific (a hardcoded key with its file:line, "needs a
-        // server", a size cap) — show them verbatim; a generic failure line would hide the one
-        // sentence the user needs.
-        setStoreResult({ ok: false, message: data?.error || 'Publishing failed — nothing was published.' });
-        return;
-      }
-      const shareUrl = `${window.location.origin}${data.shareUrl}`;
-      try { await navigator.clipboard?.writeText(shareUrl); } catch { /* the link is shown anyway */ }
-      setStoreResult({ ok: true, shareUrl, message: data.status === 'listed'
-        ? 'Published! Your app is live on the store.'
-        : 'Published! Your link works right now (copied) — the store listing goes live after a quick human review.' });
-    } catch (e) {
-      const timedOut = isFetchTimeout(e);
-      setStoreResult({ ok: false, message: timedOut
-        ? 'Publishing is taking longer than expected, so we stopped waiting. Check "Your published apps" — if it is not there, try again.'
-        : 'Could not reach the server — nothing was published.' });
-    } finally {
-      setStoreBusy(false);
-    }
-  };
   // ── THE BACKEND-DEPLOY OFFER — the control the publish refusal names (admin 2026-08-25).
   //
   // A full-stack app cannot go on a static host; the refusal says so and tells the user to use
@@ -1563,133 +1413,6 @@ export function HostingChooser({
             </p>
           </div>
 
-          {/* Path 4 — Nav App Store (instant web app). One click; runs in every viewer's browser. */}
-          <div className={`rounded-xl border p-4 flex flex-col gap-2.5 ${liveUrl ? 'border-emerald-600 bg-emerald-950/30 ring-1 ring-emerald-600/30' : 'border-emerald-800/50 bg-emerald-950/20'}`}>
-            <div className="flex items-center justify-between">
-              <span className="text-[13px] font-bold text-white">Put it on App Mart</span>
-              <span className="text-[9px] font-black uppercase tracking-widest text-emerald-300 bg-emerald-900/50 px-2 py-0.5 rounded-full">Instant</span>
-            </div>
-
-            {/* THE NEXT STEP, OFFERED WHERE IT IS EARNED (admin 2026-09-01: "koi user apni app publish
-                on navbharatai kare, tabhi usko ek tick dikhe — post in app mart").
- 
-                These four paths are siblings, so App Mart sat beside the hosting card as one more
-                option a user had to notice on their own. The moment someone HAS just published is the
-                moment putting it in front of people makes sense to them, so that is when this appears.
-                `liveUrl` is the honest gate — it comes from the durable deployment record and is set
-                only for a genuinely live app, the same signal the Unpublish control trusts.
-
-                ⚠️ It is a PROMPT, not an automatic listing. Publishing your app and showing it to
-                strangers are two different decisions, and the second one stays the user's — the same
-                reason the agent may no longer publish on its own (publishConsent.ts). */}
-            {liveUrl && (
-              <div className="rounded-lg border border-emerald-600/40 bg-emerald-900/30 px-2.5 py-2 flex items-start gap-2">
-                <Check className="w-3.5 h-3.5 text-emerald-300 shrink-0 mt-0.5" />
-                <p className="text-[11px] text-emerald-100 leading-relaxed">
-                  Your app is live on NavBharatAI. Put it on App Mart too so people can actually find it — it stays free, and you can take it off any time.
-                </p>
-              </div>
-            )}
-            <p className="text-[11.5px] text-zinc-400 leading-relaxed">
-              One click — others run your app instantly in their browser. No APK, no hosting, no install.
-            </p>
-            <ul className="text-[11px] text-zinc-300 flex flex-col gap-1 mt-0.5">
-              <li>• Share link works immediately</li>
-              <li>• Free — for you and for them</li>
-              <li>• Your keys &amp; source stay private</li>
-            </ul>
-            <div className="flex items-center gap-2.5">
-              <div className="w-11 h-11 shrink-0 rounded-lg overflow-hidden border border-zinc-700 bg-zinc-900 flex items-center justify-center">
-                {storeIcon
-                  ? <img src={storeIcon} alt="App icon" className="w-full h-full object-cover" />
-                  : <Store className="w-4 h-4 text-white/25" />}
-              </div>
-              <div className="flex flex-col gap-1 min-w-0">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <label className={`cursor-pointer inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-[11px] text-zinc-200 border border-zinc-700 w-fit ${storeIconBusy ? 'opacity-40 pointer-events-none' : ''}`}>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      disabled={storeIconBusy}
-                      onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; onStoreIconFile(f); }}
-                    />
-                    {storeIcon ? 'Change icon' : 'Add app icon'}
-                  </label>
-                  <button
-                    onClick={() => void acceptStoreIcon(() => readStoreIconFromClipboard())}
-                    disabled={storeIconBusy}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-[11px] text-zinc-200 border border-zinc-700"
-                  >
-                    {storeIconBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Clipboard className="w-3 h-3" />} Paste
-                  </button>
-                  {onMakeIcon && (
-                    <button
-                      onClick={onMakeIcon}
-                      aria-label="Make icon with AI Image Gen"
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-indigo-600 hover:bg-indigo-500 text-[11px] font-semibold text-white border border-indigo-500"
-                    >
-                      <Sparkles className="w-3 h-3" /> Make icon
-                    </button>
-                  )}
-                </div>
-                <span className="text-[10px] text-zinc-500">
-                  Shows on the store card (optional) — a square picture of at least 512×512 looks best;
-                  anything else is fitted automatically. "Make icon" opens AI Image Gen in its own tab —
-                  copy the picture it makes, come back here and press Paste. This form stays as you left it.
-                </span>
-              </div>
-              {storeIcon && (
-                <button onClick={() => { setStoreIcon(''); setStoreIconError(''); }} className="ml-auto text-[10px] text-zinc-400 hover:text-zinc-200 underline">Remove</button>
-              )}
-            </div>
-            {storeIconError && <div className="text-[10px] text-amber-300">{storeIconError}</div>}
-            <div className="flex flex-col gap-1.5">
-              <div className="flex items-center gap-2 flex-wrap">
-                {storeShots.map((s, i) => (
-                  <div key={i} className="relative w-14 h-14 rounded-md overflow-hidden border border-zinc-700 bg-zinc-900">
-                    <img src={s} alt={`Screenshot ${i + 1}`} className="w-full h-full object-cover" />
-                    <button
-                      onClick={() => setStoreShots((prev) => prev.filter((_, j) => j !== i))}
-                      className="absolute top-0 right-0 bg-black/70 text-white text-[10px] leading-none px-1 py-0.5 rounded-bl"
-                      title="Remove"
-                    >✕</button>
-                  </div>
-                ))}
-                {storeShots.length < MAX_STORE_SHOTS && (
-                  <label className="cursor-pointer w-14 h-14 rounded-md border border-dashed border-zinc-600 hover:border-emerald-500 bg-zinc-900 flex items-center justify-center text-[10px] text-zinc-400 text-center leading-tight">
-                    <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => void onStoreShotFiles(e.target.files)} />
-                    + Screen&shy;shot
-                  </label>
-                )}
-              </div>
-              <span className="text-[10px] text-zinc-500">Add up to {MAX_STORE_SHOTS} screenshots — shown when someone opens your app on App Mart (optional).</span>
-              {storeShotError && <div className="text-[10px] text-amber-300">{storeShotError}</div>}
-            </div>
-            <input
-              value={storeName}
-              onChange={(e) => setStoreName(e.target.value)}
-              placeholder="App name on the store"
-              maxLength={60}
-              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-emerald-600"
-            />
-            <button
-              onClick={() => void publishToStore()}
-              disabled={storeBusy || busy}
-              className="mt-auto w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold flex items-center justify-center gap-2 transition-colors"
-            >
-              <Store className="w-3.5 h-3.5" />
-              {storeBusy ? 'Publishing…' : 'Publish to the store'}
-            </button>
-            {storeResult && (
-              <div className={`text-[11px] leading-relaxed rounded-lg px-2.5 py-2 ${storeResult.ok ? 'text-emerald-300 bg-emerald-950/40' : 'text-amber-300 bg-amber-950/30'}`}>
-                {storeResult.message}
-                {storeResult.shareUrl && (
-                  <a href={storeResult.shareUrl} target="_blank" rel="noreferrer" className="block mt-1 underline break-all text-emerald-200">{storeResult.shareUrl}</a>
-                )}
-              </div>
-            )}
-          </div>
         </div>
 
         {/* Full-stack note + sync law */}

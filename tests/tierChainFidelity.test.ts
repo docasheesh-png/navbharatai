@@ -99,9 +99,20 @@ describe('a missing key removes a rung — it never substitutes another tier\'s 
 });
 
 describe('heal and escalation move WITHIN the ladder', () => {
-  it('a heal runs on the tier ladder itself (5.3-flash leads and can repair its own work)', () => {
+  // 🔴 CHANGED 2026-09-17 WITH THE LEAD RUNG, AND THE OLD NAME SAID WHY IT HAD TO. This case used to
+  // read "5.3-flash leads and can repair its own work" and asserted Normal's heal chain was the WHOLE
+  // ladder — true only while the lead rung was one `healLadder` does not drop. With glm-4.7-flashx
+  // leading, the 2026-08-13 rule ("a repair must not begin on the model that produced the failing
+  // app") applies again on BOTH tiers, so both heal chains drop their leading rung and open on KIMI.
+  // Asserted against `healLadder(...)` rather than a hand-written list, so the two can never drift.
+  it('a heal drops the cheap leading flash rung and opens on a different vendor', () => {
     expect(seq(chainFor({ tier: 'weak', heal: true, noClaude: true }))).toEqual(ladderSeq(healLadder(TIER_LADDERS.weak)));
-    expect(seq(chainFor({ tier: 'off', heal: true }))).toEqual(ladderSeq(TIER_LADDERS.off));
+    expect(seq(chainFor({ tier: 'off', heal: true }))).toEqual(ladderSeq(healLadder(TIER_LADDERS.off)));
+    // …and "opens on a different vendor" is the POINT, not a side effect — pinned explicitly so a
+    // future lead-rung change that happens to keep GLM first fails here instead of silently
+    // reinstating "repair on the model that just broke it".
+    expect(seq(chainFor({ tier: 'weak', heal: true, noClaude: true }))[0]).toMatch(/^KIMI:/);
+    expect(seq(chainFor({ tier: 'off', heal: true }))[0]).toMatch(/^KIMI:/);
   });
   it('escalating Strong to Opus starts its OWN ladder at Opus', () => {
     expect(seq(chainFor({ tier: 'mini', fromProvider: 'CLAUDE_OPUS' }))).toEqual([`CLAUDE_OPUS:${opusModel()}`]);

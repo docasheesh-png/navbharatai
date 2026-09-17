@@ -358,6 +358,7 @@ import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, type RuntimeError } from '../AgentV3/AutoFix';
 import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
 import { buildCostCeilingUsd, ledgerCostUsd, checkCostCeiling, costCeilingDetail } from '../AgentV3/buildCostCeiling';
+import { futilityMinutes, initialFutilityState, tickFutility, futilityDetail } from '../AgentV3/futilityBreaker';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
  *  Set SESSION_COST_CAP_USD in env to override. Default: $5. */
 function sessionCostCapUsd(): number {
@@ -11577,12 +11578,66 @@ async function noteBuildOutcome(
       if (Number.isFinite(n) && n > etaPlannedFiles) etaPlannedFiles = Math.floor(n);
     };
 
+    /**
+     * THE FUTILITY BREAKER'S STATE (futilityBreaker.ts) — the third bound on a build, beside cost and
+     * throughput. See that module for why a provider call is not progress.
+     *
+     * `commandsRun` is counted HERE rather than read back off the diagnostics timeline, because the
+     * timeline records an ATTEMPT (`SANDBOX_CMD`, a failed command, a provider fallback) and the whole
+     * point is to count only what the build actually PRODUCED. The route's own `onCommand` hook fires
+     * on completion, which is exactly the signal wanted.
+     */
+    let commandsRun = 0;
+    let futilityState = initialFutilityState();
+    let futilityFired = false;
+
     // MINUTE-BY-MINUTE TIMELINE — record a "still working" heartbeat every 60 s so the build report
     // shows what the build was doing each minute (and names any in-flight/stuck tool) instead of a
     // blank gap during a long/slow step. Best-effort; cleared in `finally`.
     const diagHeartbeatTimer: ReturnType<typeof setInterval> = setInterval(() => {
       if (rb.ended) return;
       try { buildDiagRef?.heartbeat(); } catch { /* diagnostics are best-effort */ }
+      // 🔴 IS THIS BUILD GETTING ANYWHERE AT ALL? (futilityBreaker.ts — build `d6d664e6` ran 29 minutes
+      // and wrote nothing, because cost and throughput were bounded and POINTLESSNESS was not.)
+      //
+      // Driven from this timer rather than from `captureTurnUsage`, and that is the load-bearing
+      // choice: `captureTurnUsage` fires on a SUCCESSFUL provider call, and the reported build's
+      // minutes 4→29 were failed ones. A breaker hung off the turn hook would never have run in the
+      // very case it exists for. This timer fires regardless of what the providers are doing.
+      //
+      // It fires ONCE, like the cost ceiling: a second abort is harmless (AbortController is
+      // idempotent) but would record a second identical finding, and a report that says the same
+      // thing twice reads like two events.
+      if (!futilityFired) {
+        try {
+          const limit = futilityMinutes();
+          const verdict = tickFutility(
+            futilityState,
+            { filesWritten: writtenFiles.size, commandsRun, stepsDone: etaStepsDone },
+            limit,
+          );
+          futilityState = verdict.state;
+          if (verdict.stop) {
+            futilityFired = true;
+            try {
+              buildDiagRef?.record({
+                phase: 'build', severity: 'warning', code: 'FUTILITY_BREAKER',
+                // NOT auto-resolved: the build really did stop. Marking it resolved would let a report
+                // summarise a halted build as one that healed itself — the same reasoning
+                // COST_CEILING_REACHED carries.
+                autoResolved: false,
+                message: 'Build stopped because it was producing nothing',
+                detail: futilityDetail(verdict, limit),
+              });
+            } catch { /* diagnostics are best-effort — they must never block the stop */ }
+            console.log(`[AGENTV3] futility breaker: ${verdict.quietMinutes} quiet min(s) (0 files, 0 commands, 0 steps in that window) — stopping build between turns`);
+            abortBuild({ abort: (r?: unknown) => abort.abort(r) }, 'futile');
+          }
+        } catch {
+          // A breaker we could not evaluate must never end somebody's build. Failing OPEN here is the
+          // same call the cost ceiling and the affordability gate both make.
+        }
+      }
       // Live ETA: every 2nd tick (~2 min) show elapsed + a REVISED remaining time, adapting as the
       // build runs. Honest when it overruns the estimate (no fake "almost done"). Best-effort.
       etaTick += 1;
@@ -13190,7 +13245,12 @@ async function noteBuildOutcome(
         // Each of these was already computed for the architect and simply never handed to the child.
         // See `SubAgentDeps` for what each one's absence cost; the count is now test-locked.
         framework,
-        onCommand: (c) => { try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ } },
+        onCommand: (c) => {
+          // A COMPLETED command is one of the futility breaker's three progress signals — counted here,
+          // at the one hook that fires on completion, so an attempt can never be mistaken for progress.
+          commandsRun += 1;
+          try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ }
+        },
         onLlmCall: (c: Parameters<NonNullable<typeof buildDiag.recordLlmCall>>[0]) => {
           try { buildDiag.recordLlmCall(c); } catch { /* diagnostics are best-effort */ }
         },

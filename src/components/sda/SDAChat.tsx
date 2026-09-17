@@ -6,7 +6,7 @@ import { loadVials } from '../../lib/vialMemory';
 import { dismissKeyboardOnMobile } from '../../lib/dismissKeyboard';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import ReactMarkdown from 'react-markdown';
-import { isSafeHttpUrl } from '../../lib/linkify';
+import { isSafeHttpUrl, openInRealBrowser } from '../../lib/linkify';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { sanitizeFirestoreData } from '../../lib/firestoreUtils';
@@ -984,7 +984,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                     components={{
                       a: ({ node, href, children, ...props }: any) => (
                         isSafeHttpUrl(String(href ?? ''))
-                          ? <a {...props} href={href} target="_blank" rel="noopener noreferrer" className="text-indigo-400 underline underline-offset-2 break-all">{children}</a>
+                          ? <a {...props} href={href} target="_blank" rel="noopener noreferrer" onClick={openInRealBrowser(String(href ?? ''))} className="text-indigo-400 underline underline-offset-2 break-all">{children}</a>
                           : <>{children}</>
                       ),
                     }}

@@ -1079,7 +1079,11 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '500'), 10) || 500, 1), 500);
       const dateFilter = parseDateFilter(req.query.date);
       const all = await listAllDiagnostics(limit, sinceMsFor(dateFilter));
-      const report = categorizeBuildFailures(all.map((b) => ({ workspaceId: b.workspaceId, ok: b.ok ?? null, prompt: b.prompt, rootCause: b.rootCause })));
+      const report = categorizeBuildFailures(all.map((b) => ({
+        workspaceId: b.workspaceId, ok: b.ok ?? null, prompt: b.prompt, rootCause: b.rootCause,
+        // The build's OWN verdict code beats our reading of its prose — see buildFailureCategory.ts.
+        outcomeCode: b.outcomeCode, outcomeSeverity: b.outcomeSeverity, appSeenRunning: b.appSeenRunning,
+      })));
       res.json({
         ...report,
         window: limit,

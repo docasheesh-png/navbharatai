@@ -15276,10 +15276,12 @@ async function noteBuildOutcome(
           // NOTE: no catch here on purpose — an infra THROW must reach fastVerify's retry wrapper
           // (one retry, then an honest ran:false), never be silently converted into a pass.
         };
-        const fastRepair = async (errors: string, currentFiles: { path: string; content: string }[], contract?: string, strategy?: RepairStrategy): Promise<{ path: string; content: string }[]> => {
+        const fastRepair = async (errors: string, currentFiles: { path: string; content: string }[], contract?: string, strategy?: RepairStrategy, contractPath?: string): Promise<{ path: string; content: string }[]> => {
           // GA-8: forward the ladder strategy so each attempt's prompt escalates (contract-full →
           // focus-offenders → contract-authority) instead of re-firing the identical repair call.
-          const text = await fastGenerate(repairSystemPrompt(framework, strategy), repairUserPrompt(prompt, errors, currentFiles, contract, strategy));
+          // `contractPath` names the contract FILE the lane wrote (SimpleBuilder `contractModule`), so
+          // the repair imports shared symbols from it instead of re-inventing a home for them.
+          const text = await fastGenerate(repairSystemPrompt(framework, strategy), repairUserPrompt(prompt, errors, currentFiles, contract, strategy, contractPath));
           return parseFileBlocks(text).map((b) => ({ path: b.path, content: b.content }));
         };
         const fastLog = (msg: string) => events.emit({ type: 'narration', agent: 'architect', text: msg, ts: Date.now() });

@@ -64592,6 +64592,108 @@ reading that list would otherwise go and work on items that are finished or on a
 against a *different* `main` and nothing had verified the combination: `277a6769` — typecheck ✅,
 no-unused-imports ✅, server typecheck ✅, **25105 passed | 1 skipped, 0 FAIL** ✅, build ✅, bundle ✅,
 boot ✅. The concurrent merges compose cleanly.
+
+### 2026-09-17 (autopsy 57875eb3) — a starved model was retired one KEY at a time, and the contract had no home
+
+**Branch `claude/charming-bell-htxb9u`.** Weak tier, prompt *"Mujhe ek car racing game banakae do …"*,
+`vite-react`. The engine planned 11 files, designed a shared contract, and generated all 11 in **45
+seconds** on `glm-4.7-flashx`. They did not compile. The repair pass then ran for **27 minutes** without
+returning once, and the 29-minute wall clock ended the build with a non-compiling app and the message
+*"Time limit reached — 11 files saved so far."*
+
+**The ledger, all five buckets (rule 5, step 1):**
+
+| bucket | count | items |
+|---|---|---|
+| ✅ self-healed | 0 | — |
+| 🔀 worked around | 3 | `glm-4.7-flashx` abandoned for crawling at 29 s and benched; `kimi-k2.7-code` starved 8,000 tokens and was retired; `glm-5.3` starved 8,000 tokens and was "retired for the rest of this build" — **which held for ONE key of fifty-one** |
+| ⏭️ skipped | 3 | the ~104,000 output tokens the 13 starved `glm-5.3` calls burned (+8,000 on Kimi) entered NO ledger — `liveTokens` shows 6,647 GLM output tokens, the successful calls only; `requestAnalysis.taskType: "chat"` for a romanized-Hindi build order (the Latin-script sibling of d98dae01, scores like `"hi"`); no ETA figure was ever shown (honest, but 29 minutes against a 3-minute midpoint) |
+| ❌ still broken | 2 | the app: four invented homes for one contract (`../types/game`, `../types/note`, `./types/game`, `./App`), an inline re-declaration of the contract's interfaces, `import styles from "./index.css"`, a `tsconfig.json` referencing a `tsconfig.node.json` that does not exist, a named `Obstacle` export imported as default; and the outcome — stopped by the clock, not converged |
+| 🥵 struggle | 2 | **27 minutes inside "attempt 1/3"** — 15 provider calls, 0 answers, the repair strategy ladder never reached attempt 2; `glm-5.3` called **13 times, ~2 min apart, for the identical starvation** while `CLAUDE_HAIKU` (a rung that does not reason) sat one rung away the whole time |
+
+**Root cause 1 — the retirement key (the 26 minutes).** `deadKeyFor` in `MultiProviderTurnRunner`
+retired a starved rung under `${name}::${model}`, and every key of a pool has a distinct name (`GLM`,
+`GLM#2`, …). So the memory said "retired for the rest of this build" and meant one key. **This is the
+4efab9d7 defect (the timeout streak keyed per key, 2026-09-15) in its starvation sibling — and that
+autopsy's own text says the rule: *the instance was fixed; the class was not.*** A starvation is a fact
+about the MODEL at this ask, never about the key that carried it. Fixed: `starvedKeyFor` = provider
+FAMILY (`reportAs ?? name`) + model, the same shape the throughput bench already uses; the lookup consults
+it beside the two existing keys. Model-not-found deliberately stays per key (a pool may span accounts with
+different model access; a 404 costs one round-trip, not two minutes). On this ladder the repair now reaches
+Haiku after ONE starvation per model: ~5 minutes instead of 27.
+🔒 `tests/aStarvedModelIsRetiredAcrossThePool.test.ts` (12), reversion-proven — **and the first draft of
+the proof passed with the fix reverted**, because the route names a pool's first key bare (`GLM`), so a
+per-key entry written by key 1 coincides with the family key by accident. The case that catches it has
+key 1 time out and key 2 starve; the fix is the only thing that skips keys 3..N.
+
+**Root cause 2 — the contract had no home (why a repair was needed at all: the 50/50 law).** The shared
+contract was handed to every per-file call as PROSE (*"do NOT import a symbol that is not declared
+here"*) and never said where the symbols lived, because they lived nowhere — the manifest planned no
+file for them. Eleven isolated calls each guessed. Fixed upstream in `SimpleBuilder.ts`: `contractModule`
+turns the contract into a real TypeScript module (exported enums / interfaces / type aliases; `declare`
+stripped; `const enum` demoted because `isolatedModules` cannot import an ambient one; a type-only React
+import added when the contract uses the namespace; bodiless util signatures DROPPED — valid in a
+declaration, a compile error in a module — and left to the file the manifest names), written at
+`contractFilePath` as the first produced file so every tier's dependency context carries its export
+surface, listed in every prompt, with `contractImportSpecifier` giving each file its own exact relative
+path. A planned types file at that path is superseded, not generated twice. Kill switch
+`AGENTV3_CONTRACT_FILE=off`; no file for an unexportable contract or a non-bundler framework.
+🔒 `tests/theContractIsAFileNotAParagraph.test.ts` (21), anchored on the report's own contract text,
+reversion-proven (4 fail with the wiring removed). One existing assertion superseded and corrected in
+place with the reason (`SimpleBuilder.test.ts`: a planned `src/types.ts` now yields 2 generated files +
+the contract file, not 3 generated).
+
+**The missing subsystem (step 2), named honestly:** four retirement memories in one runner (timeout →
+family, 429 → key, slow → family+model, starved → was key, now family+model) were each fixed one class
+at a time as a report exposed them. What is missing is one registry where each failure class DECLARES
+its scope (KEY / MODEL@FAMILY / FAMILY) — so the next class cannot default to the wrong one. Recorded as
+a proactive item below, not built here: the four scopes are now all deliberate, and a fifth map is not
+what the runner needs.
+
+**Timeline fact that matters for reading this report:** the futility breaker (#3044) merged at 19:38 UTC;
+this build ran 18:51–19:20. It did not run. It would now stop this build at ~minute 11 (last write at
+minute 1 + 10 quiet). With this change the repair returns in ~5 minutes instead, so the breaker becomes
+the net, not the fix.
+
+🔴 **OPEN (rule 6) — and one closed mid-PR, kept in the list so the reasoning stays legible:**
+1. ✅ **CLOSED IN THIS SAME PR — the starvation line lied fifteen times.** *"Our own ceiling, not this
+   provider … the ceiling is FLOOR_TIMEOUT_CAP_MS / AGENTV3_FLOOR_MS_PER_TOKEN"* — but the ask was the
+   fast lane's own `maxTokens: 8000` (five literal sites in `routes/agentv3.ts`), never clamped: a 300 s
+   streamed clock affords 9,833, so neither knob was the ceiling. A THIRD case beyond the two #3052
+   splits (own cap / lane clock): *the caller's ask was the ceiling and nothing reduced it.* It was first
+   recorded here as OPEN because #3052 was mid-flight in exactly those hunks; #3052 merged while this PR
+   was being gated, so it was merged in and the branch added on top: `STARVED_BY_ASK_MARK` +
+   `isAskBoundStarvation` in `floorBudget.ts` — derivable from `granted === requested`, which is
+   precisely `reconcileFloorBudget`'s not-clamped case, so no new plumbing — and a fourth
+   `OUTPUT_BUDGET_STARVED` wording that names the CALLER'S OWN ASK and no knob of that module. Mutually
+   exclusive with both other markers by construction. `tests/aStarvationOnTheCallersOwnAskSaysSo.test.ts`
+   (9), including a source-order guard that the ask branch is consulted before the lane and own-cap ones.
+2. **A starved call's tokens are invisible.** The runner throws before `onTurnComplete`, so ~$0.5 of real
+   provider spend on this build entered no ledger — not `liveTokens`, not `AGENTV3_BUILD_COST_CEILING_USD`,
+   not the admin cost report. The money-audit class ("a paid call with no governance"). The usage exists on
+   the response the runner parsed; attaching it to the thrown error and attributing it in the catch is
+   the fix, at the `throw starvedBudgetError(` statement that #3052's tests pin whole. After #3052.
+3. **Is 8,000 the right ask for a repair on a forced-reasoning rung?** `glm-5.3` spent >8,000 tokens
+   thinking about a ~60k-char repair prompt 13 times, deterministically. `reconcileFloorBudget` lifts the
+   clamp only when the ask EXCEEDS the clock; when the ask is below what the clock carries, an
+   always-reasons rung still gets only the ask. Raising it to the clock's capacity (9,833) may or may not
+   have sufficed — unknown, and not guessed at. Measure how much thinking such a rung uses on a repair
+   before moving the number (the same instrument #3052 names for clamps).
+4. **Hinglish scores like `"hi"`.** `RequestAnalyser` read *"car racing game banakae do"* as `chat`, score
+   5; #3050's `signalsCouldNotRead` covers non-Latin scripts only. Harmless on this build (a simple app on
+   the fast lane is right), wrong as a label, and the same class as d98dae01.
+
+**Proactive layer (step 6) — what would make the FIRST build right:**
+- **The single biggest lever is already the one shipped here:** most Weak fast-lane repairs exist because
+  isolated per-file calls disagree on shared names. With the symbols homed, the errors that survive should
+  be the mechanical ones the deterministic pass fixes for free — watch `SIMPLE_BUILD_FALLBACK` and the
+  repair-attempt count on Weak.
+- **One retirement registry with declared scopes** (above) — a table, not a fifth map.
+- **`8000` at five sites in `routes/agentv3.ts`** is the "retired model ids in 5 files" precedent waiting
+  to happen; one `fastLaneMaxTokens()` is the source of truth the next autopsy will want to move.
+- **The user-facing message.** *"Time limit reached — 11 files saved so far. Continuing automatically…"*
+  was true and still the wrong sentence for a user whose app never compiled; the release gate should own
+  that line, and it should say what state the files are in.
 ## 2026-09-17 — WRITE → TYPECHECK → NEXT: the compiler answers after every file (admin: "incremental typecheck wala PR bana do")
 
 From autopsy e706e068's biggest struggle: 20 files written before the first `tsc`, then 21 errors ground for
@@ -64671,3 +64773,43 @@ bill can still rise. That is the design working, not a defect — but "sasta" mu
 
 Then claim all four steps on a real phone, confirm the money moves, and only then set
 `REFERRAL_REWARDS=on`.
+### Same day — the sibling sweep the admin asked for: "screenshot script me bhi check karo"
+
+Admin, on the PR above: *"#3053 me PLAYWRIGHT_BROWSERS_PATH wala fix screenshot script me bhi check karo"*.
+Swept all 13 browser invocations across both actuators. **The answer on the PATH is that there was
+nothing to fix** — every screenshot, CDP, daemon, browser-action and browse command already carried
+`PLAYWRIGHT_BROWSERS_PATH`; the journey runner was the only one in the repo that never had it. Said
+plainly rather than dressed up as a find.
+
+**What the sweep DID turn up is the OTHER half of the same bug, in three places.** Two browser commands
+carried `2>/dev/null` **and** `.catch(() => null)`:
+
+| Where | Honest about not seeing? | Honest about why? |
+|---|---|---|
+| `browseUrl` | yes — falls back to curl with `source: 'curl'`, `painted: false` | **no** |
+| the element scan | yes — returns `scanned: false`, never "no elements" | **no** |
+| `screenshot` standalone | throws | **the crafted message was unreachable** |
+
+So none of them faked a pass — that part was already right — but when the browser genuinely could not
+launch, **the reason was destroyed twice over**: once by the shell redirect, once by a `.catch` that
+drops the `CommandExitError`. And the SDK **rejects on a non-zero exit carrying the command's real
+stdout/stderr on the error**, so both lines were throwing away a diagnosis that was free to keep. A
+browser outage would read as "this page has no elements" or "a slow SPA" for as long as it lasted.
+
+🔴 **AND THE FIX FOR THIS CLASS ALREADY EXISTED, IN THIS FILE'S OWN IMPORTS.**
+`src/server/lib/sandboxCommandError.ts` was written for precisely this ("the one moment we most need
+the tool's own words is the exact moment we discard them"), centralised under rule 4, and applied to
+the five **npm-install** call sites in this actuator. The **browser** call sites were never converted.
+Same shape as the PR it rides on: the class was fixed, the helper exists, the siblings were not hunted.
+All three now use `commandFailureResult` + `commandLogTail`, the redirects are gone, and the
+screenshot's crafted *"Screenshot failed: <what the browser said>"* is reachable for the first time.
+
+⚠️ **Deliberately NOT changed: the CDP attempt's `.catch(() => null)`** in `screenshot()`. Its failure
+is routine (the shared daemon is simply not up yet) and it falls through to the standalone run, which
+now reports properly — logging every occurrence would be noise, not evidence.
+
+**Guarded:** `sandboxBrowsersPath.test.ts` now sweeps BOTH actuators and fails on any browser
+invocation that lacks the path or carries `2>/dev/null`, and on a browse block that goes back to
+`.catch(() => null)`. Comments are stripped before the scan — the first version of that assertion was
+defeated by the fix's own comment, which names the lossy spelling it replaced. Proven by reversion
+both ways.

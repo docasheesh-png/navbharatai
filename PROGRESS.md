@@ -63048,6 +63048,58 @@ sees on day one**, and it is the admin's call.
 Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1741 files, 24611 passed, 0 failed** ·
 build · test:bundle · boot:check.
 
+## 2026-09-17 — The missing subsystem, built: the post-build suite now knows which files the app LOADS
+
+Autopsy `e706e068` named it and PR #3020 recorded it as open item 1: *"No reachability concept anywhere
+in the post-build suite. Readiness, the fake-code scan and the feature heal all read the WHOLE tree; a
+file the entry never imports is judged, healed and paid for exactly like the app."* This is that
+subsystem — **`src/server/AgentV3/appReachability.ts`** (pure, no I/O).
+
+### What it does
+
+Walks every real LOAD edge — static `import … from`, side-effect `import 'x'`, `export … from`,
+dynamic `import('x')` (React.lazy routes), `require()`, `new URL('./w', import.meta.url)` (workers) —
+from the HTML entry's `<script src>` and from every root-by-design (tooling configs, tests, `*.d.ts`,
+scripts, migrations, `public/`, server entries). Edges are read from the SOURCE TEXT, not from
+`WorkspaceMemory`'s graph, which indexes only `import … from` and `require` and would have called a
+lazily-loaded page unreachable. Everything not reached is `unreachable`.
+
+### 🔒 Precision-first — it REFUSES to answer whenever "unreachable" could be false
+
+A real page wrongly called unreachable has its placeholder finding demoted and a fake page ships as
+done, the direction `buildAuthorship` calls unsafe; a stray wrongly called reachable merely keeps
+today's behaviour. So the verdict is **not applicable** (every file counts as loaded) on: a
+file-system-routed framework id (Next/Nuxt/SvelteKit/Astro/Remix) or Next special files under
+`app/`/`pages/`; a `.vue`/`.svelte`/`.astro` file; any `import.meta.glob`; no HTML entry resolving to
+a real source file; a snapshot that did not read every listed source file (the eval snapshot caps at
+300 reads); and a conventional entry (`main`/`index`/`App`) INSIDE the entry's own directory that the
+walk failed to reach — the walk is wrong then, not the app. ⚠️ That last rule was first written
+project-wide and withheld the verdict on the e706e068 tree itself, because the stray root `App.tsx`
+matched it. Scoped to the entry's directory; the test replaying the real tree caught it.
+
+### Where it plugs in — two consumers, both narrow
+
+1. **`ToolDispatcher` evaluate**: the fake/incomplete-code finding is split by authorship (as before)
+   and THEN by reachability. Only findings in files the app loads count; the rest is recorded as a
+   zero-cost `observation` — *"[observation about files the app never loads — nothing imports them
+   from its entry] N fake/incomplete code issue(s) in M file(s) …"*. Nothing else is scoped: orphan
+   components are by definition unreachable (that warning's whole purpose), security and secret-leak
+   findings are real wherever the file sits.
+2. **The incomplete-code heal** (`routes/agentv3.ts`): stubs in files the app never loads are filtered
+   out through `dispatcher.lastReachability` — the 22-call heal of the stray `hooks/useStudents.ts`
+   cannot happen again.
+
+Tests: `tests/appReachability.test.ts` (16 cases — the real tree, every not-applicable rule, every
+edge kind, two code-parsed wiring guards). Proven by reversion: the readiness split, the heal filter and
+the dynamic-import edge each fail the suite when removed (6 of 16). `readinessJudgesOurOwnCode`'s
+wiring assertion updated to the composed line, with the reason.
+
+### Still open
+
+- The feature-presence heal and the requirement-coverage analyser still read the whole tree; neither
+  was in the e706e068 waste and both are left for their own evidence.
+- The eval snapshot's 300-file cap makes the verdict not applicable on big imported repos — honest,
+  but it means the subsystem is silent exactly where the tree is largest.
 ---
 
 ## 2026-09-17 — ONE PLANNER CHAT TURN COULD DELETE A WORKSPACE'S ENTIRE MEMORY

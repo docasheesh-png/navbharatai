@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { priceProviderUsage } from '../src/server/lib/platformBuildMetrics';
-import { realRateFor, usageCostUsd } from '../src/server/AgentV3/providerRates';
+import { realRateFor, usageCostUsd, realProviderCostUsd } from '../src/server/AgentV3/providerRates';
 
 /**
  * 🔴 THE ADMIN'S COST PANEL PRICED EVERY BUILD AT ITS FAMILY'S DEAREST RATE
@@ -66,6 +66,45 @@ describe('priceProviderUsage — the model that ran is what gets priced', () => 
     ]);
     expect(row.inputTokens).toBe(1_000_000);
     expect(row.outputTokens).toBe(1_000_000);
+  });
+});
+
+describe("🔴 the cached share is priced at the cache rate — the BILL always did, the panel never could", () => {
+  it('the rate card really does have a cheaper cache line for this rung', () => {
+    expect(GLM_FLASHX.cacheReadPerMTok).toBeDefined();
+    expect(GLM_FLASHX.cacheReadPerMTok!).toBeLessThan(GLM_FLASHX.inputPerMTok);
+  });
+
+  it('a fully-cached million input tokens costs the CACHE rate, not the input rate', () => {
+    const [row] = priceProviderUsage(
+      { GLM: { inputTokens: 1_000_000, outputTokens: 0 } },
+      [{ provider: 'GLM', model: 'glm-4.7-flashx', usage: { inputTokens: 1_000_000, outputTokens: 0, cacheReadInputTokens: 1_000_000 } }],
+    );
+    expect(row.costUsd).toBeCloseTo(GLM_FLASHX.cacheReadPerMTok!, 9);
+    expect(row.costUsd).toBeLessThan(GLM_FLASHX.inputPerMTok);
+  });
+
+  it('…and it agrees with what the BILL computes for the same entry, to the cent', () => {
+    const entry = { provider: 'GLM', model: 'glm-4.7-flashx', usage: { inputTokens: 900_000, outputTokens: 120_000, cacheReadInputTokens: 700_000 } };
+    const panel = priceProviderUsage({ GLM: { inputTokens: 900_000, outputTokens: 120_000 } }, [entry])[0].costUsd;
+    const bill = realProviderCostUsd([entry]);
+    expect(panel).toBeCloseTo(bill, 9);
+  });
+
+  it('🔒 a cache figure larger than the entry\'s own input is clamped — a provider cannot cache-serve more than it received', () => {
+    const [row] = priceProviderUsage(
+      { GLM: { inputTokens: 1_000_000, outputTokens: 0 } },
+      [{ provider: 'GLM', model: 'glm-4.7-flashx', usage: { inputTokens: 1_000_000, outputTokens: 0, cacheReadInputTokens: 9_000_000 } }],
+    );
+    expect(row.costUsd).toBeCloseTo(GLM_FLASHX.cacheReadPerMTok!, 9);
+  });
+
+  it('no cache field ⇒ the full input rate, exactly as before', () => {
+    const [row] = priceProviderUsage(
+      { GLM: { inputTokens: 1_000_000, outputTokens: 0 } },
+      [{ provider: 'GLM', model: 'glm-4.7-flashx', usage: { inputTokens: 1_000_000, outputTokens: 0 } }],
+    );
+    expect(row.costUsd).toBeCloseTo(GLM_FLASHX.inputPerMTok, 9);
   });
 });
 

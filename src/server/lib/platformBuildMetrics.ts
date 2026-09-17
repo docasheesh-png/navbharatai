@@ -19,7 +19,7 @@
  */
 import { getMetrics } from './metrics';
 import { realRateFor, usageCostUsd } from '../AgentV3/providerRates';
-import type { BilledUsage } from '../AgentV3/pricing';
+import type { ProviderModelEntry } from '../AgentV3/ProviderUsageLedger';
 
 export interface PlatformBuildRecord {
   ok: boolean;
@@ -59,7 +59,7 @@ export interface PlatformBuildRecord {
    *
    * Optional: absent ⇒ the old provider-only pricing, byte-identical to before.
    */
-  providerEntries?: Array<{ provider: string; model?: string; usage: BilledUsage }>;
+  providerEntries?: ReadonlyArray<ProviderModelEntry>;
   /**
    * Real E2B VM seconds this build held — OUR infrastructure cost, not the user's bill. It is measured
    * whether or not sandbox billing is switched on, because NavBharatAI pays for the VM either way and
@@ -85,17 +85,24 @@ export interface PlatformBuildRecord {
  * an unattributed call is one we genuinely cannot price. Exact where we know, conservative where we
  * do not. That is the same split `realProviderCostUsd` already makes with its `remainder` argument.
  *
- * ⚠️ CACHE-HIT INPUT IS NOT ATTRIBUTED, and that is a deliberate omission rather than an oversight.
- * `cacheReadInputTokens` exists only as a BUILD-level total — no per-call or per-provider breakdown
- * is recorded anywhere — so splitting it across providers would be an invented number, which this
- * repo's billing law forbids even when it flatters us. Leaving the cached share at the full input
- * rate keeps over-stating our own cost slightly, which is the safe direction for a cost panel.
+ * 🔴 CACHE-HIT INPUT IS ATTRIBUTED — and the first draft of this module said it could not be, which
+ * was simply wrong. I wrote that `cacheReadInputTokens` "exists only as a BUILD-level total, no
+ * per-call or per-provider breakdown is recorded anywhere". It is recorded per (provider, model):
+ * `captureTurnUsage` passes it into `providerLedger.add`, `ProviderTokens` has carried the field
+ * since Fix 66, and `realProviderCostUsd` hands `e.usage` straight to `usageCostUsd` — so the BILL
+ * has always priced the cached share at the provider's far cheaper cache-read rate.
+ *
+ * ⚠️ WHAT ACTUALLY HID IT WAS A TYPE. `BillingLedgerView.entries()` declared the usage as a
+ * hand-written `{inputTokens, outputTokens}`, narrower than the objects it really returns, so every
+ * reader typed against that view saw `cacheReadInputTokens: undefined` and priced the cached share at
+ * the FULL input rate. A structural type narrower than its value loses data with no error anywhere.
+ * That interface now names the ledger's own `ProviderModelEntry`, so it cannot drift again.
  *
  * PURE. Never throws; a malformed entry is skipped rather than allowed to poison a total.
  */
 export function priceProviderUsage(
   providerUsage: Record<string, { inputTokens: number; outputTokens: number }> | null | undefined,
-  entries?: ReadonlyArray<{ provider: string; model?: string; usage: BilledUsage }> | null,
+  entries?: ReadonlyArray<ProviderModelEntry> | null,
 ): Array<{ provider: string; inputTokens: number; outputTokens: number; costUsd: number }> {
   // What the per-call ledger attributes to each provider, and what that costs at the real model rates.
   const attributed = new Map<string, { inputTokens: number; outputTokens: number; costUsd: number }>();
@@ -105,10 +112,17 @@ export function priceProviderUsage(
     const inputTokens = Math.max(0, Math.round(Number(e?.usage?.inputTokens) || 0));
     const outputTokens = Math.max(0, Math.round(Number(e?.usage?.outputTokens) || 0));
     if (inputTokens === 0 && outputTokens === 0) continue;
+    // The cached share of THIS entry's input, priced at the provider's far cheaper cache-read rate —
+    // exactly as `realProviderCostUsd` has always priced the BILL. Clamped to the entry's own input,
+    // because a provider can never cache-serve more than it received.
+    const cacheReadInputTokens = Math.min(
+      inputTokens,
+      Math.max(0, Math.round(Number(e?.usage?.cacheReadInputTokens) || 0)),
+    );
     const at = attributed.get(provider) ?? { inputTokens: 0, outputTokens: 0, costUsd: 0 };
     at.inputTokens += inputTokens;
     at.outputTokens += outputTokens;
-    at.costUsd += usageCostUsd({ inputTokens, outputTokens }, realRateFor(provider, e?.model));
+    at.costUsd += usageCostUsd({ inputTokens, outputTokens, cacheReadInputTokens }, realRateFor(provider, e?.model));
     attributed.set(provider, at);
   }
 

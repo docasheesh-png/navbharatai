@@ -61974,10 +61974,31 @@ the entries fails 1; the watchdog finalizer losing them fails 1 — and that sec
 this repo has already shipped exactly that drift once (Fix 67: the watchdog path billing by the old
 formula while the normal settle used the new one).
 
+### 🔴 CORRECTION, same day, before it merged — that "open item" was my own false claim
+
+I wrote, as the reason for not attributing cache: *"`cacheReadInputTokens` has no per-provider breakdown
+anywhere."* **That is wrong.** It is recorded per (provider, model):
+
+- `captureTurnUsage` passes it into `providerLedger.add` (`routes/agentv3.ts` ~11901);
+- `ProviderTokens` has carried the field since Fix 66;
+- `realProviderCostUsd` hands `e.usage` straight to `usageCostUsd` — so **the BILL has always priced
+  the cached share at the provider's far cheaper cache-read rate.**
+
+⚠️ **What actually hid it was a TYPE.** `BillingLedgerView.entries()` declared its usage as a
+hand-written `{ inputTokens, outputTokens }` — *narrower than the objects it really returns* — so every
+reader typed against that view saw `cacheReadInputTokens: undefined` and priced the cached share at the
+FULL input rate. **A structural type narrower than its value loses data with no error anywhere.**
+
+The interface now names the ledger's own `ProviderModelEntry`, so it cannot drift again, and the panel
+prices the cached share exactly as the bill does. A test asserts the two agree **to nine decimal
+places on the same entry** — which is the parity this module's comment promised all along.
+
+Same shape as the `captured` flag and `WorkspaceMemory.removeFile`: **the data existed, the consumer
+could not see it.** Three instances in one day of "the right thing is already there and unreachable."
+
 ### 🔴 Still open from this one
 
-`cacheReadInputTokens` has no per-provider breakdown anywhere. Until one is recorded at the call that
-knows it, the cached share of every build is priced at the full input rate on the admin panel.
+Nothing. The cached share is now attributed and matches the bill.
 
 ### 🔴 …and the gate caught a THIRD brittle guard in one day
 

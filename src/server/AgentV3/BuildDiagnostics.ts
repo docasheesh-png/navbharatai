@@ -41,6 +41,10 @@ export type IssueSeverity = 'info' | 'warning' | 'error';
 const PROCESS_ONLY_CODES = new Set([
   'GROUNDING_COST', 'POST_ANSWER_TIMING', 'SERVICE_GRAPH_MULTI', 'SERVICE_GRAPH_SINGLE',
   'JOURNEY_NOT_DERIVED', 'RELEASE_GATE',
+  // Project mode could not steer the build — the build itself is unaffected (projectPlannerBudget.ts).
+  'PROJECT_MODE_FAILED',
+  // The gate said RED and a real run said otherwise — a statement about OUR verdict (runProvenApp.ts).
+  'VERDICT_HELD_BY_RUN',
 ]);
 
 /**

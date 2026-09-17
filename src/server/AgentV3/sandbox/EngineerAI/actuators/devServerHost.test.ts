@@ -1053,3 +1053,66 @@ describe('runsUnderMultiplexer — the pipe bug, one level down', () => {
     expect(ensureHostBinding('npm run dev', 'vite', 'vite')).toContain('0.0.0.0');
   });
 });
+
+// 🔴 INSTALLING A PACKAGE CALLED "dev" IS NOT RUNNING ONE.
+//
+// Autopsy of the real build "Make an VPN App" (2026-08-23), reproduced unchanged on main 25 days
+// later. `isDevServerInvocation` matches a bare `dev`, and `-` is a word boundary, so `--save-dev`
+// contains it. The install was routed into the managed dev-server boot and `ensureHostBinding`
+// appended its flag, which npm reads as a package name:
+//
+//     npm error 404 Not Found - GET https://registry.npmjs.org/--host - Not found
+//     npm error 404  '--host@*' is not in this registry.
+//
+// 76 seconds, a failed install, and an error naming nothing that would lead anyone back here. The
+// `-D` spelling was never matched, which is the only reason that build ever got its React types.
+describe('a dependency install is never a dev server ("Make an VPN App", 2026-08-23)', () => {
+  const INSTALLS = [
+    'npm install --save-dev @types/react @types/react-dom',   // the exact command from the report
+    'npm i --save-dev @types/react',
+    'npm install -D @types/react',                             // the spelling that accidentally worked
+    'yarn add --dev vitest',
+    'pnpm add --save-dev typescript',
+    'npm ci --include=dev',
+    'npm audit --omit=dev',
+    'npm ls --dev',
+    'bun install --dev',
+  ];
+
+  it('is not classified as a long-running command', () => {
+    for (const cmd of INSTALLS) {
+      expect(isLongRunningCommand(cmd), cmd).toBe(false);
+    }
+  });
+
+  it('is never given a --host flag, even if something else routed it here', () => {
+    // The second, independent guard: one guard makes the misclassification rare, two make the
+    // damage impossible. `--host` appended to an install invents a package name.
+    for (const cmd of INSTALLS) {
+      expect(ensureHostBinding(cmd, 'vite', cmd), cmd).toBe(cmd);
+    }
+    expect(ensureHostBinding('npm install --save-dev @types/react', 'vite', 'npm install --save-dev @types/react'))
+      .not.toContain('--host');
+  });
+
+  it('still routes every REAL dev server exactly as before', () => {
+    // Guarding the guard: a fix that quietly stopped managing dev servers would pass the two cases
+    // above and break every preview in the product.
+    for (const cmd of ['npm run dev', 'npm start', 'npx vite', 'npm run preview', 'npm run server',
+      'tsx watch server/index.ts', 'nodemon app.js', 'ng serve', 'next dev', 'yarn dev']) {
+      expect(isLongRunningCommand(cmd), cmd).toBe(true);
+    }
+    expect(ensureHostBinding('npm run dev', 'vite', 'vite')).toContain('0.0.0.0');
+  });
+
+  it('an install CHAINED before a dev server still counts — the dev segment is what matters', () => {
+    expect(isLongRunningCommand('npm install && npm run dev')).toBe(true);
+    expect(isLongRunningCommand('npm install --save-dev vite && npm run dev')).toBe(true);
+  });
+
+  it('`npx` and `dlx` are deliberately NOT treated as one-shot — they really do start servers', () => {
+    expect(isLongRunningCommand('npx vite')).toBe(true);
+    expect(isLongRunningCommand('npm exec vite')).toBe(true);
+    expect(isLongRunningCommand('pnpm dlx serve dist')).toBe(true);
+  });
+});

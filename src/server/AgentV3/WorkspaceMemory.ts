@@ -195,8 +195,31 @@ export function extractFacts(file: string, content: string): FileFacts {
   };
 }
 
+/**
+ * The placeholder a COLD RESUME indexes a known file with, because the snapshot stores paths and not
+ * content. Exported so the one writer and the one counter cannot drift apart on a string literal.
+ *
+ * 🔴 IT IS NOT A DETAIL — IT IS WHY A RESUMED BUILD REASONS OVER AN EMPTY GRAPH. `extractFacts` runs
+ * over this text, so a restored file enters the graph with no imports, no exports, no components and
+ * no routes; `recall`, `evaluate`, the architecture analysis and the readiness gate then all reason
+ * about a project that looks, to them, like a list of empty files.
+ */
+export const RESTORED_STUB = '/* restored */';
+
 export class WorkspaceMemory {
   private readonly fileFacts = new Map<string, FileFacts>();
+  /**
+   * Files whose facts came from `RESTORED_STUB` rather than from real content.
+   *
+   * 🔎 MEASUREMENT ONLY, DELIBERATELY — nothing branches on it (open root cause #2, 2026-09-17). The
+   * fix for the hollow graph was REFUSED rather than shipped, because filling it could move a real
+   * build's verdict in BOTH directions and nobody knows which dominates: restoring real imports can
+   * fire `unresolvedImport` (a 25-point hard blocker ⇒ `ready:false` ⇒ `ok:false` ⇒ "working app or
+   * free" ⇒ ₹0 on an app that works), while the hollow graph ALSO makes every component look
+   * un-imported, which is `PENALTY.orphanComponent` against every resumed build. This set is what
+   * turns that "nobody knows" into a number, exactly as `sandboxSessions.ts` did for E2B minutes.
+   */
+  private readonly restoredStubs = new Set<string>();
   private readonly episodes: Episode[] = [];
   // True once durable episodes have been replayed into THIS instance's object. Tied to the object's
   // lifecycle (resets when the 2h-TTL cache evicts + recreates it) so restoreWorkspaceMemory replays
@@ -214,6 +237,11 @@ export class WorkspaceMemory {
     // their app's security defect; the line belongs to `previewBridgeSource`, which we inject.
     // Stripping HERE rather than at the ten call sites makes it true for the eleventh as well.
     this.fileFacts.set(file, extractFacts(file, withoutPreviewBridge(file, content)));
+    // A file re-indexed with REAL content is no longer a stub; one indexed with the placeholder is.
+    // Kept here rather than at the restore call site so it stays true for every future writer — the
+    // same reasoning the bridge-stripping two lines above is placed here for.
+    if (content === RESTORED_STUB) this.restoredStubs.add(file);
+    else this.restoredStubs.delete(file);
     // Verification ledger: any (re)write invalidates "tsc clean"; touching package.json
     // invalidates "deps installed". Conservative-by-design — a stale claim would make the
     // team SKIP a needed check, which is worse than one redundant run.
@@ -226,9 +254,20 @@ export class WorkspaceMemory {
     return [...this.fileFacts.keys()];
   }
 
+  /**
+   * How many graph files still carry PLACEHOLDER facts from a cold resume, and which.
+   *
+   * A file here is in `graph.files` and contributes NOTHING to any analysis built on the graph. The
+   * count is the honest size of the blind spot; the paths are capped by the caller, not here.
+   */
+  restoredStubPaths(): string[] {
+    return [...this.restoredStubs];
+  }
+
   /** Drop a deleted file from the graph. */
   removeFile(file: string): void {
     this.fileFacts.delete(file);
+    this.restoredStubs.delete(file);
     this.lastWriteAt = Date.now();
   }
 
@@ -529,6 +568,12 @@ export async function warmIndexFiles(
   const maxFiles = opts.maxFiles ?? 80;
   const maxBytes = opts.maxBytes ?? 200_000;
   const known = new Set(mem.graph().files);
+  // 🔴 THIS SKIPS EVERY FILE A COLD RESUME STUBBED, AND `restoreWorkspaceMemory` USED TO CLAIM THE
+  // OPPOSITE ("warmIndexFiles will fill them later") ONE LINE ABOVE WHERE IT ALSO SAID THE TRUTH
+  // ("so warmIndexFiles skips already-known files"). Both sentences cannot hold; the code does the
+  // second. A stubbed file is IN `graph.files`, so it is `known`, so it is filtered out here and
+  // keeps its empty facts for the whole build. Behaviour is UNCHANGED by this change — see
+  // `restoredStubPaths`: the hollow graph is measured first, not quietly filled.
   const targets = fileTree.filter((f) => isCode(f) && !known.has(f)).slice(0, maxFiles);
   const indexed: string[] = [];
   for (const file of targets) {

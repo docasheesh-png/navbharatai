@@ -13,6 +13,7 @@
 
 import * as admin from 'firebase-admin';
 import type { MemorySnapshot, ProjectGraph, Episode } from './WorkspaceMemory';
+import { RESTORED_STUB } from './WorkspaceMemory';
 import { getServerDb } from '../lib/serverDb';
 import { notePersistenceFailure } from '../lib/persistenceHealth';
 
@@ -148,12 +149,20 @@ export async function restoreWorkspaceMemory(
       else if (ep.kind === 'note') mem.recordNote(ep.text, ep.file, ep.ts);
       else if (ep.kind === 'request') mem.recordRequest(ep.text, ep.ts);
     }
-    // Mark the known files as indexed (content empty — warmIndexFiles will fill them later).
-    // This populates the graph.files set so warmIndexFiles skips already-known files.
+    // ⚠️ THE TWO SENTENCES THAT USED TO STAND HERE CONTRADICTED EACH OTHER, AND THE FALSE ONE IS THE
+    // ONE A READER WOULD ACT ON. They read: "content empty — warmIndexFiles will fill them later"
+    // and, immediately after, "This populates the graph.files set so warmIndexFiles skips
+    // already-known files." Only the second is true. `warmIndexFiles` builds `known` from
+    // `graph.files` and filters those out, so a file stubbed here KEEPS its empty facts — no
+    // imports, no exports, no components, no routes — for the whole build.
+    //
+    // 🔴 That is open root cause #2 (hollow graph on cold resume), left OPEN on purpose: filling it
+    // moves a real build's verdict in both directions and which one dominates has never been
+    // measured. `RESTORED_STUB` + `restoredStubPaths()` are that measurement. Do NOT "fix" the stub
+    // here without reading `WorkspaceMemory.restoredStubs`' own comment first.
     for (const file of snapshot.graph.files) {
       if (!mem.graph().files.includes(file)) {
-        // Minimal stub so the file shows up in the graph; warmIndexFiles overwrites it.
-        mem.indexFile(file, '/* restored */');
+        mem.indexFile(file, RESTORED_STUB);
       }
     }
     return snapshot;

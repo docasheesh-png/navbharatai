@@ -62157,3 +62157,73 @@ no guard: it teaches the next reader that the thing it measures is noisy. Same l
    killed child left behind.
 6. **The build's ETA is asserted at t=0 and never reconciled** — *"ETA ~2–4 min"* on a 16.7-minute
    build, in the same document that carries both timestamps.
+
+---
+
+## 2026-09-17 — THE HOLLOW GRAPH, MEASURED BEFORE IT IS FILLED (open root cause #2 — instrumented, deliberately NOT fixed)
+
+**Branch `claude/the-hollow-graph-is-measured`. Zero behaviour change: nothing branches on the new
+measurement, and a test pins that `warmIndexFiles` still behaves exactly as it did.**
+
+### The mechanism, confirmed by reading two functions
+
+`restoreWorkspaceMemory` (`FirestoreWorkspaceMemoryStore.ts`) indexes every previously-known file
+with the placeholder `/* restored */`, because the snapshot stores **paths, not content**. That puts
+the file into `graph.files`. `warmIndexFiles` (`WorkspaceMemory.ts`) then builds
+`known = new Set(mem.graph().files)` and filters its targets to `!known.has(f)` — **so every file the
+restore stubbed is skipped, and keeps EMPTY facts for the whole build**: no imports, no exports, no
+components, no routes, no symbols.
+
+`recall`, `evaluate`, the architecture analysis and the readiness score then all reason about a
+project that looks, to them, like a list of blank files.
+
+🔴 **THE TWO COMMENTS AT THE RESTORE SITE CONTRADICTED EACH OTHER, AND THE FALSE ONE IS THE ONE A
+READER WOULD ACT ON.** They read, one line apart:
+
+> *"content empty — warmIndexFiles will fill them later"*
+> *"This populates the graph.files set so warmIndexFiles skips already-known files."*
+
+Only the second is true. Both are now replaced by one accurate note that points at the open root
+cause, so the next session does not re-derive the false half and "simplify" the stub away.
+
+### ⚠️ WHY THE FIX IS STILL REFUSED (rule 6 — recorded, not rushed)
+
+Filling the graph moves a real build's verdict in **both** directions, and which one dominates has
+never been measured:
+
+- **Toward failing a working app:** restoring real imports can fire `unresolvedImport`, a **25-point
+  hard blocker** ⇒ `ready:false` ⇒ `ok:false` ⇒ "working app or free" ⇒ **₹0 on an app that works**.
+- **Toward under-scoring every resumed build:** a hollow graph gives every restored file NO imports,
+  so every component looks un-imported — `PENALTY.orphanComponent` (6 points each) against a project
+  that is perfectly well wired. #3014's evidence shows those penalties really do bite (38 → 44, still
+  under the 50 threshold).
+
+So this change ships the **number**, not the fix — the same discipline `sandboxSessions.ts` used for
+E2B minutes, and the same one this session used to refuse the fix in the first place.
+
+### What shipped
+
+- `RESTORED_STUB` — the placeholder as one exported constant, so the single writer and the single
+  counter cannot drift apart on a string literal.
+- `WorkspaceMemory.restoredStubPaths()` — backed by a set maintained **inside `indexFile`**, so a file
+  re-indexed with real content stops being a stub automatically and a future writer cannot forget;
+  `removeFile` clears it too, so a deleted file leaves no phantom blind spot.
+- `GRAPH_RESTORED_STUBS` — an admin-only report line at the resume site: *"N of M file(s) in the
+  project graph carry PLACEHOLDER facts from a cold resume."* Recorded at **`severity: 'info'`**, so it
+  can never be picked as a rootCause on either of `deriveRootCause`'s passes and never inflates the
+  unresolved count — a measurement recorded as a warning is exactly how `TIME_TO_FIRST_CALL` once
+  headlined a successful build.
+
+### Tests — `tests/theHollowGraphIsMeasured.test.ts` (10 cases)
+
+Proven by reversion: **9 of 10 fail** with the three source files reverted, all pass restored.
+
+One case deliberately pins the DEFECT as-is — `warmIndexFiles` still skips a stubbed file — with a
+comment saying that this is the assertion a future fix must update **deliberately, with the
+measurement in hand**, rather than drift past. The reversion guard reads CODE with comments stripped
+and asserts the shared constant is used at the restore site, that the measurement reaches the report,
+and that it is recorded as `info`.
+
+**Full CI gate green on the final state**, re-run after this branch was re-cut from a `main` that had
+moved (PR #3018 merged in the meantime): `typecheck` · `noUnusedImports` · `typecheck:server` ·
+`vitest run` · `build` · `test:bundle` · `boot:check` · `deps:server-gate`.

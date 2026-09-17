@@ -84,7 +84,27 @@ export function capPathsToDocLimit(paths: string[], maxBytes = 950_000): { paths
  * comparable file count (replace allowed); genuine deletions go through removeWorkspaceFiles, which
  * is unaffected. PURE + unit-tested.
  */
-export function savePlanForFileSet(existingCount: number, newCount: number): 'replace' | 'merge' {
+/**
+ * 🔴 AND THE GUARD WAS DEFEATED BY THE ONE FAILURE IT EXISTS TO SURVIVE (found 2026-09-17, sibling of
+ * the workspace-memory erasure fixed in the same change).
+ *
+ * The caller read the existing index with `root.get().catch(() => null)` — which collapses *"there is
+ * no document"* and *"the read FAILED"* into one answer — and then passed `existingPaths.length`,
+ * i.e. **0**, into this function. `0 <= 3` returns `'replace'`, and the write that follows is
+ * `{ merge: false }`. So a single transient Firestore blip during a VISUAL EDIT (which saves ONE
+ * file) or the reviewer's critical-fix pass (~3 files) wiped the entire path index — the exact
+ * *"49 files thi! 3 rah gayi kyu?!"* wipe this guard was written to prevent.
+ *
+ * `'unknown'` is therefore a THIRD input, not a number: we did not learn the existing size, so we may
+ * not replace. Merging can never wipe; its only cost is that a genuine full rebuild leaves some stale
+ * paths in the index, and `removeWorkspaceFiles` already handles those. The asymmetry is the whole
+ * argument — a stale path is a tidy-up, a wiped index is the user's project gone.
+ */
+export function savePlanForFileSet(
+  existingCount: number | 'unknown',
+  newCount: number,
+): 'replace' | 'merge' {
+  if (existingCount === 'unknown') return 'merge';     // could not read — never overwrite what we cannot see
   if (existingCount <= 3) return 'replace';            // empty/tiny index — nothing meaningful to protect
   if (newCount >= existingCount / 2) return 'replace'; // comparable size — a real full save
   return 'merge';                                      // drastic shrink — a partial set; never wipe
@@ -140,10 +160,15 @@ export async function saveWorkspaceFiles(workspaceId: string, files: Record<stri
     const root = db.collection(COLLECTION).doc(workspaceId);
     // SHRINK GUARD (the "49 → 3 files" wipe): read the existing index BEFORE replacing it; a partial
     // set routes to mergeWorkspaceFiles (union) and the wipe is recorded visibly, never silent.
-    const guardMeta = await root.get().catch(() => null);
+    // ⚠️ A FAILED READ IS NOT AN EMPTY INDEX. `.catch(() => null)` used to answer the same `null` for
+    // both, and `[].length` then told the guard below there was nothing to protect. Distinguish them.
+    let guardMeta: FirebaseFirestore.DocumentSnapshot | null = null;
+    let guardRead: 'ok' | 'failed' = 'ok';
+    try { guardMeta = await root.get(); } catch { guardRead = 'failed'; }
     const existingPaths: string[] = guardMeta?.exists && Array.isArray(guardMeta.data()?.paths) ? guardMeta.data()!.paths : [];
-    if (savePlanForFileSet(existingPaths.length, entries.length) === 'merge') {
-      notePersistenceFailure('workspace_files', 'write', new Error(`shrink-guard: a save of ${entries.length} path(s) would have wiped an index of ${existingPaths.length} — merged instead`));
+    const existingCount: number | 'unknown' = guardRead === 'ok' ? existingPaths.length : 'unknown';
+    if (savePlanForFileSet(existingCount, entries.length) === 'merge') {
+      notePersistenceFailure('workspace_files', 'write', new Error(`shrink-guard: a save of ${entries.length} path(s) would have wiped an index of ${existingCount} — merged instead`));
       await mergeWorkspaceFiles(workspaceId, files);
       return;
     }

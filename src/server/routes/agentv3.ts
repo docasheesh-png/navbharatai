@@ -429,7 +429,7 @@ import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
-import { classifyIntentSmart, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild, userAskedForAnAppToBeBuilt } from '../AgentV3/IntentClassifier';
+import { classifyIntentSmartDetailed, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild, userAskedForAnAppToBeBuilt } from '../AgentV3/IntentClassifier';
 import { looksLikeRefusal } from '../lib/promptSafety';
 import { assessBuildInput } from '../AgentV3/buildableInput';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
@@ -9817,6 +9817,9 @@ async function noteBuildOutcome(
     })();
 
     let intent = classifyIntent(prompt);
+    // The reader's fourth answer: "they want something made but have not said WHAT" (report
+    // d6d664e6). False unless the reader says so, so every path below is unchanged without it.
+    let readerSaysUnclear = false;
     try {
       const freeRouter = AIRouterManager.getRouter('free');
       // Bounded (6s) — this LLM upgrade runs before the deadline timer is armed; a stalled free
@@ -9824,8 +9827,8 @@ async function noteBuildOutcome(
       // The smart classifier now reads INTENTION with project/conversation context, and only the
       // ambiguous (non-high-confidence) cases reach the LLM — clear greetings / explicit builds /
       // continuations stay instant.
-      intent = await raceTimeout(
-        classifyIntentSmart(
+      const smart = await raceTimeout(
+        classifyIntentSmartDetailed(
           prompt,
           (p) => freeRouter.route(p, 'You are a classifier. Reply with one word only.').then((r) => r.response.content),
           { projectExists, recentRequests },
@@ -9833,6 +9836,8 @@ async function noteBuildOutcome(
         6_000,
         'classifyIntentSmart',
       );
+      intent = smart.intent;
+      readerSaysUnclear = smart.unclear;
     } catch { /* LLM upgrade is best-effort — keyword result stands */ }
 
     /**
@@ -9894,9 +9899,23 @@ async function noteBuildOutcome(
      * attachment or an import, and not an edit intent — where a short order legitimately means
      * *carry on* with the app already there.
      */
+    /**
+     * TWO SOURCES, ONE SET OF CONDITIONS. `'no-object'` is the deterministic half — the shapes a word
+     * list can enumerate ("banao", "app banao"), decided in under a millisecond with no model. The
+     * reader's `unclear` is the half a word list can never reach: a typo, a mixed-language sentence,
+     * an unusual phrasing. Admin, 2026-09-17: *"user ka har woh message jo ek limit se chota hai ya
+     * unclear hai, hamesha LLM call karo — woh bata dega."* That call was already being made on every
+     * low-confidence message; what it lacked was a way to say this.
+     *
+     * ⚠️ BOTH pass through the SAME four narrowing conditions, deliberately. The reader already sees
+     * `projectExists` and `recentRequests`, so this is belt AND braces — but the cost of being wrong
+     * is asymmetric in the same direction it always is here, and a second opinion that can only ever
+     * make the gate NARROWER cannot introduce a new way to refuse a real prompt.
+     */
+    const namesNothingToBuild =
+      (!inputCheck.buildable && inputCheck.reason === 'no-object') || readerSaysUnclear;
     const askWhatToBuild =
-      !inputCheck.buildable
-      && inputCheck.reason === 'no-object'
+      namesNothingToBuild
       && intent !== 'edit_existing'
       && !projectExists
       && recentRequests.length === 0

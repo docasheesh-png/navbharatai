@@ -649,13 +649,44 @@ export interface IntentContext {
  * "build me X" / "fix the Y", continuations, code/URLs stay high-confidence and instant). If the LLM
  * returns an unrecognised value or throws, the keyword result stands — so it never blocks or breaks.
  */
-export async function classifyIntentSmart(
+export interface SmartIntent {
+  /** Which lane runs this turn. Never a new value — every existing caller keeps its three answers. */
+  intent: BuildIntent;
+  /**
+   * The reader concluded the user wants something MADE but has not said WHAT to make.
+   *
+   * 🔴 THE MISSING FOURTH ANSWER (admin build report d6d664e6, 2026-09-17). The prompt was one word,
+   * `"Bnao"` — *"make it"*. The keyword pass got it right and said LOW confidence, which is exactly
+   * what sends a message here. **The reader was then offered three choices — chat / build / edit —
+   * and answered `build`. It was not wrong either: "make it" IS an order to build.** The true answer,
+   * *"they have not told me WHAT"*, was not on the menu. The engine built for 29 minutes, delivered
+   * nothing, and named the app it invented after the instruction word itself.
+   *
+   * `buildableInput.ts` answers this deterministically for the shapes a word list can enumerate
+   * ("banao", "app banao"). This is the half a word list can never reach: a typo, a mixed-language
+   * sentence, an unusual phrasing. Admin's instruction, on being shown the first fix: *"user ka har
+   * woh message jo ek limit se chota hai ya unclear hai, hamesha LLM call karo — woh bata dega."*
+   * The call was already being made; what it lacked was somewhere to put this answer.
+   *
+   * 🔒 `intent` IS DELIBERATELY LEFT AT THE KEYWORD RESULT when this is true, so a caller that ignores
+   * this flag behaves EXACTLY as it does today. The flag adds an option; it removes none.
+   */
+  unclear: boolean;
+}
+
+/**
+ * The gatekeeper, with its fourth answer. See `SmartIntent.unclear` for why that answer exists.
+ *
+ * `classifyIntentSmart` below is this function with the flag discarded — one ladder, not two, the
+ * same way `classifyIntent` delegates to `classifyIntentWithConfidence`.
+ */
+export async function classifyIntentSmartDetailed(
   message: string,
   llmCall: (prompt: string) => Promise<string>,
   context?: IntentContext,
-): Promise<BuildIntent> {
+): Promise<SmartIntent> {
   const { intent, confidence } = classifyIntentWithConfidence(message);
-  if (confidence === 'high') return intent;
+  if (confidence === 'high') return { intent, unclear: false };
 
   const ctxLines: string[] = [];
   if (context?.projectExists !== undefined) {
@@ -679,26 +710,49 @@ export async function classifyIntentSmart(
     // already free to OFFER to build — so "chat" is never a refusal, only a faster first response.
     'If they are ASKING something, the answer is "chat" — even when their sentence contains a word like',
     'build, make, create or generate. Choose "build" only when they want an app produced NOW.',
-    'Choose exactly one of three categories:',
+    'Choose exactly one of four categories:',
     '  chat    — plain conversation, a greeting, a question, thanks, or asking how something works',
     '  build   — create a NEW app / feature / component from scratch',
     '  edit    — fix, modify, add to, or finish something that ALREADY exists',
+    '  unclear — they DO want something made, but have not said WHAT to make',
+    // The fourth answer, spelled out. Without this the reader must pick one of the other three, and
+    // for "make it" / "build an app" it reasonably picks "build" — which is how one word became a
+    // 29-minute build for an app nobody described (report d6d664e6).
+    'Answer "unclear" when they are asking for something to be made but their message does not say',
+    'what: "make it", "build an app", "banao", "kuch bana do". Never guess a product for them —',
+    'answering "unclear" lets us ask one short question instead of building the wrong thing.',
     ...(ctxLines.length ? ['', ...ctxLines] : []),
     '',
     `User message: "${message.slice(0, 300)}"`,
     '',
-    'Reply with ONLY one word: chat, build, or edit.',
+    'Reply with ONLY one word: chat, build, edit, or unclear.',
   ].join('\n');
 
   try {
     const raw = (await llmCall(prompt)).trim().toLowerCase().split(/\s/)[0] ?? '';
-    if (raw === 'chat') return 'chat';
-    if (raw === 'build') return 'new_build';
-    if (raw === 'edit') return 'edit_existing';
+    if (raw === 'chat') return { intent: 'chat', unclear: false };
+    if (raw === 'build') return { intent: 'new_build', unclear: false };
+    if (raw === 'edit') return { intent: 'edit_existing', unclear: false };
+    // ⚠️ The INTENT stays at the keyword result here, on purpose — see `SmartIntent.unclear`. A
+    // caller that does not read the flag must be byte-identical to before this answer existed.
+    if (raw === 'unclear') return { intent, unclear: true };
   } catch {
     /* LLM call failed — fall back to keyword result */
   }
-  return intent;
+  return { intent, unclear: false };
+}
+
+/**
+ * The three-way gatekeeper every existing caller uses: `classifyIntentSmartDetailed` with the
+ * fourth answer discarded. Delegating rather than duplicating — this file has already paid once for
+ * two hand-maintained copies of one ladder (see `classifyIntent`).
+ */
+export async function classifyIntentSmart(
+  message: string,
+  llmCall: (prompt: string) => Promise<string>,
+  context?: IntentContext,
+): Promise<BuildIntent> {
+  return (await classifyIntentSmartDetailed(message, llmCall, context)).intent;
 }
 
 /**

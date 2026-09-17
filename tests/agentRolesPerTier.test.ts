@@ -86,7 +86,9 @@ describe('what the table deliberately did NOT move — and why it is still right
     expect(safety.slice(at, at + 80)).not.toContain('async');
   });
   it('the intent doubt-reader runs on the FREE chat router (glm-4.7-flash led, $0) for every tier', () => {
-    const at = route.indexOf('classifyIntentSmart(\n');
+    // The symbol gained a suffix on 2026-09-17 (`classifyIntentSmartDetailed`, the reader's fourth
+    // answer) — the invariant asserted here, that this call runs on the FREE router, is unchanged.
+    const at = route.indexOf('classifyIntentSmartDetailed(\n');
     expect(at).toBeGreaterThan(-1);
     expect(route.slice(at - 600, at)).toContain("AIRouterManager.getRouter('free')");
   });

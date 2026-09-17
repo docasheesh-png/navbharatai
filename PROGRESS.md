@@ -63558,3 +63558,45 @@ close it: a prompt whose every word is a placeholder OR a creation verb names no
 ⚠️ **One of my own tests from the PR above asserted `"app banao"` BUILDS, and that assertion was the
 bug** — it encoded my incomplete reading of the report, not anything a user needs. Moved into the
 category-word block and corrected, with the reason recorded beside it rather than silently deleted.
+
+### 2026-09-17 (same day) — the intention reader gets its fourth answer: `unclear`
+
+Admin, after the two fixes above: *"user ka har woh message jo ek limit se chota hai ya unclear hai,
+hamesha LLM call karo — woh bata dega."*
+
+**The honest finding, reported back before building anything: that call was ALREADY being made**, on
+every low-confidence message, on the free chain at ₹0, bounded at 6 s — report `d6d664e6` is the proof
+that it ran for `"Bnao"`. **What was missing was somewhere to put the answer.** The reader is handed
+three choices (`chat` / `build` / `edit`) and answered `build`, which is not even wrong: *"make it"* IS
+an order to build. *"They have not told me WHAT"* was not on the menu.
+
+- `classifyIntentSmartDetailed` returns `{ intent, unclear }` and the reader's menu now carries a
+  fourth answer. `classifyIntentSmart` is that function with the flag discarded — **delegating, not
+  duplicating**, the same pattern `classifyIntent` already uses.
+- 🔒 **`intent` deliberately stays at the KEYWORD result when `unclear` is true.** A caller that
+  ignores the flag is byte-identical to before. The flag adds an option; it removes none.
+- The route ORs it with the deterministic `'no-object'` half and sends **both through the same four
+  narrowing conditions** (empty workspace, no earlier request, no attachment/import, not an edit).
+  A second opinion that can only make the gate NARROWER cannot introduce a new way to refuse a real
+  prompt.
+
+⚠️ **What was deliberately NOT done, and why (rule 3, no sycophancy).** The instruction as written —
+*call the LLM on every short message* — would add a provider round trip to `"hi"`, `"ok"`, `"thanks"`,
+`"haan"`: HIGH-confidence messages with no doubt in them, answered instantly and free today. That
+slows the app's most common turn for no gain. The existing design already asks **only when it is
+genuinely unsure**, which is both better and cheaper; a test now pins that a HIGH-confidence message
+never reaches the reader at all. Also recorded: `glm-4.5-flash` is on none of this repo's ladders —
+free chat leads with `glm-4.7-flashx` (₹0), which is already the cheapest rung, and pinning a model id
+in code is the churn Decision A exists to avoid.
+
+🔎 **The bigger lever, named and not yet taken:** the recurring failure is the OPPOSITE shape — a
+**HIGH-confidence hard lock that skips the reader entirely**. Three autopsies now (`5abad374`,
+`cc8c9075`, and `d6d664e6`'s sibling). PR #3040 (another session) is working that seam; this change
+deliberately stays out of `clauseReadsAsQuestion` and `userAskedForAnAppToBeBuilt` so the two do not
+race in one file.
+
+**Tests:** `tests/intentReaderCanSayUnclear.test.ts` (9) + the reader block in
+`objectlessBuildAsks.test.ts`. Reversion-proven in **both** halves — deleting the `unclear` mapping
+fails the reader suite, deleting `|| readerSaysUnclear` fails the route suite. Two source-scanning
+tests had their needles updated (`classifyIntentSmartDetailed`, the widened route window): the symbol
+and the window moved, **the assertions did not**.

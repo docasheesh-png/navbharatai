@@ -12274,6 +12274,16 @@ async function noteBuildOutcome(
           // show — see the tick below, which withholds the countdown until something real anchors it.
           etaEvidenced = estimateIsEvidenced(est);
           const etaShown = etaEvidenced ? firstEtaLine(est, past.length) : unevidencedFirstEtaLine();
+          // KEEP THE PROMISE SO THE ENDING CAN BE MEASURED AGAINST IT (open root cause #6). The
+          // `ETA_BASIS` line below records the same numbers as PROSE, for a human; this records them
+          // as NUMBERS, so the report can reconcile them against its own clock without anyone parsing
+          // a sentence we wrote. Stored structured for exactly the reason `buildFailureCategory.ts`
+          // documents: reading our own prose back to recover facts we had in hand is how a reader
+          // ends up classifying on a wording change.
+          buildDiag.setEtaPromise({
+            estimateMs: est.estimateMs, lowMs: est.lowMs, highMs: est.highMs,
+            evidenced: etaEvidenced, shown: etaShown.replace(/^⏱️\s*/, ''),
+          });
           buildDiag.record({
             phase: 'plan', severity: 'info', code: 'ETA_BASIS',
             message: `ETA ${formatEtaRange(est.lowMs, est.highMs, est.estimateMs)} (midpoint ${est.etaText}) · basis ${est.basis} · confidence ${est.confidence}`,

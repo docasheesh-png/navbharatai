@@ -22,7 +22,7 @@ import { sandboxCost, describeSandboxCost } from './sandboxCost';
 import { redactProvidersText } from '../lib/providerRedaction';
 import { costAlertAdvisory, costAlertThresholdUsd } from './costAlert';
 import { isModelUnavailableError } from './providerErrorClass';
-import { isStarvedBudgetError, isUnclampedStarvation, isLaneBoundStarvation } from './floorBudget';
+import { isStarvedBudgetError, isUnclampedStarvation, isLaneBoundStarvation, isAskBoundStarvation } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
 import { isBudgetEndedError } from './turnDeadline';
 import { typecheckEvidenceFromCommands } from './TscGate';
@@ -1657,6 +1657,15 @@ export class BuildDiagnostics {
             ? `The ${name} rung answered inside its clock and produced nothing — "${detail}". `
               + 'Its ceiling was NOT reduced by us: this rung always reasons, so it keeps the build loop\'s full per-turn ask, and it still spent every token thinking before any text or tool call appeared. '
               + 'That is the model, not our arithmetic; the rung was retired for the rest of this build so the ladder could reach a vendor that fits.'
+            // 🔴 AND A FOURTH (autopsy 57875eb3, 2026-09-17): the ask was never reduced at all. A
+            // fast-lane repair asked for 8,000 tokens, the clock could carry ~9,800, and glm-5.3
+            // spent all 8,000 thinking — thirteen times. The "own cap" sentence below blamed
+            // FLOOR_TIMEOUT_CAP_MS for a ceiling that was the caller's own `maxTokens`.
+            : isAskBoundStarvation(reason)
+            ? `The ${name} rung answered inside its clock and produced nothing — "${detail}". `
+              + 'Its ceiling was the CALLER\'S OWN ASK: the call requested exactly this many output tokens, the clock would have carried more, and nothing in floorBudget.ts reduced it — so the number to look at is that caller\'s per-call ask, not this engine\'s own cap or rate constant in floorBudget.ts. '
+              + 'A reasoning model bills its thinking to the same ceiling, so an ask below its thinking returns a reply with no text and no tool call. '
+              + 'The rung was retired for the rest of this build so the ladder could reach a vendor that fits.'
             : isLaneBoundStarvation(reason)
             ? `The ${name} rung answered inside its clock and produced nothing, because the ceiling it was given was spent before the answer began — "${detail}". `
               + 'This is NOT a provider outage and NOT the user\'s prompt: a reasoning model bills its thinking to the same ceiling, so a ceiling below its thinking returns a truncated reply with no text and no tool call. '

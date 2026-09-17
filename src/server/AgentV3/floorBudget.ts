@@ -297,6 +297,30 @@ export function isLaneBoundStarvation(error: unknown): boolean {
 }
 
 /**
+ * Marks a starvation whose ceiling was the CALLER'S OWN ASK — nothing reduced it.
+ *
+ * 🔴 THE THIRD CASE, AND THE REPORT PRINTED THE FIRST ONE'S SENTENCE FOR IT FIFTEEN TIMES (autopsy
+ * 57875eb3, 2026-09-17). A fast-lane repair asked for 8,000 tokens; the 300 s streamed clock could
+ * carry ~9,800, so `reconcileFloorBudget` granted the ask unchanged — and `glm-5.3` spent all 8,000 on
+ * reasoning, thirteen calls in a row. Every one was reported as *"Our own ceiling … the ceiling is
+ * FLOOR_TIMEOUT_CAP_MS / AGENTV3_FLOOR_MS_PER_TOKEN"*. Neither knob bounded that call. The number that
+ * did is the CALLER's per-call `maxTokens`, which lives nowhere near this module.
+ *
+ * `granted === requested` (with `requested > 0`) is exactly the not-clamped case of
+ * `reconcileFloorBudget` — the ask fitted the clock — so this fact is derivable from the two numbers
+ * already passed and needs no new plumbing. It is mutually exclusive with BOTH other markers by
+ * construction: an unclamped-reasoning rung takes the branch above, and a lane clock that did not
+ * reduce the ask did not bound it.
+ */
+export const STARVED_BY_ASK_MARK = 'the ceiling was the ask itself';
+
+/** Did the caller's own, unreduced ask bound this starvation? PURE. */
+export function isAskBoundStarvation(error: unknown): boolean {
+  const text = error instanceof Error ? error.message : String(error ?? '');
+  return text.includes(STARVED_BUDGET_MESSAGE) && text.includes(STARVED_BY_ASK_MARK);
+}
+
+/**
  * The line a starved rung throws — the marker first (the failure classifier reads the first line),
  * then the arithmetic, so the admin report carries the numbers instead of an adjective. PURE.
  */
@@ -316,6 +340,15 @@ export function starvedBudgetError(
       `${STARVED_BUDGET_MESSAGE} — this rung was authorised the full ${granted} output tokens the build `
       + `asked for (${STARVED_UNCLAMPED_MARK}) and spent every one of them on reasoning before producing `
       + 'text or a tool call. This model needs more output than one turn can carry, so the ladder moved on.',
+    );
+  }
+  if (requested > 0 && requested === granted) {
+    // Not clamped: the ask fitted the clock, so the ask IS the ceiling. See STARVED_BY_ASK_MARK.
+    return new Error(
+      `${STARVED_BUDGET_MESSAGE} — this rung was authorised the full ${granted} output tokens its caller `
+      + `asked for (${STARVED_BY_ASK_MARK}: nothing reduced it, and the clock would have carried more) and `
+      + 'spent every one of them on reasoning before producing text or a tool call. The number that bounded '
+      + "this call is the caller's own per-call ask, not this engine's cap or rate constant.",
     );
   }
   const asked = requested > 0 && requested !== granted ? `, cut down from ${requested}` : '';

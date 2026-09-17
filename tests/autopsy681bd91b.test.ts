@@ -4,7 +4,13 @@
  *
  * Six root causes, one report:
  *   A1  a starvation was retired per KEY ('GLM#2', 'GLM#3' …) although it is a fact about the MODEL,
- *       so a 51-key pool re-proved it key after key;
+ *       so a 51-key pool re-proved it key after key.
+ *       ⚠️ SUPERSEDED WHILE THIS WAS IN FLIGHT: another session shipped the same fix from report
+ *       57875eb3 (#3057), and THEIRS IS BETTER — it keeps a model-not-found keyed on the KEY, because
+ *       a pool may span accounts whose model access differs and re-proving a 404 costs one round-trip
+ *       rather than two minutes of reasoning. Main's implementation was taken whole. These two cases
+ *       are kept as a SECOND guard on the same invariant, anchored on a different report's numbers —
+ *       two reports, one contract;
  *   A2  the repair (8,000) and the roadmap planner (4,000) hard-coded an ask below what an
  *       always-reasoning model needs to BEGIN an answer, and nothing raised it;
  *   TS  the typecheck gate ran on the vite-react SCAFFOLD's untouched src/*.tsx for a build that had
@@ -46,8 +52,8 @@ describe('A1 — a starvation retires the MODEL across the whole key pool, not o
     let glmCalls = 0;
     const glm = () => { glmCalls++; return Promise.reject(starve(8000)); };
     // The FIRST key to starve is deliberately NOT the one whose name equals the family ('GLM'):
-    // with the old per-key write ('GLM#2::glm-5.3') a family lookup ('GLM::glm-5.3') would miss, so
-    // this ordering is what makes the write-key half of the fix load-bearing, not only the lookup.
+    // with a per-key write ('GLM#2::glm-5.3') a family lookup ('GLM::glm-5.3') would miss, so this
+    // ordering exercises the WRITE key as well as the lookup — the half a same-named first key hides.
     const chain = [
       rung('GLM#2', 'glm-5.3', 'GLM', glm), rung('GLM#3', 'glm-5.3', 'GLM', glm), rung('GLM', 'glm-5.3', 'GLM', glm),
       rung('CLAUDE_HAIKU', 'claude-haiku-4-5', undefined, async () => ({ text: 'ok', stopReason: 'end_turn', toolUses: [], usage: { inputTokens: 1, outputTokens: 1 } })),

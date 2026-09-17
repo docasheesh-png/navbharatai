@@ -2277,6 +2277,22 @@ the flag entries above promise.
   mislabelled empty pass. A sudden crop of `JOURNEY_FAILED` is not a regression — it is the check
   working for the first time, and each one is a real app that looks like it saves data and does not.
 
+- **`AGENTV3_CONTRACT_FILE`** (default ON, set `off` to disable — added 2026-09-17, autopsy 57875eb3) —
+  the fast lane's SHARED CONTRACT (the enums / interfaces / types every per-file call is handed) is now
+  written as a REAL file, `src/types.ts` (or `types.ts` when the app has no `src/`), BEFORE any other file,
+  and every per-file and repair prompt names it with the exact relative import specifier for that file.
+  **Why:** the contract used to be a paragraph with no home — the manifest planned no file for it — so
+  eleven isolated calls each invented one (`../types/game`, `../types/note`, `./types/game`, `./App`),
+  `tsc` failed on file one, and the repair pass that followed is where a 29-minute build died. Bodiless
+  util SIGNATURES stay in the prose block (valid in a declaration, a compile error in a module) and are
+  implemented by the file the manifest names. A planned types file at that exact path is superseded by
+  the contract rather than generated twice. No file is written for a contract with nothing exportable,
+  nor for a framework the module cannot load in (Python, Rails, …) — today's behaviour exactly. Logic in
+  `SimpleBuilder.ts` (`contractModule`, `contractFilePath`, `contractImportSpecifier`); test-locked in
+  `tests/theContractIsAFileNotAParagraph.test.ts`. **What to watch:** the repair-attempt count on Weak
+  fast-lane builds — with the symbols homed, the errors that remain should be the mechanical ones the
+  deterministic pass already fixes for free.
+
 **New report codes you will now see (2026-08-12) — what they mean:**
 - `RELEASE_GATE` — GREEN / YELLOW / RED / **UNKNOWN**. UNKNOWN is the important one: nothing failed and
   nothing was PROVEN, because every runtime check needs a live preview and they all skip together. GREEN

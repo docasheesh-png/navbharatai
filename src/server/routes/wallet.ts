@@ -8,6 +8,7 @@ import { requireUserMatch } from '../lib/authMiddleware';
 import { appLockBlocks } from '../lib/appLockEnforce';
 import { TOKENS_PER_RUPEE, welcomeBonusTokens } from '../lib/payments';
 import { decideWeeklyTopUp, topUpLedgerEntry, summarizeGiftLadder } from '../lib/weeklyTopUp';
+import { flatWelcomeGiftAllowed, weeklyTopUpAllowed, retiredGiftSummary } from '../lib/giftPolicy';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from '../lib/walletResolve';
 import { giftPlanV2Enabled, decideSignupGrant, decidePhoneClaim, claimRefusalMessage, verifiedGiftTotalTokens } from '../lib/giftPlan';
 import { normalizeEmailForGift, normalizePhoneForGift, giftMarkerCandidates, giftMarkerIdToWrite } from '../lib/giftIdentity';
@@ -42,6 +43,9 @@ class SkipLadder extends Error {}
  * a v2 account can still receive.
  */
 function v2GiftSummary(data: Record<string, any>): Record<string, unknown> {
+  // 🔴 RETIRED (admin 2026-09-17). Gating only the GRANT would leave this summary offering a claim
+  // the claim route now refuses — the screen and the money must stand down together.
+  if (!flatWelcomeGiftAllowed()) return retiredGiftSummary(data.freeGiftedTokens);
   const givenRaw = Number(data.freeGiftedTokens);
   const gifted = Number.isFinite(givenRaw) && givenRaw > 0 ? Math.floor(givenRaw) : 0;
   const total = verifiedGiftTotalTokens();
@@ -185,7 +189,11 @@ export function registerWalletRoutes(app: Express): void {
         // switch has no such stamp and keeps its ladder exactly as it is, because those users were
         // SHOWN a next-credit date and taking it away would be breaking a promise we made on screen.
         // The cost of honouring it is bounded and one-way: the ladder ends by itself at ₹650.
-        const ladderRetired = data.giftPlan === 'v2';
+        // 🔴 RETIRED FOR EVERYONE (admin 2026-09-17): "weekly reward, welcome reward yeh sab hatao."
+        // The per-wallet `giftPlan: 'v2'` stamp below retired it only for NEW wallets; this retires it
+        // for every wallet. The ladder's own logic and its 286 lines of tests are untouched — only the
+        // one place that APPLIES it stands down, so re-enabling is one line with proven code behind it.
+        const ladderRetired = !weeklyTopUpAllowed() || data.giftPlan === 'v2';
         try {
           if (ladderRetired) throw new SkipLadder();
           const giftedSoFar = Number.isFinite(Number(data.freeGiftedTokens))
@@ -320,16 +328,22 @@ export function registerWalletRoutes(app: Express): void {
             : null;
           // The per-USER marker still guards v2: it is what stops a wallet-doc recreation re-granting,
           // and that hole is independent of the per-identity ones.
-          const welcomeTokens = v2Grant
-            ? (alreadyGranted ? 0 : v2Grant.tokens)
-            : welcomeGrantTokens(alreadyGranted);
+          // 🔴 RETIRED (admin 2026-09-17): nothing is handed over for merely arriving. Both plans are
+          // gated together HERE rather than inside their own modules, because this is the only place
+          // either one moves money — which keeps their anti-abuse logic and tests intact and true.
+          const welcomeTokens = !flatWelcomeGiftAllowed() ? 0
+            : v2Grant
+              ? (alreadyGranted ? 0 : v2Grant.tokens)
+              : welcomeGrantTokens(alreadyGranted);
           const initialWallet = buildInitialWallet({ userId, email, name, welcomeTokens, nowIso });
           if (v2Grant) {
             // Stamped so the retired weekly ladder never runs for this wallet, while wallets created
             // BEFORE the switch keep their ladder and the schedule they were shown. Nobody's promise
             // is withdrawn; the plan simply changes for accounts opened under it.
             (initialWallet as Record<string, unknown>).giftPlan = 'v2';
-            (initialWallet as Record<string, unknown>).phoneVerifiedGift = v2Grant.reason === 'verified-signup';
+            // Only true when a verified-phone grant actually LANDED. Stamping it on a 0-token
+            // signup would record a gift that was never given.
+            (initialWallet as Record<string, unknown>).phoneVerifiedGift = welcomeTokens > 0 && v2Grant.reason === 'verified-signup';
           }
           tx.set(walletRef, initialWallet);
           // Spend the identities in the SAME transaction as the credit — a marker that could land
@@ -365,12 +379,16 @@ export function registerWalletRoutes(app: Express): void {
         return res.json({
           ...createdWallet,
           tokensPerRupee: TOKENS_PER_RUPEE,
-          freeGift: summarizeGiftLadder({
-            giftedSoFar: Number((createdWallet as Record<string, unknown>).freeGiftedTokens) || 0,
-            lastTopUpAt: (createdWallet as Record<string, unknown>).lastWeeklyTopUpAt as string ?? null,
-            createdAt: (createdWallet as Record<string, unknown>).createdAt as string ?? null,
-            now: Date.now(),
-          }),
+          // Same stand-down as the existing-wallet path above: a brand-new wallet must not be shown
+          // a ₹650 ladder and a next-credit date that nothing will ever deliver.
+          freeGift: !weeklyTopUpAllowed() || (createdWallet as Record<string, unknown>).giftPlan === 'v2'
+            ? v2GiftSummary(createdWallet as Record<string, any>)
+            : summarizeGiftLadder({
+                giftedSoFar: Number((createdWallet as Record<string, unknown>).freeGiftedTokens) || 0,
+                lastTopUpAt: (createdWallet as Record<string, unknown>).lastWeeklyTopUpAt as string ?? null,
+                createdAt: (createdWallet as Record<string, unknown>).createdAt as string ?? null,
+                now: Date.now(),
+              }),
         });
       }
     } catch (err: any) {
@@ -434,6 +452,9 @@ export function registerWalletRoutes(app: Express): void {
         // different things: that one bounds ONE wallet, this one bounds ONE NUMBER across wallets.
         const phoneUsed = phoneUsedPre || await giftIdentityUsedInTx(tx, db, 'phone', normPhone);
         const claim = decidePhoneClaim({ giftedSoFar: gifted, phoneUsed });
+        // The other half of the SAME ₹500 — gating only the signup grant would leave the remainder
+        // claimable through this route.
+        if (!flatWelcomeGiftAllowed()) return { granted: 0, reason: 'disabled' as const };
         if (claim.tokens <= 0) return { granted: 0, reason: claim.reason };
 
         const creditInr = claim.tokens / TOKENS_PER_RUPEE;

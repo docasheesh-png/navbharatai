@@ -62486,6 +62486,80 @@ is put to the admin as a measured proposal.
 a daemon that never created the file), and `BillingLedgerView`'s type (narrower than its own value).
 Four in one day is worth naming as a class of its own: **this codebase's most common defect is not a
 missing capability, it is a built capability nothing reaches.**
+## 2026-09-17 — Developer Tools → NavBharatAI API: the keys are real now, every scope opens a door, and a user can run their own AI on a NavBharatAI key
+
+**Admin, on seeing the API Keys card at the bottom of My Profile:** *"'other' -> 'developer tools' —
+developer tools ke andar yeh pura system bana kar dalo. par dyan rahe, system working hona chahiye, api
+keys farzi nahi ho, kam kare, jisse user app uninstall na kare! aur isko profile me se hata do!! aur user
+is api se kya kya share karna chahta hai, woh bhi control kar sake user. … ho sakta hai, user apna ai
+banaye aur hamare api key dal ke chalaye!"*
+
+### What was wrong
+
+- Three scopes could be ticked; **one** was required by anything. `read:usage` and `read:builds` were
+  labels — the second absolute rule's forbidden state, the same one the inert "Provider Kill Switches"
+  were removed for the same day.
+- `/api/v1/me` returned monthly usage to any key with `read:profile`, so `read:usage` was not a
+  permission even where it existed.
+- The card sat at the bottom of My Profile — the page a non-technical user meets first, and not where
+  a developer looks.
+
+### What exists now
+
+**Doorway.** The arrow in `"other" -> "developer tools"` is read as a PATH, not a rename: the Other AI
+page already has a group called *Developer Tools*, and the new **NavBharatAI API** tile is its first
+item — the one live tile in a group otherwise held back as "Coming soon". Renaming the whole page
+would have produced *Developer Tools → Developer Tools* and touched 85 knowledge-base paths for no
+user gain. If the admin meant a rename, it is one label in three files. The profile card is removed
+and its component deleted — one door.
+
+**Scopes = what the user shares**, each described in plain words served by the server, each guarding a
+real route (`SCOPE_ROUTES`, test-asserted against the registration):
+
+| scope | route | returns |
+|---|---|---|
+| `read:profile` | `GET /api/v1/me` | name, account id (usage only if the key also has `read:usage`) |
+| `read:usage` | `GET /api/v1/usage` | wallet balance ₹ (`null` when unreadable, never 0), month's builds + spend |
+| `read:builds` | `GET /api/v1/builds` | the holder's apps with live links |
+| `ai:chat` | `POST /api/v1/chat/completions` | **OpenAI-compatible** — `messages` in, `choices[0].message.content` out, `model: "navbharatai"` |
+
+**The AI door, and the three laws on it.** ONE-WALLET: the answer is produced by the same
+`callProfessionalAIWithUsage` chain the Other-AI tools use, inside `collectAiSpend`, charged by the same
+`chargeForAiTurns` under a new wallet feature `api` ("Developer API" on the ledger). A free-model
+answer is ₹0 exactly as in the app. WHITE-LABEL: the response, every refusal and the system prompt name
+only NavBharatAI; `usage` is included only when the provider reported tokens. SAFETY: the same
+`triagePrompt` as chat and build runs first — the pornography ban is refused with 422 before a token is
+spent.
+
+🔒 **THE CAP IS THE REAL DEFENCE** (the app-gateway lesson, applied to a secret). Every key carries a
+daily ₹ ceiling the holder sets (default ₹50, max ₹1,000, editable on the page). It is checked
+BEFORE the wallet and bites even on a free-listed account — a leaked key is a leaked key whoever owns
+it. The counter moves on what the turn cost, not on what was debited, so it keeps biting while
+`AI_WALLET_SPEND` is off. An empty wallet is refused (402) before any model call; unreadable balance is
+allowed through, fail-open like every other money gate. A Professional Pass is deliberately NOT
+honoured here: it pays for the holder's own use in the app, and a key's traffic may be an unbounded
+number of *their* users — the same reasoning `appAi.ts` records. Per-key 60 req/min in memory, plus the
+shared per-IP limiter.
+
+**The proof on the screen.** Right after a key is created — while the secret is still on screen, the
+only moment the browser has it — a "Test this key now" button calls `GET /api/v1/me` with it and shows
+the real response. The list shows each key's spend and calls today, last use, limit; the pencil edits
+the limit, the trash revokes. Quick Start in curl, Node.js (OpenAI SDK with `baseURL`) and Python.
+
+### Honest boundaries
+
+- **Non-streaming only.** The chain answers in one piece; `stream: true` is not honoured yet. Stated in
+  the module rather than half-built.
+- **`spendUsd` in `/usage` is the platform's recorded monthly figure** (`UserCostStore`), the same
+  number the Billing panel shows.
+- The free-list courtesy needs the holder's email; it is looked up via Firebase Admin and cached ten
+  minutes, and a lookup that fails means "not free-listed" — the safe side.
+- `comingSoonTools.test.ts` pinned the whole Developer Tools group as off; it now exempts exactly
+  `devapi`, with the admin's order quoted in place, and the live count moves from seven to eight.
+
+**Tests:** `tests/developerApi.test.ts` — the pure rules, and the routes end to end through a fake app
+(403 without the scope, 422 on the ban, 429 at the cap naming the spend, 402 on an empty wallet, 503
+in branded words with nothing charged, the OpenAI shape with the charge landing after the answer).
 ## 2026-09-17 — The admin's cost panel priced every build at its family's dearest rate
 
 From the deep re-autopsy of `9cca1fd5`. Verified by reading the code, not taken from the workflow.

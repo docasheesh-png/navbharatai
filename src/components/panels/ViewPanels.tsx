@@ -58,6 +58,7 @@ const WhitelabelBranding= _lz(() => import('../ide/WhitelabelBranding'), 'Whitel
 const DesignSystem      = _lz(() => import('../ide/DesignSystem'),       'DesignSystem');
 const AppHealthMonitor  = _lz(() => import('../ide/AppHealthMonitor'),   'AppHealthMonitor');
 const APITester         = lazy(() => import('../ide/APITester'));
+const DeveloperApiCard  = _lz(() => import('../devtools/DeveloperApiCard'), 'DeveloperApiCard');
 
 export interface ViewPanelsProps {
   /** The app's resolved device mode, handed to the full-page panels so a desktop screen is not given a
@@ -366,6 +367,17 @@ export function ViewPanels({
       {activeView === 'testing' && (
         <div className="flex-1 h-full overflow-hidden">
           <TestPanel generatedCode={generatedCode} files={files} />
+        </div>
+      )}
+
+      {/* THE NAVBHARATAI API — Other → Developer Tools → NavBharatAI API (admin 2026-09-17). A full page
+          rather than a card on the tools grid: a key is made, tested and controlled here, and that
+          needs room. Signed-out visitors see what they would get and are asked to sign in. */}
+      {activeView === 'devapi' && (
+        <div className="flex-1 h-full overflow-y-auto">
+          <div className="w-full max-w-4xl mx-auto px-4 sm:px-6 py-6">
+            <DeveloperApiCard signedIn={!!user} onShowLogin={() => setShowAuth(true)} />
+          </div>
         </div>
       )}
 

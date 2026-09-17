@@ -24,6 +24,7 @@
 
 import { envFlag } from './envFlag';
 
+import { parseEnvNumber } from './envNumber';
 /**
  * One purchasable token pack. TWO amounts, deliberately separate (admin 2026-08-09: "Google aur
  * Apple apna % lete hai — hamare ₹ kam nahi hone chahiye"):
@@ -57,8 +58,8 @@ export interface StorePack {
  * remit — the payout report is the only honest source for the final rate).
  */
 export function storeFeePct(): number {
-  const v = Number(process.env.STORE_FEE_PCT);
-  return Number.isFinite(v) && v >= 0 && v < 100 ? v : 15;
+  const v = parseEnvNumber(process.env.STORE_FEE_PCT);
+  return v !== null && v >= 0 && v < 100 ? v : 15;
 }
 
 /**

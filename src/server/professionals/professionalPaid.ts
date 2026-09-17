@@ -8,6 +8,7 @@
 
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 
+import { parseEnvNumber } from '../lib/envNumber';
 /** Master switch. OFF (default) = no gating anywhere — professionals behave exactly like today. */
 export function professionalPaidEnabled(): boolean {
   return String(process.env.PROFESSIONAL_PAID_ENABLED || '').trim().toLowerCase() === 'true';
@@ -16,8 +17,8 @@ export function professionalPaidEnabled(): boolean {
 /** Daily free-message allowance for non-subscribers (across all professionals). Default 50 (admin
  *  2026-07-15). Env-tunable without a deploy. */
 export function professionalFreeDailyLimit(): number {
-  const n = Number(process.env.PROFESSIONAL_FREE_DAILY_LIMIT);
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 50;
+  const n = parseEnvNumber(process.env.PROFESSIONAL_FREE_DAILY_LIMIT);
+  return n !== null && n >= 0 ? Math.floor(n) : 50;
 }
 
 /** Professional Pass price in ₹. Default 99. */

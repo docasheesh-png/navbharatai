@@ -18,6 +18,7 @@ import { adaptiveGuard } from './src/server/lib/adaptiveRateLimit';
 import { securityHeadersConfig } from './src/server/lib/securityHeaders';
 import { responseCompression } from './src/server/lib/responseCompression';
 import { setDb as setSharedDb } from './src/server/lib/db';
+import { envFlag } from './src/server/lib/envFlag';
 import { registerWalletRoutes } from './src/server/routes/wallet';
 import { registerReferralRoutes } from './src/server/routes/referral';
 import { registerSecretsRoutes } from './src/server/routes/secrets';
@@ -795,9 +796,15 @@ setInterval(() => {
         .then(({ scheduler }) => {
           /** Set only when the purge is enabled; fired once the cross-instance claim is in place. */
           let bootRun: (() => void) | null = null;
-          // P-DATA.4 — TTL retention purge, OPT-IN (DATA_RETENTION_PURGE_ENABLED=true) so no automated
+          // P-DATA.4 — TTL retention purge, OPT-IN (DATA_RETENTION_PURGE_ENABLED) so no automated
           // deletion runs in production without explicit admin sign-off. Daily @ 03:00 UTC + once at boot.
-          if (process.env.DATA_RETENTION_PURGE_ENABLED === 'true') {
+          //
+          // 🔒 READ THROUGH `envFlag`, NOT `=== 'true'`. The admin turns features on by writing `on`
+          // — CLAUDE.md records several flags set exactly that way — and under the strict comparison
+          // `on`, `1`, `yes` and `TRUE` all left this purge OFF with nothing anywhere to say so. The
+          // whole point of the 2026-08-09 one-parser sweep; this call site was outside the tree that
+          // sweep's guard walks, because `server.ts` sits at the repo ROOT and not under `src/`.
+          if (envFlag('DATA_RETENTION_PURGE_ENABLED')) {
             const runPurge = () => import('./src/server/lib/DataRetentionManager')
               .then(({ getRetentionDb, purgeExpired }) => {
                 const db = getRetentionDb();

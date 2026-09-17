@@ -60116,6 +60116,71 @@ something to bury in this change — recorded here so it is a decision rather th
 
 Tests: `publishedAppsView.test.ts` (21, the URL guard reversion-proven) ·
 `publishedAppsWiring.test.ts` (13). `AppKnowledgeBase` updated in the same change.
+## 2026-09-17 — "wahi se start ho": the app reopens your conversation, and your conversations are on Home
+
+Admin, verbatim: *"navbharatai free, me free chat ke sath bahut sare, professionals bhi hai — kuch aisa
+system banao, ki user last session jaga chore, next time wahi se start ho!! aur old session kis button ke
+piche hide na ho."*
+
+### What the audit found (read out of the code, not inferred)
+
+| Surface | Transcript saved? | Screen resumed next visit? |
+|---|---|---|
+| Free chat (`nbi_chat`) | ✅ `navbharat_sessions` + Firestore (signed-in only) | ❌ **no** — `initialNbiMessages()` returned a welcome line or the language picker |
+| Pro chat (`nbi_pro_chat`) | ✅ `navbharat_pro_messages` | ✅ transcript only, and only if you navigated there |
+| ~70 professionals | ✅ `prof_<id>_messages` | ✅ per professional, on mount — if you navigated there |
+| the app itself | — | ❌ `activeView` always initialised to `'home'` |
+
+🔴 **The worst of it was not the missing transcript — it was `currentSessionId = Date.now()` on every
+load.** The previous free conversation was not hidden, it was ORPHANED: the next message opened a new
+session row, so a user's History filled with one-message fragments of a chat they thought they were still
+in. **Restoring the messages alone would have been worse than the bug** — App.tsx's save effect writes
+`messages: <what is on screen>` back into the saved session, so a resume that showed the old transcript
+would have copied it into a new row on every refresh. The transcript and the id had to come back together.
+
+### Shipped
+
+- **`src/lib/lastPlace.ts`** — one memory, five rules, each with its reason: an explicit URL always wins
+  (a guess never overrides a statement, which is what would have broken every share link); a login-gated
+  place is never landed on while signed out (no login wall as frame one) and is **not** consumed, so
+  signing in resumes it; a place older than 30 days is left alone; a place stamped in the FUTURE still
+  resumes (the clock is wrong, the conversation is real); and the "is this a conversation?" guard lives in
+  the module, not at App's call site. Carries a small cross-surface **activity ledger**, because Free/Pro
+  sessions, ended professional chats and LIVE professional chats share no clock — deliberately a separate
+  key, never a field added to `prof_<id>_messages`, which is the only copy of a user's professional history.
+- **`src/lib/freeChatResume.ts`** — which conversation the Free chat is continuing, and what of it. The
+  live half is carried in FULL (see above); only the already-collapsed `restoredMessages`, which nothing
+  rewrites, is trimmed to 40. `isFreeSession` is a NEGATIVE test on purpose, so a session from an older
+  build resumes rather than silently vanishing.
+- **`src/lib/recentConversations.ts` + `components/home/RecentConversations.tsx`** — "Continue where you
+  left off" on Home: Free, Pro, Doctor and every professional in one ordered list, no button, no menu.
+  Renders nothing at all when there is nothing. A conversation with no known time shows **"Ongoing"**,
+  never a fabricated date.
+- **App.tsx** — boot landing (URL first, then the remembered place), a gated-landing effect that finishes
+  the job once Firebase answers (once, by ref, and only while the user is still on Home), the record
+  effect, and the Home list computed from LOCAL stores only so it paints on the first frame.
+
+🔴 **A "Recent Chats" block was built and REMOVED at the admin's request on 2026-07-01** (`ca8b6786`,
+*"isko hata do, koi matalb ka nahi hai"*). That is recorded in `recentConversations.ts` rather than quietly
+re-added. What was removed sat at the bottom of the hamburger menu — behind a button, inside a menu, under
+the navigation, half the rows titled "New Conversation", resuming nothing. The admin was right.
+
+🔴 **AND ITS `AppKnowledgeBase` ENTRY WAS STILL THERE — stale for two and a half months.** Line 347 told
+every AI in the app to send users to a "Recent Chats" section of the ☰ menu that has not existed since
+July, and the Pro entry cross-referenced it. Found by the mandatory AppKnowledgeBase check; both corrected
+here. Anyone who asked an AI "meri purani chat kahan hai?" since 2026-07-01 was given directions to a
+menu item that was not there.
+
+### Gate
+
+Two real defects in my own work were caught before push and fixed in the CODE, not the test:
+1. the `slice(-40)` described above, which would have **deleted** every turn older than the last forty in
+   every conversation the feature resumed (reversion-proven by `freeChatResume.test.ts`);
+2. `group-hover:text-white/60` with no `theme-compat.css` remap — white-on-white on the two light themes,
+   caught by `themeAlphaRemap.test.ts`.
+
+Tests: `lastPlace.test.ts` (30) · `freeChatResume.test.ts` (16) · `recentConversations.test.ts` (24) ·
+`resumeWiring.test.ts` (16). Full CI-equivalent gate run last, on the final state.
 ## 2026-09-17 — the project-mode gate never said whether it was on, and that cost a real setup attempt
 
 The admin was asked to canary Software Project Mode on their own account. They set it, in good faith,

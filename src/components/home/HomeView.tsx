@@ -10,6 +10,8 @@ import { cn } from '../../lib/utils';
 // Home, which is what used isNativeApp / playCompliance here; keeping those imports would have left
 // dead imports behind a resolved conflict.
 import { openExternalUrl } from '../../lib/mobileNative';
+import { RecentConversations } from './RecentConversations';
+import type { RecentConversation } from '../../lib/recentConversations';
 
 /**
  * THE "HOW DO I BUILD AN APP?" VIDEO.
@@ -61,6 +63,15 @@ interface HomeViewProps {
   theme: ThemeMode;
   user: any;
   onShowLogin: () => void;
+  /**
+   * The person's own recent conversations — Free, Pro and the professionals in one list.
+   *
+   * Passed IN rather than read here: Home is a presentational screen, and the three stores these
+   * rows come from are already read (and merged, and ordered) in one place. A second reader on this
+   * screen is how two surfaces start disagreeing about what "recent" means.
+   */
+  recentConversations?: readonly RecentConversation[];
+  onOpenRecent?: (item: RecentConversation) => void;
 }
 
 const PRODUCT_CARDS = [
@@ -170,6 +181,8 @@ export const HomeView = ({
   theme,
   user,
   onShowLogin,
+  recentConversations,
+  onOpenRecent,
 }: HomeViewProps) => {
   const colors = getThemeClasses(theme);
   // Lazy initial read: touching localStorage during render is fine, but doing it on EVERY render is
@@ -249,6 +262,14 @@ export const HomeView = ({
             {data?.heroSubtitle || 'The most advanced AI workspace built for the next billion developers and creators from Bharat.'}
           </p>
         </motion.div>
+
+        {/* ── CONTINUE WHERE YOU LEFT OFF ──────────────────────────────────────────────────────
+            Above the tutorial strip and the product cards, because it is the only thing on this
+            page that is about work the person has ALREADY done. Renders nothing at all when there
+            is nothing to continue, so a first-time visitor's Home is unchanged. */}
+        {recentConversations && recentConversations.length > 0 && onOpenRecent && (
+          <RecentConversations items={recentConversations} onOpen={onOpenRecent} />
+        )}
 
         {/* ── "I'M STUCK — SHOW ME HOW" ────────────────────────────────────────────────────────────
             Asked for as a small green "i" above the Pro card, which on tapping shows a button, which

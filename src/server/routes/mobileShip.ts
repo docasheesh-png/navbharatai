@@ -9,6 +9,7 @@
 // drift — rule 4); this module only GENERATES the kit and DISPATCHES the workflow.
 
 import type { Express, Request, Response } from 'express';
+import { ANDROID_BUILD_FIX_PREFIX } from '../../lib/platformFixRequest';
 import axios from 'axios';
 import { generateShipKit } from '../lib/mobileShipKit';
 import { getAllPublishGuides, getPublishGuide, renderPublishGuideText, type StorePlatform } from '../lib/storePublishGuide';
@@ -690,7 +691,7 @@ export function registerMobileShipRoutes(app: Express): void {
       const step = failedStepSection(normalizeLog(log)).trim();
       const excerpt = step.split('\n').slice(-60).join('\n').slice(0, 6000);
       return [
-        'My Android build failed on GitHub. Please fix the app code so it builds.',
+        `${ANDROID_BUILD_FIX_PREFIX} Please fix the app code so it builds.`,
         '',
         `What stopped it: ${diag.summary}`,
         ...(diag.detail ? ['', diag.detail] : []),

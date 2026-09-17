@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { platformFixRequestPrompt } from '../../lib/platformFixRequest';
 import { appRanDespiteFailedVerdict, fixRemainingIssuePrompt, appRunningNoticeText } from './failedButRunning';
 import { publicTierLabel } from '../../lib/engineLabels';
 import { usePagedList } from '../../hooks/usePagedList';
@@ -5490,8 +5491,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   // P-UX.3 — prepopulate the chat with the preview error and bring the chat into view
                   // (collapse the workspace) so the user can review and send the fix request.
                   setPrompt(
-                    `The in-browser preview failed to build with this error:\n\n${errText}\n\n` +
-                      'Please find the cause in the project files and fix it so the app builds and runs.',
+                    platformFixRequestPrompt(errText),
                   );
                   setShowWorkspace(false);
                 }}

@@ -59727,3 +59727,66 @@ every future one, which is the opposite of what a guard is for. Both re-proven b
 3. The retry's "stronger model" claim must be derived from the delivery ledger, not the branch template.
 4. Post-build review timed out at 210 s on 55 files — a paying build silently lost its findings.
 5. Sandbox 84% idle across a 39.8-minute session.
+
+## 2026-09-17 — Autopsy f5351721, open item #3 closed: "a stronger model" was a template, not a measurement
+
+The recorded item read: *"the retry claimed a 'stronger model' that never ran — an escalation message
+must be derived from the delivery ledger, not from the branch's template."* This is that fix, and the
+investigation found the claim was made in **four** places, not one.
+
+**What was asserted, and what actually happened.** In build `f5351721` all 30 calls were `glm-5.3` and
+no Claude rung ever ran. Meanwhile:
+
+1. `AgentRunner.ts` told the user *"(No files were created — the build did not run. Retrying with a
+   stronger model…)"* — **unconditionally, from inside the runner**, which does not decide whether a
+   retry happens at all. That is `shouldRetryEmptyBuild`'s call, in the route.
+2. The route's narration said *"rebuilding with a stronger model…"*.
+3. The admin diag said *"retried the whole build on a stronger model (Sonnet in normal mode; Opus only
+   in power mode)"*.
+4. On success it recorded `deliveredTier = 'sonnet'` — a literal.
+
+**The cause is architectural drift, not a typo.** Those sentences date from when a tier PINNED one
+model and `resolveModel(tier)` really decided what ran. Since the three-tier ladders (2026-09-14) the
+CHAIN decides, and the retry passes `heal: true` → `healLadder`, which drops only a leading cheap-flash
+rung. **Weak and Normal have one, so the claim was true there; Strong does not, so its retry restarts
+on the identical engine and the claim was false.** One template, two different truths, nothing checking
+which. A stale comment block beside it still described the pinned-tier behaviour in detail — `tsc` and
+`vitest` cannot read a comment, so nothing failed when it stopped being true.
+
+**The fix.** `retryLeadsHigher(tier)` (`tierLadder.ts`) derives the answer from the ladder actually in
+force — including an env override — and both sentences branch on it. When the retry is not stronger the
+honest line is *"running the build again…"*. `deliveredStartTier(provider)` maps the REAL dominant
+provider to a telemetry tier, and returns `undefined` for anything unknown so the caller keeps its
+previous value rather than inventing one. The two stale comments were corrected in the same commit.
+
+**Nobody was over-charged.** `deliveredTier` feeds `agentV3CostTelemetry` and the traces, not the bill —
+the bill comes from real provider tokens. What it corrupted is the per-tier cost/quality panel, which
+filed a GLM-delivered build under Sonnet. Margin-safe and wrong on the screen the decision is made
+from — the same shape as the E2B rate drift.
+
+**Tests.** `tests/retryStrongerClaim.test.ts`, 13 cases, each guard proven by reversion (restoring the
+literal `'sonnet'`, restoring the runner's promise, and forcing `retryLeadsHigher` to `true` each fail).
+⚠️ The guards **strip comments** — the first draft failed against the very comments that document the
+bug, and a guard that cannot tell code from prose would have to be deleted the next time someone
+explains a fix.
+
+### Sibling found and deliberately NOT fixed (rule 6)
+
+**The FAST lane never reaches the aggregate provider telemetry.** `fastGenerateOnce` captures who
+really served each call and records it per-call via `buildDiag.recordLlmCall` (so the admin report is
+truthful), but it uses its own `makeFastTextRunner` callback and never calls `captureProvider` — so
+`providerTurns` stays empty and `deliveredTier = analysis?.startTier ?? 'haiku'` records the tier the
+analyser CHOSE, not the one that delivered. Same class as the bug above.
+
+It is not fixed here because the one-line fix is not one line in effect: `captureProvider` also feeds
+`deliveredVia` and `deliveredCheap`, and `deliveredCheap` decides whether the cheap-review judge runs
+in the escalation gate — an admin-mandated path. Changing judge behaviour inside an honesty fix is
+exactly the "fix A, create X" the rules forbid. It needs its own change with its own evidence.
+
+### Still open from this autopsy
+
+1. The Kimi sibling of the forced-reasoning unclamp (no capability fact for Moonshot's models).
+2. `hmr: false` — a workaround for the E2B proxy not bridging Vite's HMR websocket.
+3. **The fast-lane telemetry sibling above.**
+4. Post-build review timed out at 210 s on 55 files.
+5. Sandbox 84% idle across a 39.8-minute session.

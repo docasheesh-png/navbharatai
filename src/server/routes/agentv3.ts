@@ -31,7 +31,7 @@ import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
 import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote } from '../AgentV3/etaEvidence';
 import { decideComplexity } from '../AgentV3/complexityRouting';
-import { tierLadder, healLadder, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
+import { tierLadder, healLadder, retryLeadsHigher, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
 import { describeRunnerChain, chainProviders, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction } from '../AgentV3/AuthenticityAnalysis';
@@ -2813,6 +2813,38 @@ export function fastLaneProviderLabel(used: string | undefined): string {
     case 'VERTEX':
     case 'GEMINI': return 'google';
     default: return (used || 'anthropic').toLowerCase();
+  }
+}
+
+/**
+ * The telemetry tier a delivery ACTUALLY happened on. PURE. Returns undefined when nobody reported.
+ *
+ * 🔴 WHY (autopsy f5351721, 2026-09-17). The empty-build retry set `deliveredTier = 'sonnet'` on any
+ * successful retry, unconditionally — a literal, not a measurement. In the build that produced this
+ * every call was `glm-5.3`, so the per-tier cost/quality table attributed a GLM-delivered build to
+ * Sonnet. **Nobody was over-charged** — the bill comes from real provider tokens, and this value feeds
+ * `agentV3CostTelemetry` and the traces — but it corrupted the exact panel used to judge what a tier
+ * costs and how often it succeeds. Same shape as the E2B rate drift: margin-safe, and wrong on the
+ * screen the decision is made from.
+ *
+ * ⚠️ `undefined` means "nobody reported", and the caller KEEPS its previous value rather than
+ * inventing one. Guessing a tier here would be the same bug wearing a different literal.
+ */
+export function deliveredStartTier(provider: string | undefined): StartTier | undefined {
+  switch ((provider || '').toUpperCase()) {
+    case 'CLAUDE_OPUS': return 'opus';
+    case 'CLAUDE': return 'sonnet';
+    case 'CLAUDE_HAIKU': return 'haiku';
+    // The cheap bucket of this taxonomy. `StartTier` predates the GLM/Kimi ladders and has no name of
+    // its own for them; 'gemini' is what this route already uses as the cheap default (see the
+    // `deliveredTier` initialiser), so a cheap delivery lands in the cheap bucket rather than a
+    // Claude one. Widening `StartTier` is a separate change with its own telemetry migration.
+    case 'GLM':
+    case 'KIMI':
+    case 'BEDROCK-GLM':
+    case 'VERTEX':
+    case 'GEMINI': return 'gemini';
+    default: return undefined;
   }
 }
 
@@ -15138,21 +15170,39 @@ async function noteBuildOutcome(
         userAskedToBuildAnApp,
         modelRefused: firstAttemptRefused,
       })) {
+        // 🔴 THE CLAIM IS DERIVED, NEVER TEMPLATED (autopsy f5351721 — see `retryLeadsHigher`). Both
+        // sentences below used to assert "a stronger model" unconditionally, and on STRONG that was
+        // false: its ladder has no flash rung, so `heal: true` drops nothing and the retry restarts on
+        // the very engine that just produced no files. 30 calls, all `glm-5.3`, no Claude anywhere.
+        const retryRungs = healLadder(tierLadder(powerLevelReqEffective).rungs);
+        const retryIsStronger = retryLeadsHigher(powerLevelReqEffective);
         buildDiag.record({
           phase: 'build', severity: 'warning', code: 'EMPTY_BUILD_RETRY',
-          message: 'First attempt produced no files — retried the whole build on a stronger model (Sonnet in normal mode; Opus only in power mode).',
+          message: retryIsStronger
+            ? `First attempt produced no files — retried the whole build one rung higher: ${describeLadder(retryRungs)}.`
+            : `First attempt produced no files — retried the whole build on the SAME ladder (${describeLadder(retryRungs)}); this tier has no cheaper lead rung to drop, so the retry does not start higher.`,
           autoResolved: false, // back-filled to true by finish() if the retry then succeeded
         });
-        events.emit({ type: 'narration', agent: 'architect', text: 'The first attempt produced no files — rebuilding with a stronger model…', ts: Date.now() });
-        // The "stronger model" for the retry: in POWER mode it's Opus; in NORMAL (power-off)
-        // mode it is SONNET — Opus is NEVER used when power is off (admin rule 2026-06-28,
-        // supersedes the 2026-06-27 "power-off Opus" rule). Since a simple app's first attempt
-        // ran on Haiku, retrying on Sonnet is already a real step up, and it keeps a failed
-        // build from ever burning the most-expensive model (the "$26 failed todo" driver).
+        // WHITE-LABEL LAW: capability, never a vendor. And when the retry is NOT stronger we must not
+        // say it is — the honest line promises only what actually happens.
+        events.emit({
+          type: 'narration', agent: 'architect',
+          text: retryIsStronger
+            ? 'The first attempt produced no files — bringing in NavBharatAI\'s stronger engine…'
+            : 'The first attempt produced no files — running the build again…',
+          ts: Date.now(),
+        });
+        // ⚠️ THIS COMMENT USED TO DESCRIBE A DIFFERENT ENGINE, AND THAT IS WHY THE CLAIM SURVIVED SO
+        // LONG. It read: *"the 'stronger model' for the retry: in POWER mode it's Opus; in NORMAL
+        // (power-off) mode it is SONNET"* — true when a tier PINNED one model and `resolveModel(tier)`
+        // decided what ran. Since the three-tier ladders (2026-09-14) the CHAIN decides, and the chain
+        // below is `healLadder` of this tier's own ladder. `tsc` and `vitest` cannot read a comment, so
+        // nothing failed when it stopped being true; it just kept telling the next reader the retry
+        // escalates. What actually happens is whatever `retryIsStronger` says above.
         const retryRunner = new AgentRunner({
           ...baseRunnerOpts,
           client: buildTurnRunner(healRunnerOpts()),
-          model: resolveModel(powerLevelReqEffective), // the tier's pinned model (Strong → Sonnet; Powerful/FT → Opus; Normal → Sonnet)
+          model: resolveModel(powerLevelReqEffective), // the Claude-rung id; GLM/Kimi rungs ignore it and force their own ladder model
           effort: powerSpecResolved.effort,
           // Generation-shaped (it re-runs the whole build), so it respects the correction reserve —
           // same reason as the escalation runner above.
@@ -15167,7 +15217,13 @@ async function noteBuildOutcome(
         });
         try {
           const retry = await retryRunner.run(buildPrompt);
-          if (retry.ok || writtenFiles.size > 0) { result = retry; deliveredTier = 'sonnet'; }
+          if (retry.ok || writtenFiles.size > 0) {
+            result = retry;
+            // Record what ACTUALLY delivered. This was the literal `'sonnet'`, which on a GLM-served
+            // retry filed the build under Sonnet in the per-tier cost table. Unknown ⇒ keep the
+            // previous value rather than invent one (see `deliveredStartTier`).
+            deliveredTier = deliveredStartTier(dominantProvider(providerTurns)) ?? deliveredTier;
+          }
         } catch (e) {
           console.log(`[AGENTV3] empty-build Claude retry failed: ${e instanceof Error ? e.message : String(e)}`);
         }

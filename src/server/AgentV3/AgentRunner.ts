@@ -728,7 +728,14 @@ export class AgentRunner {
                 ? 'The build could not start writing files: NavBharatAI\u2019s engine ran out of room to answer before it began. '
                   + 'This is our limit, not your app \u2014 nothing you asked for was wrong and nothing is lost. Please try again.'
                 : turn.text.trim()
-                  ? `${turn.text.trim()}\n\n(No files were created — the build did not run. Retrying with a stronger model…)`
+                  // 🔴 A PROMISE ABOUT A DECISION THIS MODULE DOES NOT MAKE (autopsy f5351721,
+                  // 2026-09-17). This said "Retrying with a stronger model…" — unconditionally, from
+                  // inside the runner. Whether a retry happens at all is `shouldRetryEmptyBuild`'s
+                  // call in the route, and whether it is STRONGER depends on the tier's ladder
+                  // (`retryLeadsHigher`); on Strong it is neither. So a build that retried on the same
+                  // engine, and a build that never retried at all, both told the user a stronger model
+                  // was coming. The runner now states only what it knows; the route says what it does.
+                  ? `${turn.text.trim()}\n\n(No files were created, so the build did not run.)`
                   : 'The build did not produce any files — the model replied without building.')
             : (turn.text.trim() || 'Build complete.');
 

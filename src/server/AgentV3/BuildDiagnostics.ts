@@ -23,6 +23,7 @@ import { isStarvedBudgetError, isUnclampedStarvation } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
 import { isBudgetEndedError } from './turnDeadline';
 import { typecheckEvidenceFromCommands } from './TscGate';
+import { predictsBuildFailure, prodBuildOverrulesPredictions, overruledByRealBuildMessage } from './buildFailurePrediction';
 import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
 import { agentRunEvidence as readAgentRunEvidence, type AgentRunEvidence } from './agentRunEvidence';
 
@@ -1787,9 +1788,58 @@ export class BuildDiagnostics {
    * practice, which is the same as not having it. Anything already resolved is likewise not a caveat.
    */
   shippingIssueCount(severity: IssueSeverity): number {
-    return this.issues.filter(
-      (i) => i.severity === severity && !i.autoResolved && isAppFinding(i),
-    ).length;
+    // 🔴 THE SAME DEFECT, COUNTED TWICE (autopsy e706e068, 2026-09-17). The readiness gate ran at
+    // t+1251s and again at t+1440s, and both runs recorded the byte-identical blocker
+    // `1 unresolved import(s) — the build will fail: App.tsx -> ./components/TransportRequest`.
+    // `record()` collapses only a BACK-TO-BACK repeat (it compares against the last entry), and 189
+    // seconds of timeline sat between these two — so both survived and both were counted. The user
+    // was told "3 build-breaking blocker(s)" about an app that had TWO, and the release gate's
+    // headline named that inflated number.
+    //
+    // One defect is one defect however many times we observed it. Two genuinely different problems
+    // never share a message, so this can only ever remove a double-count — it can never hide a
+    // distinct finding. The timeline keeps every entry; only the COUNT is de-duplicated.
+    const seen = new Set<string>();
+    for (const i of this.issues) {
+      if (i.severity !== severity || i.autoResolved || !isAppFinding(i)) continue;
+      seen.add(`${i.phase} ${i.code} ${i.message}`);
+    }
+    return seen.size;
+  }
+
+  /**
+   * A real production build SUCCEEDED, so any readiness finding that merely PREDICTED it would fail
+   * is superseded. Returns how many were cleared (0 when there were none).
+   *
+   * See `buildFailurePrediction.ts` for the incident and for why this is narrow in three separate
+   * ways. The caller's obligation: pass `ran`/`code` straight from `judgeProdBuild`, never a guess.
+   *
+   * ⚠️ `before` bounds it to predictions made BEFORE the build ran. A finding recorded afterwards is
+   * describing a tree this build never compiled, so a later blocker still stands on its own.
+   *
+   * Pure over the recorded issues; never throws.
+   */
+  resolveBuildFailurePredictions(opts: { ran: boolean; code: string; before: number }): number {
+    if (!prodBuildOverrulesPredictions(opts?.code, opts?.ran === true)) return 0;
+    const cutoff = Number.isFinite(opts?.before) ? opts.before : Infinity;
+    let cleared = 0;
+    for (const issue of this.issues) {
+      if (issue.code !== 'READINESS_BLOCKER' || issue.autoResolved === true) continue;
+      if (issue.ts > cutoff) continue;
+      if (!predictsBuildFailure(issue.message)) continue;
+      issue.autoResolved = true;
+      cleared++;
+    }
+    if (cleared > 0) {
+      this.record({
+        phase: 'readiness',
+        severity: 'info',
+        code: 'BUILD_PREDICTION_OVERRULED',
+        message: overruledByRealBuildMessage(cleared),
+        autoResolved: true,
+      });
+    }
+    return cleared;
   }
 
   /**

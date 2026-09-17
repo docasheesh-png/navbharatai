@@ -2502,7 +2502,13 @@ describe('post-build code gates never run on an import/survey turn', () => {
     // Five, not four: writing this test surfaced a late syntax re-parse that shared the same guard.
     // It is milder (it inspects only our own writtenFiles and never repairs), but leaving one gate
     // on the old shape is how someone later widens it and rebuilds the bug.
-    expect((SRC.match(/postBuildCodeGateShouldRun\(\{/g) ?? []).length).toBe(5);
+    // 🔴 CHANGED 2026-09-17 (build 681bd91b): the TYPECHECK gate now goes through `typecheckGateShouldRun`,
+    // which DELEGATES to this predicate and adds the one fact only tsc needs — that we wrote TypeScript
+    // at all. So four inline call sites remain, plus the typecheck site by name, plus the delegation
+    // itself. Every gate still passes through the one predicate; none is back on a size-only guard.
+    expect((SRC.match(/postBuildCodeGateShouldRun\(\{/g) ?? []).length).toBe(4);
+    expect(SRC).toContain('typecheckGateShouldRun({ ...tscGateBase, wroteTypeScript })');
+    expect(SRC).toMatch(/export function typecheckGateShouldRun\([\s\S]{0,700}return postBuildCodeGateShouldRun\(opts\) && opts\.wroteTypeScript;/);
     // Anchored on the ENABLED FIELD, not the bare env name: each gate's name also appears in its
     // explanatory comment ("disable with …=off"), which sits above the call and would match first.
     for (const env of ['AGENTV3_AGENTIC_TSC_GATE', 'AGENTV3_MISSING_FILES_GATE', 'AGENTV3_SYNTAX_GATE', 'AGENTV3_MISSING_EXPORT_GATE']) {

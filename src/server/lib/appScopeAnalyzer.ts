@@ -55,7 +55,10 @@ const FAMOUS_APPS: Array<{ name: string; re: RegExp }> = [
   { name: 'Uber / Ola', re: /\buber\b|\bola\b(?!\s)/i },
   { name: 'Swiggy / Zomato', re: /\bswiggy\b|\bzomato\b/i },
   { name: 'Amazon / Flipkart', re: /\bamazon\b|\bflipkart\b/i },
-  { name: 'Zoom / Meet', re: /\bzoom\b|google meet/i },
+  // "zoom" is a verb and a setting far more often than a product ("no page zoom problems", "pinch to
+  // zoom", "zoom level"); build 681bd91b classed an AI chat app as a Zoom clone on the first of those.
+  // A product reference names the product AS a product, or asks for a likeness of it.
+  { name: 'Zoom / Meet', re: /\bzoom\s+(?:app|call|calls|meeting|meetings|clone|style|jaisa|jaise|like)\b|\b(?:like|clone\s+of|similar\s+to|inspired\s+by|jaisa|jaise)\s+zoom\b|google meet/i },
   // A "foundation-model AI like Claude/ChatGPT" — a trained model cannot be cloned; the LLM will honestly
   // reframe this to "an app that USES an AI via an API".
   { name: 'an AI like Claude/ChatGPT', re: /\b(like|jaisa|jaise|clone of)\s+(claude|chatgpt|gpt-?\d?|gemini|openai|an?\s+ai)\b|\bapna\s+chatgpt\b|\bchatgpt\s+(jaisa|banao)\b/i },

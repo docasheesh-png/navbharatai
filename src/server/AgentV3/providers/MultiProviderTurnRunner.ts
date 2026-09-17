@@ -19,6 +19,7 @@ import { parseEnvFlag } from '../../lib/envFlag';
 import { isModelUnavailableError } from '../providerErrorClass';
 import { isBudgetEndedError, isSlowStreamAbandon } from '../turnDeadline';
 import { isStarvedBudgetError } from '../floorBudget';
+import { reasoningAwareAsk } from '../reasoningAsk';
 import {
   EMPTY_SLOW_RUNG_STATE, canBenchAnother, describeSlowRung, isRungTooSlow, recordSlowSample,
   type SlowRungState,
@@ -701,7 +702,15 @@ export function makeMultiProviderTurnRunner(
            *    call, however bad the weather is at every vendor.
            */
           const canAbandonSlowStream = () => !abandonedSlowRung && i + 1 < chain.length;
-          const result = await runner.runTurn({ ...params, canAbandonSlowStream });
+          // A rung measured to reason before every answer is never asked for less than it needs to
+          // BEGIN one — see reasoningAsk.ts. The retirement above stops a starved model being re-proved
+          // on fifty keys; this stops it starving in the first place, when the ask came from a call site
+          // that could not know which rung would answer it (build 681bd91b: a hard-coded `maxTokens:
+          // 8000` starved glm-5.3 for 26 minutes on a repair, and `4000` starved the planner before it).
+          const result = await runner.runTurn({
+            ...params, canAbandonSlowStream,
+            maxTokens: reasoningAwareAsk(params.maxTokens, chain[i].modelId),
+          });
           timeoutStreak.delete(reportName); // a success resets the family's consecutive-timeout streak
           rateLimitStreak.delete(name); // …and the consecutive-429 streak (the provider recovered)
           cooldowns.clear(name); // …and the SHARED cooldown — the provider is back for everyone

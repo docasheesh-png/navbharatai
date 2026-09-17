@@ -60252,3 +60252,94 @@ exactly as before, because we owe it an explanation. Test-locked explicitly, and
    inside this PR is its own hazard), recorded so it is fixed deliberately.
 3. **3 high/critical dependency vulnerabilities** survive `npm audit fix` and need major-version upgrades.
 4. **Design consistency grade D** on a shipped app — 42 colours, 15 off-grid spacing values.
+
+---
+
+## 2026-09-17 — Phases 0, 1 and 4 of the failure-rate plan: the panel names its own failures
+
+**Admin showed the Failure Category panel: 385 projects, 151 failed, 40.8%**, and asked for every cause
+root-caused and the success rate taken to 90%.
+
+### 🔴 Phase 0 — ~85% of failures had NO NAMED CAUSE, so every fix planned from that panel was a guess
+
+"Other (not yet in the known pattern list)" was the top reason for **13 of the 15 app types**, and 92 of
+the 107 failures in the largest row.
+
+**Root cause.** `buildFailureCategory.ts` classified failures by reading the PROSE of `rootCause` for
+compiler words (`compilation`, `cannot find module`). v5 does not fail with compiler words — it fails
+with sentences we wrote ourselves. **Six real outcome messages were run through the classifier and ALL
+SIX returned `other`**, including, verbatim from a real report: *"Build outcome: STOPPED — the app was
+built; the post-build advisory pass was cut short by its 2-minute cap."*
+
+🔒 **`BuildRetrospectiveEngine.ts` had root-caused this exact class on 2026-09-12 and written the remedy
+down**: *"The diagnostic CODE is a machine fact recorded by the build itself. Reading it is not pattern
+matching, it is just looking."* That module read the code. This panel — built four days later — did not,
+and its own header records the decision not to merge the two. **This is that merge.**
+
+The code was never missing: `listAllDiagnostics` reads the WHOLE report to project `ok`/`summary`, so
+`issues` (and the `OUTCOME_*` code inside it) was already in memory and was being dropped. Projecting it
+costs **no extra I/O** — the same argument `modelPerformance` makes in its own comment.
+
+⚠️ **SEVERITY HAD TO RIDE WITH THE CODE, or the fix would have traded one wrong answer for another.**
+`OUTCOME_STOPPED` at `warning` is the advisory cap on an app that WAS built; at `error` it is a build
+that never converged. Classifying on the code alone would have filed every perfectly good build of the
+first kind as "the run ended before it finished". An UNRECOGNISED code falls through to the text exactly
+as before, so a code added later is never silently mis-filed.
+
+### Phase 1 — three populations inside one number
+
+A single "40.8% failed" cannot be worked on, because part of it is not broken builds. The split is now
+computed and shown:
+
+| Bucket | Meaning |
+|---|---|
+| **Genuinely failed** | judged failed, app never seen running — the real target |
+| 🔴 **Worked, called failed** | judged failed while `GREEN_GUARD_SAVE`/`PREVIEW_PUBLISHED` says it rendered — a WRONG VERDICT, and each one is a person told their working app failed |
+| **Cannot tell** | records written before render evidence was projected |
+| **Succeeded** | judged ok |
+
+This matters because this repo has TWICE shipped a verdict calling a working app broken — autopsies
+697b38ee and 4efab9d7 — and every record written before those fixes keeps its old verdict, which is
+exactly what this panel reads.
+
+⚠️ **What is deliberately NOT split, said plainly: builds the USER stopped.** `buildAbortCause.ts` knows
+the difference (`'user-stop'`, and it refuses to default to it), but that cause is **not persisted into
+the report**, so it cannot be separated from stored data. Inventing a rule — "short builds are
+abandoned", "STOPPED means cancelled" — would put a guess inside the one number meant to end guessing.
+**OPEN root cause: persist `abortCause` into the report.**
+
+### Phase 4 — one number, defined once, so "90%" is a fact rather than a feeling
+
+**`appDeliveredPct` = (succeeded + builtButJudgedFailed) ÷ (those + engineFailed).**
+
+A build we wrongly called failed still gave the user a working app, so it belongs on top of the
+fraction. That is not letting ourselves off — it separates "the engine cannot build apps" from "the
+engine builds apps and then lies about them", which are different problems with different fixes.
+`reportedOkPct` is what we TOLD people, and **the gap between the two is the honesty debt**.
+
+🔒 `evidenceUnknown` is excluded from BOTH halves, so the target cannot be hit by counting unknowns, and
+the figure is `null` rather than a flattering 100% when nothing is judgeable.
+
+### Phase 2 and 3 — why they are not in this PR, honestly
+
+**Phase 2 (fix the named causes, biggest first) cannot start until this ships and the panel runs against
+production**, because its whole premise is that nobody currently knows what the causes are. Ordering
+them from today's data would be exactly the guessing Phase 0 exists to remove. Three known live causes
+already have their own PRs (#2994, the reasoning unclamp, the slow-rung bench).
+
+**Phase 3 (prevent instead of heal)** is the 50/50 law applied to whatever Phase 2 names, so it inherits
+the same dependency.
+
+### Gate
+
+typecheck · typecheck:server · noUnusedImports · **vitest 1718 files, 24264 passed, 0 failed** · build ·
+test:bundle · boot:check. `tests/failureNaming.test.ts`, 17 cases, including a drift guard asserting
+every code in `OUTCOME_TO_CATEGORY` also has a panel label — so a code added to one map and not the
+other fails CI instead of quietly reappearing as "Other".
+
+### Still open
+
+1. **`abortCause` is not persisted**, so user-stopped builds cannot be separated (above).
+2. **The denominator is LATEST-BUILD-PER-WORKSPACE**, not every build. A user who built successfully
+   five times and abandoned a sixth counts as failed, permanently. A true rate needs a per-build series.
+3. `RUNTIME_UNCHECKED` — console capture failing on builds that render, cause unknown.

@@ -81,6 +81,22 @@ export interface RuntimeEvidence {
    * omitted value keeps the original wording.
    */
   testSuitePresent?: boolean;
+
+  /**
+   * Was this build STOPPED BY THE USER rather than failed?
+   *
+   * 🔴 ROOT CAUSE (autopsy 2b0a3ed5, 2026-09-17). A user pressed Stop 66 seconds into a calculator
+   * build, and the report graded it *"RED — Not shippable — the build did not succeed."* Nothing had
+   * failed. Nobody had claimed otherwise. The build ended because a person decided it should, and
+   * every listed gap — no preview, no journey, no typecheck — is simply what "we stopped early"
+   * looks like.
+   *
+   * The distinction matters beyond wording: RED is the state that means *go and look, something is
+   * broken*, and spending it on a deliberate cancellation is how a reader learns to discount it. The
+   * verdict STAYS red (nothing was proven, so nothing may be shipped) — only the sentence stops
+   * blaming the app for a decision the user made. Optional, so every existing caller is unchanged.
+   */
+  stoppedByUser?: boolean;
 }
 
 export interface StaticFindings {
@@ -138,7 +154,10 @@ export interface GateVerdict {
  * filter over the CheckOutcome fields — that would let the next explanatory flag slip in silently,
  * which is precisely what this alias exists to prevent.
  */
-export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'testSuitePresent'>;
+// ⚠️ Every field added to RuntimeEvidence that is NOT a runtime CHECK must be excluded here, or it
+// silently becomes a row the gate tries to label and grade. tsc catches the omission, which is
+// how `stoppedByUser` was caught the moment it was added.
+export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'testSuitePresent' | 'stoppedByUser'>;
 
 /** What a PASS means. Phrased as a completed fact, because that is what `proven` is a list of. */
 const RUNTIME_LABEL: Record<CheckKey, string> = {
@@ -286,7 +305,15 @@ export function releaseGate(
 
   // RED — something we looked at is actually broken.
   if (!ev.buildOk) {
-    return { state: 'red', headline: 'Not shippable — the build did not succeed.', proven, unproven, failures };
+    // A cancellation is not a failure — see `stoppedByUser`. Still RED, because nothing was proven
+    // and an unproven app must never be presented as shippable; only the reason is told truthfully.
+    return {
+      state: 'red',
+      headline: ev.stoppedByUser === true
+        ? 'Not shippable yet — you stopped this build before it could be finished or checked.'
+        : 'Not shippable — the build did not succeed.',
+      proven, unproven, failures,
+    };
   }
   if (failures.length > 0) {
     return {

@@ -20,13 +20,50 @@ describe('describeRunnerChain', () => {
     ])).toBe('GLM(glm-5.2) → KIMI(kimi-k3) → CLAUDE');
   });
 
-  it('keeps key-pool rungs distinct — three keys tried is not one attempt', () => {
+  // ⚠️ THIS ASSERTION CHANGED SHAPE ON 2026-09-17, AND THE CONTRACT IT PROTECTS DID NOT.
+  //
+  // It used to demand each pool key as its own rung: `GLM → GLM#2 → GLM#3`. The INTENT was that
+  // "three keys were tried" must not be hidden — and that is still asserted below, by the count.
+  // What changed is that listing them individually stopped working at the scale production actually
+  // runs: with ~104 GLM keys configured, a real chain line ENDED inside the pool ("…and 80 more") and
+  // KIMI and CLAUDE_HAIKU, which were in the chain, could not be seen at all. That is this module's
+  // OWN question — "was the rung there, or never there?" — failing on its own line (autopsy 2b0a3ed5).
+  //
+  // So the count is the contract, not the spelling of it. A run collapses; the number survives.
+  it('a key pool reports HOW MANY keys were tried, not one merged attempt', () => {
     const text = describeRunnerChain([
       { name: 'GLM', modelId: 'glm-5.2' },
       { name: 'GLM#2', modelId: 'glm-5.2', reportAs: 'GLM' },
       { name: 'GLM#3', modelId: 'glm-5.2', reportAs: 'GLM' },
     ]);
-    expect(text).toBe('GLM(glm-5.2) → GLM#2(glm-5.2) → GLM#3(glm-5.2)');
+    expect(text).toBe('GLM(glm-5.2) ×3');
+    expect(text).toContain('3'); // three keys tried is still legible as three
+  });
+
+  it('🔴 a big key pool no longer hides the rest of the ladder', () => {
+    // The reported chain: 104 GLM keys, then KIMI, then Haiku. Before the collapse this line stopped
+    // at GLM#24 and the admin could not tell whether KIMI was even in the chain.
+    const pool = Array.from({ length: 104 }, (_, i) => ({
+      name: i === 0 ? 'GLM' : `GLM#${i + 1}`, modelId: 'glm-4.7-flashx', reportAs: 'GLM',
+    }));
+    const text = describeRunnerChain([
+      ...pool,
+      { name: 'KIMI', modelId: 'kimi-k2.7-code' },
+      { name: 'GLM#105', modelId: 'glm-5.3', reportAs: 'GLM' },
+      { name: 'CLAUDE_HAIKU' },
+    ]);
+    expect(text).toBe('GLM(glm-4.7-flashx) ×104 → KIMI(kimi-k2.7-code) → GLM(glm-5.3) → CLAUDE_HAIKU');
+    expect(text).not.toContain('and 80 more');
+  });
+
+  it('only CONSECUTIVE identical rungs collapse — a later return to the same engine still shows', () => {
+    // The weak ladder really does visit GLM twice on different models. Collapsing by family alone
+    // would erase the second visit and report a three-rung ladder as two.
+    expect(describeRunnerChain([
+      { name: 'GLM', modelId: 'glm-4.7-flashx' },
+      { name: 'KIMI', modelId: 'kimi-k2.7-code' },
+      { name: 'GLM', modelId: 'glm-5.3' },
+    ])).toBe('GLM(glm-4.7-flashx) → KIMI(kimi-k2.7-code) → GLM(glm-5.3)');
   });
 
   it('an EMPTY chain says so rather than rendering a blank', () => {

@@ -318,14 +318,42 @@ describe('hardware back button — Android must not exit from a screen you can g
     expect(exitApp).not.toHaveBeenCalled();
   });
 
-  it('exits the app at the root instead of trapping the user on the screen', () => {
+  /**
+   * 🔴 THIS TEST USED TO ASSERT THE OPPOSITE, AND THE BEHAVIOUR IT PINNED WAS THE BUG.
+   *
+   * It read: *"exits the app at the root instead of trapping the user on the screen"* — and it was
+   * GREEN for as long as the defect shipped, because it tested the rule rather than the outcome. The
+   * rule (`canGoBack === false ⇒ exit`) is correct for an app whose screens are history entries.
+   * NavBharatAI navigates with React state and never calls `history.pushState`, so `canGoBack` is
+   * false on EVERY screen — and a real user reported exactly what follows from that: *"kisi bhi page
+   * par back press karne se app band ho jati hai"* (admin 2026-09-17).
+   *
+   * Rewritten rather than deleted, because the replacement has to say what is true now: the handler
+   * TRANSPORTS the press and never decides to leave. The decision moved to `androidBack.ts`, where
+   * the app's own state can answer it, and exiting became something the user confirms.
+   */
+  it('NEVER exits on its own — an empty history stack is not a reason to close the app', () => {
     const onBack = vi.fn();
     const exitApp = vi.fn();
     const { ctx, fire } = ctxWith(exitApp);
     installBackButtonHandler(ctx, onBack);
     fire({ canGoBack: false });
-    expect(exitApp).toHaveBeenCalledOnce();
-    expect(onBack).not.toHaveBeenCalled();
+    expect(exitApp).not.toHaveBeenCalled();
+    expect(onBack).toHaveBeenCalledOnce();
+  });
+
+  it('forwards the press whatever the platform says, so Back always reaches the app', () => {
+    // The handler must be indifferent to canGoBack: this app's answer never depends on it, and a
+    // press that reached nobody would be a Back button that does nothing.
+    for (const data of [{ canGoBack: true }, { canGoBack: false }, undefined, {}]) {
+      const onBack = vi.fn();
+      const exitApp = vi.fn();
+      const { ctx, fire } = ctxWith(exitApp);
+      installBackButtonHandler(ctx, onBack);
+      fire(data);
+      expect(onBack).toHaveBeenCalledOnce();
+      expect(exitApp).not.toHaveBeenCalled();
+    }
   });
 
   it('falls back to navigating when the platform reports nothing', () => {

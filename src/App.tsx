@@ -153,6 +153,9 @@ import {
 } from './config/defaultContent';
 // ZipSizeModal component → moved to ViewPanels.tsx
 import type { ZipSizeModalVariant } from './components/ide/ZipSizeModal';
+import { decideBackAction, HARDWARE_BACK_EVENT } from './lib/androidBack';
+import { loadNativeShellContext, exitNativeApp } from './lib/nativeShell';
+import { ExitConfirmDialog } from './components/ExitConfirmDialog';
 // AgentMode → re-exported from ./types
 
 // Large keys that can be evicted when localStorage is nearly full.
@@ -1371,6 +1374,7 @@ export default function App() {
     return () => window.removeEventListener('navbharat:navigate', onNavigate as EventListener);
   }, [toggleTab, setSettingsScreen]);
 
+
   // A shake anywhere in the app opens the report sheet. The hook is a no-op on desktop and wherever
   // the device will not give a page motion access — see useShakeToReport for why iOS is deliberate.
   /**
@@ -1379,6 +1383,79 @@ export default function App() {
    * Read once, in the initialiser, so a re-render can never resurrect a notice the user dismissed.
    */
   const [testingNoticeOpen, setTestingNoticeOpen] = useState(() => !testingNoticeAlreadyShown());
+
+  /**
+   * 🔴 ANDROID'S HARDWARE BACK BUTTON (admin 2026-09-17: *"kisi bhi page par back press karne se
+   * app band ho jati hai"*).
+   *
+   * It closed the app from every screen because the old handler asked the WebView whether it could go
+   * back, and this app never puts anything in the WebView's history — `toggleTab` ends in
+   * `setActiveView`. So the answer was always "no", and "no" meant exit. The full account is in
+   * `androidBack.ts`; what lives HERE is the only thing that could not live there: the app's state.
+   *
+   * ⚠️ THE ORDER OF `openOverlays` IS OUTERMOST-FIRST — the LAST entry is what Back closes. In
+   * practice only one of these is ever open at a time, so the order decides almost nothing; it is
+   * written down anyway because the day two of them overlap is not the day to be guessing.
+   *
+   * 🔒 ADDING A NEW FULL-SCREEN OVERLAY? Add it to this list. Leaving it out is not a crash — Back
+   * will jump to Home from on top of it, which is the wrong answer rather than no answer.
+   */
+  const [exitPromptOpen, setExitPromptOpen] = useState(false);
+
+  useEffect(() => {
+    const onHardwareBack = () => {
+      const openOverlays: string[] = [];
+      if (isMenuOpen) openOverlays.push('menu');
+      if (showDeployPanel) openOverlays.push('deploy');
+      if (showModePicker) openOverlays.push('mode-picker');
+      if (historyPopupOpen) openOverlays.push('history');
+      if (showContinueModal) openOverlays.push('continue');
+      if (reportOpen) openOverlays.push('report');
+      if (zipSizeModal) openOverlays.push('zip-size');
+      if (showAuth) openOverlays.push('auth');
+      if (testingNoticeOpen) openOverlays.push('testing-notice');
+
+      const action = decideBackAction({ exitPromptOpen, openOverlays, isHome: activeView === 'home' });
+      switch (action.type) {
+        case 'dismiss-exit-prompt': setExitPromptOpen(false); return;
+        case 'close-overlay':
+          switch (action.id) {
+            case 'menu': setIsMenuOpen(false); return;
+            case 'deploy': setShowDeployPanel(false); return;
+            case 'mode-picker': setShowModePicker(false); return;
+            case 'history': setHistoryPopupOpen(false); return;
+            case 'continue': setShowContinueModal(false); return;
+            case 'report': setReportOpen(false); return;
+            case 'zip-size': setZipSizeModal(null); return;
+            case 'auth': setShowAuth(false); return;
+            case 'testing-notice': setTestingNoticeOpen(false); return;
+            // An id with no closer would be a Back press that does nothing — the one outcome
+            // `androidBack.ts` refuses to produce. Falling through to Home keeps Back meaningful.
+            default: toggleTab('home'); return;
+          }
+        case 'go-home': toggleTab('home'); return;
+        case 'confirm-exit': setExitPromptOpen(true); return;
+      }
+    };
+    window.addEventListener(HARDWARE_BACK_EVENT, onHardwareBack as EventListener);
+    return () => window.removeEventListener(HARDWARE_BACK_EVENT, onHardwareBack as EventListener);
+  }, [
+    exitPromptOpen, activeView, toggleTab,
+    isMenuOpen, showDeployPanel, showModePicker, historyPopupOpen,
+    showContinueModal, reportOpen, zipSizeModal, showAuth, testingNoticeOpen,
+  ]);
+
+  /**
+   * The user pressed Exit. `exitNativeApp` reports whether the plugin really ran, and a false is NOT
+   * treated as "closed anyway": the dialog closes so the user is not stranded staring at a dead
+   * button, and they remain in a working app. Never claim an exit we could not perform.
+   */
+  const confirmExitApp = useCallback(() => {
+    void loadNativeShellContext()
+      .then((ctx) => { exitNativeApp(ctx); })
+      .catch(() => { /* best effort — the dialog closes either way */ })
+      .finally(() => setExitPromptOpen(false));
+  }, []);
   // The four welcome-gift steps, for the notice's checklist. Returns empty without a request on the
   // website and for a signed-out visitor, so nothing here costs anything outside the Android app.
   const referralProgress = useReferralProgress(user?.uid ?? null);
@@ -3059,6 +3136,13 @@ export default function App() {
           {/* Reachable from every screen: shake, or the sidebar's "Report a problem". It portals to
               document.body, so being rendered here costs nothing in layout. */}
           <ReportSheet open={reportOpen} onClose={() => setReportOpen(false)} view={activeView} />
+          {/* Android's Back button, on the home screen, asks before closing the app. Rendered beside
+              the other sheets so it is inside the same tree the back handler reads its state from. */}
+          <ExitConfirmDialog
+            open={exitPromptOpen}
+            onExit={confirmExitApp}
+            onCancel={() => setExitPromptOpen(false)}
+          />
 
           {/* WE ARE STILL TESTING — say so once per app open, on the home screen, and hand over the
               way to report rather than only asking for it. Rendered beside the sheet it opens, so

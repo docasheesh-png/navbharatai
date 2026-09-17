@@ -59728,6 +59728,106 @@ every future one, which is the opposite of what a guard is for. Both re-proven b
 4. Post-build review timed out at 210 s on 55 files — a paying build silently lost its findings.
 5. Sandbox 84% idle across a 39.8-minute session.
 
+---
+
+## 2026-09-17 — Two admin requests, and both were a capability that existed and could not be reached (PR #2991)
+
+Admin, two items in one message:
+1. *"published app ko, admin jab chahe unpublish ha ban kar sake!"*
+2. *"jab bhi koi user kisi bhi page par apne android mobile se back button press karta hai, app band
+   ho jati hai"* — Back should go HOME from any page, and on Home should ask before exiting, with
+   **Exit (red)** and **Cancel (gray)**, in English.
+
+### 1 · Admin unpublish / ban — the route had no caller
+
+`POST /api/admin/deployments/:workspaceId/takedown` has existed since 2026-08-21. **Nothing in the
+repo ever called it** (verified three ways: a filename sweep, three vocabularies of content grep, and
+the whole repo rather than `src/`). From the admin's side the capability did not exist at all — which
+is the second absolute rule's "built but not really working" state, reached by a missing half rather
+than by a stub.
+
+🔴 **AND IT HAD ONLY THE PERMANENT ACTION.** `taken_down` is re-checked by the deploy gate, so a
+banned workspace can never publish again. Until today that was the *only* thing an admin could do, so
+every removal — a mistake, or "park this while I ask" — cost a real user their app for ever.
+
+**Shipped, reversible sibling first:** `POST /api/admin/deployments/:workspaceId/unpublish`. The live
+channel is deleted FIRST and the registry second (the registry must never say a site is offline while
+it is still serving); a failed delete answers **502** and the status is not touched; status becomes
+`unpublished`, which the deploy gate does not block, so the OWNER republishes from their own screen.
+It still writes the 180-day record (IT Rules 2021 Rule 3(1)(g)) — we removed somebody's live site, and
+whether they may republish does not change that fact — with the reason stamped
+`[unpublished — owner may republish]` so the two actions can never be confused when it is read back.
+
+**The screen:** a "Published apps" panel on the Security tab. Real state in words, search by app id /
+owner / link, server-side status filter, both actions per row. An unreadable list is reported as
+unreadable, never as an empty one — on a moderation screen "no published apps" over a failed read is
+the worst possible lie.
+
+🔒 **The decision is a pure module (`src/lib/adminAppModeration.ts`), and the confirmation COPY lives
+there too.** That is the safeguard, not decoration: the whole protection against an irreversible
+mistake is that a ban reads as a *different sentence* from an unpublish rather than the same one with
+a word swapped — and a sentence inside JSX is one nothing can test. A test now asserts the two share
+no title, no body and no button label. A ban also requires a typed reason: a half-second between the
+impulse and a permanent act, and the record is written from it.
+
+⚠️ **Ban stays offered on an already-OFFLINE app, deliberately.** An unpublished app can still be
+republished by its owner; a ban is precisely what stops that. Hiding it there would leave a moderator
+who has just parked something unable to make it final. Unpublish, by contrast, is offered only while
+an app is really serving — on an offline one it would delete a channel that is gone and re-write a
+status it already holds, "succeeding" while changing nothing, which teaches that the buttons are fake.
+
+### 2 · The Android Back button — one line meeting one architectural fact
+
+**Root cause.** `installBackButtonHandler` read Capacitor's `canGoBack` and called `exitApp()` when it
+was false. That is the CORRECT rule for an app whose screens are browser history entries.
+NavBharatAI's are not: navigation ends in `setActiveView`, a React state change, and **nothing in this
+app ever calls `history.pushState`**. The WebView's stack holds exactly one entry for the life of the
+app, so `canGoBack` is false on the home screen, inside Settings, mid-build — everywhere. Every Back
+press took the exit branch. The handler was not misfiring; it was asking a question this app cannot
+answer.
+
+**The fix: the app's own state is the source of truth, not the stack.** The whole decision is one pure
+function (`src/lib/androidBack.ts`) — exit dialog open ⇒ close the dialog (Back must never CONFIRM
+leaving); an overlay open ⇒ close the topmost (jumping Home would throw away the user's work); not on
+Home ⇒ go Home; on Home ⇒ ask. It is TOTAL on purpose: the one outcome worse than exiting too eagerly
+is a Back button that does nothing, which traps the user and cannot be told from a frozen app.
+
+`ExitConfirmDialog` asks in English with Exit red and Cancel grey as asked; Cancel holds initial focus
+so a stray Enter keeps the user in the app, Escape cancels, the backdrop deliberately does not dismiss,
+and focus is trapped while it is open.
+
+🔴 **A TEST WAS GREEN THE ENTIRE TIME THE DEFECT SHIPPED.** `nativeShell.test.ts` carried
+*"exits the app at the root instead of trapping the user on the screen"* — it asserted the bug as the
+contract. Rewritten to the corrected behaviour with the reason recorded, not deleted. This is the same
+shape as the 09-14 autopsy's *"each suite was tested against the other's FLAG and neither against the
+SENTENCE"*: a test can only defend the question it asks.
+
+### 3 · A light-theme defect the new dialogs surfaced
+
+`themeAlphaRemap.test.ts` caught `bg-white/30`, `hover:bg-white/30`, `ring-white/30` and
+`focus:ring-white/30` — steps no file had used before and which were therefore absent from
+`theme-compat.css`'s table. On the two light themes they would have been literal white on a near-white
+surface: invisible, and invisible precisely on the keyboard-focus affordance that says which button an
+Enter will press. Four rules added under the same law as the rest of that file (mix `--text-primary`
+to the same percentage), so the dark themes stay a byte-for-byte no-op.
+
+### Gate (run last, on the merged state — `origin/main` moved during the work, #2990)
+
+`npm run typecheck` · `node scripts/noUnusedImports.mjs` · `npm run typecheck:server` ·
+`npx vitest run` → **1710 files, 24141 passed, 1 skipped, 0 failed** · `npm run build` ·
+`npm run test:bundle` (within budget) · `npm run boot:check` (PASS).
+
+### Still open
+
+1. **Nothing re-checks a banned workspace's OTHER live apps.** A ban is per-workspace, which is the
+   right unit, but a person who published two abusive apps needs two bans and nothing on the screen
+   says so. A per-OWNER view is the honest next step; recorded rather than guessed at.
+2. **`held` and `plan_paused` are shown but not actionable here.** Both are set by automatic sweeps
+   and the admin can see them, but releasing a hold still has no button — it is a separate decision
+   about who may overrule an automatic safety verdict.
+3. **The exit dialog is web-testable only.** Whether Android's WebView delivers the `backButton` event
+   as Capacitor documents it cannot be verified from a Claude session; it needs a real `.aab` on a
+   real device. The pure decision is proven; the delivery is not.
 ## 2026-09-17 — Autopsy f5351721, open item #3 closed: "a stronger model" was a template, not a measurement
 
 The recorded item read: *"the retry claimed a 'stronger model' that never ran — an escalation message

@@ -407,6 +407,37 @@ const AUX_ASKS_US = /^(?:can|could|would|will|do|does|did|are)\s+(?:you|u|aap|tu
  * form already carried. `\b` is not used around the Devanagari half — under a non-`u` JS regex it does
  * not fire correctly across non-ASCII script boundaries, so whitespace/string edges do the job instead.
  */
+/**
+ * THE HINDI QUESTION THAT ENDS WITH ITS QUESTION WORD — "yeh main kaise karu?", typed without the "?".
+ *
+ * 🔴 THE REPORT (cc8c9075, 2026-09-17). A user typed **"Tumnay jo app banana use main open kase karu"**
+ * — *"the app you were to build, how do I open it?"* — a pure question about an app they already had.
+ * `banana` is a NEW_BUILD_SIGNAL, so it returned **new_build at HIGH confidence**, which by design
+ * skips the LLM intention reader. `userAskedForAnAppToBeBuilt` then said TRUE, which cancelled the
+ * edit-mode exemption in `shouldRetryEmptyBuild` — so the engine, having already ANSWERED the question
+ * correctly at minute 2.5 with a live clickable preview URL, called that answer an empty build and
+ * **re-ran the entire build one rung higher**. The second answer was WORSE: it told the user to run
+ * `npm run dev` and open `localhost:5173`, a URL on a machine they do not have.
+ *
+ * WHY EVERY EXISTING RULE MISSED IT. Hindi is verb-final, so its question word sits before the verb —
+ * near the END. `WH_OPENERS` is `^`-anchored per clause; `MIDSENTENCE_KYA_QUESTION` was unanchored for
+ * exactly this reason (autopsy 2026-09-16) but covers only `kya` + a pronoun. "kase karu" is neither.
+ * This is that autopsy's own finding — *"Hindi places its question particle anywhere in the sentence"*
+ * — applied to the rest of the question words instead of just one.
+ *
+ * 🔒 WHY IT CANNOT SWALLOW AN ORDER, and this is the whole safety argument: it requires a FIRST-PERSON
+ * verb. A Hindi order is second person (`karo`, `banao`, `do`, `dena`); "what shall **I** do" is
+ * `karu`/`karun`. The two are different grammatical persons, so no imperative can match — the same
+ * structural distinction `AUX_ASKS_US` already uses for "can **you**" versus "can I". The verb list is
+ * explicit rather than a `-u$` suffix rule on purpose: "you", "run", "sun" and "gun" all end that way.
+ */
+const HI_FIRST_PERSON_VERB =
+  /\b(?:karu|karun|karoon|karunga|karungi|banau|banaun|banaoon|kholu|kholun|dalu|dalun|likhu|likhun|dekhu|dekhun|lagau|lagaun|bheju|bhejun|rakhu|rakhun|jau|jaun|lu|lun|du|dun|paun|samjhu|samjhun|chalau|chalaun|laun|puchu|puchun|kharidu|kharidun|milega|milegi|hoga|hogi)\b/;
+
+/** The Hindi/Hinglish question words, unanchored — they are as likely to end a clause as open one. */
+const HI_WH_ANYWHERE =
+  /\b(?:kya|kaise|kase|kaisay|kaisi|kaisa|kahan|kaha|kahaan|kidhar|kab|kaun|kon|konsa|konsi|kitna|kitne|kitni|kyun|kyu|kyon)\b/;
+
 const MIDSENTENCE_KYA_QUESTION =
   /(?:^|[\s,.!])kya\s+(?:aap|tum|main|mai|hum|hume)\b|(?:^|[\s,।!])क्या\s+(?:मैं|मई|आप|तुम|हम|हमें)(?:\s|$|[।,.!?])/;
 
@@ -434,7 +465,11 @@ function clauseReadsAsQuestion(raw: string): boolean {
   // unreachable for every message beginning "can i …", "should i …", "do i …". The auxiliary
   // distinction itself is unchanged, so "do it again" is still an order, not a question.
   if (AUX_OPENERS.test(text) && AUX_ASKS_US.test(text)) return true;
-  return MIDSENTENCE_KYA_QUESTION.test(text);
+  if (MIDSENTENCE_KYA_QUESTION.test(text)) return true;
+  // The verb-final Hindi question: a question word anywhere, and a FIRST-PERSON verb to go with it.
+  // Both are required — the wh-word alone appears in plenty of statements ("kya baat hai"), and the
+  // verb alone appears in plenty of plans ("main banau"). Together they are only ever a question.
+  return HI_WH_ANYWHERE.test(text) && HI_FIRST_PERSON_VERB.test(text);
 }
 
 /**
@@ -535,7 +570,22 @@ function classifyIntentWithConfidenceCore(message: string): IntentWithConfidence
   // Step 0 — the user explicitly said DON'T build / just answer, or asked a pure state question.
   // Absolute priority: an instruction/question must never be out-voted by a keyword inside it.
   for (const pattern of ANSWER_ONLY_PATTERNS) {
-    if (pattern.test(lower)) return { intent: 'chat', confidence: 'high', signal: 'answer-only' };
+    if (!pattern.test(lower)) continue;
+    // 🔴 A NEGATION CAN BE A CONSTRAINT INSIDE AN ORDER, NOT A REFUSAL OF IT (report cc8c9075).
+    // The real message was *"Tum mujhe as a app bana kar do … koi quiz app **mat banana**"* — "build
+    // me an app … just don't make a quiz app". `mat banana` is the SHAPE this rule was written for,
+    // and here it narrows an order rather than cancelling one. Firing at HIGH would hard-lock the
+    // whole build request to chat on the strength of its own caveat.
+    //
+    // 🔒 The verdict does NOT flip — only the lock goes, which is the 2026-09-13 asymmetry applied
+    // here: chat costs one message, a wrongly-started build costs a whole build. LOW is what sends
+    // the sentence to the intention reader, which can see both halves at once.
+    // The original case is untouched: strip "build mat karna" out of "build mat karna, bas yeh
+    // batao" and nothing buildable is left, so it keeps its HIGH.
+    const withoutNegation = lower.replace(pattern, ' ');
+    const orderSurvives = !!firstSignalWord(withoutNegation, NEW_BUILD_SIGNALS)
+      || matchesSignal(withoutNegation, BUILD_SIGNALS);
+    return { intent: 'chat', confidence: orderSurvives ? 'low' : 'high', signal: 'answer-only' };
   }
   if (matchesSignal(lower, STATE_QUESTION_SIGNALS)) {
     return { intent: 'chat', confidence: 'high', signal: 'state-question' };
@@ -766,7 +816,26 @@ export function userAskedForAnAppToBeBuilt(message: string): boolean {
   if (isPlatformFixRequest(message)) return false;
   // The same class typed by hand — pasted toolchain output. PROBLEM_SIGNALS is human prose only.
   if (looksLikeMachineError(message)) return false;
-  return classifyIntentWithConfidence(withoutNounisedBuildWords(message)).intent === 'new_build';
+  // 🔴 HIGH IS REQUIRED, NOT JUST THE INTENT (report cc8c9075, 2026-09-17). This used to read
+  // `.intent === 'new_build'` and discard the confidence — so a LOW-confidence GUESS that a message
+  // might be a build request was enough to cancel `shouldRetryEmptyBuild`'s edit-mode exemption and
+  // re-run a whole build on a stronger model.
+  //
+  // That is the wrong thing to spend a guess on, and this function's own doc says why: `intent`
+  // answers "which lane runs this turn?", where a LOW guess is cheap and self-correcting; THIS
+  // question is "may a correct zero-file answer be called a failure?", where a LOW guess buys a
+  // duplicate build. LOW confidence is precisely the classifier reporting that it could not tell —
+  // and "I could not tell" must never authorise the expensive branch.
+  //
+  // ⚠️ It also makes the 2026-09-13 question rule finally BITE here. That rule demotes a question to
+  // LOW rather than flipping its intent, deliberately, so nothing regresses when the LLM reader is
+  // down — but a reader that is down then left this predicate reading the undemoted intent and
+  // answering TRUE anyway. Reading the confidence is what connects the two.
+  //
+  // The asymmetry is unchanged and still runs the safe way: a missed retry is reported honestly by
+  // `emptyBuildFailureSummary`; a wrongly-taken one is a whole second build nobody asked for.
+  const verdict = classifyIntentWithConfidence(withoutNounisedBuildWords(message));
+  return verdict.intent === 'new_build' && verdict.confidence === 'high';
 }
 
 /**

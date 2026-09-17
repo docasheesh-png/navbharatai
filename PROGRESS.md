@@ -63461,3 +63461,121 @@ still a full replace (the gate is what makes that safe).
 **Full CI gate green on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` ·
 `vitest run` (**24,810 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
 `deps:server-gate`.
+
+---
+
+## 2026-09-17 — AUTOPSY cc8c9075: a QUESTION was answered correctly, then called a failed build and re-run
+
+**The prompt was five words of Hinglish:** *"Tumnay jo app banana use main open kase karu"* — *"the app
+you were to build, how do I open it?"* A question about an app the user already had.
+
+**The engine answered it, correctly, at minute 2.5.** Dev server up (`npm run dev`, exit 0), preview
+published at a live URL, screenshot taken, `console_errors` clean, and a reply handing over the
+clickable address. Then it called that answer an **empty build** and re-ran the whole thing one rung
+higher. **The second answer was worse**: it told the user to run `npm run dev` and open
+`localhost:5173` — a URL on a machine they do not have. Total 13.2 minutes; the user stopped it.
+
+### The chain, proven by running the real code rather than reading it
+
+```
+"Tumnay jo app banana use main open kase karu"
+  → readsAsQuestion  = FALSE   (every opener rule is ^-anchored per clause; "kase karu" is at the END)
+  → classifyIntent   = new_build, HIGH, signal "banana"
+  → HIGH skips the LLM intention reader entirely (the 2026-09-13 "read the mood" rule never ran)
+  → userAskedForAnAppToBeBuilt = TRUE   (it read .intent and DISCARDED .confidence)
+  → shouldRetryEmptyBuild's edit-mode exemption cancelled  → EMPTY_BUILD_RETRY
+```
+
+The same probe found the user's SECOND message inverted too: *"Tum mujhe as a app bana kar do … koi
+quiz app **mat banana**"* — an explicit order to build — classified `chat` at HIGH, because the
+negative CONSTRAINT `mat banana` hit `ANSWER_ONLY_PATTERNS`, which is checked above every build signal.
+**Both of the user's messages were classified backwards, in opposite directions.**
+
+### Three DNA-level fixes, each proven by reversion
+
+1. **A verb-final Hindi question is a question.** Hindi is verb-final, so its question word sits near
+   the END. `MIDSENTENCE_KYA_QUESTION` was unanchored for exactly this reason on 2026-09-16 and covers
+   only `kya` + a pronoun; this is that autopsy's own finding applied to the rest of the question words.
+   🔒 It requires a **first-person verb** (`karu`/`karun`/`kholu`…), and a Hindi order is second person
+   (`karo`/`banao`/`do`) — different grammatical persons, so it cannot swallow a build request. The
+   verb list is explicit rather than a `-u$` suffix rule: "you", "run", "sun" and "gun" all end that way.
+2. **A negation can be a CONSTRAINT inside an order, not a refusal of it.** Strip the negated span; if a
+   build order survives, the answer-only verdict keeps its intent but **loses its HIGH lock**. The
+   original case is untouched — strip "build mat karna" out of *"build mat karna, bas yeh batao"* and
+   nothing buildable is left, so it keeps HIGH.
+3. 🔴 **A GUESS MAY NOT AUTHORISE A DUPLICATE BUILD.** `userAskedForAnAppToBeBuilt` now requires
+   `confidence === 'high'`. Its own doc already said why: `intent` answers *"which lane runs this
+   turn?"*, where a LOW guess is cheap and self-correcting; THIS question is *"may a correct zero-file
+   answer be called a failure?"*, where a LOW guess buys a whole second build. **LOW is the classifier
+   reporting that it could not tell — "I could not tell" must never buy the expensive branch.** This is
+   also what finally connects the 2026-09-13 question rule to the retry: that rule demotes rather than
+   flipping (deliberately, so nothing regresses when the reader is down), and this predicate was reading
+   the undemoted intent and answering TRUE anyway. Fix 3 holds even if 1 and 2 are ever loosened.
+
+### Two more real defects in the same report
+
+🔴 **THE TRUNCATION GUARD ASKED FOR THE IDENTICAL THING THAT HAD JUST FAILED.** `src/App.tsx` was cut
+off mid-`content` at **exactly 9,833 output tokens** — the whole authorised ceiling. The guard replied
+*"rewrite each listed file COMPLETELY … write ONE file per response if a file is large"*. It **was**
+writing one file, and that one file does not fit. Same request, same bound, same failure: **two calls,
+158 seconds each — 5.3 minutes of a 13-minute build.** A second attempt under a fixed ceiling cannot
+succeed by trying harder; it succeeds by writing less. A repeat now gets different advice (a smaller
+working file now, the rest via `edit_file`), remembered per-RUNNER because the second cut-off is by
+definition a later turn.
+
+🔴 **A BUILD THE USER STOPPED WAS FILED AS "why it failed is not known".** Its `rootCause` said exactly
+that, while the same document carried the engine's own sentence — *"user stopped the build … charged
+half the work done"* — and the user-facing summary *"Stopped, as you asked."* **Three statements of the
+stop, and the field an autopsy reads first said the cause was unknown.** The class: **one fact written
+under TWO codes, and the reader knew only one.** `stoppedByUser` looked for `USER_STOPPED_BUILD`, which
+the /stop ROUTE writes against a different in-flight diag and which never landed here;
+`CANCELLED_BUILD_CHARGED` is written by the BUILD'S OWN settle path, and `decideCancelledBuildBill`
+returns `applies: true` for nothing but `abortCause === 'user-stop'` — proof, from the one actor that
+cannot be wrong about it. The reader now accepts both, which also repairs every report already stored.
+
+### The five-bucket ledger
+
+| | Count | Items |
+|---|---|---|
+| ✅ Self-healed | 5 | missing `@playwright/test` added · `npm audit fix` ran · dev server restarted with explicit host/port · `edit_file` old_string miss recovered · GLM benched at 17 s so the ladder reached KIMI |
+| 🔀 Worked around | 1 | GLM slow → benched for the run (the bench worked exactly as designed — recorded as debt only because the lead rung failed at all) |
+| ⏭️ Skipped | 3 | typecheck never ran · no user journey derivable · no test suite runnable |
+| ❌ Still broken | 3 | 2 dependency CVEs needing a major bump (vite/esbuild) · `requestAnalysis.startTier: "gemini"` names a tier on **no ladder** since 2026-09-14 · `providerChain` prints `×51` (the key-pool count) as if it were rung repeats |
+| 🥵 Struggle | 4 | **the retry of an already-correct answer** · **2 × 158 s dead calls at the 9,833 ceiling** · 41 s before the first model call (24 s of it silent) · the ETA said "~2–4 min", then said *"still working out how big it is"* for ten more minutes and **never showed a figure** |
+
+### The missing subsystem (step 2)
+
+**There is no ONE PLACE that answers "what did the user want?".** `IntentClassifier` answers it for
+routing, `RequestAnalyser` answers it again for model choice (it said `taskType: "chat"`, correctly, and
+nothing read that), and `userAskedForAnAppToBeBuilt` answers it a third time for the retry decision.
+On this build the three disagreed — chat, new_build, and "yes they wanted an app" — and the most
+expensive of the three won. Fix 3 makes the third one consult the confidence of the second; a single
+shared verdict is the real fix and is recorded here as an **open root cause**.
+
+### Open, not guessed at
+
+- **The Kimi 9,833-token starvation** is the sibling CLAUDE.md already records as open for GLM. This
+  report is a second occurrence, twice in one turn. The honest generic fix (remember a rung that
+  starved and unclamp its NEXT call) still needs cross-turn state the per-rung runner does not carry.
+  The truncation-guard fix above bounds the DAMAGE (no third identical attempt); it does not remove the
+  cause.
+- **The ETA is asserted at t=0 and never reconciled** — already PROGRESS.md open item #6, seen again.
+- **`startTier: "gemini"` and the `×51` chain display** are admin-facing untruths, left for a
+  dedicated pass rather than widened into this change.
+
+### Separately: the build report now copies as JSON (admin, same message)
+
+> *"jab build report copy ki jaye to json formate me hi copy ho. abhi text me copy ho rahi hai."*
+
+The floating admin Copy button copies the page as TEXT — right for an ordinary screen (a browser cannot
+photograph its own window; see `pageSnapshot.ts`) and wrong for a 153-issue report, which a DOM outline
+flattens into something unparseable. It now prefers the open report's JSON. 🔒 The payload is
+**registered, not scraped back out of the DOM**: the dashboard has already resolved the exact JSON, so
+reconstructing it from rendered markup could silently differ from the real report — and a copy that
+looks like the report and is not one is worse than an honest text dump. No report open ⇒ byte-identical
+to today; an empty payload falls back to the page rather than wiping the clipboard while saying
+"copied". ⚠️ This is the sibling of the admin's own 2026-08-09 request in `adminReportParts.ts`, whose
+closing words were *"build report JSON me hi copy ho, text me nahi"* — hunted two days late.
+
+**Gate on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` · **24,951 tests
+passed** · `build` · `test:bundle` · `boot:check` · `deps:server-gate` — all green.

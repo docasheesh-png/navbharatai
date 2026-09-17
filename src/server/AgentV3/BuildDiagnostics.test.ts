@@ -424,7 +424,15 @@ describe('deriveRootCause (P-REPORT.3 — the root cause, not buried in 180 mixe
     const issues = [
       { ts: 1, phase: 'plan' as const, severity: 'warning' as const, code: 'TIME_TO_FIRST_CALL', message: '231s of preparation before the build\'s first model call began.', autoResolved: false },
     ];
-    expect(deriveRootCause({ issues, ok: true })).toBe('Build completed successfully with no problems recorded.');
+    const cause = deriveRootCause({ issues, ok: true }) ?? '';
+    // The original assertion: the advisory is NOT promoted to the build's cause.
+    expect(cause).not.toContain('231s of preparation');
+    expect(cause).toContain('Build completed successfully');
+    // …AND (2026-09-17) the verdict no longer claims a zero the report's own `counts.unresolved`
+    // contradicts. This case used to assert the flat 'with no problems recorded' sentence, which was
+    // false on exactly this input — one unresolved item was recorded, it simply could not be a cause.
+    expect(cause).toContain('1 unresolved item(s) WERE recorded');
+    expect(cause).toContain('TIME_TO_FIRST_CALL');
   });
 
   it('on ok:true a GENUINE unresolved error still outranks a working-app review suggestion', () => {
@@ -554,7 +562,12 @@ describe('deriveRootCause (P-REPORT.3 — the root cause, not buried in 180 mixe
     const issues = [
       { ts: 1, phase: 'tool' as const, severity: 'warning' as const, code: 'TOOL_ERROR', message: 'Tool call failed: Unterminated string in JSON', autoResolved: false },
     ];
-    expect(deriveRootCause({ issues, ok: true })).toBe('Build completed successfully with no problems recorded.');
+    const cause = deriveRootCause({ issues, ok: true }) ?? '';
+    expect(cause).not.toContain('Unterminated string');
+    expect(cause).toContain('Build completed successfully');
+    // The recovered transient is still COUNTED honestly — it was recorded, it just cannot be a cause.
+    expect(cause).toContain('TOOL_ERROR');
+    expect(cause).toContain('recovered from');
   });
 
   it('on ok:true, a GENUINE unresolved non-recoverable error STILL wins (never hide a real defect)', () => {
@@ -1365,7 +1378,10 @@ describe('importTurnObservation (mitrify autopsy 2026-07-27)', () => {
   it('an unused-dep hint is not the rootCause on a real build turn either', () => {
     const real = importTurnObservation(false, MSG);
     const issues = [{ ts: 1, phase: 'build' as const, severity: 'warning' as const, code: 'INTEGRITY_UNUSED_DEP', ...real }];
-    expect(deriveRootCause({ issues, ok: true })).toBe('Build completed successfully with no problems recorded.');
+    const cause = deriveRootCause({ issues, ok: true }) ?? '';
+    expect(cause).not.toContain(MSG);
+    expect(cause).toContain('Build completed successfully');
+    expect(cause).toContain('INTEGRITY_UNUSED_DEP');
     // The finding itself is NOT suppressed — only its promotion to rootCause.
     expect(real.message).toBe(MSG);
     expect(real.autoResolved).toBe(false);
@@ -1400,8 +1416,10 @@ describe('a CVE advisory can never explain a build (build 5b4f9b63)', () => {
   });
 
   it('and the CVE count itself is never promoted to the cause either', () => {
-    const rootCause = deriveRootCause({ issues: [cveAdvisory], ok: true, commands: [] });
-    expect(rootCause).toBe('Build completed successfully with no problems recorded.');
+    const rootCause = deriveRootCause({ issues: [cveAdvisory], ok: true, commands: [] }) ?? '';
+    expect(rootCause).not.toContain('known vulnerabilities');
+    expect(rootCause).toContain('Build completed successfully');
+    expect(rootCause).toContain('DEPENDENCY_VULNERABILITIES');
   });
 
   it('a REAL surviving consequence still blocks forgiveness — the Mitrify db:push case stands', () => {
@@ -1429,9 +1447,10 @@ describe('a claim-about-the-summary can never be the build root cause (build 4b7
   };
 
   it('is never promoted to the root cause of a successful build', () => {
-    const rootCause = deriveRootCause({ issues: [claimUnsupported], ok: true, commands: [] });
+    const rootCause = deriveRootCause({ issues: [claimUnsupported], ok: true, commands: [] }) ?? '';
     expect(rootCause).not.toContain('described');
-    expect(rootCause).toBe('Build completed successfully with no problems recorded.');
+    expect(rootCause).toContain('Build completed successfully');
+    expect(rootCause).toContain('CLAIM_UNSUPPORTED');
   });
 });
 

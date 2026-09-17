@@ -37,6 +37,7 @@ import { tierLadder, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutC
 import { describeRunnerChain, chainProviders, firstRungLabel, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction } from '../AgentV3/AuthenticityAnalysis';
+import { isUnreachable } from '../AgentV3/appReachability';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
 import { parallelBuildEnabled, lockedActuator } from '../AgentV3/parallelBuild';
 import { PathWriteLock } from '../AgentV3/pathWriteLock';
@@ -13744,6 +13745,28 @@ async function noteBuildOutcome(
             const wsMem = getWorkspaceMemory(workspaceId);
             await restoreWorkspaceMemory(workspaceId, wsMem).catch(() => {});
             await warmIndexFiles(wsMem, fileTree, (p) => actuator.readFile(workspaceId, p));
+            // 🔎 MEASURE THE HOLLOW GRAPH (open root cause #2, 2026-09-17). A cold resume indexes every
+            // previously-known file with `RESTORED_STUB`, which puts it in `graph.files` — and
+            // `warmIndexFiles` skips files it already knows, so those keep EMPTY facts (no imports, no
+            // exports, no components, no routes) for the whole build. Everything built on the graph
+            // then reasons about a project that looks like a list of blank files.
+            //
+            // The FIX is deliberately not shipped here: filling the graph moves a real build's verdict
+            // in BOTH directions (a restored import can fire `unresolvedImport`, a 25-point hard
+            // blocker ⇒ ₹0 on a working app; while a hollow graph makes every component look
+            // un-imported ⇒ `PENALTY.orphanComponent` against every resumed build), and which one
+            // dominates has never been measured. This line is that measurement — admin-only, no
+            // behaviour change, nothing branches on it. Best-effort inside the same try.
+            const stubs = wsMem.restoredStubPaths();
+            if (stubs.length > 0) {
+              const total = wsMem.graph().files.length;
+              buildDiag.record({
+                phase: 'plan', severity: 'info', code: 'GRAPH_RESTORED_STUBS',
+                message: `${stubs.length} of ${total} file(s) in the project graph carry PLACEHOLDER facts from a cold resume — they contribute nothing to recall, evaluate, the architecture analysis or the readiness score.`,
+                detail: stubs.slice(0, 20).join(', ') + (stubs.length > 20 ? `, +${stubs.length - 20} more` : ''),
+                autoResolved: true, // a measurement, never a defect of the user's app
+              });
+            }
           } catch { /* warming is best-effort — never blocks a build */ }
           // PROJECT CONTRACT CARD (autopsy 2026-08-02) — PREVENT the two import mistakes this edit
           // build made and then had to self-heal: it imported shared types from `./storage` (the wrong
@@ -16600,7 +16623,11 @@ async function noteBuildOutcome(
       if ((process.env.AGENTV3_INCOMPLETE_CODE_HEAL ?? '').trim().toLowerCase() !== 'off'
         && result && !result.ok && expectsArtifacts && writtenFiles.size > 0 && autoFixEnabled() && !abort.signal.aborted) {
         try {
-          const stubs = highSeverityAuthenticityIssues(Object.fromEntries(writtenFiles));
+          // A stub in a file the app never loads is not a stub the app has (appReachability.ts,
+          // autopsy e706e068: 22 model calls completed a stray hook nothing imported). The readiness
+          // gate that runs before this heal already judged which files the app loads; ask it.
+          const stubs = highSeverityAuthenticityIssues(Object.fromEntries(writtenFiles))
+            .filter((s) => !isUnreachable(dispatcher.lastReachability, s.file));
           const timeLeft = effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000;
           if (stubs.length > 0 && timeLeft) {
             events.emit({ type: 'narration', agent: 'architect', text: `🔧 Completing ${stubs.length} unfinished piece(s) of the code so the feature actually works…`, ts: Date.now() });

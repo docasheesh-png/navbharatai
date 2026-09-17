@@ -31,7 +31,7 @@ import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
 import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote } from '../AgentV3/etaEvidence';
 import { decideComplexity } from '../AgentV3/complexityRouting';
-import { tierLadder, healLadder, retryLeadsHigher, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
+import { tierLadder, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
 import { describeRunnerChain, chainProviders, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction } from '../AgentV3/AuthenticityAnalysis';
@@ -3061,7 +3061,7 @@ function unavailableTierRunner(level: PowerLevel, ladderText: string, missingKey
  * build when the floor was off, which is exactly what the rule forbids. A 429-storm on rung 1 now costs
  * one failed call per cooldown window (the shared bench still sidelines the rung), not a reorder.
  */
-export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; complex?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void;
+export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; complex?: boolean; afterLeadRung?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void;
   /** Retired-rung memory owned by the CALLER, so it can span several runner instances — the fast
    *  lane's per-file runners share ONE build's map. Omitted ⇒ each runner keeps its own, as before.
    *  See MultiProviderOptions.deadRungs for why this is caller-owned and never a singleton. */
@@ -3073,6 +3073,11 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
   // `heal` and `complex` are different questions with the same answer: skip the cheap flash opener.
   // ONE function answers both (tierLadder.withoutCheapFlashLead), so they can never drift apart.
   let rungs: LadderRung[] = (opts.heal || opts.complex) ? withoutCheapFlashLead(parsed.rungs) : [...parsed.rungs];
+  // `afterLeadRung` is the EMPTY-BUILD RETRY's ladder: the first attempt produced nothing, so the rung
+  // that produced nothing is dropped — by POSITION, because a provider can appear twice (Weak carries
+  // GLM at two rungs, so `fromProvider` would find the wrong one). Applied to the TIER ladder, not on
+  // top of `heal`: composing the two would skip two rungs on Weak/Normal and throw away a good vendor.
+  if (opts.afterLeadRung) rungs = ladderAfterLeadRung(parsed.rungs);
   if (opts.fromProvider) {
     const from = ladderFrom(rungs, opts.fromProvider);
     if (from.length > 0) rungs = from;
@@ -15174,7 +15179,7 @@ async function noteBuildOutcome(
         // sentences below used to assert "a stronger model" unconditionally, and on STRONG that was
         // false: its ladder has no flash rung, so `heal: true` drops nothing and the retry restarts on
         // the very engine that just produced no files. 30 calls, all `glm-5.3`, no Claude anywhere.
-        const retryRungs = healLadder(tierLadder(powerLevelReqEffective).rungs);
+        const retryRungs = ladderAfterLeadRung(tierLadder(powerLevelReqEffective).rungs);
         const retryIsStronger = retryLeadsHigher(powerLevelReqEffective);
         buildDiag.record({
           phase: 'build', severity: 'warning', code: 'EMPTY_BUILD_RETRY',
@@ -15201,7 +15206,15 @@ async function noteBuildOutcome(
         // escalates. What actually happens is whatever `retryIsStronger` says above.
         const retryRunner = new AgentRunner({
           ...baseRunnerOpts,
-          client: buildTurnRunner(healRunnerOpts()),
+          // 🔴 THE RETRY NEVER RESTARTS ON THE RUNG THAT PRODUCED NOTHING (admin 2026-09-17: "app 100%
+          // band, failed likh kar na aye"). It used to pass `heal: true`, which drops only a leading
+          // cheap-FLASH rung — Weak and Normal have one, Strong does not, so Strong re-ran the very
+          // engine that had just written zero files. That is a retry loop around a deterministic
+          // failure, and it is what autopsy f5351721 spent 23 extra minutes on before telling the user
+          // it had failed. `afterLeadRung` drops it by POSITION on every tier. It cannot reach another
+          // tier's model (the rungs are this tier's own, so Weak still ends at Haiku) and it never
+          // empties a one-rung ladder.
+          client: buildTurnRunner({ ...healRunnerOpts(), heal: false, afterLeadRung: true }),
           model: resolveModel(powerLevelReqEffective), // the Claude-rung id; GLM/Kimi rungs ignore it and force their own ladder model
           effort: powerSpecResolved.effort,
           // Generation-shaped (it re-runs the whole build), so it respects the correction reserve —

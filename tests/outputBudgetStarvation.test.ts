@@ -138,7 +138,13 @@ describe('🔒 the wiring — every half of this fix, pinned where it lives', ()
     // cannot be mis-reported as our arithmetic. Updated rather than loosened: a substring match on
     // `throw starvedBudgetError(` would have survived this edit and every future one, which is the
     // opposite of what a reversion guard is for.
-    expect(runner).toContain('if (turnStarvedItsBudget(result)) throw starvedBudgetError(budget.maxTokens, budget.requested, budget.reasoningUnclamped);');
+    // ⚠️ Updated again on 2026-09-17: the throw is now inside a block, because a CLAMPED starvation is
+    // first recorded in the learned-capability memo (`rememberStarvedWhileClamped`) so this model is
+    // never clamped again in this process. The behaviour this case guards — throw, never return an
+    // unusable turn — is unchanged, and the two lines are pinned together so neither can be dropped.
+    expect(runner).toContain('if (!budget.reasoningUnclamped) rememberStarvedWhileClamped(thinkingModel);');
+    expect(runner).toContain('throw starvedBudgetError(budget.maxTokens, budget.requested, budget.reasoningUnclamped);');
+    expect(runner).toContain('if (turnStarvedItsBudget(result)) {');
   });
 
   it('the chain retires the starved rung by MODEL, so sibling rungs and the backstop survive', () => {

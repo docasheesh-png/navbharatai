@@ -19,10 +19,15 @@ import { deliveredStartTier } from '../src/server/routes/agentv3';
 const on = {} as NodeJS.ProcessEnv;
 
 describe('retryLeadsHigher — the claim, derived from the ladder that actually runs', () => {
-  it('🔴 STRONG does NOT start higher — the exact case that made the old sentence false', () => {
-    expect(retryLeadsHigher('mini', on)).toBe(false);
-    // …and the reason, pinned so the answer cannot become right by accident: Strong has no flash rung,
-    // so healLadder drops nothing and the retry restarts on the identical engine.
+  it('✅ STRONG now DOES start higher — the case that made the old sentence false, since fixed', () => {
+    // ⚠️ THIS EXPECTATION WAS INVERTED ON 2026-09-17, and the reason matters. It originally asserted
+    // `false`, because at that moment the retry really did restart on the same engine and the job of
+    // the change was only to stop LYING about it. The admin then said *"app 100% band, failed likh kar
+    // na aye"*, so the retry itself was fixed (`ladderAfterLeadRung`) — it now never restarts on the
+    // rung that produced nothing. Updating this is recording a behaviour that got BETTER; it is not
+    // the forbidden "change the test to match broken behaviour".
+    expect(retryLeadsHigher('mini', on)).toBe(true);
+    // The old rule still does nothing here — which is exactly why a Strong-specific fix was needed.
     const build = tierLadder('mini', on).rungs;
     expect(healLadder(build)[0]).toEqual(build[0]);
   });

@@ -154,7 +154,13 @@ describe('every build-chain call site passes a tier — the wiring, asserted', (
     // tests/healRunnerAttribution.test.ts pins to the tier separately).
     expect(calls.length).toBeGreaterThanOrEqual(3);
     for (const c of calls) {
-      expect(c).toMatch(/\btier:/);
+      // ⚠️ A SPREAD OF `healRunnerOpts()` SUPPLIES THE TIER (2026-09-17). The empty-build retry now
+      // reads `buildTurnRunner({ ...healRunnerOpts(), heal: false, afterLeadRung: true })`, so it has
+      // no literal `tier:` — but it is guaranteed one, by the same route this case's own comment
+      // already exempts the heal sites through (healRunnerOpts sets `tier: powerLevelReqEffective`,
+      // pinned in tests/healRunnerAttribution.test.ts). Widened to accept that spread rather than
+      // dropped: the invariant — every call site passes a tier — is unchanged and still enforced.
+      expect(c).toMatch(/\btier:|\.\.\.healRunnerOpts\(\)/);
       expect(c).not.toMatch(/allowCheapFloor|cheapOnly:|claudeFirst:|geminiModel:|\bfree:|flagship:/);
     }
   });

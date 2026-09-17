@@ -1150,6 +1150,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
   const copySelectedReport = () => void copyJson(selectedPartJson, selectedPartMeta?.label || 'Report');
 
+  /**
+   * WHAT THE FLOATING COPY BUTTON SHOULD TAKE INSTEAD OF THE PAGE TEXT (admin 2026-09-17: *"jab build
+   * report copy ki jaye to json formate me hi copy ho. abhi text me copy ho rahi hai."*).
+   *
+   * Both of these are MODALS gated on their own state being non-null, so non-null means the admin is
+   * genuinely looking at one — the button never silently switches to JSON on a page showing none.
+   * The payloads are the SAME strings the panels' own Copy buttons use, so the two can never disagree.
+   */
+  const copyJsonPayload = useMemo(() => ({
+    apkReport: openApkReport && !openApkReport.loading && !openApkReport.error
+      ? { label: 'APK build report', json: JSON.stringify(openApkReport, null, 2) }
+      : null,
+    buildReport: selectedReport && selectedPartJson
+      ? { label: selectedPartMeta?.label || 'Build report', json: selectedPartJson }
+      : null,
+  }), [openApkReport, selectedReport, selectedPartJson, selectedPartMeta]);
+
   const fetchAnalytics = useCallback(async () => {
     setLoading(true);
     try {
@@ -1525,7 +1542,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   return (
     <div className="w-full max-w-7xl mx-auto space-y-6 py-4 text-left">
       {/* The floating page-copy button — every admin tab, draggable, closable (admin 2026-09-14). */}
-      <AdminCopyButton pageLabel={TABS.find((t) => t.id === activeTab)?.label || 'Admin'} />
+      <AdminCopyButton
+        pageLabel={TABS.find((t) => t.id === activeTab)?.label || 'Admin'}
+        jsonPayload={copyJsonPayload}
+      />
 
       {/* Toast */}
       {toastMsg && (

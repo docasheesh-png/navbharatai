@@ -17668,7 +17668,7 @@ async function noteBuildOutcome(
               20_000 + pageRoutes.length * PAGE_LOAD_TIMEOUT_MS, 'page-route-check',
             );
             const pageResults = parsePageCheck(out.stdout);
-            const pageSummary = summarizePageCheck(pageResults, pageRoutes.length);
+            const pageSummary = summarizePageCheck(pageResults, pageRoutes.length, out.stdout);
             // KEEP this measurement. Every page here was loaded in the sandbox's own real browser with
             // `pageerror` + `console` listeners attached, so it is genuine runtime evidence — and the
             // runtime verdict below can use it when the live preview console is not available, instead
@@ -17739,7 +17739,7 @@ async function noteBuildOutcome(
               20_000 + journeys.length * JOURNEY_TIMEOUT_MS * 2, 'journey-check',
             );
             const journeyResults = parseJourneyResults(out.stdout);
-            const verdict = summarizeJourneys(journeyResults);
+            const verdict = summarizeJourneys(journeyResults, journeys.length, out.stdout);
             // 'unreachable' is its own outcome, not a pass and not a failure — a login wall tells us
             // nothing about the app, and either other answer would be invented.
             if (journeyResults.some((r) => r.verdict === 'failed')) gateEvidence.journeys = 'failed';
@@ -17748,9 +17748,12 @@ async function noteBuildOutcome(
             buildDiag.record({
               phase: 'preview',
               severity: verdict.ok ? 'info' : 'warning',
-              code: verdict.ok ? 'JOURNEY_PASSED' : 'JOURNEY_FAILED',
+              // THREE outcomes, not two. A runner that returned nothing did not pass and did not fail —
+              // it did not run, and `JOURNEY_NOT_RUN` says so instead of borrowing either verdict. Both
+              // other codes now require `ran`, so a future empty result can never be coded green again.
+              code: !verdict.ran ? 'JOURNEY_NOT_RUN' : verdict.ok ? 'JOURNEY_PASSED' : 'JOURNEY_FAILED',
               message: verdict.summary,
-              autoResolved: verdict.ok,
+              autoResolved: verdict.ok && verdict.ran,
               detail: journeyResults.map((r) => `${r.verdict.toUpperCase()} ${r.route} (${r.step}) — ${r.note}`).join('\n'),
             });
             // SHOW THE USER THAT WE ACTUALLY CHECKED (gap analysis 2026-09-10). Everything above goes

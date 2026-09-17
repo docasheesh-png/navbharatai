@@ -2251,7 +2251,31 @@ the flag entries above promise.
   selector is read out of the source, never guessed; a form it cannot address honestly yields NO journey.
   A journey against a USER-OWNED database is downgraded to a non-writing submit — we do not put test rows
   in somebody's real Supabase. Evidence, never a gate. Codes: `JOURNEY_PASSED` / `JOURNEY_FAILED` /
-  `JOURNEY_NOT_DERIVED`.
+  `JOURNEY_NOT_DERIVED` / **`JOURNEY_NOT_RUN`**.
+  🔴 **IT HAD NEVER ONCE LAUNCHED A BROWSER, from the day it shipped until 2026-09-17 — so do NOT read
+  the paragraph above as a description of evidence this engine has been collecting.** `journeyScript`
+  built its own run line and omitted `PLAYWRIGHT_BROWSERS_PATH`; Chromium exists ONLY under
+  `/home/user/.e-tools/.browsers` (both the image build and `_kickoffPlaywright` install it with that
+  variable set, and it is never a persistent `ENV`), so `chromium.launch()` threw before the first
+  journey of every build. Its sibling `pageCheckScript` set the variable, and fourteen other Playwright
+  invocations in this repo set it; this one did not — the drifted-copy class, and a repeat of the
+  `browseUrl` bug whose own comment records it being root-caused once already.
+  ⚠️ **AND THE SAME LINE MADE IT UNOBSERVABLE, which is the half worth remembering:**
+  `… 2>&1 | grep '^NBAI_JOURNEY ' || true` folds stderr into stdout, discards every line that is not a
+  result, and swallows the exit code — so a script that died at line 1 and one that ran perfectly and
+  found nothing return the IDENTICAL empty string. Both run lines now come from ONE builder
+  (`sandboxBrowserScript.ts`) that carries the path by construction and, when a run yields no result,
+  prints a bounded tail of what the script really said under `NBAI_DIAG:`.
+  🔒 **`summarizeJourneys` returns `ran` as well as `ok`, and the route reads it.** Zero results used to
+  be `{ ok: true }`, which the route mapped to `JOURNEY_PASSED` at severity `info` with
+  `autoResolved: true` — so throughout the outage every build recorded a PASSING journey code whose own
+  message read *"No user journey was run."* The message was honest; the code was not, and the code is
+  what a reader scanning a report sees. `JOURNEY_NOT_RUN` is neither a pass nor a failure, and is
+  registered in `PROCESS_ONLY_CODES` and `NEVER_SUGGEST` so it can never count against the user's app.
+  ⚠️ **What to watch on the first real builds: `JOURNEY_PASSED` / `JOURNEY_FAILED` appearing at all.**
+  Until now the only journey outcomes a report could carry were `JOURNEY_NOT_DERIVED` and the
+  mislabelled empty pass. A sudden crop of `JOURNEY_FAILED` is not a regression — it is the check
+  working for the first time, and each one is a real app that looks like it saves data and does not.
 
 **New report codes you will now see (2026-08-12) — what they mean:**
 - `RELEASE_GATE` — GREEN / YELLOW / RED / **UNKNOWN**. UNKNOWN is the important one: nothing failed and

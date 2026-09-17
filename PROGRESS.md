@@ -64304,6 +64304,71 @@ with the abort case REVERTED, because `default`'s text also contains *"files so 
 **Full CI gate green on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` ·
 `vitest run` (**24,990 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
 `deps:server-gate`.
+
+## 2026-09-17 — THE JOURNEY CHECK HAD NEVER LAUNCHED A BROWSER, and two things guaranteed nobody could tell
+
+Found while clearing the last un-owned items from autopsy `e706e068`'s ledger (🔀 "journey not derived",
+⏭️ "page-render check: no result for 6 routes"). Reading the two modules that produce that evidence
+turned up a bug bigger than the ledger item that led to it.
+
+**1. THE BUG.** `journeyScript` built its own run line:
+
+    node /tmp/nbai-journey.mjs 2>&1 | grep '^NBAI_JOURNEY ' || true
+
+with **no `PLAYWRIGHT_BROWSERS_PATH`**. Chromium exists in exactly one place in the sandbox —
+`/home/user/.e-tools/.browsers` — because the image build (`infra/e2b/e2b.Dockerfile:67`) and the
+runtime `_kickoffPlaywright` (`E2BActuator.ts:1483`) both install it with that variable set on the
+command, and it is **never** a persistent `ENV`. So `chromium.launch()` threw *"Executable doesn't
+exist"* before the first step of the first journey, on every build, since the check shipped. Its
+sibling `pageCheckScript` set the variable. **Fourteen other Playwright invocations in this repo set
+it.** This one did not.
+
+It is also a REPEAT: `browseUrl`'s own comment records the identical bug being root-caused once before
+("ran … with no PLAYWRIGHT_BROWSERS_PATH … so the require ALWAYS failed and browseUrl silently degraded
+to a curl of the static HTML shell"). The instance was fixed; the class was not — exactly the failure
+the constitution's bar entry describes for `a38c6fef`.
+
+**2. WHY IT COULD NOT BE SEEN.** The same line is the blindness. `2>&1` folds stderr into stdout, the
+marker `grep` then discards every line that is not a result, and `|| true` hides the exit status — so a
+script that died on line 1 and one that ran perfectly and found nothing return the **identical empty
+string**. `PageRouteCheck`'s header had already written this down about an earlier NODE_PATH bug ("the
+trailing || true and the grep swallow the error, so the run simply produces no result lines") and the
+pattern was copied into the sibling anyway, carrying the blindness with it.
+
+**3. THE FAKE GREEN.** `summarizeJourneys([])` returned `{ ok: true }`, and the route records
+`code: verdict.ok ? 'JOURNEY_PASSED' : 'JOURNEY_FAILED'` at `severity: 'info'` with
+`autoResolved: true`. So for the whole outage **every build recorded a PASSING journey code** whose own
+message read *"No user journey was run."* The message was honest and the code was not, and the code is
+what a reader scanning a report actually sees. (The release gate was never misled — the route only sets
+`gateEvidence.journeys` when results exist — so this was a reporting lie, not a shipping one.)
+
+**THE FIX, at the class rather than the instance.**
+- **`src/server/AgentV3/sandboxBrowserScript.ts` (new, pure).** ONE builder for the run line of every
+  in-sandbox browser script we own. It carries `PLAYWRIGHT_BROWSERS_PATH` by construction, keeps result
+  lines on stdout unchanged (so every parser is untouched), and — only when a run yields no result or
+  exits non-zero — prints a **bounded** tail (8 lines × 200 cols, capped at 400 chars in a report) of
+  what the script really said, under its own `NBAI_DIAG:` marker. Still exits 0: a probe that found
+  nothing must never look like a failed command. POSIX `sh` only, and the quiet grep is spelled
+  `grep -q '^M' file`, not `grep '^M' file -q`, which is GNU-only. **Verified by executing the generated
+  line in a real shell** across three cases (healthy, died-at-launch, ran-but-empty) rather than by eye.
+- Both modules use it; each result marker is now named once (`JOURNEY_RESULT_MARKER`,
+  `PAGE_RESULT_MARKER`) instead of hand-written in three places, which is how the first copy drifted.
+- `summarizeJourneys(results, attempted, stdout)` returns **`ran`** beside `ok`, and
+  `summarizePageCheck(results, attempted, stdout)` takes the raw output; both now say **why** when the
+  runner produced nothing. New report code **`JOURNEY_NOT_RUN`** (neither pass nor failure), registered
+  in `PROCESS_ONLY_CODES` and `NEVER_SUGGEST` so it can never count against the user's app.
+
+**THE GUARD THAT SHOULD HAVE EXISTED.** `sandboxBrowsersPath.test.ts` already pinned the CONSTANT and
+the hand-off to the USER's suite — and its own header names "journey runs" as a consumer — but nothing
+asserted that the scripts the PLATFORM runs carry the variable. Same shape as the complexity flag in
+#3043: the decision was tested, the chain was not. It now asserts the **real generated command** for
+both scripts, and that neither module builds its own run line. Proven by reversion, three ways: putting
+the old journey line back fails 2 cases; removing the path from the builder fails 3; restoring the
+route's two-way code fails 3 in `tests/journeyRunnerWiring.test.ts`.
+
+**What to watch on the first real builds:** `JOURNEY_PASSED` / `JOURNEY_FAILED` appearing **at all**.
+A crop of `JOURNEY_FAILED` is not a regression — it is the check working for the first time, and each
+one is a real app that looks like it saves data and does not.
 ### 2026-09-17 (autopsy d98dae01, half 1 of 2) — a request none of our signals can read is not a greeting
 
 The prompt was Telugu: a text-to-speech app with voice cloning. `RequestAnalyser` scored it **5** — the

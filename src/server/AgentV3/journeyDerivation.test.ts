@@ -315,7 +315,28 @@ describe('reading the results honestly', () => {
   });
 
   it('says plainly when nothing ran at all', () => {
-    expect(summarizeJourneys([])).toEqual({ ok: true, summary: 'No user journey was run.' });
+    expect(summarizeJourneys([])).toEqual({ ok: true, ran: false, summary: 'No user journey was run.' });
+  });
+
+  // 🔴 THE FAKE GREEN. While the runner was launching no browser at all, every build recorded
+  // JOURNEY_PASSED — the route maps ok → that code — on a check that had not run. `ran` is what
+  // separates the two, and both other outcomes now require it.
+  it('a runner that returned NOTHING is neither a pass nor a failure', () => {
+    const s = summarizeJourneys([], 2);
+    expect(s.ran).toBe(false);
+    expect(s.ok).toBe(false);
+    expect(s.summary).toContain('could not be completed for 2 journeys');
+  });
+
+  it('and says why, when the runner left a reason', () => {
+    const s = summarizeJourneys([], 1, "NBAI_DIAG:browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium-1148/chrome-linux/chrome");
+    expect(s.summary).toContain('sandbox browser could not be launched');
+    expect(s.summary).toContain("Executable doesn't exist");
+  });
+
+  it('a real result still reports that it RAN', () => {
+    expect(summarizeJourneys([r({})], 1).ran).toBe(true);
+    expect(summarizeJourneys([r({ verdict: 'failed', note: 'vanished on reload' })], 1).ran).toBe(true);
   });
 
   it('a pass says what was actually proven, not that the app is correct', () => {

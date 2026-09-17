@@ -64181,3 +64181,84 @@ with the abort case REVERTED, because `default`'s text also contains *"files so 
 **Full CI gate green on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` ·
 `vitest run` (**24,990 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
 `deps:server-gate`.
+### 2026-09-17 (autopsy d98dae01, half 1 of 2) — a request none of our signals can read is not a greeting
+
+The prompt was Telugu: a text-to-speech app with voice cloning. `RequestAnalyser` scored it **5** — the
+same 5 as the word `"hi"` — and reported **`ambiguous: false`**, i.e. *"I am confident"*.
+
+**Why, in one line: every signal in that module is an ASCII pattern.** `simpleApp`, `coding`,
+`debugging`, `architecture`, `hardSignal`, `greeting` and the shared `isComplexAppPrompt` are all
+English or romanized English, so a request in Devanagari, Telugu, Bengali, Tamil, Gujarati, Kannada,
+Malayalam, Punjabi, Odia, Urdu or Arabic matches none of them, falls through `detectTaskType`'s final
+`return 'chat'`, and lands on `BASE_SCORE.chat`.
+
+🔴 **THE SCORE WAS NOT THE WORST OF IT.** `ambiguous` exists — that file's own opening docblock says so
+— precisely to mark *"a caller MAY refine this with a cheap LLM analyser"*. It was returned **false** in
+the one case where the module had read nothing at all. A confident wrong answer is worse than an
+admitted unknown, and every downstream reader was handed the confident version: the start band, the
+step ceiling (80 vs 150), the one-shot lane, the report's `requestAnalysis`, the `modelPerformance`
+rows.
+
+**What was already fixed, and why it was only half (safeguard #6, and the check paid for itself).**
+`complexityRouting.ts` reached the same finding EARLIER THE SAME DAY and answered it with
+`scorerCouldNotRead` — a private copy of the readability test, consulted by `needsSecondOpinion`, so a
+foreign-script request buys a gpt-nano second opinion whatever it scored. That is a real fix for *that
+module's* question and a workaround for everyone else's: the module that could not read went on
+insisting it could. Building the same thing again would have been PR #1 and PR #4 a third time; listing
+the open PRs and grepping `main` first is what turned a duplicate into the missing half.
+
+**The missing half, and it is the 50/50 law rather than a second opinion.** A second opinion buys a
+better ANSWER; it cannot make the answer we already had honest. When nano is down, rate-limited, or the
+flag is off, `decideComplexity` says *"the score stands"* — and the score was 5, so the biggest app in
+the queue opened on the cheapest flash rung with nothing recording that anything was unknown.
+
+- **The test moved to the module the fact is about.** `signalsCouldNotRead` now lives in
+  `RequestAnalyser.ts` beside the signals it describes; `complexityRouting` imports it and re-exports it
+  under its original name, so every caller and test keeps working. Same shape as the four drifted copies
+  of `safeRelPath` → one shared `workspacePath.ts`.
+- **`analyzeRequest` says what it could not read**: a new `unreadable` field, and `ambiguous` is now
+  `isNearBoundary(score) || unreadable`. 🔒 `taskType`, `startTier` and `escalationPath` are untouched by
+  the flag, so a caller that ignores it behaves exactly as before — the flag adds an option and removes
+  none (the same discipline #3045 used for the reader's `unclear`).
+- **A script-neutral FLOOR makes the deterministic answer honest.** Applied only when
+  `signalsCouldNotRead` is true, so the English/Hinglish path is byte-identical. It counts what can be
+  counted without reading a word — enumerated parts (commas, semicolons, newlines, bullet and numbered
+  markers, all of which mean "and another one" in every script we serve) and prompt length — and floors
+  the score at **`BASE_SCORE.coding` (30)** from `FLOOR_PARTS_FEW` parts or 300 chars, and at
+  **`BASE_SCORE.complex_app` (58)** from `FLOOR_PARTS_MANY` parts or 800 chars. **It only ever raises.**
+  🔒 Both values are existing `BASE_SCORE` bands, which is the whole correctness argument: an unreadable
+  multi-feature spec lands exactly where its ENGLISH equivalent already lands, not on a new path nobody
+  has exercised. A test asserts that equality directly.
+- **`FLOOR_PARTS_MANY = 6` is borrowed, `FLOOR_PARTS_FEW = 3` is chosen, and the difference is stated in
+  the code.** 6 is `BuildTimeEstimator.complexityFromPrompt`'s own floor on a complex-app prompt's
+  `featureCount` — this repo's existing answer to "how many features make an app complex", counted the
+  same way. `ProjectPlan.MEGA_BULLETS_WITH_NOUN` (8) was considered and rejected: it counts BULLET LINES
+  beside a big-software noun, a strictly stronger signal, and a constant borrowed across two different
+  measurements is how a shared number stops meaning one thing.
+- **Honesty half (rule 5):** the admin report now carries `requestAnalysis.signalsCouldNotRead`, written
+  only when true, so a `taskType` of `chat` on such a build is legible as a FALLTHROUGH rather than a
+  classification. Same class of wrong label as `startTier: "gemini"` (2b0a3ed5) — a default printed
+  where a measurement was expected. **No edit to `routes/agentv3.ts`**: it already passes the whole
+  analysis object to `setRequestAnalysis`, so the flag flows on its own (and PRs #3040/#3043/#3045/#3046
+  are live in that file).
+- ⚠️ **A SHORT foreign-script request stays exactly as cheap as it is today.** The floor needs evidence,
+  not a script: `"ఒక సాధారణ కాలిక్యులేటర్ యాప్ తయారు చేయండి"` still scores 5 and still opens on the
+  cheapest band — it simply no longer claims the scorer understood it.
+
+**Tests:** `tests/anUnreadableRequestIsNotAGreeting.test.ts` (24). **Reversion-proven in all four
+parts** — dropping `|| unreadable` fails 2, disabling the floor fails 3 (including one in
+`complexityRouting.test.ts`), dropping the report flag fails 1, and re-inlining a behaviourally
+IDENTICAL copy of the readability test in `complexityRouting` fails the identity assertion, which is the
+only kind of assertion that keeps failing once someone re-inlines a shared helper.
+
+⚠️ **One case in `tests/complexityRouting.test.ts` asserted the hole and that assertion was itself the
+bug**: `expect(a.complexityScore).toBeLessThan(20)` pinned the scorer's claim that a multi-feature
+hospital app was smaller than a calculator. It was an accurate description of the code on the morning it
+was written and the wrong thing to hold still. Corrected with the reason recorded in place, and what the
+case really proves — the SCORE alone never buys a second opinion, reading the script does — is unchanged
+and still asserted.
+
+**Still open from this report (rule 6), unchanged by this half:** a rung abandoned for crawling or a
+timeout still consumes the lane's remaining clock, so the rungs BELOW it are authorised fewer output
+tokens (2,314 instead of ~2,833 on this build) and Kimi was starved by a budget GLM had already spent.
+That is the second half of this autopsy and is next.

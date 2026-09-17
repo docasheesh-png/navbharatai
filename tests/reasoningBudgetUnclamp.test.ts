@@ -20,7 +20,7 @@ import {
   reasoningUnclampEnabled,
   STARVED_UNCLAMPED_MARK,
 } from '../src/server/AgentV3/floorBudget';
-import { modelAlwaysReasons, glmCanDisableThinking } from '../src/server/AgentV3/providers/glmThinking';
+import { modelAlwaysReasons, glmCanDisableThinking, MEASURED_ALWAYS_REASONS } from '../src/server/AgentV3/providers/glmThinking';
 
 /** The build loop's real per-turn ask (`buildMaxTokensPerTurn`). */
 const LOOP_ASK = 32_000;
@@ -43,14 +43,28 @@ describe('modelAlwaysReasons — a POSITIVE capability test, not a negation', ()
 
   // 🔒 THE INVERSION GUARD, and the reason this predicate exists at all instead of a `!`.
   // `glmCanDisableThinking` denies on ANYTHING it does not recognise, because sending an unsupported
-  // field is a hard 400 — denial-on-unknown is the safe answer there. Negating it would assert
-  // "kimi-k2.7-code always reasons" purely because the id failed a startsWith('glm-') check, and that
-  // claim would hand an unbounded budget to a vendor nobody has measured.
+  // field is a hard 400 — denial-on-unknown is the safe answer there. Negating it would assert that
+  // every Kimi and Grok id always reasons, purely because the id failed a startsWith('glm-') check,
+  // and that claim would hand an unbounded budget to a vendor nobody has measured.
+  //
+  // ⚠️ `kimi-k2.7-code` WAS one of the ids in this list, and it was moved out on 2026-09-17 (autopsy
+  // d98dae01) — not by loosening this guard but because the measurement arrived: four starvations of
+  // that one id across reports 58fe8254 (outputTokens 4833, three times) and d98dae01 (2,314, twice).
+  // The principle this case protects is exactly what admits it, and is unchanged: a MEASURED id may
+  // be listed; a vendor may never be assumed. The ids below are the ones still unmeasured.
   it('🔒 both are FALSE for a vendor we have not measured — the two are not opposites', () => {
-    for (const id of ['kimi-k2.7-code', 'kimi-k3', 'grok-4', 'claude-sonnet-4-6', '', undefined, null]) {
+    for (const id of ['kimi-k3', 'kimi-k2.6', 'grok-4', 'claude-sonnet-4-6', '', undefined, null]) {
       expect(glmCanDisableThinking(id as string), `canDisable ${id}`).toBe(false);
       expect(modelAlwaysReasons(id as string), `alwaysReasons ${id}`).toBe(false);
     }
+  });
+
+  it('🔒 …and the one id that IS true is true by MEASUREMENT, not by a negated prefix test', () => {
+    expect(MEASURED_ALWAYS_REASONS).toContain('kimi-k2.7-code');
+    expect(modelAlwaysReasons('kimi-k2.7-code')).toBe(true);
+    // Still false in the OTHER predicate — sending `disabled` to it is still a hard 400. The two
+    // answer different questions, which is the whole point of the case above.
+    expect(glmCanDisableThinking('kimi-k2.7-code')).toBe(false);
   });
 });
 
@@ -170,7 +184,16 @@ describe('🔒 reversion guards — the wiring, not just the helpers', () => {
   });
 
   it('the throw carries the unclamped flag, so the report cannot mis-state the cause', () => {
-    expect(runner).toContain('starvedBudgetError(budget.maxTokens, budget.requested, budget.reasoningUnclamped)');
+    // ⚠️ The pinned literal gained a FOURTH argument on 2026-09-17 (autopsy d98dae01) — the lane's
+    // remaining clock, when the LANE bounded the call rather than this engine's own cap. The flag this
+    // case exists for is untouched and is still asserted; both are pinned together so neither can be
+    // dropped while the other stands.
+    expect(runner).toContain(`starvedBudgetError(
+        budget.maxTokens,
+        budget.requested,
+        budget.reasoningUnclamped,
+        bound.source === 'deadline' ? timeoutMs : undefined,
+      )`);
   });
 
   // 🔴 THE RATE CONSTANT WAS MEASURED AND DELIBERATELY LEFT ALONE. Across 73 real calls in the reports

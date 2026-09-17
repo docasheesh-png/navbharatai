@@ -22,7 +22,7 @@ import { sandboxCost, describeSandboxCost } from './sandboxCost';
 import { redactProvidersText } from '../lib/providerRedaction';
 import { costAlertAdvisory, costAlertThresholdUsd } from './costAlert';
 import { isModelUnavailableError } from './providerErrorClass';
-import { isStarvedBudgetError, isUnclampedStarvation } from './floorBudget';
+import { isStarvedBudgetError, isUnclampedStarvation, isLaneBoundStarvation } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
 import { isBudgetEndedError } from './turnDeadline';
 import { typecheckEvidenceFromCommands } from './TscGate';
@@ -41,6 +41,8 @@ export type IssueSeverity = 'info' | 'warning' | 'error';
 const PROCESS_ONLY_CODES = new Set([
   'GROUNDING_COST', 'POST_ANSWER_TIMING', 'SERVICE_GRAPH_MULTI', 'SERVICE_GRAPH_SINGLE',
   'JOURNEY_NOT_DERIVED', 'RELEASE_GATE',
+  // Our own journey runner produced nothing — a statement about OUR check, never about their app.
+  'JOURNEY_NOT_RUN',
   // Project mode could not steer the build — the build itself is unaffected (projectPlannerBudget.ts).
   'PROJECT_MODE_FAILED',
   // The gate said RED and a real run said otherwise — a statement about OUR verdict (runProvenApp.ts).
@@ -1643,10 +1645,23 @@ export class BuildDiagnostics {
           // is a model that cannot finish thinking inside any budget a turn can carry; saying "our
           // ceiling" there would send the next autopsy to floorBudget.ts to fix arithmetic that is
           // already correct.
+          // 🔴 AND A THIRD, BECAUSE THE SECOND ONE NAMED THE WRONG MODULE (autopsy d98dae01,
+          // 2026-09-17). The clamped sentence ends by pointing at FLOOR_TIMEOUT_CAP_MS and
+          // AGENTV3_FLOOR_MS_PER_TOKEN — true when the rung's OWN cap bounded the call, and false
+          // whenever `turnDeadline` picked the calling lane's remaining budget instead. That report's
+          // 2,314-token ceiling is 74,420 ms at the floor rate: the fast lane's 90 s plan cap minus a
+          // crawl, nothing like the 150 s cap the sentence blamed. Raising either of the two named
+          // knobs would have changed NOTHING, and an autopsy reading that line would have spent its
+          // time on arithmetic that was already correct.
           message: isUnclampedStarvation(reason)
             ? `The ${name} rung answered inside its clock and produced nothing — "${detail}". `
               + 'Its ceiling was NOT reduced by us: this rung always reasons, so it keeps the build loop\'s full per-turn ask, and it still spent every token thinking before any text or tool call appeared. '
               + 'That is the model, not our arithmetic; the rung was retired for the rest of this build so the ladder could reach a vendor that fits.'
+            : isLaneBoundStarvation(reason)
+            ? `The ${name} rung answered inside its clock and produced nothing, because the ceiling it was given was spent before the answer began — "${detail}". `
+              + 'This is NOT a provider outage and NOT the user\'s prompt: a reasoning model bills its thinking to the same ceiling, so a ceiling below its thinking returns a truncated reply with no text and no tool call. '
+              + 'The ceiling here came from the REMAINING BUDGET OF THE LANE that made the call, not from this engine\'s own cap — so the fix is how much clock that lane reserves for an answer, not the cap or the rate constant in floorBudget.ts. '
+              + 'The rung was retired for the rest of this build so the ladder could reach a vendor that fits.'
             : `The ${name} rung answered inside its clock and produced nothing, because our own output ceiling was spent before the answer began — "${detail}". `
               + 'This is NOT a provider outage and NOT the user\'s prompt: a reasoning model bills its thinking to the same ceiling, so a ceiling below its thinking returns a truncated reply with no text and no tool call. '
               + 'The ceiling is FLOOR_TIMEOUT_CAP_MS / AGENTV3_FLOOR_MS_PER_TOKEN (see floorBudget.ts); the rung was retired for the rest of this build so the ladder could reach a vendor that fits.',

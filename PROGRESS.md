@@ -63983,6 +63983,60 @@ must-still-build boundary set, and **reversion guards proven to fail** when the 
    `Cannot read properties of undefined (reading 'title')`. A deterministic, model-free, two-file
    question that nothing asks.
 
+---
+
+## 2026-09-17 — THE INTENTION READER IS THE DEFAULT; the builder learns where its own buttons are
+
+**Admin, verbatim:** *"navbharatai pro, ko app self awareness nahi hai kya? preview kaise chalega, batana
+chahiye … navbharatai ko simple question ke simple anser dene sikhao. … user ka har woh messge jo ek
+limit se chota hai ya unclear hai, hamesa llm call karo?"* — and then *"aap batao kuch best option?"*
+
+### Two honest answers first
+
+**Self-awareness: NO, the builder did not have it.** `systemPrompt.ts` says so in its own words
+(2026-08-04): *"Every OTHER AI in NavBharatAI … is fed the AppKnowledgeBase … AgentV3 is not."* The one
+assistant that BUILDS the app was the only one that could not say where the Preview tab is — which is
+why report cc8c9075's answer was `npm run dev` and `localhost:5173`. The KB has had an `agentv3_preview`
+entry with the keyword `preview kaise` all along; the builder was never handed it (the full KB would
+break the cached prompt prefix).
+
+**The LLM-on-every-unclear-message proposal: right, and ~80 % already built.** `classifyIntentSmart`
+already consults the ₹0 free-chat reader — but only when confidence is LOW, and **five autopsies this
+week (5abad374, 2c61f648, the alarm app, f5351721, cc8c9075) were all HIGH-confidence hard-locks that
+skipped it.** Each added a regex; the class never closed. Regex reads words, the reader reads grammar.
+**Message LENGTH was declined as the trigger** — "build me a todo app" is five clear words, the
+cc8c9075 question was nine unclear ones — and object-less orders are already answered by #3039.
+
+### What shipped — A, B, C (each proven by reversion)
+
+- **A. Doubt → reader.** A HIGH verdict from a build/edit verb now survives only with NO question (the
+  strengthened `readsAsQuestion`) and NO negation in the sentence (`hasNegation`: `mat/nahi/don't/not/
+  no`…). Either one costs the lock, never the intent. A plain order keeps HIGH and pays nothing — a test
+  counts zero reader calls across four orders.
+- **B. Reader down on a QUESTION ⇒ chat, not build.** This REVERSES a deliberate 2026-09-13 pin
+  (*"the keyword answer still stands when the reader cannot run"*), on the admin's own asymmetry:
+  wrong-toward-chat is one message (the reply already offers to build), wrong-toward-build is a whole
+  build. A statement or order with the reader down keeps the keyword verdict exactly as before, so
+  "add a payment button" stays an edit when GLM is slow. `tests/capabilityQuestion.test.ts` records the
+  change in-file rather than silently.
+- **C. `help` is a fourth reader answer, and `NAVBHARATAI_UI_MAP` gives the builder its bearings.**
+  Fifteen static lines — Preview tab, Publish, Files/ZIP, History → Restore, Stop, Report, Download APK
+  — each tagged with its `AppKnowledgeBase` id, opening with *"Do NOT tell them to run npm, open a
+  terminal, or visit localhost: they are inside NavBharatAI on a phone."* 🔒 **ONE constant, TWO
+  readers**: the architect prompt (static side, so the cache prefix is untouched — a test asserts no
+  date/user/project interpolation) and the plain-chat lane's inline prompt in `routes/agentv3.ts`,
+  which has its OWN system prompt and would otherwise have kept answering like a generic bot.
+
+### What this does NOT do, stated so nobody re-derives it
+
+- It does not call the reader on every message — an unmistakable order still pays nothing.
+- It does not inject the whole KnowledgeBase into the build prompt (cache prefix).
+- It does not make the reader's verdict FINAL when it answers `build` on a question — that still goes
+  through `userAskedForAnAppToBeBuilt` (#3040), which now requires HIGH and so cannot re-run a build
+  on a guess.
+
+**Gate on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` · **25,001 tests
+passed** · `build` · `test:bundle` · `boot:check` · `deps:server-gate` — all green.
 ### 2026-09-17 (same day, follow-up) — "app banao" names no more than "banao" does
 
 The admin read the fix above and asked the one question that tested it: *"agar koi user send karega
@@ -64250,6 +64304,71 @@ with the abort case REVERTED, because `default`'s text also contains *"files so 
 **Full CI gate green on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` ·
 `vitest run` (**24,990 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
 `deps:server-gate`.
+
+## 2026-09-17 — THE JOURNEY CHECK HAD NEVER LAUNCHED A BROWSER, and two things guaranteed nobody could tell
+
+Found while clearing the last un-owned items from autopsy `e706e068`'s ledger (🔀 "journey not derived",
+⏭️ "page-render check: no result for 6 routes"). Reading the two modules that produce that evidence
+turned up a bug bigger than the ledger item that led to it.
+
+**1. THE BUG.** `journeyScript` built its own run line:
+
+    node /tmp/nbai-journey.mjs 2>&1 | grep '^NBAI_JOURNEY ' || true
+
+with **no `PLAYWRIGHT_BROWSERS_PATH`**. Chromium exists in exactly one place in the sandbox —
+`/home/user/.e-tools/.browsers` — because the image build (`infra/e2b/e2b.Dockerfile:67`) and the
+runtime `_kickoffPlaywright` (`E2BActuator.ts:1483`) both install it with that variable set on the
+command, and it is **never** a persistent `ENV`. So `chromium.launch()` threw *"Executable doesn't
+exist"* before the first step of the first journey, on every build, since the check shipped. Its
+sibling `pageCheckScript` set the variable. **Fourteen other Playwright invocations in this repo set
+it.** This one did not.
+
+It is also a REPEAT: `browseUrl`'s own comment records the identical bug being root-caused once before
+("ran … with no PLAYWRIGHT_BROWSERS_PATH … so the require ALWAYS failed and browseUrl silently degraded
+to a curl of the static HTML shell"). The instance was fixed; the class was not — exactly the failure
+the constitution's bar entry describes for `a38c6fef`.
+
+**2. WHY IT COULD NOT BE SEEN.** The same line is the blindness. `2>&1` folds stderr into stdout, the
+marker `grep` then discards every line that is not a result, and `|| true` hides the exit status — so a
+script that died on line 1 and one that ran perfectly and found nothing return the **identical empty
+string**. `PageRouteCheck`'s header had already written this down about an earlier NODE_PATH bug ("the
+trailing || true and the grep swallow the error, so the run simply produces no result lines") and the
+pattern was copied into the sibling anyway, carrying the blindness with it.
+
+**3. THE FAKE GREEN.** `summarizeJourneys([])` returned `{ ok: true }`, and the route records
+`code: verdict.ok ? 'JOURNEY_PASSED' : 'JOURNEY_FAILED'` at `severity: 'info'` with
+`autoResolved: true`. So for the whole outage **every build recorded a PASSING journey code** whose own
+message read *"No user journey was run."* The message was honest and the code was not, and the code is
+what a reader scanning a report actually sees. (The release gate was never misled — the route only sets
+`gateEvidence.journeys` when results exist — so this was a reporting lie, not a shipping one.)
+
+**THE FIX, at the class rather than the instance.**
+- **`src/server/AgentV3/sandboxBrowserScript.ts` (new, pure).** ONE builder for the run line of every
+  in-sandbox browser script we own. It carries `PLAYWRIGHT_BROWSERS_PATH` by construction, keeps result
+  lines on stdout unchanged (so every parser is untouched), and — only when a run yields no result or
+  exits non-zero — prints a **bounded** tail (8 lines × 200 cols, capped at 400 chars in a report) of
+  what the script really said, under its own `NBAI_DIAG:` marker. Still exits 0: a probe that found
+  nothing must never look like a failed command. POSIX `sh` only, and the quiet grep is spelled
+  `grep -q '^M' file`, not `grep '^M' file -q`, which is GNU-only. **Verified by executing the generated
+  line in a real shell** across three cases (healthy, died-at-launch, ran-but-empty) rather than by eye.
+- Both modules use it; each result marker is now named once (`JOURNEY_RESULT_MARKER`,
+  `PAGE_RESULT_MARKER`) instead of hand-written in three places, which is how the first copy drifted.
+- `summarizeJourneys(results, attempted, stdout)` returns **`ran`** beside `ok`, and
+  `summarizePageCheck(results, attempted, stdout)` takes the raw output; both now say **why** when the
+  runner produced nothing. New report code **`JOURNEY_NOT_RUN`** (neither pass nor failure), registered
+  in `PROCESS_ONLY_CODES` and `NEVER_SUGGEST` so it can never count against the user's app.
+
+**THE GUARD THAT SHOULD HAVE EXISTED.** `sandboxBrowsersPath.test.ts` already pinned the CONSTANT and
+the hand-off to the USER's suite — and its own header names "journey runs" as a consumer — but nothing
+asserted that the scripts the PLATFORM runs carry the variable. Same shape as the complexity flag in
+#3043: the decision was tested, the chain was not. It now asserts the **real generated command** for
+both scripts, and that neither module builds its own run line. Proven by reversion, three ways: putting
+the old journey line back fails 2 cases; removing the path from the builder fails 3; restoring the
+route's two-way code fails 3 in `tests/journeyRunnerWiring.test.ts`.
+
+**What to watch on the first real builds:** `JOURNEY_PASSED` / `JOURNEY_FAILED` appearing **at all**.
+A crop of `JOURNEY_FAILED` is not a regression — it is the check working for the first time, and each
+one is a real app that looks like it saves data and does not.
 ### 2026-09-17 (autopsy d98dae01, half 1 of 2) — a request none of our signals can read is not a greeting
 
 The prompt was Telugu: a text-to-speech app with voice cloning. `RequestAnalyser` scored it **5** — the
@@ -64332,6 +64451,119 @@ timeout still consumes the lane's remaining clock, so the rungs BELOW it are aut
 tokens (2,314 instead of ~2,833 on this build) and Kimi was starved by a budget GLM had already spent.
 That is the second half of this autopsy and is next.
 
+### 2026-09-17 (autopsy d98dae01, half 2 of 2) — the rung was starved by a clock nobody named
+
+The timeline, from the report's own timestamps:
+
+```
+t+0.0s   "Planning the file list…"    the fast lane's manifest call, 90 s plan cap
+t+15.5s  GLM abandoned for crawling   glm-4.7-flashx, benched for the rest of the build
+t+49.5s  KIMI starved                 authorised 2,314 output tokens, cut down from 8,000
+```
+
+**2,314 × 30 ms + 5,000 = 74,420 ms**, which is the 90-second plan cap (`preambleCapMs`) minus the
+15.5 seconds the crawling rung had already spent. So the ceiling was decided by the CALLING LANE's
+remaining budget — and the finding printed *"the ceiling is FLOOR_TIMEOUT_CAP_MS /
+AGENTV3_FLOOR_MS_PER_TOKEN (see floorBudget.ts)"*, pointing an autopsy at a 150,000 ms cap that had
+nothing to do with it. **Raising either of the two knobs that sentence names would have changed
+nothing.**
+
+⚠️ **AND MY FIRST DIAGNOSIS, PUT TO THE ADMIN, WAS HALF WRONG — recorded because the correction is the
+useful part.** I described this as *"a failed rung eats the next rung's budget"*, and the crawl does
+cost the rungs below it: 15.5 s of a 90 s cap is the difference between 2,833 tokens and 2,314. But
+**both numbers are below what that model needs to finish thinking**, so removing the crawl entirely
+would not have saved the build. Reading the report's real timestamps rather than reasoning from the
+shape of the problem is what separated the two.
+
+**What shipped:**
+
+- **`kimi-k2.7-code` joins `MEASURED_ALWAYS_REASONS`** (`glmThinking.ts`), a new set
+  `modelAlwaysReasons` consults BEFORE its GLM family rule. Evidence, not a vendor claim: report
+  `58fe8254` shows `outputTokens: 4833` three times (the constant ceiling of a clamped floor rung) and
+  this report shows 2,314 twice — **four starvations of one model id across two nights.** The
+  `-highspeed` variant is the same model served faster, so a prefix match on the measured base id
+  covers it deliberately. `kimi-k3` is NOT listed: nobody has measured it.
+  🔒 That module's docblock objected to asserting *"kimi-k2.7-code always reasons"* **because the id
+  had failed a `startsWith('glm-')` check** — a negated prefix test, not evidence. The principle is
+  unchanged and is what now admits it, and the stale example in that docblock was corrected in place.
+  🔗 `modelStarvedWhileClamped` (built earlier the same day by another session) learns the same fact at
+  runtime and would have caught the SECOND starvation; this set is what stops paying for the FIRST on
+  every fresh process, on the rung that opens a complex Weak or Normal build. Both are needed and a
+  test asserts the runner still consults both.
+  🔒 It cannot make the worst case worse — unclamping changes the ASK, never the clock, so a slow rung
+  is cut at exactly the moment it is cut today. And `glm-5.3`, the rung directly BELOW this one on both
+  ladders, is already unclamped by the family rule: this only makes two adjacent rungs behave alike.
+- **A starvation now says WHICH clock cut the ceiling.** `STARVED_BY_LANE_MARK` +
+  `isLaneBoundStarvation` (`floorBudget.ts`), fed from `bound.source === 'deadline'` — the only place
+  in the stack that fact exists. The report gains a third sentence naming the lane's remaining budget
+  as the constraint and pointing at how much clock a lane reserves for an answer, instead of at this
+  module's cap and rate constant. The two markers are **mutually exclusive by construction** (an
+  unclamped rung keeps the full ask, so no clock reduced its ceiling) and a test asserts it, because
+  two markers on one error would make the report pick between contradictory explanations.
+  🔒 The new sentence is checked against all three failure classifiers it must not match
+  (`isTimeoutProviderError`, the context-length test, `isModelUnavailableError`) — the same constraint
+  `STARVED_BUDGET_MESSAGE` already carries, now test-locked for the addition too.
+
+**Tests:** `tests/aLaneTooShortToAnswerSaysSo.test.ts` (23), anchored on the report's real numbers
+rather than on a scenario — the first two cases prove that 74,420 ms buys exactly the 2,314 tokens the
+report recorded, so every later assertion is tied to evidence. **Reversion-proven in all three parts:**
+emptying the measured set fails 5, dropping the report branch fails 1, dropping the lane clock at the
+throw site fails the wiring guard. That last guard is anchored on the statement's own closing paren,
+not a byte window — the fourth time this repo has paid for that lesson.
+
+🔴 **OPEN ROOT CAUSE (rule 6), and it is the real ceiling behind this report.** The fast lane's plan
+cap is 90 s, and 90 s at the floor rate buys **2,833 output tokens, on any rung, on every build** —
+while the call asks for 8,000. So the manifest call is structurally incapable of being answered by a
+forced-reasoning rung that is still clamped, and the crawl only decides whether the number is 2,833 or
+2,314. **This is the 4efab9d7 defect one level up**: that autopsy compared the runner's own timeout
+against its ask and fixed the runner; nobody then checked the CALLERS' deadlines against the same
+arithmetic. The obvious fix — raise `preambleCapMs` — would re-open the 858f6d7b defect it exists to
+prevent (plan 89 s + contract 70 s = 159 s of a 240 s lane before file one), and reducing the ask does
+not help because the ceiling comes from the clock, not the ask. **What is missing is an instrument, not
+a number**: nothing records a clamp unless it starves, so the frequency and size of the cut are
+unmeasured across the fleet. The honest next step is to measure it the way the sandbox-minutes work was
+measured, then move a number — not to move a number now.
+### 2026-09-17 (same day) — the intention reader gets its fourth answer: `unclear`
+
+Admin, after the two fixes above: *"user ka har woh message jo ek limit se chota hai ya unclear hai,
+hamesha LLM call karo — woh bata dega."*
+
+**The honest finding, reported back before building anything: that call was ALREADY being made**, on
+every low-confidence message, on the free chain at ₹0, bounded at 6 s — report `d6d664e6` is the proof
+that it ran for `"Bnao"`. **What was missing was somewhere to put the answer.** The reader is handed
+three choices (`chat` / `build` / `edit`) and answered `build`, which is not even wrong: *"make it"* IS
+an order to build. *"They have not told me WHAT"* was not on the menu.
+
+- `classifyIntentSmartDetailed` returns `{ intent, unclear }` and the reader's menu now carries a
+  fourth answer. `classifyIntentSmart` is that function with the flag discarded — **delegating, not
+  duplicating**, the same pattern `classifyIntent` already uses.
+- 🔒 **`intent` deliberately stays at the KEYWORD result when `unclear` is true.** A caller that
+  ignores the flag is byte-identical to before. The flag adds an option; it removes none.
+- The route ORs it with the deterministic `'no-object'` half and sends **both through the same four
+  narrowing conditions** (empty workspace, no earlier request, no attachment/import, not an edit).
+  A second opinion that can only make the gate NARROWER cannot introduce a new way to refuse a real
+  prompt.
+
+⚠️ **What was deliberately NOT done, and why (rule 3, no sycophancy).** The instruction as written —
+*call the LLM on every short message* — would add a provider round trip to `"hi"`, `"ok"`, `"thanks"`,
+`"haan"`: HIGH-confidence messages with no doubt in them, answered instantly and free today. That
+slows the app's most common turn for no gain. The existing design already asks **only when it is
+genuinely unsure**, which is both better and cheaper; a test now pins that a HIGH-confidence message
+never reaches the reader at all. Also recorded: `glm-4.5-flash` is on none of this repo's ladders —
+free chat leads with `glm-4.7-flashx` (₹0), which is already the cheapest rung, and pinning a model id
+in code is the churn Decision A exists to avoid.
+
+🔎 **The bigger lever, named and not yet taken:** the recurring failure is the OPPOSITE shape — a
+**HIGH-confidence hard lock that skips the reader entirely**. Three autopsies now (`5abad374`,
+`cc8c9075`, and `d6d664e6`'s sibling). PR #3040 (another session) is working that seam; this change
+deliberately stays out of `clauseReadsAsQuestion` and `userAskedForAnAppToBeBuilt` so the two do not
+race in one file.
+
+**Tests:** `tests/intentReaderCanSayUnclear.test.ts` (9) + the reader block in
+`objectlessBuildAsks.test.ts`. Reversion-proven in **both** halves — deleting the `unclear` mapping
+fails the reader suite, deleting `|| readerSaysUnclear` fails the route suite. Two source-scanning
+tests had their needles updated (`classifyIntentSmartDetailed`, the widened route window): the symbol
+and the window moved, **the assertions did not**.
 ### 2026-09-17 (correction) — three of the four open items from autopsy `d6d664e6` are closed, and ONE OF THEM WAS MY MISTAKE
 
 Recorded here rather than by editing the original entry, per the append-only rule, because a session
@@ -64459,3 +64691,28 @@ the net, not the fix.
 - **The user-facing message.** *"Time limit reached — 11 files saved so far. Continuing automatically…"*
   was true and still the wrong sentence for a user whose app never compiled; the release gate should own
   that line, and it should say what state the files are in.
+## 2026-09-17 — WRITE → TYPECHECK → NEXT: the compiler answers after every file (admin: "incremental typecheck wala PR bana do")
+
+From autopsy e706e068's biggest struggle: 20 files written before the first `tsc`, then 21 errors ground for
+seven minutes (six `tsc` runs, an endgame batch repair, a "repeated step" nudge, read → edit → tsc one at a
+time). Every error was visible the moment its file was written; nothing looked.
+
+**What ships (`src/server/AgentV3/writeTimeTypecheck.ts`, wired in `ToolDispatcher`):** after every
+TypeScript write on all four write paths, the dispatcher runs the shared incremental `tsc --noEmit`
+(same `/tmp/agentv3.tsbuildinfo` cache as the endgame and the `typecheck` tool — a warm run is sub-second)
+and appends the WRITTEN file's own errors to the tool result (quoted in full, capped at 10) plus a brief count
+of errors elsewhere (named, capped at 3). Clean tree ⇒ no note. Per-build `WriteTypecheckQueue` coalesces
+parallel writes (a burst costs at most two compiles). A JS project (no tsconfig), a timeout (30 s) or any
+failure ⇒ '' — never a fake pass; two consecutive timeouts stand it down for the build with a reason. Every
+run is reported through `onCommand`, so the release gate's typecheck evidence sees it (the e4ebcb5f bridge).
+Report line `WRITE_TIME_TYPECHECK` (runs, clean runs, errors quoted back, time, stand-down reason). Kill
+switch `AGENTV3_WRITE_TYPECHECK=off` restores today's behaviour exactly.
+
+**Honest cost:** ~0.5–3 s of sandbox time per TS write (the first run is cold). On a 30-file build that is
+roughly a minute, against the seven-minute grind it replaces. The fast lane (SimpleBuilder) keeps its own
+generate-all → verify → repair loop; this is the agentic builder's path.
+
+**What to watch on the first real builds:** `WRITE_TIME_TYPECHECK` runs vs. the endgame's error count at
+its first checkpoint — the endgame's "N compile errors left" should drop toward zero, and
+`REPEATED_READS`/edit loops with it. Tests: `tests/writeTimeTypecheck.test.ts` (note wording on the real
+ERP tsc output, path normalisation, caps, queue coalescing, summary, dispatcher + route wiring).

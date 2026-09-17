@@ -493,7 +493,16 @@ export class OpenAiToolRunner implements TurnRunner {
       // Learn it, so this model is never clamped again in this process. Only a CLAMPED starvation is
       // evidence — see `modelStarvedWhileClamped`.
       if (!budget.reasoningUnclamped) rememberStarvedWhileClamped(thinkingModel);
-      throw starvedBudgetError(budget.maxTokens, budget.requested, budget.reasoningUnclamped);
+      // WHICH CLOCK CUT THE CEILING IS PART OF THE FINDING (autopsy d98dae01). `bound.source` is the
+      // only place that fact exists, and without it the report blames this engine's own cap for a
+      // ceiling the CALLING LANE's remaining budget decided — sending the next autopsy to fix
+      // arithmetic that was already right. See STARVED_BY_LANE_MARK in floorBudget.ts.
+      throw starvedBudgetError(
+        budget.maxTokens,
+        budget.requested,
+        budget.reasoningUnclamped,
+        bound.source === 'deadline' ? timeoutMs : undefined,
+      );
     }
 
     // Hand the visible text to the caller in one shot — unless the streamed path already delivered it

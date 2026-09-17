@@ -25,6 +25,8 @@
 // PURE. The runner script is a STRING built here and executed by the caller in the sandbox's pre-baked
 // browser — no I/O, no clock, no model call in this module.
 
+import { browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote } from './sandboxBrowserScript';
+
 /** How a single element is addressed, in the order Playwright should be asked for it. */
 export type SelectorKind = 'testid' | 'name' | 'id' | 'placeholder' | 'label' | 'text' | 'role';
 
@@ -64,6 +66,14 @@ export const MAX_JOURNEYS = 3;
 export const JOURNEY_TIMEOUT_MS = 20_000;
 /** Where the pre-baked Playwright lives inside the sandbox image (same path PageRouteCheck uses). */
 export const TOOLS_DIR = '/home/user/.e-tools';
+
+/**
+ * The prefix one journey RESULT line carries. Named once because it is read in three places — the
+ * in-sandbox script that prints it, the run line that greps for it, and the parser that reads it —
+ * and three hand-written copies of one string is how the sibling of this module lost its browser path.
+ * ⚠️ The trailing space is part of it.
+ */
+export const JOURNEY_RESULT_MARKER = 'NBAI_JOURNEY ';
 
 // ---------------------------------------------------------------------------------------------
 // READING THE APP'S OWN MARKUP
@@ -567,11 +577,11 @@ for (const j of journeys) {
     }
   }
   await page.close().catch(() => {});
-  console.log('NBAI_JOURNEY ' + JSON.stringify(out));
+  console.log('${JOURNEY_RESULT_MARKER}' + JSON.stringify(out));
 }
 await browser.close();
 NBAI_EOF
-node /tmp/nbai-journey.mjs 2>&1 | grep '^NBAI_JOURNEY ' || true`;
+${browserScriptRunLine({ toolsDir: TOOLS_DIR, scriptPath: '/tmp/nbai-journey.mjs', marker: JOURNEY_RESULT_MARKER })}`;
 }
 
 export type JourneyVerdict = 'passed' | 'failed' | 'unreachable';
@@ -590,10 +600,10 @@ export interface JourneyResult {
 export function parseJourneyResults(stdout: string | null | undefined): JourneyResult[] {
   const out: JourneyResult[] = [];
   for (const line of String(stdout ?? '').split('\n')) {
-    const at = line.indexOf('NBAI_JOURNEY ');
+    const at = line.indexOf(JOURNEY_RESULT_MARKER);
     if (at < 0) continue;
     try {
-      const o = JSON.parse(line.slice(at + 'NBAI_JOURNEY '.length)) as JourneyResult;
+      const o = JSON.parse(line.slice(at + JOURNEY_RESULT_MARKER.length)) as JourneyResult;
       if (o && typeof o.id === 'string' && ['passed', 'failed', 'unreachable'].includes(o.verdict)) out.push(o);
     } catch { /* a truncated line is not a result */ }
   }
@@ -606,11 +616,34 @@ export function parseJourneyResults(stdout: string | null | undefined): JourneyR
  * `ok` is false ONLY for a real failure. Unreachable journeys never make a build look broken — we
  * learned nothing, and saying nothing is the correct thing to do with nothing.
  */
-export function summarizeJourneys(results: readonly JourneyResult[]): { ok: boolean; summary: string } {
+export function summarizeJourneys(
+  results: readonly JourneyResult[],
+  /** How many journeys we actually ASKED the browser to run. */
+  attempted = results.length,
+  /** The runner's raw output, so a run that produced nothing can say why. */
+  stdout?: string | null,
+): { ok: boolean; ran: boolean; summary: string } {
   const failed = results.filter((r) => r.verdict === 'failed');
   const passed = results.filter((r) => r.verdict === 'passed');
   const unreachable = results.filter((r) => r.verdict === 'unreachable');
-  if (results.length === 0) return { ok: true, summary: 'No user journey was run.' };
+  // 🔴 `ran` EXISTS BECAUSE `ok` ALONE MADE A CHECK THAT NEVER RAN LOOK LIKE A PASS (2026-09-17).
+  // This returned `{ ok: true }` for an empty result set, and the caller maps ok → JOURNEY_PASSED at
+  // severity info with autoResolved: true. So for as long as the runner was launching no browser at
+  // all — see the module header — every build recorded a PASSING journey code whose own message read
+  // "No user journey was run." The message was honest and the CODE was not, and the code is what a
+  // reader scanning a report actually sees. Three outcomes, never two: ran-and-passed, ran-and-failed,
+  // and did-not-run, which is neither.
+  if (results.length === 0) {
+    return attempted > 0
+      ? {
+        ok: false,
+        ran: false,
+        summary: `The user-journey check could not be completed for ${attempted} journey${attempted === 1 ? '' : 's'}`
+          + ' — the runner produced no result, so nothing about them was verified.'
+          + browserScriptFailureNote(parseScriptDiagnostic(stdout)),
+      }
+      : { ok: true, ran: false, summary: 'No user journey was run.' };
+  }
 
   if (failed.length > 0) {
     const lost = failed.filter((f) => f.kind === 'create-persists' && /vanished/.test(f.note));
@@ -620,6 +653,7 @@ export function summarizeJourneys(results: readonly JourneyResult[]): { ok: bool
       : `${failed.length} user journey(s) failed.`;
     return {
       ok: false,
+      ran: true,
       summary: `${lead} ${failed.map((f) => `${f.route}: ${f.note}`).join('; ')}`
         + (passed.length ? ` (${passed.length} other journey(s) passed.)` : ''),
     };
@@ -628,5 +662,5 @@ export function summarizeJourneys(results: readonly JourneyResult[]): { ok: bool
   if (unreachable.length > 0) {
     parts.push(`${unreachable.length} could not be reached and were NOT counted either way (${unreachable.map((u) => u.note).join('; ')}).`);
   }
-  return { ok: true, summary: parts.join(' ') };
+  return { ok: true, ran: true, summary: parts.join(' ') };
 }

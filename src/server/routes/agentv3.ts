@@ -33,6 +33,7 @@ import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
 import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote } from '../AgentV3/etaEvidence';
 import { decideComplexity } from '../AgentV3/complexityRouting';
+import { writeTypecheckSummary, writeTypecheckEnabled } from '../AgentV3/writeTimeTypecheck';
 import { tierLadder, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
 import { describeRunnerChain, chainProviders, firstRungLabel, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
@@ -160,7 +161,7 @@ import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
 import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
 import { parseChatRole, roleSystemPrompt, parseProposedSteps, stripStepsBlock, selectRoleContextFiles, formatRoleContext } from '../AgentV3/RoleChats';
-import { summarizeFileTree } from '../AgentV3/systemPrompt';
+import { summarizeFileTree, NAVBHARATAI_UI_MAP } from '../AgentV3/systemPrompt';
 import { weakBuildDisciplineBlock } from '../AgentV3/weakBuildDiscipline';
 import { pickPaletteForPrompt, palettePromptBlock } from '../AgentV3/designPresets';
 import { deadlinePauseMessage } from '../AgentV3/DeadlinePause';
@@ -10094,7 +10095,11 @@ async function noteBuildOutcome(
               LANGUAGE_RULE + '\n\n' + CREDENTIAL_SILENCE_RULE + '\n\n' + CODE_LITERACY_RULE + '\n\n' +
                 "You are NavBharatAI's friendly assistant. Reply briefly and warmly, following the " +
                 "LANGUAGE rule above (match the user's language; never default to Hindi). Do not " +
-                "mention which model you are.\n\n" + CREATOR_IDENTITY + '\n\n' + INDIA_TERRITORIAL_INTEGRITY + '\n\n' + recencyDirective() + '\n\n' + LINK_POLICY + chatWorkspaceContext + chatPreviewHealth + chatSessionRecall +
+                "mention which model you are.\n\n" + CREATOR_IDENTITY + '\n\n' + INDIA_TERRITORIAL_INTEGRITY + '\n\n' + recencyDirective() + '\n\n' + LINK_POLICY +
+                // The builder's own self-awareness (admin 2026-09-17: "preview kaise chalega, batana chahiye").
+                // The SAME constant the architect prompt carries, so a "how do I open it?" that lands
+                // here gets the Preview tab, never `npm run dev`. See NAVBHARATAI_UI_MAP.
+                '\n\n' + NAVBHARATAI_UI_MAP + chatWorkspaceContext + chatPreviewHealth + chatSessionRecall +
                 (clarifyWhatToBuild
                   ? "\n\nThe user has asked for something to be MADE, but their message does not say "
                     + "WHAT to make. Do NOT guess, and do NOT invent an app or a product name from "
@@ -16978,6 +16983,16 @@ async function noteBuildOutcome(
                 });
               }
             } catch { /* an advisory finding must never affect a build */ }
+            // WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068): how many compiles ran at
+            // write time and how many errors were caught while the model still held the file. Reported
+            // so the next autopsy can say whether the 7-minute endgame grind actually went away.
+            try {
+              const wt = dispatcher.writeTypecheckStats();
+              buildDiag.record({
+                phase: 'build', severity: 'info', code: 'WRITE_TIME_TYPECHECK',
+                message: writeTypecheckSummary(wt, writeTypecheckEnabled()), autoResolved: true,
+              });
+            } catch { /* an advisory line must never affect a build */ }
 
             const stranded = uiWithoutBuildVerdict({ paths: [...entries.keys()].map(String), packageJsonFiles: pkgTexts });
             if (stranded.stranded) {
@@ -17655,7 +17670,7 @@ async function noteBuildOutcome(
               20_000 + pageRoutes.length * PAGE_LOAD_TIMEOUT_MS, 'page-route-check',
             );
             const pageResults = parsePageCheck(out.stdout);
-            const pageSummary = summarizePageCheck(pageResults, pageRoutes.length);
+            const pageSummary = summarizePageCheck(pageResults, pageRoutes.length, out.stdout);
             // KEEP this measurement. Every page here was loaded in the sandbox's own real browser with
             // `pageerror` + `console` listeners attached, so it is genuine runtime evidence — and the
             // runtime verdict below can use it when the live preview console is not available, instead
@@ -17726,7 +17741,7 @@ async function noteBuildOutcome(
               20_000 + journeys.length * JOURNEY_TIMEOUT_MS * 2, 'journey-check',
             );
             const journeyResults = parseJourneyResults(out.stdout);
-            const verdict = summarizeJourneys(journeyResults);
+            const verdict = summarizeJourneys(journeyResults, journeys.length, out.stdout);
             // 'unreachable' is its own outcome, not a pass and not a failure — a login wall tells us
             // nothing about the app, and either other answer would be invented.
             if (journeyResults.some((r) => r.verdict === 'failed')) gateEvidence.journeys = 'failed';
@@ -17735,9 +17750,12 @@ async function noteBuildOutcome(
             buildDiag.record({
               phase: 'preview',
               severity: verdict.ok ? 'info' : 'warning',
-              code: verdict.ok ? 'JOURNEY_PASSED' : 'JOURNEY_FAILED',
+              // THREE outcomes, not two. A runner that returned nothing did not pass and did not fail —
+              // it did not run, and `JOURNEY_NOT_RUN` says so instead of borrowing either verdict. Both
+              // other codes now require `ran`, so a future empty result can never be coded green again.
+              code: !verdict.ran ? 'JOURNEY_NOT_RUN' : verdict.ok ? 'JOURNEY_PASSED' : 'JOURNEY_FAILED',
               message: verdict.summary,
-              autoResolved: verdict.ok,
+              autoResolved: verdict.ok && verdict.ran,
               detail: journeyResults.map((r) => `${r.verdict.toUpperCase()} ${r.route} (${r.step}) — ${r.note}`).join('\n'),
             });
             // SHOW THE USER THAT WE ACTUALLY CHECKED (gap analysis 2026-09-10). Everything above goes

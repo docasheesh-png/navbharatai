@@ -2216,6 +2216,19 @@ the flag entries above promise.
     into the code and these two keys RETIRE (which is also what shrinks the flag surface the admin
     objected to). **What to watch:** the preview appearing early and correct (not a half-rendered app),
     and per-build cost dropping on repeat builds of the same workspace.
+- **`AGENTV3_WRITE_TYPECHECK`** (default ON, set `off` to disable — added 2026-09-17, autopsy e706e068) —
+  **write → typecheck → next.** After every TypeScript write/edit (`write_file`, `write_files_batch`,
+  `edit_file`, `replace_symbol`) the dispatcher runs the SAME incremental `tsc --noEmit` the endgame
+  and the `typecheck` tool use (one shared `/tmp/agentv3.tsbuildinfo` cache, so a run after the first
+  is well under a second) and appends the written file's own errors to the tool result, while the model
+  still holds the file. Errors elsewhere are counted and named briefly, never dumped. The School ERP
+  build wrote 20 files before its first `tsc`, then ground 21 errors for seven minutes — every one of
+  them visible the moment its file was written. Never blocks a write, never fails a build, never
+  fakes a pass (a JS project, a missing compiler or a timeout ⇒ no note); two consecutive 30 s
+  timeouts stand it down for the build. Runs coalesce per build (a parallel burst costs at most two
+  compiles) and each run reaches the release gate's typecheck evidence through `onCommand`. Report
+  line `WRITE_TIME_TYPECHECK`. Logic in `writeTimeTypecheck.ts`; test-locked in
+  `tests/writeTimeTypecheck.test.ts`.
 - **`AGENTV3_ARCH_INVARIANTS`** (default ON, set `off` to disable) — before EDITING an existing app, the
   engine reads that app's OWN rules out of its code (styling system, import style, where network calls
   go, where pages live) and hands them to the builder before it writes a line; after the build it checks
@@ -2238,7 +2251,31 @@ the flag entries above promise.
   selector is read out of the source, never guessed; a form it cannot address honestly yields NO journey.
   A journey against a USER-OWNED database is downgraded to a non-writing submit — we do not put test rows
   in somebody's real Supabase. Evidence, never a gate. Codes: `JOURNEY_PASSED` / `JOURNEY_FAILED` /
-  `JOURNEY_NOT_DERIVED`.
+  `JOURNEY_NOT_DERIVED` / **`JOURNEY_NOT_RUN`**.
+  🔴 **IT HAD NEVER ONCE LAUNCHED A BROWSER, from the day it shipped until 2026-09-17 — so do NOT read
+  the paragraph above as a description of evidence this engine has been collecting.** `journeyScript`
+  built its own run line and omitted `PLAYWRIGHT_BROWSERS_PATH`; Chromium exists ONLY under
+  `/home/user/.e-tools/.browsers` (both the image build and `_kickoffPlaywright` install it with that
+  variable set, and it is never a persistent `ENV`), so `chromium.launch()` threw before the first
+  journey of every build. Its sibling `pageCheckScript` set the variable, and fourteen other Playwright
+  invocations in this repo set it; this one did not — the drifted-copy class, and a repeat of the
+  `browseUrl` bug whose own comment records it being root-caused once already.
+  ⚠️ **AND THE SAME LINE MADE IT UNOBSERVABLE, which is the half worth remembering:**
+  `… 2>&1 | grep '^NBAI_JOURNEY ' || true` folds stderr into stdout, discards every line that is not a
+  result, and swallows the exit code — so a script that died at line 1 and one that ran perfectly and
+  found nothing return the IDENTICAL empty string. Both run lines now come from ONE builder
+  (`sandboxBrowserScript.ts`) that carries the path by construction and, when a run yields no result,
+  prints a bounded tail of what the script really said under `NBAI_DIAG:`.
+  🔒 **`summarizeJourneys` returns `ran` as well as `ok`, and the route reads it.** Zero results used to
+  be `{ ok: true }`, which the route mapped to `JOURNEY_PASSED` at severity `info` with
+  `autoResolved: true` — so throughout the outage every build recorded a PASSING journey code whose own
+  message read *"No user journey was run."* The message was honest; the code was not, and the code is
+  what a reader scanning a report sees. `JOURNEY_NOT_RUN` is neither a pass nor a failure, and is
+  registered in `PROCESS_ONLY_CODES` and `NEVER_SUGGEST` so it can never count against the user's app.
+  ⚠️ **What to watch on the first real builds: `JOURNEY_PASSED` / `JOURNEY_FAILED` appearing at all.**
+  Until now the only journey outcomes a report could carry were `JOURNEY_NOT_DERIVED` and the
+  mislabelled empty pass. A sudden crop of `JOURNEY_FAILED` is not a regression — it is the check
+  working for the first time, and each one is a real app that looks like it saves data and does not.
 
 - **`AGENTV3_CONTRACT_FILE`** (default ON, set `off` to disable — added 2026-09-17, autopsy 57875eb3) —
   the fast lane's SHARED CONTRACT (the enums / interfaces / types every per-file call is handed) is now

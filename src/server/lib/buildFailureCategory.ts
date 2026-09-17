@@ -37,6 +37,7 @@
 // an open item rather than guessed at.
 
 import { analyzeRequirementGaps } from './RequirementGapAnalyzer';
+import { textIsAdvisoryCap } from '../AgentV3/advisoryCapOutcome';
 
 /** The subset of a stored build's data this module needs. Matches AllDiagnosticsEntry by shape. */
 export interface CategorizableBuild {
@@ -127,6 +128,16 @@ const REASON_PATTERNS: ReadonlyArray<{ key: string; label: string; test: RegExp 
 export function classifyFailureReason(rootCause: string | null | undefined): { key: string; label: string } {
   const text = String(rootCause ?? '').trim();
   if (!text) return { key: 'no-root-cause', label: 'No root cause was recorded' };
+  /**
+   * 🔴 NOT A FAILURE, AND IT LOOKED LIKE THE BIGGEST ONE (report af3a3f7f, 2026-09-17). The advisory
+   * cap used to share the code `OUTCOME_STOPPED` with the real wall-clock stop, and its sentence
+   * contains no keyword in the list below — so a fully built, browser-verified app landed in the
+   * honest-but-useless `other` bucket. Named here because this module only ever sees the PROSE:
+   * `listAllDiagnostics` projects `rootCause` and drops the issue codes.
+   */
+  if (textIsAdvisoryCap(text)) {
+    return { key: 'advisory-cap', label: 'Not a failure — the app was built; only the post-build checks ran out of time' };
+  }
   for (const p of REASON_PATTERNS) if (p.test.test(text)) return { key: p.key, label: p.label };
   // Honest, not a guess forced into a bucket it may not belong to — the raw text still rides in the
   // example list, so the admin can read it and decide whether a new pattern is worth adding.

@@ -334,6 +334,7 @@ import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective, classifyFailure } from '../lib/BuildRetrospectiveEngine';
 import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
 import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMisconfigured, buildStarvedItsOutputBudget } from '../AgentV3/BuildDiagnostics';
+import { ADVISORY_CAP_CODE } from '../AgentV3/advisoryCapOutcome';
 import { estimateBuildTime, complexityFromPrompt, liveEtaTick } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
 import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionReserve';
@@ -11176,7 +11177,8 @@ async function noteBuildOutcome(
         buildDiagRef?.record({
           phase: 'build',
           severity: deadlineCause === 'advisory-cap' ? 'warning' : 'error',
-          code: 'OUTCOME_STOPPED',
+          // TWO OUTCOMES, TWO CODES — `advisoryCapOutcome.ts` owns the reasoning (report af3a3f7f).
+          code: deadlineCause === 'advisory-cap' ? ADVISORY_CAP_CODE : 'OUTCOME_STOPPED',
           message: deadlineCause === 'advisory-cap'
             ? 'Build outcome: STOPPED — the app was built; the post-build advisory pass was cut short by its 2-minute cap.'
             : `Build outcome: STOPPED — the wall-clock cap (${Math.round((deadlineMs || 0) / 60000)} min) was reached before the build converged. NOT stopped by the user.`,

@@ -13213,6 +13213,20 @@ async function noteBuildOutcome(
       // in NavBharatAI's own template. `modelAuthoredPaths` removes exactly the byte-exact seeded
       // entries and nothing else, so a template the model has since edited stays ours to answer for.
       dispatcher.setAuthoredFiles(() => modelAuthoredPaths(writtenFiles));
+      // …AND THE SAME SET MUST FORGET A FILE THE BUILD DELETED (autopsy 8b3dca5c). `writtenFiles` is
+      // what the durable save is derived from, what `integrityFiles` is unioned with, and — through
+      // `modelAuthoredPaths` above — what the authorship gate reads. Leaving a deleted path in it
+      // re-persists the file, restores it into the next sandbox, and hands every later gate a module
+      // the app does not have. Removing it here is therefore correct on all three counts at once: a
+      // file the build deleted is not one it authored into the finished app. The dispatcher has
+      // already confirmed against the sandbox that each of these is genuinely gone before it says so.
+      dispatcher.setFileDeletionSink((paths) => {
+        for (const p of paths) {
+          writtenFiles.delete(p);
+          try { buildDiag.record({ phase: 'build', severity: 'info', code: 'FILE_DELETED', message: `Removed from the project: ${p}`, autoResolved: true }); }
+          catch { /* diagnostics are best-effort */ }
+        }
+      });
       // PUBLISHING NEEDS AN ASK (admin 2026-09-01). On a build turn the agent used to decide for
       // itself — a user typed "continue", the build finished, and their app went live on a public URL
       // with nobody having requested it. Consent is read from THIS message only: consent that carries

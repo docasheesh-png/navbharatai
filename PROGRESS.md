@@ -61244,3 +61244,43 @@ reading the history does not "restore" a feature that was removed on purpose.
 
 Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1728 files, 24432 passed, 0 failed** ·
 build · test:bundle · boot:check.
+
+---
+
+## 2026-09-17 — PR #2996's REMAINING half reverted: nothing decides where a reload lands
+
+**Admin:** *"yar aap is pure PR ko hi hata do! mujhe nahi chahiye. jab bhi page reload hota hai,
+navbharatai chat open ho jati hai. mai setting me kam kar raha hu, reload kiya, navbharatai chat open
+ho gayi. hatao isko. mujhe yeh pura kaam reverse kar ke do!!"*
+
+**#3007 removed the home-screen half earlier today and KEPT the reopen**, on the reading that the
+reopen was what had been asked for. It was not, and the admin found out the way users do — working in
+Settings, pressing reload, landing in a chat.
+
+🔴 **THAT IS THE FEATURE BEHAVING EXACTLY AS DESIGNED, WHICH IS THE WHOLE POINT.** The original request
+was about ONE screen: open a CHAT, and find it where you left it. #2996 turned it into an app-wide
+LANDING rule evaluated on every reload from ANY screen. **A reload is not a request to go somewhere
+else** — somebody reloading in Settings is trying to reload Settings. No exclusion list fixes a rule
+aimed at the wrong event, which is why the whole thing goes rather than being narrowed again.
+
+**Removed:** `lib/lastPlace.ts`, `lib/freeChatResume.ts`, their three test files, and every trace in
+`App.tsx` — the boot `readLastPlace`/`decideLanding`, the initial-view landing choice, the free-chat
+transcript resume AND the session-id resume that travelled with it, the `recordLastPlace` write effect
+that fired on every view change, and the login-gated second landing pass. Plus the `AppKnowledgeBase`
+bullet, because a description left behind has every AI in the product confidently describing a feature
+that is gone.
+
+⚠️ **THE SESSION ID HAD TO GO WITH THE TRANSCRIPT, not after it.** `currentSessionId` was resumed
+alongside the messages precisely because restoring one without the other duplicated the conversation on
+every refresh. Removing the transcript and leaving the id would have re-created that bug from the other
+direction, so `currentSessionId` is back to a fresh `Date.now()` in the same change. Test-locked.
+
+🔒 **THE GUARD THAT WAS MISSING: `tests/noAutoReopen.test.ts` (6 cases).** A revert leaves NO failing
+test behind, so nothing notices a feature returning — which is literally what happened between #3007
+and this: half the change survived a removal nobody could see. It pins that the modules are gone, that
+no landing symbol appears in `App.tsx`, that the Free chat opens NEW (both halves), that Home has no
+recents section, that the knowledge base promises neither behaviour — and that the unrelated
+*"YOUR PUBLISHED APPS ARE ON YOUR PROFILE"* bullet, which shares that region of the file, SURVIVED.
+
+Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1730 files, 24432 passed, 0 failed** ·
+build · test:bundle · boot:check.

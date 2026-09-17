@@ -269,11 +269,13 @@ describe('WIRING — the endgame repair starts with the cause instead of discove
   });
 });
 
-describe('WIRING — all FOUR places the compiler speaks to the model, not just the tidy one', () => {
+describe('WIRING — all FIVE places the compiler speaks to the model, not just the tidy one', () => {
   // Comments stripped: a needle must be matched in real code, never in the prose explaining it.
   const dispatcher = readFileSync(resolve(__dirname, '../src/server/AgentV3/ToolDispatcher.ts'), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => l.replace(/^\s*\/\/.*$/, '')).join('\n');
   const endgame = readFileSync(resolve(__dirname, '../src/server/AgentV3/EndgameRepair.ts'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => l.replace(/^\s*\/\/.*$/, '')).join('\n');
+  const fastLane = readFileSync(resolve(__dirname, '../src/server/AgentV3/SimpleBuilder.ts'), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => l.replace(/^\s*\/\/.*$/, '')).join('\n');
 
   it('a bare `tsc` run through BASH is annotated — the path the report\'s own root-cause line used', () => {
@@ -290,6 +292,25 @@ describe('WIRING — all FOUR places the compiler speaks to the model, not just 
   it('the endgame batch repair is annotated', () => {
     expect(endgame).toContain('const causes = tscCauseNote(tscErrorCauses(errors2, files));');
     expect(endgame).toContain('io.llmRepair(out2 + causes, subset)');
+  });
+
+  // ⚠️ FOUND BY RULE 3 AFTER THE FIRST FOUR WERE WIRED, and it is the one that repeats: the fast lane's
+  // repair loop runs up to `maxRepairs` times climbing a strategy ladder, so a missing-declaration error
+  // aims EVERY rung at a file that was never wrong — the four-rewrites-of-one-file shape itself. It reads
+  // `parseTscErrors` through a different import than the dispatcher, which is why a grep for the
+  // dispatcher's spelling alone would not have found it.
+  it('the FAST LANE repair loop is annotated, with the project text so the answer is exact', () => {
+    expect(fastLane).toContain('const causes = tscCauseNote(tscErrorCauses(');
+    expect(fastLane).toContain('if (causes) repairErrors = `${repairErrors}${causes}`;');
+    // The files map is passed, not omitted — this lane holds `byPath`, so it gets the specific advice.
+    expect(fastLane).toMatch(/tscErrorCauses\(\s*parseTscErrors\(verdict\.errors\),\s*Object\.fromEntries/);
+  });
+
+  it('every consumer of parsed compiler errors is either annotated or is not shown to a model', () => {
+    // The sweep that found the fifth site, kept as the guard against a sixth. `AgentRunner` parses only
+    // to COUNT errors for the trend checkpoint and shows the model nothing, so it is correctly absent.
+    const runner = readFileSync(resolve(__dirname, '../src/server/AgentV3/AgentRunner.ts'), 'utf8');
+    expect(runner).toContain("parseTscErrors(await withTimeout(io.runTsc(), 20_000, 'errtrend-tsc')).length");
   });
 
   it('the bash annotation is keyed on real compiler output, so an ordinary command is never touched', () => {

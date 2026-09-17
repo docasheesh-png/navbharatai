@@ -65107,21 +65107,30 @@ advice is exact and opposite; when it is not, it names both, cheapest check firs
 `extendsReactComponent` returns **null** for a class the file does not declare — "did not look" must not
 read as "does not extend".
 
-**FOUR SITES, because annotating only the tidy one would have missed this very report.** The build's own
+**FIVE SITES, because annotating only the tidy one would have missed this very report.** The build's own
 `rootCause` line is `$ ./node_modules/.bin/tsc --noEmit 2>&1 → exit 2` — a BASH command, not the
 `typecheck` tool. So: the write-time typecheck note (earliest possible moment, and the only site holding
 the file content, so the only one that gets the exact answer); the `typecheck` tool; a bare `tsc` through
 bash, keyed on output that really parses as compiler errors so an ordinary command is never annotated; and
-the endgame batch repair. That last one rides the **error text** rather than a new parameter deliberately:
+the endgame batch repair. That one rides the **error text** rather than a new parameter deliberately:
 every implementor of `llmRepair` passes that string to the model, and an optional argument an implementor
 forgot to read would be decoration.
+
+**AND A FIFTH, FOUND BY RULE 3 AFTER THE OTHER FOUR WERE WIRED — the one that REPEATS.** The fast lane's
+repair loop (`SimpleBuilder`) runs up to `maxRepairs` times climbing a strategy ladder, so a
+missing-declaration error aims EVERY rung of that ladder at a file that was never wrong — the
+four-rewrites-of-one-file shape itself. It reads `parseTscErrors` through a different import than the
+dispatcher, which is why a grep for the dispatcher's spelling alone did not find it. It holds `byPath`, so
+it gets the exact answer rather than the hedged one. The sweep that found it is kept as a test, so a sixth
+site cannot appear unnoticed: the only other consumer of parsed compiler errors, `AgentRunner`, parses to
+COUNT for the trend checkpoint and shows a model nothing.
 
 **Costs nothing.** Pure string analysis — no model call, no file read, no clock. `tscCauseNote` returns ''
 for every error outside the five, so a clean build and an ordinary type error are byte-identical to before.
 
-**Tests:** `tests/tscErrorCause.test.ts` (40 cases), **proven by reversion four ways** — removing the
-write-time note, the endgame block, the bash annotation and the typecheck-tool annotation each fails a
-named case. `tests/writeTimeTypecheck.test.ts` gained a guard that the call sites pass the CONTENT, not
+**Tests:** `tests/tscErrorCause.test.ts` (42 cases), **proven by reversion five ways** — removing the
+write-time note, the endgame block, the bash annotation, the typecheck-tool annotation or the fast-lane
+block each fails a named case. `tests/writeTimeTypecheck.test.ts` gained a guard that the call sites pass the CONTENT, not
 only the path, so a future edit that drops back to paths fails there instead of silently downgrading every
 piece of advice to the hedged form.
 

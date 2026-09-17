@@ -38,6 +38,14 @@
  * advice says both, cheapest check first, rather than guessing. An honest "check this, then that"
  * beats a confident wrong answer — and both readings still beat rewriting the file a fourth time.
  *
+ * 🔎 FIVE CALL SITES, and the fifth was found by rule 3 AFTER the first four were wired — it is the one
+ * that REPEATS. The fast lane's repair loop (`SimpleBuilder`) runs up to `maxRepairs` times climbing a
+ * strategy ladder, so a missing-declaration error aims every rung of that ladder at a file that was never
+ * wrong: the four-rewrites-of-one-file shape itself. Annotating only the tidy `typecheck` tool would have
+ * missed both it and the report that prompted all this, whose own rootCause line is a BASH command
+ * (`$ ./node_modules/.bin/tsc --noEmit 2>&1 → exit 2`). The two sites that hold file text — the write-time
+ * note and the two repair loops — get the exact answer; the two that do not get the hedged one.
+ *
  * PURE — no I/O, no clock, never throws. The callers supply whatever source they already hold; none
  * of them reads a file for this.
  */

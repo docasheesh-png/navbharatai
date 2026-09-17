@@ -60154,6 +60154,123 @@ regex fails 8 of them. Neighbouring suites re-run green (160). Full gate below, 
    showed `"stage": "install"` from an older code path; the honest value is "before any stage".
 3. **No test covers a skipped step in `mobileBuildReport.test.ts`'s own suite** — the new file covers it;
    the older suite still exercises only `queued` and `in_progress`.
+## 2026-09-17 — Autopsy `e4ebcb5f`: a rendering app was declared NOT READY and made FREE, over three placeholders in the user's own repository
+
+**The report.** Prompt: *"Fix this error and continue building the app: network error"* — an EDIT of a
+GitHub-connected project with **516 source files**, free tier, `glm-4.7-flashx`, 3.2 minutes, 15 model
+calls, **every one of them successful**. Real cost $0.0064; sandbox $0.0089. Billed **₹0**.
+
+The engine read six files, ran a clean `tsc --noEmit`, started the dev server, published a preview,
+screenshotted it, drove a browser action, and wrote **zero files** — its own closing line reads
+`♻️ Incremental: 518/518 file(s) unchanged since the last build (0 changed, 0 new)`.
+
+Then, in this order and all in the same report:
+
+| t+ | What it said |
+|---|---|
+| 125 s | `READINESS_BLOCKER` — *3 fake/incomplete code issue(s) (placeholder / not-implemented / fake data)* |
+| 131 s | `RENDER_RESCUE` — *"the live preview renders cleanly (real-browser verified) — upgraded to success so health, billing and the verdict are honest"* |
+| 133 s | `PROD_BUILD_OK` — *"ready to publish and to package"* |
+| 152 s | `RELEASE_GATE: RED` — *"Not shippable — 1 build-breaking blocker(s)"* |
+| 152 s | `OUTCOME_RELEASE_GATE_RED` — **the render rescue was overturned 21 seconds after it fired** |
+| 169 s | `GREEN_GUARD_SAVE` — *"opened in a real browser and rendered"* |
+| 195 s | *"🛡️ This build did not fully succeed, so it is FREE — no charge."* |
+
+**This is autopsy `4efab9d7`'s class reached through a different door.** That one excluded
+`provider`-phase findings from the gate BY PHASE. This blocker is not a provider finding — it is a
+`readiness` finding, and it is TRUE. It is simply not a fact about *this build*.
+
+### The five-bucket ledger
+
+- ✅ **Self-healed — 3.** `VITE_ENV_TYPES_ADDED` (wrote `src/vite-env.d.ts` rather than spending a
+  repair round discovering it from a compiler error); `AMBIENT_SHIM_REMOVED` (a vendored
+  `claude-code.d.ts` that declared a package it also imported); `RENDER_RESCUE` — **which was then
+  overturned, so it healed nothing.**
+- 🔀 **Worked around — 0.** No fallback, no retry, no escalation. The ladder never left rung 1.
+- ⏭️ **Skipped — 4.** `JOURNEY_NOT_DERIVED`; `TEST_SUITE_UNVERIFIED` (playwright binaries);
+  `RELEASE_GATE`'s *"the typecheck did not run"*; `RELEASE_GATE`'s *"the page-render check … was
+  skipped"*.
+- ❌ **Still broken — 9 unresolved.** 1 × `READINESS_BLOCKER`, 4 × `INTEGRITY_UNUSED_DEP`,
+  `DESIGN_CONSISTENCY` 50/100, `ACCESSIBILITY` 30/100, `RELEASE_GATE` RED, `OUTCOME_RELEASE_GATE_RED`.
+  **Seven of the nine describe code this build never touched.**
+- 🥵 **Struggle — 4.** 13.1 s of sandbox scan inside a 14 s "project check" that restored nothing;
+  23 s `TIME_TO_FIRST_CALL`; the sandbox **90% idle** (2.3 of 2.6 min) and costing more than the model;
+  and the gate/rescue contradiction above.
+
+### Step 2 — the missing subsystem: the readiness gate had no notion of AUTHORSHIP
+
+`assessBuildReadiness` → `evaluate` → `readEvalSnapshot()` lists the **whole workspace** (up to 300
+source files) and `collectAuthenticityIssues` scans every one. Nothing anywhere asks *did this build
+write that file?* The gate was designed for a FRESH build, where the answer is "yes" for everything and
+the distinction is invisible; it was later applied to EDITS, where it is "no" for almost everything.
+
+🔑 **`importTurnObservation` already states the rule, verbatim** — *"A build's `unresolved`/`rootCause`
+must describe what OUR engine failed to do, not tidiness hints about code we were asked only to read"* —
+and keys it on `isImportTurn`, a fact about the TURN. **That was only ever a proxy for the real
+predicate, which is per FILE.** An import turn is the case where the answer is "no" for every file;
+this build was the case where it is "no" for every file *and nobody had generalised it*.
+
+### The fixes
+
+**1 · Authorship-scoped readiness blockers** (`src/server/AgentV3/buildAuthorship.ts`, new + pure).
+`splitByAuthorship` divides per-file findings into ours and pre-existing; the dispatcher blocks only on
+ours and records the rest as an **observation** — reported, never counted. The authored set is the
+route's OWN `writtenFiles`, passed as a thunk (`setAuthoredFiles`), because it is the one set the
+architect, the fast lanes and every sub-agent all feed. A dispatcher-local tally would have missed
+sub-agent writes — the exact hole PR #2988 closed two days ago.
+
+🔒 **The safe direction is "ours".** An UNSET authored set means today's behaviour exactly; a path that
+has not said what it wrote can never disarm a correctness gate. An EMPTY set is a different statement
+and is honoured. A finding with no file stays ours. Case is never folded.
+
+**2 · `severity: 'observation'` on `ExtraFinding`** — priced at **zero**, and that is the point rather
+than a detail. Every penalty comes off ONE 100-point budget and a score under `MIN_READY_SCORE` becomes
+a blocker in its own right, so pricing a pre-existing note at even `low` (2 points) would hand this same
+failure a second door: a large imported repo would be condemned for its own history, the blocker merely
+renaming itself *"readiness score N/100 is below the bar"*. The score-floor blocker also now cites only
+findings that actually cost score.
+
+**3 · The typecheck tool's own evidence** (sibling, rule 5 — honesty). `RELEASE_GATE` said *"the
+typecheck did not run"* 111 seconds after `✓ typecheck (5s)` and the agent's *"the app compiles fine"*.
+`gateEvidence.typecheck` is filled by the G3 gate (which only runs when the build is already `ok` — this
+one was not) with `typecheckEvidenceFromAgentCommands()` as the fallback, and that reads the recorded
+SHELL-COMMAND log. **The `typecheck` TOOL was the one command path that never reported through
+`onCommand`** — `bash`, `run_tests` and the cross-language checks all did. The whole report carried
+exactly one command, `npm run dev`. Recorded now, with `exitCode: null` (the command is piped through
+`head`, so the shell's status is head's) — which also keeps `recordCommand` from filing a clean
+typecheck as a `SANDBOX_CMD_FAILED` error and causing the very failure this autopsy is about.
+
+### Step 5 — the 50/50 half: why did it arise at all?
+
+The gate's blocking behaviour was justified by a premise — *"we wrote this code"* — that stopped being
+true the day it was applied to edits, and nothing forced anyone to re-examine it. The condition is now
+removed at the type level: `ExtraFinding` makes authorship an explicit choice, so a per-file blocker
+added next month must decide which it is rather than inheriting a default nobody stated.
+
+### Tests — every piece proven by reversion
+
+`tests/readinessJudgesOurOwnCode.test.ts` (13) and `tests/typecheckToolReportsItsEvidence.test.ts` (5).
+Reverting `ToolDispatcher.ts` fails 4; reverting the route's `setAuthoredFiles` line fails 1; reverting
+`Readiness.ts` fails 3.
+
+### Still open (rule 6 — recorded, not patched)
+
+1. 🔴 **`journeyCandidates` is blind to forms in components outside `pages|screens|views|routes|app`** —
+   carried over from PR #2988 and **now confirmed recurring**, with sharper evidence than before: this
+   report says *"this app has no form for a journey to fill in — nothing here takes user input"* about a
+   CHAT app whose own `ChatInput.tsx` the agent had just read, **while `ACCESSIBILITY` in the same report
+   found "4 form field(s) with no label"**. Two of our own scanners, same files, opposite answers. Fixing
+   it needs real import resolution, not a wider regex.
+2. 🔴 **The whole-workspace attribution problem is only HALF fixed.** Authenticity is scoped; the readiness
+   SCORE is not. Architecture, security and orphan-component penalties still come off the user's entire
+   pre-existing repo and can cross the floor on their own. Not touched in this pass because each needs its
+   own per-file attribution decision, and guessing would be the "fix A, break X" trade.
+3. 🔴 **The shared EVIDENCE LEDGER (autopsy `697b38ee`) stays open.** Fix 3 closes one named door; the
+   class — gates that trust only their own private notion of what was proven — is unchanged. This report
+   also shows `RELEASE_GATE` claiming the page-render check "was skipped" while `RENDER_RESCUE` and
+   `GREEN_GUARD_SAVE` both recorded a real-browser render.
+4. 🥵 **The sandbox was 90% idle and cost more than the model** ($0.0089 vs $0.0064), and 13.1 s of the
+   14 s project check was a sandbox scan that restored nothing.
 ## 2026-09-17 — Autopsy fdd59ef8: the platform fed the builder its own voice, for the THIRD time
 
 Build `fdd59ef8`, Weak tier, `glm-4.7-flashx`, **76 seconds**, 0 files, ₹0 billed. Its prompt, verbatim:

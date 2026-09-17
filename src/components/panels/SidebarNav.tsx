@@ -270,8 +270,9 @@ export function SidebarNav({
                   ))}
 
                   {/* Download app — mobile WEB on navbharatai.com only (never inside the installed app,
-                      never on desktop). Downloads the direct APK when VITE_APK_DOWNLOAD_URL is set,
-                      else opens the Play listing so it is always a real link. */}
+                      never on desktop). Opens the PUBLIC Google Play listing. It used to open the Play
+                      internal-test opt-in link, which an ordinary visitor cannot open — see
+                      `lib/appDownload.ts` for why that default outlived its premise. */}
                   {shouldShowDownloadApp() && (
                     <a
                       href={apkDownloadUrl()}

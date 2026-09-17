@@ -97,12 +97,32 @@ describe('Settings stays escapable while locked', () => {
     expect(closeAt, 'the close button moved inside the lock').toBeLessThan(gateAt);
   });
 
-  it('the App Lock toggles live in General Settings', () => {
-    expect(settings).toContain('<AppLockSettings userId={user?.uid} />');
-    const sectionAt = settings.indexOf('<AppLockSettings');
-    const generalAt = settings.indexOf("settingsScreen === 'general'");
+  it('General shows an App Lock BUTTON, and the list itself lives on its own screen', () => {
+    // Admin 2026-09-17: "'app lock' button banao. jab user setting ja kar app lock option press kare to
+    // yeh option dikhe." The tick boxes must not be drawn on General any more — an open list of what is
+    // locked is information for whoever is holding the phone.
+    const code = codeOnly(settings);
+    expect(code).toContain("<AppLockRow userId={user?.uid} onOpen={() => setSettingsScreen('app_lock')} />");
+    const rowAt = code.indexOf('<AppLockRow');
+    const generalAt = code.indexOf("settingsScreen === 'general'");
     expect(generalAt).toBeGreaterThan(-1);
-    expect(sectionAt).toBeGreaterThan(generalAt);
+    expect(rowAt).toBeGreaterThan(generalAt);
+    // The list renders ONLY on the app_lock screen.
+    const screenAt = code.indexOf("settingsScreen === 'app_lock'");
+    expect(screenAt).toBeGreaterThan(-1);
+    expect(code.indexOf('<AppLockSettings')).toBeGreaterThan(screenAt);
+    expect(code.split('<AppLockSettings').length - 1).toBe(1);
+  });
+
+  it('🔴 the App Lock screen is ALWAYS behind the PIN — "is app lock ko open karne ke liye bhi lock chahiye"', () => {
+    const code = codeOnly(settings);
+    const screen = code.slice(code.indexOf("settingsScreen === 'app_lock'"), code.indexOf("settingsScreen === 'secrets'"));
+    // `always` gates whether or not "Settings" was ticked; `banner` shows the countdown and Lock now.
+    expect(screen).toMatch(/<AppLockGate[\s\S]*?\balways\b[\s\S]*?render=\{\(\) => <AppLockSettings/);
+    expect(screen).toContain('banner');
+    // And the gate honours it: `always` short-circuits the per-area question.
+    const gate = codeOnly(read('src/components/AppLockGate.tsx'));
+    expect(gate).toContain('if (!always && !shouldGate(area, status))');
   });
 });
 
@@ -149,9 +169,25 @@ describe('the settings screen that turns it all on', () => {
     expect(lockSection).toContain('Always on');
   });
 
-  it('🔒 demands the PIN before it will save, and says so', () => {
-    expect(lockSection).toContain('Enter your PIN to save this change.');
-    expect(lockSection).toContain('disabled={!dirty || !hasTicket || !!busy || lockedOut}');
+  it('🔒 has NO PIN field of its own — the gate in front of it is the PIN', () => {
+    // Until 2026-09-17 this screen carried its own "Enter your PIN to save" box, because it sat open on
+    // General. Now it renders only behind `AppLockGate always`, so a second PIN box would be a second
+    // prompt for the same proof. The server still demands the ticket on every save.
+    const code = codeOnly(lockSection);
+    expect(code).not.toContain('unlockWithPin(');
+    expect(code).not.toContain('Enter your PIN to save');
+    // A lapsed ticket closes the screen (the gate asks again) instead of leaving a Save that keeps failing.
+    expect(code).toContain('if (e?.needsUnlock) clearUnlock();');
+  });
+
+  it('offers Change PIN, with the CURRENT PIN typed again', () => {
+    // "sath me change lock ka bhi option dikhe" (admin 2026-09-17). The current PIN is required because a
+    // ticket alone proves only that it was entered in the last five minutes.
+    expect(lockSection).toContain('changePin(userId, currentPin, newPin)');
+    expect(lockSection).toContain('Change PIN');
+    expect(lockSection).toContain('The two new PINs do not match.');
+    const client = read('src/lib/appLock.ts');
+    expect(client).toContain("jsonBody('POST', { currentPin, newPin }, unlock.ticket)");
   });
 
   it('does NOT save on tap — the rest of this screen does, and here that would be wrong', () => {
@@ -173,7 +209,17 @@ describe('the settings screen that turns it all on', () => {
     expect(lockSection).toContain('already paid is always credited');
   });
 
-  it('points a user with no PIN at the one screen that can create one', () => {
-    expect(lockSection).toContain('Secrets &amp; API Keys');
+  it('a user with no PIN creates one HERE — no detour through Secrets & API Keys', () => {
+    // The gate's setup form is the create-PIN form, and `always` shows it whenever there is no PIN.
+    expect(codeOnly(lockSection)).not.toContain('Secrets &amp; API Keys');
+    const gate = read('src/components/AppLockGate.tsx');
+    expect(gate).toContain("setMode(s.hasPin ? 'unlock' : 'setup')");
+  });
+
+  it('the row on General says the state in one line and never draws a tick box', () => {
+    const rowSrc = lockSection.slice(lockSection.indexOf('export const AppLockRow'), lockSection.indexOf('const PIN_BOX'));
+    expect(rowSrc).toContain('appLockRowSubtitle(status, loadFailed)');
+    expect(rowSrc).not.toContain('type="checkbox"');
+    expect(rowSrc).toContain('onOpen()');
   });
 });

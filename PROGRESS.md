@@ -64688,3 +64688,43 @@ dropping the summary call fails 2, returning an empty map fails 4.
 
 **Gate on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` · **25,254 tests
 passed** · `build` · `test:bundle` · `boot:check` · `deps:server-gate` — all green.
+### Same day — the sibling sweep the admin asked for: "screenshot script me bhi check karo"
+
+Admin, on the PR above: *"#3053 me PLAYWRIGHT_BROWSERS_PATH wala fix screenshot script me bhi check karo"*.
+Swept all 13 browser invocations across both actuators. **The answer on the PATH is that there was
+nothing to fix** — every screenshot, CDP, daemon, browser-action and browse command already carried
+`PLAYWRIGHT_BROWSERS_PATH`; the journey runner was the only one in the repo that never had it. Said
+plainly rather than dressed up as a find.
+
+**What the sweep DID turn up is the OTHER half of the same bug, in three places.** Two browser commands
+carried `2>/dev/null` **and** `.catch(() => null)`:
+
+| Where | Honest about not seeing? | Honest about why? |
+|---|---|---|
+| `browseUrl` | yes — falls back to curl with `source: 'curl'`, `painted: false` | **no** |
+| the element scan | yes — returns `scanned: false`, never "no elements" | **no** |
+| `screenshot` standalone | throws | **the crafted message was unreachable** |
+
+So none of them faked a pass — that part was already right — but when the browser genuinely could not
+launch, **the reason was destroyed twice over**: once by the shell redirect, once by a `.catch` that
+drops the `CommandExitError`. And the SDK **rejects on a non-zero exit carrying the command's real
+stdout/stderr on the error**, so both lines were throwing away a diagnosis that was free to keep. A
+browser outage would read as "this page has no elements" or "a slow SPA" for as long as it lasted.
+
+🔴 **AND THE FIX FOR THIS CLASS ALREADY EXISTED, IN THIS FILE'S OWN IMPORTS.**
+`src/server/lib/sandboxCommandError.ts` was written for precisely this ("the one moment we most need
+the tool's own words is the exact moment we discard them"), centralised under rule 4, and applied to
+the five **npm-install** call sites in this actuator. The **browser** call sites were never converted.
+Same shape as the PR it rides on: the class was fixed, the helper exists, the siblings were not hunted.
+All three now use `commandFailureResult` + `commandLogTail`, the redirects are gone, and the
+screenshot's crafted *"Screenshot failed: <what the browser said>"* is reachable for the first time.
+
+⚠️ **Deliberately NOT changed: the CDP attempt's `.catch(() => null)`** in `screenshot()`. Its failure
+is routine (the shared daemon is simply not up yet) and it falls through to the standalone run, which
+now reports properly — logging every occurrence would be noise, not evidence.
+
+**Guarded:** `sandboxBrowsersPath.test.ts` now sweeps BOTH actuators and fails on any browser
+invocation that lacks the path or carries `2>/dev/null`, and on a browse block that goes back to
+`.catch(() => null)`. Comments are stripped before the scan — the first version of that assertion was
+defeated by the fix's own comment, which names the lossy spelling it replaced. Proven by reversion
+both ways.

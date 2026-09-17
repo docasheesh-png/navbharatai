@@ -60969,3 +60969,40 @@ the PLATFORM FEATURE that covers it.
 
 Tests: `tests/questionReadsEveryClause.test.ts` (16), both halves of the fix proven by reversion.
 Existing `IntentClassifier.test.ts` (73) and every classifier-adjacent suite (497 total) pass unchanged.
+
+---
+
+## 2026-09-17 — "Continue where you left off" REMOVED from the home screen (admin, same day it shipped)
+
+**Admin, urgently:** *"yeh aaj banaya gaya hai, isko abhi hatao. jaldi delete karo!!! … maine kaha tha,
+jab koi user navbharatai free, navbharatai pro koi chat open kare to use last chat jahan se chori thi
+wahi se dikhna chahiye … homepage se isko pura hatao."*
+
+**PR #2996 shipped TWO things under one title** — *"the app reopens your conversation, and your
+conversations are on Home"*. Only the first was asked for. The second put a list of every past
+conversation on the front page of the product, which is not what "open a chat and see where you left
+off" means, and the admin saw it the day it landed.
+
+**Removed (the home list):** `components/home/RecentConversations.tsx`, `lib/recentConversations.ts`,
+`tests/recentConversations.test.ts`, the `HomeView` section and its two props, and the `homeRecents` /
+`openRecentConversation` block in `App.tsx`. Four now-unused imports went with them —
+`readProfessionalHistory`, `resumeArchived`, `readPlaceActivity`, `buildHistoryIndex` — because an
+unused import keeps its whole module on the load path (`scripts/noUnusedImports.mjs` caught all four).
+
+**KEPT, deliberately — this is the half the admin actually asked for:** `lib/lastPlace.ts` and
+`lib/freeChatResume.ts` are untouched, so reopening NavBharatAI still puts the user back in the
+conversation they were last in. `tests/lastPlace.test.ts`, `tests/freeChatResume.test.ts` and the rest
+of `tests/resumeWiring.test.ts` still cover it — 58 tests, green.
+
+⚠️ **`AppKnowledgeBase.ts` was corrected in the same commit, and that matters more than it looks.**
+Three entries told every AI in the product that a "Continue where you left off" list is on the home
+screen. Leaving them would have made every assistant confidently direct users to a section that no
+longer exists — the same stale-capability class this repo has now paid for twice in one week (the four
+ladder comments on 2026-09-15, and "NavBharatAI cannot add your signing key" on 2026-09-17). Users are
+now pointed at History, which is real.
+
+**The test block asserting the home list was REPLACED WITH A NOTE, not deleted**, so a later session
+reading the history does not "restore" a feature that was removed on purpose.
+
+Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1728 files, 24432 passed, 0 failed** ·
+build · test:bundle · boot:check.

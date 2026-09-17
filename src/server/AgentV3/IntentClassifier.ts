@@ -411,15 +411,66 @@ const MIDSENTENCE_KYA_QUESTION =
   /(?:^|[\s,.!])kya\s+(?:aap|tum|main|mai|hum|hume)\b|(?:^|[\s,।!])क्या\s+(?:मैं|मई|आप|तुम|हम|हमें)(?:\s|$|[।,.!?])/;
 
 /**
+ * Connectives that JOIN a clause to the one before it without changing its mood.
+ *
+ * Stripped before a clause is judged, because "or how to create apk" is the same question as "how to
+ * create apk" — and every opener test in this file is `^`-anchored, so a two-letter conjunction in
+ * front of the question word hides it completely.
+ */
+const LEADING_CONNECTIVE = /^(?:or|and|but|so|then|also|plus|aur|ya|phir|lekin|aur phir)\s+/;
+
+/** Sentence boundaries. `।` is the Devanagari full stop; newlines end a clause as surely as a period. */
+const CLAUSE_BOUNDARY = /[.!?;।\n]+/;
+
+/** Does ONE clause read as a question? The opener rules, applied to a clause instead of the message. */
+function clauseReadsAsQuestion(raw: string): boolean {
+  const text = raw.trim().replace(LEADING_CONNECTIVE, '').trim();
+  if (!text) return false;
+  if (WH_OPENERS.test(text)) return true;
+  // 🔴 `&&`, NOT AN EARLY `return`. This line used to read
+  //     `if (AUX_OPENERS.test(text)) return AUX_ASKS_US.test(text);`
+  // so a clause opening with ANY auxiliary that was not followed by a second-person subject returned
+  // FALSE **without ever reaching `MIDSENTENCE_KYA_QUESTION` below** — the Hindi mid-sentence rule was
+  // unreachable for every message beginning "can i …", "should i …", "do i …". The auxiliary
+  // distinction itself is unchanged, so "do it again" is still an order, not a question.
+  if (AUX_OPENERS.test(text) && AUX_ASKS_US.test(text)) return true;
+  return MIDSENTENCE_KYA_QUESTION.test(text);
+}
+
+/**
  * Does this message READ as a question — a request for an answer rather than an order to act? Pure.
+ *
+ * 🔴 IT READS EVERY CLAUSE, NOT JUST THE OPENING (autopsy 2026-09-17, build 2c61f648). A real user
+ * typed **"Can I use it. Or how to create apk"** about a project they already had. Both halves
+ * classify as `chat` on their own. Joined, the message became a **HIGH-confidence `new_build`**, which
+ * by design skips the LLM intention reader entirely — and the engine ran a 7.3-minute agentic build
+ * on their existing 51-file app, changed three of their files, and left it failing `tsc`.
+ *
+ * The mechanism, exactly: `WH_OPENERS` is `^`-anchored, so "how" in the SECOND sentence was invisible;
+ * `AUX_OPENERS` matched the leading "can", and the old early `return` handed back `AUX_ASKS_US`
+ * ("can i" ≠ "can you") — **false** — without any later test running. One sentence decided the whole
+ * message.
+ *
+ * 🔴 AND THIS FILE HAD ALREADY DIAGNOSED IT, ONE DAY EARLIER. `MIDSENTENCE_KYA_QUESTION`'s own comment
+ * (autopsy 2026-09-16) states it in as many words: *"Every other line in `readsAsQuestion` requires the
+ * message to OPEN with a question word."* That autopsy unanchored the **Hindi** pattern and stopped —
+ * the identical defect in the English openers was never hunted. This is that sibling, failing in
+ * production the next day. The lesson is the repo's own rule 3, and it is now structural: openers are
+ * applied per CLAUSE, so no single pattern has to remember to be unanchored.
+ *
+ * ⚠️ WHAT DELIBERATELY DOES NOT CHANGE. An ORDER is still an order: "build a notes app" and
+ * "create apk" contain no question clause and stay HIGH-confidence builds, so the common path pays
+ * nothing. "do it again" is still a retry (the auxiliary rule above). And a question that DOES name a
+ * deliverable still keeps its build intent — it only loses the hard lock, which is the whole point.
  */
 export function readsAsQuestion(lower: string): boolean {
   const text = lower.trim();
   if (!text) return false;
   if (text.endsWith('?')) return true;
-  if (WH_OPENERS.test(text)) return true;
-  if (AUX_OPENERS.test(text)) return AUX_ASKS_US.test(text);
-  return MIDSENTENCE_KYA_QUESTION.test(text);
+  for (const clause of text.split(CLAUSE_BOUNDARY)) {
+    if (clauseReadsAsQuestion(clause)) return true;
+  }
+  return false;
 }
 
 /**

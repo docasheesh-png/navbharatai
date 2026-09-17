@@ -295,7 +295,7 @@ import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanSta
 import { computePlanProgress } from '../AgentV3/PlanProgress';
 import { decideCancelledBuildBill } from '../AgentV3/cancelledBuildBilling';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
-import { projectModeEnabled, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
+import { projectModeEnabled, projectModeDiagnosis, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
@@ -433,6 +433,7 @@ import { realismIntent } from '../lib/realismIntent';
 import { heroObjectContract } from '../lib/heroObjectSpec';
 import { BuildCheckpoint } from '../AgentV3/BuildCheckpoints';
 import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
+import { recordEngineUse } from '../AgentV3/engineUseStore';
 import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrchestrator';
 import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from '../AgentV3/escalationRollout';
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
@@ -14344,6 +14345,21 @@ async function noteBuildOutcome(
       // Mutually exclusive with the mega-app roadmap (Phase 3): both are "big app" strategies and must
       // never both steer one build. When the roadmap owns this build (step-1 target already set), SPM
       // project mode stays out.
+      // WHY project mode did or did not steer this build — recorded on BOTH branches, admin-only.
+      // The gate is an exact-match allowlist against the SIGN-IN email and used to record nothing at
+      // all, so a mistyped domain and a below-threshold prompt produced the identical symptom:
+      // silence. Advisory string only — it can never enable, block or slow a build.
+      try {
+        const pmDiag = projectModeDiagnosis({
+          flagRaw: process.env.AGENTV3_PROJECT_MODE,
+          identity: { userId, email },
+          preEmptedBy: megaRoadmapActive ? 'mega-roadmap' : planFirst ? 'plan-first' : null,
+          isNewBuild: intent === 'new_build',
+          isEditMode,
+          prompt,
+        });
+        buildDiag.record({ phase: 'plan', severity: 'info', code: pmDiag.code, message: pmDiag.message, detail: pmDiag.detail, autoResolved: true });
+      } catch { /* diagnostics are best-effort and must never touch a build */ }
       if (projectModeEnabled(process.env, { userId, email }) && !planFirst && !megaRoadmapActive) {
         try {
           let pPlan = await loadProjectPlan(workspaceId);
@@ -17682,6 +17698,19 @@ async function noteBuildOutcome(
         gateEvidence.preview = previewVerifiedRendered ? 'passed' : previewVerifiedFailed ? 'failed' : 'not-run';
         // Only changes the WORDING of an unproven preview, never the verdict — see previewUrlPublished.
         gateEvidence.previewUrlPublished = Boolean(lastPreviewUrl);
+        // THE SAME FALLBACK THE TYPECHECK ALREADY HAS, FOR THE SIBLING IT LEFT BEHIND (autopsy
+        // 697b38ee). `gateEvidence.tests` is written ONLY by the vaccine pass — flag-gated,
+        // percentage-gated, and skipped entirely on a build not yet marked `ok` — so an agent that ran
+        // the suite itself left the gate telling the user the app had no suite that could be run, in a
+        // report whose own command log held the passing run. Fills a gap only; never overrides the real
+        // evidence set above, and a suite that could not EXECUTE is not counted in either direction.
+        // Safe for billing by construction: a RED gate flips a build to free only on
+        // shippingIssueCount('error'), which test evidence does not contribute to.
+        try {
+          const proven = buildDiag.agentRunEvidence();
+          if (gateEvidence.typecheck === 'not-run' && proven.typecheck) gateEvidence.typecheck = proven.typecheck;
+          if (gateEvidence.tests === 'not-run' && proven.tests) gateEvidence.tests = proven.tests;
+        } catch { /* evidence recovery is best-effort and must never touch a build */ }
         const gateFindings = () => ({
           // Counted from what this build actually recorded, so the gate and the report cannot disagree.
           blockers: buildDiag.shippingIssueCount('error'),
@@ -19390,6 +19419,14 @@ async function noteBuildOutcome(
           console.error(`[AGENTV3 BILLING] Wallet debit threw for user ${userId}: ${err?.message || err}`);
         }
       }
+
+      // WHICH ENGINES ACTUALLY SERVED THIS BUILD (admin 2026-09-17). `providerTurns` already holds
+      // it — the same map `dominantProvider` reads — and until now it died with the request. That is
+      // exactly why the AI Engines page looked invented: it was built on `ai_usage_logs`, which the
+      // CHAT route writes and a build never touches, so the page showed chat providers and called
+      // them the platform's engines. One day-keyed counter, written where the fact is already known.
+      // Fire-and-forget on purpose: an observation must never delay a user's finished build.
+      void recordEngineUse(providerTurns);
 
       // Cost-ladder telemetry (P2 measurement): record this build's task type, start
       // tier, billed amount, tokens, success, and duration so the savings AND the

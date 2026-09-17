@@ -64331,3 +64331,32 @@ and still asserted.
 timeout still consumes the lane's remaining clock, so the rungs BELOW it are authorised fewer output
 tokens (2,314 instead of ~2,833 on this build) and Kimi was starved by a budget GLM had already spent.
 That is the second half of this autopsy and is next.
+
+### 2026-09-17 (correction) — three of the four open items from autopsy `d6d664e6` are closed, and ONE OF THEM WAS MY MISTAKE
+
+Recorded here rather than by editing the original entry, per the append-only rule, because a session
+reading that list would otherwise go and work on items that are finished or on a bug that never existed.
+
+1. 🔴 **"A bench that does not bench" — WRONG, and closed by #3047.** I reported that
+   `PROVIDER_BENCHED` fired three times while `providerChain` showed `GLM(glm-4.7-flashx) ×51`, and
+   called the contradiction an engine defect. **It was not one.** Another session read the code:
+   `describeRunnerChain` collapses consecutive same-family, same-model rungs, and that `×51` means
+   *how many KEYS stood there*, never how many attempts were made. The bench was working the whole
+   time; the rendered line simply never said "keys", so reading its output correctly required knowing
+   the module's internals. ⚠️ **I did exactly what this repo's own rule warns about — I said "not
+   guessed at here, it needs the code read", and then recorded a root cause anyway from the report
+   alone.** Naming it cost another session the read. The honest version of that sentence is: *I do
+   not know yet, and until someone reads the code there is no finding.*
+2. **The futility breaker — taken by PR #3044** ("a build that is going nowhere now stops"). Checked
+   before starting it, which is the only reason it was not built twice.
+3. **The starvation memory — already built.** `rememberStarvedWhileClamped` / `modelStarvedWhileClamped`
+   exist and are wired in `OpenAiToolRunner`, so `CLAUDE.md`'s open "Kimi sibling" item (a rung that
+   starved having its NEXT call unclamped, without inventing a capability fact for Moonshot) is closed.
+4. **The entry-point prop contract** is very likely covered by PR #3048 (`write → typecheck → next`):
+   `<App />` missing a required prop IS a TypeScript error, so a typecheck after every write catches
+   it without a dedicated check. Left to that PR rather than duplicated.
+
+**Cross-check of `main` after eight merges in one hour from five sessions**, since each PR was green
+against a *different* `main` and nothing had verified the combination: `277a6769` — typecheck ✅,
+no-unused-imports ✅, server typecheck ✅, **25105 passed | 1 skipped, 0 FAIL** ✅, build ✅, bundle ✅,
+boot ✅. The concurrent merges compose cleanly.

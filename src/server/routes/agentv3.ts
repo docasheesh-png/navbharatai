@@ -14482,6 +14482,8 @@ async function noteBuildOutcome(
       // template). Best-effort: any failure just falls through to a normal from-scratch build. Kill switch
       // AGENTV3_GOLDEN_SCAFFOLD=off.
       let goldenPreseeded = false;
+      /** Path → the exact content the platform's own template seeded. See the bill note below. */
+      const preseededGolden = new Map<string, string>();
       if (process.env.AGENTV3_GOLDEN_SCAFFOLD !== 'off' && intent === 'new_build' && !projectModuleRef && !isImportTurn) {
         try {
           const golden = goldenScaffoldForPrompt(prompt);
@@ -14496,6 +14498,13 @@ async function noteBuildOutcome(
                 try { getWorkspaceMemory(workspaceId).indexFile(gp, gc); } catch { /* index best-effort */ }
               }
               await saveWorkspaceFiles(workspaceId, goldenFiles).catch(() => {});
+              // 🔴 REMEMBERED FOR THE BILL (autopsy 2b0a3ed5). These 12 files go into `writtenFiles`
+              // above so the rest of the build treats them as present — but they are OUR template, not
+              // the user's app. `decideCancelledBuildBill`'s "nothing delivered, nothing charged" rule
+              // reads that count, so without this a user who stopped before the model produced anything
+              // of their own was billed for twelve files we wrote from a template. Content is kept, not
+              // just the path: a scaffold file the builder REWRITES is genuinely delivered work.
+              for (const [gp, gc] of Object.entries(goldenFiles)) preseededGolden.set(gp, gc);
               goldenPreseeded = true;
               buildDiag.record({ phase: 'build', severity: 'info', code: 'GOLDEN_SCAFFOLD', message: `Pre-seeded the tested "${golden.label}" template (${Object.keys(goldenFiles).length} files) — the builder verifies & customizes instead of writing from scratch.`, autoResolved: true });
               emit({ type: 'narration', agent: 'architect', text: `⚡ Starting from NavBharatAI's tested "${golden.label}" app template — verifying and customizing it for you.`, ts: Date.now() });
@@ -19320,6 +19329,11 @@ async function noteBuildOutcome(
         ? decideCancelledBuildBill({
           abortCause: abortCauseOf(abort.signal),
           filesWritten: writtenFiles.size,
+          // Our own template, untouched, is not the user's app — see `preseededUnchanged`. A scaffold
+          // file the builder REWROTE has different content and so is correctly counted as delivered.
+          // ⚠️ `writtenFiles` itself is deliberately NOT filtered: `shouldRetryEmptyBuild` and the
+          // render rescue both read its size and mean something different by it.
+          preseededUnchanged: [...preseededGolden].filter(([p, c]) => writtenFiles.get(p) === c).length,
           appRendered: buildObs.previewRendered === true,
           decidedBilledUsd: effectiveBilledUsd,
         })

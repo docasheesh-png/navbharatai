@@ -2781,6 +2781,21 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['metrics', 'stats', 'cost', 'admin', 'dashboard', 'builds', 'usage', 'ai cost', 'success rate', 'observability', 'logs', 'monitoring'],
   },
   {
+    id: 'admin-revenue-purchases',
+    name: 'Admin Revenue — purchases by user',
+    path: 'Admin panel → Revenue → "Purchases — who paid, for what" (admin only)',
+    description: `Admin-only view of every purchase behind the revenue total:
+• One row per payment record: date & time, user (name, email, id), product (wallet recharge, token pack, Professional Pass, coupon, gift), amount paid in ₹, tokens credited, ₹ credited, status (paid / pending / failed / free credit), payment method (Cashfree web, Google Play, App Store, coupon), transaction id and gateway reference
+• Revenue counts only successful payments with money received — coupons, welcome gifts and referral steps are shown but never counted
+• Search by user, email or transaction id; filter by status and date range; sort by date, amount or tokens; paginated
+• Clicking a user opens the account sheet, which shows purchased → used → remaining credits and the user's own purchase list
+• The Users tab shows each user's purchased tokens, tokens used and rupees paid
+• Refunds are not recorded by the payment webhook; the panel says so`,
+    howToUse: 'Admin login required. Open the admin panel → Revenue tab. The purchases table sits under the revenue tiles; use the search box, status and date filters, and the sort selector. Click a user name to open their account sheet.',
+    relatedFeatures: ['admin-metrics', 'admin-monitor'],
+    keywords: ['revenue', 'purchases', 'who paid', 'kisne kharida', 'kisne payment ki', 'transactions', 'transaction id', 'refund', 'tokens purchased', 'user wise purchase', 'admin revenue', 'payments list'],
+  },
+  {
     id: 'admin-monitor',
     name: 'Live Monitor (admin home)',
     path: 'Admin Dashboard → Monitor (the page that opens on login)',

@@ -337,7 +337,7 @@ import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective, classifyFailure } from '../lib/BuildRetrospectiveEngine';
 import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
-import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMisconfigured, buildStarvedItsOutputBudget, stoppedByUser } from '../AgentV3/BuildDiagnostics';
+import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMisconfigured, buildStarvedItsOutputBudget, stoppedByUser, buildWasStopped } from '../AgentV3/BuildDiagnostics';
 import { ADVISORY_CAP_CODE } from '../AgentV3/advisoryCapOutcome';
 import { estimateBuildTime, complexityFromPrompt, liveEtaTick } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
@@ -15461,6 +15461,47 @@ async function noteBuildOutcome(
       // result is always set here (OneShot, escalation, or the loop above).
       if (!result) result = await runner.run(buildPrompt);
 
+      // ── EVERY WAY A BUILD IS STOPPED MUST REACH THE TIMELINE (autopsy b89ba6f8, 2026-09-17) ──────
+      //
+      // 🔴 THE REPORT THIS COMES FROM TOLD ONE USER THREE DIFFERENT STORIES ABOUT ONE BUILD:
+      //     summary        "Stopped, as you asked."                       ← from the abort SIGNAL
+      //     narration      "NavBharatAI's engine is running slowly right now and your build could
+      //                     not finish — this one is on us, not on your app."   ← from the TOOL log
+      //     release gate   "Not shippable — the build did not succeed."   ← from the TIMELINE
+      // They disagreed because they read three different sources, and only ONE stop path writes to
+      // more than one of them. `abortBuild(…, 'user-stop')` is reached from three places — the Stop
+      // BUTTON (/stop), UNSEND, and the model's own `stop_build` tool — and only the last records
+      // `USER_STOPPED_BUILD`. So a build stopped by the BUTTON is invisible to `stoppedByUser` and to
+      // `toolWasUsed('stop_build')`, and both fell through to explanations they invented.
+      //
+      // The cost is not cosmetic: the person who pressed Stop was handed an apology for a failure
+      // that never happened, and the admin's failure panel — the one the 40.8% work is planned from —
+      // recorded a phantom "engine did not respond" event for a build nothing was wrong with.
+      //
+      // 🔑 THE FIX IS A BACK-FILL, NOT A FOURTH READER. `abortBuild` is the one funnel every stop path
+      // already goes through ("Every abort site must go through this" — buildAbortCause.ts), so the
+      // SIGNAL is the complete source. Copying it onto the timeline once, here, makes every existing
+      // timeline reader correct by construction — the gate and the empty-build explanation did not
+      // have to learn anything new, which is the same discipline `resolveRecoveredOnSuccess` uses.
+      //
+      // ⚠️ Recorded only when nothing recorded it already: the `stop_build` path writes a RICHER line
+      // (it has the sentence the model was answering), and a second entry would double-count it.
+      try {
+        if (abortCauseOf(abort.signal) === 'user-stop' && !buildWasStopped(buildDiag.report().issues)) {
+          // The same platform-composed test the tool path applies, for the same reason: when the
+          // build's own prompt was composed by NavBharatAI, nothing in that run is the user's words,
+          // so the record must not say the user did it (autopsy fdd59ef8).
+          const platformComposed = isPlatformFixRequest(prompt);
+          buildDiag.record({
+            phase: 'build', severity: 'info', code: 'USER_STOPPED_BUILD', autoResolved: true,
+            message: platformComposed
+              ? 'The build was stopped while working on a request NavBharatAI itself composed — not by the user.'
+              : 'The user asked for this build to stop, and it was stopped.',
+            detail: 'Recorded from the build\'s abort signal — Stop and Unsend reach the run only that way.',
+          });
+        }
+      } catch { /* the record must never be what breaks the build it is describing */ }
+
       /**
        * 🔒 THE WALL-CLOCK CAP GETS ITS OWN HONEST OUTCOME CODE (admin diagnostics report, 2026-09-10).
        *
@@ -19651,7 +19692,15 @@ async function noteBuildOutcome(
           // The signal is `toolWasUsed`, which reads the timeline the report itself prints, so it
           // cannot drift from what an admin sees (the alternative, a new flag threaded 6,000 lines
           // down the handler, would be a second answer to a question the timeline already answers).
-          const stopped = buildDiag.toolWasUsed('stop_build');
+          // …AND THE TIMELINE CAN NOW ANSWER IT FOR EVERY STOP PATH (autopsy b89ba6f8, 2026-09-17).
+          // The paragraph above is right that the timeline is the place to ask — its premise, that
+          // every stop reaches the timeline, was what was false: the Stop BUTTON wrote only to the
+          // abort signal, so a build the user stopped read as one nobody stopped and was explained as
+          // a degraded engine. The back-fill after the run (search: EVERY WAY A BUILD IS STOPPED)
+          // copies the signal onto the timeline, and this asks the broader of the two questions —
+          // "did this build reach the point of having a capability to judge?" — which is NO whether
+          // the person or their own sentence stopped it.
+          const stopped = buildWasStopped(buildDiag.report().issues) || buildDiag.toolWasUsed('stop_build');
           const refused = !stopped && looksLikeRefusal(result.summary);
           const degraded = !stopped && !refused && providerFailuresLookDegraded(buildDiag.providerFailureBreakdown());
           // (d) OUR OWN CONFIGURATION (build report 58fe8254, 2026-09-15). A rung that rejects every

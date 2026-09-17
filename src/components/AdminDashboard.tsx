@@ -195,6 +195,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const USER_PAGE = 25;
   const [userLimit, setUserLimit] = useState(USER_PAGE);
   const [userTotal, setUserTotal] = useState<number | null>(null);
+  // PURCHASES — who paid, for what (admin 2026-09-17). Fed by /api/admin/purchases, which reads the
+  // same rows the analytics tiles are computed from, so the table and the tiles cannot disagree.
+  const [purchases, setPurchases] = useState<{
+    rows: any[]; total: number; offset: number; limit: number;
+    summary: any; overall: any;
+  } | null>(null);
+  const [purchasesLoading, setPurchasesLoading] = useState(false);
+  const [purchasesError, setPurchasesError] = useState('');
+  const [purchaseQuery, setPurchaseQuery] = useState<{
+    search: string; status: 'all' | 'revenue' | 'success' | 'pending' | 'failed' | 'free';
+    from: string; to: string; sort: 'date' | 'amount' | 'tokens'; dir: 'asc' | 'desc'; offset: number;
+  }>({ search: '', status: 'all', from: '', to: '', sort: 'date', dir: 'desc', offset: 0 });
   // Back to page one whenever the list MEANS something different. Without this, an admin who pressed
   // "Load more" five times and then typed a search would fetch 150 rows of the new result — the same
   // reset `usePagedList` does for every client-side list, done here against the server instead.
@@ -1138,6 +1150,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
   const copySelectedReport = () => void copyJson(selectedPartJson, selectedPartMeta?.label || 'Report');
 
+  /**
+   * WHAT THE FLOATING COPY BUTTON SHOULD TAKE INSTEAD OF THE PAGE TEXT (admin 2026-09-17: *"jab build
+   * report copy ki jaye to json formate me hi copy ho. abhi text me copy ho rahi hai."*).
+   *
+   * Both of these are MODALS gated on their own state being non-null, so non-null means the admin is
+   * genuinely looking at one — the button never silently switches to JSON on a page showing none.
+   * The payloads are the SAME strings the panels' own Copy buttons use, so the two can never disagree.
+   */
+  const copyJsonPayload = useMemo(() => ({
+    apkReport: openApkReport && !openApkReport.loading && !openApkReport.error
+      ? { label: 'APK build report', json: JSON.stringify(openApkReport, null, 2) }
+      : null,
+    buildReport: selectedReport && selectedPartJson
+      ? { label: selectedPartMeta?.label || 'Build report', json: selectedPartJson }
+      : null,
+  }), [openApkReport, selectedReport, selectedPartJson, selectedPartMeta]);
+
   const fetchAnalytics = useCallback(async () => {
     setLoading(true);
     try {
@@ -1332,6 +1361,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
   useEffect(() => { fetchAnalytics(); }, [fetchAnalytics]);
   useEffect(() => { if (activeTab === 'monitor') { fetchHealthScore(); fetchInsights(); fetchChannels(); } }, [activeTab, fetchHealthScore, fetchInsights, fetchChannels]);
+  const PURCHASE_PAGE = 25;
+  const fetchPurchases = useCallback(async (q: typeof purchaseQuery) => {
+    setPurchasesLoading(true);
+    setPurchasesError('');
+    try {
+      const params = new URLSearchParams({
+        search: q.search, status: q.status, from: q.from, to: q.to, sort: q.sort, dir: q.dir,
+        limit: String(PURCHASE_PAGE), offset: String(q.offset),
+      });
+      const r = await fetch(`/api/admin/purchases?${params.toString()}`, { headers });
+      const d = await r.json();
+      if (!r.ok) { setPurchases(null); setPurchasesError(d?.detail || d?.error || 'Could not load purchases.'); return; }
+      setPurchases(d && Array.isArray(d.rows) ? d : null);
+    } catch (e: any) {
+      setPurchases(null);
+      setPurchasesError(e?.message || 'Could not load purchases.');
+    } finally {
+      setPurchasesLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+
   const fetchFeatureSpend = useCallback(async () => {
     setFeatureSpendLoading(true);
     try {
@@ -1347,6 +1398,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   useEffect(() => { if (activeTab === 'users') { fetchUsers(); void fetchFeatureSpend(); } }, [activeTab, fetchUsers, fetchFeatureSpend]);
   useEffect(() => { if (activeTab === 'settings') { fetchPromos(); fetchUpdateCohort(); } }, [activeTab, fetchPromos, fetchUpdateCohort]);
   useEffect(() => { if (activeTab === 'revenue') { fetchCostTelemetry(); fetchFinOps(); } }, [activeTab, fetchCostTelemetry, fetchFinOps]);
+  useEffect(() => { if (activeTab === 'revenue') { void fetchPurchases(purchaseQuery); } }, [activeTab, purchaseQuery, fetchPurchases]);
   useEffect(() => { if (activeTab === 'reports') { fetchBuildReports(); fetchFirstPass(); } }, [activeTab, fetchBuildReports, fetchFirstPass]);
   // 🔴 THE BUG THIS FIXES (admin screenshot 2026-09-13: "Failed" selected, worked builds still
   // listed). Every control in the All-builds bar — the status chips, the date select, the user
@@ -1490,7 +1542,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   return (
     <div className="w-full max-w-7xl mx-auto space-y-6 py-4 text-left">
       {/* The floating page-copy button — every admin tab, draggable, closable (admin 2026-09-14). */}
-      <AdminCopyButton pageLabel={TABS.find((t) => t.id === activeTab)?.label || 'Admin'} />
+      <AdminCopyButton
+        pageLabel={TABS.find((t) => t.id === activeTab)?.label || 'Admin'}
+        jsonPayload={copyJsonPayload}
+      />
 
       {/* Toast */}
       {toastMsg && (
@@ -2049,21 +2104,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         <th className="py-3 px-4 text-left">Joined</th>
                         <th className="py-3 px-4 text-left">Last Active</th>
                         <th className="py-3 px-4 text-left">Token Balance</th>
+                        <th className="py-3 px-4 text-left">Purchased</th>
                         <th className="py-3 px-4 text-left">Total Used</th>
                         <th className="py-3 px-4 text-left">Wallet</th>
+                        <th className="py-3 px-4 text-left">Paid ₹</th>
                         <th className="py-3 px-4 text-left">Status</th>
                         <th className="py-3 px-4 text-left">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
                       {usersLoading && (
-                        <tr><td colSpan={9} className="py-10 text-center"><TirangaLoader className="w-5 h-5 mx-auto" /></td></tr>
+                        <tr><td colSpan={11} className="py-10 text-center"><TirangaLoader className="w-5 h-5 mx-auto" /></td></tr>
                       )}
                       {!usersLoading && users.length === 0 && usersError && (
-                        <tr><td colSpan={9} className="py-10 text-center text-red-400 text-[10px] font-bold normal-case px-4">{usersError} <button onClick={fetchUsers} className="underline ml-1">Retry</button></td></tr>
+                        <tr><td colSpan={11} className="py-10 text-center text-red-400 text-[10px] font-bold normal-case px-4">{usersError} <button onClick={fetchUsers} className="underline ml-1">Retry</button></td></tr>
                       )}
                       {!usersLoading && users.length === 0 && !usersError && (
-                        <tr><td colSpan={9} className="py-10 text-center text-[#8b949e] text-[10px] font-bold uppercase">No users found. Click Load to fetch.</td></tr>
+                        <tr><td colSpan={11} className="py-10 text-center text-[#8b949e] text-[10px] font-bold uppercase">No users found. Click Load to fetch.</td></tr>
                       )}
                       {users.map((u: any) => (
                         <tr key={u.userId} className={`hover:bg-white/5 transition-colors ${u.banned ? 'bg-red-950/20' : ''}`}>
@@ -2090,8 +2147,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             );
                           })()}
                           <td className="py-3 px-4 font-mono text-amber-400 font-black">{(u.tokenBalance || 0).toLocaleString()}</td>
+                          <td className="py-3 px-4 font-mono text-sky-300">{(u.totalTokensPurchased || 0).toLocaleString()}</td>
+                          {/* Real since 2026-09-17: this read a field that was only ever written as 0 (walletLifetime.ts). */}
                           <td className="py-3 px-4 font-mono text-violet-400">{(u.totalTokensUsed || 0).toLocaleString()}</td>
                           <td className="py-3 px-4 font-mono text-emerald-400">₹{(u.remainingBalance || 0).toFixed(2)}</td>
+                          <td className="py-3 px-4 font-mono text-emerald-300">₹{Number(u.moneySpent || 0).toLocaleString('en-IN')}</td>
                           <td className="py-3 px-4">
                             {u.banned ? <span className="text-red-400 font-black text-[9px] uppercase flex items-center gap-1"><BanIcon className="w-3 h-3"/>Banned</span> : <span className="text-emerald-400 font-black text-[9px] uppercase flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/>Active</span>}
                           </td>
@@ -2406,12 +2466,120 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 {statCard('Active Users', analytics?.activeUsers24h || 0, 'Using AI in 24h', 'bg-violet-500', UserCheck)}
               </div>
 
+              {/* PURCHASES — "this revenue came from which users?" (admin 2026-09-17). Every row is a
+                  real `payment_transactions` document; the revenue rule (SUCCESS, paid > 0, a payment
+                  rail) is purchaseLedger.ts, shared with the tiles above. Refunds are not recorded by
+                  any writer, and the panel says so rather than staying silent. */}
+              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-black text-white uppercase tracking-tight">Purchases — who paid, for what</h3>
+                  <button onClick={() => void fetchPurchases(purchaseQuery)} disabled={purchasesLoading}
+                    className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-[#8b949e] hover:text-white transition-colors disabled:opacity-50">
+                    <RefreshCw className={`w-3 h-3 ${purchasesLoading ? 'animate-spin' : ''}`} /> Refresh
+                  </button>
+                </div>
+                {purchases?.overall && (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {statCard('Revenue (all time)', `₹${Number(purchases.overall.revenueInr || 0).toLocaleString('en-IN')}`, `${purchases.overall.revenueRows} paid purchase${purchases.overall.revenueRows === 1 ? '' : 's'}`, 'bg-emerald-500', IndianRupee)}
+                    {statCard('In this view', `₹${Number(purchases.summary?.revenueInr || 0).toLocaleString('en-IN')}`, `${purchases.summary?.revenueRows || 0} paid of ${purchases.total} row${purchases.total === 1 ? '' : 's'}`, 'bg-sky-500', Tag)}
+                    {statCard('Credits given free', (purchases.overall.freeCreditRows || 0).toLocaleString('en-IN'), 'coupons, gifts, referral steps — never revenue', 'bg-violet-500', UserCheck)}
+                    {statCard('Unfinished', `${purchases.overall.pendingRows || 0} pending · ${purchases.overall.failedRows || 0} failed`, 'never counted as revenue', 'bg-amber-500', Activity)}
+                  </div>
+                )}
+                <div className="flex flex-wrap gap-2 items-end">
+                  <input value={purchaseQuery.search} onChange={(e) => setPurchaseQuery((q) => ({ ...q, search: e.target.value, offset: 0 }))}
+                    placeholder="Search user, email, txn id…" className="flex-1 min-w-[180px] bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder:text-white/30" />
+                  <select value={purchaseQuery.status} onChange={(e) => setPurchaseQuery((q) => ({ ...q, status: e.target.value as typeof q.status, offset: 0 }))}
+                    className="bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-xs text-white">
+                    <option value="all">All rows</option>
+                    <option value="revenue">Paid (revenue)</option>
+                    <option value="success">Successful (incl. free)</option>
+                    <option value="free">Free credit only</option>
+                    <option value="pending">Pending</option>
+                    <option value="failed">Failed</option>
+                  </select>
+                  <label className="text-[9px] uppercase text-white/40 flex flex-col gap-1">From
+                    <input type="date" value={purchaseQuery.from} onChange={(e) => setPurchaseQuery((q) => ({ ...q, from: e.target.value, offset: 0 }))} className="bg-black/40 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white" />
+                  </label>
+                  <label className="text-[9px] uppercase text-white/40 flex flex-col gap-1">To
+                    <input type="date" value={purchaseQuery.to} onChange={(e) => setPurchaseQuery((q) => ({ ...q, to: e.target.value, offset: 0 }))} className="bg-black/40 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white" />
+                  </label>
+                  <select value={`${purchaseQuery.sort}:${purchaseQuery.dir}`} onChange={(e) => { const [sort, dir] = e.target.value.split(':'); setPurchaseQuery((q) => ({ ...q, sort: sort as typeof q.sort, dir: dir as typeof q.dir, offset: 0 })); }}
+                    className="bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-xs text-white">
+                    <option value="date:desc">Latest first</option>
+                    <option value="date:asc">Oldest first</option>
+                    <option value="amount:desc">Amount ↓</option>
+                    <option value="amount:asc">Amount ↑</option>
+                    <option value="tokens:desc">Tokens ↓</option>
+                    <option value="tokens:asc">Tokens ↑</option>
+                  </select>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead><tr className="border-b border-white/5 text-[#8b949e] font-black uppercase tracking-widest text-[9px]">
+                      <th className="py-2.5 px-2 text-left">Date</th>
+                      <th className="py-2.5 px-2 text-left">User</th>
+                      <th className="py-2.5 px-2 text-left">Product</th>
+                      <th className="py-2.5 px-2 text-right">Paid ₹</th>
+                      <th className="py-2.5 px-2 text-right">Tokens</th>
+                      <th className="py-2.5 px-2 text-right">Credited ₹</th>
+                      <th className="py-2.5 px-2 text-left">Status</th>
+                      <th className="py-2.5 px-2 text-left">Method</th>
+                      <th className="py-2.5 px-2 text-left">Transaction</th>
+                    </tr></thead>
+                    <tbody className="divide-y divide-white/5">
+                      {purchasesLoading && <tr><td colSpan={9} className="py-8 text-center"><TirangaLoader className="w-5 h-5 mx-auto" /></td></tr>}
+                      {!purchasesLoading && purchasesError && <tr><td colSpan={9} className="py-6 text-center text-red-400 text-[10px] font-bold normal-case">{purchasesError}</td></tr>}
+                      {!purchasesLoading && !purchasesError && (purchases?.rows || []).map((p: any) => (
+                        <tr key={p.id} className={`hover:bg-white/5 ${p.revenue ? '' : 'opacity-70'}`}>
+                          <td className="py-2 px-2 text-[#8b949e] whitespace-nowrap">{p.at ? new Date(p.at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}</td>
+                          <td className="py-2 px-2">
+                            <button onClick={() => void openAccount(p.userId)} className="text-left group" title="Open this account">
+                              <div className="text-white font-bold group-hover:underline">{p.name || p.email || 'NavBharat user'}</div>
+                              <div className="text-[9px] text-[#8b949e] font-mono">{p.email}{p.email ? ' · ' : ''}{(p.userId || '').slice(0, 10)}…</div>
+                            </button>
+                          </td>
+                          <td className="py-2 px-2 text-white/80">{p.product}</td>
+                          <td className={`py-2 px-2 text-right font-mono font-black ${p.revenue ? 'text-emerald-400' : 'text-white/40'}`}>{p.amountInr > 0 ? `₹${Number(p.amountInr).toLocaleString('en-IN')}` : '₹0'}{p.storePriceInr ? <div className="text-[8px] text-white/30 font-normal">store price ₹{p.storePriceInr}</div> : null}</td>
+                          <td className="py-2 px-2 text-right font-mono text-amber-400">{Number(p.tokens || 0).toLocaleString('en-IN')}</td>
+                          <td className="py-2 px-2 text-right font-mono text-sky-400">₹{Number(p.creditInr || 0).toFixed(2)}{p.platformFeeInr ? <div className="text-[8px] text-white/30 font-normal">fee ₹{p.platformFeeInr}</div> : null}</td>
+                          <td className="py-2 px-2">
+                            <span className={`text-[9px] font-black uppercase ${p.status === 'SUCCESS' ? (p.revenue ? 'text-emerald-400' : 'text-violet-300') : p.status === 'PENDING' ? 'text-amber-400' : 'text-red-400'}`}>
+                              {p.status === 'SUCCESS' && !p.revenue ? 'Free credit' : p.status}
+                            </span>
+                          </td>
+                          <td className="py-2 px-2 text-white/70">{p.method}</td>
+                          <td className="py-2 px-2 font-mono text-[9px] text-[#8b949e]">
+                            <div title={p.transactionId}>{p.transactionId}</div>
+                            {p.gatewayReference && p.gatewayReference !== p.transactionId && <div className="text-white/30" title={p.gatewayReference}>ref {p.gatewayReference}</div>}
+                          </td>
+                        </tr>
+                      ))}
+                      {!purchasesLoading && !purchasesError && (purchases?.rows || []).length === 0 && (
+                        <tr><td colSpan={9} className="py-6 text-center text-[#8b949e] text-[10px] font-bold uppercase">No purchases match</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-[#8b949e]">
+                  <span>
+                    {purchases ? `Showing ${purchases.rows.length === 0 ? 0 : purchases.offset + 1}–${purchases.offset + purchases.rows.length} of ${purchases.total.toLocaleString('en-IN')}` : ''}
+                    {purchases?.overall?.refundTracked === false && <span className="ml-2 text-amber-300/80">· Refunds are not recorded by the payment webhook — check the gateway dashboard before treating a paid row as final.</span>}
+                  </span>
+                  <span className="flex gap-2">
+                    <button disabled={!purchases || purchases.offset === 0 || purchasesLoading} onClick={() => setPurchaseQuery((q) => ({ ...q, offset: Math.max(0, q.offset - PURCHASE_PAGE) }))} className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-40 text-white">‹ Prev</button>
+                    <button disabled={!purchases || purchases.offset + purchases.rows.length >= purchases.total || purchasesLoading} onClick={() => setPurchaseQuery((q) => ({ ...q, offset: q.offset + PURCHASE_PAGE }))} className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-40 text-white">Next ›</button>
+                  </span>
+                </div>
+              </div>
+
               <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
                 <h3 className="text-sm font-black text-white uppercase tracking-tight">Top Consuming Users</h3>
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead><tr className="border-b border-white/5 text-[#8b949e] font-black uppercase tracking-widest text-[9px]">
                       <th className="py-2.5 px-3 text-left">User</th>
+                      <th className="py-2.5 px-3 text-left">Tokens Purchased</th>
                       <th className="py-2.5 px-3 text-left">Tokens Used</th>
                       <th className="py-2.5 px-3 text-left">Money Spent</th>
                       <th className="py-2.5 px-3 text-left">Balance Left</th>
@@ -2420,12 +2588,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       {(analytics?.expensiveUsers || []).map((u: any, i: number) => (
                         <tr key={i} className="hover:bg-white/5">
                           <td className="py-2.5 px-3"><div className="text-white font-bold">{u.name}</div><div className="text-[9px] text-[#8b949e]">{u.email}</div></td>
+                          <td className="py-2.5 px-3 text-sky-300 font-mono">{(u.tokens_purchased || 0).toLocaleString()}</td>
                           <td className="py-2.5 px-3 text-amber-400 font-mono font-black">{(u.tokens_used || 0).toLocaleString()}</td>
                           <td className="py-2.5 px-3 text-emerald-400 font-mono">₹{u.money_spent || 0}</td>
                           <td className="py-2.5 px-3 text-sky-400 font-mono">₹{(u.remaining_balance || 0).toFixed(2)}</td>
                         </tr>
                       ))}
-                      {(analytics?.expensiveUsers || []).length === 0 && <tr><td colSpan={4} className="py-8 text-center text-[#8b949e] text-[10px] font-bold uppercase">No data</td></tr>}
+                      {(analytics?.expensiveUsers || []).length === 0 && <tr><td colSpan={5} className="py-8 text-center text-[#8b949e] text-[10px] font-bold uppercase">No data</td></tr>}
                     </tbody>
                   </table>
                 </div>
@@ -2756,6 +2925,73 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   {account.payments?.ok && <> · Paid in: ₹{Number(account.payments.totalInr).toFixed(2)} over {account.payments.successful} recharge{account.payments.successful === 1 ? '' : 's'}</>}
                   {account.builds?.ok && <> · {account.builds.totalBuilds} builds ({account.builds.failed} failed)</>}
                 </p>
+
+                {/* PURCHASED − USED = REMAINING (admin 2026-09-17) — the chain from money in to credits
+                    out, on one screen, in the app's own unit. Chat tokens say how much was MEASURED and
+                    how many turns were not: a streamed turn carries no counts, and a sum that hid that
+                    would under-state every streaming-heavy account. */}
+                {account.usage && (
+                  <div className="mt-4 rounded-xl border border-white/10 p-3 space-y-1.5">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-white/40">Credits — purchased, used, remaining</p>
+                    {account.usage.ok === false ? (
+                      <p className="text-[11px] text-white/40">The wallet could not be read.</p>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-3 gap-2">
+                          {[
+                            ['Purchased', account.usage.creditsPurchasedTokens],
+                            ['Used', account.usage.creditsUsedTokens],
+                            ['Remaining', account.usage.remainingTokens],
+                          ].map(([label, value]) => (
+                            <div key={String(label)} className="rounded-lg bg-white/[0.03] px-3 py-2">
+                              <p className="text-[9px] uppercase tracking-widest text-white/40">{label}</p>
+                              <p className="text-sm font-black text-white tabular-nums">{Number(value || 0).toLocaleString('en-IN')}</p>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-[10px] text-white/40">
+                          Ledger: +{Number(account.usage.ledgerCreditTokens || 0).toLocaleString('en-IN')} credited · −{Number(account.usage.ledgerDebitTokens || 0).toLocaleString('en-IN')} debited
+                          {account.usage.ledgerVerdict === 'off' ? ' · does not reconcile with the balance' : account.usage.ledgerVerdict === 'balanced' ? ' · reconciles' : ''}
+                        </p>
+                        {account.usage.chat && (
+                          <p className="text-[10px] text-white/50">
+                            Chat AI: {account.usage.chat.ok === false ? 'could not be read' : (
+                              <>{account.usage.chat.requests} request{account.usage.chat.requests === 1 ? '' : 's'} · {Number(account.usage.chat.inputTokens || 0).toLocaleString('en-IN')} in / {Number(account.usage.chat.outputTokens || 0).toLocaleString('en-IN')} out tokens measured on {account.usage.chat.measuredRequests}
+                                {account.usage.chat.unmeasuredRequests > 0 ? ` · ${account.usage.chat.unmeasuredRequests} streamed turn${account.usage.chat.unmeasuredRequests === 1 ? '' : 's'} carry no token count` : ''}
+                                {account.usage.chat.failedRequests > 0 ? ` · ${account.usage.chat.failedRequests} failed` : ''}</>
+                            )}
+                          </p>
+                        )}
+                        <p className="text-[10px] text-white/30">Build-side provider tokens and real API cost are on each build's report (Build Reports tab); "Spent on builds" above is what the wallet was charged.</p>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {account.purchases && (
+                  <div className="mt-4">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-white/40 mb-2">
+                      Purchases{account.purchases.ok ? ` · ₹${Number(account.purchases.summary?.revenueInr || 0).toLocaleString('en-IN')} paid over ${account.purchases.summary?.revenueRows || 0}` : ''}
+                    </p>
+                    {account.purchases.ok === false ? (
+                      <p className="text-[11px] text-white/40">Payment records could not be read.</p>
+                    ) : (account.purchases.rows?.length ?? 0) === 0 ? (
+                      <p className="text-[11px] text-white/40">No purchases on this account.</p>
+                    ) : (
+                      <div className="space-y-1 max-h-56 overflow-y-auto">
+                        {account.purchases.rows.map((p: any) => (
+                          <div key={p.id} className="flex items-start gap-2 text-[10px] rounded-lg border border-white/5 bg-white/[0.02] px-2 py-1.5">
+                            <span className="text-white/40 shrink-0 w-24">{p.at ? new Date(p.at).toLocaleDateString('en-IN', { dateStyle: 'medium' }) : '—'}</span>
+                            <span className="text-white/80 flex-1 min-w-0 truncate" title={`${p.transactionId}${p.gatewayReference ? ` · ref ${p.gatewayReference}` : ''}`}>{p.product} · {p.method}</span>
+                            <span className={`tabular-nums shrink-0 font-bold ${p.revenue ? 'text-emerald-300' : 'text-white/40'}`}>₹{Number(p.amountInr || 0).toLocaleString('en-IN')}</span>
+                            <span className="tabular-nums shrink-0 text-amber-300/80">{Number(p.tokens || 0).toLocaleString('en-IN')} tk</span>
+                            <span className={`shrink-0 uppercase font-black ${p.status === 'SUCCESS' ? (p.revenue ? 'text-emerald-400' : 'text-violet-300') : p.status === 'PENDING' ? 'text-amber-400' : 'text-red-400'}`}>{p.status === 'SUCCESS' && !p.revenue ? 'free' : p.status.toLowerCase()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* 🔴 WHERE THE BALANCE WENT (admin 2026-09-13: "user ne 0 app banayi aur 250 me se
                     200 ₹ khatam ho gaye … kaha khatam hua yeh to dikha hi nahi raha?").

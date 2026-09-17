@@ -2252,6 +2252,14 @@ const NEVER_ROOT_CAUSE: ReadonlySet<string> = new Set([
   // build's first model call", because this warning is unresolved-but-not-a-failure and got picked as
   // the successful build's cause. Same class as POST_ANSWER_TIMING directly above; it belongs here too.
   'TIME_TO_FIRST_CALL',          // pure setup-timing measurement — the wait, not a cause
+  // 🔴 A NOTE ABOUT OUR OWN BILLING DECISION IS NOT A REASON A BUILD FAILED (build b89ba6f8,
+  // 2026-09-17). That report's `rootCause` reads, in full: *"Did not ask this user to add credits:
+  // the build failed because the engine did not respond…"* — a sentence about what we chose NOT to
+  // charge for, presented as the cause of the failure. It is unresolved-but-not-a-failure, so it
+  // won the "most severe unresolved issue" pick, exactly as TIME_TO_FIRST_CALL and POST_ANSWER_TIMING
+  // did before they were listed here. Worse than merely odd: it is the LAST word the admin's failure
+  // panel reads, so a build stopped by its own user was filed under a billing sentence.
+  'UPSELL_SUPPRESSED',           // what we decided not to charge for — never why anything failed
   'ARCHITECTURE_INVARIANT_VIOLATED', // consistency with the project's own conventions — not a failure
   // THE GATE IS A SUMMARY OF OTHER FINDINGS, SO IT CANNOT BE A CAUSE OF ANYTHING (first real build after
   // it shipped, 2026-08-12). It became the rootCause of a SUCCESSFUL build, and the headline the admin
@@ -2734,14 +2742,42 @@ export function outcomeCodeOf(
  * misattribution `isUserInitiated` was written to prevent, and it would quietly distort every
  * quality metric built on these reports.
  */
+/**
+ * Was this build STOPPED at all — whoever pressed it?
+ *
+ * The sibling of `stoppedByUser` below, and the distinction is not pedantry. That one answers *"is it
+ * FAIR to say the user stopped this?"* and deliberately excludes the case where the engine stopped a
+ * build working on a prompt NavBharatAI itself composed. This one answers *"did this build reach the
+ * point of having a capability to judge?"* — and the answer is no either way, which is what the
+ * empty-build explanation needs before it may blame an engine, a wallet or our own configuration.
+ *
+ * PURE. Reads the timeline the report itself prints, so it cannot drift from what an admin sees.
+ */
+export function buildWasStopped(issues: readonly BuildIssue[] | null | undefined): boolean {
+  if (!Array.isArray(issues)) return false;
+  return issues.some((i) => i?.code === 'USER_STOPPED_BUILD');
+}
+
 export function stoppedByUser(issues: readonly BuildIssue[] | null | undefined): boolean {
   if (!Array.isArray(issues)) return false;
-  return issues.some(
-    (i) =>
-      i?.code === 'USER_STOPPED_BUILD' &&
-      typeof i.message === 'string' &&
-      !i.message.includes('not by the user'),
-  );
+  return issues.some((i) => {
+    if (typeof i?.message !== 'string') return false;
+    if (i.code === 'USER_STOPPED_BUILD') return !i.message.includes('not by the user');
+    // 🔴 THE SAME FACT UNDER A SECOND CODE, AND THIS READER KNEW ONLY ONE (report cc8c9075).
+    //
+    // `USER_STOPPED_BUILD` is written by the /stop ROUTE — a separate request, against a different
+    // in-flight diag, and on that report it never landed. `CANCELLED_BUILD_CHARGED` is written by the
+    // BUILD'S OWN settle path from `abortCauseOf(signal)`, and `decideCancelledBuildBill` returns
+    // `applies: true` for NOTHING except `abortCause === 'user-stop'` — so its presence is proof, from
+    // the one actor that cannot be wrong about it.
+    //
+    // The cost of not reading it: that build's rootCause read *"why it failed is not known from this
+    // report"* while the same document carried the engine's own sentence, *"user stopped the build …
+    // charged half the work done"*, and the user-facing summary said *"Stopped, as you asked."* Three
+    // statements of the stop, and the field an autopsy reads first said the cause was unknown — which
+    // sends the next session hunting a failure that never happened.
+    return i.code === 'CANCELLED_BUILD_CHARGED';
+  });
 }
 
 /**

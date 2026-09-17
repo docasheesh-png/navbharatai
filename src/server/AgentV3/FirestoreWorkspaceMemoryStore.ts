@@ -52,6 +52,14 @@ const EMPTY_GRAPH: ProjectGraph = {
 /** Save a WorkspaceMemory snapshot to Firestore. Best-effort — never throws. Retries a TRANSIENT
  *  write failure a few times (exponential backoff) so a brief Firestore hiccup at the end of a build
  *  doesn't silently drop the turn's memory (which would reset the plan / lose lessons next session). */
+/**
+ * ⚠️ THE RAW WRITE — `{ merge: false }`, so it REPLACES the workspace's durable memory outright.
+ *
+ * Prefer `saveWorkspaceMemoryFor(workspaceId, mem)`: it hydrates first and refuses to write a memory
+ * whose durable read could not be confirmed. Calling this one directly with an un-hydrated snapshot
+ * deletes every earlier episode and the whole persisted project graph — which is exactly what one
+ * chat lane did, under a comment saying it did the opposite.
+ */
 export async function saveWorkspaceMemory(
   workspaceId: string,
   snapshot: MemorySnapshot,
@@ -99,6 +107,47 @@ export async function deleteWorkspaceMemory(workspaceId: string): Promise<void> 
   }
 }
 
+/**
+ * The load, with the ONE distinction `loadWorkspaceMemory` throws away: did we READ the durable
+ * document, or merely fail to?
+ *
+ * 🔴 WHY IT MATTERS (2026-09-17). `loadWorkspaceMemory` answers `null` for BOTH "there is no
+ * snapshot" and "the read failed", and `saveWorkspaceMemory` writes with `{ merge: false }`. So a
+ * caller that loads, gets null from a transient Firestore blip, and then saves, does not "start
+ * fresh" — it DELETES the workspace's entire episode history and project graph, including the
+ * `PLAN_STATE` note a "continue" reads back to resume an unfinished plan.
+ *
+ * `ok: false` means only "we do not know". It is never a licence to overwrite.
+ */
+export async function loadWorkspaceMemoryResult(
+  workspaceId: string,
+): Promise<{ ok: true; snapshot: MemorySnapshot | null } | { ok: false }> {
+  const db = getDb();
+  // No Firestore configured at all (tests, local dev) is a KNOWN state, not a failed read: there is
+  // no durable document and nothing a save could destroy.
+  if (!db) return { ok: true, snapshot: null };
+  try {
+    const snap = await db.collection(COLLECTION).doc(workspaceId).get();
+    if (!snap.exists) return { ok: true, snapshot: null };
+    const data = snap.data();
+    if (!data) return { ok: true, snapshot: null };
+    // Stale (see MAX_AGE_MS) — read successfully, deliberately not used.
+    if (typeof data.savedAt === 'number' && Date.now() - data.savedAt > MAX_AGE_MS) {
+      return { ok: true, snapshot: null };
+    }
+    return {
+      ok: true,
+      snapshot: {
+        graph: { ...EMPTY_GRAPH, ...(data.graph ?? {}) },
+        episodes: Array.isArray(data.episodes) ? data.episodes : [],
+      },
+    };
+  } catch (e) {
+    notePersistenceFailure('workspace_memory', 'read', e);
+    return { ok: false };
+  }
+}
+
 export async function loadWorkspaceMemory(
   workspaceId: string,
 ): Promise<MemorySnapshot | null> {
@@ -123,6 +172,44 @@ export async function loadWorkspaceMemory(
 }
 
 /**
+ * PERSIST A LIVE MEMORY SAFELY — hydrate first, and never overwrite history we could not read.
+ *
+ * 🔴 THE DEFECT THIS CLOSES (2026-09-17). The Planner/Advisor role-chat lane did exactly this:
+ *
+ *     const mem = getWorkspaceMemory(roleWorkspaceId);
+ *     mem.recordRequest(prompt);
+ *     void saveWorkspaceMemory(roleWorkspaceId, mem.snapshot());
+ *
+ * …under a comment claiming it persisted *"exactly like the plain-chat lane"*. The plain-chat lane
+ * has one more line, and its comment says why: *"ensure durable episodes are loaded first"*. On a
+ * COLD instance — after every deploy, and after any 2-hour cache eviction — `getWorkspaceMemory`
+ * returns an EMPTY object, `recordRequest` gives it exactly one episode, and the save writes that
+ * over the durable document with `{ merge: false }`. One Planner chat turn therefore destroyed the
+ * workspace's whole episode history AND its persisted project graph, including the `PLAN_STATE` note
+ * a "continue" reads back to resume an unfinished plan.
+ *
+ * 🔑 FIXED AS A CLASS, NOT AT THAT CALL SITE. A rule written into one caller is a rule the next
+ * caller never hears about — which is precisely how this one arrived, by copying a lane and dropping
+ * a line. Every writer now goes through here, so "save without hydrating" cannot be expressed.
+ *
+ * Returns what it did, so a caller can log honestly rather than assume it saved. Never throws.
+ */
+export async function saveWorkspaceMemoryFor(
+  workspaceId: string,
+  mem: import('./WorkspaceMemory').WorkspaceMemory,
+): Promise<'saved' | 'skipped-unconfirmed'> {
+  try {
+    if (!mem.isHydrationConfirmed()) await restoreWorkspaceMemory(workspaceId, mem);
+  } catch { /* restore is best-effort; the check below is what decides */ }
+  // 🔒 STILL UNCONFIRMED ⇒ DO NOT WRITE. Losing one turn's episode is strictly better than deleting
+  // every earlier one, and the next turn on a healthy instance persists it anyway. This also covers
+  // the case a timeout race leaves behind: `markHydrated` may be set while the read never landed.
+  if (!mem.isHydrationConfirmed()) return 'skipped-unconfirmed';
+  await saveWorkspaceMemory(workspaceId, mem.snapshot());
+  return 'saved';
+}
+
+/**
  * Restore a previously-persisted MemorySnapshot into a live WorkspaceMemory.
  * Replays the graph by calling indexFile for each file with a placeholder so
  * the fileFacts map is warm — then returns the restored snapshot for awareness.
@@ -138,7 +225,13 @@ export async function restoreWorkspaceMemory(
   // then the source of truth); the flag resets when the 2h-TTL cache evicts + recreates the object.
   if (mem.isHydrated()) return null;
   mem.markHydrated();
-  const snapshot = await loadWorkspaceMemory(workspaceId);
+  // ⚠️ `markHydrated` above is the RE-ENTRANCY guard and is deliberately set BEFORE the read, so two
+  // concurrent restores cannot replay the same episodes twice. It is NOT an answer to "do I hold the
+  // durable history?" — see `WorkspaceMemory._hydrationConfirmed`, which only a genuine read sets.
+  const result = await loadWorkspaceMemoryResult(workspaceId);
+  if (!result.ok) return null;          // could not read — a writer must NOT overwrite on this
+  mem.markHydrationConfirmed();         // read succeeded; an ABSENT document is a real answer too
+  const snapshot = result.snapshot;
   if (!snapshot) return null;
   try {
     // Replay episodes into the live memory object — PRESERVING each episode's original timestamp so

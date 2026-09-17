@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { platformFixRequestPrompt } from '../../lib/platformFixRequest';
+import { platformFixRequestPrompt, fixErrorAndContinuePrompt, errorCanBeFixedByEditingTheApp } from '../../lib/platformFixRequest';
 import { appRanDespiteFailedVerdict, fixRemainingIssuePrompt, appRunningNoticeText } from './failedButRunning';
 import { publicTierLabel } from '../../lib/engineLabels';
 import { usePagedList } from '../../hooks/usePagedList';
@@ -122,7 +122,7 @@ const V3_EXT_COLOR: Record<string, string> = {
 let lastAppliedResumeNonce = 0;
 
 export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPreviewNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; openPreviewNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number; autoSend?: boolean } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
-  const { state, running, error, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
+  const { state, running, error, errorBeforeBuildStarted, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
   // "Ship to main" / "Revert" (own-repo storage, slice 2): in-flight + last honest note for the bar.
@@ -4504,12 +4504,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       </button>
                     </div>
                   ) : (
-                    <button
-                      onClick={() => fixWithAI(`Fix this error and continue building the app:\n\n${error || state.error}`)}
-                      className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded px-2.5 py-1"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" /> Fix with AI
-                    </button>
+                    /* 🔴 NOT EVERY ERROR IS THE APP'S FAULT (autopsy fdd59ef8, 2026-09-17). This
+                       button used to appear under EVERY error, including a 401 "Please sign in to
+                       build with NavBharatAI Pro" — and it pre-fills the composer with that notice,
+                       so the person sends our own message to the builder as an app request. That is
+                       exactly what happened: 76 seconds, a sandbox, and a model replying "I need to
+                       sign in first". `errorCanBeFixedByEditingTheApp` answers it structurally — a
+                       refusal raised before the stream opened means no build ran and no code exists
+                       to fix — rather than by a list of message phrases that would need a new entry
+                       for every future refusal. */
+                    errorCanBeFixedByEditingTheApp({ beforeBuildStarted: errorBeforeBuildStarted, message: error || state.error }) ? (
+                      <button
+                        onClick={() => fixWithAI(fixErrorAndContinuePrompt(error || state.error || ''))}
+                        className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded px-2.5 py-1"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" /> Fix with AI
+                      </button>
+                    ) : null
                   )
                 )}
               </div>

@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from 'express';
 import { copyName, copyStatus } from '../AgentV3/duplicateApp';
+import { isPlatformFixRequest } from '../../lib/platformFixRequest';
 import { buildRateLimiter, rateLimiter, workspaceRateLimiter, workspacePollRateLimiter, deployOpsRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
 import express from 'express';
 import { HIT_PATH, parseHit, parseBytesReport, requestOptsOut, siteAnalyticsEnabled } from '../lib/siteAnalytics';
@@ -13207,10 +13208,25 @@ async function noteBuildOutcome(
       // a user stop means; nothing new had to learn it.
       dispatcher.setStopBuild((reason) => {
         try {
+          // 🔴 "user said:" MUST NOT QUOTE OUR OWN VOICE (autopsy fdd59ef8, 2026-09-17). That build's
+          // report reads *user said: Please sign in to build with NavBharatAI Pro* — a sentence no
+          // user ever typed. It is OUR 401 notice, wrapped by the "Fix with AI" button and handed to
+          // the builder, which read it as an instruction and stopped. Attributing it to the user made
+          // the one record of what happened blame the person for our own loop.
+          //
+          // The test is on the PROMPT, not the reason: when the build's own prompt was composed by the
+          // platform, NOTHING in that run is the user's words, whatever the model echoed back. The
+          // button can no longer compose such a prompt from a pre-start refusal, so this is the second
+          // net rather than the first.
+          const platformComposed = isPlatformFixRequest(prompt);
           buildDiag.record({
             phase: 'build', severity: 'info', code: 'USER_STOPPED_BUILD', autoResolved: true,
-            message: 'The user asked for this build to stop, and it was stopped.',
-            detail: reason ? `user said: ${reason}` : undefined,
+            message: platformComposed
+              ? 'The build was stopped by the engine while working on a request NavBharatAI itself composed — not by the user.'
+              : 'The user asked for this build to stop, and it was stopped.',
+            detail: reason
+              ? (platformComposed ? `engine gave the reason: ${reason}` : `user said: ${reason}`)
+              : undefined,
           });
         } catch { /* the record must never be what prevents the stop */ }
         abortBuild({ abort: (r?: unknown) => abort.abort(r) }, 'user-stop');
@@ -16089,7 +16105,20 @@ async function noteBuildOutcome(
             // `integrityFiles` is the durable project ∪ this build's writes, and it is ALREADY loaded
             // right here — POST_ANSWER_TIMING on that same report measured the load at 0s for 149
             // files, so whole-app coverage costs nothing.
-            const quality = lintBuiltApp(integrityFiles);
+            // 🔴 THERE MUST BE A USER APP TO GRADE (autopsy fdd59ef8, 2026-09-17). That build wrote
+            // ZERO files and its durable store was empty ("durable read 0 file(s)") — yet the report
+            // carried *"Design consistency 70/100 (C) across 3 file(s)"* as an unresolved problem.
+            // Those 3 files are OUR OWN SCAFFOLD: `integrityFiles` is `storeFiles ∪ writtenFiles`
+            // plus the entry files the loop above reads straight out of the sandbox, and with the
+            // first two empty that is all it contains. So we graded NavBharatAI's starter template
+            // and filed the C against the user's app.
+            //
+            // The existing `null` guard cannot catch this — the scaffold IS lintable; it is simply
+            // not theirs. This is the same honesty rule from the other direction: that comment
+            // refuses to claim we checked when we did not, and this refuses to report a verdict on
+            // something the user never wrote.
+            const hasUserApp = Object.keys(storeFiles).length > 0 || writtenFiles.size > 0;
+            const quality = hasUserApp ? lintBuiltApp(integrityFiles) : null;
             // `null` means nothing lintable was found. Recording a perfect score there would claim we
             // checked when we did not — the same lie in the other direction.
             if (quality) {
@@ -19192,8 +19221,22 @@ async function noteBuildOutcome(
           // would leave two answers to one question, which is the exact shape of the bug all three of
           // (a)-(c) came from. If the render evidence ever needs to suppress an upsell on a build that
           // genuinely DID fail, that is a new decision with its own evidence — not this one restated.
-          const refused = looksLikeRefusal(result.summary);
-          const degraded = !refused && providerFailuresLookDegraded(buildDiag.providerFailureBreakdown());
+          // (f) THE BUILD WAS STOPPED, SO NOTHING WAS EVER ATTEMPTED (autopsy fdd59ef8, 2026-09-17).
+          // That build's prompt was OUR OWN 401 sign-in notice, wrapped by the "Fix with AI" button;
+          // the model read it, answered "I need to sign in first" and called `stop_build`. This block
+          // then told the person *"Your app needs our strongest engine… Add credits and I will
+          // complete it on the best engine."* **Their problem was signing in.** A fuller wallet buys
+          // nothing at all here — no engine was ever asked to build anything.
+          //
+          // TESTED FIRST, ahead of even a refusal, and that ordering is the claim: a stopped build did
+          // not reach the point of having a capability to judge, so every reading below it — refused,
+          // degraded, misconfigured, starved — is reasoning about evidence that was never gathered.
+          // The signal is `toolWasUsed`, which reads the timeline the report itself prints, so it
+          // cannot drift from what an admin sees (the alternative, a new flag threaded 6,000 lines
+          // down the handler, would be a second answer to a question the timeline already answers).
+          const stopped = buildDiag.toolWasUsed('stop_build');
+          const refused = !stopped && looksLikeRefusal(result.summary);
+          const degraded = !stopped && !refused && providerFailuresLookDegraded(buildDiag.providerFailureBreakdown());
           // (d) OUR OWN CONFIGURATION (build report 58fe8254, 2026-09-15). A rung that rejects every
           // call with the same PERMANENT error is neither an engine limit nor an outage to ride out —
           // it is our request or our ladder being wrong, and it will still be wrong tomorrow. That
@@ -19202,7 +19245,7 @@ async function noteBuildOutcome(
           //
           // Tested AFTER `degraded` because degraded is the transient reading and a build can carry
           // both — when providers really were flaky, saying so is the more useful of the two truths.
-          const misconfigured = !refused && !degraded
+          const misconfigured = !stopped && !refused && !degraded
             && providerFailuresLookMisconfigured(buildDiag.providerFailureBreakdown());
           // (e) OUR OWN OUTPUT CEILING (build report ee20478d, 2026-09-15). The rungs ANSWERED — three
           // times, inside their clock, HTTP 200 every time — and produced nothing, because the ceiling
@@ -19211,9 +19254,9 @@ async function noteBuildOutcome(
           // wallet would have changed nothing: the ceiling is a constant of ours, identical on every
           // tier. Grouped with (d) because it is the same KIND of fact — our configuration, not their
           // service — and tested last only because the readings above are strictly more specific.
-          const starved = !refused && !degraded && !misconfigured
+          const starved = !stopped && !refused && !degraded && !misconfigured
             && buildStarvedItsOutputBudget(buildDiag.providerFailureBreakdown());
-          if (!refused) {
+          if (!refused && !stopped) {
             const emptyCause = misconfigured || starved
               ? 'our-configuration'
               : assessBuildInput(prompt).buildable ? 'engine' : 'no-instruction';
@@ -19224,10 +19267,12 @@ async function noteBuildOutcome(
               ts: Date.now(),
             });
           }
-          if (refused || degraded || misconfigured || starved) {
+          if (refused || degraded || misconfigured || starved || stopped) {
             buildDiag.record({
               phase: 'build', severity: 'warning', code: 'UPSELL_SUPPRESSED', autoResolved: false,
-              message: refused
+              message: stopped
+                ? 'Did not ask this user to add credits: the build was STOPPED, so no engine was ever asked to build anything. There is no capability limit to sell against — a fuller wallet would have changed nothing.'
+                : refused
                 ? 'Did not ask this user to add credits: the engine REFUSED this request on policy grounds. A refusal is an answer, not a capability limit — selling a stronger engine after one offers to do the very thing we just declined to do.'
                 : starved
                   // Deliberately NOT the "did not respond" wording below: it responded, inside its clock,

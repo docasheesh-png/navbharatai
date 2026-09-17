@@ -60189,3 +60189,109 @@ evidence instead of filling a gap.
    harvesting one. Deliberately not guessed at here.
 2. `CLAIM_UNSUPPORTED` ("not one file was changed" two seconds before `Incremental: 2 changed, 2 new`)
    is the same WRITE-half gap.
+## 2026-09-17 — Autopsy fdd59ef8: the platform fed the builder its own voice, for the THIRD time
+
+Build `fdd59ef8`, Weak tier, `glm-4.7-flashx`, **76 seconds**, 0 files, ₹0 billed. Its prompt, verbatim:
+
+> Fix this error and continue building the app:
+>
+> Please sign in to build with NavBharatAI Pro — builds run on a real account so usage can be tracked.
+
+**Both halves are ours.** The wrapper is the "Fix with AI" button's template
+(`AgentV3Panel.tsx`); the body is our own **401 sign-in notice** (`routes/agentv3.ts`), returned
+*before the stream opens*. The builder scored it `debugging` at complexity 45, took a sandbox, and the
+model — correctly — answered *"I need to sign in first"* and called `stop_build`.
+
+### The 5-bucket ledger
+
+- ✅ **Self-healed: 0.**
+- 🔀 **Worked around: 1** — the fast lane's manifest call died at 60 s and handed off to the full
+  builder (`SIMPLE_BUILD_FALLBACK`).
+- ⏭️ **Skipped: 1** — the typecheck, the render check and the journey all skipped together, correctly,
+  because no preview ever existed.
+- ❌ **Still broken: 4** — the loop itself; the false attribution; the upsell; the mislabelled clock.
+- 🥵 **Struggle: 76 s and a whole sandbox spent on our own sentence**, 99% of it idle.
+
+### Root cause, and why it is the third occurrence
+
+`platformFixRequest.ts` was created in #2987 for exactly this class and says in its own words that
+*"a new platform template inherits the stand-down by adding one prefix."* The design was right. **This
+third template was never migrated to it**, so `isPlatformFixRequest` answered FALSE and every guard
+built on it stood down.
+
+### The fix, and why it is structural rather than a keyword list
+
+The deeper question is not "which sentences do we compose?" but **"can this error possibly be about the
+user's code?"** These refusals are returned with `res.status(...).json(...)` *before* `flushHeaders` —
+no stream, no sandbox, no build, not one file touched. So the answer is definitively **no**, and it
+needs no vocabulary.
+
+`errorCanBeFixedByEditingTheApp({ beforeBuildStarted })` is that test; the hook carries the fact out of
+the HTTP-refusal branch; the button simply does not render. A phrase list would have needed a new entry
+for every future refusal — which is precisely how this arrived, since the panel **already had** an
+`errorCode` branch for `phone-verification-required` and `signin` had never been added to it.
+
+### Honesty (rule 5)
+
+The report read *"user said: Please sign in to build with NavBharatAI Pro"* — a sentence no user ever
+typed. The one record of what happened blamed the person for our own loop. The test is on the PROMPT:
+when the build's own prompt was platform-composed, nothing in that run is the user's words, whatever
+the model echoed back.
+
+### ⚠️ A near-miss worth recording: the frontend typecheck cannot see the server
+
+`isPlatformFixRequest` was used in `routes/agentv3.ts` with **no import**, and `npm run typecheck`
+passed — the frontend tsconfig excludes `src/server/**`. Only `typecheck:server` caught it. This is the
+documented gap between the two-command habit and the real CI gate, hit live. A test now pins that the
+route imports what it uses.
+
+### ✅ ALL FOUR OF THE BELOW WERE CLOSED THE SAME DAY — the admin asked "sabhi problem fix huye?"
+
+The honest answer was **no, two of six**, so the remaining four were done rather than left recorded.
+Kept below as written, because the reasoning for deferring them is part of the record:
+
+1. **The upsell on a STOPPED build** — fixed. `stopped = buildDiag.toolWasUsed('stop_build')` is the
+   SIXTH reason not to ask for money, and it is tested **first**: a stopped build never reached the
+   point of having a capability to judge, so refused / degraded / misconfigured / starved are all
+   reasoning about evidence that was never gathered. The signal reads the timeline the report itself
+   prints, so it cannot drift from what an admin sees.
+2. **"build budget reached" on a 60 s silence** — fixed. `clockMessage` decided by `bound.source`,
+   which describes the TOTAL clock, so the IDLE bound firing was reported as our budget. The test is
+   arithmetic: `idleMs = min(streamIdleMs(), timeoutMs)`, so `idleMs < timeoutMs` means the lane had
+   more clock than the silence window and the provider simply said nothing.
+   🔑 **And the mislabel was disabling its own repair:** `BUDGET_REACHED_MESSAGE` deliberately never
+   benches a provider, so a rung silent for a full minute was never benched and the ladder stayed on
+   GLM.
+3. **~104 GLM rungs before KIMI** — NOT a separate defect, and this is the honest reading rather than
+   a fix. The pool is enumerated by design (429 rotation) and the FAMILY bench is what bounds it —
+   which item 2 had switched off. With silence recognised again, two timeouts retire the family and
+   the length stops mattering. Nothing changed here on purpose.
+4. **`DESIGN_CONSISTENCY` on a 0-file build** — fixed. `integrityFiles` is `storeFiles ∪
+   writtenFiles` plus the entry files read from the sandbox, so with the first two empty it held only
+   OUR scaffold: we graded NavBharatAI's starter template and filed the C against the user's app. The
+   existing `null` guard could not catch it (the scaffold IS lintable — it is simply not theirs).
+   A CONTINUE build still grades the whole app, so the 2026-08-15 whole-app fix is untouched.
+5. **`rootCause` contradicting `counts`** — fixed. It announced "NO unresolved problem was recorded"
+   while the same document counted 2. Both were in `NEVER_ROOT_CAUSE`, so they were never
+   *candidates* — a different fact from not existing, and conflating them sends a reader past the two
+   findings sitting right there.
+
+Tests: `tests/autopsyFdd59ef8Remainder.test.ts` (10 cases), each proven by reversion.
+
+### 🔴 Originally recorded as still open (rule 6 — kept for the record)
+
+1. **The upsell fired on a STOPPED build.** `freeTierBuildActive && !result.ok` reached *"Add credits
+   and I will complete it on the best engine"* for a user whose problem was signing in. The guard
+   already carries three reasons not to ask for money (a refusal, our own outage, nothing to build
+   from); **"the build was stopped, so nothing was attempted" is a fourth** and belongs in the same
+   place. Not added here because that guard is dense and admin-reviewed, and this change is already
+   client+server wide.
+2. **A 60 s call kill was labelled "build budget reached" while 1,665 s of budget remained.** The
+   report says so in two places at once (`LLM_CALL_BUDGET_ENDED` vs `CORRECTION_BUDGET
+   leftAtGate=1665s`). It reads as our budget ending, so the provider is deliberately not benched —
+   and the ladder therefore never moved past GLM.
+3. **`providerChain` lists ~104 GLM rungs** (the key pool enumerated) before KIMI is reachable.
+4. **`DESIGN_CONSISTENCY` graded 3 files on a build that wrote 0** — it scored the scaffold and
+   reported a C as a problem of the user's app.
+5. **`rootCause` contradicts `counts` in the same document**: it says "NO unresolved problem was
+   recorded" while `counts.unresolved` is 2.

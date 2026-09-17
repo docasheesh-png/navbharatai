@@ -60849,6 +60849,97 @@ exactly as before, because we owe it an explanation. Test-locked explicitly, and
    inside this PR is its own hazard), recorded so it is fixed deliberately.
 3. **3 high/critical dependency vulnerabilities** survive `npm audit fix` and need major-version upgrades.
 4. **Design consistency grade D** on a shipped app — 42 colours, 15 off-grid spacing values.
+
+---
+
+## 2026-09-17 — Phases 0, 1 and 4 of the failure-rate plan: the panel names its own failures
+
+**Admin showed the Failure Category panel: 385 projects, 151 failed, 40.8%**, and asked for every cause
+root-caused and the success rate taken to 90%.
+
+### 🔴 Phase 0 — ~85% of failures had NO NAMED CAUSE, so every fix planned from that panel was a guess
+
+"Other (not yet in the known pattern list)" was the top reason for **13 of the 15 app types**, and 92 of
+the 107 failures in the largest row.
+
+**Root cause.** `buildFailureCategory.ts` classified failures by reading the PROSE of `rootCause` for
+compiler words (`compilation`, `cannot find module`). v5 does not fail with compiler words — it fails
+with sentences we wrote ourselves. **Six real outcome messages were run through the classifier and ALL
+SIX returned `other`**, including, verbatim from a real report: *"Build outcome: STOPPED — the app was
+built; the post-build advisory pass was cut short by its 2-minute cap."*
+
+🔒 **`BuildRetrospectiveEngine.ts` had root-caused this exact class on 2026-09-12 and written the remedy
+down**: *"The diagnostic CODE is a machine fact recorded by the build itself. Reading it is not pattern
+matching, it is just looking."* That module read the code. This panel — built four days later — did not,
+and its own header records the decision not to merge the two. **This is that merge.**
+
+The code was never missing: `listAllDiagnostics` reads the WHOLE report to project `ok`/`summary`, so
+`issues` (and the `OUTCOME_*` code inside it) was already in memory and was being dropped. Projecting it
+costs **no extra I/O** — the same argument `modelPerformance` makes in its own comment.
+
+⚠️ **SEVERITY HAD TO RIDE WITH THE CODE, or the fix would have traded one wrong answer for another.**
+`OUTCOME_STOPPED` at `warning` is the advisory cap on an app that WAS built; at `error` it is a build
+that never converged. Classifying on the code alone would have filed every perfectly good build of the
+first kind as "the run ended before it finished". An UNRECOGNISED code falls through to the text exactly
+as before, so a code added later is never silently mis-filed.
+
+### Phase 1 — three populations inside one number
+
+A single "40.8% failed" cannot be worked on, because part of it is not broken builds. The split is now
+computed and shown:
+
+| Bucket | Meaning |
+|---|---|
+| **Genuinely failed** | judged failed, app never seen running — the real target |
+| 🔴 **Worked, called failed** | judged failed while `GREEN_GUARD_SAVE`/`PREVIEW_PUBLISHED` says it rendered — a WRONG VERDICT, and each one is a person told their working app failed |
+| **Cannot tell** | records written before render evidence was projected |
+| **Succeeded** | judged ok |
+
+This matters because this repo has TWICE shipped a verdict calling a working app broken — autopsies
+697b38ee and 4efab9d7 — and every record written before those fixes keeps its old verdict, which is
+exactly what this panel reads.
+
+⚠️ **What is deliberately NOT split, said plainly: builds the USER stopped.** `buildAbortCause.ts` knows
+the difference (`'user-stop'`, and it refuses to default to it), but that cause is **not persisted into
+the report**, so it cannot be separated from stored data. Inventing a rule — "short builds are
+abandoned", "STOPPED means cancelled" — would put a guess inside the one number meant to end guessing.
+**OPEN root cause: persist `abortCause` into the report.**
+
+### Phase 4 — one number, defined once, so "90%" is a fact rather than a feeling
+
+**`appDeliveredPct` = (succeeded + builtButJudgedFailed) ÷ (those + engineFailed).**
+
+A build we wrongly called failed still gave the user a working app, so it belongs on top of the
+fraction. That is not letting ourselves off — it separates "the engine cannot build apps" from "the
+engine builds apps and then lies about them", which are different problems with different fixes.
+`reportedOkPct` is what we TOLD people, and **the gap between the two is the honesty debt**.
+
+🔒 `evidenceUnknown` is excluded from BOTH halves, so the target cannot be hit by counting unknowns, and
+the figure is `null` rather than a flattering 100% when nothing is judgeable.
+
+### Phase 2 and 3 — why they are not in this PR, honestly
+
+**Phase 2 (fix the named causes, biggest first) cannot start until this ships and the panel runs against
+production**, because its whole premise is that nobody currently knows what the causes are. Ordering
+them from today's data would be exactly the guessing Phase 0 exists to remove. Three known live causes
+already have their own PRs (#2994, the reasoning unclamp, the slow-rung bench).
+
+**Phase 3 (prevent instead of heal)** is the 50/50 law applied to whatever Phase 2 names, so it inherits
+the same dependency.
+
+### Gate
+
+typecheck · typecheck:server · noUnusedImports · **vitest 1718 files, 24264 passed, 0 failed** · build ·
+test:bundle · boot:check. `tests/failureNaming.test.ts`, 17 cases, including a drift guard asserting
+every code in `OUTCOME_TO_CATEGORY` also has a panel label — so a code added to one map and not the
+other fails CI instead of quietly reappearing as "Other".
+
+### Still open
+
+1. **`abortCause` is not persisted**, so user-stopped builds cannot be separated (above).
+2. **The denominator is LATEST-BUILD-PER-WORKSPACE**, not every build. A user who built successfully
+   five times and abandoned a sixth counts as failed, permanently. A true rate needs a per-build series.
+3. `RUNTIME_UNCHECKED` — console capture failing on builds that render, cause unknown.
 ## 2026-09-17 — The admin dashboard tells you where the work is, and the AI Engines page stops lying
 
 **Admin, in their own words:** *"us sub header me naam ke sath number bhi chahiye … jisse admin ko ek
@@ -61042,6 +61133,76 @@ the PLATFORM FEATURE that covers it.
 Tests: `tests/questionReadsEveryClause.test.ts` (16), both halves of the fix proven by reversion.
 Existing `IntentClassifier.test.ts` (73) and every classifier-adjacent suite (497 total) pass unchanged.
 
+## 2026-09-17 — Autopsy 2b0a3ed5: the working calculator the user never saw
+
+Admin sent build report `2b0a3ed5`. Prompt: *"Build a calculator app with the standard operations
+(+ − × ÷ %), a clear and a delete key, decimal support, keyboard input, and a running history of
+recent calculations. Big, tappable buttons; light/dark mode."* — a plain build order, correctly
+classified (`simple_app`, complexity 15). Nothing wrong with the routing this time.
+
+### The timeline, and the one fact that matters
+
+| t | what happened |
+|---|---|
+| 1.0 s | workspace ready (warm sandbox) |
+| **6.7 s** | **`GOLDEN_SCAFFOLD` — a tested, CI-proven, WORKING Calculator, 12 files, durably saved** |
+| 6.7 → 62.7 s | **nothing on screen.** One `glm-4.7-flashx` call: 26,569 tokens in, **27 tokens out**, `latencyMs` **55,723** |
+| 62.7 s | the model replies *"I'll quickly check the existing calculator template and finish it up."* |
+| ~64 s | **the user presses Stop** |
+| 65.6 s | `CANCELLED_BUILD_CHARGED` — 50%, **₹0.65**, 64 wallet tokens |
+
+`RELEASE_GATE: RED — no live preview was ever available, so nothing here was proven to RUN.`
+Sandbox: 1.1 min up, **98% idle**.
+
+🔑 **The app they asked for existed, complete and working, at second 7. We showed them a spinner for
+another 56 seconds, and then charged them for giving up.** Against the admin's own bar — *"chutkiyon
+🫰 ka kaam"* — a calculator is the easiest app there is, and this is the worst possible way to lose it.
+
+### Why the existing defences could not help, checked rather than assumed
+
+- **The slow-rung bench (`slowRungBench.ts`) could never fire.** `crossesSlowThresholds` needs
+  `calls >= 3` **and** `observedMs >= 90_000`. This build had **one** call at 55.7 s. ⚠️ Those
+  thresholds are RIGHT — retiring a provider on one unlucky call would be worse, and the file argues
+  it well — so this is **not** a reason to weaken them. It is a reason to stop making the user wait
+  for the model at all when the app already works.
+- **`TIME_TO_FIRST_CALL` saw it perfectly** and said so: *"The first call itself then took 56 s; that
+  is model time, not setup."* The instrument was right and nothing acted on it.
+
+### The fix — show it the moment it exists
+
+The golden scaffold is the ONE case where the app is known to work **before any model call** ("CI-proven
+to parse under esbuild AND compile under the in-browser Babel preview"). Its files were already durable
+one line earlier; what was missing was the `file_changed` events that tell the client's preview to
+render them. `streamingFirstPaint.ts` already owns that mechanism and that wire contract — the scaffold
+simply never used it.
+
+`firstPaintEvents()` extracted so the event shape has ONE definition (the streaming handler now uses it
+too, test-locked so they cannot drift), and the pre-seed emits it **after** its awaited save, behind the
+**same** `AGENTV3_STREAMING_PREVIEW` flag the admin already has on.
+
+⚠️ **Events only — no dev server is started here, deliberately.** The build's own agent runs
+`npm run dev` later; racing it would risk two servers contending for port 5173 and a published URL
+pointing at whichever lost. This costs no model call and no sandbox time, and `off` is byte-identical
+to today.
+
+### Ledger (5 buckets)
+
+- ✅ **Self-healed: 0.**
+- 🔀 **Worked around: 0** — the build never got far enough to route around anything.
+- ⏭️ **Skipped (4):** page-render check, user journey, typecheck, test suite — all for the same reason
+  (`no live preview was ever available`), which is the defect above, not four separate ones.
+- ❌ **Still broken (2):** `RELEASE_GATE` RED; `DESIGN_CONSISTENCY` **68/100 (C)** — 20 distinct
+  colours, 11 off-grid spacings, **in our own golden scaffold**, which is worth fixing at the template
+  rather than healing per build (recorded, not done here).
+- 🥵 **Struggle:** the whole 56-second silence; 0.48 output tokens/second.
+
+### 🔴 OPEN, and honestly stated
+
+1. **The user was charged ₹0.65 for our slowness.** The 50% cancellation charge is the designed
+   behaviour (2026-09-14) and the files WERE saved — but what they stopped was a 56-second blank
+   screen, not their own change of mind. Whether a cancellation inside the first model call, with no
+   preview ever shown, should cost anything is an ADMIN decision, not mine to change unasked.
+2. **Design consistency C on the shipped golden scaffold** — our own template scores 68/100.
 ## 2026-09-17 — "Download app" sent every visitor to a page they could not open
 
 Admin: *"navbharatai.com par jab koi user sidebar menu me 'download app' button par click karta hai, to
@@ -61288,3 +61449,42 @@ template edits. The linter is **not** blinded: `puzzle` still carries its own re
 Tests: `tests/designKitTruth.test.ts` (10), both halves proven by reversion. The existing
 `designLinter`, `buildQualityLint`, `goldenScaffolds` and `autopsyFdd59ef8Remainder` suites (360) pass
 unchanged.
+---
+
+## 2026-09-17 — PR #2996's REMAINING half reverted: nothing decides where a reload lands
+
+**Admin:** *"yar aap is pure PR ko hi hata do! mujhe nahi chahiye. jab bhi page reload hota hai,
+navbharatai chat open ho jati hai. mai setting me kam kar raha hu, reload kiya, navbharatai chat open
+ho gayi. hatao isko. mujhe yeh pura kaam reverse kar ke do!!"*
+
+**#3007 removed the home-screen half earlier today and KEPT the reopen**, on the reading that the
+reopen was what had been asked for. It was not, and the admin found out the way users do — working in
+Settings, pressing reload, landing in a chat.
+
+🔴 **THAT IS THE FEATURE BEHAVING EXACTLY AS DESIGNED, WHICH IS THE WHOLE POINT.** The original request
+was about ONE screen: open a CHAT, and find it where you left it. #2996 turned it into an app-wide
+LANDING rule evaluated on every reload from ANY screen. **A reload is not a request to go somewhere
+else** — somebody reloading in Settings is trying to reload Settings. No exclusion list fixes a rule
+aimed at the wrong event, which is why the whole thing goes rather than being narrowed again.
+
+**Removed:** `lib/lastPlace.ts`, `lib/freeChatResume.ts`, their three test files, and every trace in
+`App.tsx` — the boot `readLastPlace`/`decideLanding`, the initial-view landing choice, the free-chat
+transcript resume AND the session-id resume that travelled with it, the `recordLastPlace` write effect
+that fired on every view change, and the login-gated second landing pass. Plus the `AppKnowledgeBase`
+bullet, because a description left behind has every AI in the product confidently describing a feature
+that is gone.
+
+⚠️ **THE SESSION ID HAD TO GO WITH THE TRANSCRIPT, not after it.** `currentSessionId` was resumed
+alongside the messages precisely because restoring one without the other duplicated the conversation on
+every refresh. Removing the transcript and leaving the id would have re-created that bug from the other
+direction, so `currentSessionId` is back to a fresh `Date.now()` in the same change. Test-locked.
+
+🔒 **THE GUARD THAT WAS MISSING: `tests/noAutoReopen.test.ts` (6 cases).** A revert leaves NO failing
+test behind, so nothing notices a feature returning — which is literally what happened between #3007
+and this: half the change survived a removal nobody could see. It pins that the modules are gone, that
+no landing symbol appears in `App.tsx`, that the Free chat opens NEW (both halves), that Home has no
+recents section, that the knowledge base promises neither behaviour — and that the unrelated
+*"YOUR PUBLISHED APPS ARE ON YOUR PROFILE"* bullet, which shares that region of the file, SURVIVED.
+
+Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1730 files, 24432 passed, 0 failed** ·
+build · test:bundle · boot:check.

@@ -8454,9 +8454,29 @@ export class ToolDispatcher {
         }
         const sinceSec = typeof input.since_seconds === 'number' ? input.since_seconds : 120;
         const since = Date.now() - Math.max(1, sinceSec) * 1000;
-        const { errors } = await this.actuator.getConsoleErrors(this.workspaceId, since);
-        if (errors.length === 0) return 'No runtime browser errors captured in the window — the page ran clean.';
-        return `Runtime browser errors (${errors.length}):\n` + errors.slice(0, 30).map((e) => `- [${e.kind}] ${e.text}`).join('\n');
+        const { errors, captured } = await this.actuator.getConsoleErrors(this.workspaceId, since);
+        if (errors.length > 0) {
+          return `Runtime browser errors (${errors.length}):\n` + errors.slice(0, 30).map((e) => `- [${e.kind}] ${e.text}`).join('\n');
+        }
+        // 🔴 AN UNREAD CONSOLE IS NOT A CLEAN ONE (autopsy 9cca1fd5, 2026-09-17).
+        //
+        // This line used to say "the page ran clean" for an EMPTY result, and an empty result is what
+        // the actuator returns in two completely different situations: the console was read and held
+        // nothing, and the console could not be read at all. The port has carried `captured` — and a
+        // doc comment saying "`errors` means 'could NOT check', NOT 'clean'" — for exactly this, and
+        // this tool destructured only `errors` and threw the distinction away.
+        //
+        // It matters because the model acts on what this string says: told "the page ran clean", it
+        // writes that into its summary. `claimAudit.ts` exists because of precisely that sentence —
+        // a build claimed "no console errors" in the same report that recorded RUNTIME_UNCHECKED.
+        //
+        // `undefined` keeps the old wording, as the port's own back-compat rule requires: an actuator
+        // that has not been updated is not making a claim either way.
+        return captured === false
+          ? 'The browser console could NOT be read for this window — no browser session left a console log. '
+            + 'NOTHING about runtime errors was checked, so this is not evidence either way. Open the app '
+            + '(screenshot / browser_action) and ask again if you need a real answer.'
+          : 'No runtime browser errors in the window — the console was read and it was clean.';
       }
 
       // Level 7: structural codemods (AST-safe cross-file refactoring via ts-morph).

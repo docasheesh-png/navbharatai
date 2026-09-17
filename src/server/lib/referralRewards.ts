@@ -57,6 +57,7 @@
 
 import { TOKENS_PER_RUPEE } from '../../lib/walletPricing';
 import { parseEnvFlag } from './envFlag';
+import { capSelfGift, capReferrerPerFriend } from './giftPolicy';
 
 /** The four things a new user can do, each worth one payment, ever. */
 export type RewardStep = 'referral-code' | 'email' | 'mobile' | 'github';
@@ -132,6 +133,7 @@ export function referrerLifetimeCapTokens(env: NodeJS.ProcessEnv = process.env):
 export type SelfRewardReason =
   | 'granted'
   | 'already-paid'        // this step has been paid before; a step pays once, ever
+  | 'cap-reached'         // the account is at its ₹400 lifetime gift ceiling (giftPolicy.ts)
   | 'not-android'         // web and iOS earn nothing here (rule 1)
   | 'device-unverified'   // no genuine-device proof ⇒ no money, never a silent skip
   | 'disabled';           // the master flag is off
@@ -157,6 +159,12 @@ export function decideSelfReward(input: {
   alreadyPaidSteps: unknown;
   deviceVerified: boolean;
   platform: 'android' | 'ios' | 'web' | string;
+  /**
+   * What this account has ALREADY been gifted, lifetime (`freeGiftedTokens`). Optional so existing
+   * callers keep working — but a caller that omits it gets NO ceiling beyond the step list, which is
+   * why `referral.ts` passes it and a test asserts that it does.
+   */
+  alreadyGiftedTokens?: unknown;
   env?: NodeJS.ProcessEnv;
 }): SelfReward {
   const env = input.env ?? process.env;
@@ -164,7 +172,20 @@ export function decideSelfReward(input: {
   if (input.platform !== 'android') return { ...NOTHING, reason: 'not-android' };
   if (!input.deviceVerified) return { ...NOTHING, reason: 'device-unverified' };
   if (readSteps(input.alreadyPaidSteps).includes(input.step)) return { ...NOTHING, reason: 'already-paid' };
-  return { tokens: stepRewardTokens(env), reason: 'granted', recordStep: input.step };
+  /**
+   * 🔒 "EK PAISA JYADA NAHI" IS ENFORCED AGAINST THE TOTAL, NOT ASSUMED FROM THE PARTS.
+   *
+   * Four steps × ₹100 = ₹400 holds only while `REFERRAL_STEP_TOKENS` is 100. Set it to 200 in a
+   * console and the same four steps pay ₹800 with nothing objecting. `capSelfGift` clamps against
+   * what the account has actually received, so the ceiling survives any tunable.
+   */
+  const want = stepRewardTokens(env);
+  const tokens = input.alreadyGiftedTokens === undefined ? want : capSelfGift(want, input.alreadyGiftedTokens);
+  // Reported as its own reason rather than folded into 'already-paid': the two are different facts
+  // about a real person, and an admin reading "already paid" for someone who was never paid this
+  // step would be reading a wrong answer to the question they asked.
+  if (tokens <= 0) return { ...NOTHING, reason: 'cap-reached' };
+  return { tokens, reason: 'granted', recordStep: input.step };
 }
 
 /** Everything B has earned so far, for the progress checklist. PURE — a view, never a payment. */
@@ -240,7 +261,18 @@ export function decideReferrerReward(input: {
   // A PARTIAL payment still records EVERY step it was computed from. Otherwise the unpaid remainder
   // stays pending for ever and every later call re-offers it — a referrer parked at the cap would be
   // re-evaluated on every one of their friends' events, for nothing.
-  const tokens = Math.min(owed, room);
+  // Two ceilings, answering different questions: `room` is this referrer's ₹1,500 LIFETIME cap across
+  // everybody; `capReferrerPerFriend` is the ₹75 this ONE friend can ever be worth. Without the second,
+  // raising REFERRER_STEP_TOKENS would raise the cost of acquiring one user past the admin's ₹475.
+  //
+  // ⚠️ The steps already paid for this friend are valued at TODAY's rate — the only figure this pure
+  // function is given. So a rate that was RAISED since makes this OVER-state what was paid and pay
+  // less; a rate that was lowered makes it under-state and pay slightly more, bounded by ₹75 either
+  // way. Under-paying a referrer is a support message; passing the ₹475 ceiling is the thing the
+  // admin said must not happen, so the error is left leaning that way deliberately.
+  const paidForThisFriend = alreadyPaid.length * per;
+  const tokens = capReferrerPerFriend(Math.min(owed, room), paidForThisFriend);
+  if (tokens <= 0) return none('cap-reached', owed);
   return { tokens, reason: 'granted', recordSteps: pending, owedBeforeCap: owed };
 }
 

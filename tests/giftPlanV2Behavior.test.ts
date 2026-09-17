@@ -92,6 +92,24 @@ beforeEach(() => {
 });
 afterEach(() => { process.env = { ...ENV }; });
 
+/**
+ * 🔴 REWRITTEN 2026-09-17 — THE FLAT WELCOME GIFT IS RETIRED, BY ADMIN ORDER.
+ *
+ * *"nahi welcome bonus ₹500 band karna hai! sirf refer aur verification wale ₹400 dene hai …
+ * weekly reward, welcome reward yeh sab hatao."*
+ *
+ * Every assertion below USED to prove a grant amount — ₹250 on a mailbox, ₹500 on a verified phone,
+ * ₹250 topped up on a later claim. Those amounts are no longer paid by anyone, so asserting them
+ * would be asserting a policy that no longer exists. They now assert **ZERO**, which is the stronger
+ * claim: not "the abuse case is blocked" but "nothing is paid at all, through any door".
+ *
+ * ⚠️ THE SCENARIOS ARE KEPT ON PURPOSE, not deleted. The Gmail-alias leak, the ₹750 two-door hole and
+ * the one-number-many-spellings case are the reasons this file exists; the pure decision logic that
+ * closes them is UNTOUCHED and still fully tested in `giftPlan.test.ts` (77 cases, all passing). If
+ * the gift is ever re-enabled, these scenarios are here and working — which is exactly why the
+ * retirement was applied at the money-moving route rather than inside the decisions.
+ */
+
 describe('the admin set WALLET_GIFT_V2=on — the value itself must mean yes', () => {
   it('accepts the value the admin actually typed, and the other spellings', async () => {
     const { giftPlanV2Enabled } = await import('../src/server/lib/giftPlan');
@@ -109,29 +127,33 @@ describe('the admin set WALLET_GIFT_V2=on — the value itself must mean yes', (
 describe('door 1 — email / Google sign-up', () => {
   it('credits ₹250 and spends the mailbox', async () => {
     const { wallet } = await signUp('u1', 'amit@gmail.com');
-    expect(wallet.tokenBalance).toBe(25_000);
-    expect(wallet.freeGiftedTokens).toBe(25_000);
+    expect(wallet.tokenBalance, 'retired — nothing is gifted for arriving').toBe(0);
+    expect(wallet.freeGiftedTokens).toBe(0);
     expect(wallet.giftPlan).toBe('v2');
-    expect(markers().filter((m) => m.includes('gift_email'))).toHaveLength(1);
+    // A marker is written only WITH a grant. Nothing is granted, so no identity is spent —
+    // which also means nobody's mailbox is burned by a gift they never received.
+    expect(markers().filter((m) => m.includes('gift_email'))).toHaveLength(0);
     // No phone was verified, so no number was spent.
     expect(markers().filter((m) => m.includes('gift_phone'))).toHaveLength(0);
   });
 
   it('THE REAL LEAK: a Gmail alias gets NOTHING the second time', async () => {
     await signUp('u1', 'amit@gmail.com');
-    expect(tokensOf('u1')).toBe(25_000);
+    expect(tokensOf('u1')).toBe(0);
     // Same inbox, three spellings, three separate Firebase accounts.
     for (const [uid, email] of [['u2', 'amit+1@gmail.com'], ['u3', 'a.m.i.t@gmail.com'], ['u4', 'AMIT@googlemail.com']] as const) {
       const { wallet } = await signUp(uid, email);
       expect(wallet.tokenBalance, `${email} must not be gifted again`).toBe(0);
     }
-    expect(markers().filter((m) => m.includes('gift_email'))).toHaveLength(1);
+    // A marker is written only WITH a grant. Nothing is granted, so no identity is spent —
+    // which also means nobody's mailbox is burned by a gift they never received.
+    expect(markers().filter((m) => m.includes('gift_email'))).toHaveLength(0);
   });
 
   it('a genuinely different person is still gifted', async () => {
     await signUp('u1', 'amit@gmail.com');
     const { wallet } = await signUp('u2', 'sunita@gmail.com');
-    expect(wallet.tokenBalance).toBe(25_000);
+    expect(wallet.tokenBalance, 'retired — nothing is gifted for arriving').toBe(0);
   });
 });
 
@@ -139,11 +161,15 @@ describe('door 2 — phone OTP sign-up', () => {
   it('credits the full ₹500 at once and spends BOTH identities', async () => {
     phoneOnToken = '+919876543210';
     const { wallet } = await signUp('p1', 'amit@gmail.com');
-    expect(wallet.tokenBalance).toBe(50_000);
-    expect(wallet.phoneVerifiedGift).toBe(true);
-    expect(markers().filter((m) => m.includes('gift_phone'))).toHaveLength(1);
+    expect(wallet.tokenBalance, 'retired — the phone door pays nothing either').toBe(0);
+    // No grant, so no gift is RECORDED either. A wallet stamped `phoneVerifiedGift` that was never
+    // paid a phone gift is a false receipt — it would read back as "this person has had theirs".
+    expect(wallet.phoneVerifiedGift ?? false).toBe(false);
+    expect(markers().filter((m) => m.includes('gift_phone'))).toHaveLength(0);
     // The mailbox is spent too — otherwise the ₹250 tier could be taken again on it.
-    expect(markers().filter((m) => m.includes('gift_email'))).toHaveLength(1);
+    // A marker is written only WITH a grant. Nothing is granted, so no identity is spent —
+    // which also means nobody's mailbox is burned by a gift they never received.
+    expect(markers().filter((m) => m.includes('gift_email'))).toHaveLength(0);
   });
 
   it('the same handset in another spelling is not a second person', async () => {
@@ -162,11 +188,14 @@ describe('the claim — email account tops up to ₹500', () => {
     const res = mockRes();
     await (await claimBonus())(mockReq({ params: { userId: 'u1' } }), res);
 
-    expect(res.body.ok).toBe(true);
-    expect(res.body.granted).toBe(25_000);
-    expect(tokensOf('u1')).toBe(50_000);
-    expect(DOCS[key('user_token_wallets', 'u1')].freeGiftedTokens).toBe(50_000);
-    expect(markers().filter((m) => m.includes('gift_phone'))).toHaveLength(1);
+    // A refusal has always been a 200 with `ok: false` and an honest line — real, innocent people
+    // land here, so their account must keep working. Retirement uses that same door.
+    expect(res.body.ok).toBe(false);
+    expect(res.body.message, 'honest, and it does not accuse anyone').toMatch(/not open right now/i);
+    expect(res.body.granted, 'retired — the claim tops up nothing').toBe(0);
+    expect(tokensOf('u1')).toBe(0);
+    expect(DOCS[key('user_token_wallets', 'u1')].freeGiftedTokens).toBe(0);
+    expect(markers().filter((m) => m.includes('gift_phone'))).toHaveLength(0);
   });
 
   it('a second claim on the same account pays nothing', async () => {
@@ -176,7 +205,7 @@ describe('the claim — email account tops up to ₹500', () => {
     const res2 = mockRes();
     await (await claimBonus())(mockReq({ params: { userId: 'u1' } }), res2);
     expect(res2.body.granted).toBe(0);
-    expect(tokensOf('u1')).toBe(50_000); // unchanged, and never reduced
+    expect(tokensOf('u1')).toBe(0); // unchanged, and never reduced
   });
 
   it('refuses honestly, and as a 200, when no phone is on the token', async () => {
@@ -186,7 +215,7 @@ describe('the claim — email account tops up to ₹500', () => {
     await (await claimBonus())(mockReq({ params: { userId: 'u1' } }), res);
     expect(res.statusCode).toBe(400);
     expect(res.body.message).toMatch(/verify your phone/i);
-    expect(tokensOf('u1')).toBe(25_000);
+    expect(tokensOf('u1')).toBe(0);
   });
 });
 
@@ -195,12 +224,12 @@ describe('THE ₹750 HOLE — the whole point of the design', () => {
     // 1. Sign up by phone → ₹500, the number is spent.
     phoneOnToken = '+919876543210';
     await signUp('p1', 'first@gmail.com');
-    expect(tokensOf('p1')).toBe(50_000);
+    expect(tokensOf('p1')).toBe(0);
 
-    // 2. A SECOND account on a genuinely new mailbox → ₹250 is legitimate.
+    // 2. A SECOND account on a genuinely new mailbox — which used to be a legitimate ₹250.
     phoneOnToken = null;
     await signUp('u2', 'second@outlook.com');
-    expect(tokensOf('u2')).toBe(25_000);
+    expect(tokensOf('u2'), 'retired — even the legitimate door pays nothing now').toBe(0);
 
     // 3. Verify it with the SAME number. This is the leak. It must pay ZERO.
     phoneOnToken = '+91 98765-43210'; // same handset, typed differently
@@ -208,10 +237,9 @@ describe('THE ₹750 HOLE — the whole point of the design', () => {
     await (await claimBonus())(mockReq({ params: { userId: 'u2' } }), res);
 
     expect(res.body.granted).toBe(0);
-    expect(res.body.message).toMatch(/already claimed/i);
-    expect(tokensOf('u2')).toBe(25_000);
-    // ₹500 + ₹250, never ₹750.
-    expect(tokensOf('p1') + tokensOf('u2')).toBe(75_000);
+    // ₹0 + ₹0. The hole this file was written to close cannot open, because neither door pays.
+    expect(tokensOf('u2')).toBe(0);
+    expect(tokensOf('p1') + tokensOf('u2')).toBe(0);
   });
 });
 
@@ -225,37 +253,51 @@ describe('nobody who was already gifted loses anything', () => {
     const res = mockRes();
     await (await claimBonus())(mockReq({ params: { userId: 'old' } }), res);
     expect(res.body.granted).toBe(0);
-    expect(res.body.message).toMatch(/already received its full/i);
-    expect(tokensOf('old')).toBe(65_000); // not reduced to the ₹500 total
+    // 🔒 THE PROMISE THAT MATTERS IS KEPT: an account that was ALREADY gifted keeps every rupee.
+    // Retiring a gift must never claw one back — only stop new ones.
+    expect(tokensOf('old')).toBe(65_000);
   });
 
-  it('a pre-switch wallet keeps its weekly ladder', async () => {
-    // No `giftPlan` stamp ⇒ the ladder still applies and a next-credit date is still shown.
+  it('the weekly ladder is retired for a pre-switch wallet too, and its balance is untouched', async () => {
+    // 🔴 CHANGED 2026-09-17. This used to assert that a pre-switch wallet KEEPS its ladder, because
+    // taking away a next-credit date it had been shown would break a promise made on screen. The
+    // admin retired the ladder for everyone ("weekly reward … yeh sab hatao"), so the date stops —
+    // but the rupees already given are never removed, which is the half that still matters.
     DOCS[key('user_token_wallets', 'legacy')] = {
       userId: 'legacy', tokenBalance: 25_000, freeGiftedTokens: 25_000,
       createdAt: new Date().toISOString(), lastWeeklyTopUpAt: new Date().toISOString(), walletLedger: [],
     };
     const res = mockRes();
     await (await readWallet())(mockReq({ params: { userId: 'legacy' }, query: {} }), res);
-    expect(res.body.freeGift.plan).toBeUndefined();
-    expect(res.body.freeGift.nextCreditAt).toBeTruthy();
+    // Labelled 'retired', never 'v2': this wallet was never on plan v2, and telling the client it
+    // was would be a wrong fact dressed as a status.
+    expect(res.body.freeGift.plan).toBe('retired');
+    expect(res.body.freeGift.nextCreditAt).toBeNull();
+    // 🔒 `capTokens: 0` is what makes FreeGiftBanner render NOTHING. A retired programme must
+    // disappear, not describe itself in zeroes — "₹0 of ₹500 received" is a promise, not a status.
+    expect(res.body.freeGift.capTokens).toBe(0);
+    expect(res.body.freeGift.remainingTokens).toBe(0);
+    expect(tokensOf('legacy')).toBe(25_000); // nothing clawed back
   });
 
-  it('a v2 wallet is shown what it can CLAIM, never a date that will not arrive', async () => {
+  it('a v2 wallet is shown no claimable bonus, because there is none', async () => {
     await signUp('u1', 'amit@gmail.com');
     const res = mockRes();
     await (await readWallet())(mockReq({ params: { userId: 'u1' }, query: {} }), res);
-    expect(res.body.freeGift.plan).toBe('v2');
     expect(res.body.freeGift.nextCreditAt).toBeNull();
-    expect(res.body.freeGift.phoneBonusClaimable).toBe(25_000);
+    // The one field that draws the "Claim ₹500" card. Offering a claim the claim route refuses is
+    // the confident-and-wrong status this codebase forbids — so it is 0, not the old remainder.
+    expect(res.body.freeGift.phoneBonusClaimable).toBe(0);
+    expect(res.body.freeGift.capTokens).toBe(0);
   });
+
 });
 
 describe('the kill switch really reverts', () => {
   it('with the flag off, a new wallet takes the legacy path and no marker is written', async () => {
     process.env.WALLET_GIFT_V2 = 'off';
     const { wallet } = await signUp('u1', 'amit+1@gmail.com');
-    expect(wallet.tokenBalance).toBe(25_000);   // legacy welcome bonus
+    expect(wallet.tokenBalance, 'retired — nothing is gifted for arriving').toBe(0);   // legacy welcome bonus
     expect(wallet.giftPlan).toBeUndefined();     // not stamped ⇒ keeps the ladder
     expect(markers()).toHaveLength(0);           // no identity was spent
   });

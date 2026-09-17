@@ -341,6 +341,10 @@ export function registerReferralRoutes(app: Express): void {
           alreadyPaidSteps: rec.paidSteps,
           deviceVerified: true,
           platform: 'android',
+          // 🔒 The account's REAL lifetime gift total, read in this same transaction — so the ₹400
+          // ceiling is applied to what was actually received rather than to what the step list
+          // implies. See giftPolicy.ts: "ek paisa jyada nahi" cannot rest on a tunable.
+          alreadyGiftedTokens: (walletSnap.exists() ? walletSnap.data() : {})?.freeGiftedTokens,
         });
         if (reward.tokens <= 0 || !reward.recordStep) return { granted: 0, reason: reward.reason };
 

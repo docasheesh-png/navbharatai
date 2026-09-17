@@ -204,6 +204,22 @@ export class WorkspaceMemory {
   private _hydrated = false;
   isHydrated(): boolean { return this._hydrated; }
   markHydrated(): void { this._hydrated = true; }
+  /**
+   * 🔴 A SEPARATE FLAG FROM `_hydrated`, AND THE DIFFERENCE IS THE WHOLE POINT.
+   *
+   * `_hydrated` is marked BEFORE the durable read, deliberately, so two concurrent restores cannot
+   * replay the same episodes twice. That makes it a re-entrancy guard and NOT an answer to the
+   * question a WRITER has to ask: *do I actually hold the durable history, or an empty object that
+   * merely tried to load it?* `saveWorkspaceMemory` writes with `{ merge: false }`, so a writer that
+   * confuses the two DELETES the workspace's entire episode history and project graph.
+   *
+   * This one is set only when the durable document was genuinely READ — including when it does not
+   * exist, which is a real answer ("there is nothing to lose"). A read that FAILED leaves it false,
+   * so a transient Firestore blip can never be mistaken for an empty workspace.
+   */
+  private _hydrationConfirmed = false;
+  isHydrationConfirmed(): boolean { return this._hydrationConfirmed; }
+  markHydrationConfirmed(): void { this._hydrationConfirmed = true; }
 
   /** Index (or re-index) a file's content into the project graph. */
   indexFile(file: string, content: string): void {

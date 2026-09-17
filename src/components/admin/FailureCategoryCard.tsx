@@ -22,8 +22,19 @@ interface DomainRow {
   domain: string; total: number; failed: number; succeeded: number;
   failureRatePct: number | null; topReasons: ReasonRow[];
 }
+interface VerdictSplit {
+  engineFailed: number;
+  builtButJudgedFailed: number;
+  succeeded: number;
+  unjudged: number;
+  evidenceUnknown: number;
+  appDeliveredPct: number | null;
+  reportedOkPct: number | null;
+}
+
 interface ReportData {
   totalBuilds: number;
+  verdictSplit?: VerdictSplit;
   unjudged: number;
   failed: number;
   overallFailureRatePct: number | null;
@@ -108,6 +119,88 @@ export function FailureCategoryCard({ adminToken }: { adminToken: string }): Rea
         <p className="mt-4 text-[11px] font-semibold text-[#8b949e]">No build records found yet.</p>
       ) : (
         <>
+          {/* ── WHAT IS REALLY INSIDE THE HEADLINE RATE (admin 2026-09-17) ────────────────────
+              A single "40.8% failed" cannot be worked on, because some of it is not broken builds.
+              The row that matters is the middle one: builds we JUDGED failed while the app was seen
+              rendering in a real browser. Those are wrong verdicts, and each is a person who was told
+              their working app had failed. */}
+          {data.verdictSplit && (
+            <div className="mt-4 rounded-xl border border-white/5 bg-black/20 p-4">
+              <p className="text-[9px] font-black uppercase tracking-widest text-[#484f58]">
+                What the failures really are
+              </p>
+              <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+                {[
+                  {
+                    label: 'Genuinely failed',
+                    value: data.verdictSplit.engineFailed,
+                    note: 'never seen running — the real target',
+                    tone: 'text-red-400',
+                  },
+                  {
+                    label: 'Worked, called failed',
+                    value: data.verdictSplit.builtButJudgedFailed,
+                    note: 'rendered in a real browser — a wrong verdict, not a failure',
+                    tone: 'text-amber-400',
+                  },
+                  {
+                    label: 'Cannot tell',
+                    value: data.verdictSplit.evidenceUnknown,
+                    note: 'recorded before render evidence was kept',
+                    tone: 'text-[#8b949e]',
+                  },
+                  {
+                    label: 'Succeeded',
+                    value: data.verdictSplit.succeeded,
+                    note: '',
+                    tone: 'text-emerald-400',
+                  },
+                ].map((r) => (
+                  <div key={r.label}>
+                    <p className="text-[9px] font-black uppercase tracking-widest text-[#484f58]">{r.label}</p>
+                    <p className={`mt-1 text-lg font-black ${r.tone}`}>{r.value}</p>
+                    {r.note && <p className="mt-0.5 text-[9px] leading-snug text-[#484f58]">{r.note}</p>}
+                  </div>
+                ))}
+              </div>
+              {/* THE NUMBER THE 90% TARGET IS MEASURED AGAINST, and the honesty debt beside it. */}
+              <div className="mt-4 flex flex-wrap items-baseline gap-x-6 gap-y-2 border-t border-white/5 pt-3">
+                <div>
+                  <p className="text-[9px] font-black uppercase tracking-widest text-[#484f58]">
+                    User got a working app
+                  </p>
+                  <p className={`mt-1 text-2xl font-black ${
+                    data.verdictSplit.appDeliveredPct == null ? 'text-[#8b949e]'
+                      : data.verdictSplit.appDeliveredPct >= 90 ? 'text-emerald-400'
+                      : data.verdictSplit.appDeliveredPct >= 75 ? 'text-amber-400' : 'text-red-400'}`}>
+                    {data.verdictSplit.appDeliveredPct == null ? '—' : `${data.verdictSplit.appDeliveredPct}%`}
+                    <span className="ml-2 text-[10px] font-bold text-[#484f58]">target 90%</span>
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[9px] font-black uppercase tracking-widest text-[#484f58]">
+                    What we told them
+                  </p>
+                  <p className="mt-1 text-2xl font-black text-white/70">
+                    {data.verdictSplit.reportedOkPct == null ? '—' : `${data.verdictSplit.reportedOkPct}%`}
+                  </p>
+                </div>
+                {data.verdictSplit.appDeliveredPct != null && data.verdictSplit.reportedOkPct != null
+                  && data.verdictSplit.appDeliveredPct > data.verdictSplit.reportedOkPct && (
+                  <p className="text-[10px] leading-snug text-amber-300/80">
+                    The gap is the honesty debt — apps that worked and were reported as failures.
+                  </p>
+                )}
+              </div>
+              <p className="mt-3 text-[9px] leading-relaxed text-[#484f58]">
+                Builds nobody could judge either way are left out of both figures, so the target cannot be hit by
+                counting unknowns. Builds the USER stopped are not separated out yet — the engine knows the difference but does not
+                record it in the report, and guessing it would put an invented number in the one figure meant to
+                end guessing.
+              </p>
+            </div>
+          )}
+
           <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
             {[
               ['Builds examined', String(total), `${data.unjudged ?? 0} still in progress / excluded`],

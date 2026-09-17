@@ -451,7 +451,7 @@ import { purgeWorkspace } from '../AgentV3/WorkspaceManager';
 import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesByPath, removeWorkspaceFiles, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet, workspaceFilesSavedAt } from '../AgentV3/WorkspaceFileStore';
 import { applyWellKnownMissingDeps } from '../AgentV3/DependencyAutoFix';
 import { splitCachedSystem } from '../AgentV3/systemPromptCache';
-import { makeFirstPaintHandler } from '../AgentV3/streamingFirstPaint';
+import { makeFirstPaintHandler, firstPaintEvents, streamingFirstPaintEnabled } from '../AgentV3/streamingFirstPaint';
 import { buildRuntimeLogCommand, parseRuntimeLogOutput, runtimeLogGapNotice } from '../AgentV3/runtimeLogs';
 import { buildServicesProbeCommand, parseProcessList, splitProcsSection, mergeServiceStatus, extraPorts, portsSummary } from '../AgentV3/portsPanel';
 import { findProjectInstructionPath, normalizeProjectInstructions, projectInstructionsBlock, projectInstructionsNotice } from '../AgentV3/projectInstructions';
@@ -14505,6 +14505,27 @@ async function noteBuildOutcome(
               // of their own was billed for twelve files we wrote from a template. Content is kept, not
               // just the path: a scaffold file the builder REWRITES is genuinely delivered work.
               for (const [gp, gc] of Object.entries(goldenFiles)) preseededGolden.set(gp, gc);
+
+              // 🔴 SHOW IT NOW — autopsy 2b0a3ed5 (2026-09-17). A user asked for a calculator; this
+              // pre-seed put a tested, CI-proven, WORKING calculator on disk at second 6.7. They then
+              // watched nothing at all for 56 seconds while the first model call returned 27 tokens,
+              // and pressed Stop at 64 s. They were charged for it. `RELEASE_GATE` recorded the whole
+              // thing honestly: *"no live preview was ever available"*.
+              //
+              // The scaffold is the ONE case where the app is known to work BEFORE any model call —
+              // that is what "hand-verified, CI-proven to parse under esbuild AND compile under the
+              // in-browser preview" means above. So there is nothing to wait for: the files are
+              // already durable one line up, and these events are what tell the client's preview to
+              // render them (PreviewSurface debounces a burst into one reload, and the sandbox-free
+              // in-browser preview reads straight from the durable store).
+              //
+              // ⚠️ EVENTS ONLY — no dev server is started here, deliberately. The build's own agent
+              // runs `npm run dev` later; racing it would risk two servers contending for port 5173
+              // and a published URL pointing at whichever lost. This costs no model call, no sandbox
+              // time, and nothing at all when the flag is off.
+              if (streamingFirstPaintEnabled()) {
+                for (const e of firstPaintEvents(Object.keys(goldenFiles))) events.emit(e);
+              }
               goldenPreseeded = true;
               buildDiag.record({ phase: 'build', severity: 'info', code: 'GOLDEN_SCAFFOLD', message: `Pre-seeded the tested "${golden.label}" template (${Object.keys(goldenFiles).length} files) — the builder verifies & customizes instead of writing from scratch.`, autoResolved: true });
               emit({ type: 'narration', agent: 'architect', text: `⚡ Starting from NavBharatAI's tested "${golden.label}" app template — verifying and customizing it for you.`, ts: Date.now() });

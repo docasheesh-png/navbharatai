@@ -58,6 +58,27 @@ export function streamingFirstPaintEnabled(): boolean {
  * Returning `undefined` rather than a no-op function is deliberate: the builder branches on whether the
  * callback exists, so a no-op would still change its code path. Off must mean genuinely untouched.
  */
+/**
+ * The events that tell the client's preview to render these paths. Pure.
+ *
+ * Exported so the ONE place that knows this event's shape is this file. The golden-scaffold pre-seed
+ * (`routes/agentv3.ts`) needs exactly these events and nothing else — it already persists its files
+ * durably, and with an awaited save it must not hand that job to the fire-and-forget handler below.
+ * Hand-rolling the object at that call site would be a second definition of the same wire contract,
+ * and the two would drift the first time either changed.
+ */
+export function firstPaintEvents(
+  paths: readonly string[],
+  now: () => number = Date.now,
+): FileChangedEvent[] {
+  const out: FileChangedEvent[] = [];
+  for (const path of paths ?? []) {
+    if (typeof path !== 'string' || !path) continue;
+    out.push({ type: 'file_changed', agent: 'architect', change: { path, kind: 'create' }, ts: now() });
+  }
+  return out;
+}
+
 export function makeFirstPaintHandler(
   workspaceId: string,
   deps: FirstPaintDeps,
@@ -82,8 +103,6 @@ export function makeFirstPaintHandler(
     // still happens at the end, so the worst case of a failure here is that the user waits exactly as
     // long as they do today.
     void Promise.resolve(deps.merge(workspaceId, record)).catch(() => { /* head start only; never the build's save path */ });
-    for (const path of Object.keys(record)) {
-      deps.emit({ type: 'file_changed', agent: 'architect', change: { path, kind: 'create' }, ts: now() });
-    }
+    for (const event of firstPaintEvents(Object.keys(record), now)) deps.emit(event);
   };
 }

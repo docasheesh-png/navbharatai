@@ -63461,3 +63461,71 @@ still a full replace (the gate is what makes that safe).
 **Full CI gate green on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` ·
 `vitest run` (**24,810 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
 `deps:server-gate`.
+
+## 2026-09-17 — Admin Revenue → purchases by USER, and the Users page's "Total Used / Paid" were reading dead fields
+
+**Admin's request** (forwarded from an external ChatGPT brief, with the instruction *"dont build blindly"*): the
+Revenue page must say **which users** the revenue came from — who, what, how many tokens, how much, when,
+transaction id, method, status — and the Users page / account sheet must show each user's **purchased →
+used → remaining** credits and AI usage. Per the external-suggestion rule the brief was AUDITED against the
+code first, and most of what it asked for already existed; this change wires the gaps and fixes one real bug
+the audit found.
+
+### What the audit found (STEP 1–3 of the brief, recorded so nobody re-derives it)
+
+| Asked for | Already existed | Gap |
+|---|---|---|
+| Every purchase with user, amount, tokens, txn id, status, method | `payment_transactions` carries all of it (amountPaid, balanceAdded, paymentProvider, paymentStatus, paymentReference, productType, platformFeeInr, storePriceInr) | Revenue tab showed only 10 rows with a truncated uid — no product, status, method or reference |
+| Revenue = successful money only | `/api/admin/analytics` sums `amountPaid` over SUCCESS rows | "Token Purchases" tile excluded only `WELCOME_BONUS`, so a **coupon redemption counted as a successful payment** |
+| Per-user purchased / used / remaining | Wallet carries `totalTokensPurchased`, `totalTokensUsed`, `tokenBalance`; `walletLedger` holds every credit and debit with `feature` + `buildRef` | 🔴 **Users list, "Top Consuming Users" and the account sheet read `total_output_tokens_used` / `total_money_spent` — fields written ONCE as 0 at wallet creation. Every account showed 0 used, ₹0 paid.** The live writers are `walletDebit.ts` → `totalTokensUsed` and `payments.ts` → `totalMoneySpent` |
+| Per-user input/output tokens, model, cost | `ai_usage_logs` (chat only; tokens only on non-streamed measured turns); build tokens per provider in each admin build report; wallet ledger for what was charged | Nothing summed chat tokens per user; the sheet did not say how many turns carried NO count |
+| Refund handling | — | **No writer produces a REFUNDED status.** The Cashfree webhook and verifier only move PENDING → SUCCESS. A refund issued in the gateway dashboard leaves the row saying SUCCESS |
+| Admin-only access | `verifyAdminToken` (admin.ts) / `requireAdmin` (reports.ts) on every route | none — the new endpoint uses the same gate |
+
+**No database change and no new tracking.** Everything on the new screens is read from documents already
+written; the brief's "implement tracking if missing" clause did not apply.
+
+### What shipped
+
+- **`src/server/lib/purchaseLedger.ts`** (pure) — the ONE reading of a `payment_transactions` row:
+  `purchaseRow` (user, product, paid ₹, credited ₹ and tokens, status, method, our id + gateway ref, fee,
+  store list price), `isRevenueRow` (SUCCESS ∧ paid > 0 ∧ not a free-credit rail), `summarisePurchases`,
+  `filterPurchases` (search / status / date range), `sortPurchases` (date / amount / tokens, ties → the paid
+  row first). `refundTracked: false` rides on every summary so the screen can say refunds are not recorded.
+- **`GET /api/admin/purchases`** (admin.ts, `verifyAdminToken`) — the whole collection read the analytics
+  route already does, joined with wallet name/email, filtered and sorted in memory, paged (≤200). Returns
+  `summary` (filtered set) and `overall` (everything) so the tile never moves when a filter is applied.
+- **`src/server/lib/walletLifetime.ts`** (pure) — `lifetimeMoneySpentInr` / `lifetimeTokensUsed` /
+  `lifetimeTokensPurchased` read BOTH spellings and take the max (never the sum — a merged wallet carries
+  both). Applied in `/api/admin/users` (rows + the `ai_per_day` sort, plus a new `paid` sort and a
+  `totalTokensPurchased` field), the analytics `expensiveUsers`, the account sheet's `totalSpentInr`, and
+  `giftSpend.hasEverPaid` (which had only worked through its `lastRechargeAt` fallback).
+  `accountMerge.mergeWallets` now also carries `totalMoneySpent`, which a merge used to drop.
+- **Analytics** — `tokenPurchaseCount` / `recentPurchases` go through `isRevenueRow`.
+- **Account sheet** (`/api/admin/users/:uid/account`) — `purchases` (every row for that user, newest first,
+  through `purchaseRow`) and `usage` (purchased / used / remaining tokens from the wallet, the ledger's
+  credit and debit totals with its reconcile verdict, and chat tokens via the new
+  `summariseChatTokens`: measured in/out sums PLUS the count of streamed turns that carry no count).
+  The privacy invariants of `adminUserDetail.test.ts` (no transcript collection, no message field) hold.
+- **AdminDashboard** — Revenue tab: a *Purchases — who paid, for what* panel (tiles, search, status filter,
+  date range, sort, pagination, a click-through to the account sheet, and the refund caveat in words);
+  *Top Consuming Users* gains a Purchased column. Users tab: **Purchased** and **Paid ₹** columns, and
+  *Total Used* is finally a real number. Account sheet: a *Credits — purchased, used, remaining* block and
+  the user's purchase list.
+
+### Honest limits, said on the screen too
+
+- **Refunds:** not tracked anywhere; the panel says so. Wiring Cashfree's refund webhook event is a
+  separate change (open item).
+- **Per-user input/output tokens** exist only for chat turns the router measured; streamed turns are
+  COUNTED as unmeasured, never summed as zero. Build-side provider tokens and real API cost stay on each
+  build's admin report; the account sheet points there rather than inventing a per-user figure.
+- **Store rows** record `amountPaid` as the credit value (₹99), not the store list price (₹119); the table
+  shows the list price beside it so the two are not confused. That is what the store path has always
+  written; changing it would rewrite history.
+
+### Tests
+
+`tests/purchaseLedger.test.ts` (18), `tests/walletLifetime.test.ts` (8), `tests/adminChatTokens.test.ts`
+(3) — the wiring guards read the routes with comments stripped and assert the dead snake_case reads are
+gone and the shared modules are what the routes call.

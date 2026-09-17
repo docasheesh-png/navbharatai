@@ -71,6 +71,10 @@ export function mergeWallets(into: Wallet, other: Wallet, nowIso: string): Merge
 
   const outputUsed = num(into.total_output_tokens_used) + num(other.total_output_tokens_used);
   const moneySpent = num(into.total_money_spent) + num(other.total_money_spent);
+  // The LIVE money figure is camelCase (`payments.ts` increments `totalMoneySpent`); the snake_case
+  // field above is initialised to 0 and never incremented. Carrying only the snake_case sum dropped
+  // the retired wallet's real payments from the merged account (walletLifetime.ts, 2026-09-17).
+  const moneySpentLive = num(into.totalMoneySpent) + num(other.totalMoneySpent);
   const purchasedTotal = realPurchased + welcomeGranted; // keep the invariant balance = purchased − used
 
   const pickLater = (a: unknown, b: unknown): string | null => {
@@ -131,6 +135,7 @@ export function mergeWallets(into: Wallet, other: Wallet, nowIso: string): Merge
     totalTokensUsed: num(into.totalTokensUsed) + num(other.totalTokensUsed),
     total_output_tokens_used: outputUsed,
     total_money_spent: moneySpent,
+    totalMoneySpent: moneySpentLive,
     lastRechargeAt: pickLater(into.lastRechargeAt, other.lastRechargeAt),
     walletLedger: ledger,
     updatedAt: nowIso,

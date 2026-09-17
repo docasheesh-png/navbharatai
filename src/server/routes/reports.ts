@@ -29,6 +29,9 @@ import { saveNotification } from '../lib/AdminNotificationStore';
 import { getWebApp } from '../lib/navStoreWeb';
 import { resolveUserIdentities } from '../lib/adminUserLookup';
 import { summariseBuilds, summarisePayments, accountFlags } from '../lib/adminUserAccount';
+import { lifetimeMoneySpentInr, lifetimeTokensUsed, lifetimeTokensPurchased } from '../lib/walletLifetime';
+import { purchaseRow, sortPurchases, summarisePurchases } from '../lib/purchaseLedger';
+import { buildWalletStatement } from '../lib/walletStatement';
 import { userBuildHistoryStore } from '../lib/UserBuildHistoryStore';
 import { deploymentStore, isLiveDeployment } from '../AgentV3/DeploymentStore';
 import { getServerDb } from '../lib/serverDb';
@@ -41,7 +44,7 @@ import { professionalPassStore } from '../professionals/ProfessionalPassStore';
 import { routeParam, routeParams } from '../lib/expressCompat';
 import {
   fetchAuthMetadata, firebaseAuthBatch, resolveJoinedAt, resolveLastActiveAt,
-  summariseAiActivity, summariseDevices, profileView,
+  summariseAiActivity, summariseChatTokens, summariseDevices, profileView,
 } from '../lib/adminUserActivity';
 
 /** The Firestore handle the identity lookup needs, or null so it degrades to ids rather than throwing. */
@@ -486,7 +489,7 @@ export function registerReportRoutes(app: Express): void {
           // Single equality on userId — no composite index, the rule this repo already paid for once.
           const snap = await (db as never as { collection: (n: string) => { where: (f: string, op: string, v: unknown) => { limit: (n: number) => { get: () => Promise<{ docs: Array<{ data: () => Record<string, unknown> }> }> } } } })
             .collection('payment_transactions').where('userId', '==', uid).limit(300).get();
-          return { ok: true, rows: snap.docs.map((d) => d.data()) };
+          return { ok: true, rows: snap.docs.map((d) => ({ __id: (d as { id?: string }).id ?? '', ...(d.data() as Record<string, unknown>) })) };
         } catch { return { ok: false, rows: [] as Record<string, unknown>[] }; }
       })(),
       // The user's OWN profile, shown back to them read-only. This screen never writes.
@@ -580,7 +583,9 @@ export function registerReportRoutes(app: Express): void {
         ok: wallet.ok,
         tokenBalance: Number(w.tokenBalance ?? 0),
         remainingBalanceInr: Number(w.remaining_balance ?? 0),
-        totalSpentInr: Number(w.total_money_spent ?? 0),
+        // Through the ONE reader (walletLifetime.ts): `total_money_spent` is initialised to 0 and
+        // never incremented; the real-money path writes `totalMoneySpent`. This read ₹0 for everyone.
+        totalSpentInr: lifetimeMoneySpentInr(w),
         banned: w.banned === true,
         banReason: typeof w.banReason === 'string' ? w.banReason : '',
         // 🔴 WHERE THE BALANCE WENT (admin 2026-09-13). This route already READ the whole wallet
@@ -627,6 +632,31 @@ export function registerReportRoutes(app: Express): void {
         })),
       },
       payments: { ok: payments.ok, ...money },
+      // EVERY PURCHASE, AS A ROW (admin 2026-09-17: "who purchased, what, how many tokens, how much,
+      // when, transaction id"). The same 300 documents `payments` was summarised from, read through
+      // purchaseLedger.ts so this sheet and the Revenue table agree on what counts as money.
+      purchases: (() => {
+        const rows = sortPurchases(payments.rows.map((r) => purchaseRow(String((r as { __id?: unknown }).__id ?? ''), r)));
+        return { ok: payments.ok, rows: rows.slice(0, 60), summary: summarisePurchases(rows) };
+      })(),
+      // PURCHASED − USED = REMAINING, in the app's own unit, from the wallet's own lifetime figures
+      // and its ledger — the connection the admin asked to see on one screen. Chat tokens come from
+      // `ai_usage_logs` and are honest about what was NOT measured (a streamed turn carries no
+      // counts); build-side provider tokens live in each build's admin report, not here.
+      usage: (() => {
+        const statement = buildWalletStatement(w);
+        const chat = summariseChatTokens(aiLogs.rows as never[]);
+        return {
+          ok: wallet.ok,
+          creditsPurchasedTokens: lifetimeTokensPurchased(w),
+          creditsUsedTokens: lifetimeTokensUsed(w),
+          remainingTokens: Number(w.tokenBalance ?? 0),
+          ledgerCreditTokens: statement.creditTokens,
+          ledgerDebitTokens: statement.debitTokens,
+          ledgerVerdict: statement.verdict,
+          chat: { ok: aiLogs.ok, ...chat },
+        };
+      })(),
       reportsAgainst,
       // Few on purpose: a long list of amber flags trains an admin to ignore all of them.
       flags: accountFlags({ builds, payments: money, reportsAgainst }),

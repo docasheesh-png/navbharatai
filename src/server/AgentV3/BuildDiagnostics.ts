@@ -12,6 +12,7 @@
 
 import { startBandLabel } from './RequestAnalyser';
 import { toolCallDetail } from './toolCallTarget';
+import { isPlatformFixRequest, looksLikeMachineError, PLATFORM_COMPOSED_PREFIXES } from '../../lib/platformFixRequest';
 import { isTransientStatusLine } from './workingHeartbeat';
 import type { AgentEvent } from './types';
 import { parseNpmAuditSummary, npmAuditNote, auditSeverity, looksLikeDependencyInstall } from './npmAuditSummary';
@@ -40,6 +41,10 @@ export type IssueSeverity = 'info' | 'warning' | 'error';
 const PROCESS_ONLY_CODES = new Set([
   'GROUNDING_COST', 'POST_ANSWER_TIMING', 'SERVICE_GRAPH_MULTI', 'SERVICE_GRAPH_SINGLE',
   'JOURNEY_NOT_DERIVED', 'RELEASE_GATE',
+  // Project mode could not steer the build — the build itself is unaffected (projectPlannerBudget.ts).
+  'PROJECT_MODE_FAILED',
+  // The gate said RED and a real run said otherwise — a statement about OUR verdict (runProvenApp.ts).
+  'VERDICT_HELD_BY_RUN',
 ]);
 
 /**
@@ -85,35 +90,77 @@ const PROCESS_ONLY_CODES = new Set([
 const PROBLEM_WORD_SOURCE =
   "(error|failed|cannot|could not|not responding|isn'?t available|unavailable|retry|retrying"
   + '|stuck|timed out|blocked request|closed port|won\'?t come up|no files|warning)';
+/**
+ * Strip the BENIGN COMPOUNDS — "error boundary", "error handling", "warning banner" — that are
+ * ordinary feature work rather than a failure. Hoisted out of the classifier (where it was added by
+ * the ShopKhata autopsy 2026-07-17) so BOTH sides of the echo comparison can use it.
+ *
+ * 🔴 APPLYING IT TO ONE SIDE ONLY WAS A REAL DEFECT, found by adversarial review of this very change
+ * before it merged. `said` came from the stripped narration while `known` came from the RAW prompt, so
+ * an ordinary feature request — *"Build a checkout page with proper error handling and a warning
+ * banner"* — put "error" and "warning" into the whitelist and silenced every genuine engine struggle
+ * for the rest of that build. It traded false positives on fix-turns for false NEGATIVES on ordinary
+ * builds, which is the same trade in the other direction.
+ */
+function stripBenignCompounds(text: string): string {
+  return String(text ?? '')
+    .replace(/\berrors?[- ](boundar(?:y|ies)|handling|handlers?|messages?|states?|pages?|toasts?|ui|display)\b/gi, '')
+    .replace(/\bwarnings?[- ](messages?|banners?|badges?|toasts?)\b/gi, '');
+}
+
 /** Non-global: `.test()` on a `/g` regex is STATEFUL (measured true/false/true on one string). */
 const PROBLEM_WORD_RE = new RegExp(`\\b${PROBLEM_WORD_SOURCE}\\b`, 'i');
 /** Global, used ONLY via `.match()`, which does reset `lastIndex`. */
 const PROBLEM_WORD_RE_G = new RegExp(`\\b${PROBLEM_WORD_SOURCE}\\b`, 'gi');
 
 /**
- * Is every problem word in this narration one the USER THEMSELVES wrote?
+ * Is every problem word in this narration one the USER THEMSELVES reported?
  *
  * 🔴 THE DEFECT THIS ANSWERS (build e4ebcb5f, 2026-09-17). The prompt was *"Fix this error and
- * continue building the app: network error"*, and the agent's ordinary narration — *"Let me check
- * the current app structure and identify the network error:"* — was recorded as a PROBLEM. It is the
- * agent quoting the symptom it was asked to investigate, which is the most normal thing an agent
- * does on a "fix this error" turn.
+ * continue building the app: network error"*, and the agent's ordinary narration — *"Let me check the
+ * current app structure and identify the network error:"* — was recorded as a PROBLEM. It is the agent
+ * quoting the symptom it was asked to investigate, which is the most normal thing an agent does on a
+ * "fix this error" turn.
  *
  * 🔑 THE CLASS, and why no keyword list can express it: the classifier asks *"does this sentence
  * contain a scary word?"* when the question it exists to answer is *"did the ENGINE fail?"* Four
- * separate patches (2026-07-07 ×3, ShopKhata 2026-07-17, PaisaTrack 2026-07-21) have narrowed this
- * predicate and not one has widened it — a rule that has only ever been walked back is one whose
- * default answer is wrong. The structural signal was already present and simply never consulted:
- * `meta.prompt` is the user's own words, set at construction, so it cannot be gamed by the model.
+ * separate patches have narrowed that predicate and not one has widened it.
+ *
+ * ⚠️ THREE CORRECTIONS FOUND BY ADVERSARIAL REVIEW BEFORE THIS MERGED, each of which turned a
+ * plausible guard into a wrong one. They are the reason this function is shaped the way it is:
+ *
+ *  1. **`meta.prompt` is NOT reliably "the user's own words"** — an earlier draft of this comment said
+ *     it was, and that sentence was load-bearing. `fixErrorAndContinuePrompt` (AgentV3Panel) composes
+ *     the prompt from a PLATFORM prefix plus NavBharatAI's own error notice, so our own wording could
+ *     whitelist its own vocabulary for a whole build. The composed prefixes are removed before
+ *     harvesting.
+ *  2. **It must only arm on an actual SYMPTOM REPORT.** Without that, a plain feature request —
+ *     *"Build me a dashboard that shows error rates"* — silenced every later "error" narration in a
+ *     build that reported no symptom at all. `isPlatformFixRequest` / `looksLikeMachineError` are this
+ *     repo's existing answer to "is this message reporting a failure?", so the line is drawn once.
+ *  3. **Both sides must speak the same vocabulary.** `said` was stripped of benign compounds and
+ *     `known` was not, so *"add proper error handling"* put "error" into the whitelist. Both now go
+ *     through `stripBenignCompounds`.
  *
  * `every`, not `some`: a line mixing the user's word with a NEW one ("the network error is back and
- * the preview is not responding") carries a word the user never wrote, so it stays a problem.
+ * the preview is not responding") carries a word the user never reported, so it stays a problem.
  *
- * PURE. Never throws. No prompt ⇒ false ⇒ today's behaviour exactly.
+ * 🔴 STILL OPEN, named rather than covered over: when the wrapped body is itself NavBharatAI's own
+ * branded notice ("The build produced no files. Please try again."), the guard still arms — that is
+ * the fdd59ef8 "our own voice fed back" class, and it belongs to that fix, not this one.
+ *
+ * PURE. Never throws. No prompt, or a prompt that is not a symptom report ⇒ false ⇒ today's behaviour.
  */
 export function narrationEchoesPromptSymptom(text: string, prompt: string | undefined | null): boolean {
-  const asked = String(prompt ?? '');
-  if (!asked) return false;
+  const raw = String(prompt ?? '');
+  if (!raw) return false;
+  // Only a message that REPORTS a failure may whitelist failure vocabulary. A feature request that
+  // merely names the vocabulary must not.
+  if (!isPlatformFixRequest(raw) && !looksLikeMachineError(raw)) return false;
+  // Our own composed opener is not the user reporting anything.
+  let asked = raw;
+  for (const prefix of PLATFORM_COMPOSED_PREFIXES) asked = asked.split(prefix).join(' ');
+  asked = stripBenignCompounds(asked);
   const said = (String(text ?? '').match(PROBLEM_WORD_RE_G) ?? []).map((w) => w.toLowerCase());
   if (said.length === 0) return false;
   const known = new Set((asked.match(PROBLEM_WORD_RE_G) ?? []).map((w) => w.toLowerCase()));
@@ -914,27 +961,51 @@ export class BuildDiagnostics {
    *
    * Returns null when nothing is worth reporting (no gap, or one too short to matter). PURE.
    */
+  /**
+   * A TIMER TICK IS NOT ACTIVITY, AND COUNTING IT AS ACTIVITY HID A 160-SECOND STALL (build 8682b6b1).
+   *
+   * That report's preparation window was 171s, of which ONE measured step — the sandbox scan — took
+   * 160.5s. The warning pointed the reader at a 60-second silence instead, because the heartbeat
+   * writes `⏱ minute 1 — still working` once a minute and every one of those ticks LOOKED like
+   * something happening. A 160-second stall was therefore reported as three 60-second ones, and the
+   * biggest single cost in the build was invisible to the instrument built to find it.
+   *
+   * A heartbeat is the engine saying it is alive; it is by definition emitted while nothing else is
+   *. Same rule as `isProgressNoise` in `activityTimeline.ts` — named so the two are recognisably one
+   * idea rather than two coincidences.
+   */
+  private static isTimerChatter(e: { message?: string; code?: string }): boolean {
+    return e?.code === 'HEARTBEAT' || String(e?.message ?? '').trimStart().startsWith('⏱');
+  }
+
   static longestSilentGap(
-    entries: ReadonlyArray<{ ts: number; message: string }>,
+    entries: ReadonlyArray<{ ts: number; message: string; code?: string }>,
     startedAt: number,
     untilTs: number,
     minSeconds = 20,
-  ): { seconds: number; after: string } | null {
+  ): { seconds: number; after: string; until: string } | null {
     const marks = [...(entries || [])]
       .filter((e) => e && typeof e.ts === 'number' && e.ts >= startedAt && e.ts <= untilTs)
+      .filter((e) => !BuildDiagnostics.isTimerChatter(e))
       .sort((a, b) => a.ts - b.ts);
-    let best: { seconds: number; after: string } | null = null;
+    let best: { seconds: number; after: string; until: string } | null = null;
     // The window from the build's start to its FIRST recorded entry counts too — a build that is silent
     // for four minutes before it says anything is exactly the case worth surfacing.
     let prevTs = startedAt;
     let prevMsg = 'the build started';
     for (const m of [...marks, { ts: untilTs, message: '' }]) {
       const seconds = Math.round((m.ts - prevTs) / 1000);
-      if (seconds > (best?.seconds ?? 0)) best = { seconds, after: prevMsg };
+      // 🔑 `until` — the entry that ENDED the silence, which is usually the entry that EXPLAINS it.
+      // Every self-timing step in this codebase records at COMPLETION (`PHASE_TIMING`, all four
+      // `SETUP_TIMING` sites), so the line that breaks a silence is the line reporting the work that
+      // filled it. `after` alone is structurally the least informative half: it names the last thing
+      // that spoke BEFORE the stall, which is often innocent.
+      if (seconds > (best?.seconds ?? 0)) best = { seconds, after: prevMsg, until: m.message };
       if (m.message) { prevTs = m.ts; prevMsg = m.message; }
     }
     if (!best || best.seconds < minSeconds) return null;
-    return { seconds: best.seconds, after: best.after.split('\n')[0].slice(0, 120) };
+    const trim = (t: string) => t.split('\n')[0].slice(0, 120);
+    return { seconds: best.seconds, after: trim(best.after), until: trim(best.until) };
   }
 
   /**
@@ -1012,8 +1083,18 @@ export class BuildDiagnostics {
     // because the total and the biggest single stretch answer two different questions, and the second
     // one is what an autopsy actually acts on. Only stated when a real gap exists.
     const gap = BuildDiagnostics.longestSilentGap(this.issues, this.startedAt, this.now() - (lat ?? 0));
+    // ⚠️ THE WORDING HAD TO CHANGE IN THE SAME EDIT AS THE FILTER. Once timer ticks stop counting as
+    // activity, "with NOTHING recorded" would be literally false — a heartbeat WAS recorded in that
+    // stretch. Fixing a misleading pointer by making an untrue claim is the trade this repo forbids.
     const withGap = gap
-      ? `${attributed} The longest single stretch with NOTHING recorded was ${gap.seconds}s, beginning right after: "${gap.after}" — that is where to look first (it names when the silence started, not what caused it).`
+      ? `${attributed} The longest single stretch with no work recorded (heartbeats aside) was `
+        + `${gap.seconds}s, beginning right after: "${gap.after}"`
+        + (gap.until
+          // Self-timing steps record at COMPLETION, so this is usually the step that FILLED the
+          // silence — the nearest thing to a cause the timeline can honestly offer. Still hedged: the
+          // line that ended a stall is not proof it caused it.
+          ? `, and ending at: "${gap.until}" — that second line is usually the step that filled it, and is where to look first.`
+          : ' — that is where to look first (it names when the silence started, not what caused it).')
       : attributed;
     this.record({
       phase: 'plan',
@@ -1345,8 +1426,7 @@ export class BuildDiagnostics {
         // matched inside "error boundary". Building error-UX (boundaries, handling, messages, toasts)
         // is normal work — strip those compounds BEFORE the problem-keyword test so only a genuine
         // failure phrase can classify a narration as a problem.
-        const tForMatch = t.replace(/\berrors?[- ](boundar(?:y|ies)|handling|handlers?|messages?|states?|pages?|toasts?|ui|display)\b/gi, '')
-          .replace(/\bwarnings?[- ](messages?|banners?|badges?|toasts?)\b/gi, '');
+        const tForMatch = stripBenignCompounds(t);
         const problemWord = PROBLEM_WORD_RE.test(tForMatch);
         // A genuine FAILURE VERB (not the bare noun "error") is what makes a note a real problem — and an
         // ERROR-severity one. "error"/"errors" as a NOUN the agent is working on is not itself a failure.

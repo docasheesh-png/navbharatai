@@ -103,8 +103,14 @@ describe('robustness — this runs on every build', () => {
     // 🔒 NO ENTRIES AT ALL is not "nothing to report" — it means the build said NOTHING for the whole
     // window, which is the loudest version of this signal, not the quietest. So it reports the full
     // span from the start rather than going silent about the silence.
-    expect(gap([], 0, 100 * S)).toEqual({ seconds: 100, after: 'the build started' });
-    expect(gap(null as never, 0, 100 * S)).toEqual({ seconds: 100, after: 'the build started' });
+    // `until` is the entry that ENDED the silence (added 2026-09-17 — see
+    // tests/silenceNamesTheStepThatFilledIt.test.ts for why: a completion-recorded step is usually the
+    // step that FILLED the stall). With NO entries at all nothing ended it, so it is empty — and that
+    // emptiness is what makes the warning fall back to the original "where to look first" wording
+    // instead of naming a line that does not exist. Asserted rather than loosened to `toMatchObject`,
+    // because an exact shape is what stops a field being added here without anyone deciding to.
+    expect(gap([], 0, 100 * S)).toEqual({ seconds: 100, after: 'the build started', until: '' });
+    expect(gap(null as never, 0, 100 * S)).toEqual({ seconds: 100, after: 'the build started', until: '' });
     // An entry with an unusable timestamp is dropped, never trusted into the arithmetic.
     expect(gap([{ ts: NaN, message: 'x' } as never], 0, 100 * S)?.seconds).toBe(100);
   });

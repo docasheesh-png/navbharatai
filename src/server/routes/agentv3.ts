@@ -434,6 +434,7 @@ import { realismIntent } from '../lib/realismIntent';
 import { heroObjectContract } from '../lib/heroObjectSpec';
 import { BuildCheckpoint } from '../AgentV3/BuildCheckpoints';
 import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
+import { recordEngineUse } from '../AgentV3/engineUseStore';
 import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrchestrator';
 import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from '../AgentV3/escalationRollout';
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
@@ -19409,6 +19410,14 @@ async function noteBuildOutcome(
           console.error(`[AGENTV3 BILLING] Wallet debit threw for user ${userId}: ${err?.message || err}`);
         }
       }
+
+      // WHICH ENGINES ACTUALLY SERVED THIS BUILD (admin 2026-09-17). `providerTurns` already holds
+      // it — the same map `dominantProvider` reads — and until now it died with the request. That is
+      // exactly why the AI Engines page looked invented: it was built on `ai_usage_logs`, which the
+      // CHAT route writes and a build never touches, so the page showed chat providers and called
+      // them the platform's engines. One day-keyed counter, written where the fact is already known.
+      // Fire-and-forget on purpose: an observation must never delay a user's finished build.
+      void recordEngineUse(providerTurns);
 
       // Cost-ladder telemetry (P2 measurement): record this build's task type, start
       // tier, billed amount, tokens, success, and duration so the savings AND the

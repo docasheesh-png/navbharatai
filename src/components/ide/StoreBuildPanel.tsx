@@ -474,7 +474,10 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
         return;
       }
       setProgressNote('Something went wrong — NavBharatAI is looking at it…');
-      let fix: { fixed?: boolean; summary?: string; code?: string; report?: string } | null = null;
+      // `detail` carries the classifier's facts — `missing` is every signing secret the repository
+      // lacks, which is what raises the one-press key offer below.
+      let fix: { fixed?: boolean; summary?: string; code?: string; report?: string;
+        detail?: Record<string, string | string[]> | null } | null = null;
       try {
         const fRes = await fetch('/api/mobile-ship/autofix', {
           method: 'POST',
@@ -489,11 +492,30 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
         setPhase('failed');
         void fetchFailReport(finished.id, kind);
         if (fix?.report) setFixReport(fix.report);
+        // 🔴 THIS SENTENCE WENT STALE ONE DAY AFTER IT WAS WRITTEN, and it was the costly kind of
+        // stale — it sent the user to do by hand the exact thing the app had just learned to do.
+        // It read: *"It has to stay yours, so NavBharatAI cannot add it for you — the guide below
+        // walks through creating it."* True until 2026-09-16, when one-press upload-key creation
+        // shipped. The key does still stay theirs (it is written to THEIR repository's secrets and
+        // we keep no copy), but "NavBharatAI cannot add it for you" became false, and a user who
+        // believed it went off to install a JDK and learn `keytool` for nothing.
+        //
+        // So the offer is raised instead of described: `signingGap` is what renders the "Create my
+        // signing key" button, and setting it here means the message and the button appear together.
+        // That also closes the one hole the pre-flight cannot cover — a build dispatched while the
+        // signing check answered `unknown` (a GitHub hiccup) lands here with no gap set, and used to
+        // leave the user with a dead end and a manual guide.
+        const missingSecrets = Array.isArray(fix?.detail?.missing)
+          ? (fix.detail.missing as string[])
+          : [];
+        const signingFailure = fix?.code === 'MISSING_SIGNING_SECRET' && needsUserSecrets(workflow);
+        // An empty array is meaningful: it still raises the offer, for a log that named no secret.
+        if (signingFailure) setSigningGap(missingSecrets);
         setError(
           // A missing signing key is the ONE failure that is genuinely the user's to resolve, and only
           // the Play Store path can hit it — the .apk build needs no key at all, so never say this there.
-          fix?.code === 'MISSING_SIGNING_SECRET' && needsUserSecrets(workflow)
-            ? `${fix.summary} It has to stay yours, so NavBharatAI cannot add it for you — the guide below walks through creating it.`
+          signingFailure
+            ? `${fix.summary} NavBharatAI can create this key for you — press “Create my signing key” below, and it is saved to your own repository.`
             : fix?.summary
               ? `${fix.summary} NavBharatAI could not fix this one on its own.`
               : 'The build did not finish, and NavBharatAI could not work out why.',

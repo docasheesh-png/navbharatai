@@ -29,6 +29,10 @@ import { ReportFilterBar } from './admin/ReportFilterBar';
 import { submittedRowFacts, allBuildRowFacts, personLabel } from '../lib/reportRowFacts';
 import { rowMatches, statusCountsFor, EMPTY_FILTERS, type ListFilterState } from '../lib/reportListFilter';
 import { describeOverflow } from '../lib/reportDiagnostics';
+import {
+  badgesFromPayload, formatBadge, badgeNeedsAttention, BADGE_HINTS,
+  type AdminTabBadges,
+} from '../lib/adminTabBadges';
 import { ReportShot } from './ReportShot';
 import { compressForReport } from '../lib/reportImage';
 
@@ -1218,6 +1222,41 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     }
   }, [adminToken]);
 
+  // THE TAB-BAR COUNTERS — "kaha kaam abhi karna hai" (admin 2026-09-17).
+  //
+  // Fetched ONCE per dashboard load and on Refresh, never per tab switch: the point is that the admin
+  // sees where the work is WITHOUT opening anything, so a badge that only appeared after you visited
+  // the page would answer a question nobody has. `badgesFromPayload` is total and defensive, so an
+  // older server mid-deploy (which knows nothing about this route) simply leaves the bar as it is.
+  const [tabBadges, setTabBadges] = useState<AdminTabBadges | null>(null);
+  const fetchTabBadges = useCallback(async () => {
+    try {
+      const r = await fetch('/api/admin/tab-badges', { headers });
+      setTabBadges(badgesFromPayload(await r.json()));
+    } catch {
+      // 🔒 NOT `badgesFromPayload({})` — that would be a set of measured-nothing badges. A failed
+      // fetch means we never looked, and the bar must look exactly as it does today.
+      setTabBadges(null);
+    }
+  }, [adminToken]);
+
+  // THE REAL BUILD ENGINES — see GET /api/admin/engines for why the old page was fake.
+  const [engines, setEngines] = useState<any>(null);
+  const [enginesLoading, setEnginesLoading] = useState(false);
+  const fetchEngines = useCallback(async () => {
+    setEnginesLoading(true);
+    try {
+      const r = await fetch('/api/admin/engines', { headers });
+      const d = await r.json();
+      setEngines(d && typeof d === 'object' ? d : null);
+    } catch (e) {
+      console.error(e);
+      setEngines(null);
+    } finally {
+      setEnginesLoading(false);
+    }
+  }, [adminToken]);
+
   const fetchLlmLatency = useCallback(async () => {
     setLlmLoading(true);
     try {
@@ -1336,7 +1375,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     }
   }, [adminToken]);
 
-  useEffect(() => { if (activeTab === 'engines') { fetchLlmLatency(); fetchLatencyAnomaly(); } }, [activeTab, fetchLlmLatency, fetchLatencyAnomaly]);
+  useEffect(() => { if (activeTab === 'engines') { fetchLlmLatency(); fetchLatencyAnomaly(); void fetchEngines(); } }, [activeTab, fetchLlmLatency, fetchLatencyAnomaly, fetchEngines]);
+  // The bar is loaded once, independently of which tab is open — that is the whole point of it.
+  useEffect(() => { void fetchTabBadges(); }, [fetchTabBadges]);
 
   // ── P-SEC.3 — admin MFA enrolment handlers ──
   const fetchMfaStatus = useCallback(async () => {
@@ -1555,16 +1596,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
       {/* Tabs */}
       <div className="flex gap-1 bg-[#161b22] p-1 rounded-2xl border border-white/5 overflow-x-auto">
-        {TABS.map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-wider whitespace-nowrap transition-all ${activeTab === tab.id ? 'bg-indigo-600 text-white shadow-lg' : 'text-[#8b949e] hover:text-white hover:bg-white/5'}`}
-          >
-            <tab.icon className="w-3.5 h-3.5" />
-            {tab.label}
-          </button>
-        ))}
+        {TABS.map(tab => {
+          // THE COUNTER BESIDE THE NAME. `formatBadge` returns null for anything unmeasured, and a
+          // null renders NOTHING — never a zero, which on this bar would read as "I looked, there is
+          // no work here". Security and Settings carry no badge: neither has a number that means
+          // pending work, and inventing one would dilute the ones that do.
+          const badge = tabBadges ? (tabBadges as any)[tab.id] : null;
+          const text = formatBadge(badge);
+          const hot = badgeNeedsAttention(badge);
+          const hint = (BADGE_HINTS as any)[tab.id] as string | undefined;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              title={text && hint ? `${tab.label} — ${hint}` : tab.label}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-wider whitespace-nowrap transition-all ${activeTab === tab.id ? 'bg-indigo-600 text-white shadow-lg' : 'text-[#8b949e] hover:text-white hover:bg-white/5'}`}
+            >
+              <tab.icon className="w-3.5 h-3.5" />
+              {tab.label}
+              {text && (
+                <span
+                  className={`px-1.5 py-0.5 rounded-md text-[9px] font-black font-mono tabular-nums border ${
+                    hot
+                      ? 'bg-red-500/15 border-red-500/40 text-red-300'
+                      : activeTab === tab.id
+                        ? 'bg-black/25 border-white/20 text-white/90'
+                        : 'bg-white/5 border-white/10 text-[#8b949e]'
+                  }`}
+                >
+                  {text}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {loading && !analytics ? (
@@ -2086,20 +2151,118 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           {/* ── AI ENGINES TAB ── */}
           {activeTab === 'engines' && (
             <div className="space-y-6">
-              {/* Live provider status */}
+              {/* ── THE REAL BUILD ENGINES ───────────────────────────────────────────────────
+                  Admin, 2026-09-17: *"ai engine wale page ko bhi update karo, woh fake hai abhi."*
+                  They were right. What used to sit here were the CHAT router's in-memory counters,
+                  presented as the platform's engines — so GLM and KIMI, which lead every tier and do
+                  nearly all of the work, appeared nowhere, and a provider with no traffic at all read
+                  as a green "Healthy". Beside it was a "Provider Kill Switches" panel promising that
+                  disabling a provider would stop requests routing to it; `serverStats.providerEnabled`
+                  is read by NOTHING that routes a request, so the promise was never kept. Both are
+                  replaced by what actually decides a build: the three tier ladders themselves. */}
+              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Cpu className="w-4 h-4 text-indigo-400" />
+                    <div>
+                      <h3 className="text-sm font-black text-white uppercase tracking-tight">Build Engines</h3>
+                      <p className="text-[9px] text-[#8b949e] font-bold uppercase tracking-widest mt-0.5">
+                        The exact order a build tries, per tier — read from the engine itself
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={fetchEngines}
+                    disabled={enginesLoading}
+                    className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-[#8b949e] hover:text-white transition-colors disabled:opacity-40"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${enginesLoading ? 'animate-spin' : ''}`} /> Refresh
+                  </button>
+                </div>
+
+                {!engines || !Array.isArray(engines.tiers) ? (
+                  <p className="text-[10px] text-[#8b949e] uppercase font-bold py-4">
+                    {enginesLoading ? 'Reading the ladders…' : 'Could not read the engine ladders.'}
+                  </p>
+                ) : (
+                  <div className="space-y-4">
+                    {engines.tiers.map((t: any) => (
+                      <div key={t.level} className={`rounded-xl border p-4 ${t.available ? 'border-white/5 bg-white/[0.02]' : 'border-red-500/40 bg-red-500/5'}`}>
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-[11px] font-black uppercase tracking-widest text-white">{t.label}</span>
+                          <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-full border ${t.available ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-red-500/10 border-red-500/30 text-red-400'}`}>
+                            {t.available ? 'Can build' : 'No engine — builds refused'}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {(t.rungs || []).map((r: any, i: number) => (
+                            <React.Fragment key={`${r.provider}-${r.model}-${i}`}>
+                              {i > 0 && <span className="text-[#484f58] text-xs">→</span>}
+                              <span
+                                title={r.keyed ? 'Key present — this rung can run' : 'No key set for this engine — the ladder skips this rung'}
+                                className={`px-2.5 py-1.5 rounded-lg border font-mono text-[10px] font-black ${r.keyed ? 'bg-black/30 border-white/10 text-white' : 'bg-black/20 border-white/5 text-[#484f58] line-through'}`}
+                              >
+                                {r.provider}
+                                <span className="text-[#8b949e] font-normal"> · {r.model}</span>
+                                {engines.today?.readable && engines.today?.counts?.[String(r.provider).split('_')[0]] > 0 && (
+                                  <span className="ml-1.5 text-emerald-400">
+                                    {engines.today.counts[String(r.provider).split('_')[0]]} today
+                                  </span>
+                                )}
+                              </span>
+                            </React.Fragment>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* WHAT REALLY RAN TODAY. Withheld entirely when the day could not be read —
+                        "nothing built today" and "we could not look" must never render the same. */}
+                    <div className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest leading-relaxed">
+                      {engines.today?.readable
+                        ? (Object.keys(engines.today.counts || {}).length > 0
+                            ? `Calls today (${engines.today.day}, UTC): ` +
+                              Object.entries(engines.today.counts as Record<string, number>)
+                                .sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(' · ')
+                            : `No builds have run yet today (${engines.today.day}, UTC).`)
+                        : 'Today\u2019s engine use could not be read — this is not the same as "nothing ran".'}
+                      <br />
+                      A struck-through rung has no key set in this environment, so the ladder skips it.
+                      Change a ladder or turn an engine off in Cloud Run (AGENTV3_LADDER_*,
+                      AGENTV3_CHEAP_FLOOR) — that is where the switches really are, and they survive a
+                      restart. A panel here would only affect one server instance until its next deploy.
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* ── CHAT ROUTER — kept, but labelled for what it actually is ─────────────────── */}
+              <div className="space-y-2">
+                <h3 className="text-sm font-black text-white uppercase tracking-tight">Chat Router — Live</h3>
+                <p className="text-[9px] text-[#8b949e] font-bold uppercase tracking-widest">
+                  {engines?.chat?.scope
+                    ? `Scope: ${engines.chat.scope} — resets on every deploy, and does not include other instances`
+                    : 'This server instance, since it started — resets on every deploy'}
+                  . These serve CHAT, not app builds.
+                </p>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {Object.entries(analytics?.liveProviderStats || {}).map(([name, stat]: any) => {
                   const isOnCooldown = stat.cooldownUntil > Date.now();
                   const secondsLeft = isOnCooldown ? Math.ceil((stat.cooldownUntil - Date.now()) / 1000) : 0;
+                  // 🔒 A PROVIDER THAT HAS NEVER RUN IS NOT "HEALTHY". The old card printed a green
+                  // Healthy badge on zero requests, which is the most misleading state a status light
+                  // can have — it reads as "checked and fine" when nothing was ever checked.
+                  const everRan = Number(stat.requestCount) > 0;
                   return (
                     <div key={name} className={`bg-[#161b22] border rounded-[1.5rem] p-5 space-y-3 ${isOnCooldown ? 'border-red-500/30' : 'border-white/10'}`}>
                       <div className="flex justify-between items-center">
                         <div className="flex items-center gap-3">
-                          <div className={`w-3 h-3 rounded-full ${isOnCooldown ? 'bg-red-500 animate-pulse' : stat.inFlight > 0 ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`} />
+                          <div className={`w-3 h-3 rounded-full ${isOnCooldown ? 'bg-red-500 animate-pulse' : !everRan ? 'bg-[#484f58]' : stat.inFlight > 0 ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`} />
                           <span className="font-black text-white uppercase font-mono">{name}</span>
                         </div>
-                        <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-full border ${isOnCooldown ? 'bg-red-500/10 border-red-500/30 text-red-400' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'}`}>
-                          {isOnCooldown ? `Cooldown ${secondsLeft}s` : 'Healthy'}
+                        <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-full border ${isOnCooldown ? 'bg-red-500/10 border-red-500/30 text-red-400' : !everRan ? 'bg-white/5 border-white/10 text-[#8b949e]' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'}`}>
+                          {isOnCooldown ? `Cooldown ${secondsLeft}s` : !everRan ? 'Not used yet' : 'Healthy'}
                         </span>
                       </div>
                       <div className="grid grid-cols-3 gap-2 text-center">
@@ -2109,7 +2272,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         </div>
                         <div className="bg-black/30 rounded-lg p-2">
                           <div className="text-[9px] text-[#8b949e] uppercase font-bold">Avg Latency</div>
-                          <div className="text-sm font-black text-amber-400 font-mono">{stat.avgLatencyMs}ms</div>
+                          <div className="text-sm font-black text-amber-400 font-mono">{everRan ? `${stat.avgLatencyMs}ms` : '—'}</div>
                         </div>
                         <div className="bg-black/30 rounded-lg p-2">
                           <div className="text-[9px] text-[#8b949e] uppercase font-bold">Errors</div>
@@ -2121,32 +2284,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   );
                 })}
                 {Object.keys(analytics?.liveProviderStats || {}).length === 0 && (
-                  <div className="col-span-2 text-center py-12 text-[#8b949e] text-[10px] font-bold uppercase">No provider activity yet. Stats appear after first AI request.</div>
+                  <div className="col-span-2 text-center py-12 text-[#8b949e] text-[10px] font-bold uppercase">No chat activity on this server instance yet.</div>
                 )}
               </div>
 
-              {/* Provider ON/OFF controls */}
-              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
-                <h3 className="text-sm font-black text-white uppercase tracking-tight">Provider Kill Switches</h3>
-                <p className="text-[10px] text-[#8b949e]">Disable a provider to prevent new requests from routing to it. Changes take effect immediately on next request.</p>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {Object.entries(providerEnabled).map(([name, enabled]: any) => (
-                    <button
-                      key={name}
-                      onClick={() => { const newVal = { ...providerEnabled, [name]: !enabled }; setProviderEnabledState(newVal); adminPost('/api/admin/settings', { providerEnabled: newVal }).then(() => toast(`${name} ${!enabled ? 'enabled' : 'disabled'}`)); }}
-                      className={`flex items-center justify-between p-4 rounded-xl border transition-all ${enabled ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}
-                    >
-                      <span className="font-black uppercase text-[11px] text-white">{name}</span>
-                      {enabled ? <ToggleRight className="w-5 h-5 text-emerald-400" /> : <ToggleLeft className="w-5 h-5 text-red-400" />}
-                    </button>
-                  ))}
-                </div>
-                <div className="flex justify-end">
-                  <button onClick={handleSettingsSave} className="px-5 py-2.5 bg-indigo-600 rounded-xl text-[11px] font-black uppercase tracking-wider text-white hover:bg-indigo-700 transition-all active:scale-95">
-                    Save Provider Settings
-                  </button>
-                </div>
-              </div>
 
               {/* ── P-MON.3 Inference-latency percentiles (real, from trace spans) ── */}
               <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">

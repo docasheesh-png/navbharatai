@@ -60061,6 +60061,71 @@ broken behaviour"; the broken behaviour is what was removed.
 4. Sandbox 84% idle across a 39.8-minute session.
 5. `AGENTV3_PROJECT_MODE` — admin-only, Cloud Run.
 
+## 2026-09-17 — "wahi se start ho": the app reopens your conversation, and your conversations are on Home
+
+Admin, verbatim: *"navbharatai free, me free chat ke sath bahut sare, professionals bhi hai — kuch aisa
+system banao, ki user last session jaga chore, next time wahi se start ho!! aur old session kis button ke
+piche hide na ho."*
+
+### What the audit found (read out of the code, not inferred)
+
+| Surface | Transcript saved? | Screen resumed next visit? |
+|---|---|---|
+| Free chat (`nbi_chat`) | ✅ `navbharat_sessions` + Firestore (signed-in only) | ❌ **no** — `initialNbiMessages()` returned a welcome line or the language picker |
+| Pro chat (`nbi_pro_chat`) | ✅ `navbharat_pro_messages` | ✅ transcript only, and only if you navigated there |
+| ~70 professionals | ✅ `prof_<id>_messages` | ✅ per professional, on mount — if you navigated there |
+| the app itself | — | ❌ `activeView` always initialised to `'home'` |
+
+🔴 **The worst of it was not the missing transcript — it was `currentSessionId = Date.now()` on every
+load.** The previous free conversation was not hidden, it was ORPHANED: the next message opened a new
+session row, so a user's History filled with one-message fragments of a chat they thought they were still
+in. **Restoring the messages alone would have been worse than the bug** — App.tsx's save effect writes
+`messages: <what is on screen>` back into the saved session, so a resume that showed the old transcript
+would have copied it into a new row on every refresh. The transcript and the id had to come back together.
+
+### Shipped
+
+- **`src/lib/lastPlace.ts`** — one memory, five rules, each with its reason: an explicit URL always wins
+  (a guess never overrides a statement, which is what would have broken every share link); a login-gated
+  place is never landed on while signed out (no login wall as frame one) and is **not** consumed, so
+  signing in resumes it; a place older than 30 days is left alone; a place stamped in the FUTURE still
+  resumes (the clock is wrong, the conversation is real); and the "is this a conversation?" guard lives in
+  the module, not at App's call site. Carries a small cross-surface **activity ledger**, because Free/Pro
+  sessions, ended professional chats and LIVE professional chats share no clock — deliberately a separate
+  key, never a field added to `prof_<id>_messages`, which is the only copy of a user's professional history.
+- **`src/lib/freeChatResume.ts`** — which conversation the Free chat is continuing, and what of it. The
+  live half is carried in FULL (see above); only the already-collapsed `restoredMessages`, which nothing
+  rewrites, is trimmed to 40. `isFreeSession` is a NEGATIVE test on purpose, so a session from an older
+  build resumes rather than silently vanishing.
+- **`src/lib/recentConversations.ts` + `components/home/RecentConversations.tsx`** — "Continue where you
+  left off" on Home: Free, Pro, Doctor and every professional in one ordered list, no button, no menu.
+  Renders nothing at all when there is nothing. A conversation with no known time shows **"Ongoing"**,
+  never a fabricated date.
+- **App.tsx** — boot landing (URL first, then the remembered place), a gated-landing effect that finishes
+  the job once Firebase answers (once, by ref, and only while the user is still on Home), the record
+  effect, and the Home list computed from LOCAL stores only so it paints on the first frame.
+
+🔴 **A "Recent Chats" block was built and REMOVED at the admin's request on 2026-07-01** (`ca8b6786`,
+*"isko hata do, koi matalb ka nahi hai"*). That is recorded in `recentConversations.ts` rather than quietly
+re-added. What was removed sat at the bottom of the hamburger menu — behind a button, inside a menu, under
+the navigation, half the rows titled "New Conversation", resuming nothing. The admin was right.
+
+🔴 **AND ITS `AppKnowledgeBase` ENTRY WAS STILL THERE — stale for two and a half months.** Line 347 told
+every AI in the app to send users to a "Recent Chats" section of the ☰ menu that has not existed since
+July, and the Pro entry cross-referenced it. Found by the mandatory AppKnowledgeBase check; both corrected
+here. Anyone who asked an AI "meri purani chat kahan hai?" since 2026-07-01 was given directions to a
+menu item that was not there.
+
+### Gate
+
+Two real defects in my own work were caught before push and fixed in the CODE, not the test:
+1. the `slice(-40)` described above, which would have **deleted** every turn older than the last forty in
+   every conversation the feature resumed (reversion-proven by `freeChatResume.test.ts`);
+2. `group-hover:text-white/60` with no `theme-compat.css` remap — white-on-white on the two light themes,
+   caught by `themeAlphaRemap.test.ts`.
+
+Tests: `lastPlace.test.ts` (30) · `freeChatResume.test.ts` (16) · `recentConversations.test.ts` (24) ·
+`resumeWiring.test.ts` (16). Full CI-equivalent gate run last, on the final state.
 ## 2026-09-17 — the project-mode gate never said whether it was on, and that cost a real setup attempt
 
 The admin was asked to canary Software Project Mode on their own account. They set it, in good faith,
@@ -60191,6 +60256,97 @@ evidence instead of filling a gap.
    is the same WRITE-half gap.
 ---
 
+## 2026-09-17 — APK build-report autopsy (run 34935149896): the keystore half was already fixed; the report telling the truth was not
+
+**The report.** A user (`jilikabegum454@gmail.com`) pressed "Google Play bundle". The run died in
+**13 seconds** at its FIRST step — the signing pre-flight — with
+`Missing signing secret(s): ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS
+ANDROID_KEY_PASSWORD`.
+
+### ✅ The reported failure itself was fixed 22 hours later — stated plainly rather than re-fixed
+
+The run started `2026-09-15T06:01:49Z`. The pre-flight block (#2960) landed on `main` at
+`2026-09-16T04:15Z` and one-press key creation (#2961) at `04:36Z`. **This user hit the exact wall those
+two PRs were written from, before they existed.** Verified rather than assumed: `StoreBuildPanel` really
+does call `/api/mobile-ship/signing-status` before dispatch and return early on a `missing` verdict, and
+`/api/mobile-ship/signing-key` really does mint a PKCS#12 and write all four secrets. Nothing was
+re-built here. The same press today is stopped before it spends a run, and offered the key in one press.
+
+### ❌ But four things in that report were wrong, and three are still live today
+
+**1. THE REPORT CLAIMED NINE STEPS RAN THAT NEVER RAN.** One step `failed`; the other nine — including
+*"Compiling your Android app"* and *"Packaging your download"* — were `done`, in a 13-second run.
+**Root cause:** GitHub's terminal state for a step that never ran is `status: 'completed'` with
+`conclusion: 'skipped'`. `mapRunSteps` consulted `conclusion` for exactly ONE value (`'failure'`) and
+then fell through to `status === 'completed' ? 'done'`, which every skipped step satisfies the moment
+the job stops — and the `BuildReportStep` union had no state that could mean "never ran", so there was
+nowhere truthful to put them even if the branch had existed. Fixed by making CONCLUSION the authority on
+the outcome and `status` only the authority on how far a step got; `'skipped'` added to the union;
+`cancelled` rides the same branch so pressing Stop cannot leave a row of green ticks.
+🔎 **Sibling closed by the same line (rule 3):** `/api/mobile-ship/run-steps` computes `percent` as
+`done / total` over the SAME shared mapping, so the live progress bar was inflating for every skipped
+step too. One implementation, both readers — which is why the fix reaches both.
+⚠️ Collapsed duplicates now keep the STRONGEST signal via an explicit rank. This is a deliberate change,
+not a refactor: the old rule let a `running` sibling overwrite a `failed` one and hide it.
+
+**2. `detail: null` WHILE THE LOG NAMED ALL FOUR SECRETS — the matcher read a sentence nothing prints.**
+`classifyBuildFailure` looked for `Missing required secret: X`. **Grepping the whole repo for that phrase
+returns the regex and its own tests — nothing else.** Every workflow this repo generates prints
+`Missing signing secret(s): A B C D`. So the precise branch (naming the secret, populating `detail`) was
+**dead in production**: it had never fired for a real user, the generic fallback carried every real
+failure, and the four names sat unparsed in the log excerpt beside a null `detail`.
+🔒 **THE CLASS, named so it is recognised again: a matcher written against an INVENTED string and then
+tested against that same invented string passes for ever while reading nothing.** `tsc` and `vitest`
+cannot tell that a regex describes no real system. `signingReadiness.test.ts` had already solved exactly
+this for the secret NAMES ("asserts this list against the names `mobileShipKit` really generates");
+`tests/apkReportTruth.test.ts` now does it for the SENTENCE, rebuilding the line from the kit's own
+template — so a reword of the workflow fails CI instead of quietly returning us to a generic message.
+Now captures ALL names, because a user who fixes one of four and rebuilds fails on the next.
+
+**3. 🔴 THE MESSAGE ON A FAILED BUILD WENT STALE ONE DAY AFTER IT WAS WRITTEN — the costly kind.**
+`StoreBuildPanel` told the user: *"It has to stay yours, so NavBharatAI cannot add it for you — the guide
+below walks through creating it."* True until 2026-09-16. The key **does** still stay theirs (written to
+their own repository's secrets, no copy kept), but *"NavBharatAI cannot add it for you"* became false the
+day one-press creation shipped — and a user who believed it went off to install a JDK and learn `keytool`
+for nothing, on the one screen where they are already stuck. **Same drift shape as the four stale ladder
+comments the admin caught by reading the code on 2026-09-15: a sentence asserting a neighbouring module's
+capability, left behind when that capability changed.**
+Fixed by RAISING the offer rather than describing it: a `MISSING_SIGNING_SECRET` failure now sets
+`signingGap` from `detail.missing`, so the "Create my signing key" button appears with the message that
+promises it. That also closes the one hole the pre-flight cannot cover — a build dispatched while the
+signing check answered `unknown` (a GitHub hiccup) lands here with no gap set, and used to leave the user
+a dead end plus a manual guide.
+
+**4. `[object Object]` IN THE PROMPT SENT TO REPAIR THE USER'S APP (pre-existing, found while widening
+`detail`).** `failureReport()` built its text with `...(diag.detail ? ['', diag.detail] : [])` — pushing
+the OBJECT into a string array, which `join('\n')` stringified. So the one useful fact (the package that
+does not exist, the directory Capacitor wanted) reached the repair AI as the literal text
+`[object Object]`. TypeScript could not catch it: the array widens to `(string | Record<…>)[]` and `join`
+accepts anything. Now rendered as `key: value` lines.
+
+### What stays FALSE on purpose
+
+`autoFixable` remains `false` for a missing signing key. NavBharatAI can now create one, but that flag
+means "repair the repository's FILES and build again unattended" — and a signing key is the app's
+permanent identity, not a file with a mistake in it. Minting one unattended could also land beside a key
+the user already published with, which is the case the create route's own 409 exists to prevent. The
+offer belongs in front of the person, which is where `detail.missing` now puts it.
+
+### Gate + proof
+
+`tests/apkReportTruth.test.ts` (15 cases), **proven by reversion**: restoring the old ternary and the old
+regex fails 8 of them. Neighbouring suites re-run green (160). Full gate below, on the final state.
+
+### Still open
+
+1. **Only `jobs[0]` is ever read** (`mobileShip.ts`, all three call sites). Every workflow the kit
+   generates is single-job, so it is correct today and would silently report one job's steps for a
+   multi-job workflow. Recorded, not speculatively changed.
+2. **`failure.stage` is `null` for any pre-flight failure** — `failedStage` reads a `NBAI_FAILED_STAGE`
+   marker the workflow prints later, so a step that fails before it has no stage. The observed report
+   showed `"stage": "install"` from an older code path; the honest value is "before any stage".
+3. **No test covers a skipped step in `mobileBuildReport.test.ts`'s own suite** — the new file covers it;
+   the older suite still exercises only `queued` and `in_progress`.
 ## 2026-09-17 — Journey derivation could not see a form the page COMPOSES (autopsy `e4ebcb5f`, second occurrence)
 
 **Recorded as an OPEN root cause in PR #2988 two days ago; this report is the second occurrence, with
@@ -60566,6 +60722,109 @@ exactly as before, because we owe it an explanation. Test-locked explicitly, and
    inside this PR is its own hazard), recorded so it is fixed deliberately.
 3. **3 high/critical dependency vulnerabilities** survive `npm audit fix` and need major-version upgrades.
 4. **Design consistency grade D** on a shipped app — 42 colours, 15 off-grid spacing values.
+## 2026-09-17 — The admin dashboard tells you where the work is, and the AI Engines page stops lying
+
+**Admin, in their own words:** *"us sub header me naam ke sath number bhi chahiye … jisse admin ko ek
+nazar me pata lag jaye, kaha kaam abhi karna hai"* and, in the same message, *"ai engine wale page ko
+bhi update karo, woh fake hai abhi"*.
+
+Both halves were right, and the second one was a real second-absolute-rule breach, not a cosmetic
+complaint.
+
+### 1 · The sub-header counters
+
+Nine tabs, and nothing on any of them said which one needed a person. The admin was opening each page
+in turn to find out. Each tab now carries the pair they asked for:
+
+| Tab | Badge | Source |
+|---|---|---|
+| Monitor | things needing attention | in-memory provider error counters — the SAME figure the Monitor's own health score uses, so the badge and the page cannot disagree |
+| Users | visitors today / registered | `site_analytics` (website + app, one UTC day — the store the "Who came" card is already built on) + `user_token_wallets` |
+| AI Engines | engines that served today / engines holding a key | `agentv3_engine_use` (new, below) + the real tier ladders |
+| Revenue | today / all time | `payment_transactions`, SUCCESS only, today bounded on the SERVER clock |
+| Build / User / APK Reports | never opened / not yet fixed | `reportTriage`'s existing `reportStatus` + `openReportCount` — the words already exist, a second vocabulary is how a badge starts disagreeing with the page it points at |
+
+🔴 **THE ONE RULE THE WHOLE MODULE EXISTS TO ENFORCE: `null` IS NOT `0`.** On this bar a zero is a
+promise — *"I looked, and there is no work here"* — and the admin acts on it by not opening the page.
+Every source behind these numbers can fail (a Firestore read, an instance that just booted, an older
+server mid-deploy), and a failure that silently became a calm zero is exactly the forbidden state: a
+status indicator that does not reflect real state. So `value: null` renders **nothing at all**, a
+*measured* zero still renders, a failed fetch sets `null` rather than an empty payload, and a pair
+whose total could not be read still shows its numerator ("54 people came today" answers the question
+on its own; a denominator alone does not).
+
+Colour means work waiting and nothing else: only an `attention` badge above zero is red. Colouring a
+zero, or colouring healthy activity, is what trains a person to stop seeing colour.
+
+`src/lib/adminTabBadges.ts` is PURE — no fetch, no clock, no env — precisely so that rule is testable.
+`tests/adminTabBadges.test.ts` (19 cases, reversion-proven: making `formatBadge` treat `null` as `0`
+fails 5 of them).
+
+### 2 · The AI Engines page was fake in three separate ways
+
+Not fabricated — **mis-sourced, and one control was inert.** Each is fixed at the cause:
+
+1. 🔴 **The engines it listed are not the engines that build apps.** Every card came from
+   `getProviderStats()`, the CHAT router's counter. GLM and KIMI lead the first rung of all three
+   tiers and do nearly all of the platform's work; they appeared **nowhere** on a page called AI
+   Engines. The root cause is one this repo already knew and had never acted on: every AI number in
+   the admin panel comes from `ai_usage_logs`, **which the chat route writes and an AgentV3 build
+   never touches.**
+2. 🔴 **The status was this instance, since boot**, presented as the platform's — it resets on every
+   deploy and cannot see sibling instances. Worse, a provider with **zero requests** displayed a green
+   *"Healthy"*: the most misleading state a status light can have, because it reads as "checked and
+   fine" when nothing was ever checked. It now reads **"Not used yet"**, grey, with `—` for latency.
+3. 🔴 **THE KILL SWITCHES DID NOTHING.** The panel said *"Disable a provider to prevent new requests
+   from routing to it. Changes take effect immediately on next request."* `serverStats.providerEnabled`
+   is read by exactly two places in the whole repo — the settings route that echoes it back, and the
+   health check that COUNTS it — and by **not one routing decision**. It was also in-memory only, so
+   it could not have survived a deploy or reached another instance even if something had read it.
+   **Removed, not recaptioned** — a button that does not do what it says is the forbidden state, and
+   the fix is never a softer caption.
+
+**What replaces it is what actually decides a build:** the three tier ladders, rung by rung, read from
+`TIER_LADDERS` itself (never re-typed into the route — a second copy is a second thing to drift), each
+rung marked with whether its key is present *in this environment*, each tier marked with the same
+`tierEngineAvailable` predicate the build route refuses on. Beside each rung: how many calls it really
+served today.
+
+Where the switches genuinely are is stated on the panel — `AGENTV3_LADDER_*`, `AGENTV3_CHEAP_FLOOR` in
+Cloud Run — rather than building a second, weaker copy of a mechanism that already exists and works
+across instances and restarts.
+
+### 3 · The missing subsystem, named: nothing recorded which engine served a BUILD
+
+`src/server/AgentV3/engineUseStore.ts` — one document per UTC day, `FieldValue.increment` per engine
+FAMILY. Deliberately patterned on `agentv3_sandbox_starts`, so it adds no new idea and inherits a
+storage shape already proven in production. A per-CALL row would be a second `ai_usage_logs`
+(unbounded, and the very cost this panel exists to watch).
+
+- **Families, not keys.** A 50-key pool reports `GLM`, `GLM#2`, `GLM#17`. Counting those as fifty
+  engines would make "engines used today" a measure of our key list, jumping the day somebody buys
+  keys.
+- **`null` for unreadable, `{}` for a genuinely empty day** — the caller must be able to tell "nothing
+  built today" from "we could not look", because the badge above renders a number for one and nothing
+  for the other.
+- **An observation must never block a build.** Every write is best-effort and swallowed, and the call
+  site is `void recordEngineUse(providerTurns)` at settle, where the fact is already known.
+
+Tests: `tests/aiEnginesPageIsReal.test.ts` (14 cases), reversion-proven — restoring the kill-switch
+panel fails it. One assertion is worth noting for later sessions: every "this is gone" check runs
+against source **with comments stripped**, because the comment that replaced each removed panel names
+it on purpose, and a test that cannot tell an explanation from the thing it explains punishes exactly
+the clarity this file asks for.
+
+### ⚠️ Honest boundaries
+
+- **The Monitor badge counts provider errors since this instance booted**, not a platform-wide total —
+  the load board would be the truer source and was rejected on cost (it calls Cloud Monitoring and the
+  sandbox provider, which is the right price for a page somebody opened and far too much for a header
+  that draws on every visit).
+- **`/api/health`'s "AI engines: N of M available" is now always N = M**, because the only thing that
+  could change it was the inert switch. That count was a hand-set note presented as a health check on
+  a PUBLIC page; it is more honest constant than it was adjustable.
+- **`engines used today` starts at zero on the day this ships** — the store has no history, and
+  backfilling it would mean inventing days nobody measured.
 ## 2026-09-17 — Autopsy 2c61f648: "Can I use it. Or how to create apk" built an app for 7.3 minutes
 
 Admin sent build report `2c61f648` (user `vasanthakumar9813@gmail.com`, weak tier, `ok: true`,

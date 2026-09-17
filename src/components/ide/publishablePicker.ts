@@ -40,6 +40,45 @@ export interface PublishableApp {
 /** An app with no title yet still needs a name a human can recognise in a list. */
 export const UNTITLED_LABEL = 'Untitled app';
 
+/**
+ * The longest name this picker will SUGGEST.
+ *
+ * 🔴 WHY A CAP EXISTS AT ALL (admin 2026-09-17, from a phone screenshot of App Mart). A
+ * workspace's `title` is the user's own BUILD PROMPT, and the suggested name was that title
+ * verbatim. People accept a pre-filled field, so App Mart filled up with listings called
+ * "To build a massive, rapidly scaling carpool…" and "I already have the complete frontend UI
+ * for…". Nobody browsing can tell what those apps DO, which is what the admin actually saw.
+ *
+ * ⚠️ THE SERVER ALREADY CUTS AT 60 (`/api/nav-store/web/publish`), and that is a different thing
+ * from this: 60 is the longest a name may BE, this is the longest one we will PUT THERE for
+ * somebody. A prompt fragment is still not a name at 60 characters — it is just a shorter prompt
+ * fragment — so this cuts at a word boundary near 42, which is about what fits two lines of an App
+ * Mart tile, and leaves the field fully editable.
+ *
+ * It deliberately does NOT try to invent a better name from the prompt. Guessing a product name
+ * from a sentence is the kind of cleverness that produces a confidently wrong label the creator
+ * never notices; a visibly truncated one invites the edit instead.
+ */
+export const MAX_SUGGESTED_NAME = 42;
+
+/**
+ * Trim a workspace title down to something name-shaped. PURE.
+ *
+ * Collapses runs of whitespace (a pasted multi-line prompt arrives with newlines in it), then cuts
+ * at the last word boundary that fits so a name never ends mid-word. A single word longer than the
+ * cap is cut hard — there is no boundary to find, and keeping it whole would defeat the cap.
+ */
+export function shortenSuggestedName(raw: string, max: number = MAX_SUGGESTED_NAME): string {
+  const clean = String(raw ?? '').replace(/\s+/g, ' ').trim();
+  if (clean.length <= max) return clean;
+  const cut = clean.slice(0, max);
+  const lastSpace = cut.lastIndexOf(' ');
+  // Only honour a boundary that leaves a usable name — cutting "Extraordinarily long single word"
+  // at its first space would hand back one letter.
+  const body = lastSpace > max * 0.5 ? cut.slice(0, lastSpace) : cut;
+  return `${body.replace(/[\s,.;:\-—]+$/, '')}…`;
+}
+
 /** Human "when" for the dropdown — a list of identical titles is useless without it. PURE. */
 export function whenLabel(ts: number, now: number): string {
   const diff = Math.max(0, now - ts);
@@ -72,7 +111,7 @@ export function publishableApps(rows: ConversationRow[] | null | undefined, now:
     const existing = byWorkspace.get(workspaceId);
     if (existing && existing.updatedAt >= updatedAt) continue;
     const title = String(row?.title ?? '').trim();
-    const suggestedName = title || UNTITLED_LABEL;
+    const suggestedName = shortenSuggestedName(title) || UNTITLED_LABEL;
     const when = whenLabel(updatedAt, now);
     byWorkspace.set(workspaceId, {
       workspaceId,

@@ -17701,12 +17701,21 @@ async function noteBuildOutcome(
             let pkgRaw: string | undefined;
             try { pkgRaw = await actuator.readFile(workspaceId, 'package.json'); } catch { pkgRaw = undefined; }
             const plan = detectTestPlan(files, pkgRaw);
+            // WHETHER A SUITE EXISTS IS A FACT ABOUT THE PROJECT, AND THE GATE HAD TO GUESS IT
+            // (autopsy 8b3dca5c). Without this the release gate's caveat read "the app has no test
+            // suite that could be run here" in the same report that said, seven seconds later, "This
+            // project HAS a Playwright test suite but @playwright/test is not installed here".
+            // It only changes the WORDING of an unproven check — see `testSuitePresent`.
+            if (plan) gateEvidence.testSuitePresent = true;
             if (!plan) {
               // "Nothing ran" and "there was nothing to run" are different facts, and only the second is
               // good news. A suite whose runner is not installed — which includes the one WE scaffold —
               // now says so instead of going quiet.
               const missing = suitePresentButRunnerMissing(files, pkgRaw);
               if (missing) {
+                // `detectTestPlan` found no RUNNABLE plan, but the suite is on disk — that is exactly
+                // the case whose absence the gate used to announce as the project's own gap.
+                gateEvidence.testSuitePresent = true;
                 buildDiag.record({
                   phase: 'readiness', severity: 'info', code: 'TEST_SUITE_UNVERIFIED',
                   message: missing, autoResolved: true, // not an app defect — nothing for the build to resolve

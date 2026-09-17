@@ -113,9 +113,24 @@ export interface LoadReadings {
   /** Hosted Cloud Run services against the 1,000 cap (§12 #5). */
   hostedServices?: number | null;
   hostedServicesCap?: number | null;
-  /** Publish channels against their cap (§10). */
+  /**
+   * PREVIEW channels against their cap (§10).
+   *
+   * 🔴 IT IS THE PREVIEW COUNT, NOT EVERY CHANNEL THE API LISTS (admin Monitor capture, 2026-09-17).
+   * This tile read `channels.length`, which includes the site's own `live` channel — and the cap is
+   * on PREVIEW channels, which `live` is not. `channelCeilingVerdict` had already fixed exactly this
+   * off-by-one on 2026-09-14, in its own words: *"with it counted, 'N of about 50' was off by one on
+   * every site, always."* The board kept the old arithmetic, so one screen showed BOTH numbers at
+   * once — Publish load `44 / 50` beside Published Apps `43 / 50`. The drifted-sibling class: fixed
+   * in one reader, never hunted in the other. The route now feeds `channelCeilingVerdict().used`.
+   */
   publishChannels?: number | null;
   publishChannelsCap?: number | null;
+  /**
+   * Is bucket-only publishing ON (`PUBLISHED_APPS_BUCKET_ONLY`)? Undefined when the caller does not
+   * know, which reads exactly as today. See the publish tile for why the NOTE depends on it.
+   */
+  publishBucketOnly?: boolean;
   /** Provider 429 rate over the window, 0–1 (§12 #8). */
   providerErrorRate?: number | null;
   /** Spend not recovered from users, in INR, over the window. */
@@ -273,9 +288,22 @@ export function loadBoard(r: LoadReadings | null | undefined): LoadTile[] {
     value: x.publishChannels ?? null,
     cap: x.publishChannelsCap ?? null,
     display: displayOf(x.publishChannels, x.publishChannelsCap, 'channels'),
+    // 🔴 THE NOTE MUST NOT PRESCRIBE WORK THAT IS ALREADY DONE (admin Monitor capture, 2026-09-17).
+    // It read "Bucket-only publishing takes no channel at all — that is the fix" unconditionally —
+    // true as a fact, and wrong as an instruction once `PUBLISHED_APPS_BUCKET_ONLY=on` went live in
+    // production (verified on a real published app, 2026-09-17). An admin reading it is sent to switch
+    // on a thing that has been on for hours, while the action that WOULD move this number — reclaiming
+    // the channels no live app is using — goes unnamed. With bucket-only on, new publishes take no
+    // channel, so this count cannot grow: the ceiling is frozen and only the backlog is left.
+    // `undefined` keeps today's wording exactly, so a caller that does not know says nothing new.
     note: pubLevel === 'ok' || pubLevel === 'unknown'
-      ? 'Published sites holding a hosting channel.'
-      : 'Approaching the channel ceiling. Bucket-only publishing takes no channel at all — that is the fix.',
+      ? (x.publishBucketOnly
+        ? 'Published sites still holding a hosting channel. New publishes take none — bucket-only publishing is on.'
+        : 'Published sites holding a hosting channel.')
+      : (x.publishBucketOnly
+        ? 'Near the channel ceiling, but it can no longer grow: bucket-only publishing is on, so new publishes '
+          + 'take no channel. What is left is reclaiming the channels no live app is using.'
+        : 'Approaching the channel ceiling. Bucket-only publishing takes no channel at all — that is the fix.'),
   });
 
   // 8 · AI PROVIDERS — already handled in code; this is the tile that says whether it is still true.

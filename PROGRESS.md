@@ -64090,4 +64090,94 @@ Proven by reversion: **3 of 16 fail** with `runnerChainSummary.ts` reverted.
 
 **Full CI gate green on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` ·
 `vitest run` (**25,011 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
+## 2026-09-17 — THE FUTILITY BREAKER: a build that is going nowhere now stops (open item from #3039, closed)
+
+**Branch `claude/a-build-going-nowhere-must-stop`. New module
+`src/server/AgentV3/futilityBreaker.ts`, one new abort cause, wired at the minute heartbeat.**
+
+### The report
+
+Build `d6d664e6` (autopsy shipped as #3039, which recorded this as an OPEN item): the prompt was one
+word, the build ran the full **29 minutes** to the `BUILD_TIMEOUT` wall clock, wrote **no app**, and
+minutes 4→29 contain nothing but heartbeats and failed provider calls. **Zero files, zero completed
+commands, zero plan steps, for twenty-five consecutive minutes.**
+
+#3039's own words, and they name the gap exactly: *"Cost is bounded, throughput is bounded,
+**pointlessness** is bounded by nothing."*
+
+| bound | what enforces it |
+|---|---|
+| MONEY | `buildCostCeiling.ts` — stops a build past its cost ceiling |
+| THROUGHPUT | `slowRungBench.ts` — retires a provider delivering too few tokens/second |
+| **FUTILITY** | **nothing** — until now |
+
+It is the admin's own bar applied to the clock: *"minutes, and the minutes must be WORKING minutes."*
+
+### 🔑 Progress is what the build PRODUCED, not what it attempted
+
+That distinction is the whole design. A failed provider call records an issue, emits narration and
+burns a minute — counting any of that as activity is exactly what let this build look busy for
+twenty-five minutes. So progress is three things a build can only do by moving forward:
+
+1. a **file** was written (`writtenFiles.size`)
+2. a **command completed** (the route's own `onCommand` hook — which fires on completion)
+3. a **plan step** was done (`etaStepsDone`)
+
+Deliberately NOT progress: a provider call (successful or failed), a narration line, a heartbeat, an
+issue being recorded, a token being spent. Every one of those was happening throughout that build.
+
+### 🔴 Driven from the TIMER, not from the provider-turn hook — the load-bearing choice
+
+The obvious home was `captureTurnUsage`, where the cost ceiling lives. **It would never have run in
+the case it exists for:** that hook fires on a *successful* provider call, and the reported build's
+quiet twenty-five minutes were *failed* ones. The minute heartbeat (`diagHeartbeatTimer`) fires
+regardless of what the providers are doing, so the breaker rides that. A reversion guard asserts the
+tick sits after the heartbeat and *before* `captureTurnUsage` in the file, so it cannot be "tidied"
+into the turn hook later.
+
+### 🔒 It is a STOP, not a kill — and the floor is measured, not guessed
+
+Copied from `buildCostCeiling.ts`: `AgentRunner` ends BETWEEN turns, files already written are
+persisted, and the user is told their work is saved and one message resumes it. So it can only ever
+make a build end **sooner** than the wall clock would have — the worst case is strictly better.
+
+⚠️ **The one risk is a single legitimate operation longer than the window.** Measured rather than
+assumed: the longest **bounded** single operation anywhere in the build path is **5 minutes**
+(`COMMAND_TIMEOUT_MS` in `E2BActuator`, and `AGENTV3_STREAM_HARD_CAP_MS`'s 300 s ceiling on one
+streamed call); next are `import-preview-boot` at 240 s and `vaccine-run-tests` at 180 s. So the
+**floor is 6 minutes** — strictly above every one of them — and the default is **10**, twice the
+longest. A build cannot be broken during an operation still allowed to be running.
+
+`AGENTV3_FUTILITY_MINUTES`: **not set, code default 10**. An explicit `0` (or `off`) disables it;
+anything present-but-unreadable falls back to the default, never to "off". Clamped to 6…30 — past 30
+the wall-clock watchdog owns it.
+
+### Honesty
+
+- New abort cause **`'futile'`**, so the reason is recorded rather than guessed (that module's whole
+  purpose). Its user sentence avoids **"too long"** — that is the watchdog's, and this build may have
+  stopped at minute 12 of a 30-minute budget. It says the build *was not getting anywhere*, names no
+  provider, no model and no cost (White-Label Law), and when files survived it says so and how to
+  continue. When nothing was produced it asks for **a bit more detail** — the same remedy #3039's
+  objectless-order rule gives *before* a build starts; this is the net for when that rule did not
+  catch it.
+- Admin finding **`FUTILITY_BREAKER`**, `autoResolved: false` (the build really did stop — marking it
+  resolved would let a report summarise a halted build as one that healed itself), whose detail names
+  all three counters, because *"nothing happened"* is a claim the reader must be able to check.
+- Fails **OPEN** in every uncertain case: a NaN counter reads as zero, a counter that went backwards
+  counts as progress, a throw inside the tick ends nothing.
+
+### Tests — `tests/aBuildGoingNowhereMustStop.test.ts` (24 cases)
+
+Proven by reversion in **all three parts**: removing the module fails the file to import; reverting
+the route wiring fails 5; reverting the abort cause fails 2.
+
+⚠️ **Two of my own drafts were wrong and the tests caught both.** An assertion expected ten quiet
+ticks to stop a run seeded with a non-zero snapshot — the first tick against it *is* progress, so the
+quiet run begins on the second; **the code was right**. And the "files survived" message test passed
+with the abort case REVERTED, because `default`'s text also contains *"files so far are saved"* and
+*"continue from here"* — it now asserts `stopped making progress`, which only this branch says.
+
+**Full CI gate green on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` ·
+`vitest run` (**24,990 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
 `deps:server-gate`.

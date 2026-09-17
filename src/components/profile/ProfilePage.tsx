@@ -11,11 +11,13 @@
 import { useEffect, useState, useCallback } from 'react';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
-import { User, Wallet, Clock, CheckCircle2, Circle, AlertCircle, ChevronRight, Edit3, Save, X, CalendarDays, Zap, Activity, LogOut, AlertTriangle, Smartphone, ShieldCheck, Mail, Loader2, Gift, Copy } from 'lucide-react';
+import { User, Wallet, Clock, CheckCircle2, Circle, AlertCircle, ChevronRight, Edit3, Save, X, CalendarDays, Zap, Activity, LogOut, AlertTriangle, Smartphone, ShieldCheck, Mail, Loader2, Gift, Copy, Globe } from 'lucide-react';
 import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { ApiKeysCard } from './ApiKeysCard';
+import { PublishedAppsCard } from './PublishedAppsCard';
+import { publishedAppRows, type PublishedAppRow } from '../../lib/publishedAppsView';
 import { panelWidth, panelColumns, type DeviceMode } from '../../lib/panelWidth';
 import { maskPhone } from '../../lib/phoneNumber';
 import { VerifyPhoneSheet } from '../VerifyPhoneSheet';
@@ -166,6 +168,14 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
     setGithubLinked(isGithubLinked(user));
   }, [user]);
 
+  // ── Published apps (admin 2026-09-17: "kitne app published huyi hai, woh bhi dikhe") ───────────
+  // `null` is NOT an empty list: it means "not read yet". The card needs the difference, because
+  // "you have published nothing" and "we could not read your apps" are opposite statements to make
+  // to somebody about their own work.
+  const [publishedApps, setPublishedApps] = useState<PublishedAppRow[] | null>(null);
+  const [publishedMeta, setPublishedMeta] = useState<{ used: number; cap: number; planName: string | null } | null>(null);
+  const [publishedError, setPublishedError] = useState('');
+
   const [verifyBusy, setVerifyBusy] = useState<'email' | 'github' | null>(null);
   const [verifyError, setVerifyError] = useState<{ which: 'email' | 'github'; text: string } | null>(null);
   const [emailSent, setEmailSent] = useState(false);
@@ -249,6 +259,30 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
         const ar = await fetch('/api/profile/cost-alerts', { headers: { Authorization: `Bearer ${token}` } });
         if (ar.ok) setCostAlerts(await ar.json());
       } catch { /* non-fatal — banner simply doesn't render */ }
+      // The person's own published apps. Best-effort and separate, like the alerts above: this list
+      // must never be able to stop the profile itself from rendering.
+      //
+      // 🔎 NO NEW ROUTE. `/api/agentv3/my-published-apps` already answers exactly this question for
+      // the signed-in caller (it is what the Publish sheet's own list reads) and is scoped to the
+      // verified uid on the server — so this screen can never see another account's apps, whatever
+      // it asks for.
+      try {
+        const pr = await fetch('/api/agentv3/my-published-apps', { headers: { Authorization: `Bearer ${token}` } });
+        if (pr.ok) {
+          const pd = await pr.json();
+          setPublishedApps(publishedAppRows(pd?.apps));
+          setPublishedMeta({
+            used: Number(pd?.used ?? 0),
+            cap: Number(pd?.cap ?? 0),
+            planName: typeof pd?.planName === 'string' ? pd.planName : null,
+          });
+          setPublishedError('');
+        } else {
+          setPublishedError('Your published apps could not be loaded just now.');
+        }
+      } catch {
+        setPublishedError('Your published apps could not be loaded just now.');
+      }
     } catch { /* best-effort */ } finally {
       setLoading(false);
     }
@@ -626,6 +660,23 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
               )}
             </div>
           </div>
+        </div>
+
+        {/* ── Published Apps (admin 2026-09-17) ────────────────────────────────
+            Above the wallet, because it is the only section on this page about something the person
+            MADE. Each row opens in the real browser, never inside the app's own WebView. */}
+        <div className="bg-[#161b22] border border-white/5 rounded-3xl p-6 space-y-4">
+          <div className="flex items-center gap-2">
+            <Globe className="w-4 h-4 text-emerald-400" />
+            <h2 className="text-xs font-black text-white uppercase tracking-widest">Your Published Apps</h2>
+          </div>
+          <PublishedAppsCard
+            rows={publishedApps ?? []}
+            loading={publishedApps === null && !publishedError}
+            {...(publishedError ? { error: publishedError } : {})}
+            {...(publishedMeta ? { used: publishedMeta.used, cap: publishedMeta.cap, planName: publishedMeta.planName } : {})}
+            emptyText="You have not published any apps yet. Build one with NavBharatAI Pro and press Publish — it gets a permanent link you can share with anyone."
+          />
         </div>
 
         {/* ── Wallet Summary ───────────────────────────────────────────────── */}

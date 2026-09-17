@@ -22,8 +22,22 @@ import { SHIP_WORKFLOWS, isShipWorkflow, workflowPath } from '../../lib/shipWork
 /** A run's step in the user's language (mapped by friendlyBuildStep, GitHub housekeeping hidden). */
 export interface BuildReportStep {
   label: string;
-  state: 'done' | 'running' | 'pending' | 'failed';
+  /**
+   * ⚠️ `skipped` is NOT a cosmetic addition — see `mapRunSteps`. GitHub's terminal state for a step
+   * that never ran is `status: 'completed'`, and without a state meaning "never ran" there was
+   * nowhere honest to put it, so it was reported as `done`.
+   */
+  state: 'done' | 'running' | 'pending' | 'failed' | 'skipped';
 }
+
+/**
+ * Which signal wins when two raw steps collapse onto one friendly label. A real outcome beats the
+ * absence of one, and a failure beats everything — a failed sub-step must never be hidden by a
+ * sibling that was still running.
+ */
+const STATE_RANK: Record<BuildReportStep['state'], number> = {
+  pending: 0, skipped: 1, done: 2, running: 3, failed: 4,
+};
 
 /** What GitHub reports about the run itself. */
 export interface BuildReportRun {
@@ -68,7 +82,8 @@ export interface MobileBuildReport {
     /** True when NavBharatAI's self-healing loop can repair this class itself on the next press. */
     navbharatCanFixItself: boolean;
     /** Structured facts the classifier extracted (e.g. the missing secret's name). */
-    detail: Record<string, string> | null;
+    /** Facts from the log. A value may be a list — `missing` carries every absent signing secret. */
+    detail: Record<string, string | string[]> | null;
     /** The real log lines of the failed step — bounded, timestamps stripped. */
     logExcerpt: string[];
   };
@@ -128,16 +143,32 @@ export function mapRunSteps(
   for (const s of rawSteps) {
     const label = friendlyBuildStep(String(s.name || ''));
     if (!label) continue; // hide GitHub's own housekeeping steps
+    // 🔴 CONCLUSION IS THE AUTHORITY ON THE OUTCOME; STATUS ONLY SAYS HOW FAR THE STEP GOT.
+    //
+    // THE BUG THIS FIXES (real report, .aab run 34935149896, 2026-09-15): the run died at its FIRST
+    // step — the signing pre-flight — after 13 seconds, and the report showed the other nine steps as
+    // `done`, including "Compiling your Android app" and "Packaging your download". Nothing had
+    // compiled and nothing had been packaged.
+    //
+    // WHY, and it is one missing case rather than a wrong one: GitHub marks a step that NEVER RAN as
+    // `status: 'completed'` with `conclusion: 'skipped'`. The old ternary consulted `conclusion` for
+    // exactly one value, `'failure'`, and then fell through to `status === 'completed' ? 'done'` —
+    // which every skipped step satisfies the moment the job stops. There was also no state in the
+    // union that could mean "never ran", so there was nowhere truthful to put them even if the
+    // branch had existed.
+    //
+    // `cancelled` rides the same branch: a user who pressed Stop must not be shown a row of ticks
+    // for work their cancel prevented.
     const state: BuildReportStep['state'] =
-      s.conclusion === 'failure' ? 'failed'
-        : s.status === 'completed' ? 'done'
-          : s.status === 'in_progress' ? 'running'
-            : 'pending';
+      s.conclusion === 'failure' || s.conclusion === 'timed_out' ? 'failed'
+        : s.conclusion === 'skipped' || s.conclusion === 'cancelled' ? 'skipped'
+          : s.status === 'completed' ? 'done'
+            : s.status === 'in_progress' ? 'running'
+              : 'pending';
     // Collapse consecutive duplicates (e.g. setup steps that map to one friendly label).
     const prev = steps[steps.length - 1];
     if (prev && prev.label === label) {
-      if (state === 'failed' || state === 'running') prev.state = state;
-      else if (prev.state === 'pending' && state === 'done') prev.state = 'done';
+      if (STATE_RANK[state] > STATE_RANK[prev.state]) prev.state = state;
       continue;
     }
     steps.push({ label, state });

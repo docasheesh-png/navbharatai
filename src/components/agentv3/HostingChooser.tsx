@@ -22,6 +22,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { Rocket, X, Globe, Server, Link2, GitBranch, ExternalLink, AlertCircle, Database, Smartphone, ChevronDown } from 'lucide-react';
+import { openExternalUrl } from '../../lib/mobileNative';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { NbaiDomainConnect } from './NbaiDomainConnect';
 import { usePublishState } from '../../hooks/usePublishState';
@@ -717,14 +718,20 @@ export function HostingChooser({
 
             {myApps?.map((a) => (
               <div key={a.workspaceId} className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3 flex flex-col gap-1.5">
-                <a
-                  href={a.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-[12px] text-emerald-300 hover:text-emerald-200 font-semibold break-all"
+                {/* SIBLING OF THE PROFILE/ADMIN LISTS (2026-09-17), fixed in the same change.
+                    This is the same action — "open my published app" — and a bare `target="_blank"`
+                    opens INSIDE the Android shell's own WebView rather than in the browser, which is
+                    precisely what the request for those two screens rules out. `openExternalUrl`
+                    passes `_system` on native, validates the scheme, and adds noopener on the web.
+                    ⚠️ The wider class is NOT swept here: 45 bare `target="_blank"` links remain across
+                    24 files, recorded as an open root cause in PROGRESS.md rather than half-fixed. */}
+                <button
+                  type="button"
+                  onClick={() => openExternalUrl(a.url)}
+                  className="text-[12px] text-emerald-300 hover:text-emerald-200 font-semibold break-all text-left"
                 >
                   {a.url.replace(/^https?:\/\//, '')}
-                </a>
+                </button>
                 <p className="text-[11px] text-zinc-500">
                   {a.sizeMb !== null ? `${a.sizeMb.toFixed(1)} MB` : 'size unknown'}
                   {a.updatedAt ? ` · updated ${new Date(a.updatedAt).toLocaleDateString()}` : ''}

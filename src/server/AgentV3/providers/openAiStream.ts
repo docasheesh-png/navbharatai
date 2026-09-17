@@ -60,7 +60,18 @@ export type StreamStopCause =
   /** No chunk arrived for the idle bound — the provider went quiet mid-answer. */
   | 'idle'
   /** The caller's own budget/ceiling ran out while chunks were still arriving. */
-  | 'deadline';
+  | 'deadline'
+  /**
+   * The provider is ANSWERING, and answering so slowly that waiting for it costs more than moving on.
+   *
+   * 🔴 THE CASE NOTHING COULD SEE (autopsy 2b0a3ed5, 2026-09-17). A first call took 55.7 seconds and
+   * returned 27 output tokens — 0.48 tok/s against the ~33/s our own budget arithmetic assumes — and
+   * the user pressed Stop at 66 s. It reached NO escalation path: the timeout bench needs a throw and
+   * the call succeeded; the 429 bench needs a 429; the idle bound needs 60 s of TOTAL silence and
+   * tokens trickled; the hard cap is 300 s; and the post-call slow bench needs three calls. A stream
+   * that is neither healthy nor silent is a THIRD state, and this is its name.
+   */
+  | 'slow';
 
 /**
  * Accumulates streamed deltas into the SAME completion shape the non-streaming call returns.
@@ -116,6 +127,31 @@ export class OpenAiStreamAccumulator {
   /** The visible text seen so far — what an incremental `onText` has already been handed. */
   textSoFar(): string {
     return this.text;
+  }
+
+  /** The provider's own thinking so far, where it streams one. Never part of the ANSWER. */
+  reasoningSoFar(): string {
+    return this.reasoning;
+  }
+
+  /**
+   * How much the provider has PRODUCED, counting everything it sent: answer text, tool-call
+   * arguments, and its own reasoning.
+   *
+   * 🔑 REASONING IS COUNTED, AND THAT IS THE WHOLE REASON THIS IS SAFE (autopsy 2b0a3ed5). GLM 5.3+
+   * always reasons, and its thinking arrives BEFORE any content — so a throughput floor that watched
+   * only `text` would read a perfectly healthy reasoning turn as producing nothing and abandon it, on
+   * exactly the tier that reasons most. Counting reasoning makes a working provider look busy,
+   * because it IS busy, and leaves only the genuinely crawling one below the line.
+   *
+   * Characters rather than tokens, deliberately: tokens are not known until the final chunk, and
+   * inventing a token count from text length is the estimate the wallet law forbids. This number
+   * decides ROUTING, never a bill, and a ratio of characters is the same ratio either way.
+   */
+  producedChars(): number {
+    let total = this.text.length + this.reasoning.length;
+    for (const call of this.calls.values()) total += call.name.length + call.args.length;
+    return total;
   }
 
   /** Did the provider send anything at all, reasoning included? */
@@ -204,6 +240,68 @@ export const STREAM_IDLE_MS_DEFAULT = 60_000;
  * `turnDeadline` remains the authority on the lane's budget and this never overrides it.
  */
 export const STREAM_HARD_CAP_MS_DEFAULT = 300_000;
+
+/**
+ * 🔴 THE THROUGHPUT FLOOR — the third state a streamed call can be in (autopsy 2b0a3ed5, 2026-09-17).
+ *
+ * Streaming bounded a call by SILENCE, which assumes two kinds of provider: healthy, and stalled. A
+ * provider that trickles is a third: it never goes quiet, so the 60 s idle bound never fires, and it
+ * always has an answer eventually, so the 300 s ceiling returns a truncated SUCCESS. The reported
+ * call sat in that gap for 55.7 seconds and produced 27 tokens.
+ *
+ * ⚠️ THIS IS DELIBERATELY NOT A SECOND COPY OF `FLOOR_MS_PER_OUTPUT_TOKEN`. That constant sizes a
+ * REQUEST (how many tokens fit in a clock) and is well calibrated at 30 ms/token — measured across 73
+ * real calls and deliberately left alone. This decides whether to keep WAITING, which is a different
+ * question and needs a far more forgiving number: the floor below is roughly one twentieth of the
+ * budgeted pace, so a provider merely having a bad minute is nowhere near it.
+ */
+export const STREAM_MIN_CHARS_PER_SEC = 6;
+
+/**
+ * How long a stream is left alone before its rate is judged at all.
+ *
+ * A provider legitimately spends the first seconds on prompt ingestion and returns nothing — at 26,569
+ * input tokens the reported call had real work to do before its first byte. Judging inside that window
+ * would abandon healthy calls for being new, so the grace period is what makes the floor a measurement
+ * rather than a race.
+ */
+export const STREAM_THROUGHPUT_GRACE_MS = 15_000;
+
+function streamNumber(value: string | undefined, min: number): number | null {
+  // A BLANK value means UNSET, not zero — `Number('')` is 0 (see slowRungBench's own note on this).
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  const n = Number(text);
+  return Number.isFinite(n) && n >= min ? n : null;
+}
+
+/** The configured floor. Junk, blank, or a negative falls back; an explicit `0` disables the guard. */
+export function streamMinCharsPerSec(env: NodeJS.ProcessEnv = process.env): number {
+  return streamNumber(env.AGENTV3_STREAM_MIN_CHARS_PER_SEC, 0) ?? STREAM_MIN_CHARS_PER_SEC;
+}
+
+/** The configured grace period. Never shorter than 5 s — below that the floor is a race, not a reading. */
+export function streamThroughputGraceMs(env: NodeJS.ProcessEnv = process.env): number {
+  return streamNumber(env.AGENTV3_STREAM_THROUGHPUT_GRACE_MS, 5_000) ?? STREAM_THROUGHPUT_GRACE_MS;
+}
+
+/**
+ * Is this stream crawling — past its grace period and below the floor? PURE.
+ *
+ * 🔒 `producedChars` counts REASONING as well as answer text (see `OpenAiStreamAccumulator`), so a
+ * forced-reasoning model thinking hard before it writes is never mistaken for a dead one.
+ */
+export function streamIsCrawling(
+  sample: { producedChars: number; elapsedMs: number },
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const floor = streamMinCharsPerSec(env);
+  if (floor <= 0) return false;
+  const elapsedMs = Number.isFinite(sample?.elapsedMs) ? sample.elapsedMs : 0;
+  if (elapsedMs < streamThroughputGraceMs(env)) return false;
+  const produced = Number.isFinite(sample?.producedChars) ? Math.max(0, sample.producedChars) : 0;
+  return produced / (elapsedMs / 1000) < floor;
+}
 
 function envMs(raw: string | undefined, fallback: number): number {
   const n = Number(String(raw ?? '').trim());

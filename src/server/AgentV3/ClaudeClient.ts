@@ -157,6 +157,19 @@ export interface RunTurnParams {
    */
   onThinking?: (delta: string) => void;
   /**
+   * May a streamed call ABANDON this provider when it is answering far below a usable rate, so the
+   * chain can fall to the next rung? (autopsy 2b0a3ed5, 2026-09-17.)
+   *
+   * 🔒 SET ONLY BY THE LADDER, and only when there is somewhere else to go. The provider runner
+   * cannot see the chain, so if it decided for itself it could give up on the LAST engine and turn a
+   * slow success into a failure — a slow app beats no app. Absent ⇒ never abandon, which is the
+   * behaviour every caller had before this existed.
+   *
+   * A predicate rather than a boolean because the answer changes DURING a build: once a rung has been
+   * benched, the set of places left to go is smaller.
+   */
+  canAbandonSlowStream?: () => boolean;
+  /**
    * ABSOLUTE epoch-ms instant after which the CALLER no longer wants this answer.
    *
    * THE BUG IT CLOSES (admin report 2026-09-13): the fast lane capped its plan call at 90 s while the

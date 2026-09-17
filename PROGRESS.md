@@ -61653,6 +61653,101 @@ build · test:bundle · boot:check.
 
 ---
 
+## 2026-09-17 — The first call the user sits through: a throughput floor, and a clock
+
+Autopsy 2b0a3ed5 left three items open (rule 6). The admin read them and asked for the best answer to
+each; this closes the first two. **The third — sandbox 98% idle — is deliberately not touched, because
+the honest next step there is to READ a measurement we already collect, not to write code.**
+
+### 1 · 🔴 THE THROUGHPUT FLOOR — the third state a streamed call can be in
+
+Streaming bounded a call by SILENCE, which assumes two kinds of provider: healthy, and stalled. **A
+provider that trickles is a third.** It never goes quiet, so the 60 s idle bound never fires; it always
+has an answer eventually, so the 300 s ceiling returns a truncated SUCCESS. The reported call sat in
+that gap for **55.7 seconds and produced 27 tokens**, and reached no escalation path at all (the
+timeout bench needs a throw, the 429 bench a 429, the post-call slow bench three calls).
+
+`streamIsCrawling` judges one stream, live: past a **15 s grace period**, below **6 characters per
+second**, it is abandoned and the chain falls to the next rung.
+
+🔑 **REASONING IS COUNTED, AND THAT IS THE ENTIRE SAFETY ARGUMENT.** GLM 5.3+ always reasons and emits
+its thinking BEFORE any content. A floor watching only answer text would read a perfectly healthy
+reasoning turn as producing nothing and abandon it — on exactly the tier that reasons most. This was
+the reason I recorded the fix as open yesterday; the accumulator turned out to already track
+`reasoning` separately, so what was missing was one counter, not a subsystem. **I over-stated the
+difficulty and the record now says so.**
+
+Characters, not tokens: tokens are not known until the final chunk, and inventing a count from text
+length is the estimate the wallet law forbids. This decides ROUTING, never a bill.
+
+🔒 **THREE THINGS BOUND THE DOWNSIDE, and each removes a different way this could make a build worse:**
+
+| guard | what it prevents |
+|---|---|
+| `canAbandon` is supplied by the LADDER, never by the stream | abandoning the **last** engine, turning a slow success into a failure |
+| `i + 1 < chain.length` | the same, checked per rung |
+| **once per build** (`abandonedSlowRung`) | walking the whole ladder when every vendor is having a bad hour — the total cost is capped at ONE abandoned call |
+
+⚠️ **AND THE ABANDON CARRIES ITS OWN VERDICT, or the guard defeats itself.** We walk away before the
+call completes, so it reports no usage, so the POST-CALL slow bench never sees a sample — and the very
+next turn would go straight back to the same crawling rung. `isSlowStreamAbandon` benches the FAMILY
+immediately (still behind `canBenchAnother`). Because the skip is inside the rung loop, a 104-key GLM
+pool is skipped in the same turn and the ladder reaches KIMI at once.
+
+The error reads as a timeout **and** is tellable from one: it must bench like a hung rung, but it is
+the one ending where the rung would probably have answered eventually, so it earns an immediate bench
+rather than a second slow turn proving the same thing. Keys: `AGENTV3_STREAM_MIN_CHARS_PER_SEC` (6,
+explicit `0` disables) and `AGENTV3_STREAM_THROUGHPUT_GRACE_MS` (15000, floor 5000). Both unset.
+
+### 2 · 🔴 THE ELAPSED CLOCK — and the reason it is allowed where an ETA was not
+
+Of the build's 66 seconds, **63 showed the user nothing**: the scaffold narration fired at 6.7 s and
+the next line arrived at 62.7 s. A blank screen and a crashed app look identical.
+
+The ETA was withheld, and that was right — the only estimate available was a prompt-word heuristic,
+and a heuristic is not evidence. **But an elapsed clock is a measurement.** "34 seconds have passed"
+cannot be wrong and promises nothing. That distinction is the whole justification, and `workingLine`
+is asserted to contain no prediction of any kind.
+
+- Silent for the first **12 s** (most turns answer inside it; a line that appeared at once would
+  flicker on every call and teach the user to ignore it), then every **15 s**.
+- Emitted with a stable `id: 'working'`, so the reducer **replaces one line** instead of appending —
+  the same mechanism the `eta-live` line already uses. **No client change was needed.**
+- Wrapped in `finally`, so a thrown turn can never leave a timer emitting into a dead build.
+- 🔒 **Recorded in the build report ONCE.** Every narration lands on the timeline, so a 30-minute build
+  would file its own reassurance a hundred times and bury the report it sits beside. `lastActivity` is
+  still refreshed on every tick, so the still-running detector is unaffected.
+
+### 3 · 🔎 THE PROVIDER'S OWN THINKING WAS ARRIVING AND BEING THROWN AWAY
+
+Found while building the above. `OpenAiStreamAccumulator` has collected `reasoning_content` since
+streaming shipped, and `stream_delta` with `kind: 'thinking'` has existed since Claude got extended
+thinking — **nothing joined them.** So on a tier that reasons, the user watched an empty panel while a
+perfectly busy model thought. One line each side. The bytes were already paid for, the reducer already
+renders that kind, and the client needed no change.
+
+### ⏭️ Item 3 (sandbox 98% idle) — deliberately NOT built, and why
+
+It was ~₹0.26 on this build, the least valuable of the three, and **the report's own
+`started-by=files` line says the machine was created by a file-list request, not by the build.** If
+opening a workspace starts a VM, that is where the money is — and the admin panel's *"Where does a
+sandbox's billed time go?"* card already answers it under "Why machines started". This repo's own rule
+for sandbox changes is **measure first**; writing code here before reading that screen would repeat the
+`E2B_USD_PER_HOUR` mistake — a confident-looking derivation that was half wrong.
+
+### ⏸️ Also not built, and waiting on the admin: hedging
+
+The fastest possible answer to the wait is to start the next rung **in parallel** after ~20 s and take
+whichever answers first, so a good answer is never lost. It is not built because it is the same
+mechanism the money audit deliberately removed from free chat (*"A RACE IS A PURCHASE OF SPEED, SO IT
+BELONGS WHERE SOMEONE IS PAYING"*). The cost profile is very different — it would fire only after
+demonstrated slowness rather than on every turn — but that is the admin's decision to revisit, not
+mine to take quietly.
+
+**Tests:** `tests/firstCallIsVisible.test.ts` (22 cases). Three guarantees proven by reversion —
+removing the crawl check, removing the record-once guard, and dropping reasoning from `producedChars`
+each fail it. The existing stream suites pass unchanged, because `canAbandon` absent means today's
+behaviour exactly.
 ## 2026-09-17 — PR #2996's REMAINING half reverted: nothing decides where a reload lands
 
 **Admin:** *"yar aap is pure PR ko hi hata do! mujhe nahi chahiye. jab bhi page reload hota hai,

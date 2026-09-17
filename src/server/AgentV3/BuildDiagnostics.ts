@@ -24,6 +24,7 @@ import { unreachedProvidersNote } from './runnerChainSummary';
 import { isBudgetEndedError } from './turnDeadline';
 import { typecheckEvidenceFromCommands } from './TscGate';
 import { predictsBuildFailure, prodBuildOverrulesPredictions, overruledByRealBuildMessage } from './buildFailurePrediction';
+import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
 import { agentRunEvidence as readAgentRunEvidence, type AgentRunEvidence } from './agentRunEvidence';
 
 export type IssuePhase =
@@ -2453,8 +2454,26 @@ export function deriveRootCause(input: {
   stillRunning?: boolean;
 }): string | undefined {
   const { issues, errors, review, ok } = input;
-  const outcome = [...issues].reverse().find((i) => i.code.startsWith('OUTCOME_'));
+  /**
+   * 🔴 THE ADVISORY CAP IS NOT AN OUTCOME FOR THE APP (report af3a3f7f, 2026-09-17).
+   *
+   * A build that succeeded on every measure — rendered in a real browser, `vitest 6/6`, `PROD_BUILD_OK`,
+   * `GREEN_GUARD_SAVE` — reported "Build outcome: STOPPED — the app was built; the post-build advisory
+   * pass was cut short by its 2-minute cap" as its ROOT CAUSE. Nothing stopped: `ADVISORY_CAP_MS` is a
+   * designed ceiling on optional post-build extras, so reaching it is the system working.
+   *
+   * ⚠️ AND SIMPLY SKIPPING IT WOULD HAVE TRADED ONE WRONG ANSWER FOR A WORSE ONE. This outcome pick
+   * runs BEFORE every other guard, so falling through would hand the same successful build the most
+   * severe remaining warning — which on that very report was `PROVIDER_FALLBACK: Provider GLM failed`.
+   * That is exactly the provider-error-as-app-blocker class autopsy 4efab9d7 closed. So when the
+   * advisory cap is the ONLY outcome of a SUCCESSFUL build, the honest answer is that there is NO root
+   * cause: the app was built. A build that did NOT succeed still falls through as before, because we
+   * owe it an explanation.
+   */
+  const outcomes = [...issues].reverse().filter((i) => i.code.startsWith('OUTCOME_'));
+  const outcome = outcomes.find((i) => !isAdvisoryCapOutcome(i));
   if (outcome) return outcome.message;
+  if (ok === true && outcomes.length > 0) return undefined;
   // A reviewer [CRITICAL] is the rootCause ONLY when the build did not succeed. On a SUCCESSFUL, rendered
   // build the app works and the reviewer's finding was OFFERED to the user, not applied (GREEN STOP /
   // REVIEW_SUGGESTED_NOT_APPLIED) — so promoting it to the build's rootCause reports a working app as

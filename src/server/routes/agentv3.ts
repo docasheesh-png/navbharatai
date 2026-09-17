@@ -9877,6 +9877,38 @@ async function noteBuildOutcome(
     }
 
     /**
+     * 🔴 AN ORDER WITH NO OBJECT — the 29-minute word (admin build report d6d664e6, 2026-09-17).
+     *
+     * The whole prompt was **"Bnao"**. The engine ran for 29 minutes, hit the wall-clock ceiling,
+     * delivered nothing, and named the app it was inventing after the instruction word itself
+     * ("Root HTML template with **Bnao** metadata"). Admin's ruling, verbatim: *"agar cheez clear
+     * nahi hai ki kya banana hai, to user se direct puchna chahiye — mai samjha nahi, puri baat
+     * batao."*
+     *
+     * The `'too-short'` reason above deliberately does NOT divert, because it cannot tell "banao"
+     * from "calculator". `'no-object'` can: see `buildableInput.ts`, where the distinction lives.
+     *
+     * ⚠️ FOUR CONDITIONS, AND EVERY ONE OF THEM NARROWS IT. Asking a user who really did describe an
+     * app would be far worse than the bug, so this fires only when NOTHING else in the turn can say
+     * what to build: not the workspace (empty), not the conversation (no earlier request), not an
+     * attachment or an import, and not an edit intent — where a short order legitimately means
+     * *carry on* with the app already there.
+     */
+    const askWhatToBuild =
+      !inputCheck.buildable
+      && inputCheck.reason === 'no-object'
+      && intent !== 'edit_existing'
+      && !projectExists
+      && recentRequests.length === 0
+      && zipImports.length === 0
+      && !(typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== '')
+      && rawAttachments.length === 0;
+    if (askWhatToBuild) {
+      console.log('[AGENTV3] the prompt orders something built but names nothing — asking the user instead of inventing an app');
+      intent = 'chat';
+    }
+
+    /**
      * WHAT THE USER ASKED FOR, captured BEFORE the workspace's state gets a vote.
      *
      * Every reclassification below is protective and correct — a build request must not bulldoze an
@@ -9973,6 +10005,13 @@ async function noteBuildOutcome(
         // build/edit/informational/problem/continuation/social/short signal matched at all) apart from
         // CLEAR chit-chat ('social'/'short') — only the ambiguous case gets nudged to offer building.
         const ambiguousBuildAsk = classifyIntentWithConfidence(prompt).signal === 'default';
+        // A clearly-ambiguous message gets the gentle "shall I build this?" nudge above. An ORDER
+        // WITH NO OBJECT ("Bnao") is a different case and takes precedence: the user HAS asked for
+        // something to be made, so the reply must not answer as though they were chatting — it must
+        // say plainly that we did not understand what, and ask. Steering the model (rather than
+        // returning the canned `inputCheck.message`) is what keeps the question in the USER'S OWN
+        // LANGUAGE, which LANGUAGE_RULE already governs on this path.
+        const clarifyWhatToBuild = askWhatToBuild;
         let chatPrompt = attachmentContext
           ? `${prompt}\n\nThe user attached file(s); here is the extracted content:\n\n${attachmentContext}`
           : prompt;
@@ -10012,7 +10051,13 @@ async function noteBuildOutcome(
         // and free, no behaviour change. Once real file-count context is injected, the reply depends on
         // THIS project's state, so it must bypass the cache (a stale/wrong count is worse than a cache
         // miss). Build/edit turns never reach this path, and attachment turns are skipped (unique prompt).
-        const cacheable = !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && chatCacheEnabled();
+        // ⚠️ `clarifyWhatToBuild` is the one steer here that is NOT a pure function of the prompt
+        // text — it also reads the workspace and the conversation. The same word ("banao") must get
+        // a clarifying question in an empty session and a normal reply in a live project, so a
+        // prompt-keyed cache could serve one turn's answer to the other. Excluded outright rather
+        // than reasoned around: the other conditions happen to cover it today, and that is exactly
+        // the kind of coincidence that stops being true after an unrelated edit.
+        const cacheable = !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !clarifyWhatToBuild && chatCacheEnabled();
         const cacheKey = cacheable ? hashKey(['chatv1', prompt]) : '';
         let reply: string;
         const cachedReply = cacheable ? chatResponseCache.get(cacheKey) : undefined;
@@ -10030,7 +10075,15 @@ async function noteBuildOutcome(
                 "You are NavBharatAI's friendly assistant. Reply briefly and warmly, following the " +
                 "LANGUAGE rule above (match the user's language; never default to Hindi). Do not " +
                 "mention which model you are.\n\n" + CREATOR_IDENTITY + '\n\n' + INDIA_TERRITORIAL_INTEGRITY + '\n\n' + recencyDirective() + '\n\n' + LINK_POLICY + chatWorkspaceContext + chatPreviewHealth + chatSessionRecall +
-                (ambiguousBuildAsk
+                (clarifyWhatToBuild
+                  ? "\n\nThe user has asked for something to be MADE, but their message does not say "
+                    + "WHAT to make. Do NOT guess, and do NOT invent an app or a product name from "
+                    + "their words. Reply in one or two short sentences: say honestly that you did not "
+                    + "understand what to build, and ask them to describe it in a line or two, with one "
+                    + "brief example of the kind of answer that helps (for instance a shop billing app "
+                    + "with GST). Be warm and brief — they are one sentence away from starting."
+                  : '')
+                + (ambiguousBuildAsk && !clarifyWhatToBuild
                   ? "\n\nThis message was ambiguous — it might be a request to build or change something "
                     + "in the user's app, phrased in an unusual way, OR it might just be a genuine "
                     + "question/comment. Answer it naturally, but if it plausibly could mean \"build/fix "

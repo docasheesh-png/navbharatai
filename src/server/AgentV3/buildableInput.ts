@@ -50,13 +50,82 @@ const FILLER = new Set([
 /** The fewest real words a prompt must carry before we will spend a model call on it. */
 export const MIN_INSTRUCTION_WORDS = 2;
 
+/**
+ * 🔴 AN ORDER WITH NO OBJECT IS NOT A BUILD ORDER (admin build report d6d664e6, 2026-09-17).
+ *
+ * The entire prompt was one word: **"Bnao"** — Hindi for *"make it"*, naming nothing to make. The
+ * engine built for **29 minutes**, hit the wall-clock ceiling, delivered no app, and — because it had
+ * no product to name — **took its name from the instruction word**: the plan it wrote reads *"Root
+ * HTML template with Bnao metadata"*, *"Main Bnao landing page component"*. A verb became a product.
+ *
+ * ⚠️ AND THE KEYWORD CLASSIFIER WAS NOT THE CULPRIT — it got this RIGHT. "bnao" is a misspelling of
+ * "banao", so it matches none of `IntentClassifier`'s signal arrays; the message fell through to the
+ * one-word rule and was classified `{ intent: 'chat', confidence: 'low', signal: 'short' }`. LOW
+ * confidence is exactly what sends a message to the LLM intention reader — and the reader, offered
+ * only `chat` / `build` / `edit`, answered `build`. It was not wrong: "make it" *is* an order to
+ * build. **There was no way for it to say the true answer, which is "they have not told me WHAT."**
+ * That missing fourth answer is the defect, and no amount of prompt tuning on three choices fixes it.
+ *
+ * So the deterministic pass answers it instead, before a model or a sandbox is involved: a prompt
+ * whose every remaining word is a bare creation verb names nothing to produce. It is the sibling of
+ * `'link-only'` (a link with no instruction) — the same question, asked of a verb instead of a URL.
+ *
+ * 🔒 WHY THIS CANNOT BECOME "IT REFUSES TO BUILD", which would be far worse than the bug:
+ *   • A NOUN is never an action word, so **"calculator"** — one word, names a deliverable — still
+ *     builds instantly. This is why the existing `'too-short'` reason is deliberately NOT diverted:
+ *     it cannot tell "calculator" from "banao". This one can.
+ *   • "app banao", "ek billing app banao", "todo app" all carry a non-action word ⇒ untouched.
+ *   • An EDIT verb ("fix karo") classifies as `edit_existing`, which the route's divert excludes, so
+ *     a short order inside a live project still means *carry on* — the continuation amnesia this repo
+ *     has already fixed once cannot return through here.
+ *   • The route additionally requires an EMPTY workspace and NO earlier requests, so "bnao" following
+ *     *"ek billing app chahiye"* builds from that context instead of asking again.
+ */
+const BARE_ACTION_WORDS = new Set([
+  // English creation verbs used alone
+  'build', 'make', 'create', 'generate', 'develop', 'design', 'code', 'write', 'built', 'begin', 'start',
+  // Hinglish — the spellings people actually type, misspellings included (the reported prompt was a
+  // misspelling, so a list that only holds correct forms would not have caught the very report it
+  // was written for).
+  'banao', 'bnao', 'banado', 'bnado', 'banade', 'bnade', 'banaao', 'banana', 'bana', 'banaa',
+  'banwao', 'bnwao', 'banadijiye', 'likho', 'likhdo', 'likhdijiye',
+]);
+
+/**
+ * The `banao` family, for the spellings the list above does not enumerate. Deliberately tight: it
+ * requires b·(a)·n·a(a)·<ending>, so "ban", "banner" and "banana" do not match it (the last is in the
+ * set above on purpose — as a one-word prompt, a fruit is no more buildable than a verb).
+ */
+const BANAO_FAMILY = /^b[a]?n[a]{1,2}(?:o|do|de|deo|dena|dijiye|ye)?$/;
+
+/** Is this single word a bare instruction to produce something, carrying no object? PURE. */
+export function isBareActionWord(word: string): boolean {
+  const w = String(word ?? '').trim().toLowerCase();
+  if (!w) return false;
+  return BARE_ACTION_WORDS.has(w) || BANAO_FAMILY.test(w);
+}
+
+/**
+ * Does this prompt order something to be made without ever saying WHAT? PURE — no model, no I/O.
+ *
+ * True only when, after links and filler are stripped, there is at least one word left and EVERY one
+ * of them is a bare action word. One noun anywhere makes it false.
+ */
+export function namesNoObject(prompt: string): boolean {
+  const words = instructionWords(prompt);
+  if (words.length === 0) return false; // 'empty' / 'link-only' own that case, with better messages.
+  return words.every(isBareActionWord);
+}
+
 export type UnbuildableReason =
   /** Nothing at all — empty or whitespace. */
   | 'empty'
   /** Only links (plus filler). We cannot open a private file, and nothing describes an app. */
   | 'link-only'
   /** Words, but far too few to be an instruction (e.g. "app"). */
-  | 'too-short';
+  | 'too-short'
+  /** An order to make something, with no something: "banao", "build", "make it". */
+  | 'no-object';
 
 export interface BuildableVerdict {
   /** True when the engine should build exactly as it does today. The overwhelmingly common case. */
@@ -129,6 +198,18 @@ export function assessBuildInput(prompt: string): InputVerdict {
 
   const links = linksIn(raw);
   const words = instructionWords(raw);
+
+  // An ORDER WITH NO OBJECT, checked BEFORE the word-count gate — "banao" is one word and "build it
+  // now" is three, and neither says what to make. See the BARE_ACTION_WORDS block above (report
+  // d6d664e6). Links are excluded so a pasted link keeps the better 'link-only' message.
+  if (links.length === 0 && namesNoObject(raw)) {
+    return {
+      buildable: false,
+      reason: 'no-object',
+      links,
+      message: 'I did not understand what to make. Tell me in a line or two what the app should do — for example "a shop billing app with GST" — and I will build it right away.',
+    };
+  }
 
   if (words.length >= MIN_INSTRUCTION_WORDS) return { buildable: true };
 

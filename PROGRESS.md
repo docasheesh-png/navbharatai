@@ -63506,3 +63506,81 @@ no attempt; same PIN refused; five wrong ⇒ 429 and the right PIN is refused du
 `appLockWiring.test.ts` rewritten for the new contract (button on General, one `<AppLockSettings>` only on
 the app_lock screen, `always` + `banner` on its gate, no PIN box in the screen, Change PIN present, row
 draws no checkbox).
+---
+
+## 2026-09-17 — Autopsy `d6d664e6`: an ORDER WITH NO OBJECT is not a build order
+
+**The report.** The entire prompt was one word: **`"Bnao"`** (Hindi, *"make it"*). The engine ran
+**29 minutes**, hit the `BUILD_TIMEOUT` wall-clock ceiling at 1740 s, wrote no app — and, having no
+product to name, **took the app's name from the instruction word**: Kimi's plan reads *"Root HTML
+template with **Bnao** metadata"*, *"Main **Bnao** landing page component"*. Minutes 4→29 contain only
+heartbeats and failed provider calls. Admin's ruling, verbatim: *"agar cheez clear nahi hai ki kya
+banana hai, to user se direct puchna chahiye — mai samjha nahi puri baat batao."*
+
+**Ledger (12 items).** ✅ self-healed 0 (nothing healed — reported as zero rather than inflated) ·
+🔀 workaround 2 (a product name invented from the verb; the ladder climbing away from starvation
+instead of it being prevented) · ⏭️ skipped 3 (`PROVIDER_BENCHED` ignored by the rung selector; the
+preview error recorded and never repaired; "this prompt names no deliverable" never asked) ·
+❌ still broken 3 (no app; `App.tsx` requiring props `main.tsx` never passes; the report's own bench
+claim untrue) · 🥵 struggle 4 (25 zero-progress minutes; 12 provider failures; 102 GLM calls after
+three bench events; `complexityScore: 5` read by nothing).
+
+### 🔴 THE ROOT CAUSE WAS NOT WHERE THE AUTOPSY FIRST PUT IT — the keyword classifier got this RIGHT
+
+My first reading blamed `IntentClassifier` for hard-locking a build. Reading the code disproved it.
+`"bnao"` is a **misspelling** of `banao`, so it matches none of the signal arrays; it fell through to
+the one-word rule and was classified **`{ intent: 'chat', confidence: 'low', signal: 'short' }`** —
+the correct, cautious answer, and the report's own `taskType: "chat"` agrees. LOW confidence is
+precisely what sends a message to the LLM intention reader. **The reader is offered three choices —
+`chat` / `build` / `edit` — and answered `build`. It was not wrong either: "make it" IS an order to
+build.** The true answer, *"they have not told me WHAT"*, was not on the menu. That missing fourth
+answer is the defect, and no prompt tuning over three choices can reach it.
+
+### The fix (PR: `claude/objectless-build-asks`)
+
+A deterministic pass answers the question before a model or a sandbox is involved — the sibling of the
+`'link-only'` rule shipped for report `541979d2`, asked of a verb instead of a URL.
+
+- **`buildableInput.ts`** gains `isBareActionWord` / `namesNoObject` and a new `'no-object'` reason: a
+  prompt whose every remaining word (links and filler stripped) is a bare creation verb names nothing
+  to produce. Misspellings are in the vocabulary **on purpose** — the reported prompt was one, so a
+  list of only correct spellings would not have caught the report it was written for.
+- **`routes/agentv3.ts`** diverts such a turn to chat and steers the reply to say honestly that it did
+  not understand what to build and ask — **steered rather than canned, so the question arrives in the
+  user's own language** under the existing `LANGUAGE_RULE`.
+
+**Why this cannot become "it refuses to build" — four narrowing conditions, all required.** A NOUN is
+never an action word, so **"calculator"** still builds instantly; this is exactly why the existing
+`'too-short'` reason is still NOT diverted (it cannot tell "calculator" from "banao"). And the route
+asks only when nothing else in the turn can name the object: empty workspace, no earlier request, no
+attachment or import, and not an `edit_existing` intent — so a short order inside a live project still
+means *carry on*, and the continuation amnesia this repo already fixed once cannot return through here.
+
+**The cache, noted because it is the one impure input.** `clarifyWhatToBuild` depends on the workspace,
+not only the prompt text, so a clarify turn is excluded from the prompt-keyed plain-chat reply cache
+outright — the other conditions happen to cover it today, and that is the kind of coincidence that
+stops being true after an unrelated edit.
+
+**Tests:** `tests/objectlessBuildAsks.test.ts` (41), including the exact reported prompt, the
+must-still-build boundary set, and **reversion guards proven to fail** when the verdict branch or the
+`!projectExists` condition is removed.
+
+### 🔴 STILL OPEN from this autopsy (rule 6) — recorded, not silently dropped
+
+1. **A bench that does not bench.** `PROVIDER_BENCHED` fired three times saying *"benched for the rest
+   of this build"* while `providerChain` shows `GLM(glm-4.7-flashx) ×51` and `GLM(glm-5.3) ×51`. Either
+   the bench key does not match the key the rung selector reads, or the bench state does not survive
+   the runner being rebuilt per turn. **Not guessed at here** — it needs the code read, and the report
+   cannot distinguish the two. This is the second sighting of the missing **shared evidence ledger**
+   already open from autopsy `697b38ee`.
+2. **No futility breaker.** Cost is bounded (`AGENTV3_BUILD_COST_CEILING_USD`), throughput is bounded
+   (`slowRungBench`), and *pointlessness* is bounded by nothing: 25 minutes of zero files, zero tool
+   calls and zero text ended only at the 29-minute wall.
+3. **`OUTPUT_BUDGET_STARVED` ×8 on a day the unclamp shipped.** Needs the per-call model ids to say
+   whether the starved rungs were `glm-5.3` (which the 2026-09-17 unclamp should cover — a wiring gap)
+   or `glm-4.7-flashx` (which *can* be told not to think — a different bug). The one KIMI starvation is
+   the sibling already recorded as open.
+4. **No entry-point contract check.** `App.tsx` was generated taking required props (`theme`,
+   `metadata`, `breadcrumbs`, `children`) while `main.tsx` renders `<App />` with none →
+   `Cannot read properties of undefined (reading 'title')`. A deterministic, model-free, two-file
+   question that nothing asks.

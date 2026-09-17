@@ -25,7 +25,10 @@ describe('the setup wait reports where it went', () => {
     // The split is the point. One total would say the wait is real without saying which read, scan or
     // write to shorten — which is the position the last report left us in.
     expect(route).toContain('durable read ${loadMs}ms');
-    expect(route).toContain('sandbox scan `\n                  + `${scanMs}ms');
+    // Since 2026-09-17 the scan is a LISTING (no contents read) plus a bounded read of the live config
+    // files — two costs where there was one, each timed on its own so the next report can still say
+    // which of them to shorten.
+    expect(route).toContain('sandbox listing `\n                  + `${scanMs}ms · config read ${configMs}ms');
   });
 
   it('times the COMMON case too, where nothing needed restoring', () => {

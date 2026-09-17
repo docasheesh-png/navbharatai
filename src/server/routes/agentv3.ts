@@ -408,7 +408,7 @@ import {
   type DesignContract,
 } from '../AgentV3/designContract';
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
-import { collectWorkspaceFiles, writeWorkspaceFiles, pool } from '../AgentV3/WorkspaceFiles';
+import { collectWorkspaceFiles, listWorkspaceFiles, collectWorkspaceConfigFiles, writeWorkspaceFiles, pool } from '../AgentV3/WorkspaceFiles';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { applyPreviewDomain, internalPreviewUrl } from '../AgentV3/PreviewDomain';
 import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand, classifyDevServerFailure, userFacingPreviewFailure, cleanPreviewLogForUser } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
@@ -453,7 +453,7 @@ import {
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
 import { purgeWorkspace } from '../AgentV3/WorkspaceManager';
 import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesByPath, removeWorkspaceFiles, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet, workspaceFilesSavedAt } from '../AgentV3/WorkspaceFileStore';
-import { applyWellKnownMissingDeps } from '../AgentV3/DependencyAutoFix';
+import { applyWellKnownMissingDeps, restoreDroppedDependencies } from '../AgentV3/DependencyAutoFix';
 import { splitCachedSystem } from '../AgentV3/systemPromptCache';
 import { makeFirstPaintHandler, firstPaintEvents, streamingFirstPaintEnabled } from '../AgentV3/streamingFirstPaint';
 import { buildRuntimeLogCommand, parseRuntimeLogOutput, runtimeLogGapNotice } from '../AgentV3/runtimeLogs';
@@ -504,7 +504,7 @@ import { auditRlsInSql, rlsAuditSummary } from '../AppMakerLab/generator/RlsPoli
 import { buildServiceGraph } from '../AgentV3/serviceGraph';
 import { detectMonorepo } from '../AgentV3/monorepoAnalysis';
 import { unsendKeepCount } from '../AgentV3/unsend';
-import { planFileGuardian } from '../AgentV3/FileGuardian';
+import { planFileGuardianFromListing } from '../AgentV3/FileGuardian';
 import { summarizeSession, sessionSummaryLine } from '../AgentV3/sessionSummary';
 import { sweepUnusedImports, importSweepEnabled } from '../AgentV3/UnusedImportSweep';
 import { looksLikePlatformSource, PLATFORM_SOURCE_REFUSAL } from '../AgentV3/PlatformSourceGuard';
@@ -12865,11 +12865,23 @@ async function noteBuildOutcome(
           // Same pattern as the six others found today (see PROGRESS.md): a fallback value standing in
           // for a measurement that never happened.
           let scanFailed = false;
-          const existing = await collectWorkspaceFiles(actuator, workspaceId).catch(() => {
+          // 🔴 A LISTING, NOT A READ (autopsy 8682b6b1, 2026-09-17: `sandbox scan 160493ms` of a
+          // 171-second wait before the first model call). The guardian decides by MEMBERSHIP — which
+          // saved paths the sandbox lacks — and `collectWorkspaceFiles` was fetching every file's
+          // contents over the network to answer a question that never read them. `listWorkspaceFiles`
+          // partitions the listing exactly as the collector would (present ∪ skipped = the listing) and
+          // reads nothing; the only contents the turn-start reconcile needs — the live package.json and
+          // tsconfig*.json — are read separately below, bounded, and layered over the durable map.
+          const existing = await listWorkspaceFiles(actuator, workspaceId).catch(() => {
             scanFailed = true; // could not look — never "nothing is there"
-            return { files: {} as Record<string, string>, skipped: [] as string[] };
+            return { present: [] as string[], skipped: [] as string[] };
           });
           const scanMs = Date.now() - scanT0;
+          const configT0 = Date.now();
+          const liveConfig = scanFailed
+            ? ({} as Record<string, string>)
+            : await collectWorkspaceConfigFiles(actuator, workspaceId, existing.present).catch(() => ({} as Record<string, string>));
+          const configMs = Date.now() - configT0;
           if (scanFailed) {
             buildDiag.record({
               phase: 'build', severity: 'warning', code: 'WORKSPACE_SCAN_FAILED', autoResolved: false,
@@ -12883,7 +12895,7 @@ async function noteBuildOutcome(
           // to read them (excluded/too large/binary/unreadable/past a cap). Judged without it, they
           // looked missing — a false data-loss report AND an overwrite of possibly-newer content by an
           // older snapshot (mitrify autopsy 2026-08-04). See planFileGuardian's header.
-          const plan = planFileGuardian(saved, existing.files, existing.skipped);
+          const plan = planFileGuardianFromListing(saved, [...existing.present, ...existing.skipped]);
           // !scanFailed is the whole point: with a failed scan EVERY stored file looks missing, so this
           // branch would claim total data loss and then rewrite the entire project into a sandbox we
           // could not even list — writes that throw, are caught by the outer handler, and leave a build
@@ -12894,7 +12906,7 @@ async function noteBuildOutcome(
             // sandbox was recycled/cold; a partial gap means specific files went missing. This lands
             // in the report's dataLossEvents so the WHY is diagnosable after the fact, not guessed.
             try {
-              const existingCount = Object.keys(existing.files).length;
+              const existingCount = existing.present.length;
               // Message math made explicit (quiz-app autopsy 2026-07-17): "store holds 27; sandbox
               // listed 27 — restoring 1" read as self-contradictory. The listings are SETS, not just
               // counts — the sandbox can list N files while still MISSING some stored ones (it may
@@ -12905,7 +12917,7 @@ async function noteBuildOutcome(
               const skippedCount = existing.skipped.length;
               buildDiag.recordDataLoss(
                 existingCount === 0 ? 'sandbox recycled/empty' : 'files missing from sandbox',
-                `durable store holds ${Object.keys(saved).length} file(s); the live sandbox read ${existingCount}${skippedCount > 0 ? ` (plus ${skippedCount} present but not read — excluded/too large/binary)` : ''} and was genuinely missing ${plan.count} of the stored file(s) — restoring ${plan.count} (mode: ${plan.mode}). The durable store + GitHub history retained everything; only the ephemeral sandbox lost state.`,
+                `durable store holds ${Object.keys(saved).length} file(s); the live sandbox listed ${existingCount} source file(s)${skippedCount > 0 ? ` (plus ${skippedCount} present but excluded/binary)` : ''} and was genuinely missing ${plan.count} of the stored file(s) — restoring ${plan.count} (mode: ${plan.mode}). The durable store + GitHub history retained everything; only the ephemeral sandbox lost state.`,
               );
             } catch { /* diagnostics are best-effort */ }
             const writeT0 = Date.now();
@@ -12917,8 +12929,8 @@ async function noteBuildOutcome(
               buildDiag.record({
                 phase: 'build', severity: 'info', code: 'SETUP_TIMING', autoResolved: true,
                 message: `Project restored in ${Math.round((Date.now() - restoreT0) / 1000)}s`,
-                detail: `durable read ${loadMs}ms (${Object.keys(saved).length} file(s)) · sandbox scan `
-                  + `${scanMs}ms · wrote ${plan.count} missing file(s) + assets ${Date.now() - writeT0}ms`,
+                detail: `durable read ${loadMs}ms (${Object.keys(saved).length} file(s)) · sandbox listing `
+                  + `${scanMs}ms · config read ${configMs}ms · wrote ${plan.count} missing file(s) + assets ${Date.now() - writeT0}ms`,
               });
             } catch { /* timing is observation only — it must never affect a build */ }
             // The guardian used to restore files SILENTLY — no file_changed event, so the client's
@@ -12944,7 +12956,7 @@ async function noteBuildOutcome(
               buildDiag.record({
                 phase: 'build', severity: 'info', code: 'SETUP_TIMING', autoResolved: true,
                 message: `Project checked in ${Math.round((Date.now() - restoreT0) / 1000)}s — nothing needed restoring`,
-                detail: `durable read ${loadMs}ms (${Object.keys(saved).length} file(s)) · sandbox scan ${scanMs}ms`,
+                detail: `durable read ${loadMs}ms (${Object.keys(saved).length} file(s)) · sandbox listing ${scanMs}ms · config read ${configMs}ms`,
               });
             } catch { /* timing is observation only — it must never affect a build */ }
           }
@@ -12963,7 +12975,11 @@ async function noteBuildOutcome(
           // isImportTurn) — that fix covered the integrity self-heal but not this pass. Gated the same way.
           if (process.env.AGENTV3_DEP_RECONCILE !== 'off' && !isImportTurn) {
             try {
-              const union = { ...saved, ...existing.files, ...plan.restore };
+              // The durable map, with the sandbox's OWN config files layered over it — the same
+              // precedence the full scan gave those files, at three bounded reads instead of a read of
+              // everything. Other files come from the durable store; every consumer below is
+              // add-only or warn-only, so a file the store lacks costs at most a finding not raised.
+              const union = { ...saved, ...liveConfig, ...plan.restore };
               // FRAMEWORK-DRIFT CORRECTION (PulseBoard autopsy 2026-07-20): the `framework` label is set
               // ONCE (client picker / first-turn prompt) and never re-derived from what the app ACTUALLY
               // became. A Next.js app carried a stale `vite-react` label for the WHOLE session — so the
@@ -13010,7 +13026,18 @@ async function noteBuildOutcome(
                 // package). phantomAliasDependencies is safe-by-construction — it only names a dep whose
                 // `src/<name>/` folder exists under a declared `baseUrl:"src"`, i.e. one that is provably
                 // unreachable as a package, so removing it can never break the app.
-                const afterAdd = depRes.added.length ? depRes.files['package.json'] : union['package.json'];
+                // 🔒 ADD-ONLY BY CONSTRUCTION. The reconcile rewrites package.json from a parsed object;
+                // measured against the sandbox's own live copy, anything it would have DROPPED is put
+                // back before a byte is written — the dependency-deleting corruption two independent
+                // reviews traced through this block (2026-09-17) cannot reach the file. The phantom
+                // prune below stays deliberate: it runs after the guard, on names it proves unreachable.
+                const reconciled = depRes.added.length ? depRes.files['package.json'] : union['package.json'];
+                const livePkg = liveConfig['package.json'];
+                const guarded = typeof livePkg === 'string' ? restoreDroppedDependencies(reconciled, livePkg) : { content: reconciled, restored: [] as string[] };
+                if (guarded.restored.length) {
+                  buildDiag.record({ phase: 'build', severity: 'warning', code: 'DEP_RECONCILE_GUARDED', autoResolved: true, message: `The turn-start dependency reconcile would have dropped ${guarded.restored.length} dependency(ies) from package.json (${guarded.restored.slice(0, 5).join(', ')}) — restored before writing.` });
+                }
+                const afterAdd = guarded.content;
                 const phantoms = phantomAliasDependencies(union);
                 const finalPkg = phantoms.length ? removeDependenciesFromPackageJson(afterAdd, phantoms) : afterAdd;
                 const pruned = phantoms.length > 0 && finalPkg !== afterAdd;

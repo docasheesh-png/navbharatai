@@ -10,6 +10,7 @@
 // oversized files are skipped (a deploy is source/text).
 
 import { buildTarGz, shouldBulkLand, bulkLandEnabled } from './BulkLanding';
+import { isBinaryAsset } from './fileClassification';
 
 /** The minimal slice of the sandbox actuator this collector needs. */
 export interface WorkspaceFileSource {
@@ -110,6 +111,13 @@ export async function collectWorkspaceFiles(
   // set is identical to before); only the latency-bound READS are parallelised.
   const candidates = all.filter((path) => {
     if (isExcludedPath(path)) { skipped.push(path); return false; }
+    // 🔴 A BINARY IS KNOWN BY ITS NAME BEFORE IT IS READ (autopsy 8682b6b1, 2026-09-17: a 160-second
+    // "sandbox scan" on a resumed project). Every `.png`/`.woff2`/`.mp4` used to be fetched over the
+    // network in full and THEN dropped by the NUL-byte heuristic below — paying the round trip and the
+    // bytes for a file that was never going to be kept. `isBinaryAsset` is the one shared answer to
+    // "is this text?" (fileClassification.ts), so the outcome is identical — the path lands in
+    // `skipped` exactly as it did after the read — only the read is gone. `.svg` stays text, as there.
+    if (isBinaryAsset(path)) { skipped.push(path); return false; }
     return true;
   });
 
@@ -135,6 +143,75 @@ export async function collectWorkspaceFiles(
   }
 
   return { files, skipped };
+}
+
+/** What a sandbox LISTS, partitioned the way `collectWorkspaceFiles` would partition it — with zero reads. */
+export interface WorkspaceListing {
+  /** Paths the collector would try to read (source text). */
+  present: string[];
+  /** Paths the collector would skip by name alone (excluded dir, live secret, binary asset). */
+  skipped: string[];
+}
+
+/**
+ * The sandbox's file LISTING, with the collector's name-based partition and NO content reads.
+ *
+ * 🔴 WHY (autopsy 8682b6b1, 2026-09-17). The File Guardian ran `collectWorkspaceFiles` on every turn
+ * of an existing project — reading every file over the network — and then asked ONE question of the
+ * result: which saved paths are absent from the sandbox? `planFileGuardian` reads only keys; the
+ * contents were fetched and discarded. On a real report that read was `sandbox scan 160493ms`, the
+ * whole of a 171-second wait before the first model call.
+ *
+ * 🔒 MEMBERSHIP-IDENTICAL BY CONSTRUCTION: every listed path ends up in `files` or `skipped` when the
+ * collector runs (a failed read, a cap, a binary, an exclusion all land in `skipped`), so
+ * `present ∪ skipped` here is exactly `keys(files) ∪ skipped` there. The guardian sees the same set
+ * it always saw. Tested against the read-based collector in WorkspaceFiles.test.ts.
+ *
+ * Throws when the listing itself fails — the caller must be able to tell "could not look" from
+ * "nothing is there" (see the route's `scanFailed`). Never returns a partial answer.
+ */
+export async function listWorkspaceFiles(
+  source: Pick<WorkspaceFileSource, 'listFiles'>,
+  workspaceId: string,
+): Promise<WorkspaceListing> {
+  const all = await source.listFiles(workspaceId);
+  const present: string[] = [];
+  const skipped: string[] = [];
+  for (const path of all) {
+    if (isExcludedPath(path) || isBinaryAsset(path)) skipped.push(path);
+    else present.push(path);
+  }
+  return { present, skipped };
+}
+
+/** The files the turn-start reconcile genuinely needs the LIVE copy of. Top-level only. */
+const CONFIG_FILE_RE = /^(package\.json|tsconfig(\.[\w.-]+)?\.json)$/;
+
+/** Reads must be bounded: a stalled read here would put the wait back that this module removes. */
+const CONFIG_READ_TIMEOUT_MS = 5_000;
+
+/**
+ * The sandbox's OWN `package.json` and `tsconfig*.json` — the handful of files whose live content the
+ * turn-start reconcile must see (a dependency added by `npm install` in the sandbox is not in the
+ * durable store until the build saves). At most a few reads, each bounded; a read that fails or times
+ * out is simply absent, never a throw. Layer the result OVER the durable map so the sandbox's copy of
+ * these files keeps the precedence the full scan used to give it.
+ */
+export async function collectWorkspaceConfigFiles(
+  source: WorkspaceFileSource,
+  workspaceId: string,
+  listing: readonly string[],
+): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  const wanted = listing.filter((p) => CONFIG_FILE_RE.test(p)).slice(0, 6);
+  await pool(wanted, 3, async (path) => {
+    try {
+      const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('config read timed out')), CONFIG_READ_TIMEOUT_MS));
+      const content = await Promise.race([source.readFile(workspaceId, path), timeout]);
+      if (typeof content === 'string' && !looksBinary(content)) out[path] = content;
+    } catch { /* absent — the durable copy stands, exactly as when a scan read failed */ }
+  });
+  return out;
 }
 
 /**

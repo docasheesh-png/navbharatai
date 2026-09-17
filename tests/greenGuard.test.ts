@@ -354,7 +354,9 @@ describe('"KEEP MY CHANGES" — the escape hatch, because a net you cannot leave
   it('WIRING: it runs BEFORE the file guardian, so one restore path carries it into the sandbox', () => {
     const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
     const hatch = route.indexOf('── "KEEP MY CHANGES"');
-    const guardian = route.indexOf('const plan = planFileGuardian(');
+    // The guardian plans from a LISTING since 2026-09-17 (guardianListsInsteadOfReading.test.ts); the
+    // ordering this proves — the escape hatch before the guardian — is unchanged.
+    const guardian = route.indexOf('const plan = planFileGuardianFromListing(');
     expect(hatch).toBeGreaterThan(-1);
     expect(hatch).toBeLessThan(guardian);
     const seg = route.slice(hatch, hatch + 3200);

@@ -62271,6 +62271,84 @@ no guard: it teaches the next reader that the thing it measures is noisy. Same l
 6. **The build's ETA is asserted at t=0 and never reconciled** — *"ETA ~2–4 min"* on a 16.7-minute
    build, in the same document that carries both timestamps.
 
+---
+
+## 2026-09-17 — 🔴 THE FLAT GIFT IS RETIRED. ₹475 IS THE MOST ONE USER MAY EVER COST.
+
+**Admin, verbatim:** *"nahi welcom bonus ₹500 band karna hai! sirf refer aur verification wale ₹400
+dene hai. matlab mera(admin) ek user ke liye maximum= ₹475. isse 1 paisa jyada nahi."* and
+*"weekly reward, welcome reward yeh sab hatao."*
+
+### What was actually wrong — it was not one number, it was FOUR modules that could not see each other
+
+The payouts lived in four places with no shared ceiling: `welcomeBonus.ts` (the legacy flat gift),
+`giftPlan.ts` (the v2 ₹250/₹500, through TWO separate decisions), `weeklyTopUp.ts` (₹200 a rung to a
+₹650 lifetime cap) and `referralRewards.ts` (₹400 + ₹75). **The rule that they must not stack existed
+only as a COMMENT inside the last one.** A real account could collect ₹650 of flat-and-weekly gifts AND
+₹400 of referral steps — over ₹1,050 — with nothing failing and no screen showing a wrong number.
+
+That is the same class this file already records four times this week: **the code was correct and a
+sentence was lying.** A comment is not an enforcement.
+
+### What shipped
+
+- **`src/server/lib/giftPolicy.ts` (new)** — the whole policy as code. `flatWelcomeGiftAllowed()` and
+  `weeklyTopUpAllowed()` both return **false**; `capSelfGift` / `capReferrerPerFriend` clamp against
+  `MAX_SELF_GIFT_TOKENS` (₹400) and `MAX_REFERRER_PER_FRIEND_TOKENS` (₹75).
+- 🔒 **THE CEILING IS APPLIED TO THE TOTAL, NEVER ASSUMED FROM THE PARTS.** "4 steps × ₹100 = ₹400"
+  holds until somebody types `REFERRAL_STEP_TOKENS=200` in a console, at which point the same four
+  steps pay ₹800 and nothing objects. The cap reads the account's real `freeGiftedTokens`, in the same
+  transaction that credits it, so no tunable can raise its own ceiling.
+- 🔑 **THE THREE RETIREMENTS ARE GATED AT THE ROUTE, NOT INSIDE THE DECISIONS — and that was a REVERSAL
+  of my first attempt.** Gating inside `giftPlan.ts` / `weeklyTopUp.ts` / `welcomeBonus.ts` broke **37
+  tests**, all of them the 836 lines of proven anti-abuse logic (the Gmail-alias leak, the ₹750
+  two-door hole, the one-number-many-spellings case). Those decisions are the thing worth keeping. All
+  four grant functions have exactly ONE money-moving caller — `routes/wallet.ts` — so the stand-down
+  lives there, the anti-abuse suites stay green and true, and re-enabling is one function with proven
+  code behind it. A caller-count guard answers CLAUDE.md's "tenth caller" objection.
+
+### The half that is easy to miss: the SCREEN had to stand down with the money
+
+Stopping the grant alone would have left `FreeGiftBanner` drawing a **"Claim ₹500"** card whose button
+calls a route that now refuses — a promise the product cannot keep, shown at the exact moment a user is
+looking at an empty balance. Worse than the old policy, not better. Three honesty fixes, each proven by
+reversion:
+
+1. `v2GiftSummary` defers to `retiredGiftSummary`, whose **`capTokens: 0`** is what makes the banner
+   render **nothing**. A retired programme disappears; it does not describe itself in zeroes
+   ("₹0 of ₹500 received — ₹500 still to come" is a promise, not a status).
+2. `phoneBonusClaimable` is **0**. It is the single field that draws the claim card.
+3. `phoneVerifiedGift` is stamped only when `welcomeTokens > 0`. A wallet carrying that flag with no
+   gift behind it is a **false receipt** — it reads back as "this person has had theirs".
+
+Also: a legacy wallet's summary is labelled `plan: 'retired'`, never `'v2'` — it was never on plan v2,
+and telling the client it was would be a wrong fact dressed as a status.
+
+### The promise that survives
+
+**Nothing is clawed back.** An old ladder account sitting at ₹650 keeps every rupee; only new grants
+stop. Proven against a real wallet in `giftPlanV2Behavior.test.ts`.
+
+### Honest, and stated rather than discovered later
+
+`decideReferrerReward` values the steps already paid for a friend at **today's** rate — the only figure
+a pure function is given. A rate RAISED since makes it over-state what was paid and pay less; lowered,
+it under-states and pays slightly more, bounded by ₹75 either way. Under-paying a referrer is a support
+message; passing ₹475 is what the admin said must not happen, so the error leans that way deliberately.
+
+A refusal at the ceiling now reports **`cap-reached`**, not `already-paid` — two different facts about
+a real person, and an admin reading "already paid" for a step nobody was paid for is reading a wrong
+answer to the question they asked.
+
+**Gate:** `typecheck` · `noUnusedImports` · `typecheck:server` · **24,620 tests passed** · `build` ·
+`test:bundle` · `boot:check` · `deps:server-gate` — all green on the final state.
+
+⚠️ **PR #3021 (the conditional welcome-gift exclusion) MERGED to `main` while this was in flight**, so
+the two now coexist — deliberately, as two nets at different heights. `welcomeGiftExclusion.ts` answers
+a CONDITIONAL question ("is the referral ladder paying instead?") inside `welcomeBonus.ts` and
+`giftPlan.ts`; `giftPolicy.ts` answers an UNCONDITIONAL one at the route. If the flat gift is ever
+re-enabled, that module still stops it stacking with the ladder. Neither is a duplicate of the other,
+and `giftPolicy.ts`'s header says so, so neither gets deleted as one.
 ## 2026-09-17 — Autopsy `e706e068`, second half: the three doors that were still open after #3009
 
 **The admin's instruction, verbatim:** *"aapko teeno a b c karne hai! aur itna strong solve karo ki app

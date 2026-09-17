@@ -11,7 +11,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
-import { User, Wallet, Clock, CheckCircle2, Circle, AlertCircle, ChevronRight, Edit3, Save, X, CalendarDays, Zap, Activity, LogOut, AlertTriangle, Smartphone, ShieldCheck, Mail, Loader2, Gift, Copy, Globe } from 'lucide-react';
+import { User, Wallet, Clock, CheckCircle2, Circle, AlertCircle, ChevronRight, Edit3, Save, X, CalendarDays, Zap, Activity, LogOut, AlertTriangle, Smartphone, ShieldCheck, Mail, Loader2, Gift, Copy, Globe, Share2 } from 'lucide-react';
 import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import type { User as FirebaseUser } from 'firebase/auth';
@@ -23,6 +23,7 @@ import { maskPhone } from '../../lib/phoneNumber';
 import { VerifyPhoneSheet } from '../VerifyPhoneSheet';
 import { ReferralEarningsSheet } from '../ReferralEarningsSheet';
 import { useReferralProgress } from '../../hooks/useReferralProgress';
+import { shareReferral } from '../../lib/shareReferral';
 import { auth as firebaseAuth } from '../../lib/firebase';
 import { sendVerificationEmail, linkGithubAccount, isGithubLinked, describeLinkGithubError } from '../../lib/accountVerificationActions';
 
@@ -154,6 +155,8 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
   const referral = useReferralProgress(user?.uid);
   const [earningsOpen, setEarningsOpen] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
+  /** Only set when sharing genuinely could not happen — a dismissed sheet says nothing. */
+  const [shareNote, setShareNote] = useState<string | null>(null);
   // ── Verifications card (admin 2026-09-16: "3 verification button add karo — email, phone, github,
   // jo referral system me use ho") ─────────────────────────────────────────────────────────────────
   // `emailVerified` / `providerData` live ON the Firebase `user` object; these two mirror them into
@@ -518,13 +521,19 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
           </div>
         </div>
 
-        {/* ── Referral Code ────────────────────────────────────────────────── */}
+        {/* ── Refer and earn ──────────────────────────────────────────────────
+            ADMIN 2026-09-17: the headline leads with what the user GETS ("refer and earn tokens
+            worth ₹1,500"), not with the words "Your Referral Code". The amount is read from
+            `capRupees` — the server's own `REFERRER_LIFETIME_CAP_TOKENS` — and never typed here, so
+            an admin who retunes the cap cannot leave a stale number promising money on this screen. */}
         {referral.enabled && (
           <div className="bg-[#161b22] border border-amber-500/20 rounded-3xl p-6 space-y-3.5">
             <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <Gift className="w-4 h-4 text-amber-400" />
-                <h2 className="text-xs font-black text-white uppercase tracking-widest">Your Referral Code</h2>
+              <div className="flex items-center gap-2 min-w-0">
+                <Gift className="w-4 h-4 text-amber-400 shrink-0" />
+                <h2 className="text-xs font-black text-white uppercase tracking-widest">
+                  Refer &amp; earn tokens worth ₹{referral.capRupees}
+                </h2>
               </div>
               <button
                 onClick={() => setEarningsOpen(true)}
@@ -548,6 +557,27 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
                 <Copy className="h-3 w-3" /> {codeCopied ? 'Copied' : 'Copy'}
               </button>
             </div>
+
+            {/* SHARE — the device's own sheet, so the code reaches WhatsApp / Instagram / anywhere
+                the person already talks to their friends. Called straight from the click handler:
+                browsers require a user gesture for `navigator.share`, and an `await` before it can
+                spend that gesture. A device with no share sheet copies instead and says so, rather
+                than being a button that does nothing. */}
+            <button
+              disabled={!referral.code}
+              onClick={async () => {
+                const outcome = await shareReferral(
+                  referral.shareMessage || referral.code || '', undefined, navigator,
+                );
+                if (outcome === 'copied') { setCodeCopied(true); setTimeout(() => setCodeCopied(false), 2000); }
+                if (outcome === 'failed') setShareNote('Could not open sharing on this device — use Copy instead.');
+                // 'dismissed' says nothing at all: the user closed the sheet, which is a decision.
+              }}
+              className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 py-3 text-[11px] font-black uppercase tracking-widest text-black transition-all hover:bg-amber-600 disabled:opacity-40"
+            >
+              <Share2 className="h-3.5 w-3.5" /> Share
+            </button>
+            {shareNote && <p className="text-[11px] font-semibold text-amber-300">{shareNote}</p>}
 
             <p className="text-[11px] font-bold text-[#8b949e]">
               Earned so far: <span className="text-emerald-400">₹{referral.earnedRupees}</span> of ₹{referral.capRupees}

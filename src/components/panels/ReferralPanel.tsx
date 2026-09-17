@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Circle, Copy, Gift, Loader2, Share2 } from 'lucide-react';
+import { shareReferral } from '../../lib/shareReferral';
 import { collectDeviceCheck } from '../../lib/deviceIntegrityNative';
 import { normalizeReferralCodeClient } from '../../lib/referralCodeClient';
 import { STEP_ORDER, type RewardStep } from '../../lib/referralStepNames';
@@ -193,9 +194,23 @@ export const ReferralPanel: React.FC<{
             <Copy className="h-3 w-3" /> Copy
           </button>
         </div>
+        {/* A REAL share button, not an icon on a sentence (admin 2026-09-17). Same shared helper the
+            profile card uses, so the two surfaces can never behave differently. */}
+        <button
+          disabled={!code}
+          onClick={async () => {
+            const outcome = await shareReferral(shareMessage || code || '', undefined, navigator);
+            if (outcome === 'shared') props.onToast('Shared ✓', 'success');
+            if (outcome === 'copied') props.onToast('Referral link copied ✓', 'success');
+            if (outcome === 'failed') props.onToast('Could not open sharing — use Copy instead.', 'error');
+            // 'dismissed' is silent: the user closed the sheet on purpose.
+          }}
+          className="mt-3 w-full inline-flex items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 py-3 text-[11px] font-black uppercase tracking-widest text-black transition-all hover:bg-amber-600 disabled:opacity-40"
+        >
+          <Share2 className="h-3.5 w-3.5" /> Share
+        </button>
         <p className="mt-4 text-xs font-semibold leading-relaxed text-amber-200/70">
-          <Share2 className="mr-1 inline h-3.5 w-3.5" />
-          Share your code. You earn ₹25 for each of your friend&rsquo;s three verifications — ₹75 per friend,
+          You earn ₹25 for each of your friend&rsquo;s three verifications — ₹75 per friend,
           up to ₹{capRupees} in total. Your friend must apply it in the Android app.
         </p>
         <p className="mt-2 text-[11px] font-bold text-[#8b949e]">

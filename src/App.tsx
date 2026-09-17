@@ -156,13 +156,8 @@ import type { ZipSizeModalVariant } from './components/ide/ZipSizeModal';
 import { decideBackAction, HARDWARE_BACK_EVENT } from './lib/androidBack';
 import {
   browserStore as placeStore, readLastPlace, recordLastPlace, decideLanding, needsSignIn,
-  readPlaceActivity,
 } from './lib/lastPlace';
 import { pickFreeChatResume } from './lib/freeChatResume';
-import { recentConversations as buildRecentConversations, type RecentConversation } from './lib/recentConversations';
-import { buildHistoryIndex } from './lib/historyIndex';
-import { readProfessionalHistory } from './components/professionals/ProfessionalHistoryView';
-import { resumeArchived } from './lib/professionalChatStore';
 import { loadNativeShellContext, exitNativeApp } from './lib/nativeShell';
 import { ExitConfirmDialog } from './components/ExitConfirmDialog';
 // AgentMode → re-exported from ./types
@@ -2598,47 +2593,6 @@ export default function App() {
     toggleTab, addToast, addLog, initialFreeChatMessages: initialNbiMessages,
   });
 
-  /**
-   * The Home list — the read half of "old session kis button ke piche hide na ho".
-   *
-   * Computed only while Home is on screen, and from LOCAL stores only (`navbharat_sessions`,
-   * `prof_<id>_*`, the activity ledger), so it paints on the first frame with no network wait and
-   * costs nothing on any other screen. `sessions` is in the dependency list, so the cloud merge that
-   * lands a moment later corrects the list in place.
-   */
-  const homeRecents = useMemo<RecentConversation[]>(() => {
-    if (activeView !== 'home') return [];
-    try {
-      return buildRecentConversations({
-        sessions: buildHistoryIndex(sessions),
-        professionals: readProfessionalHistory(),
-        activity: readPlaceActivity(placeStore()),
-      });
-    } catch {
-      return []; // a list we cannot build is a section that does not render, never a broken Home
-    }
-  }, [activeView, sessions]);
-
-  /**
-   * Open one of those rows.
-   *
-   * Each kind reuses the path that already knows how to open it — `handleRestoreUci` for a saved
-   * session, and for a professional the same `resumeArchived`-then-open the history screen uses.
-   * ⚠️ An ENDED professional conversation MUST be made live before the tab opens, or the tab reads
-   * its live slot, finds nothing, and shows a blank chat: the fake-button class.
-   */
-  const openRecentConversation = useCallback((item: RecentConversation) => {
-    if (item.kind === 'professional') {
-      if (item.profEndedAt !== undefined) {
-        const store = professionalStore();
-        if (store) resumeArchived(store, item.view, item.profEndedAt);
-      }
-      toggleTab(item.view as ViewType);
-      return;
-    }
-    if (item.sessionId) void handleRestoreUci(item.sessionId);
-  }, [toggleTab, handleRestoreUci]);
-
   useEffect(() => {
     // Check and restore saved layout/project state if returning from OAuth
     try {
@@ -3260,8 +3214,6 @@ export default function App() {
                theme={theme}
                user={user}
                onShowLogin={() => setShowAuth(true)}
-               recentConversations={homeRecents}
-               onOpenRecent={openRecentConversation}
              />
           )}
           {activeView === 'other_ai' && (

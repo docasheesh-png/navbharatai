@@ -61102,3 +61102,73 @@ bug installed. Draft 2 sent the same line three times — identical narrations D
 `repeatCount: 3`, so it failed against correct code as well. Only after measuring the real behaviour
 (three DISTINCT lines → three separate notes) did it bite. **A guard written from a guess is not a
 guard; it has to be measured against the code it guards.**
+## 2026-09-17 — Every link every AI gives a user now opens in the real browser on Android
+
+Admin asked what else was worth upgrading. Measured rather than guessed: **45 bare `target="_blank"`
+links remain across 24 files** (the open item recorded with PR #3000), and **one of them carries more
+of the product's real link traffic than the other 44 combined**.
+
+`LinkedText` (`src/lib/linkify.tsx`) renders the links in every reply from ~70 Professionals
+(`ProfessionalChat`) and NavBharatAI Pro (`FoldableMessage`). Inside a Capacitor WebView a bare
+`target="_blank"` does not open Chrome — it navigates in place, or opens a chromeless child view with
+no address bar and no obvious way back. A user who taps a source link an AI handed them is stranded
+inside what still looks like NavBharatAI.
+
+**Fixed:** the click is handed to `openExternalUrl` (which passes `_system` on native), and three
+properties are pinned by tests because each would be quietly lost by an "obvious" simplification:
+- 🔒 **it is still an `<a href>`** — a button would cost long-press → "Copy link address", the hover
+  URL preview, and the announced screen-reader role. Only the CLICK is redirected;
+- 🔒 **the web path is untouched** — intercepting there would break ctrl/cmd-click and middle-click
+  into a new tab, and could meet a pop-up blocker;
+- 🔒 **a modified click is never intercepted** — the user asking for a new tab themselves is honoured.
+
+🔴 **SIBLING HUNTED, and it was the one that matters most.** My first draft asserted all three AI
+surfaces render through `LinkedText`. **The test failed, and it was right to:** Doctor AI does NOT —
+`SDAChat.tsx` imports only `isSafeHttpUrl` and renders model text through `ReactMarkdown` with its own
+anchor component, carrying the identical defect. **Its links are medical sources**, so being stranded
+in a chromeless view matters most exactly there. Both renderers now share ONE exported handler rather
+than a second copy that would drift.
+
+Tests: `tests/aiLinksOpenInBrowser.test.ts` (7, proven by reversion — removing the native guard fails
+the web-path test, removing the onClick fails two more). The existing `linkify` suite (12) passes
+unchanged.
+
+⚠️ **Still open:** the remaining ~43 bare `target="_blank"` sites (admin panels, settings, the store,
+the Pro panel). Lower traffic and mostly admin-facing, so they stay a recorded sweep rather than a
+rushed one.
+---
+
+## 2026-09-17 — "Continue where you left off" REMOVED from the home screen (admin, same day it shipped)
+
+**Admin, urgently:** *"yeh aaj banaya gaya hai, isko abhi hatao. jaldi delete karo!!! … maine kaha tha,
+jab koi user navbharatai free, navbharatai pro koi chat open kare to use last chat jahan se chori thi
+wahi se dikhna chahiye … homepage se isko pura hatao."*
+
+**PR #2996 shipped TWO things under one title** — *"the app reopens your conversation, and your
+conversations are on Home"*. Only the first was asked for. The second put a list of every past
+conversation on the front page of the product, which is not what "open a chat and see where you left
+off" means, and the admin saw it the day it landed.
+
+**Removed (the home list):** `components/home/RecentConversations.tsx`, `lib/recentConversations.ts`,
+`tests/recentConversations.test.ts`, the `HomeView` section and its two props, and the `homeRecents` /
+`openRecentConversation` block in `App.tsx`. Four now-unused imports went with them —
+`readProfessionalHistory`, `resumeArchived`, `readPlaceActivity`, `buildHistoryIndex` — because an
+unused import keeps its whole module on the load path (`scripts/noUnusedImports.mjs` caught all four).
+
+**KEPT, deliberately — this is the half the admin actually asked for:** `lib/lastPlace.ts` and
+`lib/freeChatResume.ts` are untouched, so reopening NavBharatAI still puts the user back in the
+conversation they were last in. `tests/lastPlace.test.ts`, `tests/freeChatResume.test.ts` and the rest
+of `tests/resumeWiring.test.ts` still cover it — 58 tests, green.
+
+⚠️ **`AppKnowledgeBase.ts` was corrected in the same commit, and that matters more than it looks.**
+Three entries told every AI in the product that a "Continue where you left off" list is on the home
+screen. Leaving them would have made every assistant confidently direct users to a section that no
+longer exists — the same stale-capability class this repo has now paid for twice in one week (the four
+ladder comments on 2026-09-15, and "NavBharatAI cannot add your signing key" on 2026-09-17). Users are
+now pointed at History, which is real.
+
+**The test block asserting the home list was REPLACED WITH A NOTE, not deleted**, so a later session
+reading the history does not "restore" a feature that was removed on purpose.
+
+Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1728 files, 24432 passed, 0 failed** ·
+build · test:bundle · boot:check.

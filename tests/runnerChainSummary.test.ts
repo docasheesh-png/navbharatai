@@ -30,14 +30,52 @@ describe('describeRunnerChain', () => {
   // OWN question — "was the rung there, or never there?" — failing on its own line (autopsy 2b0a3ed5).
   //
   // So the count is the contract, not the spelling of it. A run collapses; the number survives.
-  it('a key pool reports HOW MANY keys were tried, not one merged attempt', () => {
+  // ⚠️ THIS CASE'S OWN TITLE USED TO SAY "keys were TRIED", AND THAT IS THE MISREADING (2026-09-17).
+  // The chain records what was BUILT — this module's header says so in its first line — so three
+  // rungs means three keys STANDING THERE, whether the run reached one of them or all three. The
+  // number now says which noun it is counting; the old bare `×3` did not, and a real autopsy paid
+  // for it (see the next case).
+  it('a key pool reports HOW MANY keys STOOD there, not one merged rung', () => {
     const text = describeRunnerChain([
       { name: 'GLM', modelId: 'glm-5.2' },
       { name: 'GLM#2', modelId: 'glm-5.2', reportAs: 'GLM' },
       { name: 'GLM#3', modelId: 'glm-5.2', reportAs: 'GLM' },
     ]);
-    expect(text).toBe('GLM(glm-5.2) ×3');
-    expect(text).toContain('3'); // three keys tried is still legible as three
+    expect(text).toBe('GLM(glm-5.2) ×3 keys');
+    expect(text).toContain('3'); // three keys is still legible as three
+  });
+
+  /**
+   * 🔴 THE PHANTOM ROOT CAUSE A BARE `×N` BOUGHT (autopsy `d6d664e6`, shipped as #3039).
+   *
+   * That autopsy recorded an open item titled *"a bench that does not bench"*: `PROVIDER_BENCHED`
+   * fired three times saying *"benched for the rest of this build"* while this line read
+   * `GLM(glm-4.7-flashx) ×51`. Fifty-one reads as fifty-one ATTEMPTS, so the two statements looked
+   * like a contradiction and an engine defect was recorded that did not exist.
+   *
+   * The bench was working. The label was ambiguous. One word closes it — and a phantom open item is
+   * not free: it sends the next session to read code that is already correct.
+   */
+  it('a bare ×N is what made a working bench look broken', () => {
+    const pool = Array.from({ length: 51 }, (_, i) => ({
+      name: i === 0 ? 'GLM' : `GLM#${i + 1}`, modelId: 'glm-4.7-flashx', reportAs: 'GLM',
+    }));
+    const text = describeRunnerChain([...pool, { name: 'KIMI', modelId: 'kimi-k2.7-code' }]);
+    expect(text).toContain('×51 keys');
+    // The reading that produced the phantom finding is no longer available: the number is labelled.
+    expect(text).not.toMatch(/×51(?! keys)/);
+  });
+
+  it('genuinely identical rungs — same name, not a pool — keep the bare count', () => {
+    // A pool rung carries its OWN name under a shared `reportAs`; that is the discriminator, and it
+    // is the same one `isPoolMember` keys off in MultiProviderTurnRunner. Without distinct names
+    // there is no pool to name, so the honest label is the bare count.
+    const text = describeRunnerChain([
+      { name: 'VERTEX', modelId: 'gemini-2.5-flash' },
+      { name: 'VERTEX', modelId: 'gemini-2.5-flash' },
+    ]);
+    expect(text).toBe('VERTEX(gemini-2.5-flash) ×2');
+    expect(text).not.toContain('keys');
   });
 
   it('🔴 a big key pool no longer hides the rest of the ladder', () => {
@@ -52,7 +90,7 @@ describe('describeRunnerChain', () => {
       { name: 'GLM#105', modelId: 'glm-5.3', reportAs: 'GLM' },
       { name: 'CLAUDE_HAIKU' },
     ]);
-    expect(text).toBe('GLM(glm-4.7-flashx) ×104 → KIMI(kimi-k2.7-code) → GLM(glm-5.3) → CLAUDE_HAIKU');
+    expect(text).toBe('GLM(glm-4.7-flashx) ×104 keys → KIMI(kimi-k2.7-code) → GLM(glm-5.3) → CLAUDE_HAIKU');
     expect(text).not.toContain('and 80 more');
   });
 

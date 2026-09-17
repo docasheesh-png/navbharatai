@@ -196,7 +196,7 @@ export function DeveloperApiCard({ signedIn, onShowLogin }: DeveloperApiCardProp
 `# Who am I (read:profile)
 curl ${base}/me -H "X-API-Key: nbai_YOUR_KEY"
 
-# Ask NavBharatAI's AI (ai:chat) — OpenAI-compatible
+# Ask NavBharatAI's AI (ai:chat) — standard chat-completions format
 curl ${base}/chat/completions \\
   -H "Authorization: Bearer nbai_YOUR_KEY" \\
   -H "Content-Type: application/json" \\
@@ -204,7 +204,7 @@ curl ${base}/chat/completions \\
     node:
 `import OpenAI from "openai";
 
-// Any OpenAI-compatible client works — only the base URL and key change.
+// Any standard chat-completions client works — only the base URL and key change.
 const client = new OpenAI({ apiKey: "nbai_YOUR_KEY", baseURL: "${base}" });
 
 const reply = await client.chat.completions.create({

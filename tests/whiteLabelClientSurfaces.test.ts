@@ -106,6 +106,11 @@ const ALLOWED: Record<string, string> = {
   'src/components/ide/SecurityScan.tsx': "uses the USER'S own key",
   'src/lib/credentialRecipes.ts': "setup recipes for the USER'S own provider accounts",
   'src/hooks/useChatEngine.ts': "forwards the USER'S own keys as headers",
+  // The quick-start snippets name the CLIENT LIBRARY the developer installs (`openai` on npm/PyPI) to
+  // call OUR endpoint — the model in every snippet is "navbharatai". The package name is the user's
+  // own tooling, not the engine behind the answer; the prose deliberately says "chat-completions
+  // format", never a vendor. (2026-09-17, Developer Tools → NavBharatAI API)
+  'src/components/devtools/DeveloperApiCard.tsx': "the developer's OWN SDK package name in a quick-start snippet",
   // This module's whole job is to name the forbidden tokens so they can be kept out.
   'src/lib/engineLabels.ts': 'the choke point itself — it must contain the vocabulary it blocks',
 };

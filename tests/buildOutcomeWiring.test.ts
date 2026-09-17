@@ -14,6 +14,38 @@ import { scoreBuildOutcome, complaintInText } from '../src/server/AgentV3/buildO
 const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
 const surface = readFileSync(join(process.cwd(), 'src/components/agentv3/PreviewSurface.tsx'), 'utf8');
 
+/**
+ * 🔴 A GUARD BOUNDED BY A BYTE COUNT BREAKS ON THE NEXT CORRECT LINE (2026-09-17).
+ *
+ * The two `finalizeOnDeadline` guards below sliced a FIXED 9000 / 14000 characters from the function
+ * header. An unrelated, correct three-line addition earlier in that function pushed
+ * `buildDiagRef?.finish(...)` from offset 8,924 to 9,080 — past the window — and the guard failed
+ * against code that still did exactly what the guard exists to require.
+ *
+ * That is the third guard in this repo to break on its own formatting in one day (the release-gate
+ * count guard pinned an `issues.filter(...)` shape; a constructor-arity guard counted commas inside a
+ * doc comment). The pattern is the same every time: **the guard measured the text instead of the
+ * claim**, and a session then has to decide whether the code or the guard is wrong — which is exactly
+ * the doubt a guard is supposed to remove.
+ *
+ * So the window is now the function's REAL extent, found by matching braces from its header. It cannot
+ * be outgrown, and it still proves what the assertions mean: these lines are inside THIS function, in
+ * THIS order. Strictly stronger than the byte count it replaces — never weaker.
+ */
+function functionBody(src: string, header: string): string {
+  const at = src.indexOf(header);
+  if (at < 0) return '';
+  const open = src.indexOf('{', at + header.length - 1);
+  if (open < 0) return '';
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    const ch = src[i];
+    if (ch === '{') depth++;
+    else if (ch === '}') { depth--; if (depth === 0) return src.slice(at, i + 1); }
+  }
+  return src.slice(at); // unbalanced — fall back to the remainder rather than to nothing
+}
+
 describe('a record is opened for every build that ends', () => {
   it('startBuild runs in the FINALLY, so every ending is covered', () => {
     const fin = route.indexOf('clearInterval(diagHeartbeatTimer);');
@@ -170,7 +202,7 @@ describe('🔒 a PERSISTED diagnostics report can never carry a stale success na
   it('the watchdog finalizer computes an honest pause message BEFORE finishing the report, and passes it on the not-ok branch', () => {
     const i = route.indexOf('const finalizeOnDeadline = async () => {');
     expect(i).toBeGreaterThan(-1);
-    const body = route.slice(i, i + 9000);
+    const body = functionBody(route, 'const finalizeOnDeadline = async () => {');
     const pauseComputed = body.indexOf('const pauseMsgForReport = deadlinePauseMessage(writtenFiles.size);');
     const finishCall = body.indexOf('buildDiagRef?.finish(ok, ok ? buildResultRef?.summary : pauseMsgForReport.summary);');
     expect(pauseComputed).toBeGreaterThan(-1);
@@ -181,8 +213,7 @@ describe('🔒 a PERSISTED diagnostics report can never carry a stale success na
   });
 
   it('the resumable-pause chat bubble and the persisted report summary are the SAME honest text — one computation, not two', () => {
-    const i = route.indexOf('const finalizeOnDeadline = async () => {');
-    const body = route.slice(i, i + 14000);
+    const body = functionBody(route, 'const finalizeOnDeadline = async () => {');
     // The `else` branch (not-ok, resumable) must reuse the same value rather than recomputing it —
     // two independent calls to deadlinePauseMessage() could disagree if writtenFiles.size changed
     // between them, silently reopening this exact class of contradiction.

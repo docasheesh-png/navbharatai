@@ -11,6 +11,7 @@
 // events (a provider fallback, a sandbox-create timeout).
 
 import { toolCallDetail } from './toolCallTarget';
+import { isTransientStatusLine } from './workingHeartbeat';
 import type { AgentEvent } from './types';
 import { parseNpmAuditSummary, npmAuditNote, auditSeverity, looksLikeDependencyInstall } from './npmAuditSummary';
 import { manifestSummaryLine, type BuildManifestV1 } from './BuildManifest';
@@ -476,6 +477,8 @@ export class BuildDiagnostics {
   /** provider → failure bucket → count. See recordProviderFailure. */
   private readonly providerFailureReasons = new Map<string, Map<string, number>>();
   private requestAnalysis?: { taskType: string; complexityScore: number; startTier: string };
+  /** See the transient-status note in the narration handler. */
+  private transientStatusRecorded = false;
   private readonly meta: BuildDiagnosticsMeta;
   private readonly now: () => number;
   private readonly startedAt: number;
@@ -1256,6 +1259,22 @@ export class BuildDiagnostics {
         const t = (e.text || '').trim();
         if (!t) break;
         this.lastActivity = t.slice(0, 80);
+        /**
+         * 🔴 A LINE THAT UPDATES EVERY 15 SECONDS MUST NOT BECOME 120 ROWS (autopsy 2b0a3ed5).
+         *
+         * The "still working" clock is emitted repeatedly with a stable id so the SURFACE replaces one
+         * line — but every narration also lands on this timeline, and a 30-minute build would file its
+         * own reassurance a hundred times over, burying the report the line exists to sit beside.
+         *
+         * Recorded ONCE, which is the same discipline `slowKeptAnyway` already uses for a verdict that
+         * stays true: the admin needs to know the user was being told something, not to read the clock
+         * tick. `lastActivity` above is still refreshed on every tick, so the still-running detector —
+         * which is the one reader that genuinely wants the newest heartbeat — is unaffected.
+         */
+        if (isTransientStatusLine(t)) {
+          if (this.transientStatusRecorded) break;
+          this.transientStatusRecorded = true;
+        }
         // A problem the agent is talking about (sandbox unavailable, port/preview not responding,
         // errors remaining, retries) is flagged warning/error; everything else is recorded as a
         // normal AGENT_STEP so the report shows WHAT the agent was doing minute-to-minute, not only

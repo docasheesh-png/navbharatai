@@ -56,6 +56,26 @@ export const BUDGET_EXHAUSTED_MESSAGE = 'build budget exhausted before this call
 export const BUDGET_REACHED_MESSAGE = 'build budget reached while this call was still running';
 
 /**
+ * A provider we ABANDONED for crawling — answering, but far below the rate at which waiting is worth
+ * it (autopsy 2b0a3ed5, 2026-09-17).
+ *
+ * ⚠️ IT MUST READ AS A TIMEOUT AND BE TELLABLE FROM ONE. `isTimeout` matches "timed out", and that is
+ * deliberate here: a rung we walked away from should bench exactly like one that hung. But the ladder
+ * ALSO needs to know this particular ending, because it is the one case where the rung would probably
+ * have answered eventually — so it benches the family at once instead of spending a second slow turn
+ * proving the same thing.
+ *
+ * 🔒 NEVER a user-facing string: it names the engines, so it stays in the admin report (White-Label).
+ */
+export const SLOW_STREAM_MESSAGE = 'OpenAI-compatible call (GLM/Kimi) timed out — abandoned for crawling';
+
+/** Was this error our own decision to walk away from a crawling provider? PURE. */
+export function isSlowStreamAbandon(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? '');
+  return message.includes('abandoned for crawling');
+}
+
+/**
  * Did this call end because OUR budget ran out, rather than because the provider did anything wrong?
  *
  * 🔴 THE HALF THIS MODULE WAS MISSING, and a real build paid for it (report 70115adf, 2026-09-13).

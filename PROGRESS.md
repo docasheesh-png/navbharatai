@@ -64617,3 +64617,74 @@ generate-all → verify → repair loop; this is the agentic builder's path.
 its first checkpoint — the endgame's "N compile errors left" should drop toward zero, and
 `REPEATED_READS`/edit loops with it. Tests: `tests/writeTimeTypecheck.test.ts` (note wording on the real
 ERP tsc output, path normalisation, caps, queue coalescing, summary, dispatcher + route wiring).
+
+---
+
+## 2026-09-17 — AUTOPSY e706e068, FOURTH pass: the one finding in it nobody could act on
+
+The admin re-sent the School ERP report (*"app banne ke bad tut gayi?"*). **It has now been autopsied
+three times** — PRs #3009, #3020/#3023/#3025/#3031, and #3043 (its own title says "residue") — and
+`main` was re-read rather than trusted: its ledger is genuinely closed, and **two of the three open root
+causes that #3043 recorded have since been closed by other sessions**:
+
+| #3043's open item | State on `main` today |
+|---|---|
+| The first `tsc` ran after 20 files, then a 7-minute grind | **CLOSED** by #3048 — `writeTimeTypecheck.ts`, the compiler answers after every TypeScript write |
+| The abandoned planner call keeps running on the provider side | **CLOSED** by #3044's futility breaker for the *build*; the in-flight provider call itself is still the standing mid-build-cost-stop item |
+| The scaffolded E2E suite can never run here | **STILL OPEN** — infra: `@playwright/test` is not baked into the E2B images. Needs a template rebuild (`infra/e2b/build.mjs`), an admin action; not coded blind |
+
+### What was left, and it was hiding in plain sight
+
+Two of that report's unresolved warnings were **findings nobody could act on**:
+
+```
+ACCESSIBILITY      45/100 (D) … 14 form field(s) with no label … 7 button/link with no accessible name
+DESIGN_CONSISTENCY 50/100 (D) … 58 distinct colours … 14 spacing values off the 4px grid
+```
+
+Across a **31-file** app, naming **no file and no line**. A user cannot fix "14 form fields"; neither can
+a repair pass. Both shipped as permanent unresolved warnings, and the a11y one matters: `A11yLinter`'s own
+module comment says *"tsc, ESLint, the CSS consistency check and the reviewer are all blind to every one
+of those"* — so this is the ONLY thing in the stack that looks at accessibility, and its output was
+unusable.
+
+🔑 **The same report proves it was not inevitable.** `DESIGN_PAGE_INCONSISTENT` named its files
+(*"worst: src/pages/Attendance.tsx"*). **Two quality linters in one document, one actionable and one
+not** — because `lintBuiltApp` JOINS every file into one string before linting, so by the time a
+violation exists the file it came from has already been thrown away.
+
+### The fix
+
+`lintBuiltApp` now returns `offenders` — violation `type` → the files carrying the most of it, worst
+first (top 3). The summaries append `Worst: src/pages/Students.tsx (4), src/pages/Teachers.tsx (2).`
+
+🔒 **The score is unchanged.** Attribution is a second pass over the **same selected files**, in the same
+loop, so the headline number still comes from the joined text exactly as before and the two can never
+disagree about which files were judged — the existing 12 cases pass untouched. Cost is one more regex
+scan over the same characters, on a build that has already succeeded.
+
+⚠️ **A distinctness rule is attributed honestly.** For "58 distinct colours" or "3 font families" the
+per-file counts deliberately do **not** sum to the app-wide total (two files can share the same one-off
+colour). The word used is **"worst"**, which is true of every rule; nothing claims a share of the total,
+and a test asserts the sum differs for `color-count` precisely so nobody later "fixes" it into a lie.
+For a counting rule (`input-label`, `control-name`, `img-alt`) the per-file numbers DO add up, and a
+test asserts that too.
+
+Bounded (3 files per type, so a defect in fifty pages names three), deterministic, no model call, and
+`offenders` missing degrades to the old sentence instead of throwing.
+
+**Tests:** `tests/qualityFindingsNameTheirFiles.test.ts` (7), proven by reversion in both halves —
+dropping the summary call fails 2, returning an empty map fails 4.
+
+### Still open from this report, unchanged and not guessed at
+
+- **The E2E suite cannot run here** (infra, above).
+- **Accessibility is detected and never REPAIRED.** Naming the files is what makes a repair possible;
+  building one is a separate decision with its own cost. `input-label` on a field that already has a
+  `placeholder` is deterministically fixable (`aria-label` from the placeholder, zero guessing); an
+  icon-only button's name is not — a machine cannot invent what the button means. Recorded rather than
+  half-built.
+- **The abandoned in-flight provider call** — the standing mid-build cost-stop item.
+
+**Gate on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` · **25,254 tests
+passed** · `build` · `test:bundle` · `boot:check` · `deps:server-gate` — all green.

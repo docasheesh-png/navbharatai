@@ -61778,6 +61778,64 @@ reading the history does not "restore" a feature that was removed on purpose.
 Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1728 files, 24432 passed, 0 failed** ·
 build · test:bundle · boot:check.
 
+## 2026-09-17 — autopsy `8682b6b1`: our own heartbeat hid a 160-second stall
+
+Second fix from the two-report autopsy. `TIME_TO_FIRST_CALL` read:
+
+> *"171s of preparation before the build's first model call began … The longest single stretch with
+> NOTHING recorded was 60s, beginning right after: '⏱ minute 1 — still working …' — that is where to
+> look first."*
+
+The real answer was twenty lines above it in the SAME report:
+
+> `SETUP_TIMING: "Project checked in 161s — nothing needed restoring"`
+> `detail: "durable read 294ms (114 file(s)) · sandbox scan 160493ms"`
+
+**ONE measured step took 160.5s of the 171s**, and the instrument built to find the biggest cost
+pointed at a 60-second gap and at a heartbeat.
+
+### Root cause — a liveness ping counted as activity
+
+`longestSilentGap` treated every recorded entry as a mark of work. The heartbeat writes
+`⏱ minute N — still working` once a minute, and it is emitted *precisely because nothing else is
+happening*. So one 161-second stall was chopped into 56s / 60s / 45s and the largest reported gap was
+60s — the interval between two heartbeats. **The engine's "I am alive" ping was concealing the thing
+it was pinging through.** This is the shared-evidence-ledger class again: the report held the answer
+and the verdict could not read it.
+
+### The fix — two halves, one commit, because either alone is worse than neither
+
+1. **Timer chatter no longer counts as activity** (`isTimerChatter`: `code === 'HEARTBEAT'`, or a
+   message starting `⏱` — the route also emits `⏱️ Still building…` as an `AGENT_STEP`, so the code
+   alone is not the tell). Named against `isProgressNoise` in `activityTimeline.ts` so the two are
+   recognisably one idea.
+2. **The sentence stops claiming "with NOTHING recorded"** — once heartbeats are filtered that is
+   literally false, and fixing a misleading pointer by making an untrue claim is exactly the trade
+   this repo forbids. It now says *"with no work recorded (heartbeats aside)"*.
+
+Plus `until`: every self-timing step in this codebase records at COMPLETION (`PHASE_TIMING`, all four
+`SETUP_TIMING` sites), so **the line that ENDS a silence is usually the step that FILLED it**. On the
+real timeline that is `"Project checked in 161s — nothing needed restoring"` — the answer, named. Still
+hedged in the wording: the line that ended a stall is not proof it caused it.
+
+No schema change was needed. An earlier plan added a `durationMs` field to `BuildIssue` so the warning
+could read step durations; the gap BEFORE a completion-recorded step already *is* its duration, so the
+timeline carried the fact all along.
+
+### Tests
+
+`tests/silenceNamesTheStepThatFilledIt.test.ts` — 10 cases built from the report's real timestamps, so
+the 161s and the old 60s are both reproduced exactly. The existing 169 `BuildDiagnostics` tests are
+unchanged. Three guards proven by reversion: removing the filter (4 fail), dropping `until` (2),
+restoring the old wording (3).
+
+⚠️ **Two of my own test drafts were wrong, and both are recorded because they are the lesson.**
+`163497 - 80000` is 83 seconds, not the 84 I asserted from mental arithmetic. And the honesty guard
+first asserted `String(constructor)`, which never contains a method body — it passed no matter what the
+sentence said. **A guard that cannot fail is not a guard**, and this is the second time in one session
+that lesson had to be paid for. The rewritten guard reads the source and STRIPS COMMENTS, because the
+module's own comment legitimately quotes the old phrase while explaining why it had to go — and the
+first version of that guard flagged the explanation as the bug.
 ## 2026-09-17 — Every golden scaffold graded C or D, and only ONE of the two reasons was real
 
 Admin's second delegated decision. Build report `2b0a3ed5` reported `DESIGN_CONSISTENCY 68/100 (C)` on
@@ -62015,6 +62073,61 @@ recents section, that the knowledge base promises neither behaviour — and that
 Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1730 files, 24432 passed, 0 failed** ·
 build · test:bundle · boot:check.
 
+## 2026-09-17 — the echo guard I had just shipped was itself the forbidden trade (caught before merge)
+
+Two independent adversarial reviewers, run against the narration-echo guard **after it was pushed and
+before it was merged**, found the same real defect. Both were right.
+
+### What was wrong
+
+`said` was built from `tForMatch` — the narration with benign compounds STRIPPED ("error boundary",
+"error handling", "warning banner") — while `known` was built from the **RAW** prompt. Applying the
+stripper to one side only meant an ordinary feature request seeded the whitelist:
+
+> prompt: *"Build a checkout page with proper error handling and a warning banner for overdue items."*
+> → `known = {error, warning}` → every genuine engine struggle for the rest of that build was
+> downgraded to a step.
+
+Measured by the reviewers against the real class: *"The dev server is throwing an error on startup"*,
+*"There is still an error in the console after rebuild"*, *"The production build exits with an error"*,
+*"There is a warning about the port"* — all four flipped from problem to step, in a build that had
+reported no symptom at all.
+
+**That is the same trade in the other direction** — false positives on fix-turns exchanged for false
+NEGATIVES on ordinary builds — which is exactly what the constitution forbids. Money was clean and
+verified clean (`AGENT_NOTE` is always `autoResolved: true`, and every money-touching reader excludes
+it), but the admin's forensic ledger is the input the fifth absolute rule mines, and it was being
+thinned silently.
+
+### Two further corrections from the same review
+
+1. **`meta.prompt` is NOT reliably "the user's own words"**, and my doc comment said it was — a
+   load-bearing sentence for whoever reads it next. `fixErrorAndContinuePrompt` composes the prompt
+   from a PLATFORM prefix plus NavBharatAI's own error notice, so our own wording could whitelist its
+   own vocabulary. `PLATFORM_COMPOSED_PREFIXES` are removed before harvesting.
+2. **The guard must only arm on an actual SYMPTOM REPORT.** `isPlatformFixRequest` /
+   `looksLikeMachineError` (`lib/platformFixRequest.ts`) are this repo's existing answer to "is this
+   message reporting a failure?", already used server-side by `IntentClassifier`. Drawing the line
+   once, there, is what stops *"Build me a dashboard that shows error rates"* silencing a build.
+
+🔴 **STILL OPEN, named rather than covered over:** when the wrapped body is itself NavBharatAI's own
+branded notice (*"The build produced no files. Please try again."*), the guard still arms. That is the
+`fdd59ef8` "our own voice fed back" class and belongs to that fix, not this one.
+
+### Tests
+
+Four new over-correction guards in `tests/narrationEchoesPrompt.test.ts` (16 total). Each correction
+proven by reversion against its OWN test.
+
+⚠️ **Two of my test drafts were wrong again, and the pattern is now unmistakable.** Two unit tests used
+the shorthand prompt `'fix this error'`, which is not a symptom report — the guard correctly refused it
+and the TESTS were wrong, not the code. And the prefix guard first asserted a narration word
+(`"failed"`) that appears in neither the prefix nor the body, so it returned false either way and
+guarded nothing; the discriminating case needs a word that lives ONLY in our own opener.
+
+**Three times in one session a guard has been written from a guess and had to be rewritten after
+measuring.** The rule that keeps being relearned: *a test that cannot fail is not a test* — and the
+only way to know it can fail is to break the code and watch it go red.
 ---
 
 ## 2026-09-17 — CORRECTION to the `8b3dca5c` autopsy above: the workspace was EMPTY, so the authorship fix does not clear that build
@@ -62158,6 +62271,92 @@ no guard: it teaches the next reader that the thing it measures is noisy. Same l
 6. **The build's ETA is asserted at t=0 and never reconciled** — *"ETA ~2–4 min"* on a 16.7-minute
    build, in the same document that carries both timestamps.
 
+## 2026-09-17 — Autopsy `e706e068`, second half: the three doors that were still open after #3009
+
+**The admin's instruction, verbatim:** *"aapko teeno a b c karne hai! aur itna strong solve karo ki app
+banne ke bad apne aap tute na. ek bar app ban jati hai, preview chalta bhi hai. par achanak se build
+fails aur bill = 0₹ isko specialy fix karna hai."* PR #3009 (another session, merged the same morning)
+had already closed one door — a "the build will fail" prediction is superseded by `PROD_BUILD_OK`, and
+one defect is counted once. Re-checked against `main` before starting (safeguard #6): even with #3009,
+the School ERP would STILL have been flipped, because its third blocker, *"2 fake/incomplete code
+issue(s)"*, is not a build prediction and stood on its own. Three fixes, three modules, three tests.
+
+### A · The project planner's clock, and the silence when it ran out
+
+`AGENTV3_PROJECT_MODE` **was working** — the report's `🏗️ decomposing…` line at 10:18:30 is the
+allowlist gate AND `detectMegaProject` both firing. What nobody could see: `ppGenerate` raced the
+model against a hard-coded **60 s** timer, the outer `catch` swallowed the rejection, and
+`recordLlmCall` sat AFTER the race, so no failed call reached the ledger. The user was promised a
+module-by-module build and the promise trailed off.
+
+- **`projectPlannerBudget.ts`** — the outer timeout is now the INNER call's own bound plus slack
+  (stream hard cap 300 s when build calls are streamed, the 150 s floor ceiling when not; env
+  override `AGENTV3_PROJECT_PLANNER_TIMEOUT_MS`, clamped 30–600 s, malformed ignored). A backstop,
+  never a second tighter clock — the same reasoning `OpenAiToolRunner` records for its SDK client.
+  Tier-awareness is inherited: the ladders differ, a legitimate call's length does not.
+- A failed planner call is recorded `ok: false` on the model-call ledger; the outer catch records
+  **`PROJECT_MODE_FAILED`** (process-only — never counted against the app); and if the decomposition
+  had been ANNOUNCED, the user is told it was withdrawn (`PROJECT_MODE_FALLBACK_NARRATION`).
+
+### B · The batch repair wrote whatever path came back — and that is where the strays came from
+
+The three root files (`App.tsx`, `hooks/useStudents.ts`, `types/student.ts`) are timestamped inside
+the Endgame batch-repair window and appear in none of the model's tool calls. The batch call was
+handed `src/App.tsx` and returned its content as `App.tsx`; `runEndgameRepair` wrote it. Nothing
+imported the copies (so `npm run build` and the browser never saw them), while the readiness gate
+read the whole tree and found an unresolved import and placeholder data IN THE STRAYS.
+
+- **`resolveRepairTarget`** (EndgameRepair.ts): a returned path is written only if it is an existing
+  file, names exactly ONE existing file by its tail (remapped — the dropped-prefix case), or is a
+  module a TS2307 error says the app already imports (`referencedMissingModules`). Anything else is
+  refused, counted (`llmFilesRejected`) and named in the log. Refusing is the safe direction.
+- This is the 50/50 upstream half: with the strays never written, the feature-heal that spent
+  3 minutes and 22 KIMI calls "fixing" the dead `hooks/useStudents.ts` has nothing to fix.
+
+### C/D · THE CLASS, closed at the room rather than at a door — `runProvenApp.ts`
+
+Every earlier fix (isAppFinding, buildFailurePrediction, recordReadinessRecovery) closed the one
+static finding that had flipped a rendering app that week. `runProvenApp` asks the question all of
+them were approximations of: **has this app already been proven to RUN, by evidence a static finding
+cannot outrank?** A real-browser render (`shot.source === 'browser'` only — a curl shell proves
+nothing, the Green Freeze rule), the production build not FAILED (`not-run` neither helps nor hurts:
+the render alone is then the evidence, which is the admin's 4efab9d7 rule verbatim), no runtime check
+failed (preview / pages / journey), no deterministic runtime-crash proof, not a refusal, not stopped.
+
+**All THREE late flips of `ok → false` in the route now ask it first**: the release gate's RED
+(`OUTCOME_RELEASE_GATE_RED`), the final syntax re-verify (`OUTCOME_SYNTAX_ERROR`), and the reviewer's
+unresolved [CRITICAL]s (`OUTCOME_REVIEW_CRITICAL`). Held ⇒ `VERDICT_HELD_BY_RUN` (process-only) names
+both sides; the findings stay on the timeline, the health card and the gate's own RED sentence. What is
+refused is only "not built / not charged" about an app on the screen. The dukaan case (2026-08-12:
+missing modules AND failing page routes) is still flipped — pages `failed` vetoes — and a test says so.
+
+⚠️ **Stated plainly:** the release gate's headline still says *"N build-breaking blocker(s)"* on a held
+build; that wording lives in `releaseGate.ts`, which PR #3018 was mid-flight in while this was written
+(it merged during this change's gate run, and the whole gate was re-run on the merged tree). Teaching the
+gate itself about run-proof is a separate design change to its evidence shape, deliberately not folded
+in here. The VERDICT line beside it explains the contradiction.
+
+### Tests — all proven by reversion
+
+| file | cases | reverted → fails |
+|---|---|---|
+| `tests/endgameRepairNeverCreatesStrayFiles.test.ts` | 9 (the real three strays, replayed) | the target guard → 1 |
+| `tests/projectPlannerBudget.test.ts` | 13 | the 60 s literal restored → 1 |
+| `tests/runProvenApp.test.ts` | 18 (the real 10:44:08 evidence) | the gate hold → 1; the prod-build veto → 1 |
+
+The route guards parse the CODE (comments stripped, bounded by real anchors). My first draft of one
+used a 1,200-character window and failed on its own — the byte-window trap this file records four times
+today — and was rewritten to anchor on the block's closing `catch`.
+
+### Still open (rule 6)
+
+1. 🔴 **No reachability concept anywhere in the post-build suite.** Readiness, the fake-code scan and
+   the feature heal all read the WHOLE tree; a file the entry never imports is judged, healed and paid
+   for exactly like the app. Fix B stops one source of such files; it does not teach the gates to ask
+   "does the app load this?". The import graph already exists in `ArchitectureAnalysis` — a transitive
+   closure from `index.html → src/main.tsx` is the missing subsystem.
+2. `releaseGate.ts` wording on a held build (above).
+3. 🥵 Sandbox 87% idle across 26.6 minutes; 115 s to the first model call — unchanged here.
 ---
 
 ## 2026-09-17 — ONE welcome gift per person: the rule three modules stated and none enforced

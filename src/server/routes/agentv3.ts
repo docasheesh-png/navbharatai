@@ -296,6 +296,7 @@ import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanSta
 import { computePlanProgress } from '../AgentV3/PlanProgress';
 import { decideCancelledBuildBill } from '../AgentV3/cancelledBuildBilling';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
+import { projectPlannerTimeoutMs, PROJECT_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, PROJECT_MODE_FALLBACK_NARRATION } from '../AgentV3/projectPlannerBudget';
 import { projectModeEnabled, projectModeDiagnosis, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
@@ -491,6 +492,7 @@ import { sandboxCost, sandboxBillableUsd, sandboxBillingNote } from '../AgentV3/
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
 import { renderRescueEligible, renderRescueConfirmsSuccess } from '../AgentV3/renderRescue';
+import { runProvenApp, verdictHeldMessage, type ProdBuildOutcome, type LateFlip } from '../AgentV3/runProvenApp';
 import { shouldAttemptPlatformPreview, platformPreviewBudgetMs, platformPreviewPort } from '../AgentV3/deliveryProof';
 import { floorTimeoutForTokens } from '../AgentV3/floorBudget';
 import { parseDevServerHealthLine } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
@@ -14404,20 +14406,40 @@ async function noteBuildOutcome(
         buildDiag.record({ phase: 'plan', severity: 'info', code: pmDiag.code, message: pmDiag.message, detail: pmDiag.detail, autoResolved: true });
       } catch { /* diagnostics are best-effort and must never touch a build */ }
       if (projectModeEnabled(process.env, { userId, email }) && !planFirst && !megaRoadmapActive) {
+        // True once the user has been PROMISED a module-by-module build — so a failure after that
+        // point is withdrawn aloud instead of trailing off (autopsy e706e068).
+        let ppDecompositionAnnounced = false;
         try {
           let pPlan = await loadProjectPlan(workspaceId);
           const planPreExisted = !!pPlan;
           // A single bounded plan-generation LLM call (used by BOTH the initial decomposition and the
-          // GA-7 live-replan below). Cheap-floor-first like every other build text call; hard 60s
-          // timeout so a planner call can NEVER hang the build.
+          // GA-7 live-replan below). Cheap-floor-first like every other build text call. The outer
+          // timeout is the inner call's OWN bound plus slack (projectPlannerBudget.ts) — a backstop,
+          // never a second, tighter clock: the hard-coded 60 s that stood here killed the School ERP
+          // decomposition (autopsy e706e068) on a rung that needed minutes, and recorded nothing.
+          const ppTimeoutMs = projectPlannerTimeoutMs();
           const ppGenerate = async (system: string, user: string): Promise<string> => {
             const startedAt = Date.now();
             let ppProvider = 'CLAUDE';
             const call = makeFastTextRunner((used) => { ppProvider = used; }).runTurn({
               model: fastBuildModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000,
             });
-            const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('project planner timed out')), 60_000));
-            const t = await Promise.race([call, timeout]);
+            let ppTimer: ReturnType<typeof setTimeout> | undefined;
+            const timeout = new Promise<never>((_, rej) => { ppTimer = setTimeout(() => rej(new Error(PROJECT_PLANNER_TIMED_OUT)), ppTimeoutMs); });
+            let t: Awaited<typeof call>;
+            try {
+              t = await Promise.race([call, timeout]);
+            } catch (err) {
+              // A planner call that failed is a model call that failed — it belongs on the same ledger
+              // as every other one, or the report cannot say whether the key was working at all.
+              try {
+                const lbl = fastLaneProviderLabel(ppProvider);
+                buildDiag.recordLlmCall({ model: lbl === 'anthropic' ? fastBuildModel() : ppProvider.toLowerCase(), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
+              } catch { /* diagnostics best-effort */ }
+              throw err;
+            } finally {
+              if (ppTimer) clearTimeout(ppTimer);
+            }
             try {
               const lbl = fastLaneProviderLabel(ppProvider);
               buildDiag.recordLlmCall({ model: lbl === 'anthropic' ? fastBuildModel() : ppProvider.toLowerCase(), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true });
@@ -14428,6 +14450,7 @@ async function noteBuildOutcome(
             return t.text;
           };
           if (!pPlan && intent === 'new_build' && !isEditMode && detectMegaProject(prompt)) {
+            ppDecompositionAnnounced = true;
             events.emit({ type: 'narration', agent: 'architect', text: '🏗️ This is a large software project — decomposing it into independently-buildable modules with frozen interface contracts…', ts: Date.now() });
             const ppScaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
             const modules = parsePlannedModules(await ppGenerate(projectPlanSystemPrompt(framework), projectPlanUserPrompt(prompt, ppScaffold)));
@@ -14496,7 +14519,23 @@ async function noteBuildOutcome(
           } else if (pPlan && !planComplete(pPlan) && planPreExisted) {
             events.emit({ type: 'narration', agent: 'architect', text: `ℹ️ Handling this message normally (project plan stays paused at ${planProgressLine(pPlan)}). Say "continue" to resume the next module.`, ts: Date.now() });
           }
-        } catch { /* project mode is additive — on ANY failure the build proceeds exactly as today */ }
+        } catch (err) {
+          // Project mode is additive — on ANY failure the build proceeds exactly as today. But it does
+          // not proceed SILENTLY any more: the School ERP build swallowed a planner timeout here and the
+          // report could not say whether the key had worked. Admin-only line (process-only code, so it
+          // can never count against the app); user told only if a plan had been announced to them.
+          try {
+            const kind = plannerFailureKind(err);
+            buildDiag.record({
+              phase: 'plan', severity: 'warning', code: 'PROJECT_MODE_FAILED', autoResolved: false,
+              message: projectModeFailedMessage(kind, projectPlannerTimeoutMs(), err),
+              detail: `kind=${kind} · announced=${ppDecompositionAnnounced}`,
+            });
+          } catch { /* diagnostics best-effort */ }
+          if (ppDecompositionAnnounced) {
+            events.emit({ type: 'narration', agent: 'architect', text: PROJECT_MODE_FALLBACK_NARRATION, ts: Date.now() });
+          }
+        }
       }
 
       // Cost-ladder escalation (P3) — DORMANT unless AGENTV3_ESCALATION=on. When off,
@@ -16763,6 +16802,35 @@ async function noteBuildOutcome(
         } catch { /* diagnostics are best-effort — never blocks a build */ }
       }
       let previewVerifiedFailed = false;
+      // ── A RUN-PROVEN APP IS NEVER FLIPPED TO "NOT BUILT" BY A VERDICT THAT ONLY READ THE CODE ──
+      // (runProvenApp.ts — autopsy e706e068, and the admin's standing 4efab9d7 rule). Two facts only
+      // a RUN can establish, kept here so every late flip below asks the same question of the same
+      // evidence: did a REAL browser render this app (never a curl fallback — the Green Freeze rule),
+      // and what did the production build say when it actually ran.
+      let browserRenderProven = false;
+      let prodBuildOutcome: ProdBuildOutcome = 'not-run';
+      /**
+       * Ask, at the moment a late flip wants to fail the build, whether the app has already been
+       * proven to run. Reads the LIVE evidence (a page or journey failure recorded after the render
+       * still vetoes), so it must be called at the flip, not cached before it.
+       */
+      const runProof = () => runProvenApp({
+        browserRendered: browserRenderProven,
+        prodBuild: prodBuildOutcome,
+        previewFailed: gateEvidence.preview === 'failed',
+        pagesFailed: gateEvidence.pages === 'failed',
+        journeyFailed: gateEvidence.journeys === 'failed',
+        runtimeCrashBlocker: buildDiag.hasRuntimeCrashBlocker(),
+        deliveryRefused: looksLikeRefusal(result?.summary ?? ''),
+        stopped: abort.signal.aborted,
+      });
+      /** Record that a flip was HELD — admin-only, process-only code, never counted against the app. */
+      const recordVerdictHeld = (flip: LateFlip, count: number) => {
+        try {
+          const proof = runProof();
+          buildDiag.record({ phase: 'readiness', severity: 'warning', code: 'VERDICT_HELD_BY_RUN', message: verdictHeldMessage(flip, proof, count), autoResolved: true, detail: `flip=${flip} · prodBuild=${prodBuildOutcome} · browserRendered=${browserRenderProven}` });
+        } catch { /* diagnostics best-effort */ }
+      };
       // The POSITIVE counterpart. Without it the runtime verdict below could report "no live preview
       // session" for a build whose preview had just been opened and confirmed rendering — the
       // self-contradicting report from the Shiv Medical Store autopsy (2026-08-10).
@@ -16890,6 +16958,7 @@ async function noteBuildOutcome(
             result = { ...result, ok: true, summary: result.summary || 'The app builds and the live preview renders correctly.' };
             renderRescued = true;
             previewGreen = true; // real browser, real render — the one thing worth protecting
+            if (shot.source === 'browser') browserRenderProven = true; // the evidence every late flip must respect
             // GREEN FREEZE — the app is proven working. From here, refuse edits to its existing files
             // unless an allowlisted pass (the user's own request) makes them, so no later pass can
             // silently break what the browser just rendered. Snapshot the files present now. Best-effort.
@@ -16947,6 +17016,7 @@ async function noteBuildOutcome(
             // (the upgrade SimpleBuilder left to the route). Without this a verified-working app was
             // permanently reported as BUILD_PARTIAL. No-ops unless the last outcome was PARTIAL/PREVIEW_FAILED.
             previewGreen = true; // opened in a real browser, rendered, and no console errors
+            if (shot.source === 'browser') browserRenderProven = true; // the evidence every late flip must respect
             // GREEN FREEZE — the app is proven working. From here, refuse edits to its existing files
             // unless an allowlisted pass (the user's own request) makes them, so no later pass can
             // silently break what the browser just rendered. Snapshot the files present now. Best-effort.
@@ -17609,6 +17679,7 @@ async function noteBuildOutcome(
               output = `${r.stdout || ''}\n${r.stderr || ''}`;
             } catch { ran = false; /* no sandbox, or it outran the bound — UNVERIFIED, never "failed" */ }
             const verdict = judgeProdBuild({ ran, exitCode, output });
+            prodBuildOutcome = verdict.code === 'PROD_BUILD_OK' ? 'ok' : verdict.code === 'PROD_BUILD_FAILED' ? 'failed' : 'not-run';
             buildDiag.record({
               phase: 'readiness',
               severity: verdict.code === 'PROD_BUILD_FAILED' ? 'warning' : 'info',
@@ -17984,6 +18055,16 @@ async function noteBuildOutcome(
         const gateBlockers = buildDiag.shippingIssueCount('error');
         const settled = result; // captured once — `result` is reassigned in the heal loop above
         if (gate.state === 'red' && gateBlockers > 0 && settled && settled.ok) {
+          // …UNLESS THE APP HAS ALREADY BEEN PROVEN TO RUN (runProvenApp.ts, autopsy e706e068). A RED
+          // built from STATIC findings — a placeholder in a stray file, a forecast about the bundle —
+          // cannot outrank a real browser that rendered the app and a production build that compiled
+          // it. The gate stays RED and every blocker stays listed; only the "not built / not charged"
+          // conclusion is refused. A RED with RUNTIME evidence (a failed page, journey or preview, a
+          // crash proof) is not held — that is the dukaan case this block was written for.
+          const held = runProof();
+          if (held.proven) {
+            recordVerdictHeld('release-gate-red', gateBlockers);
+          } else {
           // The cause comes from the gate's own sentence, not a second derivation — one source, so the
           // summary the user reads and the verdict that flipped can never describe different builds.
           result = { ...settled, ok: false, summary: releaseGateFailureSummary(gateBlockers, releaseGateSummary(gate)) };
@@ -17997,6 +18078,7 @@ async function noteBuildOutcome(
             message: `The build reported success while the release gate was RED with ${gateBlockers} unresolved build-breaking issue(s) — the verdict has been corrected to NOT ok.`,
             autoResolved: false,
           });
+          }
         }
         // ── UNKNOWN MUST REACH THE PERSON WHO IS ABOUT TO TRUST THE APP ──────────────────────────
         //
@@ -18724,8 +18806,14 @@ async function noteBuildOutcome(
             // verdict so both exits agree (buildResultRef drives the deadline finalizer; result drives the
             // normal settle) and the "working app or free" guard makes it free. findSyntaxErrors flags ONLY
             // genuinely non-parsing files (see the block header), so a good build is never falsely failed.
-            if (result) result = { ...result, ok: false, summary: finalSyntaxErrorSummary(finalSyntaxErrors.length) };
-            if (buildResultRef) buildResultRef = { ...buildResultRef, ok: false };
+            // …unless a real browser and the production build have already proven the app runs — then
+            // the non-parsing file is one the app never loads, and the verdict is held (runProvenApp.ts).
+            if (runProof().proven) {
+              recordVerdictHeld('final-syntax-error', finalSyntaxErrors.length);
+            } else {
+              if (result) result = { ...result, ok: false, summary: finalSyntaxErrorSummary(finalSyntaxErrors.length) };
+              if (buildResultRef) buildResultRef = { ...buildResultRef, ok: false };
+            }
           }
         } catch { /* final syntax re-verify is best-effort — never blocks a build */ }
       }
@@ -18805,7 +18893,15 @@ async function noteBuildOutcome(
       // via the "working app or free" guard below (it keys on !result.ok), and (c) build health can't say
       // READY (the OUTCOME_REVIEW_CRITICAL blocker below + ok:false both force ready:false). The specific
       // findings stay in the ADMIN-only diagnostics (white-label — the user sees only the honest count).
-      if (result && result.ok && reviewCriticalsUnresolved.length > 0) {
+      if (result && result.ok && reviewCriticalsUnresolved.length > 0 && runProof().proven) {
+        // The reviewer READ the code; a real browser RAN it. The findings are recorded below exactly as
+        // they would be on a flip, so nothing is hidden — only the "not working / free" conclusion is
+        // refused for an app already proven to run (runProvenApp.ts).
+        recordVerdictHeld('review-critical', reviewCriticalsUnresolved.length);
+        try {
+          buildDiag.record({ phase: 'build', severity: 'warning', code: 'REVIEW_CRITICAL_UNVERIFIED', message: `${reviewCriticalsUnresolved.length} reviewer [CRITICAL] finding(s) were not verifiably fixed, on an app a real browser rendered:\n- ${reviewCriticalsUnresolved.join('\n- ')}`, autoResolved: false });
+        } catch { /* best-effort */ }
+      } else if (result && result.ok && reviewCriticalsUnresolved.length > 0) {
         const n = reviewCriticalsUnresolved.length;
         result = { ...result, ok: false, summary: reviewCriticalUnresolvedSummary(n) };
         if (buildResultRef) buildResultRef = { ...buildResultRef, ok: false };

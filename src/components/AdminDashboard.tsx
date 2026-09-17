@@ -4,6 +4,8 @@ import { TirangaLoader } from './ui/TirangaLoader';
 import { usePagedList } from '../hooks/usePagedList';
 import { LoadMore } from './common/LoadMore';
 import { stampLabel, dayLabel, signInMethodWords } from '../lib/adminUserDisplay';
+import { PublishedAppsCard } from './profile/PublishedAppsCard';
+import { publishedAppRows, liveAppCount } from '../lib/publishedAppsView';
 import { adultOptInSummary } from '../lib/adultContent';
 import { appStatusView, canUnpublish, canBan, matchesAppQuery, confirmCopy } from '../lib/adminAppModeration';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
@@ -2722,7 +2724,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     rows.push(['App builds', account.builds?.ok
                       ? `${account.builds.totalBuilds} build${account.builds.totalBuilds === 1 ? '' : 's'} across ${account.builds.apps?.length ?? 0} app${(account.builds.apps?.length ?? 0) === 1 ? '' : 's'}`
                       : 'could not be read']);
-                    rows.push(['Published apps', account.publishedApps?.ok ? String(account.publishedApps.count) : 'could not be read']);
+                    // LIVE apps, matching the card below — the old `count` included taken-down
+                    // and unpublished records, so a copied summary contradicted the badges on screen.
+                    rows.push(['Published apps (live)', account.publishedApps?.ok ? String(account.publishedApps.liveCount ?? liveAppCount(publishedAppRows(account.publishedApps.rows))) : 'could not be read']);
                     rows.push(['AI chat requests', act.ok === false
                       ? 'could not be read'
                       : `${act.aiRequests ?? 0} recorded · ${act.aiLast30Days ?? 0} in the last 30 days · last ${last.text}`]);
@@ -2855,8 +2859,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   </div>
                 )}
 
-                {account.publishedApps?.ok && account.publishedApps.count > 0 && (
-                  <p className="mt-3 text-[11px] text-white/50">{account.publishedApps.count} published app{account.publishedApps.count === 1 ? '' : 's'} live</p>
+                {/* 🔴 THE APPS THIS PERSON HAS PUBLISHED — the list, not just a number (admin
+                    2026-09-17: "jab admin kisi user ki profile dekhe, to waha bhi woh list dikhe, app
+                    open admin bhi kar sake").
+
+                    The rows were ALREADY in this response, complete with each url; the screen printed
+                    the count and discarded them. And that count was `publishedApps.count`, which is
+                    every deployment RECORD — under the words "published apps live". An account with
+                    four apps of which three were taken down read as four live apps, on the exact
+                    screen used to decide whether to act on that account. The card counts what the
+                    badges say, from one rule (`liveAppCount`). */}
+                {account.publishedApps && (
+                  <div className="mt-4">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-white/40 mb-2">Published apps</p>
+                    <PublishedAppsCard
+                      rows={publishedAppRows(account.publishedApps.rows)}
+                      {...(typeof account.publishedApps.liveCount === 'number' ? { liveCount: account.publishedApps.liveCount } : {})}
+                      {...(typeof account.publishedApps.count === 'number' ? { totalCount: account.publishedApps.count } : {})}
+                      {...(account.publishedApps.ok ? {} : { error: 'This user\u2019s published apps could not be read.' })}
+                      showStatus
+                      dense
+                      emptyText="This user has not published any apps."
+                    />
+                  </div>
                 )}
 
                 {/* SAID ON THE SCREEN, NOT ONLY IN A COMMENT. Without this line an absent section reads

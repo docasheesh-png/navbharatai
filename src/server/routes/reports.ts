@@ -30,7 +30,7 @@ import { getWebApp } from '../lib/navStoreWeb';
 import { resolveUserIdentities } from '../lib/adminUserLookup';
 import { summariseBuilds, summarisePayments, accountFlags } from '../lib/adminUserAccount';
 import { userBuildHistoryStore } from '../lib/UserBuildHistoryStore';
-import { deploymentStore } from '../AgentV3/DeploymentStore';
+import { deploymentStore, isLiveDeployment } from '../AgentV3/DeploymentStore';
 import { getServerDb } from '../lib/serverDb';
 import { audit } from '../lib/audit';
 import { activeHostingTier } from '../lib/hostingPlan';
@@ -606,9 +606,24 @@ export function registerReportRoutes(app: Express): void {
       builds: { ok: buildRows.ok, ...builds },
       publishedApps: {
         ok: deployments.ok,
+        /** Every deployment RECORD for this user — live, taken down, unpublished and paused alike. */
         count: deployments.rows.length,
-        rows: deployments.rows.slice(0, 20).map((d: { url?: string; workspaceId?: string; status?: string; updatedAt?: number }) => ({
+        /**
+         * How many are actually LIVE.
+         *
+         * 🔴 COMPUTED HERE, OVER EVERY ROW, because `rows` below is truncated to 20 and a count
+         * derived from a truncated list is simply wrong for a heavy account. The screen used to
+         * print `count` under the words "published apps live", so an account with four apps of
+         * which three were taken down read as four live ones — on the exact panel used to decide
+         * whether to act on that account. One number, one meaning, stated at the source.
+         */
+        liveCount: deployments.rows.filter((d: { url?: string; status?: string }) => isLiveDeployment(d as never)).length,
+        rows: deployments.rows.slice(0, 20).map((d: { url?: string; workspaceId?: string; status?: string; updatedAt?: number; sizeMb?: number; orphaned?: boolean }) => ({
           url: d.url, workspaceId: d.workspaceId, status: d.status ?? 'active', updatedAt: d.updatedAt,
+          // Carried so the admin's rows describe an app as fully as its owner's do — the two screens
+          // render the SAME component, and a field missing on one side would silently read as
+          // "unknown" there while the owner sees a real value.
+          sizeMb: d.sizeMb, orphaned: d.orphaned === true,
         })),
       },
       payments: { ok: payments.ok, ...money },

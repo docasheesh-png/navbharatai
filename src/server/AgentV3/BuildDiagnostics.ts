@@ -2769,12 +2769,24 @@ export function buildWasStopped(issues: readonly BuildIssue[] | null | undefined
 
 export function stoppedByUser(issues: readonly BuildIssue[] | null | undefined): boolean {
   if (!Array.isArray(issues)) return false;
-  return issues.some(
-    (i) =>
-      i?.code === 'USER_STOPPED_BUILD' &&
-      typeof i.message === 'string' &&
-      !i.message.includes('not by the user'),
-  );
+  return issues.some((i) => {
+    if (typeof i?.message !== 'string') return false;
+    if (i.code === 'USER_STOPPED_BUILD') return !i.message.includes('not by the user');
+    // 🔴 THE SAME FACT UNDER A SECOND CODE, AND THIS READER KNEW ONLY ONE (report cc8c9075).
+    //
+    // `USER_STOPPED_BUILD` is written by the /stop ROUTE — a separate request, against a different
+    // in-flight diag, and on that report it never landed. `CANCELLED_BUILD_CHARGED` is written by the
+    // BUILD'S OWN settle path from `abortCauseOf(signal)`, and `decideCancelledBuildBill` returns
+    // `applies: true` for NOTHING except `abortCause === 'user-stop'` — so its presence is proof, from
+    // the one actor that cannot be wrong about it.
+    //
+    // The cost of not reading it: that build's rootCause read *"why it failed is not known from this
+    // report"* while the same document carried the engine's own sentence, *"user stopped the build …
+    // charged half the work done"*, and the user-facing summary said *"Stopped, as you asked."* Three
+    // statements of the stop, and the field an autopsy reads first said the cause was unknown — which
+    // sends the next session hunting a failure that never happened.
+    return i.code === 'CANCELLED_BUILD_CHARGED';
+  });
 }
 
 /**

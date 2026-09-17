@@ -15,7 +15,7 @@ import { PARALLEL_WRITER_ROLES } from './parallelBuild';
 import { repairSystemPrompt, repairUserPrompt } from './SimpleBuilder';
 import { parseFileBlocks } from './OneShotBuilder';
 import { findSyntaxErrors } from './SyntaxCheck';
-import { textMarkerFilePaths, truncationRecoverySteer, truncationRecoveryNarration } from './TruncationRecovery';
+import { textMarkerFilePaths, truncationRecoverySteer, truncationRecoveryNarration, truncationSteeredPaths } from './TruncationRecovery';
 import { newRepeatProbeState, collectRepeatProbeSteer, loopGuardEnabled, loopGuardThreshold, isProbeBanned, bannedProbeMessage } from './RepeatProbeGuard';
 import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { missingFeatureNotice } from './missingFeatureNotice';
@@ -320,6 +320,14 @@ interface ToolResultBlock {
 export class AgentRunner {
   /** B8 — last context reading SENT, so the meter only speaks when it meaningfully changed. */
   private lastContextUsage: ContextUsage | null = null;
+
+  /**
+   * Files the truncation guard has already ordered a rewrite of in THIS run.
+   *
+   * Per-runner rather than per-turn on purpose: the whole point is to notice the SECOND cut-off on a
+   * file, which by definition happens on a later turn. Paths only — a bounded handful per build.
+   */
+  private readonly _truncationSteered = new Set<string>();
 
   constructor(private readonly opts: AgentRunnerOptions) {}
 
@@ -997,7 +1005,15 @@ export class AgentRunner {
             const writtenPaths = new Set(Object.keys(written));
             const textLost = textMarkerFilePaths(turn.text).filter((p) => !writtenPaths.has(p));
             const truncatedLost = truncatedToolPaths.filter((p) => !writtenPaths.has(p));
-            truncationSteer = truncationRecoverySteer({ brokenJs: broken, textMarkerPaths: textLost, truncatedToolPaths: truncatedLost });
+            const steerInput = { brokenJs: broken, textMarkerPaths: textLost, truncatedToolPaths: truncatedLost };
+            truncationSteer = truncationRecoverySteer({
+              ...steerInput,
+              // What this guard has already asked for in THIS run. A file cut off at the ceiling twice
+              // cannot be rewritten whole under it, so the second steer asks for something that fits
+              // instead of repeating the first (report cc8c9075: two 158-second calls, same failure).
+              previouslyTruncatedPaths: [...this._truncationSteered],
+            });
+            for (const p of truncationSteeredPaths(steerInput)) this._truncationSteered.add(p);
             if (truncationSteer) {
               events.emit({ type: 'narration', agent: agentRole, text: truncationRecoveryNarration(broken.length, textLost.length + truncatedLost.length), ts: Date.now() });
             }

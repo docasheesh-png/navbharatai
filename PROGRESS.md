@@ -64414,3 +64414,28 @@ reading that list would otherwise go and work on items that are finished or on a
 against a *different* `main` and nothing had verified the combination: `277a6769` — typecheck ✅,
 no-unused-imports ✅, server typecheck ✅, **25105 passed | 1 skipped, 0 FAIL** ✅, build ✅, bundle ✅,
 boot ✅. The concurrent merges compose cleanly.
+## 2026-09-17 — WRITE → TYPECHECK → NEXT: the compiler answers after every file (admin: "incremental typecheck wala PR bana do")
+
+From autopsy e706e068's biggest struggle: 20 files written before the first `tsc`, then 21 errors ground for
+seven minutes (six `tsc` runs, an endgame batch repair, a "repeated step" nudge, read → edit → tsc one at a
+time). Every error was visible the moment its file was written; nothing looked.
+
+**What ships (`src/server/AgentV3/writeTimeTypecheck.ts`, wired in `ToolDispatcher`):** after every
+TypeScript write on all four write paths, the dispatcher runs the shared incremental `tsc --noEmit`
+(same `/tmp/agentv3.tsbuildinfo` cache as the endgame and the `typecheck` tool — a warm run is sub-second)
+and appends the WRITTEN file's own errors to the tool result (quoted in full, capped at 10) plus a brief count
+of errors elsewhere (named, capped at 3). Clean tree ⇒ no note. Per-build `WriteTypecheckQueue` coalesces
+parallel writes (a burst costs at most two compiles). A JS project (no tsconfig), a timeout (30 s) or any
+failure ⇒ '' — never a fake pass; two consecutive timeouts stand it down for the build with a reason. Every
+run is reported through `onCommand`, so the release gate's typecheck evidence sees it (the e4ebcb5f bridge).
+Report line `WRITE_TIME_TYPECHECK` (runs, clean runs, errors quoted back, time, stand-down reason). Kill
+switch `AGENTV3_WRITE_TYPECHECK=off` restores today's behaviour exactly.
+
+**Honest cost:** ~0.5–3 s of sandbox time per TS write (the first run is cold). On a 30-file build that is
+roughly a minute, against the seven-minute grind it replaces. The fast lane (SimpleBuilder) keeps its own
+generate-all → verify → repair loop; this is the agentic builder's path.
+
+**What to watch on the first real builds:** `WRITE_TIME_TYPECHECK` runs vs. the endgame's error count at
+its first checkpoint — the endgame's "N compile errors left" should drop toward zero, and
+`REPEATED_READS`/edit loops with it. Tests: `tests/writeTimeTypecheck.test.ts` (note wording on the real
+ERP tsc output, path normalisation, caps, queue coalescing, summary, dispatcher + route wiring).

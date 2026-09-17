@@ -2216,6 +2216,19 @@ the flag entries above promise.
     into the code and these two keys RETIRE (which is also what shrinks the flag surface the admin
     objected to). **What to watch:** the preview appearing early and correct (not a half-rendered app),
     and per-build cost dropping on repeat builds of the same workspace.
+- **`AGENTV3_WRITE_TYPECHECK`** (default ON, set `off` to disable — added 2026-09-17, autopsy e706e068) —
+  **write → typecheck → next.** After every TypeScript write/edit (`write_file`, `write_files_batch`,
+  `edit_file`, `replace_symbol`) the dispatcher runs the SAME incremental `tsc --noEmit` the endgame
+  and the `typecheck` tool use (one shared `/tmp/agentv3.tsbuildinfo` cache, so a run after the first
+  is well under a second) and appends the written file's own errors to the tool result, while the model
+  still holds the file. Errors elsewhere are counted and named briefly, never dumped. The School ERP
+  build wrote 20 files before its first `tsc`, then ground 21 errors for seven minutes — every one of
+  them visible the moment its file was written. Never blocks a write, never fails a build, never
+  fakes a pass (a JS project, a missing compiler or a timeout ⇒ no note); two consecutive 30 s
+  timeouts stand it down for the build. Runs coalesce per build (a parallel burst costs at most two
+  compiles) and each run reaches the release gate's typecheck evidence through `onCommand`. Report
+  line `WRITE_TIME_TYPECHECK`. Logic in `writeTimeTypecheck.ts`; test-locked in
+  `tests/writeTimeTypecheck.test.ts`.
 - **`AGENTV3_ARCH_INVARIANTS`** (default ON, set `off` to disable) — before EDITING an existing app, the
   engine reads that app's OWN rules out of its code (styling system, import style, where network calls
   go, where pages live) and hands them to the builder before it writes a line; after the build it checks

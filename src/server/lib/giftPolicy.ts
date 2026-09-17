@@ -25,6 +25,14 @@
 // the parts — so the cap below is applied to what an account has ALREADY been given, at the moment of
 // granting, whatever the per-step value happens to be.
 
+// 🔗 HOW THIS RELATES TO `welcomeGiftExclusion.ts`, so neither is deleted as a duplicate of the other.
+// That module answers a CONDITIONAL question — "is the referral ladder paying instead?" — and is
+// asked INSIDE `welcomeBonus.ts` and `giftPlan.ts`. This one answers an UNCONDITIONAL one: the admin
+// retired the flat gift outright, so it is off whatever any env key says, and the stand-down is
+// applied at `routes/wallet.ts`, the single place either plan moves money. Two nets, deliberately at
+// different heights: if the flat gift is ever re-enabled here, that module still stops it stacking
+// with the ladder.
+
 import { TOKENS_PER_RUPEE } from './payments';
 
 /**

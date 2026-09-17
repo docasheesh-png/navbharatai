@@ -62343,8 +62343,12 @@ answer to the question they asked.
 **Gate:** `typecheck` · `noUnusedImports` · `typecheck:server` · **24,620 tests passed** · `build` ·
 `test:bundle` · `boot:check` · `deps:server-gate` — all green on the final state.
 
-⚠️ **PR #3021 (the earlier conditional welcome-gift exclusion) is SUPERSEDED by this** — it made the
-flat gift conditional on a referral; the admin's ruling removes it outright.
+⚠️ **PR #3021 (the conditional welcome-gift exclusion) MERGED to `main` while this was in flight**, so
+the two now coexist — deliberately, as two nets at different heights. `welcomeGiftExclusion.ts` answers
+a CONDITIONAL question ("is the referral ladder paying instead?") inside `welcomeBonus.ts` and
+`giftPlan.ts`; `giftPolicy.ts` answers an UNCONDITIONAL one at the route. If the flat gift is ever
+re-enabled, that module still stops it stacking with the ladder. Neither is a duplicate of the other,
+and `giftPolicy.ts`'s header says so, so neither gets deleted as one.
 ## 2026-09-17 — Autopsy `e706e068`, second half: the three doors that were still open after #3009
 
 **The admin's instruction, verbatim:** *"aapko teeno a b c karne hai! aur itna strong solve karo ki app

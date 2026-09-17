@@ -174,7 +174,10 @@ describe('the wiring — proven by reversion', () => {
 
   it('the readiness gate splits authenticity findings by authorship before counting blockers', () => {
     expect(DISPATCH).toContain('const authorship = splitByAuthorship(issues, authoredSet);');
-    expect(DISPATCH).toContain("const authHigh = authorship.ours.filter((i) => i.severity === 'high').length;");
+    // Since 2026-09-17 (appReachability.ts) the count is taken from the OURS half after a second
+    // split — by whether the app LOADS the file — so the authorship split is still the first gate.
+    expect(DISPATCH).toContain('const loadSplit = splitByReachability(authorship.ours, reach);');
+    expect(DISPATCH).toContain("const authHigh = loadSplit.loaded.filter((i) => i.severity === 'high').length;");
     // …and the ones we did not write are still REPORTED, never dropped.
     expect(DISPATCH).toContain('preExistingCodeObservation(');
   });

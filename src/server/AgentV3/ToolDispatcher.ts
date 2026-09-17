@@ -140,6 +140,7 @@ import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './E
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
 import { authoredPathSet, splitByAuthorship, preExistingCodeObservation } from './buildAuthorship';
+import { computeReachability, splitByReachability, unreachableCodeObservation, type ReachabilityVerdict } from './appReachability';
 import { deletionCandidates, deletionReconciledMessage } from './fileDeletion';
 import { analyzeHooksRules, hookViolationWriteNote } from './HooksRulesAnalysis';
 import { dedupeDuplicateImports } from './DuplicateImportGuard';
@@ -1171,6 +1172,13 @@ export class ToolDispatcher {
    * same objective scan the agent uses — never a second, divergent implementation.
    */
   private lastReadiness: ReadinessReport | null = null;
+  /**
+   * Which files the app LOADS, as judged by the last `evaluate` (appReachability.ts). Read by the
+   * route's incomplete-code heal so it never spends a model pass completing a file nothing imports
+   * (autopsy e706e068: 22 calls on a stray hook). `null` until an evaluate has run.
+   */
+  private _lastReachability: ReachabilityVerdict | null = null;
+  get lastReachability(): ReachabilityVerdict | null { return this._lastReachability; }
 
   /**
    * Run the real `evaluate` scan and return its structured readiness verdict (R2 §1.1).
@@ -3381,8 +3389,31 @@ export class ToolDispatcher {
         // and was declared "NOT ready to use" and made FREE over three placeholders it had never
         // seen. A fresh build is unaffected: it wrote every file, so every finding is still ours.
         const authorship = splitByAuthorship(issues, authoredSet);
-        const authHigh = authorship.ours.filter((i) => i.severity === 'high').length;
+        // 🔴 …AND ONLY IN A FILE THE APP LOADS (autopsy e706e068 — full story in `appReachability.ts`).
+        // The strays a batch repair wrote at the project root were never imported by the app, never
+        // bundled, never rendered — and the placeholder data inside one of them was raised as a
+        // build-breaking blocker on a working app. The verdict is withheld (everything counts as
+        // loaded, today's behaviour) whenever the walk could be incomplete; see the module header.
+        let reach: ReachabilityVerdict | null = null;
+        try {
+          const listedCode = snap.files.filter((p) => /\.(tsx?|jsx?|mjs|cjs|mts|cts)$/i.test(p) && !/(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)/i.test(p));
+          reach = computeReachability(snap.sources, { framework: this.framework, listedSourcePaths: listedCode });
+        } catch { reach = null; /* never let the walk fail the scan — not applicable is today's behaviour */ }
+        this._lastReachability = reach;
+        const loadSplit = splitByReachability(authorship.ours, reach);
+        const authHigh = loadSplit.loaded.filter((i) => i.severity === 'high').length;
         if (authHigh) extra.push({ severity: 'high', label: `${authHigh} fake/incomplete code issue(s) (placeholder / not-implemented / fake data)` });
+        const unloadedHigh = loadSplit.unloaded.filter((i) => i.severity === 'high');
+        if (unloadedHigh.length) {
+          extra.push({
+            severity: 'observation',
+            label: unreachableCodeObservation(
+              `${unloadedHigh.length} fake/incomplete code issue(s) in `
+              + `${new Set(unloadedHigh.map((i) => i.file)).size} file(s) the app never loads: `
+              + `${[...new Set(unloadedHigh.map((i) => i.file))].slice(0, 3).join(', ')}`,
+            ),
+          });
+        }
         // Recorded, never counted against us — we hide nothing (the `importTurnObservation` discipline).
         const authPreExistingHigh = authorship.preExisting.filter((i) => i.severity === 'high').length;
         if (authPreExistingHigh) {

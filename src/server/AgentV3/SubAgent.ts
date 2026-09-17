@@ -85,18 +85,102 @@ export interface SubAgentDeps {
    */
   onFileWrite?: (path: string, content: string) => void;
 
+  // ── THE REST OF WHAT THE PARENT ALREADY HAS ────────────────────────────────────────────────────
+  //
+  // 🔴 `onFileWrite` above closed ONE dropped argument, for this exact build (`9cca1fd5`, PR #2988).
+  // An exhaustive re-autopsy of the SAME report found the rest: the child `ToolDispatcher` was being
+  // constructed with **11 of the constructor's 13 positional parameters**, and the child `AgentRunner`
+  // with five of its options missing. Seventeen separate findings, one call site.
+  //
+  // The comment left above that call said, in its own words, *"only onFileWrite (position 11) is newly
+  // threaded through"* — which is exactly how positions 12 and 13 stayed invisible: the fix named what
+  // it added and nobody counted what remained. `subAgentGetsTheWholeWiring.test.ts` now counts, by
+  // comparing the constructor's real arity against this call's, so the class cannot return silently.
+  //
+  // 🔒 EVERY FIELD BELOW IS OPTIONAL AND ABSENT MEANS TODAY'S BEHAVIOUR EXACTLY. A caller that has not
+  // been updated loses nothing it had; only a caller that passes them gains.
+
+  /**
+   * The framework id (`nextjs`, `vue`, …). Position 12 of the dispatcher constructor, and never passed
+   * — so every sub-agent's dispatcher silently defaulted to `vite-react`, whatever the project is. The
+   * framework-specific write transforms (the Next.js middleware relocation) therefore never fired for a
+   * DELEGATED write, and the architect delegates all app code by design.
+   */
+  framework?: string;
+
+  /**
+   * The raw result of every sandbox `bash` command. Position 13, and never passed — so **not one
+   * sub-agent shell command has ever reached a build report**. The phase that writes the app is the
+   * phase whose `npm install`, `tsc` and `vite build` output is missing from the one document the
+   * admin reads to find out why a build failed.
+   */
+  onCommand?: (result: { command: string; exitCode: number | null; stdout: string; stderr: string; durationMs: number }) => void;
+
+  /**
+   * Per-model-call telemetry. `AgentRunner` has always accepted it; the child was built without it, so
+   * the majority of a build's turns appear in no `llmCalls` log — which is also why a sub-agent's slow
+   * or failing provider is invisible to every instrument that reads that log.
+   */
+  onLlmCall?: import('./AgentRunner').AgentRunnerOptions['onLlmCall'];
+
+  /**
+   * The build's abort signal. Its absence is the one that costs money: a user pressing Stop, or the
+   * mid-build cost ceiling firing, ends the ARCHITECT between turns — and the sub-agent it delegated to
+   * keeps running and keeps spending, because nothing told it. The `task` tool is additionally exempt
+   * from the tool timeout, so there is no second net.
+   */
+  signal?: AbortSignal;
+
+  /**
+   * How long this build still has, read as a THUNK at SPAWN time.
+   *
+   * ⚠️ It must be the REMAINING time, not the build's total: `AgentRunner` measures its deadline from
+   * ITS OWN start, so handing a child the whole budget would give a sub-agent spawned at minute 25 a
+   * fresh 30 minutes. A thunk because the spawn closure is built once and used many times.
+   */
+  remainingBuildMs?: () => number;
+
+  /**
+   * Does THIS BUILD expect files to be produced at all? (A plain chat turn does not.)
+   *
+   * Combined with the role's own tool set — see `roleExpectsArtifacts` — this is what stops a sub-agent
+   * that hit its step cap being reported as a failure however much it built.
+   *
+   * ⚠️ A THUNK, like `ignoreRules` and `remainingBuildMs`: the route decides this well AFTER the spawn
+   * closure is built (and the rebuild guard can still change `intent` in between), so reading a value
+   * here would freeze an answer taken before the question was settled.
+   */
+  expectsArtifacts?: () => boolean;
+}
+
+/**
+ * Can this role produce artifacts at all?
+ *
+ * Derived from the role's OWN tool set rather than a new per-role flag, so a role added later is
+ * classified correctly without anyone remembering to mark it. A researcher (`read_file`/`grep`/`glob`)
+ * is not expected to write files and must keep today's verdict; a builder is.
+ *
+ * Pure; never throws.
+ */
+export function roleExpectsArtifacts(tools: readonly string[] | null | undefined): boolean {
+  return Array.isArray(tools) && tools.includes('write_file');
 }
 
 export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
   return async (role: AgentRole, instruction: string) => {
     const cfg = roleConfig(role);
     // A child dispatcher with NO spawn capability → workers cannot recurse.
-    // secondOpinion/consensus/webSearch/deploy stay withheld exactly as before (positions 7-10) —
-    // only onFileWrite (position 11) is newly threaded through, so this fix changes nothing about
-    // what tools a sub-agent may call, only whether its writes are counted by the parent turn.
+    // secondOpinion/consensus/webSearch/deploy stay withheld deliberately (positions 7-10): that is a
+    // CAPABILITY decision, and it is the only reason any argument here is `undefined`.
+    //
+    // ⚠️ EVERY OTHER POSITION IS NOW PASSED, AND THE COUNT IS TESTED. This call used to stop at 11 of
+    // 13, so `framework` and `onCommand` were silently undefined — see `SubAgentDeps` for what that
+    // cost. `subAgentGetsTheWholeWiring.test.ts` compares this call's argument count against the
+    // constructor's real arity, so a fourteenth parameter added later fails CI here instead of
+    // becoming the next thing nobody threaded.
     const childDispatcher = new ToolDispatcher(
       deps.actuator, deps.workspaceId, deps.state, deps.events, undefined, deps.checkpointer,
-      undefined, undefined, undefined, undefined, deps.onFileWrite,
+      undefined, undefined, undefined, undefined, deps.onFileWrite, deps.framework, deps.onCommand,
     );
     // C2 — arm the guard on the child too. Read at SPAWN time via the thunk, so it sees the rules
     // however late they were loaded.
@@ -134,6 +218,31 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       agentRole: role,
       // Billing accounting fix: feed the SAME build-level sink so this sub-agent's tokens are billed.
       usageSink: deps.usageSink,
+      // ── and the five the child never got ───────────────────────────────────────────────────────
+      // Telemetry: without this the majority of a build's model calls appear in no `llmCalls` log.
+      onLlmCall: deps.onLlmCall,
+      // Stop / the mid-build cost ceiling can finally end a delegated run. `AgentRunner` ends BETWEEN
+      // turns, so this cancels nothing in flight and loses no written file — it stops the next call.
+      signal: deps.signal,
+      // The REMAINING build time, read now (see `remainingBuildMs`). A non-positive answer is omitted
+      // rather than passed as 0 — `buildTimedOut` treats 0 as "no deadline", so passing it would read
+      // as unlimited, which is the opposite of what an exhausted budget means.
+      ...(() => {
+        // 🔒 Every thunk here is called inside a try: a getter that throws — including a `const` read
+        // before its own initialiser has run, which a closure built earlier in the same scope can do —
+        // must degrade to today's behaviour, never take down a spawn. Same discipline as `ignoreRules`.
+        let left = 0;
+        try { left = Math.floor(deps.remainingBuildMs?.() ?? 0); } catch { left = 0; }
+        return left > 0 ? { maxBuildMs: left } : {};
+      })(),
+      // A step-capped specialist that BUILT something is not a failure. `ok` at that exit is
+      // `expectsArtifacts && builtSomething`, so an absent flag made every capped sub-agent FAILED
+      // however much it produced — and also withheld the bounded one-time step extension, which is
+      // gated on the same flag. Both halves of `AgentRunner`'s own step-cap policy were unreachable.
+      expectsArtifacts: (() => {
+        try { return (deps.expectsArtifacts?.() ?? false) && roleExpectsArtifacts(cfg.tools); }
+        catch { return false; }
+      })(),
     });
     // Give the specialist the live project map (Phase 2) so it knows the codebase
     // the Architect has built so far — what files/components/routes exist and what

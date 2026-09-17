@@ -61828,3 +61828,87 @@ recents section, that the knowledge base promises neither behaviour — and that
 
 Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1730 files, 24432 passed, 0 failed** ·
 build · test:bundle · boot:check.
+
+---
+
+## 2026-09-17 — Deep re-autopsy of `9cca1fd5`: 45 confirmed findings, and 17 of them are ONE call site
+
+**Method.** The admin re-sent build `9cca1fd5` (the Alarm app, already autopsied for merged PR #2988).
+Rather than re-read the timeline, a 54-agent workflow mined it across six dimensions — attribution,
+honesty, sub-agents, time, verification, money — and **adversarially verified every candidate against
+current `main`** before keeping it. 11.5M tokens, 2.4 hours, 45 confirmed + 8 completeness-critic items.
+
+### The clusters
+
+| | count | what |
+|---|---|---|
+| 🔴 **`makeSubAgentSpawn`** | **17** | the call that builds every specialist |
+| 🔴 console evidence | 5 | `console_errors` discards the actuator's `captured` flag; a clean app never creates the log file, so "clean" and "could not read" are the same observable — `RUNTIME_VERIFIED` is unreachable |
+| 🔴 page-render check | 4 | routes derived from `writtenFiles` alone ⇒ silently never runs on an edit turn. **One half fixed in PR #3018** |
+| 🔴 whole-workspace filed as this turn's | 3 | `DESIGN_CONSISTENCY` + `ACCESSIBILITY` never got #2997's authorship rule — the sibling of PR #3014's class |
+| 🔴 cold-resume graph | 1 (high) | `restoreWorkspaceMemory` replays files as `/* restored */` stubs and DISCARDS the persisted graph; `warmIndexFiles` and `seedGraphFromWorkspace` both skip them as already-known, and the hollow graph is then re-persisted — worse on every resume |
+| 🔴 money / report | 5 | the admin cost donut prices a cached GLM build **11.9× high**; margin subtracts token cost while the bill is `tieredMarkup(tokens + sandbox)` |
+
+### 🔴 The one this change fixes: eleven of thirteen
+
+`SubAgent.ts` builds the specialist that **writes the app** — the Architect delegates all app code to
+it by design. Its child `ToolDispatcher` was constructed with **11 of the constructor's 13 positional
+parameters**, and its child `AgentRunner` with five of its options missing. Verified by reading both,
+not taken from the workflow.
+
+**PR #2988 had already fixed ONE dropped argument here, for THIS EXACT BUILD** — `onFileWrite`,
+position 11. The comment it left reads *"only onFileWrite (position 11) is newly threaded through"*.
+That sentence is how 12 and 13 stayed invisible: a fix that names what it added, beside a call that
+counts nothing.
+
+| missing | cost |
+|---|---|
+| `onCommand` (13) | **not one sub-agent shell command has ever reached a build report** |
+| `framework` (12) | every child dispatcher silently assumed `vite-react` |
+| `onLlmCall` | the majority of a build's model calls appear in no `llmCalls` log |
+| `signal` | **Stop and the mid-build cost ceiling could not end a delegated run** — it kept spending |
+| `maxBuildMs` | the child never learned the build had a deadline |
+| `expectsArtifacts` | `ok = expectsArtifacts && builtSomething` at the step cap, so a capped sub-agent was ALWAYS *"Stopped without completing"* however much it built — and the bounded one-time step extension, gated on the same flag, could never fire either |
+
+**The fix threads all of them**, each optional and absent ⇒ today's behaviour exactly.
+`expectsArtifacts` is additionally gated on `roleExpectsArtifacts(cfg.tools)` — derived from the role's
+OWN tool set, so a read-only researcher keeps today's verdict and a role added later classifies itself
+without anyone remembering a flag. `remainingBuildMs` is a THUNK returning the time LEFT, because
+`AgentRunner` measures its deadline from its own start: handing a child the build's total would give a
+sub-agent spawned at minute 25 a fresh thirty. Every thunk is called inside a `try`.
+
+🔒 **The four withheld capabilities stay withheld** (`spawnSubAgent`, `secondOpinion`, `consensus`,
+`webSearch`, `deploy`): this threads WIRING, never new powers, and a test asserts each stays `undefined`.
+
+### 🔒 The 50/50 half: the class is now counted, not remembered
+
+`subAgentGetsTheWholeWiring.test.ts` reads `ToolDispatcher`'s constructor, counts its real parameters,
+counts the arguments `SubAgent.ts` passes, and asserts they match. **A fourteenth parameter added later
+fails CI here** instead of becoming the next thing nobody threaded. That is the only guard in this
+change that would have caught the original defect before it shipped.
+
+⚠️ **And the first draft of that guard was WRONG, in the most instructive way.** It reported the
+constructor as taking **14** parameters against correct code, because the doc block above
+`onFileWriteRaw` contains *"not relying on a later, sometimes-empty, sandbox listFiles"* — commas at
+bracket depth zero. The parser now strips comments first. A guard whose parser is wrong is worse than
+no guard: it teaches the next reader that the thing it measures is noisy. Same lesson as this morning's
+`engineEventsNeverBlock` guard, which pinned formatting instead of behaviour.
+
+### 🔴 Still open from this re-autopsy (rule 6 — recorded, not rushed)
+
+1. **The preview bridge ships inside the built app.** `withoutPreviewBridge` guards the durable store,
+   `read_file` and the project graph — but **not `downloadDistFiles`**, the path that uploads the built
+   app to hosting. The dev-server launch writes the bridge into the sandbox's `index.html`, and
+   `npm run build` copies that file into `dist/`. Mechanism verified by reading the call sites; NOT
+   observed on a live deployed app. Deserves its own change: this is our code inside a user's published
+   site, which the White-Label Law speaks to directly.
+2. **Cold-resume hollows the project graph, permanently.** The high-severity finding above. Needs a
+   `restoreGraph` on `WorkspaceMemory`, or for restore to index nothing so `warmIndexFiles` refills it.
+3. **`console_errors` discards `captured`**, so an unread console is reported to the model as "the page
+   ran clean" — and a clean app never creates the log file, so the two states are indistinguishable.
+4. **The admin cost donut prices AgentV3 builds at the provider-FAMILY fallback rate**, no model, no
+   cache: a cached GLM build reads 11.9× high on the panel used to judge engine spend.
+5. **A step-capped sub-agent's scratch files stay in the user's project** — nothing reconciles what a
+   killed child left behind.
+6. **The build's ETA is asserted at t=0 and never reconciled** — *"ETA ~2–4 min"* on a 16.7-minute
+   build, in the same document that carries both timestamps.

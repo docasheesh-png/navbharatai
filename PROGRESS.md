@@ -61616,6 +61616,133 @@ the Pro panel). Lower traffic and mostly admin-facing, so they stay a recorded s
 rushed one.
 ---
 
+## 2026-09-17 — Autopsy of build `8b3dca5c` (JEE mock test): the engine deleted its own debris, and we failed the build over it
+
+**The report.** Prompt: the two words **`npm install`**. Free Weak engine, 15.3 minutes, 40 model calls,
+`ok: false`, **₹0 charged**. Built by GLM's ladder, finished by `kimi-k2.7-code` after GLM was benched on
+two consecutive timeouts.
+
+**The app was working.** `tsc --noEmit` → exit 0, five separate times · dev server up · preview published ·
+`RENDER_RESCUE` — *"the live preview renders cleanly (real-browser verified)"* · **`PROD_BUILD_OK`** ·
+**`ACCESSIBILITY 100/100`**. Its single blocker:
+
+> `readiness score 38/100 is below the 50/100 bar (too many unresolved quality issues — 9 component(s)
+> created but never used: src/components/Counter.tsx (Counter), src/components/FilterBar.tsx (FilterBar),
+> src/components/Header.tsx (Header), …; No tests at all)`
+
+The arithmetic is exact: **100 − 9×6 (`PENALTY.orphanComponent`) − 8 (`securityMedium`, "No tests at
+all") = 38.** Below `MIN_READY_SCORE` → blocker → `RELEASE_GATE: RED` → `OUTCOME_RELEASE_GATE_RED` →
+"working app or free" → ₹0.
+
+### 🔴 Finding 1 — the build DELETED one of those nine, 121 seconds before it was charged for it
+
+```
+t+788s   $ rm src/components/Counter.tsx   →  exit 0
+t+909s   READINESS_BLOCKER … 9 component(s) created but never used:
+                              src/components/Counter.tsx (Counter), …
+```
+
+The agent noticed its own debris and removed it. Nothing told the project map.
+
+**Root cause: NOTHING IN AgentV3 DELETES.** `WorkspaceMemory.removeFile(file)` has existed all along,
+with the doc comment *"Drop a deleted file from the graph"*, and had **zero callers** — the same
+dead-reader shape `CLAUDE.md` already records for `EmbeddingSearch.search()`. And the one function that
+looked like it would fix this does not: `seedGraphFromWorkspace()` re-reads the real tree before the gate
+runs, but filters with `!known.has(p)` — it can only ever **add**. So the graph is the union of everything
+the build has ever touched, which is not the app, and every gate reading it judges a tree that does not
+exist. The stale entry is then persisted, restored into the next sandbox, and counted again.
+
+### 🔴 Finding 2 — two lanes of one build were given different amounts of the user's request
+
+`manifestUserPrompt(prompt, scaffoldPaths)` interpolates the turn's text and nothing else, so the fast
+lane's planner was asked, literally: *"Plan the file list for this app: **npm install**"*. It invented a
+generic Counter / TaskList / ThemeToggle demo, wrote **10 files**, failed its own typecheck
+(`SIMPLE_BUILD_OUTCOME: TYPECHECK_FAILED`) and handed off at t+185s — leaving the files behind.
+
+The full builder, which had the conversation, opened with *"I'll build a mock test app for JEE exam
+practice with all the features you asked for"* and built the real app on top of that debris.
+`classifyForSimpleLane` decides eligibility **by tier alone** — there is no check that the prompt names
+an app at all. **185 seconds went into an app nobody asked for, and its remains failed the one they did.**
+
+### 🔴 Finding 3 — the report contradicts itself about tests, seven seconds apart
+
+```
+t+909s   READINESS_WARNING  "No tests at all"                                      ← −8 points
+t+912s   E2E_SCAFFOLDED     playwright.config.ts, e2e/smoke.spec.ts written — BY US
+t+916s   TEST_SUITE_UNVERIFIED  "This project has a Playwright test suite …"
+```
+
+We penalised the project for having no tests, then wrote the tests ourselves three seconds later. Same
+class as `e706e068`/PR #3009 — a finding that was true when taken and false when read — reached through
+ORDERING rather than through a stale prediction. **Recorded as an OPEN root cause below, not patched:**
+the honest fix is to run the passes that CHANGE the project before the gate that JUDGES it, and moving
+the E2E scaffold depends on `result.ok` and `lastPreviewUrl`, so it is not a reordering to do in passing.
+
+### The five-bucket ledger
+
+- ✅ **Self-healed — 6.** 6 wrong local import paths auto-fixed; an orphan global stylesheet wired into
+  the entry; `src/index.css` injected into `main.tsx`; repair attempt 3 made it worse (14 → 18 errors)
+  and was **reverted to the previous version**; GLM benched after 2 timeouts → KIMI finished the build;
+  `RENDER_RESCUE` upgraded a not-ok verdict on real browser evidence.
+- 🔀 **Workarounds — 2.** `npm audit fix` ran (exit 1; **1 high + 1 moderate vulnerability survive**);
+  the fast lane failed and routed to the full builder rather than being prevented from starting.
+- ⏭️ **Skipped — 4.** The page-render check (*"needs a running app and was skipped"* — **on a build whose
+  app was running and had been screenshotted**); the user journey (legitimate — the app has no form);
+  the Playwright suite (`@playwright/test` not installed); peak memory (no cgroup accounting).
+- ❌ **Still broken — 4.** The RED verdict and ₹0 on a working app; `DESIGN_CONSISTENCY` **50/100 (D)**
+  with 38 distinct colours; `INTEGRITY_DUPLICATE_STYLESHEET` — `./App.css` imported by both `App.tsx`
+  and `main.tsx`; 2 dependency vulnerabilities.
+- 🥵 **Struggles — 5.** Three fast-lane repair attempts, one of which made the app worse; two GLM
+  timeouts; the 185 wasted seconds; **sandbox 93% idle across 15.3 minutes** (1.1 min of real work);
+  `TIME_TO_FIRST_CALL` 4s.
+
+### Step 2 — the missing subsystem
+
+**There is no concept of REMOVAL anywhere in the engine.** Files are only ever added — to the graph, to
+`writtenFiles`, to the durable index. Every quality gate therefore answers a question about a tree that
+grows monotonically and never shrinks. This is the same family as the EVIDENCE LEDGER (`697b38ee`): a
+verdict computed from a private, stale notion of what is true.
+
+### The fix (PR: `claude/deletion-and-authored-score`)
+
+1. **`fileDeletion.ts`** (new, pure) + `ToolDispatcher.reconcileDeletions` + `setFileDeletionSink`.
+   A path leaves the project map only when **three** conditions hold: the delete-governance parser
+   already extracted it AND the still-imported-file guard allowed it; the command exited 0; and the
+   sandbox **confirms by a direct read** that the file is gone. That third condition is what makes the
+   second safe — `rm x || true` exits 0 having deleted nothing. The route drops the path from
+   `writtenFiles` so we stop claiming to have written a file we deleted. Report code `FILE_DELETED`.
+   ⚠️ **The safe direction here is the OPPOSITE of `buildAuthorship`'s, deliberately**: an unknown
+   answer KEEPS the file, because a graph that wrongly forgets a module stops seeing unresolved imports
+   into it — a silently narrowed gate is worse than a stale entry.
+2. **The readiness SCORE is scoped to code this build wrote** — PR #2997's own recorded open item
+   (*"the readiness SCORE is still whole-workspace"*), closed with that PR's own two primitives:
+   `splitByAuthorship` decides, `severity: 'observation'` records without pricing. `archReport` itself is
+   **untouched**, so the architecture summary, the build report and `computeBuildConfidence` still see
+   every orphan; only the score is scoped, and the pre-existing ones are still listed under
+   `preExistingCodeObservation`'s wording. With no authored set the behaviour is byte-identical to today.
+
+**Stated plainly: fix 1 alone would NOT have saved this build.** Honouring the deleted `Counter.tsx`
+takes the score from 38 to 44 — still under the 50 bar. It is fix 2 that clears it. A test asserts
+exactly that (`44`), so nobody later reads fix 1 as sufficient.
+
+`tests/deletedFilesLeaveTheProject.test.ts` — **26 cases**, including the real timeline's arithmetic and
+an end-to-end run of the actual `evaluate` scan. **Proven by reversion:** removing the reconcile call
+fails 1; unscoping the score fails 3 (two of them behavioural); dropping the route's `writtenFiles.delete`
+fails 1.
+
+### Still open (rule 6 — recorded, not rushed)
+
+1. 🔴 **The durable index still keeps a deleted file.** `saveWorkspaceFiles`' `paths` list IS
+   authoritative, but the route's save is derived from a map that may route through the shrink-guard's
+   MERGE path, so a durable delete needs its own design. Until then a deleted file leaves this build's
+   graph and can still be restored into the next sandbox.
+2. 🔴 **The fast lane plans from the turn's text alone.** A continuation prompt that names no app
+   (`npm install`, `continue`, `fix it`) makes it invent one. Either it should not run when the prompt
+   describes no app, or it must see what the full builder sees.
+3. 🔴 **"No tests at all" is scored three seconds before we write the tests** (finding 3).
+4. 🔴 **`PAGE_RENDER_FAILED` / `RELEASE_GATE` disagree about whether the app was running** — the same
+   contradiction recorded for `e706e068`, unchanged.
+5. 🥵 **Sandbox 93% idle** across 15.3 minutes.
 ## 2026-09-17 — "Continue where you left off" REMOVED from the home screen (admin, same day it shipped)
 
 **Admin, urgently:** *"yeh aaj banaya gaya hai, isko abhi hatao. jaldi delete karo!!! … maine kaha tha,
@@ -61754,6 +61881,65 @@ Tests: `tests/designKitTruth.test.ts` (10), both halves proven by reversion. The
 unchanged.
 ---
 
+## 2026-09-17 — The release gate printed a falsehood in the same sentence that disproved it
+
+**The evidence** — one `RELEASE_GATE` message, verbatim, from build `8b3dca5c`:
+
+```
+Release gate: RED — Not shippable — 1 build-breaking blocker(s).
+  Proven:          the app came up and rendered; the project typechecks
+  NOT established: the page-render check NEEDS A RUNNING APP AND WAS SKIPPED;
+                   … the app HAS NO TEST SUITE that could be run here
+```
+
+The app had come up, rendered and been screenshotted — the gate's own `proven` list says so on the line
+above. And the same report, **seven seconds later**:
+
+> `TEST_SUITE_UNVERIFIED` — *"This project has a Playwright test suite but `@playwright/test` is not
+> installed here, so it was NOT run."*
+
+**The class.** `WHY_MISSING` phrases every reason as an ABSOLUTE claim about the project — *"there was
+never a preview"*, *"there is no running app"*, *"the app has no test suite"* — while the gate routinely
+holds evidence that contradicts it. The `preview` instance was found on 2026-08-27 (Fight 3D report) and
+fixed **in place, with an inline `else if`**. Its two siblings were never hunted. Rule 3, again.
+
+**The fix.** One exported pure function `whyMissing(key, ev)` now answers *"why is this check unproven?"*
+from the evidence the gate already holds, and the inline `preview` branch moved INTO it — so a fourth
+case is added there rather than as a fourth `else if`, which is what let these two hide.
+
+- `pages` unproven while the preview PASSED (or a URL was published) ⇒ *"the app came up, but its
+  individual page routes were never render-checked here"*. No new input: the gate already holds `preview`.
+- `tests` unproven while a suite exists ⇒ *"this project HAS a test suite, but it could not be run here"*.
+  New optional `testSuitePresent`, set by the vaccine pass in the two branches that already know
+  (`detectTestPlan` found a plan; `suitePresentButRunnerMissing` found a suite with no runner) — the exact
+  `previewUrlPublished` design, whose own doc says an omitted value must keep the original wording.
+
+🔒 **It cannot change a verdict.** Every branch returns a string that lands in `unproven`. A check
+explained more accurately is exactly as unproven as before — saying *"we did not look"* instead of
+*"there was nothing to look at"* is an admission, not partial credit. A test asserts state, headline,
+`proven`, `failures` and the unproven LENGTH are all identical with and without the flags.
+
+⚠️ `CheckKey`'s manual exclusion list did its job again: adding `testSuitePresent` broke three maps at
+compile time until it was named there. Its comment now says not to "tidy" that into a structural filter.
+
+`tests/theGateDoesNotContradictItself.test.ts` — 13 cases. **Proven by reversion:** removing the `pages`
+branch fails 2, the `tests` branch fails 2, the route wiring fails 1. The 85 existing release-gate tests
+pass unchanged — including the one asserting the OLD `pages` wording, which still holds because nothing
+came up in that scenario. This narrows; it does not soften.
+
+### 🔴 An open item CORRECTED before anyone acts on it
+
+`8b3dca5c`'s open item 2 noted that the fast lane plans from the turn's text alone. Its report also shows
+`requestAnalysis: { taskType: "chat", complexityScore: 5 }` — which looks like the platform already
+knowing the prompt named no app.
+
+**It is not, and building a gate on it would have been a real bug.** `detectTaskType` ends with a bare
+`return 'chat'` — **`chat` is the FALLTHROUGH default**, not a positive verdict. Skipping the fast lane on
+`taskType === 'chat'` would skip it for every prompt none of the regexes recognise, which in this product
+includes a great deal of Hindi and Hinglish. Recorded here so the next session does not walk into it:
+`CLAUDE.md`'s own lesson, *"'not invented' is a weaker standard than 'checked'"*, applied to a field that
+looked like a measurement and is a default. The real fix remains giving the fast lane the same request the
+full builder sees — not guessing from a signal that cannot carry the weight.
 ## 2026-09-17 — The first call the user sits through: a throughput floor, and a clock
 
 Autopsy 2b0a3ed5 left three items open (rule 6). The admin read them and asked for the best answer to
@@ -61944,6 +62130,65 @@ measuring.** The rule that keeps being relearned: *a test that cannot fail is no
 only way to know it can fail is to break the code and watch it go red.
 ---
 
+## 2026-09-17 — CORRECTION to the `8b3dca5c` autopsy above: the workspace was EMPTY, so the authorship fix does not clear that build
+
+**I asserted, in the entry above and in PR #3014's description, that "several of the nine [orphan
+components] belong to an EARLIER build in the same workspace". That is FALSE, and the report says so in
+a field I had not read:**
+
+```
+SETUP_TIMING — "Project checked in 1s — nothing needed restoring"
+  detail: durable read 73ms (0 file(s)) · sandbox scan 973ms
+```
+
+**Zero files.** Corroborated by `Personal context … applied: none (new user or first build)` and by
+`priorFailedBuilds: 0`. The workspace held nothing but the scaffold when the turn began.
+
+**What follows, and all of it is against my own claim:**
+
+- `intent = 'new_build'` was **correct**, and `rebuildGuardFlipsToEdit` correctly did NOT fire — its
+  `durableSourceCount` was genuinely 0, not an infra hiccup. That guard is fine; I had it under suspicion.
+- **All nine orphan components were written by THIS build**: four by the fast lane
+  (`Counter`, `Header`, `TaskList`, `ThemeToggle` — all ten of its files are still in the final tree) and
+  five by the full builder (`FilterBar`, `QuestionForm`, `QuestionList`, `SectionHeader`, `StatusBadge`).
+- Therefore **the authorship-scoped score changes this build's number by nothing at all.** Every orphan
+  is ours. PR #3014's line *"It is fix 2 that clears it"* is wrong.
+
+**The honest arithmetic, corrected:**
+
+| | score | verdict |
+|---|---|---|
+| as it shipped | 100 − 9×6 − 8 = **38** | RED |
+| + honouring the deleted `Counter.tsx` | 100 − 8×6 − 8 = **44** | **still RED** |
+| + not charging "No tests at all" | 100 − 8×6 = **52** | **GREEN** |
+
+**So neither fix in PR #3014 would have saved this build.** The deletion fix is real and verified — the
+`rm` is in the command log and the file was still being charged for 121 seconds later — and the
+authorship scoping is a real fix for the class it was written for (`e4ebcb5f`, a user's own 516-file
+repository, which is exactly the case #2997 opened). Both belong. Neither is *this* report's cure.
+
+🔑 **What this reprioritises: open item 3 is not a nice-to-have, it is the other half.** The pair that
+clears this build is *the deleted file* + *"No tests at all"*, and the second is the one I deferred as
+"not a reordering to do in passing". It is worth doing properly:
+
+```
+t+909s  READINESS_WARNING      "No tests at all"                          ← −8 of a 100-point budget
+t+912s  E2E_SCAFFOLDED         playwright.config.ts, e2e/smoke.spec.ts    ← written BY US
+t+916s  TEST_SUITE_UNVERIFIED  "This project HAS a Playwright test suite…"
+```
+
+Every first build of a new app has no tests until we add them seconds later, and the charge for that
+default state is 8% of a budget whose floor fails the build.
+
+⚠️ **NOT changed on my own initiative**, because zeroing a quality charge is a gate-loosening judgement
+with a real trade-off (for an IMPORTED project "no tests at all" IS a genuine statement about the user's
+code), and three PRs are already in flight. Put to the admin instead.
+
+🔒 **The lesson, and it is this repo's own:** I reasoned from the orphan NAMES — `Counter`, `TaskList`,
+`ThemeToggle` look like leftovers — instead of from the one field that measures it. `CLAUDE.md` calls
+this out twice already: *"a conclusion drawn from a capped result set is not a verified fact"* and
+*"'not invented' is a weaker standard than 'checked'"*. A plausible story about an artefact is not a
+reading of it.
 ## 2026-09-17 — Deep re-autopsy of `9cca1fd5`: 45 confirmed findings, and 17 of them are ONE call site
 
 **Method.** The admin re-sent build `9cca1fd5` (the Alarm app, already autopsied for merged PR #2988).

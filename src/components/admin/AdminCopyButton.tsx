@@ -8,7 +8,12 @@
 // It sits above every admin tab, drags with a finger or a mouse to anywhere on the screen, remembers
 // where it was put, and closes. One press copies the whole page.
 //
-// 🔴 WHAT IT COPIES IS TEXT, AND THAT IS THE POINT, NOT A SHORTFALL. The reasoning lives in
+// 🔵 IT COPIES JSON WHEN A BUILD REPORT IS OPEN (admin 2026-09-17: *"jab build report copy ki jaye to
+// json formate me hi copy ho. abhi text me copy ho rahi hai."*). The page-text copy below is right for
+// an ordinary admin screen and wrong for a 153-issue report, which a DOM outline flattens into
+// something unparseable. See `adminCopyPayload.ts`. Everywhere else, the paragraph below still stands.
+//
+// 🔴 WHAT IT COPIES OTHERWISE IS TEXT, AND THAT IS THE POINT, NOT A SHORTFALL. The reasoning lives in
 // `pageSnapshot.ts` — in short, a browser cannot photograph its own window, the libraries that claim
 // to REDRAW the page instead (a refusal `ReportSheet.tsx` already recorded), and `getDisplayMedia`
 // prompts every time and does not exist in the Android WebView. A text copy works on 100% of pages on
@@ -32,6 +37,7 @@ import { collectDiagnostics, describeOverflow } from '../../lib/reportDiagnostic
 import { recentErrors } from '../../lib/recentErrors';
 import { nativeAppBuild } from '../../lib/appBuildId';
 import { copyTextToClipboard } from '../../lib/copyText';
+import { chooseAdminCopyPayload, copyStatusText, type AdminCopyCandidates } from '../../lib/adminCopyPayload';
 
 /** Survives a tab switch and a reload; per-browser, and nothing but two numbers. */
 export const COPY_BUTTON_POSITION_KEY = 'nbai.admin.copyButton.pos';
@@ -44,9 +50,15 @@ type Status = null | { ok: boolean; text: string };
 export interface AdminCopyButtonProps {
   /** The tab the admin is on — it names the page at the top of the copy. */
   pageLabel: string;
+  /**
+   * JSON the open view says should be copied INSTEAD of the page text (admin 2026-09-17: "jab build
+   * report copy ki jaye to json formate me hi copy ho"). Omitted/null ⇒ today's page-text copy,
+   * byte-identical. See `adminCopyPayload.ts` for why this is registered rather than scraped.
+   */
+  jsonPayload?: AdminCopyCandidates | null;
 }
 
-export function AdminCopyButton({ pageLabel }: AdminCopyButtonProps) {
+export function AdminCopyButton({ pageLabel, jsonPayload }: AdminCopyButtonProps) {
   const [pos, setPos] = useState<Point | null>(null);
   const [hidden, setHidden] = useState(false);
   const [closedNote, setClosedNote] = useState(false);
@@ -103,6 +115,18 @@ export function AdminCopyButton({ pageLabel }: AdminCopyButtonProps) {
     if (busy) return;
     setBusy(true);
     try {
+      // A BUILD REPORT WINS OVER THE PAGE TEXT. Checked first so a report that is open is never
+      // flattened into a DOM outline — but it does NOT skip the page read below, because the report's
+      // own JSON is what gets copied only when there genuinely is one.
+      const payload = chooseAdminCopyPayload(jsonPayload ?? {});
+      if (payload) {
+        const okJson = await copyTextToClipboard(payload.json);
+        setStatus(okJson
+          ? { ok: true, text: copyStatusText(payload, 0) }
+          : { ok: false, text: 'The browser refused the clipboard. Try again with the window focused.' });
+        return;
+      }
+
       // READ THE PAGE FIRST, ANSWER AFTERWARDS. Everything below is measured from the page as it is at
       // the moment of the press — a value cached at mount would describe a screen the admin has since
       // navigated away from, and would be impossible to tell apart from the real one in the paste.
@@ -134,14 +158,14 @@ export function AdminCopyButton({ pageLabel }: AdminCopyButtonProps) {
       // "Copied!" over a refusal is exactly the fake success this repo forbids — the admin would paste
       // their old clipboard and never know why the page did not match.
       setStatus(ok
-        ? { ok: true, text: `Page copied (${outline.lines.length} lines) — paste it in the chat` }
+        ? { ok: true, text: copyStatusText(null, outline.lines.length) }
         : { ok: false, text: 'The browser refused the clipboard. Try again with the window focused.' });
     } catch {
       setStatus({ ok: false, text: 'Could not read this page. Nothing was copied.' });
     } finally {
       setBusy(false);
     }
-  }, [busy, pageLabel]);
+  }, [busy, pageLabel, jsonPayload]);
 
   const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (!pos) return;

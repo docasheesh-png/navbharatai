@@ -26,7 +26,7 @@ describe('HOME_TOOL_GROUPS — the builder tools moved from Settings to the Home
     const ids = HOME_TOOL_GROUPS.flatMap((g) => g.items.map((i) => i.id)).sort();
     expect(ids).toEqual([
       'aitesting', 'analytics', 'api', 'apimarket', 'apk', 'botbuilder', 'cicd', 'codereview', 'collab',
-      'components', 'darkmode', 'dbstudio', 'debugger', 'designsys', 'domain', 'figma', 'gallery', 'imagegen',
+      'components', 'darkmode', 'dbstudio', 'debugger', 'designsys', 'devapi', 'domain', 'figma', 'gallery', 'imagegen',
       'insights', 'localization', 'minifier', 'monetize', 'multipages', 'performance', 'plugins', 'seo', 'sharereview', 'team', 'testing',
       'versioning', 'whitelabel',
     ]);

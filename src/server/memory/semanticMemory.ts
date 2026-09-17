@@ -1,5 +1,6 @@
 // Semantic conversation memory (RAG) — the PURE, dependency-free core (admin 2026-07-17).
 import { parseEnvFlag } from '../lib/envFlag';
+import { parseEnvNumber } from '../lib/envNumber';
 //
 // WHY: today an AI only "remembers" the recent-history WINDOW the client resends (last ~20 turns) plus
 // curated profile facts. Anything older that slid out of the window is forgotten. This adds retrieval-
@@ -41,8 +42,8 @@ export function memoryTopK(): number {
 }
 /** Minimum cosine similarity for a chunk to be considered relevant (below = noise, dropped). */
 export function memoryMinScore(): number {
-  const v = Number(process.env.SEMANTIC_MEMORY_MIN_SCORE);
-  return Number.isFinite(v) && v >= 0 && v <= 1 ? v : 0.72;
+  const v = parseEnvNumber(process.env.SEMANTIC_MEMORY_MIN_SCORE);
+  return v !== null && v >= 0 && v <= 1 ? v : 0.72;
 }
 /** The Gemini embedding model id. */
 export function memoryEmbedModel(): string {

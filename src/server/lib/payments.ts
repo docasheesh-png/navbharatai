@@ -6,6 +6,7 @@ import { doc, getDoc, updateDoc, runTransaction, getServerDb as getDb } from './
 import { getSecretValue } from './secrets';
 import { TOKENS_PER_RUPEE } from '../../lib/walletPricing';
 import { professionalPassStore } from '../professionals/ProfessionalPassStore';
+import { parseEnvNumber } from './envNumber';
 import {
   professionalPassPriceInr, passEntitlementForPayment, MAX_PASS_PERIODS,
 } from '../professionals/professionalPaid';
@@ -36,8 +37,8 @@ export { TOKENS_PER_RUPEE };
  * non-finite/negative overrides fall back to the default.
  */
 export function welcomeBonusTokens(): number {
-  const n = Number(process.env.WELCOME_BONUS_TOKENS);
-  return Number.isFinite(n) && n >= 0 ? Math.round(n) : 250 * TOKENS_PER_RUPEE;
+  const n = parseEnvNumber(process.env.WELCOME_BONUS_TOKENS);
+  return n !== null && n >= 0 ? Math.round(n) : 250 * TOKENS_PER_RUPEE;
 }
 
 /**

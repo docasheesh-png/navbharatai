@@ -52,8 +52,14 @@ export async function verifyCaptcha(token: string, remoteip?: string): Promise<b
     if (data.success !== true) return false;
     // reCAPTCHA v3 returns a 0..1 risk score — enforce a minimum. v2/Turnstile/hCaptcha omit it (pass).
     if (typeof data.score === 'number') {
-      const min = Number(process.env.CAPTCHA_MIN_SCORE ?? '0.5');
-      return data.score >= (Number.isFinite(min) ? min : 0.5);
+      // A CLEARED env field must not open this gate. Number('') is 0, not NaN, so a blank
+      // CAPTCHA_MIN_SCORE used to make this "score >= 0" — which passes a certain-bot 0. An empty
+      // value means "not set", and so does a negative one (never a real 0..1 floor). An
+      // out-of-range value like 5 is left alone on purpose: it refuses everything, which is the
+      // safe failure for a bot gate and must not be relaxed into the default.
+      const rawMin = (process.env.CAPTCHA_MIN_SCORE || '').trim();
+      const min = rawMin === '' ? NaN : Number(rawMin);
+      return data.score >= (Number.isFinite(min) && min >= 0 ? min : 0.5);
     }
     return true;
   } catch {

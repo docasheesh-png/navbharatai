@@ -38,7 +38,12 @@ describe('the engine chain is recorded', () => {
   });
 
   it('the main build client actually passes onChain through to the report', () => {
-    expect(code).toMatch(/onChain:\s*\(chain\)\s*=>\s*\{[\s\S]{0,200}?buildDiag\.setProviderChain\(describeRunnerChain\(chain\),\s*chainProviders\(chain\)\)/);
+    // ⚠️ THE ARGUMENT LIST IS NOT THE CONTRACT. This used to end at `chainProviders(chain))`, so
+    // autopsy 2b0a3ed5 adding a THIRD argument — `firstRungLabel(chain)`, which stops the report
+    // naming the Claude backstop as the model a weak build planned to use — broke an assertion about
+    // a call that had just become strictly more informative. Anchored on the two things that must
+    // hold: the chain reaches the report, and it does so from `onChain`.
+    expect(code).toMatch(/onChain:\s*\(chain\)\s*=>\s*\{[\s\S]{0,200}?buildDiag\.setProviderChain\(describeRunnerChain\(chain\),\s*chainProviders\(chain\)/);
   });
 });
 

@@ -10,6 +10,7 @@
 // the live AgentEvent stream and (b) accepts explicitly-recorded issues for signals that are not
 // events (a provider fallback, a sandbox-create timeout).
 
+import { startBandLabel } from './RequestAnalyser';
 import { toolCallDetail } from './toolCallTarget';
 import type { AgentEvent } from './types';
 import { parseNpmAuditSummary, npmAuditNote, auditSeverity, looksLikeDependencyInstall } from './npmAuditSummary';
@@ -355,7 +356,7 @@ export interface BuildDiagnosticsReport {
    * Observability only: written once at build start from a value the route already computed, read by
    * nothing in the build path.
    */
-  requestAnalysis?: { taskType: string; complexityScore: number; startTier: string };
+  requestAnalysis?: { taskType: string; complexityScore: number; startTier: string; startBand?: string };
   liveTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
   /** The cache-hit input tokens seen so far, paired with `liveTokens`. Same unreconciled status. */
   liveCacheReadInputTokens?: number;
@@ -475,7 +476,7 @@ export class BuildDiagnostics {
   private readonly issues: BuildIssue[] = [];
   /** provider → failure bucket → count. See recordProviderFailure. */
   private readonly providerFailureReasons = new Map<string, Map<string, number>>();
-  private requestAnalysis?: { taskType: string; complexityScore: number; startTier: string };
+  private requestAnalysis?: { taskType: string; complexityScore: number; startTier: string; startBand?: string };
   private readonly meta: BuildDiagnosticsMeta;
   private readonly now: () => number;
   private readonly startedAt: number;
@@ -503,6 +504,7 @@ export class BuildDiagnostics {
   private shadowFastLaneTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
   private providerChain?: string;
   private providerChainNames?: string[];
+  private plannedFirstRung?: string;
   private liveTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
   private liveCacheReadInputTokens?: number;
   private sandboxCostRecord?: { seconds: number; usd: number; estimated: true };
@@ -1528,14 +1530,21 @@ export class BuildDiagnostics {
     // All three or none: a half-recorded analysis would read as a real measurement with a missing
     // half, which is the shape `USAGE_NOT_REPORTED` exists to keep out of this report.
     if (!taskType || !startTier || typeof score !== 'number' || !Number.isFinite(score)) return;
-    this.requestAnalysis = { taskType, complexityScore: score, startTier };
+    // The band's KEY is kept (telemetry is grouped by it) and its MEANING is recorded beside it, so
+    // the report never again asserts that a build started on a provider no ladder contains — see
+    // `startBandLabel`. Derived here rather than at each reader, so one answer exists.
+    this.requestAnalysis = { taskType, complexityScore: score, startTier, startBand: startBandLabel(startTier) };
   }
 
-  setProviderChain(chain: string, names?: string[]): void {
+  setProviderChain(chain: string, names?: string[], firstRung?: string): void {
     const text = typeof chain === 'string' ? chain.trim() : '';
     if (!text) return;
     this.providerChain = text.slice(0, 600);
     this.providerChainNames = Array.isArray(names) ? names.filter((n) => typeof n === 'string' && n.trim()) : undefined;
+    // The engine we really intend to call first — see `firstRungLabel`. Optional, so a caller that
+    // does not pass it keeps the old `meta.model` answer exactly.
+    const first = typeof firstRung === 'string' ? firstRung.trim() : '';
+    if (first) this.plannedFirstRung = first.slice(0, 120);
     this.notify();
   }
 
@@ -1757,7 +1766,12 @@ export class BuildDiagnostics {
       // now leads with what ACTUALLY delivered and keeps the intent under `plannedModel`, so no
       // information is lost and the headline field stops asserting something untrue.
       model: honestModelLabel(this.meta.model, this.llmCalls),
-      plannedModel: this.meta.model,
+      // ⚠️ THE LADDER'S FIRST RUNG WHERE WE HAVE IT, not `selectBuildModel`'s answer (autopsy
+      // 2b0a3ed5). That helper predates the three-ladder rewrite and still replies in the old
+      // Haiku/Sonnet vocabulary, so a weak build reported its Claude BACKSTOP as the model it planned
+      // to use while GLM did the work. Falls back to the old value, so nothing regresses where the
+      // chain was never recorded.
+      plannedModel: this.plannedFirstRung ?? this.meta.model,
       framework: this.meta.framework,
       startedAt: this.startedAt,
       endedAt: this.endedAt,
@@ -2384,6 +2398,36 @@ export function outcomeCodeOf(
   return last?.code ?? '';
 }
 
+/**
+ * Did the USER stop this build?
+ *
+ * 🔴 ROOT CAUSE (autopsy 2b0a3ed5, 2026-09-17). A user pressed Stop 66 seconds into a calculator
+ * build. The report's `rootCause` read *"Build did not succeed, but no specific error was
+ * captured."* — while the same document carried `USER_STOPPED_BUILD` and `CANCELLED_BUILD_CHARGED`
+ * in its own timeline, and the summary the user saw said "Stopped, as you asked."
+ *
+ * "No specific error was captured" is the sentence that sends the next autopsy hunting a bug. Here
+ * there is no bug: the reason is fully recorded, two lines away, and was simply never asked for.
+ *
+ * 🔑 READ OFF THE TIMELINE, exactly like `toolWasUsed`, so it cannot drift from what the report
+ * shows. A new flag threaded through every ending path is a flag some future ending path forgets —
+ * which is the hole `endedWithoutOutcome` already exists to plug, one level down.
+ *
+ * ⚠️ `USER_STOPPED_BUILD` is recorded for an ENGINE-initiated stop too, and its message says which.
+ * Only the user's own doing counts here: filing a platform stop under "the user abandoned it" is the
+ * misattribution `isUserInitiated` was written to prevent, and it would quietly distort every
+ * quality metric built on these reports.
+ */
+export function stoppedByUser(issues: readonly BuildIssue[] | null | undefined): boolean {
+  if (!Array.isArray(issues)) return false;
+  return issues.some(
+    (i) =>
+      i?.code === 'USER_STOPPED_BUILD' &&
+      typeof i.message === 'string' &&
+      !i.message.includes('not by the user'),
+  );
+}
+
 export function deriveRootCause(input: {
   issues: readonly BuildIssue[];
   errors?: readonly CapturedError[];
@@ -2523,6 +2567,25 @@ export function deriveRootCause(input: {
     return problem
       ? `This build ended without recording an outcome (cut off before it could report one) — so the reason it stopped is NOT known. The most severe issue recorded before it stopped, which may or may not be related: ${problem.message}`
       : 'This build ended without recording an outcome (cut off before it could report one) — the reason it stopped is not known, and no unresolved issue was recorded either.';
+  }
+  /**
+   * 🔴 A BUILD THE USER STOPPED HAS A KNOWN CAUSE, AND IT IS NOT A DEFECT (autopsy 2b0a3ed5).
+   *
+   * Placed ABOVE every "worst thing seen" branch on purpose: when a person ends a build, that IS why
+   * it ended, whatever else the timeline happens to contain. The most severe recorded issue is still
+   * named — it is the most useful thing we have — but demoted to what it is, exactly as the
+   * still-running branch above demotes it, rather than presented as the reason.
+   *
+   * ⚠️ `ok !== true` IS LOAD-BEARING, AND THE REASON IS ONE COMMIT OLD. #3004 landed the same day
+   * because a build that SUCCEEDED on every measure was headlined "Build outcome: STOPPED". A user
+   * can press Stop on a build that has already produced a working app; without this condition, this
+   * branch would re-create that exact bug in a new place — reporting a stop as the root cause of a
+   * successful build, and beating the `ok === true` guards further down to it.
+   */
+  if (ok !== true && stoppedByUser(issues)) {
+    return problem
+      ? `The USER stopped this build — that is why it ended, and no failure of the app or the engine is implied. The most severe thing recorded before the stop, which may be unrelated: ${problem.message}`
+      : 'The USER stopped this build — that is why it ended. Nothing failed, and no unresolved problem was recorded.';
   }
   /**
    * 🔴 AN ITEM WE OURSELVES MARKED RESOLVED MUST NOT BE PRESENTED AS THE CAUSE (autopsy fd021c64).

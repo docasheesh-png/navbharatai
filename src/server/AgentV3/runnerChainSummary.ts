@@ -28,18 +28,44 @@ export interface ChainRung {
 
 /**
  * One line naming every rung in order, e.g.
- *   `GLM(glm-5.2) → GLM#2(glm-5.2) → KIMI(kimi-k3) → CLAUDE → CLAUDE_HAIKU`
+ *   `GLM(glm-5.2) ×104 → KIMI(kimi-k3) → CLAUDE → CLAUDE_HAIKU`
  *
- * The rung's OWN name is used, not `reportAs`: a key-pool rung is a genuinely separate attempt and
- * collapsing it would hide that three keys were tried. Truncated at a sane width — a 40-rung pool is
- * still readable as "…and N more" and an unbounded line would be dropped by the timeline's cap.
+ * 🔴 A KEY POOL USED TO EAT THE WHOLE LINE, AND IT ATE THE ANSWER WITH IT (open root cause from
+ * autopsy fdd59ef8, recurring in 2b0a3ed5, 2026-09-17). This function listed each pool key as its own
+ * rung — `GLM → GLM#2 → … → GLM#24 … and 80 more` — so with ~104 keys configured, a real report's
+ * chain line ENDED inside the GLM pool. KIMI and CLAUDE_HAIKU were in the chain and invisible.
+ *
+ * ⚠️ THAT IS THIS MODULE'S OWN QUESTION, FAILING ON ITS OWN LINE. Its header exists to separate "the
+ * rung was there and never reached" from "the rung was never there at all"; a line truncated before
+ * the second family can no longer answer it, and a reader is back to guessing.
+ *
+ * The original reasoning — *"a key-pool rung is a genuinely separate attempt and collapsing it would
+ * hide that three keys were tried"* — is kept, not discarded: a run of identical rungs collapses to
+ * `NAME(model) ×N`, so the count still says how many keys stood there. Only CONSECUTIVE rungs of the
+ * same family AND model collapse, so a ladder that legitimately returns to a provider later
+ * (`GLM(flashx) → KIMI → GLM(glm-5.3)`) still shows both visits.
+ *
+ * `maxRungs` now counts COLLAPSED entries, which is what makes the budget reach the end of a real
+ * ladder. Pure.
  */
 export function describeRunnerChain(chain: readonly ChainRung[], maxRungs = 24): string {
   const rungs = (chain ?? []).filter((r) => r && typeof r.name === 'string' && r.name.trim());
   if (rungs.length === 0) return 'no providers in the chain';
-  const shown = rungs.slice(0, Math.max(1, maxRungs));
-  const parts = shown.map((r) => (r.modelId ? `${r.name}(${r.modelId})` : r.name));
-  const rest = rungs.length - shown.length;
+
+  // Collapse consecutive same-family, same-model rungs. The FAMILY is `reportAs` where the rung has
+  // one ('GLM#17' reports as 'GLM') — that field exists precisely to say "these are one engine".
+  const groups: Array<{ label: string; count: number }> = [];
+  for (const r of rungs) {
+    const family = (r.reportAs || r.name).trim();
+    const label = r.modelId ? `${family}(${r.modelId})` : family;
+    const last = groups[groups.length - 1];
+    if (last && last.label === label) last.count += 1;
+    else groups.push({ label, count: 1 });
+  }
+
+  const shown = groups.slice(0, Math.max(1, maxRungs));
+  const parts = shown.map((g) => (g.count > 1 ? `${g.label} ×${g.count}` : g.label));
+  const rest = groups.length - shown.length;
   return rest > 0 ? `${parts.join(' → ')} … and ${rest} more` : parts.join(' → ');
 }
 
@@ -72,4 +98,27 @@ export function unreachedProvidersNote(providers: readonly string[], delivered: 
   if (idle.length === 0) return null;
   return `In the chain but never reached this build: ${idle.join(', ')}. `
     + `A provider ABSENT from the chain above was never configured for this build — that is a different thing from one that sat idle.`;
+}
+
+/**
+ * The engine this build actually PLANS to call first — `GLM(glm-4.7-flashx)`, or the bare name when
+ * the rung pins no model. `undefined` for an empty chain.
+ *
+ * 🔴 WHY THE REPORT NEEDS THIS (autopsy 2b0a3ed5, 2026-09-17). A weak-tier build reported
+ * `plannedModel: "claude-haiku-4-5-20251001"` while delivering on `glm-4.7-flashx`. Haiku is the LAST
+ * rung of the weak ladder — the backstop — so the field named the engine we hoped never to reach as
+ * the one we intended to use. `selectBuildModel` predates the three-ladder rewrite (2026-09-14) and
+ * still answers in the old Haiku/Sonnet vocabulary; the LADDER is what decides now.
+ *
+ * ⚠️ This is a LABEL, not a routing decision. Nothing about which engine runs changes — the same
+ * mislabelling already cost one autopsy a wrong lead, when a turn timeout was filed against
+ * `claude-sonnet-4-6` on a weak build that never called Claude (4efab9d7).
+ */
+export function firstRungLabel(chain: readonly ChainRung[]): string | undefined {
+  for (const r of chain ?? []) {
+    const family = (r?.reportAs || r?.name || '').trim();
+    if (!family) continue;
+    return r.modelId ? `${family}(${r.modelId})` : family;
+  }
+  return undefined;
 }

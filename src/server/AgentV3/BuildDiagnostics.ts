@@ -23,6 +23,7 @@ import { isStarvedBudgetError, isUnclampedStarvation } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
 import { isBudgetEndedError } from './turnDeadline';
 import { typecheckEvidenceFromCommands } from './TscGate';
+import { agentRunEvidence as readAgentRunEvidence, type AgentRunEvidence } from './agentRunEvidence';
 
 export type IssuePhase =
   | 'sandbox' | 'provider' | 'plan' | 'tool' | 'build' | 'readiness' | 'preview' | 'autofix' | 'deploy';
@@ -780,6 +781,20 @@ export class BuildDiagnostics {
    */
   typecheckEvidenceFromAgentCommands(): 'passed' | 'failed' | undefined {
     return typecheckEvidenceFromCommands(this.commands);
+  }
+
+  /**
+   * EVERYTHING this build's own command log already settles — see `./agentRunEvidence`.
+   *
+   * The generalisation of the method above. That one closed the typecheck half of autopsy 697b38ee
+   * and was wired for that one fact; the `tests` half of the SAME report went unread, so a build
+   * whose Playwright suite the agent had installed, run and PASSED was told it had "no test suite
+   * that could be run here". A gate asks this instead of growing a third private fallback.
+   *
+   * Absent keys mean the log does not settle that fact — never a promotion to a pass.
+   */
+  agentRunEvidence(): AgentRunEvidence {
+    return readAgentRunEvidence(this.commands);
   }
 
   /**
@@ -2506,7 +2521,17 @@ export function deriveRootCause(input: {
    * `stillRunning` branches above already do for the same reason.
    */
   if (problem && problem === resolvedOnly) {
-    return `This build did not succeed, but NO unresolved problem was recorded — so why it failed is not known from this report. The most severe thing seen, which the engine had already resolved and which may be unrelated: ${problem.message}`;
+    // 🔴 "NO unresolved problem was recorded" WAS FALSE, AND THE SAME DOCUMENT SAID SO (autopsy
+    // fdd59ef8, 2026-09-17). That report carried `counts.unresolved: 2` — a DESIGN_CONSISTENCY
+    // warning and the RELEASE_GATE summary — while this sentence announced there were none. Both are
+    // in NEVER_ROOT_CAUSE, so they were never CANDIDATES; that is a different fact from not existing,
+    // and conflating the two makes the report contradict its own header. A reader who trusts the
+    // sentence stops looking for the two findings that are sitting right there.
+    const ineligible = issues.filter((i) => i.severity !== 'info' && i.autoResolved === false).length;
+    const note = ineligible > 0
+      ? `${ineligible} unresolved item(s) WERE recorded, but none of them can name a cause (a design/accessibility advisory or the release-gate summary, which only restates other findings)`
+      : 'NO unresolved problem was recorded';
+    return `This build did not succeed, but ${note} — so why it failed is not known from this report. The most severe thing seen, which the engine had already resolved and which may be unrelated: ${problem.message}`;
   }
   if (problem) return problem.message;
   if (ok === true) return 'Build completed successfully with no problems recorded.';

@@ -371,7 +371,32 @@ export class OpenAiToolRunner implements TurnRunner {
     const startedAt = Date.now();
     // The response OBJECT must still arrive promptly even when streaming: a provider that has not
     // answered the request at all inside the idle window is hung before it has begun.
-    const raw = await withTimeout(call(), streaming ? idleMs : timeoutMs, clockMessage(streaming ? idleMs : timeoutMs));
+    //
+    // 🔴 SILENCE IS THE PROVIDER'S, NOT OUR BUDGET'S (autopsy fdd59ef8, 2026-09-17). `clockMessage`
+    // decides by `bound.source`, which describes the TOTAL clock — so when the IDLE bound fired first
+    // it still reported *"build budget reached while this call was still running"*. That report shows
+    // the contradiction in two places at once: the call died at 60,012 ms while `CORRECTION_BUDGET`
+    // recorded **1,665 s of budget still left**.
+    //
+    // 🔑 AND THE MISLABEL DISABLED THE REPAIR. `BUDGET_REACHED_MESSAGE` deliberately never benches a
+    // provider ("a provider must never be benched for our budgeting") — correct when it is true. Here
+    // it was false, so a rung that had gone silent for a full minute was recorded as our own clock
+    // ending, was NOT benched, and the ladder never advanced. That is also what makes the ~104-rung
+    // GLM key pool in the same report look alarming: the family bench is exactly the mechanism that
+    // makes a long pool harmless, and this wording was switching it off.
+    //
+    // The test is arithmetic, not a guess: `idleMs = min(streamIdleMs(), timeoutMs)`, so when
+    // `idleMs < timeoutMs` the lane still had more clock than the silence window — whatever fired at
+    // `idleMs` was the provider saying nothing, and our budget was not involved.
+    const initialBoundMs = streaming ? idleMs : timeoutMs;
+    const providerWentSilent = streaming && idleMs < timeoutMs;
+    const raw = await withTimeout(
+      call(),
+      initialBoundMs,
+      providerWentSilent
+        ? `OpenAI-compatible call (GLM/Kimi) timed out after ${idleMs}ms`
+        : clockMessage(initialBoundMs),
+    );
 
     let completion: OpenAiCompletionLike;
     let streamedText = false;

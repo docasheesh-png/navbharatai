@@ -139,6 +139,7 @@ import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
+import { authoredPathSet, splitByAuthorship, preExistingCodeObservation } from './buildAuthorship';
 import { analyzeHooksRules, hookViolationWriteNote } from './HooksRulesAnalysis';
 import { dedupeDuplicateImports } from './DuplicateImportGuard';
 import { isReactFamilyFramework } from './frameworkFamily';
@@ -575,6 +576,26 @@ export class ToolDispatcher {
   /** Set by the composition root once per build, from the project's own ignore file. */
   setIgnoreRules(rules: IgnoreRule[]): void {
     this.ignoreRules = Array.isArray(rules) ? rules : [];
+  }
+
+  /**
+   * Which files THIS BUILD has written — read as a THUNK, never a value (autopsy e4ebcb5f; the full
+   * story is in `buildAuthorship.ts`). The readiness gate runs after the last turn, so the set must be
+   * sampled then, not at construction when it is necessarily empty. Same reason `ignoreRules` is a
+   * thunk on the sub-agent spawn: capturing the value would silently answer "nothing was written".
+   *
+   * 🔒 IT MUST BE THE ROUTE'S OWN `writtenFiles`, NOT A SET THIS CLASS KEEPS. A dispatcher-local
+   * tally would see only its own instance's writes — and every sub-agent runs on its OWN child
+   * dispatcher, which is precisely the hole that made sub-agent writes invisible to the parent turn
+   * (fixed 2026-09-17, PR #2988). One shared source of truth, fed by the architect, the fast lane
+   * (which writes through `dispatcher.dispatch('write_file')`) and every sub-agent alike.
+   *
+   * Unset ⇒ the gate behaves exactly as it did before authorship existed.
+   */
+  private authoredFiles?: () => Iterable<string>;
+
+  setAuthoredFiles(getter: () => Iterable<string>): void {
+    if (typeof getter === 'function') this.authoredFiles = getter;
   }
 
   /**
@@ -3129,6 +3150,9 @@ export class ToolDispatcher {
         // (was ~7 directory listings + each file read ~5×). `snap.files` is the full
         // name-only list for hygiene/secret-leak; `snap.sources` carries content.
         const snap = await this.readEvalSnapshot();
+        // Sampled ONCE, here, at the end of the build — see `setAuthoredFiles` for why it is a thunk.
+        // `undefined` when nothing armed it, which keeps the pre-authorship behaviour exactly.
+        const authoredSet = this.authoredFiles ? authoredPathSet(this.authoredFiles()) : undefined;
         // Best-effort authenticity/completeness pass — never throws.
         const issues = this.collectAuthenticityIssues(snap.sources);
         // Best-effort dependency-consistency pass — graph-based; never throws.
@@ -3292,10 +3316,29 @@ export class ToolDispatcher {
         // an app that can't run, or a high-severity security misconfig must BLOCK
         // "READY" — not merely be reported. The rest lower the score as warnings.
         const extra: ExtraFinding[] = [];
-        // Fake/incomplete code (not-implemented, placeholder, lorem-ipsum, fake-data)
-        // is a hard blocker — the constitution forbids shipping it as "done".
-        const authHigh = issues.filter((i) => i.severity === 'high').length;
+        // Fake/incomplete code (not-implemented, placeholder, lorem-ipsum, fake-data) is a hard
+        // blocker — the constitution forbids shipping it as "done".
+        //
+        // 🔴 …BUT ONLY IN A FILE THIS BUILD WROTE (autopsy e4ebcb5f, 2026-09-17 — full story in
+        // `buildAuthorship.ts`). The scan reads the WHOLE workspace, so on an edit of an existing
+        // 516-file project it was condemning a build for placeholders in the user's own repository.
+        // One real turn wrote ZERO files, rendered in a real browser, passed its production build —
+        // and was declared "NOT ready to use" and made FREE over three placeholders it had never
+        // seen. A fresh build is unaffected: it wrote every file, so every finding is still ours.
+        const authorship = splitByAuthorship(issues, authoredSet);
+        const authHigh = authorship.ours.filter((i) => i.severity === 'high').length;
         if (authHigh) extra.push({ severity: 'high', label: `${authHigh} fake/incomplete code issue(s) (placeholder / not-implemented / fake data)` });
+        // Recorded, never counted against us — we hide nothing (the `importTurnObservation` discipline).
+        const authPreExistingHigh = authorship.preExisting.filter((i) => i.severity === 'high').length;
+        if (authPreExistingHigh) {
+          extra.push({
+            severity: 'observation',
+            label: preExistingCodeObservation(
+              `${authPreExistingHigh} fake/incomplete code issue(s) (placeholder / not-implemented / fake data) in `
+              + `${new Set(authorship.preExisting.filter((i) => i.severity === 'high').map((i) => i.file)).size} file(s) this build did not touch`,
+            ),
+          });
+        }
         // Serious privacy/compliance violations (PII in logs, plaintext sensitive
         // storage, personal data over http) block "launch-safe" (Layer 77).
         const complianceHigh = complianceIssues.filter((i) => i.severity === ('high' as ComplianceSeverity)).length;
@@ -4089,14 +4132,38 @@ export class ToolDispatcher {
           && files.some((f) => /\.tsx?$/i.test(f) && !/\.d\.ts$/i.test(f));
         if (isTsProject && !syntaxHeader) {
           try {
+            const tscCommand = robustTscCommand('--noEmit --incremental --tsBuildInfoFile /tmp/agentv3.tsbuildinfo', '2>&1 | head -60');
+            const tscStartedAt = Date.now();
             const r = await withTimeout(
-              this.actuator.runCommand(
-                this.workspaceId,
-                robustTscCommand('--noEmit --incremental --tsBuildInfoFile /tmp/agentv3.tsbuildinfo', '2>&1 | head -60'),
-              ),
+              this.actuator.runCommand(this.workspaceId, tscCommand),
               30_000,
               'typecheck-tsc',
             );
+            // 🔴 THE PROOF USED TO DIE INSIDE THIS TOOL (autopsy e4ebcb5f, 2026-09-17). A real
+            // `tsc --noEmit` runs right here, and its verdict reached only the model, as prose. The
+            // release gate's typecheck evidence is filled by the deterministic G3 gate — which runs
+            // ONLY when the build is already marked `ok` — with `typecheckEvidenceFromAgentCommands()`
+            // as the fallback, and that fallback reads the recorded SHELL-COMMAND log. This call never
+            // entered it, because the `typecheck` TOOL was the one path that skipped `onCommand` while
+            // `bash`, `run_tests` and the cross-language checks above all report through it.
+            //
+            // So a build whose own timeline showed `✓ typecheck (5s)` and whose agent said "the app
+            // compiles fine" was told by the release gate, in the same report, that "the typecheck did
+            // not run". Recording it closes that with no new concept: the existing bridge parses the
+            // OUTPUT (never the piped exit code) and already refuses a tsc help page as evidence, so a
+            // failing typecheck reports honestly as failed and a toolchain miss as neither.
+            //
+            // This is one named instance of the shared EVIDENCE LEDGER that CLAUDE.md records as an
+            // open root cause (autopsy 697b38ee) — not the ledger itself, which stays open.
+            try {
+              this.onCommand?.({
+                command: tscCommand,
+                exitCode: null, // piped through `head`, so the shell's code is not tsc's — the parser reads the output
+                stdout: r.stdout || '',
+                stderr: r.stderr || '',
+                durationMs: Date.now() - tscStartedAt,
+              });
+            } catch { /* diagnostics are best-effort — never break the tool */ }
             const combined = `${r.stdout || ''}\n${r.stderr || ''}`.trim();
             const tscErrs = parseTscErrors(combined);
             if (tscErrs.length > 0) {

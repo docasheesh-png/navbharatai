@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { WorkspaceMemory } from '../src/server/AgentV3/WorkspaceMemory';
+import { savePlanForFileSet } from '../src/server/AgentV3/WorkspaceFileStore';
 
 /**
  * 🔴 ONE PLANNER CHAT TURN COULD DELETE A WORKSPACE'S ENTIRE MEMORY (found 2026-09-17).
@@ -49,6 +50,50 @@ describe('the two hydration flags answer two different questions', () => {
     m.markHydrated();
     m.markHydrationConfirmed();
     expect(m.isHydrationConfirmed()).toBe(true);
+  });
+});
+
+describe('🔎 the SIBLING (rule 3): the shrink guard was defeated by the failure it exists to survive', () => {
+  /**
+   * `saveWorkspaceFiles` read the existing index with `root.get().catch(() => null)` — the SAME
+   * collapse of "there is no document" and "the read FAILED" — and passed `existingPaths.length`,
+   * i.e. 0, into the guard. `0 <= 3` returned 'replace', and the write that follows is
+   * `{ merge: false }`. So one transient Firestore blip during a VISUAL EDIT (which saves ONE file)
+   * or the reviewer's critical-fix pass (~3 files) wiped the whole path index — the exact
+   * "49 files thi! 3 rah gayi kyu?!" wipe the guard was written to prevent.
+   */
+  /**
+   * ⚠️ HONEST NOTE ON WHAT THESE THREE CASES DO AND DO NOT PROVE. Reverting `WorkspaceFileStore.ts`
+   * makes only the THIRD one fail. The first two pass either way — under the old numeric signature
+   * `'unknown' <= 3` is `false` (a NaN comparison) and `newCount >= 'unknown'/2` is `false` too, so
+   * the old code returned `'merge'` for this input **by accident**. What the type change buys is that
+   * the answer is now INTENTIONAL and stated, and that a caller passing an unknown size type-checks
+   * instead of being coerced. The DEFECT was never in this function: the call site never passed
+   * `'unknown'` — it passed `0`, because its read collapsed a failure into an empty document. That is
+   * what the third case measures, and it is the one that goes red.
+   */
+  it('an UNKNOWN existing size can never authorise a replace', () => {
+    expect(savePlanForFileSet('unknown', 1)).toBe('merge');    // the visual-edit case
+    expect(savePlanForFileSet('unknown', 3)).toBe('merge');    // the reviewer critical-fix case
+    expect(savePlanForFileSet('unknown', 500)).toBe('merge');  // even a big save may not replace blind
+  });
+
+  it('every numeric verdict is unchanged — this widens the guard, it does not loosen it', () => {
+    expect(savePlanForFileSet(0, 1)).toBe('replace');   // genuinely empty index
+    expect(savePlanForFileSet(3, 1)).toBe('replace');   // tiny index, nothing to protect
+    expect(savePlanForFileSet(49, 3)).toBe('merge');    // the original reported wipe
+    expect(savePlanForFileSet(49, 40)).toBe('replace'); // a real full save
+    expect(savePlanForFileSet(10, 5)).toBe('replace');  // exactly half is still comparable
+    expect(savePlanForFileSet(10, 4)).toBe('merge');
+  });
+
+  it('the caller distinguishes a failed read from an absent document', () => {
+    const src = readFileSync(join(__dirname, '../src/server/AgentV3/WorkspaceFileStore.ts'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    // The collapsing form must be gone from the guard's own read.
+    expect(src).not.toContain('await root.get().catch(() => null)');
+    expect(src).toContain("let guardRead: 'ok' | 'failed' = 'ok';");
+    expect(src).toContain("guardRead === 'ok' ? existingPaths.length : 'unknown'");
   });
 });
 

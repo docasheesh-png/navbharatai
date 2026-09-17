@@ -2568,6 +2568,44 @@ export function outcomeCodeOf(
   return last?.code ?? '';
 }
 
+/**
+ * The SEVERITY the build's last `OUTCOME_*` was recorded at, or null when it recorded none.
+ *
+ * Sits beside `outcomeCodeOf` because the two are only useful together: one code can carry opposite
+ * meanings (`OUTCOME_STOPPED` at `warning` is the advisory cap on an app that WAS built; at `error`
+ * it is a build that never converged). A reader given the code alone cannot tell those apart, which
+ * is exactly how a successful build came to be filed as "incomplete". PURE.
+ */
+export function severityOfOutcome(
+  issues: ReadonlyArray<{ code: string; severity?: string }> | null | undefined,
+): string | null {
+  const last = [...(issues ?? [])].reverse().find((i) => typeof i?.code === 'string' && i.code.startsWith('OUTCOME_'));
+  return last && typeof last.severity === 'string' ? last.severity : null;
+}
+
+/**
+ * DID ANYONE ACTUALLY SEE THIS APP RUN? — the one fact that separates "the engine failed" from "we
+ * told the user it failed while their app worked". PURE.
+ *
+ * 🔴 WHY IT IS NEEDED (admin 2026-09-17, the 40.8% panel). This repo has TWICE shipped a verdict that
+ * called a working app broken: autopsy 697b38ee (a build that typechecked, built, rendered and passed
+ * its own Playwright suite told the user *"The build produced no files"*) and autopsy 4efab9d7 (a
+ * provider timeout counted as an app blocker → release gate RED → "working app or free" → ₹0). Both
+ * were fixed forward, but every record written BEFORE those fixes keeps its old verdict — and those
+ * records are what the failure panel reads today. Without this, a failure rate cannot be told apart
+ * from a mislabelling rate.
+ *
+ * ⚠️ ONLY BROWSER-CONFIRMED EVIDENCE COUNTS, deliberately. `GREEN_GUARD_SAVE` is recorded only after
+ * the app was opened in a real browser and seen rendering, and `PREVIEW_PUBLISHED` only after a URL
+ * was really served. A clean typecheck or a green unit suite proves the CODE is fine and says nothing
+ * about whether anything rendered, which is the distinction `deliveryProof.ts` was built on.
+ */
+export function appWasSeenRunning(
+  issues: ReadonlyArray<{ code: string }> | null | undefined,
+): boolean {
+  return (issues ?? []).some((i) => i?.code === 'GREEN_GUARD_SAVE' || i?.code === 'PREVIEW_PUBLISHED');
+}
+
 export function deriveRootCause(input: {
   issues: readonly BuildIssue[];
   errors?: readonly CapturedError[];

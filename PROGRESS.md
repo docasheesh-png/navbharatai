@@ -61778,6 +61778,64 @@ reading the history does not "restore" a feature that was removed on purpose.
 Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1728 files, 24432 passed, 0 failed** ·
 build · test:bundle · boot:check.
 
+## 2026-09-17 — autopsy `8682b6b1`: our own heartbeat hid a 160-second stall
+
+Second fix from the two-report autopsy. `TIME_TO_FIRST_CALL` read:
+
+> *"171s of preparation before the build's first model call began … The longest single stretch with
+> NOTHING recorded was 60s, beginning right after: '⏱ minute 1 — still working …' — that is where to
+> look first."*
+
+The real answer was twenty lines above it in the SAME report:
+
+> `SETUP_TIMING: "Project checked in 161s — nothing needed restoring"`
+> `detail: "durable read 294ms (114 file(s)) · sandbox scan 160493ms"`
+
+**ONE measured step took 160.5s of the 171s**, and the instrument built to find the biggest cost
+pointed at a 60-second gap and at a heartbeat.
+
+### Root cause — a liveness ping counted as activity
+
+`longestSilentGap` treated every recorded entry as a mark of work. The heartbeat writes
+`⏱ minute N — still working` once a minute, and it is emitted *precisely because nothing else is
+happening*. So one 161-second stall was chopped into 56s / 60s / 45s and the largest reported gap was
+60s — the interval between two heartbeats. **The engine's "I am alive" ping was concealing the thing
+it was pinging through.** This is the shared-evidence-ledger class again: the report held the answer
+and the verdict could not read it.
+
+### The fix — two halves, one commit, because either alone is worse than neither
+
+1. **Timer chatter no longer counts as activity** (`isTimerChatter`: `code === 'HEARTBEAT'`, or a
+   message starting `⏱` — the route also emits `⏱️ Still building…` as an `AGENT_STEP`, so the code
+   alone is not the tell). Named against `isProgressNoise` in `activityTimeline.ts` so the two are
+   recognisably one idea.
+2. **The sentence stops claiming "with NOTHING recorded"** — once heartbeats are filtered that is
+   literally false, and fixing a misleading pointer by making an untrue claim is exactly the trade
+   this repo forbids. It now says *"with no work recorded (heartbeats aside)"*.
+
+Plus `until`: every self-timing step in this codebase records at COMPLETION (`PHASE_TIMING`, all four
+`SETUP_TIMING` sites), so **the line that ENDS a silence is usually the step that FILLED it**. On the
+real timeline that is `"Project checked in 161s — nothing needed restoring"` — the answer, named. Still
+hedged in the wording: the line that ended a stall is not proof it caused it.
+
+No schema change was needed. An earlier plan added a `durationMs` field to `BuildIssue` so the warning
+could read step durations; the gap BEFORE a completion-recorded step already *is* its duration, so the
+timeline carried the fact all along.
+
+### Tests
+
+`tests/silenceNamesTheStepThatFilledIt.test.ts` — 10 cases built from the report's real timestamps, so
+the 161s and the old 60s are both reproduced exactly. The existing 169 `BuildDiagnostics` tests are
+unchanged. Three guards proven by reversion: removing the filter (4 fail), dropping `until` (2),
+restoring the old wording (3).
+
+⚠️ **Two of my own test drafts were wrong, and both are recorded because they are the lesson.**
+`163497 - 80000` is 83 seconds, not the 84 I asserted from mental arithmetic. And the honesty guard
+first asserted `String(constructor)`, which never contains a method body — it passed no matter what the
+sentence said. **A guard that cannot fail is not a guard**, and this is the second time in one session
+that lesson had to be paid for. The rewritten guard reads the source and STRIPS COMMENTS, because the
+module's own comment legitimately quotes the old phrase while explaining why it had to go — and the
+first version of that guard flagged the explanation as the bug.
 ## 2026-09-17 — Every golden scaffold graded C or D, and only ONE of the two reasons was real
 
 Admin's second delegated decision. Build report `2b0a3ed5` reported `DESIGN_CONSISTENCY 68/100 (C)` on
@@ -62015,6 +62073,61 @@ recents section, that the knowledge base promises neither behaviour — and that
 Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1730 files, 24432 passed, 0 failed** ·
 build · test:bundle · boot:check.
 
+## 2026-09-17 — the echo guard I had just shipped was itself the forbidden trade (caught before merge)
+
+Two independent adversarial reviewers, run against the narration-echo guard **after it was pushed and
+before it was merged**, found the same real defect. Both were right.
+
+### What was wrong
+
+`said` was built from `tForMatch` — the narration with benign compounds STRIPPED ("error boundary",
+"error handling", "warning banner") — while `known` was built from the **RAW** prompt. Applying the
+stripper to one side only meant an ordinary feature request seeded the whitelist:
+
+> prompt: *"Build a checkout page with proper error handling and a warning banner for overdue items."*
+> → `known = {error, warning}` → every genuine engine struggle for the rest of that build was
+> downgraded to a step.
+
+Measured by the reviewers against the real class: *"The dev server is throwing an error on startup"*,
+*"There is still an error in the console after rebuild"*, *"The production build exits with an error"*,
+*"There is a warning about the port"* — all four flipped from problem to step, in a build that had
+reported no symptom at all.
+
+**That is the same trade in the other direction** — false positives on fix-turns exchanged for false
+NEGATIVES on ordinary builds — which is exactly what the constitution forbids. Money was clean and
+verified clean (`AGENT_NOTE` is always `autoResolved: true`, and every money-touching reader excludes
+it), but the admin's forensic ledger is the input the fifth absolute rule mines, and it was being
+thinned silently.
+
+### Two further corrections from the same review
+
+1. **`meta.prompt` is NOT reliably "the user's own words"**, and my doc comment said it was — a
+   load-bearing sentence for whoever reads it next. `fixErrorAndContinuePrompt` composes the prompt
+   from a PLATFORM prefix plus NavBharatAI's own error notice, so our own wording could whitelist its
+   own vocabulary. `PLATFORM_COMPOSED_PREFIXES` are removed before harvesting.
+2. **The guard must only arm on an actual SYMPTOM REPORT.** `isPlatformFixRequest` /
+   `looksLikeMachineError` (`lib/platformFixRequest.ts`) are this repo's existing answer to "is this
+   message reporting a failure?", already used server-side by `IntentClassifier`. Drawing the line
+   once, there, is what stops *"Build me a dashboard that shows error rates"* silencing a build.
+
+🔴 **STILL OPEN, named rather than covered over:** when the wrapped body is itself NavBharatAI's own
+branded notice (*"The build produced no files. Please try again."*), the guard still arms. That is the
+`fdd59ef8` "our own voice fed back" class and belongs to that fix, not this one.
+
+### Tests
+
+Four new over-correction guards in `tests/narrationEchoesPrompt.test.ts` (16 total). Each correction
+proven by reversion against its OWN test.
+
+⚠️ **Two of my test drafts were wrong again, and the pattern is now unmistakable.** Two unit tests used
+the shorthand prompt `'fix this error'`, which is not a symptom report — the guard correctly refused it
+and the TESTS were wrong, not the code. And the prefix guard first asserted a narration word
+(`"failed"`) that appears in neither the prefix nor the body, so it returned false either way and
+guarded nothing; the discriminating case needs a word that lives ONLY in our own opener.
+
+**Three times in one session a guard has been written from a guess and had to be rewritten after
+measuring.** The rule that keeps being relearned: *a test that cannot fail is not a test* — and the
+only way to know it can fail is to break the code and watch it go red.
 ---
 
 ## 2026-09-17 — CORRECTION to the `8b3dca5c` autopsy above: the workspace was EMPTY, so the authorship fix does not clear that build
@@ -62227,3 +62340,264 @@ and that it is recorded as `info`.
 **Full CI gate green on the final state**, re-run after this branch was re-cut from a `main` that had
 moved (PR #3018 merged in the meantime): `typecheck` · `noUnusedImports` · `typecheck:server` ·
 `vitest run` · `build` · `test:bundle` · `boot:check` · `deps:server-gate`.
+## 2026-09-17 — Autopsy `e706e068`, second half: the three doors that were still open after #3009
+
+**The admin's instruction, verbatim:** *"aapko teeno a b c karne hai! aur itna strong solve karo ki app
+banne ke bad apne aap tute na. ek bar app ban jati hai, preview chalta bhi hai. par achanak se build
+fails aur bill = 0₹ isko specialy fix karna hai."* PR #3009 (another session, merged the same morning)
+had already closed one door — a "the build will fail" prediction is superseded by `PROD_BUILD_OK`, and
+one defect is counted once. Re-checked against `main` before starting (safeguard #6): even with #3009,
+the School ERP would STILL have been flipped, because its third blocker, *"2 fake/incomplete code
+issue(s)"*, is not a build prediction and stood on its own. Three fixes, three modules, three tests.
+
+### A · The project planner's clock, and the silence when it ran out
+
+`AGENTV3_PROJECT_MODE` **was working** — the report's `🏗️ decomposing…` line at 10:18:30 is the
+allowlist gate AND `detectMegaProject` both firing. What nobody could see: `ppGenerate` raced the
+model against a hard-coded **60 s** timer, the outer `catch` swallowed the rejection, and
+`recordLlmCall` sat AFTER the race, so no failed call reached the ledger. The user was promised a
+module-by-module build and the promise trailed off.
+
+- **`projectPlannerBudget.ts`** — the outer timeout is now the INNER call's own bound plus slack
+  (stream hard cap 300 s when build calls are streamed, the 150 s floor ceiling when not; env
+  override `AGENTV3_PROJECT_PLANNER_TIMEOUT_MS`, clamped 30–600 s, malformed ignored). A backstop,
+  never a second tighter clock — the same reasoning `OpenAiToolRunner` records for its SDK client.
+  Tier-awareness is inherited: the ladders differ, a legitimate call's length does not.
+- A failed planner call is recorded `ok: false` on the model-call ledger; the outer catch records
+  **`PROJECT_MODE_FAILED`** (process-only — never counted against the app); and if the decomposition
+  had been ANNOUNCED, the user is told it was withdrawn (`PROJECT_MODE_FALLBACK_NARRATION`).
+
+### B · The batch repair wrote whatever path came back — and that is where the strays came from
+
+The three root files (`App.tsx`, `hooks/useStudents.ts`, `types/student.ts`) are timestamped inside
+the Endgame batch-repair window and appear in none of the model's tool calls. The batch call was
+handed `src/App.tsx` and returned its content as `App.tsx`; `runEndgameRepair` wrote it. Nothing
+imported the copies (so `npm run build` and the browser never saw them), while the readiness gate
+read the whole tree and found an unresolved import and placeholder data IN THE STRAYS.
+
+- **`resolveRepairTarget`** (EndgameRepair.ts): a returned path is written only if it is an existing
+  file, names exactly ONE existing file by its tail (remapped — the dropped-prefix case), or is a
+  module a TS2307 error says the app already imports (`referencedMissingModules`). Anything else is
+  refused, counted (`llmFilesRejected`) and named in the log. Refusing is the safe direction.
+- This is the 50/50 upstream half: with the strays never written, the feature-heal that spent
+  3 minutes and 22 KIMI calls "fixing" the dead `hooks/useStudents.ts` has nothing to fix.
+
+### C/D · THE CLASS, closed at the room rather than at a door — `runProvenApp.ts`
+
+Every earlier fix (isAppFinding, buildFailurePrediction, recordReadinessRecovery) closed the one
+static finding that had flipped a rendering app that week. `runProvenApp` asks the question all of
+them were approximations of: **has this app already been proven to RUN, by evidence a static finding
+cannot outrank?** A real-browser render (`shot.source === 'browser'` only — a curl shell proves
+nothing, the Green Freeze rule), the production build not FAILED (`not-run` neither helps nor hurts:
+the render alone is then the evidence, which is the admin's 4efab9d7 rule verbatim), no runtime check
+failed (preview / pages / journey), no deterministic runtime-crash proof, not a refusal, not stopped.
+
+**All THREE late flips of `ok → false` in the route now ask it first**: the release gate's RED
+(`OUTCOME_RELEASE_GATE_RED`), the final syntax re-verify (`OUTCOME_SYNTAX_ERROR`), and the reviewer's
+unresolved [CRITICAL]s (`OUTCOME_REVIEW_CRITICAL`). Held ⇒ `VERDICT_HELD_BY_RUN` (process-only) names
+both sides; the findings stay on the timeline, the health card and the gate's own RED sentence. What is
+refused is only "not built / not charged" about an app on the screen. The dukaan case (2026-08-12:
+missing modules AND failing page routes) is still flipped — pages `failed` vetoes — and a test says so.
+
+⚠️ **Stated plainly:** the release gate's headline still says *"N build-breaking blocker(s)"* on a held
+build; that wording lives in `releaseGate.ts`, which PR #3018 was mid-flight in while this was written
+(it merged during this change's gate run, and the whole gate was re-run on the merged tree). Teaching the
+gate itself about run-proof is a separate design change to its evidence shape, deliberately not folded
+in here. The VERDICT line beside it explains the contradiction.
+
+### Tests — all proven by reversion
+
+| file | cases | reverted → fails |
+|---|---|---|
+| `tests/endgameRepairNeverCreatesStrayFiles.test.ts` | 9 (the real three strays, replayed) | the target guard → 1 |
+| `tests/projectPlannerBudget.test.ts` | 13 | the 60 s literal restored → 1 |
+| `tests/runProvenApp.test.ts` | 18 (the real 10:44:08 evidence) | the gate hold → 1; the prod-build veto → 1 |
+
+The route guards parse the CODE (comments stripped, bounded by real anchors). My first draft of one
+used a 1,200-character window and failed on its own — the byte-window trap this file records four times
+today — and was rewritten to anchor on the block's closing `catch`.
+
+### Still open (rule 6)
+
+1. 🔴 **No reachability concept anywhere in the post-build suite.** Readiness, the fake-code scan and
+   the feature heal all read the WHOLE tree; a file the entry never imports is judged, healed and paid
+   for exactly like the app. Fix B stops one source of such files; it does not teach the gates to ask
+   "does the app load this?". The import graph already exists in `ArchitectureAnalysis` — a transitive
+   closure from `index.html → src/main.tsx` is the missing subsystem.
+2. `releaseGate.ts` wording on a held build (above).
+3. 🥵 Sandbox 87% idle across 26.6 minutes; 115 s to the first model call — unchanged here.
+---
+
+## 2026-09-17 — The admin's cost panel priced every build at its family's dearest rate
+
+From the deep re-autopsy of `9cca1fd5`. Verified by reading the code, not taken from the workflow.
+
+`platformBuildMetrics.ts` carries this promise in its own comment:
+
+> *"Price it with the SAME live rate card the real-cost billing uses, so the admin's cost graph and the
+> admin's bill can never tell two different stories about one build."*
+
+**They told different stories on every build.** The graph was priced from `providerUsage` — a
+per-PROVIDER token blob with no model in it — through `realRateFor(provider)` with the model argument
+simply **omitted**:
+
+```ts
+const realUsd = usageCostUsd({ inputTokens, outputTokens }, realRateFor(provider));
+```
+
+`realRateFor`'s provider-only fallback is deliberately the family's most expensive rate, and says so in
+place: *"an unrecognized model can only ever over-state cost, never under-state it."* **That is exactly
+right as a BILLING safeguard and exactly wrong as a MEASUREMENT.** A build that really ran
+`glm-4.7-flashx` ($0.07 in / $0.40 out) was recorded at the GLM 4.x coder line ($0.60 / $2.20) —
+**8.6× on input, 5.5× on output** — on the one screen used to decide whether engine spend is acceptable.
+
+⚠️ **The error ran the SAFE way**: it OVER-stated our own cost, so nobody was under-charged and no user
+was affected. Same shape as the `E2B_USD_PER_HOUR` incident this file records at length — a wrong number
+on the admin's own cost panel, margin-safe and still wrong.
+
+🔎 **And the exact right number was already in scope, one line away.** The settle destructures
+`realCostUsd: decidedRealCostUsd` from `decideBuildBilledUsd`, commented *"The platform's OWN cost …
+Priced by the same call that priced the bill."* The telemetry call sat beside it and re-derived a worse
+figure from a coarser input.
+
+**The fix.** `priceProviderUsage(providerUsage, entries)` (pure, exported, tested) is now what the
+recorder calls. The two inputs answer two different questions and both are needed:
+
+- `providerUsage` — per-provider totals, already RECONCILED against the billing sink. The authority on
+  **how many** tokens, including spend the per-call ledger could not attribute (plan/judge aux calls).
+- `entries` — the per-call ledger, which knows **which model** ran but not the unattributed remainder.
+
+Every attributed entry is priced at its own model's real rate; whatever the reconciled total holds
+beyond the entries is priced at the provider fallback **exactly as before** — the same split
+`realProviderCostUsd` already makes with its `remainder` argument. Exact where we know, conservative
+where we do not. Absent `entries` ⇒ byte-identical to the old behaviour, test-locked.
+
+🔒 **The reconciled total always wins on TOKENS.** A ledger claiming more than the reconciled figure is
+clamped and priced at the ledger's own average for the share kept — never trusted upward. Trusting a
+double-counted call would make the panel read high, which is the very failure being fixed.
+
+⚠️ **CACHE-HIT INPUT IS NOT ATTRIBUTED, deliberately.** `cacheReadInputTokens` exists only as a
+BUILD-level total — no per-call or per-provider breakdown is recorded anywhere — so splitting it across
+providers would be an invented number, which the billing law forbids even when it flatters us. The
+cached share therefore stays at the full input rate, still slightly over-stating our cost: the safe
+direction for a cost panel, and recorded here rather than left to be discovered.
+
+`tests/adminCostPanelPricesTheModel.test.ts` — 15 cases. **Proven by reversion:** the recorder ignoring
+the entries fails 1; the watchdog finalizer losing them fails 1 — and that second guard exists because
+this repo has already shipped exactly that drift once (Fix 67: the watchdog path billing by the old
+formula while the normal settle used the new one).
+
+### 🔴 CORRECTION, same day, before it merged — that "open item" was my own false claim
+
+I wrote, as the reason for not attributing cache: *"`cacheReadInputTokens` has no per-provider breakdown
+anywhere."* **That is wrong.** It is recorded per (provider, model):
+
+- `captureTurnUsage` passes it into `providerLedger.add` (`routes/agentv3.ts` ~11901);
+- `ProviderTokens` has carried the field since Fix 66;
+- `realProviderCostUsd` hands `e.usage` straight to `usageCostUsd` — so **the BILL has always priced
+  the cached share at the provider's far cheaper cache-read rate.**
+
+⚠️ **What actually hid it was a TYPE.** `BillingLedgerView.entries()` declared its usage as a
+hand-written `{ inputTokens, outputTokens }` — *narrower than the objects it really returns* — so every
+reader typed against that view saw `cacheReadInputTokens: undefined` and priced the cached share at the
+FULL input rate. **A structural type narrower than its value loses data with no error anywhere.**
+
+The interface now names the ledger's own `ProviderModelEntry`, so it cannot drift again, and the panel
+prices the cached share exactly as the bill does. A test asserts the two agree **to nine decimal
+places on the same entry** — which is the parity this module's comment promised all along.
+
+Same shape as the `captured` flag and `WorkspaceMemory.removeFile`: **the data existed, the consumer
+could not see it.** Three instances in one day of "the right thing is already there and unreachable."
+
+### 🔴 Still open from this one
+
+Nothing. The cached share is now attributed and matches the bill.
+
+### 🔴 …and the gate caught a THIRD brittle guard in one day
+
+The full suite failed on `buildOutcomeWiring.test.ts` — a guard that slices a **fixed 9,000 characters**
+from `finalizeOnDeadline`'s header. The three correct lines added above (the `providerEntries` pass and
+its comment) pushed `buildDiagRef?.finish(...)` from offset 8,924 to **9,080** — past the window. The
+code still did exactly what the guard exists to require; the guard failed anyway.
+
+**Third one today, same shape every time:**
+
+| guard | what it measured instead of the claim |
+|---|---|
+| `engineEventsNeverBlock` | the exact `issues.filter(...)` source formatting |
+| my own constructor-arity guard (#3019) | commas — including commas inside a doc comment |
+| `buildOutcomeWiring` | a byte offset from a function header |
+
+**The pattern: the guard measured the TEXT instead of the CLAIM**, so a session then has to decide
+whether the code or the guard is wrong — which is precisely the doubt a guard exists to remove.
+
+Both `finalizeOnDeadline` guards (the 9,000 and the 14,000 window — rule 3, the sibling was hunted)
+now bound by the function's **real extent**, found by matching braces from its header. It cannot be
+outgrown, and it still proves what the assertions mean: these lines are inside THIS function, in THIS
+order.
+
+🔒 **Proven strictly stronger, not weakened** — the required discipline when a guard is touched to get
+green. Two separate reversions were run against the hardened guard and both fail it: replacing the
+honest pause summary with `undefined`, and swapping the two statements so `finish()` comes first.
+## 2026-09-17 — ONE welcome gift per person: the rule three modules stated and none enforced
+
+**Found while answering the admin's plain question — *"batao mai Cloud Run me kya likho?"*** The answer
+was going to be `REFERRAL_REWARDS=on`. Checking what that switch actually does first is what surfaced
+this.
+
+### 🔴 The hole
+
+`referralRewards.ts` states the rule in its own words:
+
+> *"The two plans must never both pay: together they would hand one person ₹500 + ₹400."*
+
+**That sentence was a COMMENT, enforced by nothing.** The plans are gated by two INDEPENDENT env keys —
+`WALLET_GIFT_V2` (the flat welcome gift) and `REFERRAL_REWARDS` (the ladder) — and neither read the
+other. `giftPlan.ts` contains no reference to referrals at all; verified by grep.
+
+**Setting `REFERRAL_REWARDS=on` would have paid every new user ₹500 + ₹400 = ₹900, plus ₹75 to the
+referrer: ₹975 per referred user against a plan costed at ₹475.** Nothing would have failed, and no
+number on any screen would have looked wrong — the two systems would each have been behaving correctly
+in isolation.
+
+⚠️ **AND THERE ARE THREE GRANT SURFACES, NOT TWO.** A fix written into `giftPlan.ts` alone would have
+left the other paying:
+- `welcomeBonus.ts` — the LEGACY flat bonus (`WELCOME_BONUS_TOKENS`), live whenever `WALLET_GIFT_V2` is OFF
+- `giftPlan.ts` — the v2 plan (₹250/₹500), live when it is ON, via TWO decision points
+  (`decideSignupGrant` AND `decidePhoneClaim`, the second being the other half of the same ₹500)
+- `referralRewards.ts` — the ladder
+
+Whichever welcome plan is active, the ladder stacked on top of it.
+
+### The fix
+
+`src/server/lib/welcomeGiftExclusion.ts` — one pure rule, consulted by every flat-gift decision point.
+**The ladder wins**, because it was designed as a REPLACEMENT: its own plan pays a referred user ₹400
+and an organic one ₹300, both deliberately at or below the ₹500 flat gift they replace.
+
+🔒 **THE DIRECTION IS THE SAFE ONE.** With `REFERRAL_REWARDS` unset — today — the rule returns false and
+every grant path behaves byte for byte as it does now. It can only ever REMOVE a double payment, never
+introduce one. That is what makes it shippable without waiting on a decision.
+
+**Test-locked** in `tests/welcomeGiftExclusion.test.ts` (8 cases), **proven by reversion**. The last two
+assert the call sites BY NAME rather than trusting a future grant path to remember — the entire defect
+was a rule that existed only as prose, and a fourth surface added later must appear there too.
+
+### 🔴 The class, for the fourth time this week
+
+*The code was correct and a sentence was lying.* Stale model-ladder comments (09-15), *"NavBharatAI
+cannot add your signing key"* (09-17), the knowledge base describing a removed home-screen list
+(09-17), and now a money rule written as a comment beside the code that ignores it. **Tests cannot see
+prose, and `tsc` cannot either.** Each one was found by a human reading, or by a question that happened
+to touch it — never by the gate.
+
+### What the admin still has to decide
+
+`REFERRAL_REWARDS=on` is now SAFE to set: the flat gift stands down automatically and a referred user
+costs ₹475 as planned. What it changes, stated plainly so the switch is a decision and not a surprise:
+every new user's welcome credit stops being ₹500 up-front and becomes ₹300–₹400 earned across
+verification steps. **That is the plan working as designed — but it IS a change to what a brand-new user
+sees on day one**, and it is the admin's call.
+
+Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1741 files, 24611 passed, 0 failed** ·
+build · test:bundle · boot:check.

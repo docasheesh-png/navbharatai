@@ -61244,3 +61244,47 @@ reading the history does not "restore" a feature that was removed on purpose.
 
 Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1728 files, 24432 passed, 0 failed** ·
 build · test:bundle · boot:check.
+
+## 2026-09-17 — Every golden scaffold graded C or D, and only ONE of the two reasons was real
+
+Admin's second delegated decision. Build report `2b0a3ed5` reported `DESIGN_CONSISTENCY 68/100 (C)` on
+a **calculator** build, and I proposed "fix the calculator template's design". **Measuring first showed
+that premise was wrong** — and acting on it would have damaged a correct design system.
+
+### What the measurement showed
+
+Scoring all **40** golden scaffolds with the build's own linter (`lintBuiltApp`): **every one was C or
+D**, and 38 carried *identical* numbers ("20 distinct colours", "11 off-grid spacings"). Identical
+numbers across apps with different code means the cause is in a file they all share — not in any app.
+Per-file scoring confirmed it: each app's own `src/App.tsx` scores **100/A**; the grade came entirely
+from the shared `src/index.css` (70/C) and `src/theme.tsx` (82/B).
+
+### The two complaints, settled in opposite directions
+
+🔴 **"20 distinct colours" — FALSE, and the fix is in the LINTER.** All 19 colours are **token
+declarations** in `DESIGN_KIT_CSS` — `--accent: #4f46e5`, `--bg: #0d0d12` — and **not one is ad-hoc**.
+That is a palette, not a violation of one. Worse, a kit with a dark mode declares every token TWICE by
+construction, so **a well-built two-theme system fails the rule harder the more complete it is.**
+`extractTokenColors` now excludes declared tokens from the palette budget.
+
+⚠️ `hardcoded-colors` deliberately still reads **every** colour: it asks a different question ("many
+colours and NO tokens at all"), and filtering its input would have made it near-unreachable — a file
+that half-adopted tokens would have its real problem hidden by the very tokens it did declare.
+
+✅ **"11 spacing values off the 4px grid" — TRUE, and the fix is in the CSS.** `designKit.ts` really
+did use 9/14/6/10/22px padding, margin and gap. Snapped to the grid.
+
+🔒 **The constraint that made this a measurement rather than a bulk replace:** `button, .btn` and
+`input, textarea, select` deliberately **share their vertical padding** so a button lines up with an
+input beside it in a form row. Snapping one to 8 and the other to 10 would have broken control
+alignment in every app NavBharatAI generates. Both moved to 8 together; test-pinned.
+
+### Result
+
+All 40 scaffolds now grade **100/A** — through one linter change and one shared stylesheet, not 40
+template edits. The linter is **not** blinded: `puzzle` still carries its own real 12-colour tile ramp,
+`arcade` 2 and `calculator` 1, and a file with 14 genuinely ad-hoc colours is still caught at 86/B.
+
+Tests: `tests/designKitTruth.test.ts` (10), both halves proven by reversion. The existing
+`designLinter`, `buildQualityLint`, `goldenScaffolds` and `autopsyFdd59ef8Remainder` suites (360) pass
+unchanged.

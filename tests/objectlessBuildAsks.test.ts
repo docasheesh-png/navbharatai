@@ -5,6 +5,7 @@ import {
   assessBuildInput,
   namesNoObject,
   isBareActionWord,
+  isPlaceholderNoun,
   MIN_INSTRUCTION_WORDS,
 } from '../src/server/AgentV3/buildableInput';
 import { classifyIntentWithConfidence } from '../src/server/AgentV3/IntentClassifier';
@@ -73,8 +74,10 @@ describe('what must keep building — an app builder that argues is not an app b
     expect(namesNoObject('calculator')).toBe(false);
   });
 
+  // ⚠️ "app banao" USED TO BE IN THIS LIST, and that assertion was wrong — see the category-word
+  // block at the end of this file. It encoded my own incomplete reading of the report, not anything
+  // a user needs; the admin caught it the same day by asking which app it would build.
   for (const prompt of [
-    'app banao',
     'ek billing app banao',
     'todo app',
     'build a todo app with due dates',
@@ -142,4 +145,53 @@ describe('the route only asks when NOTHING else can say what to build', () => {
     // answers. Asserted from the source because the cache decision is inside the request handler.
     expect(source).toContain('!clarifyWhatToBuild && chatCacheEnabled()');
   });
+});
+
+/**
+ * "APP BANAO" NAMES NO MORE THAN "BANAO" DOES — admin, 2026-09-17, on reading the fix above:
+ * *"agar koi user send karega 'app banao' to navbharatai kon sa app banayega?"* The honest answer
+ * was: one it invents. A category word is not a deliverable.
+ */
+describe('a category word is not a deliverable', () => {
+  for (const prompt of [
+    'app banao',
+    'ek app banao',
+    'website banao',
+    'kuch banao',
+    'koi bhi app banao',
+    'page banao',
+    'make an app',
+    'build a website',
+    'make me something',
+  ]) {
+    it(`"${prompt}" still says nothing about what to build`, () => {
+      expect(namesNoObject(prompt)).toBe(true);
+      expect((assessBuildInput(prompt) as { reason?: string }).reason).toBe('no-object');
+    });
+  }
+
+  for (const word of ['app', 'website', 'page', 'kuch', 'ek', 'something']) {
+    it(`"${word}" is a category`, () => expect(isPlaceholderNoun(word)).toBe(true));
+  }
+
+  for (const word of ['todo', 'calculator', 'billing', 'shop', 'bakery', 'invoice', 'mobile']) {
+    it(`"${word}" says what the thing IS`, () => expect(isPlaceholderNoun(word)).toBe(false));
+  }
+
+  // THE LINE. One real noun anywhere and the build starts instantly, exactly as before — this is
+  // what keeps the fix from becoming an app builder that argues with you.
+  for (const prompt of [
+    'todo app banao',
+    'calculator banao',
+    'shop app banao',
+    'ek billing app banao',
+    'website for my bakery',
+    'mobile app banao',
+    'build a todo app with due dates',
+  ]) {
+    it(`"${prompt}" builds, untouched`, () => {
+      expect(namesNoObject(prompt)).toBe(false);
+      expect(assessBuildInput(prompt).buildable).toBe(true);
+    });
+  }
 });

@@ -63540,3 +63540,21 @@ must-still-build boundary set, and **reversion guards proven to fail** when the 
    `metadata`, `breadcrumbs`, `children`) while `main.tsx` renders `<App />` with none →
    `Cannot read properties of undefined (reading 'title')`. A deterministic, model-free, two-file
    question that nothing asks.
+
+### 2026-09-17 (same day, follow-up) — "app banao" names no more than "banao" does
+
+The admin read the fix above and asked the one question that tested it: *"agar koi user send karega
+**'app banao'** to navbharatai kon sa app banayega?"* Checked before answering — it **still built**, and
+the honest answer was: **an app it invents.** The same failure as report `d6d664e6`, one word wider.
+
+`'app'` is a CATEGORY, not a deliverable, and so are "website", "page", "kuch", "something". The
+verb-only rule let them through because they are not verbs. `PLACEHOLDER_NOUNS` + `isPlaceholderNoun`
+close it: a prompt whose every word is a placeholder OR a creation verb names nothing.
+
+**The line is unchanged — one real noun and it builds instantly:** `"todo app banao"`,
+`"calculator banao"`, `"shop app banao"`, `"ek billing app banao"`, `"website for my bakery"`,
+`"mobile app banao"` are all untouched. The route's four narrowing conditions are untouched too.
+
+⚠️ **One of my own tests from the PR above asserted `"app banao"` BUILDS, and that assertion was the
+bug** — it encoded my incomplete reading of the report, not anything a user needs. Moved into the
+category-word block and corrected, with the reason recorded beside it rather than silently deleted.

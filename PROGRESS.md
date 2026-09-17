@@ -62837,6 +62837,49 @@ document from a failed read.
 `noUnusedImports` · `typecheck:server` · `vitest run` (**24,659 passed, 1 skipped, 0 failed**) ·
 `build` · `test:bundle` · `boot:check` · `deps:server-gate`.
 
+### 🔎 SIBLING SWEEP (rule 3) — the SAME root cause had already defeated the guard written for it
+
+`WorkspaceFileStore.saveWorkspaceFiles` carries a SHRINK GUARD added on 2026-07-07 for the admin's own
+report — *"49 files thi! 3 rah gayi kyu?!"* — a save that would shrink an established path index to
+under half its size is merged instead of replacing it. It read the existing index like this:
+
+```ts
+const guardMeta = await root.get().catch(() => null);
+const existingPaths = guardMeta?.exists && Array.isArray(...) ? ... : [];
+if (savePlanForFileSet(existingPaths.length, entries.length) === 'merge') { ... }
+```
+
+**The identical collapse.** A read that FAILED and a document that does not EXIST both produce `null`,
+so `existingPaths.length` is `0`, `0 <= 3` returns `'replace'`, and the write that follows is
+`{ merge: false }`. **One transient Firestore blip during a VISUAL EDIT (which saves ONE file) or the
+reviewer's critical-fix pass (~3 files) wiped the entire path index** — the precise wipe the guard
+exists to prevent, arriving through the one failure mode it could not see.
+
+🔴 **AND IT DID NOT SHIP IN THE SAME CHANGE, THOUGH IT WAS WRITTEN FOR IT — recorded because the
+reason is a real hazard of concurrent sessions, not a detail.** This fix was committed onto PR #3029's
+branch and pushed, but the push was rejected (another actor had merged `main` into that branch), and
+in the ~90 seconds it took to merge, re-gate and re-push, **#3029 was merged at the commit BEFORE
+it**. The fix landed on a branch whose PR had just closed. Verified against `main` rather than
+assumed: `git show origin/main:…/WorkspaceFileStore.ts | grep -c guardRead` returned **0** while the
+memory half returned **2**. Restarted from the current `main` as its own PR, per the rule that a
+merged PR is finished and follow-up work is a fresh change.
+
+⚠️ **THE GENERAL LESSON: "I pushed it to that branch" is not "it is in `main`."** With several sessions
+merging, a push and a merge can cross. After any push that raced a merge, re-read the merged tree for
+the symbol you added — not the PR, not the branch.
+
+The fix itself: `savePlanForFileSet` takes `number | 'unknown'`, and `'unknown'` can never
+authorise a replace. Merging can never wipe; its only cost is that a genuine full rebuild leaves some
+stale paths, which `removeWorkspaceFiles` already handles. **The asymmetry is the whole argument — a
+stale path is a tidy-up, a wiped index is the user's project gone.**
+
+⚠️ **AND THE TEST FOR IT SAYS HONESTLY WHAT IT DOES NOT PROVE.** Reverting `WorkspaceFileStore.ts`
+makes only ONE of the three new cases fail. Under the old numeric signature `'unknown' <= 3` is
+`false` (a NaN comparison) and `newCount >= 'unknown'/2` is `false` too, so the old code returned
+`'merge'` for that input **by accident**. The defect was never in that function — the call site never
+passed `'unknown'`, it passed `0`. The case that goes red is the source guard on the call site's read,
+and the test comment says so rather than implying a stronger proof than exists.
+
 ### 🔎 Open item #5 — searched for, NOT found (safeguard #6's wording, deliberately)
 
 The 2026-09-17 re-autopsy's open item #5 reads *"a step-capped sub-agent's scratch files stay in the

@@ -13180,6 +13180,12 @@ async function noteBuildOutcome(
       const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite, framework,
         // AI Diagnosis Bundle #3 — capture every sandbox command's raw logs into the build report.
         (c) => { try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ } });
+      // WHOSE CODE IS THE READINESS GATE JUDGING? (autopsy e4ebcb5f — see `buildAuthorship.ts`.)
+      // `writtenFiles` is the ONE set every writer feeds — the architect's tools, the fast lanes
+      // (which write through `dispatcher.dispatch('write_file')`) and every sub-agent — so it is the
+      // only honest answer to "did this build write that file?". Passed as a thunk because the gate
+      // asks at the END of the build and the map is empty right now.
+      dispatcher.setAuthoredFiles(() => writtenFiles.keys());
       // PUBLISHING NEEDS AN ASK (admin 2026-09-01). On a build turn the agent used to decide for
       // itself — a user typed "continue", the build finished, and their app went live on a public URL
       // with nobody having requested it. Consent is read from THIS message only: consent that carries

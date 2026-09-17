@@ -26,7 +26,11 @@ describe('1 · a STOPPED build is never asked for money', () => {
   });
 
   it('the guard tests `stopped` FIRST, so every later reading is skipped', () => {
-    expect(route).toContain("const stopped = buildDiag.toolWasUsed('stop_build');");
+    // Since autopsy b89ba6f8 (2026-09-17) the timeline is asked through `buildWasStopped`, because
+    // the Stop BUTTON never recorded a `stop_build` TOOL call and so was invisible here — the tool
+    // check stays as the second half. The property this test protects is the ORDER below, which is
+    // unchanged: `stopped` is established first and every later reading stands down on it.
+    expect(route).toContain("const stopped = buildWasStopped(buildDiag.report().issues) || buildDiag.toolWasUsed('stop_build');");
     // Each subsequent reading must stand down when the build was stopped — it is reasoning about
     // evidence that was never gathered.
     expect(route).toContain('const refused = !stopped && looksLikeRefusal(result.summary);');

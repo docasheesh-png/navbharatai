@@ -63095,3 +63095,43 @@ The charitable reading (a capped child leaves half-written REAL files) is not su
 architect's own capped turn leaves the same state, and `tsc` catches the syntactic half for both.
 Recorded here rather than acted on, because building a reconciler for a mechanism nobody can point at
 is exactly the speculative fix rule 6 forbids.
+
+## 2026-09-17 — The 160-second sandbox scan: the File Guardian lists instead of reading
+
+**The evidence (autopsy `8682b6b1`):** `SETUP_TIMING — "Project checked in 161s — nothing needed
+restoring" · detail: "durable read 73ms · sandbox scan 160493ms"`. Of a 171-second wait before the
+first model call, 160.5 s was the guardian reading every file of a resumed project over the network —
+and then asking one question of the result, *which saved paths are absent?*, which `planFileGuardian`
+answers from KEYS alone. The contents were fetched and discarded, on every turn of every existing
+project.
+
+**The shape two independent adversarial reviews converged on (recorded on 2026-09-17, built now):**
+
+1. **List, don't read** — `listWorkspaceFiles` (WorkspaceFiles.ts) partitions the listing exactly as
+   `collectWorkspaceFiles` would and reads nothing. Membership-identical by construction: every listed
+   path lands in `files` or `skipped` when the collector runs, so `present ∪ skipped` equals
+   `keys(files) ∪ skipped`. `planFileGuardianFromListing` is the guardian's new door; equivalence with
+   the read-based call is ASSERTED in every mode (none / missing / full), not assumed. A failed listing
+   still throws, so `scanFailed` keeps meaning "could not look", never "nothing is there".
+2. **A binary is known by its name before it is read** — `collectWorkspaceFiles` now skips
+   `isBinaryAsset` paths before the network round trip (the NUL check used to drop them AFTER fetching
+   the whole file). Same outcome, no read. `.svg` stays text. This also speeds the remaining callers
+   (the endgame's `readFiles`, the completion save).
+3. **The reconcile sees the live config, and only that** — `collectWorkspaceConfigFiles` reads the
+   sandbox's own `package.json` / `tsconfig*.json` (≤ 6 files, 3-wide, 5 s each) and they are layered
+   OVER the durable map, so those files keep the precedence the full scan gave them. Every other
+   consumer of the union (framework drift, coherence, missing-dep add, phantom prune) is add-only or
+   warn-only, so a file the durable store lacks costs at most a finding not raised.
+4. **Add-only by construction** — before `package.json` is written, `restoreDroppedDependencies`
+   (already used by the write tool) puts back anything the reconcile would have dropped, measured
+   against the sandbox's live copy; `DEP_RECONCILE_GUARDED` names what it restored. The phantom prune
+   runs after the guard, on names it proves unreachable — deliberate removals are not "drops". This
+   closes the dependency-deleting corruption both reviews traced through this block.
+
+Tests: `tests/guardianListsInsteadOfReading.test.ts` (8 cases — the partition equality, the plan
+equivalence in all three modes, the never-read binaries, bounded config reads, two code-parsed wiring
+guards). Proven by reversion: the binary skip, the listing membership and the add-only guard each fail
+the suite when removed (3 of 8).
+
+**Expected effect:** 160 s → the listing (≈ 1 s on that project) plus three bounded reads. Watch
+`SETUP_TIMING`'s `sandbox listing … · config read …` detail on the next resumed build.

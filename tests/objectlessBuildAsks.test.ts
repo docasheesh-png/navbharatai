@@ -205,8 +205,11 @@ describe('a category word is not a deliverable', () => {
 describe('the intention reader can finally say "I do not know what they want"', () => {
   const source = readFileSync(resolve(__dirname, '../src/server/AgentV3/IntentClassifier.ts'), 'utf8');
 
-  it('offers the reader four answers, not three', () => {
-    expect(source).toContain('chat, build, edit, or unclear');
+  it('offers the reader "unclear" as an answer — no longer only three', () => {
+    // Pinned by the WORD rather than the whole list: #3046 added "help" the same day, so the menu is
+    // now five, and a test that spelled out the four would fail on a sibling that removed nothing.
+    expect(source).toMatch(/Reply with ONLY one word: [a-z, ]*\bunclear\b/);
+    expect(source).toContain("  unclear — they DO want something made, but have not said WHAT to make");
     expect(source).not.toContain('Reply with ONLY one word: chat, build, or edit.');
   });
 

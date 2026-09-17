@@ -33,11 +33,16 @@
 // including the cases that LOOK like violations: alt="" with aria-hidden, an aria-label on a button, a
 // label[for], a wrapping label, and a hidden input).
 
+import { browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote } from './sandboxBrowserScript';
+
 /** How many page routes to actually open. A 40-page app must not add minutes to every build. */
 export const MAX_PAGE_ROUTES = 6;
 
 /** Where the pre-baked Playwright and its browsers live inside the sandbox image. */
 export const TOOLS_DIR = '/home/user/.e-tools';
+
+/** The prefix one page RESULT line carries — named once, for the reason journeyDerivation's is. */
+export const PAGE_RESULT_MARKER = 'NBAI_PAGE:';
 
 /** How long one route may take to load before we stop waiting on it. */
 export const PAGE_LOAD_TIMEOUT_MS = 12_000;
@@ -189,11 +194,11 @@ for (const route of routes) {
     out.errors.push(String(e && e.message ? e.message : e).slice(0, 200));
   }
   await page.close().catch(() => {});
-  console.log('NBAI_PAGE:' + JSON.stringify(out));
+  console.log('${PAGE_RESULT_MARKER}' + JSON.stringify(out));
 }
 await browser.close().catch(() => {});
 NBAI_EOF
-PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node /tmp/nbai-pagecheck.mjs 2>&1 | grep '^NBAI_PAGE:' || true`;
+${browserScriptRunLine({ toolsDir: TOOLS_DIR, scriptPath: '/tmp/nbai-pagecheck.mjs', marker: PAGE_RESULT_MARKER })}`;
 }
 
 export type PageVerdict = 'ok' | 'blank' | 'server-error' | 'script-error' | 'unreachable';
@@ -286,10 +291,10 @@ export function vitalsVerdict(r: { settled?: boolean; vitals?: PageVitals | null
 export function parsePageCheck(stdout: string | null | undefined): PageResult[] {
   const out: PageResult[] = [];
   for (const line of String(stdout ?? '').split('\n')) {
-    const at = line.indexOf('NBAI_PAGE:');
+    const at = line.indexOf(PAGE_RESULT_MARKER);
     if (at < 0) continue;
     try {
-      const raw = JSON.parse(line.slice(at + 'NBAI_PAGE:'.length)) as { route?: unknown; status?: unknown; text?: unknown; errors?: unknown; settled?: unknown; vitals?: unknown; a11y?: unknown };
+      const raw = JSON.parse(line.slice(at + PAGE_RESULT_MARKER.length)) as { route?: unknown; status?: unknown; text?: unknown; errors?: unknown; settled?: unknown; vitals?: unknown; a11y?: unknown };
       if (typeof raw.route !== 'string' || !raw.route) continue;
       const rv = raw.vitals as { lcp?: unknown; cls?: unknown; ttfb?: unknown } | null | undefined;
       out.push({
@@ -373,13 +378,26 @@ export function slowRouteCount(results: readonly PageResult[]): number {
  * Says how many were CHECKED as well as how many passed, because "3 pages render" means nothing without
  * knowing whether the app has 3 pages or 30. PURE.
  */
-export function summarizePageCheck(results: PageResult[], attempted = results.length): { ok: boolean; summary: string } {
+export function summarizePageCheck(
+  results: PageResult[],
+  attempted = results.length,
+  /**
+   * What the runner said when it produced nothing. Before this existed the summary could only report
+   * THAT the check produced no result, never WHY — the stderr was folded into stdout and then thrown
+   * away by the marker grep, so every failure of this check looked identical from the outside.
+   */
+  stdout?: string | null,
+): { ok: boolean; summary: string } {
   // "Nothing to check" and "the check produced nothing" are different facts, and only the first is good
   // news. Collapsing them would have reported a check that never ran as a clean result — which is what
   // the NODE_PATH bug above would have done on every single build.
   if (results.length === 0) {
     return attempted > 0
-      ? { ok: false, summary: `The page-render check could not be completed for ${attempted} route${attempted === 1 ? '' : 's'} — it produced no result, so nothing about those pages was verified.` }
+      ? {
+        ok: false,
+        summary: `The page-render check could not be completed for ${attempted} route${attempted === 1 ? '' : 's'} — it produced no result, so nothing about those pages was verified.`
+          + browserScriptFailureNote(parseScriptDiagnostic(stdout)),
+      }
       : { ok: true, summary: 'No additional page routes were found to check.' };
   }
   const bad = results.filter((r) => r.verdict !== 'ok');

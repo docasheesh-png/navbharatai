@@ -63983,6 +63983,60 @@ must-still-build boundary set, and **reversion guards proven to fail** when the 
    `Cannot read properties of undefined (reading 'title')`. A deterministic, model-free, two-file
    question that nothing asks.
 
+---
+
+## 2026-09-17 — THE INTENTION READER IS THE DEFAULT; the builder learns where its own buttons are
+
+**Admin, verbatim:** *"navbharatai pro, ko app self awareness nahi hai kya? preview kaise chalega, batana
+chahiye … navbharatai ko simple question ke simple anser dene sikhao. … user ka har woh messge jo ek
+limit se chota hai ya unclear hai, hamesa llm call karo?"* — and then *"aap batao kuch best option?"*
+
+### Two honest answers first
+
+**Self-awareness: NO, the builder did not have it.** `systemPrompt.ts` says so in its own words
+(2026-08-04): *"Every OTHER AI in NavBharatAI … is fed the AppKnowledgeBase … AgentV3 is not."* The one
+assistant that BUILDS the app was the only one that could not say where the Preview tab is — which is
+why report cc8c9075's answer was `npm run dev` and `localhost:5173`. The KB has had an `agentv3_preview`
+entry with the keyword `preview kaise` all along; the builder was never handed it (the full KB would
+break the cached prompt prefix).
+
+**The LLM-on-every-unclear-message proposal: right, and ~80 % already built.** `classifyIntentSmart`
+already consults the ₹0 free-chat reader — but only when confidence is LOW, and **five autopsies this
+week (5abad374, 2c61f648, the alarm app, f5351721, cc8c9075) were all HIGH-confidence hard-locks that
+skipped it.** Each added a regex; the class never closed. Regex reads words, the reader reads grammar.
+**Message LENGTH was declined as the trigger** — "build me a todo app" is five clear words, the
+cc8c9075 question was nine unclear ones — and object-less orders are already answered by #3039.
+
+### What shipped — A, B, C (each proven by reversion)
+
+- **A. Doubt → reader.** A HIGH verdict from a build/edit verb now survives only with NO question (the
+  strengthened `readsAsQuestion`) and NO negation in the sentence (`hasNegation`: `mat/nahi/don't/not/
+  no`…). Either one costs the lock, never the intent. A plain order keeps HIGH and pays nothing — a test
+  counts zero reader calls across four orders.
+- **B. Reader down on a QUESTION ⇒ chat, not build.** This REVERSES a deliberate 2026-09-13 pin
+  (*"the keyword answer still stands when the reader cannot run"*), on the admin's own asymmetry:
+  wrong-toward-chat is one message (the reply already offers to build), wrong-toward-build is a whole
+  build. A statement or order with the reader down keeps the keyword verdict exactly as before, so
+  "add a payment button" stays an edit when GLM is slow. `tests/capabilityQuestion.test.ts` records the
+  change in-file rather than silently.
+- **C. `help` is a fourth reader answer, and `NAVBHARATAI_UI_MAP` gives the builder its bearings.**
+  Fifteen static lines — Preview tab, Publish, Files/ZIP, History → Restore, Stop, Report, Download APK
+  — each tagged with its `AppKnowledgeBase` id, opening with *"Do NOT tell them to run npm, open a
+  terminal, or visit localhost: they are inside NavBharatAI on a phone."* 🔒 **ONE constant, TWO
+  readers**: the architect prompt (static side, so the cache prefix is untouched — a test asserts no
+  date/user/project interpolation) and the plain-chat lane's inline prompt in `routes/agentv3.ts`,
+  which has its OWN system prompt and would otherwise have kept answering like a generic bot.
+
+### What this does NOT do, stated so nobody re-derives it
+
+- It does not call the reader on every message — an unmistakable order still pays nothing.
+- It does not inject the whole KnowledgeBase into the build prompt (cache prefix).
+- It does not make the reader's verdict FINAL when it answers `build` on a question — that still goes
+  through `userAskedForAnAppToBeBuilt` (#3040), which now requires HIGH and so cannot re-run a build
+  on a guess.
+
+**Gate on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` · **25,001 tests
+passed** · `build` · `test:bundle` · `boot:check` · `deps:server-gate` — all green.
 ### 2026-09-17 (same day, follow-up) — "app banao" names no more than "banao" does
 
 The admin read the fix above and asked the one question that tested it: *"agar koi user send karega
@@ -64250,6 +64304,71 @@ with the abort case REVERTED, because `default`'s text also contains *"files so 
 **Full CI gate green on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` ·
 `vitest run` (**24,990 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
 `deps:server-gate`.
+
+## 2026-09-17 — THE JOURNEY CHECK HAD NEVER LAUNCHED A BROWSER, and two things guaranteed nobody could tell
+
+Found while clearing the last un-owned items from autopsy `e706e068`'s ledger (🔀 "journey not derived",
+⏭️ "page-render check: no result for 6 routes"). Reading the two modules that produce that evidence
+turned up a bug bigger than the ledger item that led to it.
+
+**1. THE BUG.** `journeyScript` built its own run line:
+
+    node /tmp/nbai-journey.mjs 2>&1 | grep '^NBAI_JOURNEY ' || true
+
+with **no `PLAYWRIGHT_BROWSERS_PATH`**. Chromium exists in exactly one place in the sandbox —
+`/home/user/.e-tools/.browsers` — because the image build (`infra/e2b/e2b.Dockerfile:67`) and the
+runtime `_kickoffPlaywright` (`E2BActuator.ts:1483`) both install it with that variable set on the
+command, and it is **never** a persistent `ENV`. So `chromium.launch()` threw *"Executable doesn't
+exist"* before the first step of the first journey, on every build, since the check shipped. Its
+sibling `pageCheckScript` set the variable. **Fourteen other Playwright invocations in this repo set
+it.** This one did not.
+
+It is also a REPEAT: `browseUrl`'s own comment records the identical bug being root-caused once before
+("ran … with no PLAYWRIGHT_BROWSERS_PATH … so the require ALWAYS failed and browseUrl silently degraded
+to a curl of the static HTML shell"). The instance was fixed; the class was not — exactly the failure
+the constitution's bar entry describes for `a38c6fef`.
+
+**2. WHY IT COULD NOT BE SEEN.** The same line is the blindness. `2>&1` folds stderr into stdout, the
+marker `grep` then discards every line that is not a result, and `|| true` hides the exit status — so a
+script that died on line 1 and one that ran perfectly and found nothing return the **identical empty
+string**. `PageRouteCheck`'s header had already written this down about an earlier NODE_PATH bug ("the
+trailing || true and the grep swallow the error, so the run simply produces no result lines") and the
+pattern was copied into the sibling anyway, carrying the blindness with it.
+
+**3. THE FAKE GREEN.** `summarizeJourneys([])` returned `{ ok: true }`, and the route records
+`code: verdict.ok ? 'JOURNEY_PASSED' : 'JOURNEY_FAILED'` at `severity: 'info'` with
+`autoResolved: true`. So for the whole outage **every build recorded a PASSING journey code** whose own
+message read *"No user journey was run."* The message was honest and the code was not, and the code is
+what a reader scanning a report actually sees. (The release gate was never misled — the route only sets
+`gateEvidence.journeys` when results exist — so this was a reporting lie, not a shipping one.)
+
+**THE FIX, at the class rather than the instance.**
+- **`src/server/AgentV3/sandboxBrowserScript.ts` (new, pure).** ONE builder for the run line of every
+  in-sandbox browser script we own. It carries `PLAYWRIGHT_BROWSERS_PATH` by construction, keeps result
+  lines on stdout unchanged (so every parser is untouched), and — only when a run yields no result or
+  exits non-zero — prints a **bounded** tail (8 lines × 200 cols, capped at 400 chars in a report) of
+  what the script really said, under its own `NBAI_DIAG:` marker. Still exits 0: a probe that found
+  nothing must never look like a failed command. POSIX `sh` only, and the quiet grep is spelled
+  `grep -q '^M' file`, not `grep '^M' file -q`, which is GNU-only. **Verified by executing the generated
+  line in a real shell** across three cases (healthy, died-at-launch, ran-but-empty) rather than by eye.
+- Both modules use it; each result marker is now named once (`JOURNEY_RESULT_MARKER`,
+  `PAGE_RESULT_MARKER`) instead of hand-written in three places, which is how the first copy drifted.
+- `summarizeJourneys(results, attempted, stdout)` returns **`ran`** beside `ok`, and
+  `summarizePageCheck(results, attempted, stdout)` takes the raw output; both now say **why** when the
+  runner produced nothing. New report code **`JOURNEY_NOT_RUN`** (neither pass nor failure), registered
+  in `PROCESS_ONLY_CODES` and `NEVER_SUGGEST` so it can never count against the user's app.
+
+**THE GUARD THAT SHOULD HAVE EXISTED.** `sandboxBrowsersPath.test.ts` already pinned the CONSTANT and
+the hand-off to the USER's suite — and its own header names "journey runs" as a consumer — but nothing
+asserted that the scripts the PLATFORM runs carry the variable. Same shape as the complexity flag in
+#3043: the decision was tested, the chain was not. It now asserts the **real generated command** for
+both scripts, and that neither module builds its own run line. Proven by reversion, three ways: putting
+the old journey line back fails 2 cases; removing the path from the builder fails 3; restoring the
+route's two-way code fails 3 in `tests/journeyRunnerWiring.test.ts`.
+
+**What to watch on the first real builds:** `JOURNEY_PASSED` / `JOURNEY_FAILED` appearing **at all**.
+A crop of `JOURNEY_FAILED` is not a regression — it is the check working for the first time, and each
+one is a real app that looks like it saves data and does not.
 ### 2026-09-17 (autopsy d98dae01, half 1 of 2) — a request none of our signals can read is not a greeting
 
 The prompt was Telugu: a text-to-speech app with voice cloning. `RequestAnalyser` scored it **5** — the
@@ -64473,3 +64592,28 @@ reading that list would otherwise go and work on items that are finished or on a
 against a *different* `main` and nothing had verified the combination: `277a6769` — typecheck ✅,
 no-unused-imports ✅, server typecheck ✅, **25105 passed | 1 skipped, 0 FAIL** ✅, build ✅, bundle ✅,
 boot ✅. The concurrent merges compose cleanly.
+## 2026-09-17 — WRITE → TYPECHECK → NEXT: the compiler answers after every file (admin: "incremental typecheck wala PR bana do")
+
+From autopsy e706e068's biggest struggle: 20 files written before the first `tsc`, then 21 errors ground for
+seven minutes (six `tsc` runs, an endgame batch repair, a "repeated step" nudge, read → edit → tsc one at a
+time). Every error was visible the moment its file was written; nothing looked.
+
+**What ships (`src/server/AgentV3/writeTimeTypecheck.ts`, wired in `ToolDispatcher`):** after every
+TypeScript write on all four write paths, the dispatcher runs the shared incremental `tsc --noEmit`
+(same `/tmp/agentv3.tsbuildinfo` cache as the endgame and the `typecheck` tool — a warm run is sub-second)
+and appends the WRITTEN file's own errors to the tool result (quoted in full, capped at 10) plus a brief count
+of errors elsewhere (named, capped at 3). Clean tree ⇒ no note. Per-build `WriteTypecheckQueue` coalesces
+parallel writes (a burst costs at most two compiles). A JS project (no tsconfig), a timeout (30 s) or any
+failure ⇒ '' — never a fake pass; two consecutive timeouts stand it down for the build with a reason. Every
+run is reported through `onCommand`, so the release gate's typecheck evidence sees it (the e4ebcb5f bridge).
+Report line `WRITE_TIME_TYPECHECK` (runs, clean runs, errors quoted back, time, stand-down reason). Kill
+switch `AGENTV3_WRITE_TYPECHECK=off` restores today's behaviour exactly.
+
+**Honest cost:** ~0.5–3 s of sandbox time per TS write (the first run is cold). On a 30-file build that is
+roughly a minute, against the seven-minute grind it replaces. The fast lane (SimpleBuilder) keeps its own
+generate-all → verify → repair loop; this is the agentic builder's path.
+
+**What to watch on the first real builds:** `WRITE_TIME_TYPECHECK` runs vs. the endgame's error count at
+its first checkpoint — the endgame's "N compile errors left" should drop toward zero, and
+`REPEATED_READS`/edit loops with it. Tests: `tests/writeTimeTypecheck.test.ts` (note wording on the real
+ERP tsc output, path normalisation, caps, queue coalescing, summary, dispatcher + route wiring).

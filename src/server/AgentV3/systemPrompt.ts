@@ -379,6 +379,43 @@ export function dateContextBlock(nowIso: string): string {
   ].join('\n');
 }
 
+/**
+ * WHERE THINGS ARE IN NAVBHARATAI PRO — the builder's own self-awareness, in fifteen lines.
+ *
+ * 🔴 ADMIN 2026-09-17 (report cc8c9075): *"navbharatai pro ko app self awareness nahi hai kya? preview
+ * kaise chalega, batana chahiye — niche footer me … preview option waha click karo, is prakar batana
+ * chahiye."* A user asked how to OPEN the app that had just been built. The builder — the one assistant
+ * in NavBharatAI that is NOT fed the AppKnowledgeBase (see the note above the APK block below) — told
+ * them to open a terminal, run `npm run dev` and visit `localhost:5173`, a URL on a machine they do not
+ * have. It answered like a generic coding bot, because that is all it had been told it was.
+ *
+ * WHY A CONSTANT AND NOT THE WHOLE KB: the architect prompt is the Anthropic cache prefix
+ * (`AGENTV3_CACHE_PREFIX`), so anything in it must be STATIC. The full KnowledgeBase is ~2,000 lines
+ * and changes weekly; these are the six places a user asks about every day, and they do not move.
+ * 🔒 ONE constant, TWO readers — the architect prompt and the plain-chat lane in `routes/agentv3.ts`
+ * both include it — so the build lane and the chat lane can never give different directions.
+ * Keep each line in step with its `AppKnowledgeBase.ts` entry (ids in the comments).
+ */
+export const NAVBHARATAI_UI_MAP = [
+  'WHERE THINGS ARE IN NAVBHARATAI PRO — when the user asks how to SEE, OPEN, RUN, SHARE or SAVE their',
+  'app, or where a button is, answer with the button below. Do NOT tell them to run npm, open a',
+  'terminal, or visit localhost: they are inside NavBharatAI on a phone or browser, not at a shell.',
+  '- SEE / OPEN / RUN the app → the "Preview" tab in the header. It shows the app by itself (the real',
+  '  build of the last successful build, or an instant in-browser render meanwhile). "Live server"',
+  '  there runs it on a real machine when the app needs a backend.                    [agentv3_preview]',
+  '- SHARE / GO LIVE → the "Publish" button in the header action row. It gives a permanent public',
+  '  https link anyone can open.                                                       [agentv3_deploy]',
+  '- THE CODE → the "Files" tab in the header (also: sidebar → Files). The "ZIP" button at the top of',
+  '  the file list downloads the whole project.                        [agentv3_files, agentv3_export]',
+  '- FILES LOOK GONE → the "History" tab (or Files when empty) → "Restore all files".',
+  '                                                                             [agentv3_restore_files]',
+  '- STOP a build → the red Stop button where Send was. Files so far are kept; one more message',
+  '  continues from there.                                                                  [stop]',
+  '- REPORT a bad build → the "Report" button in the header tab row; it goes to NavBharatAI\'s team.',
+  '                                                                             [agentv3_build_report]',
+  '- ANDROID FILE (.apk) → the "More" tab at the bottom → "Download APK" (details below).  [apk_builder]',
+].join('\n');
+
 export function architectSystemPrompt(framework?: string, opts?: { parallelBuild?: boolean }): string {
   const scaffoldHint = frameworkScaffoldHint(framework);
   return [
@@ -424,6 +461,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  plainly rather than inventing its contents.',
     '- Internal/private addresses are refused by design; only real public websites open.',
     '- Copy IDEAS and STRUCTURE, never a site\'s copyrighted text, images or logos into a user\'s app.',
+    '',
+    NAVBHARATAI_UI_MAP,
     '',
     'If the user asks how to get their app as a real Android file (an .apk they can install on a',
     'phone, or the .aab Google Play needs) — answer them, do NOT start building:',

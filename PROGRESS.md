@@ -63381,3 +63381,91 @@ still a full replace (the gate is what makes that safe).
 **Full CI gate green on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` ·
 `vitest run` (**24,810 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
 `deps:server-gate`.
+
+## 2026-09-17 — Autopsy `b89ba6f8`: one build told its user THREE different stories about why it ended
+
+Free user (`bvs***@gmail.com`), weak tier, edit of an existing 30-file app. Prompt: *"Continue from
+where you left off and finish/fix the build so the app works end-to-end."* 94 seconds, ONE model call,
+ONE tool call (`update_todo`), zero files, ₹0.
+
+### The five-bucket ledger
+
+- ✅ **Self-healed — 1.** GLM `glm-4.7-flashx` crawled below a usable rate and was abandoned mid-answer
+  at 53 s and benched for the run; KIMI answered. The 2026-09-16 throughput machinery did exactly its
+  job. ⚠️ Per rule 5 step 5 a self-heal is a red flag, and this one is about a decision made HOURS
+  earlier: `glm-4.7-flashx` became the lead rung of Weak and Normal on 2026-09-17, and its first
+  appearance in a real report is a crawl that cost the user 54 seconds.
+- 🔀 **Workaround — 1.** The ladder fell GLM → KIMI. Deferred, not free: the user waited those 54 s.
+- ⏭️ **Skipped — 5.** typecheck never ran · page-render check never ran · no journey derivable · no
+  test suite run · no preview ever came up (and `deliveryProof` did not fire either — the build was
+  aborted before it could).
+- ❌ **Shipped imperfect — 4.** The three contradictory stories below (3 items), plus
+  `DESIGN_CONSISTENCY` graded 21 files on a turn that wrote **0 changed, 0 new** — the `buildAuthorship`
+  class in a scanner that split was never extended to. It cost nothing here (a warning, `DESIGN_` is
+  already never a root cause, no money moved), so it is recorded as OPEN rather than widened into.
+- 🥵 **Struggles — 4.** 54 s on a crawling rung · 63 s for a first answer that was a todo list (258
+  output tokens) · the whole build used 94 s of a 1740 s budget · sandbox **98% idle** (1.5 of 1.6 min).
+
+### 🔴 The finding: three readers, one question, three answers
+
+```
+summary        "Stopped, as you asked."                       ← the abort SIGNAL
+narration      "NavBharatAI's engine is running slowly right now and your build could not
+                finish — this one is on us, not on your app."  ← the TOOL log
+release gate   "Not shippable — the build did not succeed."    ← the TIMELINE
+```
+
+`abortBuild(…, 'user-stop')` is reached from **three** places — the Stop **button** (`/stop`),
+**unsend**, and the model's own `stop_build` tool — and **only the last one records
+`USER_STOPPED_BUILD`**. So a build stopped by the BUTTON is invisible to `stoppedByUser(issues)` (the
+gate) and to `toolWasUsed('stop_build')` (the empty-build explanation), and both invented an
+explanation instead.
+
+**The cost is not cosmetic.** The person who pressed Stop was handed an apology for a failure that
+never happened, and the admin's Failure Category panel — the very panel the 40.8%-failure work is
+planned from — recorded a phantom *"engine did not respond"* for a build nothing was wrong with. One
+GLM timeout is enough for `providerFailuresLookDegraded` (`DEGRADED_BUCKETS` holds `timeout`), even
+though the ladder RECOVERED from it.
+
+⚠️ **The block that got it wrong had the right principle written above it**, and a false premise:
+*"The signal is `toolWasUsed`, which reads the timeline the report itself prints, so it cannot drift
+from what an admin sees … a question the timeline already answers."* The timeline did not answer it —
+for two of the three stop paths it was never told.
+
+### The fix — a back-fill, not a fourth reader
+
+`abortBuild` is the one funnel every stop path already goes through ("Every abort site must go through
+this" — `buildAbortCause.ts`), so the **signal is the complete source**. It is copied onto the timeline
+ONCE, right after the run, only when nothing recorded it already (the tool path writes a richer line —
+it has the sentence the model was answering). Every existing timeline reader then becomes correct
+**without learning anything new** — the same discipline `resolveRecoveredOnSuccess` uses.
+
+- **`buildWasStopped(issues)`** joins `stoppedByUser(issues)` as its deliberate sibling. They answer
+  two different questions and a test pins the difference: *"did this build reach the point of having a
+  capability to judge?"* (no, whoever stopped it) versus *"is it FAIR to say the USER did this?"* (no,
+  when NavBharatAI composed the prompt — autopsy `fdd59ef8`). The empty-build explanation asks the
+  first; the release gate keeps asking the second.
+- **`UPSELL_SUPPRESSED` joins `NEVER_ROOT_CAUSE`.** This build's recorded `rootCause` was, in full,
+  *"Did not ask this user to add credits: the build failed because the engine did not respond…"* — a
+  sentence about what we chose **not to charge for**, presented as the reason the build failed. Exactly
+  the class `TIME_TO_FIRST_CALL` and `POST_ANSWER_TIMING` are already listed for. Nothing is hidden:
+  the finding stays on the timeline and is NAMED in the honest "none of these can carry a cause" line.
+
+### Tests — `tests/everyStopReachesTheTimeline.test.ts`, 10 cases, proven by reversion
+
+Built from the real timeline. Reverting the never-root-cause entry, the back-fill guard, or the
+empty-build predicate fails **5 of 10**.
+
+⚠️ **My own first draft measured the wrong thing and the test caught it**: the replay helper omitted
+`finish()`, so the report read as *still running* and derived a different `rootCause` entirely. Fixed
+by measuring the real object rather than predicting it — the fifth time this session that a guard
+written from a guess had to be rewritten from a measurement.
+
+### Still open (rule 6)
+
+1. **`DESIGN_CONSISTENCY` judges files this build never wrote** (above) — the authorship split reaches
+   the readiness scan and the orphan list, not this scanner.
+2. **One provider timeout is enough to call the engine "degraded" to the user**, even when the ladder
+   recovered from it and delivered. The wording is a big claim from one data point; now that a stop can
+   no longer reach it, the remaining question is whether a RECOVERED timeout should reach it either.
+3. 🥵 **Sandbox 98% idle** across the session — unchanged, and the same figure every report carries.

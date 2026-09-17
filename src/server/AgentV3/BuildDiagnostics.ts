@@ -459,7 +459,7 @@ export interface BuildDiagnosticsReport {
    * Observability only: written once at build start from a value the route already computed, read by
    * nothing in the build path.
    */
-  requestAnalysis?: { taskType: string; complexityScore: number; startTier: string; startBand?: string };
+  requestAnalysis?: { taskType: string; complexityScore: number; startTier: string; startBand?: string; signalsCouldNotRead?: boolean };
   liveTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
   /** The cache-hit input tokens seen so far, paired with `liveTokens`. Same unreconciled status. */
   liveCacheReadInputTokens?: number;
@@ -585,7 +585,7 @@ export class BuildDiagnostics {
   private readonly issues: BuildIssue[] = [];
   /** provider → failure bucket → count. See recordProviderFailure. */
   private readonly providerFailureReasons = new Map<string, Map<string, number>>();
-  private requestAnalysis?: { taskType: string; complexityScore: number; startTier: string; startBand?: string };
+  private requestAnalysis?: { taskType: string; complexityScore: number; startTier: string; startBand?: string; signalsCouldNotRead?: boolean };
   /** See the transient-status note in the narration handler. */
   private transientStatusRecorded = false;
   private readonly meta: BuildDiagnosticsMeta;
@@ -1712,7 +1712,7 @@ export class BuildDiagnostics {
    * Record what the analyser concluded about this request. Called once, at build start, with a value
    * the route has already computed — no work is done here and nothing in the build reads it back.
    */
-  setRequestAnalysis(a: { taskType?: string; complexityScore?: number; startTier?: string } | null | undefined): void {
+  setRequestAnalysis(a: { taskType?: string; complexityScore?: number; startTier?: string; unreadable?: boolean } | null | undefined): void {
     const taskType = typeof a?.taskType === 'string' ? a.taskType.trim() : '';
     const startTier = typeof a?.startTier === 'string' ? a.startTier.trim() : '';
     const score = a?.complexityScore;
@@ -1722,7 +1722,16 @@ export class BuildDiagnostics {
     // The band's KEY is kept (telemetry is grouped by it) and its MEANING is recorded beside it, so
     // the report never again asserts that a build started on a provider no ladder contains — see
     // `startBandLabel`. Derived here rather than at each reader, so one answer exists.
-    this.requestAnalysis = { taskType, complexityScore: score, startTier, startBand: startBandLabel(startTier) };
+    // 🔴 SAY WHEN THE SCORER COULD NOT READ THE REQUEST (autopsy d98dae01, 2026-09-17). A Telugu or
+    // Devanagari prompt matches none of the analyser's ASCII signals, so a `taskType` of 'chat' on
+    // such a build is a FALLTHROUGH, not a classification — and a report that prints it without this
+    // flag presents a default as a measurement, exactly as `startTier: "gemini"` once did.
+    // Recorded only when TRUE, so every existing report and every English build is byte-identical.
+    const couldNotRead = a?.unreadable === true;
+    this.requestAnalysis = {
+      taskType, complexityScore: score, startTier, startBand: startBandLabel(startTier),
+      ...(couldNotRead ? { signalsCouldNotRead: true } : {}),
+    };
   }
 
   setProviderChain(chain: string, names?: string[], firstRung?: string): void {

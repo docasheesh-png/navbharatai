@@ -72,13 +72,29 @@ describe('💸 a model call is only bought when its answer could change the outc
 
 // "jo language hamara code nahi samajh paye" (admin 2026-09-17). The scorer's signals are ALL ASCII, so
 // a request in an Indian script is not merely mis-scored — it is unread, and the score-based ask above
-// cannot catch that, because an unread request scores 5 and 5 is nowhere near the 40 line.
+// cannot catch that: such a request used to score 5, and 5 is nowhere near the 40 line. It is floored
+// on script-neutral evidence now (`scriptNeutralFloor`, later the same day) and still lands well
+// below the line for anything short of a big spec, so reading the SCRIPT is what buys the call.
 describe('🔴 a request the scorer could not READ is asked about, whatever it scored', () => {
-  it('the hole is real: a big Devanagari app scores like small talk', () => {
+  /**
+   * ⚠️ THIS CASE ASSERTED THE HOLE, AND THAT ASSERTION WAS ITSELF THE BUG — corrected the same day,
+   * with the reason kept here rather than silently deleted. It read
+   * `expect(a.complexityScore).toBeLessThan(20)`, i.e. it pinned the scorer's claim that a
+   * multi-feature hospital app was smaller than a calculator. That was an accurate description of
+   * the code on the morning it was written and the wrong thing to hold still: the second opinion
+   * this file buys is the better ANSWER, and `analyzeRequest` flooring the request on script-neutral
+   * evidence (`scriptNeutralFloor`) is what makes the answer we already had HONEST — needed exactly
+   * when no classifier is available, which is the case this file's own fallback covers.
+   *
+   * What the case really exists to prove is unchanged and is still asserted below: the SCORE alone
+   * would never buy a second opinion for a request in this script, and reading the prompt does.
+   */
+  it('the score alone never asks about an unread request — reading the prompt is what does', () => {
     const hindi = 'एक अस्पताल प्रबंधन ऐप बनाओ जिसमें डॉक्टर लॉगिन, मरीज़ रिकॉर्ड, अपॉइंटमेंट बुकिंग, बिलिंग और रिपोर्ट हों';
     const a = analyzeRequest({ prompt: hindi });
-    expect(a.taskType).toBe('chat');                 // not one signal matched
-    expect(a.complexityScore).toBeLessThan(20);      // …so the biggest app in this file scores tiny
+    expect(a.taskType).toBe('chat');                 // a FALLTHROUGH, not a classification
+    expect(a.unreadable).toBe(true);                 // …and the scorer now SAYS so
+    expect(a.complexityScore).toBeGreaterThan(20);   // floored on script-neutral evidence, not a 5
     expect(needsSecondOpinion(a.complexityScore)).toBe(false);   // the score alone would NEVER ask
     expect(needsSecondOpinion(a.complexityScore, hindi)).toBe(true); // reading the prompt does
   });

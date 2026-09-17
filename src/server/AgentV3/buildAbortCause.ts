@@ -36,6 +36,7 @@ export type AbortCause =
   | 'lock-reclaimed' // a newer build took over an abandoned lock
   | 'reaper'         // the zombie reaper cleaned up a build that stopped reporting
   | 'cost-cap'       // the build spent past its cost ceiling (buildCostCeiling.ts)
+  | 'futile'         // the build produced nothing for the whole window (futilityBreaker.ts)
   | 'unknown';       // aborted with no cause recorded — reported as unknown, never guessed
 
 const TAG = '__nbaiAbortCause';
@@ -129,6 +130,21 @@ export function abortSummary(cause: AbortCause, ctx: AbortSummaryContext = {}): 
       return saved
         ? "This build reached its size limit, so I stopped it here rather than let it run on. Your files so far are saved — send another message and I'll continue from here."
         : 'This build reached its size limit before it produced anything. Nothing was lost — try again with a smaller first step.';
+    case 'futile':
+      // 🔴 NEITHER THE USER'S FAULT NOR THEIR APP'S, and the two branches are genuinely different
+      // situations rather than one sentence with a clause bolted on.
+      //
+      // The reported build (`d6d664e6`) wrote NOTHING in 29 minutes from a one-word prompt, so the
+      // second branch is the common one, and its advice has to be actionable: "try again" alone sends
+      // the person back to the same prompt for another 29 minutes. Asking for a little more detail is
+      // the one thing that actually changes the outcome — and it is the same remedy the objectless-order
+      // rule (#3039) gives BEFORE a build starts. This is the net for when that rule did not catch it.
+      //
+      // ⚠️ It must NOT say "too long", which is the watchdog's sentence: this build may have stopped at
+      // minute 12 of a 30-minute budget. The honest word is that it was not getting anywhere.
+      return saved
+        ? "This build stopped making progress, so I stopped it here rather than let it run on. Your files so far are saved — send another message and I'll continue from here."
+        : 'This build was not getting anywhere — nothing had been produced, so I stopped it instead of letting it run on. Nothing was lost. Try again with a bit more detail about what the app should do.';
     case 'unknown':
     default:
       // Honest about not knowing, rather than picking a plausible culprit.

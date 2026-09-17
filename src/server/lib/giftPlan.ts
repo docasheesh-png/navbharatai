@@ -34,6 +34,7 @@
 
 import { TOKENS_PER_RUPEE } from './payments';
 import { parseEnvFlag } from './envFlag';
+import { flatWelcomeGiftSuppressed } from './welcomeGiftExclusion';
 
 /**
  * Master switch. Default OFF — while off, every wallet keeps today's ₹250 + weekly-ladder behaviour
@@ -98,6 +99,10 @@ export function decideSignupGrant(input: {
   env?: NodeJS.ProcessEnv;
 }): SignupGrant {
   const env = input.env ?? process.env;
+  // The referral ladder REPLACES this gift rather than adding to it — see welcomeGiftExclusion.ts.
+  // Without this the two plans pay the same person ₹500 + ₹400, which this file's sibling warns about
+  // in a comment that nothing enforced.
+  if (flatWelcomeGiftSuppressed(env)) return { tokens: 0, markEmail: false, markPhone: false, reason: 'disabled' };
   if (!giftPlanV2Enabled(env)) return { tokens: 0, markEmail: false, markPhone: false, reason: 'disabled' };
 
   if (input.phoneVerified) {
@@ -138,6 +143,8 @@ export function decidePhoneClaim(input: {
   env?: NodeJS.ProcessEnv;
 }): PhoneClaim {
   const env = input.env ?? process.env;
+  // Same exclusion as decideSignupGrant — the phone claim is the second half of the SAME ₹500.
+  if (flatWelcomeGiftSuppressed(env)) return { tokens: 0, reason: 'disabled' };
   if (!giftPlanV2Enabled(env)) return { tokens: 0, reason: 'disabled' };
   if (input.phoneUsed) return { tokens: 0, reason: 'identity-used' };
 

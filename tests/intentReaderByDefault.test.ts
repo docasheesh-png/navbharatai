@@ -77,7 +77,7 @@ describe('C — "help" is a fourth answer, and the builder finally knows where i
     expect(classifyIntentWithConfidence(m)).toMatchObject({ intent: 'new_build', confidence: 'low' });
     expect(await classifyIntentSmart(m, llm)).toBe('chat');
     expect(seen).toMatch(/help\s+—\s+asking how to use NAVBHARATAI ITSELF/);
-    expect(seen).toMatch(/chat, help, build, or edit/);
+    expect(seen).toMatch(/chat, help, build, edit, or unclear/);
   });
 
   it('THE REPORTED ANSWER CAN NO LONGER HAPPEN: the map forbids npm/terminal/localhost and names the Preview tab', () => {

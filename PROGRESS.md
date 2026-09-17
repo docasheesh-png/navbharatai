@@ -60353,3 +60353,78 @@ Tests: `tests/autopsyFdd59ef8Remainder.test.ts` (10 cases), each proven by rever
    reported a C as a problem of the user's app.
 5. **`rootCause` contradicts `counts` in the same document**: it says "NO unresolved problem was
    recorded" while `counts.unresolved` is 2.
+
+---
+
+## 2026-09-17 — Autopsy `e706e068` (School ERP): "3 build-breaking blockers" on an app that had one
+
+**The screenshot the admin sent is the whole finding**: the School ERP login page rendering in the
+preview pane, beside *"Your app is built and saved, but 3 things are still broken… You have NOT been
+charged for this build."* 26.8 minutes, free Weak engine, 40 model calls.
+
+### The timeline, in its own timestamps
+
+| t+ | |
+|---|---|
+| 1251s | `READINESS_BLOCKER` — *1 unresolved import(s) — **the build will fail**: App.tsx -> ./components/TransportRequest* |
+| 1251s | `READINESS_BLOCKER` — *2 fake/incomplete code issue(s)* |
+| 1298s | `TOOL_ERROR` — the agent tries to read `TransportRequest.tsx`; it does not exist |
+| 1406s | `tsc --noEmit` → **exit 0** (the eighth clean typecheck of the run) |
+| **1440s** | `READINESS_BLOCKER` — **the SAME import sentence, byte-identical, recorded a second time** |
+| 1440s | `RENDER_RESCUE` — the live preview renders cleanly, real-browser verified |
+| **1512s** | **`PROD_BUILD_OK` — "The production build succeeded — this app is ready to publish and to package."** |
+| 1593s | `RELEASE_GATE: RED — 3 build-breaking blocker(s)` → `OUTCOME_RELEASE_GATE_RED` → ₹0 |
+
+### Two independent defects produced that "3". The honest number was ONE.
+
+**1 · The same blocker, counted twice.** `record()` collapses only a BACK-TO-BACK repeat — it compares
+against `issues[issues.length - 1]`. These two sat 189 seconds and many entries apart, so both
+survived and `shippingIssueCount` counted both.
+
+**2 · A prediction outlived its own refutation.** *"the build will fail"* is a forecast about
+`npm run build`, derived from the import graph. Seventy-two seconds later the platform RAN that build
+and it SUCCEEDED, on the same tree with no writes in between. Nothing reconciled them, so the falsified
+forecast went on to turn the gate RED and make a rendering, publishable app free.
+
+🔑 **THE RULE: when we have RUN the thing a finding merely predicted, the run wins.** One named door of
+the EVIDENCE LEDGER class (autopsy `697b38ee`), which stays open.
+
+### The fixes
+
+`buildFailurePrediction.ts` (new, pure) + `BuildDiagnostics.resolveBuildFailurePredictions()`, called
+from the prod-build gate with `judgeProdBuild`'s own verdict. Narrow in three independent ways: only a
+claim ABOUT `npm run build`; only a build that genuinely RAN and exited 0; only predictions recorded
+BEFORE it ran. `shippingIssueCount` de-duplicates by `phase|code|message` — every record stays on the
+timeline, only the COUNT changes.
+
+### 🔴 The guard that caught a defect in this very change
+
+`engineEventsNeverBlock.test.ts` has a case named *"the release gate and the health card count with ONE
+predicate"*. It failed on the first attempt — and investigating it produced a third finding:
+
+**it never checked a count.** It asserted both surfaces use the same FILTER EXPRESSION. They did, and
+they still disagreed: `buildHealthCard`'s `messages()` has always de-duplicated by message text, while
+`shippingIssueCount` did not. So on this build the card listed two distinct blocker lines while the
+gate's headline said three. The guard is now behavioural — record the same finding twice, and the gate
+and the card must return the same number.
+
+⚠️ The old assertion pinned the exact `issues.filter(...)` formatting, so it broke when the body
+changed shape even though the predicate was untouched. It now asserts the three-part predicate as a
+conjunction, which is what it was always for.
+
+### Still open (rule 6 — recorded, not rushed)
+
+1. 🔴 **THE NEXT ONE, with fresh evidence: `8b3dca5c` (JEE mock test, same day).** Its ONLY blocker was
+   *"readiness score 38/100 is below the 50/100 bar — **9 component(s) created but never used**:
+   Counter.tsx, FilterBar.tsx, Header.tsx…"* — and those nine are **debris from our OWN abandoned fast
+   lane**, which built a generic Counter/TaskList/ThemeToggle app, failed its typecheck, and handed off
+   to the full builder that then built the real JEE app. `tsc` clean, dev server up, `PROD_BUILD_OK`,
+   `ACCESSIBILITY 100/100`, render verified — RED and ₹0 because of files our own engine orphaned.
+   ⚠️ This is the #2997 open item ("the readiness SCORE is still whole-workspace") with a sharper
+   cause, and it is NOT covered by the authorship fix: the fast lane's files genuinely ARE ours.
+   The upstream (50/50) fix is for an abandoned lane's files not to survive the handoff; the score
+   floor itself exists *because* of orphan components (2026-07-05), so it must not simply be loosened.
+2. 🔴 `PAGE_RENDER_FAILED` says the check "could not be completed for 6 routes", while `RELEASE_GATE`
+   in the same report says it "needs a running app and was skipped" — on a build whose preview was
+   published and render-verified. Two wrong statements in one sentence.
+3. 🥵 Sandbox **87% idle** across 26.6 minutes; 115s before the first model call.

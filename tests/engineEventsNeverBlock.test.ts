@@ -139,8 +139,39 @@ describe('🔒 the wiring — the platform proves the preview itself, and the be
   it('the release gate and the health card count with ONE predicate', () => {
     expect(route).toContain("blockers: buildDiag.shippingIssueCount('error')");
     const diag = readFileSync('src/server/AgentV3/BuildDiagnostics.ts', 'utf8');
-    expect(diag).toMatch(/shippingIssueCount\(severity: IssueSeverity\): number \{\n\s+return this\.issues\.filter\(\n\s+\(i\) => i\.severity === severity && !i\.autoResolved && isAppFinding\(i\),/);
+    // The three-part predicate, asserted as a conjunction rather than as one literal line — the
+    // original pattern pinned the exact `issues.filter(...)` formatting, so it broke the moment the
+    // body changed shape even though the predicate itself was untouched.
+    const body = diag.slice(diag.indexOf('shippingIssueCount(severity: IssueSeverity): number'), diag.indexOf('shippingIssueCount(severity: IssueSeverity): number') + 1600);
+    expect(body).toContain('i.severity !== severity');
+    expect(body).toContain('i.autoResolved');
+    expect(body).toContain('isAppFinding(i)');
     const card = readFileSync('src/server/AgentV3/buildHealthCard.ts', 'utf8');
     expect(card).toContain("p.severity === 'error' && !p.autoResolved && isAppFinding(p)");
+  });
+
+  /**
+   * 🔴 THE GUARD ABOVE IS NAMED FOR A COUNT AND NEVER CHECKED ONE (autopsy e706e068, 2026-09-17).
+   *
+   * It asserted that both surfaces use the same FILTER EXPRESSION. They did — and they still
+   * disagreed, because `buildHealthCard`'s `messages()` de-duplicates by message text and
+   * `shippingIssueCount` did not. The School ERP build recorded the byte-identical blocker
+   * `1 unresolved import(s) — the build will fail: App.tsx -> ./components/TransportRequest` twice,
+   * 189 seconds apart, and the release gate's headline read "3 build-breaking blocker(s)" over an app
+   * that had two.
+   *
+   * So this asserts the thing the name promises: the same repeated finding is ONE finding to both.
+   */
+  it('…and they agree on the COUNT when the same finding is recorded twice', () => {
+    const d = new BuildDiagnostics('agreement');
+    const dup = 'the build will fail: App.tsx -> ./components/Missing';
+    d.record({ phase: 'readiness', severity: 'error', code: 'READINESS_BLOCKER', message: dup, autoResolved: false, ts: 1 });
+    d.record({ phase: 'tool', severity: 'warning', code: 'NOISE', message: 'something else', autoResolved: false, ts: 2 });
+    d.record({ phase: 'readiness', severity: 'error', code: 'READINESS_BLOCKER', message: dup, autoResolved: false, ts: 3 });
+
+    const gateCount = d.shippingIssueCount('error');
+    const card = buildHealthFromDiagnostics(d.report(), false);
+    expect(gateCount).toBe(1);
+    expect(card.blockers).toHaveLength(gateCount);
   });
 });

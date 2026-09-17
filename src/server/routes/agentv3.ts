@@ -295,7 +295,7 @@ import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanSta
 import { computePlanProgress } from '../AgentV3/PlanProgress';
 import { decideCancelledBuildBill } from '../AgentV3/cancelledBuildBilling';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
-import { projectModeEnabled, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
+import { projectModeEnabled, projectModeDiagnosis, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
@@ -434,6 +434,7 @@ import { realismIntent } from '../lib/realismIntent';
 import { heroObjectContract } from '../lib/heroObjectSpec';
 import { BuildCheckpoint } from '../AgentV3/BuildCheckpoints';
 import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
+import { recordEngineUse } from '../AgentV3/engineUseStore';
 import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrchestrator';
 import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from '../AgentV3/escalationRollout';
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
@@ -13183,6 +13184,12 @@ async function noteBuildOutcome(
       const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite, framework,
         // AI Diagnosis Bundle #3 — capture every sandbox command's raw logs into the build report.
         (c) => { try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ } });
+      // WHOSE CODE IS THE READINESS GATE JUDGING? (autopsy e4ebcb5f — see `buildAuthorship.ts`.)
+      // `writtenFiles` is the ONE set every writer feeds — the architect's tools, the fast lanes
+      // (which write through `dispatcher.dispatch('write_file')`) and every sub-agent — so it is the
+      // only honest answer to "did this build write that file?". Passed as a thunk because the gate
+      // asks at the END of the build and the map is empty right now.
+      dispatcher.setAuthoredFiles(() => writtenFiles.keys());
       // PUBLISHING NEEDS AN ASK (admin 2026-09-01). On a build turn the agent used to decide for
       // itself — a user typed "continue", the build finished, and their app went live on a public URL
       // with nobody having requested it. Consent is read from THIS message only: consent that carries
@@ -14340,6 +14347,21 @@ async function noteBuildOutcome(
       // Mutually exclusive with the mega-app roadmap (Phase 3): both are "big app" strategies and must
       // never both steer one build. When the roadmap owns this build (step-1 target already set), SPM
       // project mode stays out.
+      // WHY project mode did or did not steer this build — recorded on BOTH branches, admin-only.
+      // The gate is an exact-match allowlist against the SIGN-IN email and used to record nothing at
+      // all, so a mistyped domain and a below-threshold prompt produced the identical symptom:
+      // silence. Advisory string only — it can never enable, block or slow a build.
+      try {
+        const pmDiag = projectModeDiagnosis({
+          flagRaw: process.env.AGENTV3_PROJECT_MODE,
+          identity: { userId, email },
+          preEmptedBy: megaRoadmapActive ? 'mega-roadmap' : planFirst ? 'plan-first' : null,
+          isNewBuild: intent === 'new_build',
+          isEditMode,
+          prompt,
+        });
+        buildDiag.record({ phase: 'plan', severity: 'info', code: pmDiag.code, message: pmDiag.message, detail: pmDiag.detail, autoResolved: true });
+      } catch { /* diagnostics are best-effort and must never touch a build */ }
       if (projectModeEnabled(process.env, { userId, email }) && !planFirst && !megaRoadmapActive) {
         try {
           let pPlan = await loadProjectPlan(workspaceId);
@@ -17515,6 +17537,17 @@ async function noteBuildOutcome(
               // marking it auto-resolved would file it away as handled when nothing has handled it.
               autoResolved: verdict.code !== 'PROD_BUILD_FAILED',
             });
+            // A MEASUREMENT BEATS A PREDICTION ABOUT THE SAME THING (autopsy e706e068 — the full
+            // story is in `buildFailurePrediction.ts`). The readiness gate forecasts `npm run build`
+            // from the import graph; we have just RUN it. When it succeeded, a finding that said it
+            // would fail is superseded — otherwise the falsified forecast goes on to turn the release
+            // gate RED and make a rendering, publishable app free.
+            //
+            // Bounded to predictions recorded BEFORE this run, and only on a build that really ran
+            // and exited 0 — `judgeProdBuild`'s own verdict, never a guess.
+            try {
+              buildDiag.resolveBuildFailurePredictions({ ran, code: verdict.code, before: Date.now() });
+            } catch { /* diagnostics are best-effort — never break the build */ }
             const note = prodBuildUserNote(verdict);
             if (note) events.emit({ type: 'narration', agent: 'architect', text: note, ts: Date.now() });
             // A FINISHED APP SHOULD NOT NEED A RENTED COMPUTER TO STAY ALIVE (previewSnapshot.ts).
@@ -17667,6 +17700,19 @@ async function noteBuildOutcome(
         gateEvidence.preview = previewVerifiedRendered ? 'passed' : previewVerifiedFailed ? 'failed' : 'not-run';
         // Only changes the WORDING of an unproven preview, never the verdict — see previewUrlPublished.
         gateEvidence.previewUrlPublished = Boolean(lastPreviewUrl);
+        // THE SAME FALLBACK THE TYPECHECK ALREADY HAS, FOR THE SIBLING IT LEFT BEHIND (autopsy
+        // 697b38ee). `gateEvidence.tests` is written ONLY by the vaccine pass — flag-gated,
+        // percentage-gated, and skipped entirely on a build not yet marked `ok` — so an agent that ran
+        // the suite itself left the gate telling the user the app had no suite that could be run, in a
+        // report whose own command log held the passing run. Fills a gap only; never overrides the real
+        // evidence set above, and a suite that could not EXECUTE is not counted in either direction.
+        // Safe for billing by construction: a RED gate flips a build to free only on
+        // shippingIssueCount('error'), which test evidence does not contribute to.
+        try {
+          const proven = buildDiag.agentRunEvidence();
+          if (gateEvidence.typecheck === 'not-run' && proven.typecheck) gateEvidence.typecheck = proven.typecheck;
+          if (gateEvidence.tests === 'not-run' && proven.tests) gateEvidence.tests = proven.tests;
+        } catch { /* evidence recovery is best-effort and must never touch a build */ }
         const gateFindings = () => ({
           // Counted from what this build actually recorded, so the gate and the report cannot disagree.
           blockers: buildDiag.shippingIssueCount('error'),
@@ -19375,6 +19421,14 @@ async function noteBuildOutcome(
           console.error(`[AGENTV3 BILLING] Wallet debit threw for user ${userId}: ${err?.message || err}`);
         }
       }
+
+      // WHICH ENGINES ACTUALLY SERVED THIS BUILD (admin 2026-09-17). `providerTurns` already holds
+      // it — the same map `dominantProvider` reads — and until now it died with the request. That is
+      // exactly why the AI Engines page looked invented: it was built on `ai_usage_logs`, which the
+      // CHAT route writes and a build never touches, so the page showed chat providers and called
+      // them the platform's engines. One day-keyed counter, written where the fact is already known.
+      // Fire-and-forget on purpose: an observation must never delay a user's finished build.
+      void recordEngineUse(providerTurns);
 
       // Cost-ladder telemetry (P2 measurement): record this build's task type, start
       // tier, billed amount, tokens, success, and duration so the savings AND the

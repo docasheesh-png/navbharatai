@@ -38,7 +38,7 @@ import { isNativeApp } from './lib/mobileNative';
 import { medicalViewBlocked, medicalFeaturesHidden } from './lib/playCompliance';
 import { isComingSoonTool } from './lib/comingSoonTools';
 // SDAChat kept eager — used immediately on tab open
-import { PROFESSIONAL_CHATS } from './components/professionals/professionalConfigs';
+import { PROFESSIONAL_CHATS, PROFESSIONALS_IMPLEMENTED_ELSEWHERE } from './components/professionals/professionalConfigs';
 import { endProfessionalChat, browserStore as professionalStore } from './lib/professionalChatStore';
 import { MOBILE_NAV_TOTAL_HEIGHT, publishMobileNavHeight } from './lib/mobileNav';
 import { ModePickerSheet } from './components/chat/ModePickerSheet';
@@ -154,6 +154,10 @@ import {
 // ZipSizeModal component → moved to ViewPanels.tsx
 import type { ZipSizeModalVariant } from './components/ide/ZipSizeModal';
 import { decideBackAction, HARDWARE_BACK_EVENT } from './lib/androidBack';
+import {
+  browserStore as placeStore, readLastPlace, recordLastPlace, decideLanding, needsSignIn,
+} from './lib/lastPlace';
+import { pickFreeChatResume } from './lib/freeChatResume';
 import { loadNativeShellContext, exitNativeApp } from './lib/nativeShell';
 import { ExitConfirmDialog } from './components/ExitConfirmDialog';
 // AgentMode → re-exported from ./types
@@ -385,8 +389,61 @@ export default function App() {
       return new URLSearchParams(window.location.search).get('view') === 'appstore';
     } catch { return false; }
   };
+  /**
+   * "wahi se start ho" (admin 2026-09-17) — the places the app may land somebody in on launch.
+   *
+   * Sourced from the professionals REGISTRY rather than a pattern: `other_ai` is the builder-tools
+   * hub and matches any `_ai` test, so a regex would have resumed people into a grid of tools they
+   * never opened. `PROFESSIONALS_IMPLEMENTED_ELSEWHERE` carries Doctor AI, which has its own
+   * component instead of a config — the same list `tabParenting.test.ts` keeps honest.
+   */
+  const RESUMABLE_PROFESSIONALS = useMemo(
+    () => [...Object.keys(PROFESSIONAL_CHATS), ...PROFESSIONALS_IMPLEMENTED_ELSEWHERE],
+    [],
+  );
+  /**
+   * 🔒 DOES THE URL ALREADY SAY WHERE TO GO? Then the remembered place must not argue with it.
+   *
+   * Deliberately broad — ANY non-root path, ANY query string, ANY hash. A share link, an OAuth
+   * return (`#gh_token`, `?sbconnect`), `/privacy`, `/store/app/<id>`: each is somebody stating a
+   * destination, and a guess about where they might want to be must never override a statement of
+   * where they asked to be. An unreadable URL counts as "explicit" for the same reason — when in
+   * doubt, leave today's behaviour alone.
+   */
+  const hasExplicitDestination = (): boolean => {
+    try {
+      if (typeof window === 'undefined') return true;
+      if (readAdminRoute() || readStoreRoute() || readV3ViewFlag()) return true;
+      if (window.location.pathname.replace(/\/+$/, '') !== '') return true;
+      if ((window.location.search || '').length > 1) return true;
+      if ((window.location.hash || '').length > 1) return true;
+      return false;
+    } catch { return true; }
+  };
+  /**
+   * Read ONCE, at mount, before anything can overwrite it — the free-chat resume below needs the
+   * same record, and re-reading it after `recordLastPlace` has run would return the new place
+   * rather than the one the user left.
+   */
+  const bootPlaceRef = useRef(readLastPlace(placeStore()));
+  /**
+   * ⚠️ `signedIn: false` HERE, ALWAYS — and it is not a bug. Firebase resolves auth asynchronously,
+   * so at mount nobody is signed in yet. Claiming otherwise would land a signed-out person on Pro
+   * chat's login wall as the very first frame of the app. Login-gated places are resumed by the
+   * effect further down, once auth has actually answered.
+   */
+  const bootLanding = useMemo(() => decideLanding({
+    lastPlace: bootPlaceRef.current,
+    hasDeepLink: hasExplicitDestination(),
+    signedIn: false,
+    professionalIds: RESUMABLE_PROFESSIONALS,
+    now: Date.now(),
+  }), []);
   const [activeView, setActiveView] = useState<ViewType>(() =>
-    readAdminRoute() ? 'admin' : (readStoreRoute() ? 'appstore' : (readV3ViewFlag() ? 'nbi_pro_chat' : 'home')),
+    readAdminRoute() ? 'admin'
+      : readStoreRoute() ? 'appstore'
+      : readV3ViewFlag() ? 'nbi_pro_chat'
+      : ((bootLanding?.view as ViewType) ?? 'home'),
   );
   // Scoped History: the NavBharatAI Free footer opens History filtered to Free only. It resets to
   // 'all' whenever we leave the History view, so opening History from anywhere else shows everything.
@@ -443,6 +500,23 @@ export default function App() {
     const lang = localStorage.getItem('navbharat_language');
     return lang ? [WELCOME_MSG] : [LANGUAGE_PICKER_MSG];
   };
+  /**
+   * The Free chat's conversation, as it was when the user last closed the app.
+   *
+   * 🔴 THE SESSION ID COMES BACK WITH IT, AND THAT IS THE WHOLE POINT. `currentSessionId` used to be
+   * a fresh `Date.now()` on every load while this returned a greeting — so the previous conversation
+   * was not just hidden, it was ORPHANED: the next message opened a new row and History filled with
+   * one-message fragments of a chat the user thought they were still in. Restoring the transcript
+   * WITHOUT the id would have been worse than the bug, duplicating the conversation on every refresh.
+   * `freeChatResume.ts` answers both halves together and both are used below.
+   *
+   * ⚠️ NOT wired into `initialNbiMessages` above, deliberately: that one is what **New chat** uses,
+   * and a New chat button that reopens the old conversation is the fake-button class.
+   */
+  const freeResumeRef = useRef(
+    hasExplicitDestination() ? null : pickFreeChatResume(safeLocalJson<any[]>('navbharat_sessions', []), bootPlaceRef.current),
+  );
+  const bootFreeChatMessages = (): Message[] => freeResumeRef.current?.messages ?? initialNbiMessages();
   const initialProMessages = (): Message[] => {
     try {
       const saved = localStorage.getItem('navbharat_pro_messages');
@@ -454,7 +528,7 @@ export default function App() {
     return [];
   };
   const [messagesMap, setMessagesMap] = useState<Record<string, Message[]>>({
-    nbi_chat: initialNbiMessages(),
+    nbi_chat: bootFreeChatMessages(),
     nbi_pro_chat: initialProMessages(),
   });
   // Backward-compatible derived accessors — all existing code using messages/proMessages still works
@@ -562,7 +636,11 @@ export default function App() {
   const isSplitChat = false;
 
   const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [currentSessionId, setCurrentSessionId] = useState<string>(() => Date.now().toString());
+  // The resumed conversation's OWN id — see `bootFreeChatMessages` for why the two must travel
+  // together. With nothing to resume this is `Date.now()`, exactly as before.
+  const [currentSessionId, setCurrentSessionId] = useState<string>(
+    () => freeResumeRef.current?.sessionId ?? Date.now().toString(),
+  );
   // Pro App Builder chat needs its own session id — it must never share/overwrite
   // the Free (NBI) chat's session document.
   // G1.2: persist in localStorage so the same ID survives a browser refresh,
@@ -857,6 +935,32 @@ export default function App() {
   const [githubRepoContext, setGithubRepoContext] = useState<any>(() => safeLocalJson<any>('navbharat_gh_context', null));
 
   // theme persistence → handled inside useSettings() hook
+
+  /**
+   * REMEMBER WHERE THE USER IS — the write half of "wahi se start ho".
+   *
+   * 🔒 THE GUARD LIVES IN `lastPlace.ts`, NOT HERE. This fires on every view change, including
+   * Settings, Admin and the App Store; `recordLastPlace` ignores anything that is not a
+   * conversation. Deciding it at the call site would mean a screen added next year silently becomes
+   * somewhere the app can drop people into on launch.
+   *
+   * The title is the current conversation's own, so the Home card can say what it is resuming
+   * rather than "Continue" with no object.
+   */
+  useEffect(() => {
+    const title = sessions.find((x) => x.id === currentSessionId)?.title;
+    recordLastPlace(
+      placeStore(),
+      {
+        view: activeView,
+        at: Date.now(),
+        ...(activeView === 'nbi_chat' && currentSessionId ? { sessionId: currentSessionId } : {}),
+        ...(activeView === 'nbi_pro_chat' && currentProSessionId ? { sessionId: currentProSessionId } : {}),
+        ...(title && title !== 'New Conversation' ? { title } : {}),
+      },
+      RESUMABLE_PROFESSIONALS,
+    );
+  }, [activeView, currentSessionId, currentProSessionId, sessions, RESUMABLE_PROFESSIONALS]);
 
   const togglePin = (sessionId: string) => {
     if (!user) return;
@@ -1362,6 +1466,36 @@ export default function App() {
     
     setActiveView(view);
   }, [user, openTabs, activeView, addLog, setShowAuth]);
+
+  /**
+   * The login-gated half of the same decision, run once auth has actually answered.
+   *
+   * `bootLanding` above is computed with `signedIn: false` because Firebase has not replied at mount,
+   * so a Pro or Doctor conversation is never resumed there — landing a signed-out person on a login
+   * wall would be the worst possible first frame. When the user turns out to BE signed in, and
+   * nothing else has claimed the screen (they are still on Home, which is where a non-landing boots),
+   * take them the rest of the way.
+   *
+   * ⚠️ ONCE, by ref. Without the guard, signing out and back in — or any later auth refresh — would
+   * yank somebody out of whatever they had since navigated to.
+   */
+  const gatedLandingDoneRef = useRef(false);
+  useEffect(() => {
+    if (gatedLandingDoneRef.current) return;
+    if (!user) return;
+    gatedLandingDoneRef.current = true;
+    const place = bootPlaceRef.current;
+    if (!place || !needsSignIn(place.view)) return;
+    if (activeView !== 'home') return; // the user already went somewhere; their choice wins
+    const landing = decideLanding({
+      lastPlace: place,
+      hasDeepLink: hasExplicitDestination(),
+      signedIn: true,
+      professionalIds: RESUMABLE_PROFESSIONALS,
+      now: Date.now(),
+    });
+    if (landing) toggleTab(landing.view as ViewType);
+  }, [user, activeView, toggleTab, RESUMABLE_PROFESSIONALS]);
 
   // Cross-component navigation (billing PR 5): deeply-nested surfaces (e.g. the v5.0 panel inside
   // ProV3Surface, which gets no nav callback) can request a view switch by dispatching
@@ -2458,8 +2592,6 @@ export default function App() {
     setIsAppBuilt, setRestoreUciError, setIsRestoringUci, setResumeUciInputState, setShowContinueModal,
     toggleTab, addToast, addLog, initialFreeChatMessages: initialNbiMessages,
   });
-
-
 
   useEffect(() => {
     // Check and restore saved layout/project state if returning from OAuth

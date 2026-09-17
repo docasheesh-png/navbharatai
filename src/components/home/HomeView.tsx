@@ -61,6 +61,13 @@ interface HomeViewProps {
   theme: ThemeMode;
   user: any;
   onShowLogin: () => void;
+  /**
+   * The person's own recent conversations — Free, Pro and the professionals in one list.
+   *
+   * Passed IN rather than read here: Home is a presentational screen, and the three stores these
+   * rows come from are already read (and merged, and ordered) in one place. A second reader on this
+   * screen is how two surfaces start disagreeing about what "recent" means.
+   */
 }
 
 const PRODUCT_CARDS = [

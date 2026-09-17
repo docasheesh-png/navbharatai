@@ -19,6 +19,7 @@
 // The parser is PURE and exported, so every rule below is tested without a DOM.
 
 import React from 'react';
+import { isNativeApp, openExternalUrl } from './mobileNative';
 
 export type LinkPart =
   | { kind: 'text'; value: string }
@@ -109,6 +110,40 @@ export function splitLinks(input: string): LinkPart[] {
 }
 
 /**
+ * On the Android/iOS shell, send the link to the REAL browser instead of the app's own WebView.
+ *
+ * 🔴 WHY THIS ONE FILE MATTERS MORE THAN THE OTHER 44 (2026-09-17). `LinkedText` is what renders EVERY
+ * link EVERY NavBharatAI AI hands a user — all ~70 Professionals (`ProfessionalChat`), Doctor AI
+ * (`SDAChat`) and NavBharatAI Pro (`FoldableMessage`). A bare `target="_blank"` inside a Capacitor
+ * WebView does not open Chrome: it navigates IN PLACE or opens a chromeless child view with no address
+ * bar and no obvious way back, so a user who taps a source link an AI gave them is stranded inside
+ * what still looks like NavBharatAI. `openExternalUrl` passes `_system`, which hands it to the real
+ * browser.
+ *
+ * ⚠️ THE ANCHOR STAYS AN ANCHOR, deliberately. Replacing it with a button would cost long-press →
+ * "Copy link address", the URL preview on hover, and the fact that a screen reader announces it as a
+ * link. So the href is untouched and only the CLICK is redirected.
+ *
+ * EXPORTED because Doctor AI does not use `LinkedText` — it renders model text through
+ * `ReactMarkdown` with its own anchor component (`SDAChat.tsx`), and carried the identical defect.
+ * Its links are MEDICAL SOURCES, so being stranded in a chromeless WebView matters most there. One
+ * handler, both renderers — a second copy would drift the first time either changed.
+ *
+ * ⚠️ AND ONLY ON NATIVE. On the web the existing `target="_blank" rel="noopener noreferrer"` is
+ * already correct, and intercepting there would break ctrl/cmd-click and middle-click into a new tab
+ * and could meet a pop-up blocker. A modified click (the user asking for a new tab/window themselves)
+ * is never intercepted either.
+ */
+export function openInRealBrowser(href: string) {
+  return (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (!isNativeApp()) return;
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    openExternalUrl(href);
+  };
+}
+
+/**
  * Render text with its URLs as real links. Drop-in for a `whitespace-pre-wrap` bubble: it emits plain
  * strings and anchors, nothing else, so existing layout and wrapping are unchanged.
  */
@@ -123,6 +158,7 @@ export function LinkedText({ text, linkClassName }: { text: string; linkClassNam
             href={p.href}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={openInRealBrowser(p.href)}
             className={linkClassName ?? 'text-indigo-400 underline underline-offset-2 break-all hover:text-indigo-300'}
           >
             {p.label}

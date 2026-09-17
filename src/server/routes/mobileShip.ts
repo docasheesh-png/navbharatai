@@ -687,6 +687,13 @@ export function registerMobileShipRoutes(app: Express): void {
      * The real log excerpt travels with it: a summary alone would make v5 guess at the same error the
      * compiler already named exactly.
      */
+    /** `detail` as readable lines. A list value is joined, because a list is what `missing` holds. */
+    const detailLines = (detail?: Record<string, string | string[]>): string[] => {
+      const entries = Object.entries(detail || {});
+      if (entries.length === 0) return [];
+      return ['', ...entries.map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)];
+    };
+
     const failureReport = (): string => {
       const step = failedStepSection(normalizeLog(log)).trim();
       const excerpt = step.split('\n').slice(-60).join('\n').slice(0, 6000);
@@ -694,7 +701,14 @@ export function registerMobileShipRoutes(app: Express): void {
         `${ANDROID_BUILD_FIX_PREFIX} Please fix the app code so it builds.`,
         '',
         `What stopped it: ${diag.summary}`,
-        ...(diag.detail ? ['', diag.detail] : []),
+        // 🔴 THIS USED TO PUSH THE OBJECT ITSELF INTO A STRING ARRAY. `join('\n')` then stringified
+        // it, so the prompt handed to the AI that repairs the user's app carried the literal text
+        // `[object Object]` where the one useful fact — the package that does not exist, the
+        // directory Capacitor wanted — was supposed to be. TypeScript could not catch it: the array
+        // widens to `(string | Record<…>)[]` and `join` accepts anything. Found while widening
+        // `detail` to hold lists, which would have made the same line print `[object Object]` for a
+        // second reason.
+        ...detailLines(diag.detail),
         '',
         'The build log said:',
         '```',

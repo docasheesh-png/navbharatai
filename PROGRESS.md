@@ -60061,6 +60061,531 @@ broken behaviour"; the broken behaviour is what was removed.
 4. Sandbox 84% idle across a 39.8-minute session.
 5. `AGENTV3_PROJECT_MODE` — admin-only, Cloud Run.
 
+## 2026-09-17 — Published apps on My Profile, and on the admin's view of a user
+
+Admin: *"jab user my profile par click kare … kitne app published huyi hai woh bhi dikhe, waha direct
+us app ko open karne ka button ya link ho, aur app ek new page me open ho (chrome ke new page me) …
+sath hi jab admin kisi user ki profile dekhe, to waha bhi woh list dikhe, app open admin bhi kar sake."*
+
+### 🔎 Neither half needed a new server route — and that is the finding, not a footnote
+
+The redundant-work check (safeguard #6) found BOTH data sources already shipped:
+
+- **The owner's side:** `GET /api/agentv3/my-published-apps` has listed the caller's own live apps,
+  with cap and plan, for some time. Its ONLY consumer was `AgentV3Panel` → the Publish sheet → Host on
+  NavBharatAI → a button — four taps deep inside the Pro builder, invisible to anyone not mid-build.
+- **The admin's side:** `GET /api/admin/users/:uid/account` already returned `publishedApps.rows`,
+  each with its url. **The dashboard printed the COUNT and threw the rows away.**
+
+What was missing was never data. It was a screen. Had the search stopped at "does a published-apps
+list exist?", this would have been a second endpoint and a second list.
+
+### Shipped
+
+- **`src/lib/publishedAppsView.ts`** — one normaliser, because the two endpoints disagree: the
+  owner's pre-filters to live apps and drops `status`; the admin's returns every record with it.
+  🔒 A stored URL is validated to http(s) before a row is allowed to offer an Open button — the admin
+  sheet renders whatever is stored against somebody's account, and a `javascript:` address would
+  otherwise become a link an admin is invited to click. Nothing writes one today, which is exactly
+  the assumption a validator is for. An UNRECOGNISED status reads as `held`, never as live.
+- **`src/components/profile/PublishedAppsCard.tsx`** — one component, two screens. Built shared on
+  purpose: separately, an admin would eventually see six apps where the owner sees four and neither
+  would know which screen was wrong. The real differences (status badges, non-live rows) are props.
+- **`ProfilePage`** — "Your Published Apps", above the wallet. `null` ≠ `[]`: "could not read" and
+  "you have none" are opposite statements to make to somebody about their own work.
+- **`AdminDashboard`** — the same card on the account sheet, with statuses.
+
+### 🔴 A wrong number on the screen used to judge an account
+
+`publishedApps.count` is every deployment RECORD, and the sheet printed it under the words
+**"N published apps live"**. An account with four apps of which three were taken down read as four
+live apps — and the copy-to-clipboard summary said the same. The server now sends `liveCount`,
+computed over every row with `isLiveDeployment` (**not** derived from `rows`, which is truncated to
+20 and would under-report a heavy account), and a capped list says so on screen.
+
+### Sibling hunted, and the wider class recorded rather than half-swept
+
+The Publish sheet's own list opened an app with a bare `<a target="_blank">`, which on the Android
+shell opens inside NavBharatAI's own WebView — exactly what *"chrome ke new page me"* rules out. It
+now uses `openExternalUrl` (`_system` on native, scheme re-validated, `noopener,noreferrer` on web),
+the same helper both new screens use.
+
+🔴 **OPEN ROOT CAUSE (rule 6): 45 bare `target="_blank"` links remain across 24 files.** Every one has
+the same defect on the native shell. That is a repo-wide sweep with its own risk surface, not
+something to bury in this change — recorded here so it is a decision rather than an oversight.
+
+Tests: `publishedAppsView.test.ts` (21, the URL guard reversion-proven) ·
+`publishedAppsWiring.test.ts` (13). `AppKnowledgeBase` updated in the same change.
+## 2026-09-17 — "wahi se start ho": the app reopens your conversation, and your conversations are on Home
+
+Admin, verbatim: *"navbharatai free, me free chat ke sath bahut sare, professionals bhi hai — kuch aisa
+system banao, ki user last session jaga chore, next time wahi se start ho!! aur old session kis button ke
+piche hide na ho."*
+
+### What the audit found (read out of the code, not inferred)
+
+| Surface | Transcript saved? | Screen resumed next visit? |
+|---|---|---|
+| Free chat (`nbi_chat`) | ✅ `navbharat_sessions` + Firestore (signed-in only) | ❌ **no** — `initialNbiMessages()` returned a welcome line or the language picker |
+| Pro chat (`nbi_pro_chat`) | ✅ `navbharat_pro_messages` | ✅ transcript only, and only if you navigated there |
+| ~70 professionals | ✅ `prof_<id>_messages` | ✅ per professional, on mount — if you navigated there |
+| the app itself | — | ❌ `activeView` always initialised to `'home'` |
+
+🔴 **The worst of it was not the missing transcript — it was `currentSessionId = Date.now()` on every
+load.** The previous free conversation was not hidden, it was ORPHANED: the next message opened a new
+session row, so a user's History filled with one-message fragments of a chat they thought they were still
+in. **Restoring the messages alone would have been worse than the bug** — App.tsx's save effect writes
+`messages: <what is on screen>` back into the saved session, so a resume that showed the old transcript
+would have copied it into a new row on every refresh. The transcript and the id had to come back together.
+
+### Shipped
+
+- **`src/lib/lastPlace.ts`** — one memory, five rules, each with its reason: an explicit URL always wins
+  (a guess never overrides a statement, which is what would have broken every share link); a login-gated
+  place is never landed on while signed out (no login wall as frame one) and is **not** consumed, so
+  signing in resumes it; a place older than 30 days is left alone; a place stamped in the FUTURE still
+  resumes (the clock is wrong, the conversation is real); and the "is this a conversation?" guard lives in
+  the module, not at App's call site. Carries a small cross-surface **activity ledger**, because Free/Pro
+  sessions, ended professional chats and LIVE professional chats share no clock — deliberately a separate
+  key, never a field added to `prof_<id>_messages`, which is the only copy of a user's professional history.
+- **`src/lib/freeChatResume.ts`** — which conversation the Free chat is continuing, and what of it. The
+  live half is carried in FULL (see above); only the already-collapsed `restoredMessages`, which nothing
+  rewrites, is trimmed to 40. `isFreeSession` is a NEGATIVE test on purpose, so a session from an older
+  build resumes rather than silently vanishing.
+- **`src/lib/recentConversations.ts` + `components/home/RecentConversations.tsx`** — "Continue where you
+  left off" on Home: Free, Pro, Doctor and every professional in one ordered list, no button, no menu.
+  Renders nothing at all when there is nothing. A conversation with no known time shows **"Ongoing"**,
+  never a fabricated date.
+- **App.tsx** — boot landing (URL first, then the remembered place), a gated-landing effect that finishes
+  the job once Firebase answers (once, by ref, and only while the user is still on Home), the record
+  effect, and the Home list computed from LOCAL stores only so it paints on the first frame.
+
+🔴 **A "Recent Chats" block was built and REMOVED at the admin's request on 2026-07-01** (`ca8b6786`,
+*"isko hata do, koi matalb ka nahi hai"*). That is recorded in `recentConversations.ts` rather than quietly
+re-added. What was removed sat at the bottom of the hamburger menu — behind a button, inside a menu, under
+the navigation, half the rows titled "New Conversation", resuming nothing. The admin was right.
+
+🔴 **AND ITS `AppKnowledgeBase` ENTRY WAS STILL THERE — stale for two and a half months.** Line 347 told
+every AI in the app to send users to a "Recent Chats" section of the ☰ menu that has not existed since
+July, and the Pro entry cross-referenced it. Found by the mandatory AppKnowledgeBase check; both corrected
+here. Anyone who asked an AI "meri purani chat kahan hai?" since 2026-07-01 was given directions to a
+menu item that was not there.
+
+### Gate
+
+Two real defects in my own work were caught before push and fixed in the CODE, not the test:
+1. the `slice(-40)` described above, which would have **deleted** every turn older than the last forty in
+   every conversation the feature resumed (reversion-proven by `freeChatResume.test.ts`);
+2. `group-hover:text-white/60` with no `theme-compat.css` remap — white-on-white on the two light themes,
+   caught by `themeAlphaRemap.test.ts`.
+
+Tests: `lastPlace.test.ts` (30) · `freeChatResume.test.ts` (16) · `recentConversations.test.ts` (24) ·
+`resumeWiring.test.ts` (16). Full CI-equivalent gate run last, on the final state.
+## 2026-09-17 — the project-mode gate never said whether it was on, and that cost a real setup attempt
+
+The admin was asked to canary Software Project Mode on their own account. They set it, in good faith,
+to `doc.asheesh@iclod.com` — one character short of `icloud.com`. `projectModeEnabled` matches EXACTLY
+(lower-cased, no normalisation, no typo tolerance), so that value is `false` for ever.
+
+**The gate recorded NOTHING, on either branch.** So the only way to discover the typo was to send a
+mega-prompt and notice that nothing happened — and that symptom is identical to three other causes:
+
+1. the prompt was below `detectMegaProject`'s deliberately-high threshold,
+2. the mega-app roadmap (default-ON, needs no key) took the build first and project mode stood down,
+3. the feature is broken.
+
+**Four causes, one symptom: silence.** This repo has already paid for that exact shape twice —
+`E2B_USD_PER_HOUR` charged half the real rate for a month with nothing failing anywhere, and
+`ALERT_EMAIL_FROM` read as configured while the provider rejected every send. Both were fixed the same
+way: not by changing the decision, but by making the decision SAY ITSELF.
+
+### The fix
+
+`projectModeDiagnosis()` (`ProjectPlan.ts`, pure) returns one admin-report line naming which of the five
+states the build was in — `not-configured` · `account-not-on-allowlist` · `pre-empted` ·
+`not-a-new-build` · `below-threshold`, or `null` when project mode genuinely took the build. Recorded as
+`PROJECT_MODE` from `routes/agentv3.ts` **before** the gate branches, so a SKIP is explained too — a
+record inside the `if` would only ever explain the branch that ran, i.e. would say nothing in exactly the
+case that needs explaining.
+
+Two details that are not decoration:
+
+- **The identity is MASKED** (`doc***@icloud.com`). `userFacingReport` keeps every issue's `detail`
+  verbatim — it strips provider names and nothing else — so this text can reach the build's own user.
+  That is their own address, so there is no cross-user leak by construction; masking is the second lock.
+  Enough survives to spot a wrong domain, which is the only reason the identity is printed at all.
+- **`enabled` is answered by the REAL gate**, not by a second copy of its rules: `projectModeDiagnosis`
+  calls `projectModeEnabled` with the raw flag. A re-implementation would be free to disagree with the
+  branch the build actually took.
+
+### The 50/50 half — why the problem could arise at all
+
+The thresholds lived only inside `detectMegaProject`, so any explanation of them had to be re-derived.
+`megaProjectSignals()` is now the one place they live and `detectMegaProject` is literally its `fires`
+field, with `MEGA_SCALE_MIN` / `MEGA_BULLETS_WITH_NOUN` / `MEGA_BULLETS_ALONE` named so the report quotes
+the real numbers. **No behaviour change** — a test asserts the two agree across six prompts. This matters
+because four ladder comments in this repo once described a rung that no longer existed, and neither `tsc`
+nor `vitest` can read a comment.
+
+### Tests
+
+`tests/projectModeVisibility.test.ts` — 22 cases, built from the real incident (the `iclod.com` value,
+the admin's own school-ERP test prompt). Three guards proven by REVERSION, each failing exactly one
+targeted test: un-masking the identity, moving the record inside the `if`, and giving `detectMegaProject`
+a drifted second copy of the rules.
+
+⚠️ **Process note, recorded because it cost real work.** Reversion-proving was run on UNCOMMITTED
+changes and `git checkout <file>` discarded them — both source edits had to be rewritten from scratch.
+Safeguard #4 ("commit small, commit often") is not only about credit cutoffs: **commit before testing a
+guard by breaking the code.**
+
+### Still open (rule 6)
+
+1. **The key itself is admin-only.** Nothing here enables project mode — it only makes the gate's answer
+   visible. The recommended value lists both known admin addresses, since the gate reads the SIGN-IN
+   email and an Apple/developer-account address need not be the same one.
+2. **A pre-existing plan is reported as `not-a-new-build`**, which is honest but coarse: telling
+   "a plan exists and is waiting for a continuation" apart from "this is an edit" would need a plan load
+   before the gate, i.e. a Firestore read on every build. Deliberately not paid for.
+
+## 2026-09-17 — the evidence ledger's READ half: the sibling the typecheck fix left behind
+
+Continuing the ChatGPT-sourced reliability review (adapted, not transcribed — external-suggestion rule).
+Its §11/§16 argument is that a release gate must read real evidence rather than its own private signal.
+That is not a new idea here: it is the **open root cause** recorded from autopsy `697b38ee`, whose exact
+words are *"there is no shared EVIDENCE LEDGER… the gates trust only their own."*
+
+🔎 **AND HALF OF IT WAS ALREADY FIXED, WHICH THE SEARCH ONLY FOUND BY LOOKING PROPERLY.** On 2026-09-16
+`typecheckEvidenceFromCommands` (`TscGate.ts`) closed the typecheck case exactly right — it reads the
+build's own command log and fills the gate's evidence when the deterministic gate never ran. **It was
+wired at ONE call site, for ONE fact.** The same autopsy's `tests` case is the identical defect with the
+identical cure, and nothing read it: that report's release gate told the user the app *"has no test suite
+that could be run here"* about a build whose own Playwright suite the agent had installed, run, and
+PASSED — with the passing run sitting in the same report's command log.
+
+That silence was structural, not incidental: `gateEvidence.tests` is written **only** by the vaccine
+pass, which is flag-gated, percentage-gated, and skipped entirely on a build not yet marked `ok`.
+
+### The fix — the generalisation, not a third one-off
+
+`src/server/AgentV3/agentRunEvidence.ts` (pure) is the ONE place a gate asks *"what has already been
+proven?"*. `typecheck` **delegates** to the existing implementation rather than being re-derived — a
+second copy of a verdict is a second copy free to disagree. `testsEvidenceFromCommands` is the new half,
+parsing with the **same** `parseTestOutcome` the vaccine trusts. Read through
+`buildDiag.agentRunEvidence()`, wired once at the release-gate assembly, filling only evidence still at
+`not-run`.
+
+Discipline inherited deliberately from the typecheck harvester: `undefined` means "the log does not
+settle this", never a silent promotion; latest wins; the OUTPUT is parsed rather than the exit code (a
+piped run reports the last stage's code); and **a run that could not EXECUTE is evidence of nothing in
+either direction** — blaming a user's app because our sandbox lacked a browser binary is the Shiv
+Medical Store mistake and must not return through a fallback.
+
+🔒 **CHECKED, NOT ASSUMED — this cannot cost a user money.** A RED release gate flips a build to
+`ok: false` (and therefore FREE) only when `shippingIssueCount('error') > 0`, and test evidence
+contributes nothing to that count; the verdict-correction block says so in its own words. So `passed`
+can only move the gate UP and `failed` only makes the sentence honest.
+
+### Two bugs the tests caught in my own code
+
+1. **`\b--version` never matches anything.** Between a space and a `-` both sides are non-word
+   characters, so the whole flag exclusion was dead and `npx jest --version` was classified as a jest
+   RUN. Flags are now anchored on whitespace.
+2. **A file verb reads as a suite run.** `cat src/tests/login.playwright.test.ts` matched the playwright
+   rule on vocabulary alone — the same "contains the word" trap `looksLikeTypecheckCommand` refuses by
+   requiring `--noEmit`. `FILE_VERB` now excludes it.
+
+### Tests
+
+`tests/agentRunEvidence.test.ts` — 20 cases. Three guards proven by reversion: counting a
+could-not-run as a failure, dropping the `FILE_VERB` guard, and letting the fallback override real gate
+evidence instead of filling a gap.
+
+### Still open (rule 6)
+
+1. **The ledger's WRITE half does not exist.** The autopsy's third false statement — `RUNTIME_UNCHECKED`
+   after three successful browser console reads — cannot be recovered from the shell log at all, because
+   that proof is held by the page checks. It needs an actor recording a proven fact, not a reader
+   harvesting one. Deliberately not guessed at here.
+2. `CLAIM_UNSUPPORTED` ("not one file was changed" two seconds before `Incremental: 2 changed, 2 new`)
+   is the same WRITE-half gap.
+---
+
+## 2026-09-17 — APK build-report autopsy (run 34935149896): the keystore half was already fixed; the report telling the truth was not
+
+**The report.** A user (`jilikabegum454@gmail.com`) pressed "Google Play bundle". The run died in
+**13 seconds** at its FIRST step — the signing pre-flight — with
+`Missing signing secret(s): ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS
+ANDROID_KEY_PASSWORD`.
+
+### ✅ The reported failure itself was fixed 22 hours later — stated plainly rather than re-fixed
+
+The run started `2026-09-15T06:01:49Z`. The pre-flight block (#2960) landed on `main` at
+`2026-09-16T04:15Z` and one-press key creation (#2961) at `04:36Z`. **This user hit the exact wall those
+two PRs were written from, before they existed.** Verified rather than assumed: `StoreBuildPanel` really
+does call `/api/mobile-ship/signing-status` before dispatch and return early on a `missing` verdict, and
+`/api/mobile-ship/signing-key` really does mint a PKCS#12 and write all four secrets. Nothing was
+re-built here. The same press today is stopped before it spends a run, and offered the key in one press.
+
+### ❌ But four things in that report were wrong, and three are still live today
+
+**1. THE REPORT CLAIMED NINE STEPS RAN THAT NEVER RAN.** One step `failed`; the other nine — including
+*"Compiling your Android app"* and *"Packaging your download"* — were `done`, in a 13-second run.
+**Root cause:** GitHub's terminal state for a step that never ran is `status: 'completed'` with
+`conclusion: 'skipped'`. `mapRunSteps` consulted `conclusion` for exactly ONE value (`'failure'`) and
+then fell through to `status === 'completed' ? 'done'`, which every skipped step satisfies the moment
+the job stops — and the `BuildReportStep` union had no state that could mean "never ran", so there was
+nowhere truthful to put them even if the branch had existed. Fixed by making CONCLUSION the authority on
+the outcome and `status` only the authority on how far a step got; `'skipped'` added to the union;
+`cancelled` rides the same branch so pressing Stop cannot leave a row of green ticks.
+🔎 **Sibling closed by the same line (rule 3):** `/api/mobile-ship/run-steps` computes `percent` as
+`done / total` over the SAME shared mapping, so the live progress bar was inflating for every skipped
+step too. One implementation, both readers — which is why the fix reaches both.
+⚠️ Collapsed duplicates now keep the STRONGEST signal via an explicit rank. This is a deliberate change,
+not a refactor: the old rule let a `running` sibling overwrite a `failed` one and hide it.
+
+**2. `detail: null` WHILE THE LOG NAMED ALL FOUR SECRETS — the matcher read a sentence nothing prints.**
+`classifyBuildFailure` looked for `Missing required secret: X`. **Grepping the whole repo for that phrase
+returns the regex and its own tests — nothing else.** Every workflow this repo generates prints
+`Missing signing secret(s): A B C D`. So the precise branch (naming the secret, populating `detail`) was
+**dead in production**: it had never fired for a real user, the generic fallback carried every real
+failure, and the four names sat unparsed in the log excerpt beside a null `detail`.
+🔒 **THE CLASS, named so it is recognised again: a matcher written against an INVENTED string and then
+tested against that same invented string passes for ever while reading nothing.** `tsc` and `vitest`
+cannot tell that a regex describes no real system. `signingReadiness.test.ts` had already solved exactly
+this for the secret NAMES ("asserts this list against the names `mobileShipKit` really generates");
+`tests/apkReportTruth.test.ts` now does it for the SENTENCE, rebuilding the line from the kit's own
+template — so a reword of the workflow fails CI instead of quietly returning us to a generic message.
+Now captures ALL names, because a user who fixes one of four and rebuilds fails on the next.
+
+**3. 🔴 THE MESSAGE ON A FAILED BUILD WENT STALE ONE DAY AFTER IT WAS WRITTEN — the costly kind.**
+`StoreBuildPanel` told the user: *"It has to stay yours, so NavBharatAI cannot add it for you — the guide
+below walks through creating it."* True until 2026-09-16. The key **does** still stay theirs (written to
+their own repository's secrets, no copy kept), but *"NavBharatAI cannot add it for you"* became false the
+day one-press creation shipped — and a user who believed it went off to install a JDK and learn `keytool`
+for nothing, on the one screen where they are already stuck. **Same drift shape as the four stale ladder
+comments the admin caught by reading the code on 2026-09-15: a sentence asserting a neighbouring module's
+capability, left behind when that capability changed.**
+Fixed by RAISING the offer rather than describing it: a `MISSING_SIGNING_SECRET` failure now sets
+`signingGap` from `detail.missing`, so the "Create my signing key" button appears with the message that
+promises it. That also closes the one hole the pre-flight cannot cover — a build dispatched while the
+signing check answered `unknown` (a GitHub hiccup) lands here with no gap set, and used to leave the user
+a dead end plus a manual guide.
+
+**4. `[object Object]` IN THE PROMPT SENT TO REPAIR THE USER'S APP (pre-existing, found while widening
+`detail`).** `failureReport()` built its text with `...(diag.detail ? ['', diag.detail] : [])` — pushing
+the OBJECT into a string array, which `join('\n')` stringified. So the one useful fact (the package that
+does not exist, the directory Capacitor wanted) reached the repair AI as the literal text
+`[object Object]`. TypeScript could not catch it: the array widens to `(string | Record<…>)[]` and `join`
+accepts anything. Now rendered as `key: value` lines.
+
+### What stays FALSE on purpose
+
+`autoFixable` remains `false` for a missing signing key. NavBharatAI can now create one, but that flag
+means "repair the repository's FILES and build again unattended" — and a signing key is the app's
+permanent identity, not a file with a mistake in it. Minting one unattended could also land beside a key
+the user already published with, which is the case the create route's own 409 exists to prevent. The
+offer belongs in front of the person, which is where `detail.missing` now puts it.
+
+### Gate + proof
+
+`tests/apkReportTruth.test.ts` (15 cases), **proven by reversion**: restoring the old ternary and the old
+regex fails 8 of them. Neighbouring suites re-run green (160). Full gate below, on the final state.
+
+### Still open
+
+1. **Only `jobs[0]` is ever read** (`mobileShip.ts`, all three call sites). Every workflow the kit
+   generates is single-job, so it is correct today and would silently report one job's steps for a
+   multi-job workflow. Recorded, not speculatively changed.
+2. **`failure.stage` is `null` for any pre-flight failure** — `failedStage` reads a `NBAI_FAILED_STAGE`
+   marker the workflow prints later, so a step that fails before it has no stage. The observed report
+   showed `"stage": "install"` from an older code path; the honest value is "before any stage".
+3. **No test covers a skipped step in `mobileBuildReport.test.ts`'s own suite** — the new file covers it;
+   the older suite still exercises only `queued` and `in_progress`.
+## 2026-09-17 — Journey derivation could not see a form the page COMPOSES (autopsy `e4ebcb5f`, second occurrence)
+
+**Recorded as an OPEN root cause in PR #2988 two days ago; this report is the second occurrence, with
+evidence sharp enough to close it.**
+
+The build was a CHAT app. The agent's own timeline shows it reading `src/App.tsx`,
+`src/components/ChatWindow.tsx` and `src/services/ai.ts`. The report then said:
+
+> `JOURNEY_NOT_DERIVED` — *"No user journey was run — this app has no form for a journey to fill in —
+> nothing here takes user input."*
+
+…and **thirty seconds earlier, in the same report**:
+
+> `ACCESSIBILITY` — *"WCAG 1.3.1: 4 form field(s) with no label"*
+
+**Two of our own scanners, the same files, opposite answers.**
+
+### Root cause
+
+`deriveJourneys` (line ~263) and `noJourneyReason` (line ~360) both read only `files[page]` —
+`inputTags(files[p])`. A React page composes its UI from components, so the `<input>` lived in
+`ChatInput.tsx`, ONE import away, and neither function ever looked. The module's candidate list was
+already shared between the two (a previous fix, for exactly the "the explanation describes a different
+search" class) — but both then narrowed to the page's own text, so sharing the list bought nothing.
+
+### The fix
+
+`formSourcesFor(page, files)` — the page, then the LOCAL components it imports, one level deep, capped
+at `MAX_IMPORTS_PER_PAGE` (12), deterministic order. `resolveLocalImport` handles `./`, `../`, the `@/`
+alias, implicit extensions and `index` files, and returns null for any bare (package) specifier. Both
+call sites now use it, so the derivation and its explanation still cannot describe different searches.
+
+**One level, not a graph walk**: it covers how a page actually composes a form, stays bounded, and
+keeps the result explainable in a report. A test asserts it does NOT recurse.
+
+### 🔒 Why this cannot manufacture a RED gate — checked BEFORE writing it, not after
+
+`journeys` is in `releaseGate`'s `RED_ON_FAILURE`, so a wrongly-failed journey would flip the verdict
+to NOT ok and make the build free — the exact harm the same day's other autopsy was about. Widening
+what gets derived is therefore not a free improvement, and the question had to be settled from the
+runner's code rather than assumed.
+
+It is safe **by construction**: `journeyScript` defaults every journey to `unreachable`, and a missing
+field (`no-fields`) or missing submit (`no-submit`) throws before anything is pressed, leaving that
+default. Only after a submit actually goes through does the script say, in its own comment, *"From here
+on, a failure IS the app's failure"*. So a component that is not rendered on the route yields evidence
+we did not get — never an accusation against the app.
+
+Also deliberate: the journey keeps the **PAGE's** route. A component has none, and `routeForFile` on a
+component's filename would resolve to `/` and drive the browser to the wrong URL — test-locked.
+
+### Tests
+
+`tests/journeySeesFormsInComponents.test.ts` (14), proven by reversion: reverting
+`journeyDerivation.ts` fails 8. The 75 pre-existing journey tests are unchanged and still pass.
+
+⚠️ **One expectation in the new file was mine and wrong, and the code was right.** I asserted a canvas
+game would get the *"a game, a dashboard or a landing page has nothing to save"* wording; it does not,
+because that branch only fires when `pages.length === 0` and the game has an `App.tsx`. It gets the
+"no form for a journey to fill in" sentence instead — which is TRUE for a game. The fix is about which
+apps reach that sentence, not its wording.
+
+### Still open
+
+- The nicer "nothing to save and reload" wording is unreachable for any app that HAS an `App.tsx`,
+  because that branch is gated on `pages.length === 0`. Not touched here: it is a wording question with
+  its own precision risk, and the sentence it falls back to is true in every case that reaches it.
+## 2026-09-17 — Autopsy `e4ebcb5f`: a rendering app was declared NOT READY and made FREE, over three placeholders in the user's own repository
+
+**The report.** Prompt: *"Fix this error and continue building the app: network error"* — an EDIT of a
+GitHub-connected project with **516 source files**, free tier, `glm-4.7-flashx`, 3.2 minutes, 15 model
+calls, **every one of them successful**. Real cost $0.0064; sandbox $0.0089. Billed **₹0**.
+
+The engine read six files, ran a clean `tsc --noEmit`, started the dev server, published a preview,
+screenshotted it, drove a browser action, and wrote **zero files** — its own closing line reads
+`♻️ Incremental: 518/518 file(s) unchanged since the last build (0 changed, 0 new)`.
+
+Then, in this order and all in the same report:
+
+| t+ | What it said |
+|---|---|
+| 125 s | `READINESS_BLOCKER` — *3 fake/incomplete code issue(s) (placeholder / not-implemented / fake data)* |
+| 131 s | `RENDER_RESCUE` — *"the live preview renders cleanly (real-browser verified) — upgraded to success so health, billing and the verdict are honest"* |
+| 133 s | `PROD_BUILD_OK` — *"ready to publish and to package"* |
+| 152 s | `RELEASE_GATE: RED` — *"Not shippable — 1 build-breaking blocker(s)"* |
+| 152 s | `OUTCOME_RELEASE_GATE_RED` — **the render rescue was overturned 21 seconds after it fired** |
+| 169 s | `GREEN_GUARD_SAVE` — *"opened in a real browser and rendered"* |
+| 195 s | *"🛡️ This build did not fully succeed, so it is FREE — no charge."* |
+
+**This is autopsy `4efab9d7`'s class reached through a different door.** That one excluded
+`provider`-phase findings from the gate BY PHASE. This blocker is not a provider finding — it is a
+`readiness` finding, and it is TRUE. It is simply not a fact about *this build*.
+
+### The five-bucket ledger
+
+- ✅ **Self-healed — 3.** `VITE_ENV_TYPES_ADDED` (wrote `src/vite-env.d.ts` rather than spending a
+  repair round discovering it from a compiler error); `AMBIENT_SHIM_REMOVED` (a vendored
+  `claude-code.d.ts` that declared a package it also imported); `RENDER_RESCUE` — **which was then
+  overturned, so it healed nothing.**
+- 🔀 **Worked around — 0.** No fallback, no retry, no escalation. The ladder never left rung 1.
+- ⏭️ **Skipped — 4.** `JOURNEY_NOT_DERIVED`; `TEST_SUITE_UNVERIFIED` (playwright binaries);
+  `RELEASE_GATE`'s *"the typecheck did not run"*; `RELEASE_GATE`'s *"the page-render check … was
+  skipped"*.
+- ❌ **Still broken — 9 unresolved.** 1 × `READINESS_BLOCKER`, 4 × `INTEGRITY_UNUSED_DEP`,
+  `DESIGN_CONSISTENCY` 50/100, `ACCESSIBILITY` 30/100, `RELEASE_GATE` RED, `OUTCOME_RELEASE_GATE_RED`.
+  **Seven of the nine describe code this build never touched.**
+- 🥵 **Struggle — 4.** 13.1 s of sandbox scan inside a 14 s "project check" that restored nothing;
+  23 s `TIME_TO_FIRST_CALL`; the sandbox **90% idle** (2.3 of 2.6 min) and costing more than the model;
+  and the gate/rescue contradiction above.
+
+### Step 2 — the missing subsystem: the readiness gate had no notion of AUTHORSHIP
+
+`assessBuildReadiness` → `evaluate` → `readEvalSnapshot()` lists the **whole workspace** (up to 300
+source files) and `collectAuthenticityIssues` scans every one. Nothing anywhere asks *did this build
+write that file?* The gate was designed for a FRESH build, where the answer is "yes" for everything and
+the distinction is invisible; it was later applied to EDITS, where it is "no" for almost everything.
+
+🔑 **`importTurnObservation` already states the rule, verbatim** — *"A build's `unresolved`/`rootCause`
+must describe what OUR engine failed to do, not tidiness hints about code we were asked only to read"* —
+and keys it on `isImportTurn`, a fact about the TURN. **That was only ever a proxy for the real
+predicate, which is per FILE.** An import turn is the case where the answer is "no" for every file;
+this build was the case where it is "no" for every file *and nobody had generalised it*.
+
+### The fixes
+
+**1 · Authorship-scoped readiness blockers** (`src/server/AgentV3/buildAuthorship.ts`, new + pure).
+`splitByAuthorship` divides per-file findings into ours and pre-existing; the dispatcher blocks only on
+ours and records the rest as an **observation** — reported, never counted. The authored set is the
+route's OWN `writtenFiles`, passed as a thunk (`setAuthoredFiles`), because it is the one set the
+architect, the fast lanes and every sub-agent all feed. A dispatcher-local tally would have missed
+sub-agent writes — the exact hole PR #2988 closed two days ago.
+
+🔒 **The safe direction is "ours".** An UNSET authored set means today's behaviour exactly; a path that
+has not said what it wrote can never disarm a correctness gate. An EMPTY set is a different statement
+and is honoured. A finding with no file stays ours. Case is never folded.
+
+**2 · `severity: 'observation'` on `ExtraFinding`** — priced at **zero**, and that is the point rather
+than a detail. Every penalty comes off ONE 100-point budget and a score under `MIN_READY_SCORE` becomes
+a blocker in its own right, so pricing a pre-existing note at even `low` (2 points) would hand this same
+failure a second door: a large imported repo would be condemned for its own history, the blocker merely
+renaming itself *"readiness score N/100 is below the bar"*. The score-floor blocker also now cites only
+findings that actually cost score.
+
+**3 · The typecheck tool's own evidence** (sibling, rule 5 — honesty). `RELEASE_GATE` said *"the
+typecheck did not run"* 111 seconds after `✓ typecheck (5s)` and the agent's *"the app compiles fine"*.
+`gateEvidence.typecheck` is filled by the G3 gate (which only runs when the build is already `ok` — this
+one was not) with `typecheckEvidenceFromAgentCommands()` as the fallback, and that reads the recorded
+SHELL-COMMAND log. **The `typecheck` TOOL was the one command path that never reported through
+`onCommand`** — `bash`, `run_tests` and the cross-language checks all did. The whole report carried
+exactly one command, `npm run dev`. Recorded now, with `exitCode: null` (the command is piped through
+`head`, so the shell's status is head's) — which also keeps `recordCommand` from filing a clean
+typecheck as a `SANDBOX_CMD_FAILED` error and causing the very failure this autopsy is about.
+
+### Step 5 — the 50/50 half: why did it arise at all?
+
+The gate's blocking behaviour was justified by a premise — *"we wrote this code"* — that stopped being
+true the day it was applied to edits, and nothing forced anyone to re-examine it. The condition is now
+removed at the type level: `ExtraFinding` makes authorship an explicit choice, so a per-file blocker
+added next month must decide which it is rather than inheriting a default nobody stated.
+
+### Tests — every piece proven by reversion
+
+`tests/readinessJudgesOurOwnCode.test.ts` (13) and `tests/typecheckToolReportsItsEvidence.test.ts` (5).
+Reverting `ToolDispatcher.ts` fails 4; reverting the route's `setAuthoredFiles` line fails 1; reverting
+`Readiness.ts` fails 3.
+
+### Still open (rule 6 — recorded, not patched)
+
+1. 🔴 **`journeyCandidates` is blind to forms in components outside `pages|screens|views|routes|app`** —
+   carried over from PR #2988 and **now confirmed recurring**, with sharper evidence than before: this
+   report says *"this app has no form for a journey to fill in — nothing here takes user input"* about a
+   CHAT app whose own `ChatInput.tsx` the agent had just read, **while `ACCESSIBILITY` in the same report
+   found "4 form field(s) with no label"**. Two of our own scanners, same files, opposite answers. Fixing
+   it needs real import resolution, not a wider regex.
+2. 🔴 **The whole-workspace attribution problem is only HALF fixed.** Authenticity is scoped; the readiness
+   SCORE is not. Architecture, security and orphan-component penalties still come off the user's entire
+   pre-existing repo and can cross the floor on their own. Not touched in this pass because each needs its
+   own per-file attribution decision, and guessing would be the "fix A, break X" trade.
+3. 🔴 **The shared EVIDENCE LEDGER (autopsy `697b38ee`) stays open.** Fix 3 closes one named door; the
+   class — gates that trust only their own private notion of what was proven — is unchanged. This report
+   also shows `RELEASE_GATE` claiming the page-render check "was skipped" while `RENDER_RESCUE` and
+   `GREEN_GUARD_SAVE` both recorded a real-browser render.
+4. 🥵 **The sandbox was 90% idle and cost more than the model** ($0.0089 vs $0.0064), and 13.1 s of the
+   14 s project check was a sandbox scan that restored nothing.
 ## 2026-09-17 — Autopsy fdd59ef8: the platform fed the builder its own voice, for the THIRD time
 
 Build `fdd59ef8`, Weak tier, `glm-4.7-flashx`, **76 seconds**, 0 files, ₹0 billed. Its prompt, verbatim:
@@ -60170,6 +60695,78 @@ Tests: `tests/autopsyFdd59ef8Remainder.test.ts` (10 cases), each proven by rever
 
 ---
 
+## 2026-09-17 — Autopsy `e706e068` (School ERP): "3 build-breaking blockers" on an app that had one
+
+**The screenshot the admin sent is the whole finding**: the School ERP login page rendering in the
+preview pane, beside *"Your app is built and saved, but 3 things are still broken… You have NOT been
+charged for this build."* 26.8 minutes, free Weak engine, 40 model calls.
+
+### The timeline, in its own timestamps
+
+| t+ | |
+|---|---|
+| 1251s | `READINESS_BLOCKER` — *1 unresolved import(s) — **the build will fail**: App.tsx -> ./components/TransportRequest* |
+| 1251s | `READINESS_BLOCKER` — *2 fake/incomplete code issue(s)* |
+| 1298s | `TOOL_ERROR` — the agent tries to read `TransportRequest.tsx`; it does not exist |
+| 1406s | `tsc --noEmit` → **exit 0** (the eighth clean typecheck of the run) |
+| **1440s** | `READINESS_BLOCKER` — **the SAME import sentence, byte-identical, recorded a second time** |
+| 1440s | `RENDER_RESCUE` — the live preview renders cleanly, real-browser verified |
+| **1512s** | **`PROD_BUILD_OK` — "The production build succeeded — this app is ready to publish and to package."** |
+| 1593s | `RELEASE_GATE: RED — 3 build-breaking blocker(s)` → `OUTCOME_RELEASE_GATE_RED` → ₹0 |
+
+### Two independent defects produced that "3". The honest number was ONE.
+
+**1 · The same blocker, counted twice.** `record()` collapses only a BACK-TO-BACK repeat — it compares
+against `issues[issues.length - 1]`. These two sat 189 seconds and many entries apart, so both
+survived and `shippingIssueCount` counted both.
+
+**2 · A prediction outlived its own refutation.** *"the build will fail"* is a forecast about
+`npm run build`, derived from the import graph. Seventy-two seconds later the platform RAN that build
+and it SUCCEEDED, on the same tree with no writes in between. Nothing reconciled them, so the falsified
+forecast went on to turn the gate RED and make a rendering, publishable app free.
+
+🔑 **THE RULE: when we have RUN the thing a finding merely predicted, the run wins.** One named door of
+the EVIDENCE LEDGER class (autopsy `697b38ee`), which stays open.
+
+### The fixes
+
+`buildFailurePrediction.ts` (new, pure) + `BuildDiagnostics.resolveBuildFailurePredictions()`, called
+from the prod-build gate with `judgeProdBuild`'s own verdict. Narrow in three independent ways: only a
+claim ABOUT `npm run build`; only a build that genuinely RAN and exited 0; only predictions recorded
+BEFORE it ran. `shippingIssueCount` de-duplicates by `phase|code|message` — every record stays on the
+timeline, only the COUNT changes.
+
+### 🔴 The guard that caught a defect in this very change
+
+`engineEventsNeverBlock.test.ts` has a case named *"the release gate and the health card count with ONE
+predicate"*. It failed on the first attempt — and investigating it produced a third finding:
+
+**it never checked a count.** It asserted both surfaces use the same FILTER EXPRESSION. They did, and
+they still disagreed: `buildHealthCard`'s `messages()` has always de-duplicated by message text, while
+`shippingIssueCount` did not. So on this build the card listed two distinct blocker lines while the
+gate's headline said three. The guard is now behavioural — record the same finding twice, and the gate
+and the card must return the same number.
+
+⚠️ The old assertion pinned the exact `issues.filter(...)` formatting, so it broke when the body
+changed shape even though the predicate was untouched. It now asserts the three-part predicate as a
+conjunction, which is what it was always for.
+
+### Still open (rule 6 — recorded, not rushed)
+
+1. 🔴 **THE NEXT ONE, with fresh evidence: `8b3dca5c` (JEE mock test, same day).** Its ONLY blocker was
+   *"readiness score 38/100 is below the 50/100 bar — **9 component(s) created but never used**:
+   Counter.tsx, FilterBar.tsx, Header.tsx…"* — and those nine are **debris from our OWN abandoned fast
+   lane**, which built a generic Counter/TaskList/ThemeToggle app, failed its typecheck, and handed off
+   to the full builder that then built the real JEE app. `tsc` clean, dev server up, `PROD_BUILD_OK`,
+   `ACCESSIBILITY 100/100`, render verified — RED and ₹0 because of files our own engine orphaned.
+   ⚠️ This is the #2997 open item ("the readiness SCORE is still whole-workspace") with a sharper
+   cause, and it is NOT covered by the authorship fix: the fast lane's files genuinely ARE ours.
+   The upstream (50/50) fix is for an abandoned lane's files not to survive the handoff; the score
+   floor itself exists *because* of orphan components (2026-07-05), so it must not simply be loosened.
+2. 🔴 `PAGE_RENDER_FAILED` says the check "could not be completed for 6 routes", while `RELEASE_GATE`
+   in the same report says it "needs a running app and was skipped" — on a build whose preview was
+   published and render-verified. Two wrong statements in one sentence.
+3. 🥵 Sandbox **87% idle** across 26.6 minutes; 115s before the first model call.
 ## 2026-09-17 — Autopsy of build `af3a3f7f`: a SUCCESSFUL build reported "STOPPED" as its root cause
 
 **The report** (user rajeshkumar00077890@, free tier, 6.8 min, ₹80.50 billed, weak ladder, built by KIMI
@@ -60343,3 +60940,398 @@ other fails CI instead of quietly reappearing as "Other".
 2. **The denominator is LATEST-BUILD-PER-WORKSPACE**, not every build. A user who built successfully
    five times and abandoned a sixth counts as failed, permanently. A true rate needs a per-build series.
 3. `RUNTIME_UNCHECKED` — console capture failing on builds that render, cause unknown.
+## 2026-09-17 — The admin dashboard tells you where the work is, and the AI Engines page stops lying
+
+**Admin, in their own words:** *"us sub header me naam ke sath number bhi chahiye … jisse admin ko ek
+nazar me pata lag jaye, kaha kaam abhi karna hai"* and, in the same message, *"ai engine wale page ko
+bhi update karo, woh fake hai abhi"*.
+
+Both halves were right, and the second one was a real second-absolute-rule breach, not a cosmetic
+complaint.
+
+### 1 · The sub-header counters
+
+Nine tabs, and nothing on any of them said which one needed a person. The admin was opening each page
+in turn to find out. Each tab now carries the pair they asked for:
+
+| Tab | Badge | Source |
+|---|---|---|
+| Monitor | things needing attention | in-memory provider error counters — the SAME figure the Monitor's own health score uses, so the badge and the page cannot disagree |
+| Users | visitors today / registered | `site_analytics` (website + app, one UTC day — the store the "Who came" card is already built on) + `user_token_wallets` |
+| AI Engines | engines that served today / engines holding a key | `agentv3_engine_use` (new, below) + the real tier ladders |
+| Revenue | today / all time | `payment_transactions`, SUCCESS only, today bounded on the SERVER clock |
+| Build / User / APK Reports | never opened / not yet fixed | `reportTriage`'s existing `reportStatus` + `openReportCount` — the words already exist, a second vocabulary is how a badge starts disagreeing with the page it points at |
+
+🔴 **THE ONE RULE THE WHOLE MODULE EXISTS TO ENFORCE: `null` IS NOT `0`.** On this bar a zero is a
+promise — *"I looked, and there is no work here"* — and the admin acts on it by not opening the page.
+Every source behind these numbers can fail (a Firestore read, an instance that just booted, an older
+server mid-deploy), and a failure that silently became a calm zero is exactly the forbidden state: a
+status indicator that does not reflect real state. So `value: null` renders **nothing at all**, a
+*measured* zero still renders, a failed fetch sets `null` rather than an empty payload, and a pair
+whose total could not be read still shows its numerator ("54 people came today" answers the question
+on its own; a denominator alone does not).
+
+Colour means work waiting and nothing else: only an `attention` badge above zero is red. Colouring a
+zero, or colouring healthy activity, is what trains a person to stop seeing colour.
+
+`src/lib/adminTabBadges.ts` is PURE — no fetch, no clock, no env — precisely so that rule is testable.
+`tests/adminTabBadges.test.ts` (19 cases, reversion-proven: making `formatBadge` treat `null` as `0`
+fails 5 of them).
+
+### 2 · The AI Engines page was fake in three separate ways
+
+Not fabricated — **mis-sourced, and one control was inert.** Each is fixed at the cause:
+
+1. 🔴 **The engines it listed are not the engines that build apps.** Every card came from
+   `getProviderStats()`, the CHAT router's counter. GLM and KIMI lead the first rung of all three
+   tiers and do nearly all of the platform's work; they appeared **nowhere** on a page called AI
+   Engines. The root cause is one this repo already knew and had never acted on: every AI number in
+   the admin panel comes from `ai_usage_logs`, **which the chat route writes and an AgentV3 build
+   never touches.**
+2. 🔴 **The status was this instance, since boot**, presented as the platform's — it resets on every
+   deploy and cannot see sibling instances. Worse, a provider with **zero requests** displayed a green
+   *"Healthy"*: the most misleading state a status light can have, because it reads as "checked and
+   fine" when nothing was ever checked. It now reads **"Not used yet"**, grey, with `—` for latency.
+3. 🔴 **THE KILL SWITCHES DID NOTHING.** The panel said *"Disable a provider to prevent new requests
+   from routing to it. Changes take effect immediately on next request."* `serverStats.providerEnabled`
+   is read by exactly two places in the whole repo — the settings route that echoes it back, and the
+   health check that COUNTS it — and by **not one routing decision**. It was also in-memory only, so
+   it could not have survived a deploy or reached another instance even if something had read it.
+   **Removed, not recaptioned** — a button that does not do what it says is the forbidden state, and
+   the fix is never a softer caption.
+
+**What replaces it is what actually decides a build:** the three tier ladders, rung by rung, read from
+`TIER_LADDERS` itself (never re-typed into the route — a second copy is a second thing to drift), each
+rung marked with whether its key is present *in this environment*, each tier marked with the same
+`tierEngineAvailable` predicate the build route refuses on. Beside each rung: how many calls it really
+served today.
+
+Where the switches genuinely are is stated on the panel — `AGENTV3_LADDER_*`, `AGENTV3_CHEAP_FLOOR` in
+Cloud Run — rather than building a second, weaker copy of a mechanism that already exists and works
+across instances and restarts.
+
+### 3 · The missing subsystem, named: nothing recorded which engine served a BUILD
+
+`src/server/AgentV3/engineUseStore.ts` — one document per UTC day, `FieldValue.increment` per engine
+FAMILY. Deliberately patterned on `agentv3_sandbox_starts`, so it adds no new idea and inherits a
+storage shape already proven in production. A per-CALL row would be a second `ai_usage_logs`
+(unbounded, and the very cost this panel exists to watch).
+
+- **Families, not keys.** A 50-key pool reports `GLM`, `GLM#2`, `GLM#17`. Counting those as fifty
+  engines would make "engines used today" a measure of our key list, jumping the day somebody buys
+  keys.
+- **`null` for unreadable, `{}` for a genuinely empty day** — the caller must be able to tell "nothing
+  built today" from "we could not look", because the badge above renders a number for one and nothing
+  for the other.
+- **An observation must never block a build.** Every write is best-effort and swallowed, and the call
+  site is `void recordEngineUse(providerTurns)` at settle, where the fact is already known.
+
+Tests: `tests/aiEnginesPageIsReal.test.ts` (14 cases), reversion-proven — restoring the kill-switch
+panel fails it. One assertion is worth noting for later sessions: every "this is gone" check runs
+against source **with comments stripped**, because the comment that replaced each removed panel names
+it on purpose, and a test that cannot tell an explanation from the thing it explains punishes exactly
+the clarity this file asks for.
+
+### ⚠️ Honest boundaries
+
+- **The Monitor badge counts provider errors since this instance booted**, not a platform-wide total —
+  the load board would be the truer source and was rejected on cost (it calls Cloud Monitoring and the
+  sandbox provider, which is the right price for a page somebody opened and far too much for a header
+  that draws on every visit).
+- **`/api/health`'s "AI engines: N of M available" is now always N = M**, because the only thing that
+  could change it was the inert switch. That count was a hand-set note presented as a health check on
+  a PUBLIC page; it is more honest constant than it was adjustable.
+- **`engines used today` starts at zero on the day this ships** — the store has no history, and
+  backfilling it would mean inventing days nobody measured.
+## 2026-09-17 — Autopsy 2c61f648: "Can I use it. Or how to create apk" built an app for 7.3 minutes
+
+Admin sent build report `2c61f648` (user `vasanthakumar9813@gmail.com`, weak tier, `ok: true`,
+release gate YELLOW, and the user immediately reached for Diagnose/Restart).
+
+### What the user asked, and what they got
+
+The prompt was **`"Can I use it. Or how to create apk"`** — a question about a project they ALREADY
+had (51 source files, a React+Vite trading app with a Flask backend). What ran was a full agentic
+build: **438.7 s wall clock**, ~104 provider calls, 28 deliveries, 569k input tokens, 3 of the user's
+own files rewritten (`index.html`, `README.md`, `tsconfig.json`), and the project left **failing
+`tsc`** (`OUTCOME_TYPECHECK_FAILED` — "type errors remained after the agentic build and one repair
+pass"). Sandbox: 7.3 min up, **6.7 min idle (92%)**.
+
+### 🔴 Root cause — and it is a sibling that was named in this file ONE DAY EARLIER
+
+`readsAsQuestion` only ever examined the message's **opening**:
+
+```
+if (text.endsWith('?')) return true;
+if (WH_OPENERS.test(text)) return true;                     // ^-anchored
+if (AUX_OPENERS.test(text)) return AUX_ASKS_US.test(text);  // ^-anchored, and an EARLY RETURN
+return MIDSENTENCE_KYA_QUESTION.test(text);
+```
+
+For this message: no `?`; `WH_OPENERS` is `^`-anchored so the **"how" in the second sentence was
+invisible**; `AUX_OPENERS` matched the leading "can", and the early `return` handed back
+`AUX_ASKS_US` ("can i" ≠ "can you") — **false** — without any later test running. One sentence
+decided the whole message.
+
+Both halves classify as `chat` on their own. Joined they became **`new_build` at HIGH confidence**,
+and HIGH returns from `classifyIntentSmart` **before the LLM intention reader is ever asked** — the
+exact hard lock the 2026-09-13 "read the mood first" rule exists to remove.
+
+🔴 **`MIDSENTENCE_KYA_QUESTION`'s own comment, written 2026-09-16, states the defect verbatim:**
+*"Every other line in `readsAsQuestion` requires the message to OPEN with a question word."* That
+autopsy unanchored the **Hindi** pattern and stopped; the English siblings were never hunted. This is
+that sibling, failing in production the next day. **Third instance of this meta-pattern in this file's
+history** (cf. `a38c6fef`, `4efab9d7`).
+
+**Fixed structurally, not with another special case:** the openers are applied per CLAUSE
+(`CLAUSE_BOUNDARY`, `clauseReadsAsQuestion`), with leading connectives stripped ("or how…" is the same
+question as "how…"), so no future pattern has to remember to be unanchored. The `AUX_OPENERS` early
+`return` became `&&`, which also made yesterday's Hindi rule reachable for every message opening
+"can i / should i / do i" — it had been dead code for that whole shape.
+
+⚠️ Orders are untouched and verified: "build a notes app", "create apk", "ek billing app banao" stay
+`new_build` HIGH; **"do it again" is still a retry**, not small talk.
+
+### 🔴 The second finding: a prompt rule is a suggestion once the loop is running
+
+`systemPrompt.ts` already carries, verbatim: *"If the user asks how to get their app as a real Android
+file … **answer them, do NOT start building**"* and *"**NEVER** tell them to install Android Studio,
+**use the Capacitor CLI**, or set up GitHub Actions themselves."*
+
+The build ran `npm install @capacitor/core @capacitor/cli @capacitor/android`, `npx cap init`,
+`npx cap add android`, `npx cap sync android` — then discovered at 250 s that **Java is not installed**
+and gave up. At **207.8 s** the model had already said *"NavBharatAI has a built-in APK Builder that
+does exactly this for you"* — it recited the rule and violated it in the same sentence.
+
+**The instruction was correct, present and emphatic, and it lost — because routing had already decided
+the turn was a build.** A loop whose job is to act cannot be talked out of acting by a prompt line.
+This is the 50/50 law's other half: the upstream fix IS the routing fix, and that prompt line should
+never have had to fire.
+
+### The ledger (5 buckets)
+
+- ✅ **Self-healed (2):** `update_todo` malformed call; 4 `<script>` tags without SRI.
+- 🔀 **Worked around (4):** GLM benched at 161 s for answering **4.5× slower than budgeted** (139 s of
+  work our clock sizes at 31 s, over 4 calls) → fell to Kimi; APK built by hand → abandoned, notes
+  written instead; Playwright `COULD NOT RUN` (browsers absent); `npm audit fix` exit 1.
+- ⏭️ **Skipped (5):** journey not derived (no form); e2e scaffold skipped; console not captured
+  (`RUNTIME_UNCHECKED`); peak memory unavailable; page-render check skipped.
+- ❌ **Still broken (4):** typecheck fails; design consistency **50/100 (D)** (31 colours, 37 off-grid
+  spacings); 5 dependency vulnerabilities (1 high); release gate **YELLOW**.
+- 🥵 **Struggles:** the whole build; the 42-second Capacitor detour; ~104 calls for a question; 92%
+  sandbox idle.
+
+### Step 2 — the missing subsystem, named
+
+**There is no SANDBOX CAPABILITY CONTRACT.** The agent spent 208–250 s discovering by trial and error
+three FIXED properties of our own image — no Capacitor, no Java, no Android SDK — that the platform
+knows at build time. Nothing tells the builder what the machine cannot do, so infrastructure limits are
+learned by running commands and failing. Recorded as an OPEN root cause (rule 6): the fix is a
+machine-readable capability block injected into the build prompt, naming both the absent toolchain and
+the PLATFORM FEATURE that covers it.
+
+Tests: `tests/questionReadsEveryClause.test.ts` (16), both halves of the fix proven by reversion.
+Existing `IntentClassifier.test.ts` (73) and every classifier-adjacent suite (497 total) pass unchanged.
+
+## 2026-09-17 — "Download app" sent every visitor to a page they could not open
+
+Admin: *"navbharatai.com par jab koi user sidebar menu me 'download app' button par click karta hai, to
+pata nahi kahan redirect ho jata hai."*
+
+### Root cause — a default that outlived its premise
+
+`src/lib/appDownload.ts` set `DEFAULT_LISTING_URL = INTERNAL_TEST_URL`
+(`https://play.google.com/apps/internaltest/4701220640641478442`). The reasoning beside it was correct
+**at the time it was written**: *"The app is currently in INTERNAL TESTING, so the PUBLIC store listing
+does not exist yet (a public visitor would get 'item not found')."*
+
+The app reached **production on Play on 2026-08-25** (release 91 — `ANDROID_LATEST_VERSION_CODE`). The
+premise changed; the default did not. An internal-test opt-in link opens for nobody except the ≤100
+testers the admin added by hand, so every ordinary visitor tapping the button landed somewhere useless —
+exactly the "pata nahi kahan" the admin saw.
+
+### ⚠️ The escape hatch the old comment promised could not be used
+
+It said the migration needed *"no code change — just point `VITE_PLAY_LISTING_URL` at the public
+listing"*. **That was false.** `import.meta.env.VITE_*` is frozen when the Docker image is BUILT, and
+**neither `VITE_PLAY_LISTING_URL` nor `VITE_APK_DOWNLOAD_URL` is passed as a build `ARG`** — verified
+against `Dockerfile` and `cloudbuild.yaml`, which pass only `VITE_PREVIEW_ORIGIN`. Setting either in
+Cloud Run changes NOTHING, with no error anywhere to reveal it: the same silent-drift class this file
+already records for `VITE_META_PIXEL_ID`.
+
+So the **code default is the only value that can reach a user today**, which is why the fix is the
+default itself rather than a configuration note. Wiring an override up later is a deliberate four-line
+change (an `ARG`+`ENV` pair in `Dockerfile`, a `--build-arg` and a substitution in `cloudbuild.yaml`),
+named in the module header so nobody re-derives it — and so nobody "fixes" this again by setting a Cloud
+Run variable that cannot reach the browser.
+
+### The fix
+
+`DEFAULT_LISTING_URL = PUBLIC_LISTING_URL`
+(`https://play.google.com/store/apps/details?id=com.navbharat.ai`), and **`INTERNAL_TEST_URL` is DELETED
+rather than demoted** — a constant sitting one assignment away from being the default again is how this
+bug returns (the 50/50 law: make the wrong branch impossible, not merely unchosen).
+
+`AppKnowledgeBase.ts` needed no edit: it already told every AI that the button *"opens the Google Play
+listing (com.navbharat.ai)"*. That description was **wrong before this change and is true after it** —
+another quiet instance of the docs describing intended behaviour while the code did something else.
+
+### Tests
+
+`src/lib/appDownload.test.ts` — 10 cases. The guard asserts the **source**, not just the export:
+re-introducing an internal-test URL anywhere in the module fails CI even if nothing assigns it to the
+default yet, and every `play.google.com` URL in the module must be the public listing. Comments are
+stripped first, so the header may keep explaining the incident. Proven by reversion: restoring the old
+default fails 4 of the 10.
+
+## 2026-09-17 — autopsy `e4ebcb5f`: the agent quoting the user's own error became a "problem"
+
+First fix from the two-report autopsy the admin asked for. Investigated with an adversarial fan-out
+(one investigator plus two challengers per finding) precisely because of the standing rule that a fix
+must never trade one problem for another — and on this finding the investigation overturned two of my
+own readings.
+
+### The incident
+
+The user's prompt was *"Fix this error and continue building the app: network error"*. The agent's
+ordinary narration — *"Let me check the current app structure and identify the network error:"* —
+landed in the report's `problems[]` as a WARNING.
+
+Walked boolean by boolean and confirmed by RUNNING the real class: `statusLike` true; the compound
+stripper leaves "network error" alone (it is anchored on "error" FIRST, so a pre-modified noun phrase
+can never match it); `problemWord` true via `\berror\b`; `failureVerb` false; `remediationIntent`
+false (the verbs are "check" and "identify"). So the line was recorded `severity: 'warning'`.
+
+### 🔴 The damage was never cosmetic — three consequences, each now asserted directly
+
+1. **A PHANTOM SELF-HEAL in the admin's first-pass-quality tally.** `AGENT_NOTE` is recorded
+   `autoResolved: true`, and the heal count takes autoResolved warnings (INFO was excluded by the
+   mitrify 2026-08-04 fix — *"a heal tally that counts heartbeats is a green number wearing a lie"* —
+   and WARNING was left in). One sentence of prose was reported as one self-heal on a build that
+   healed nothing. Under the fifth absolute rule a future autopsy would have chased it.
+2. **It could HEADLINE a failed build.** `deriveRootCause`'s `resolvedOnly` fallback is
+   autoResolved-inclusive and fires whenever `ok !== true`, and `AGENT_NOTE` is in neither
+   never-root-cause list. Verified end to end: the rootCause became the agent announcing it was about
+   to look at something.
+3. **It DELETED the line from the user's reopened conversation.** The reopen digest rebuilds the
+   assistant turn from `AGENT_STEP` only — a partial return of the 2026-07-07 *"na chat recover hui"*
+   bug. The more the agent discussed the user's own reported error, the more of the story vanished.
+
+✅ **No billing or release-gate impact**, checked rather than assumed: `shippingIssueCount` requires
+`!autoResolved`, and `AGENT_NOTE` is `autoResolved: true` unconditionally.
+
+### The fix — the structural signal was already wired and never read
+
+`meta.prompt` (the user's own words, set at construction, `readonly`) was consulted only during
+serialisation. `narrationEchoesPromptSymptom(text, prompt)` asks whether EVERY problem word in the
+narration is one the user themselves wrote, and the classifier now skips such a line — gated on
+`!failureVerb` exactly as `remediationIntent` already is, so *"The dev server FAILED to start — port
+5173 error."* stays an error even when the prompt says "error".
+
+`every`, not `some`: a mixed line ("the network error is back and the preview is not responding")
+carries a word the user never wrote and stays a problem.
+
+### ⛔ Two traps found by measurement, both pinned by tests
+
+1. **DO NOT add `s?` to the problem-word list.** `\berror\b` does not match "errors", so the verdict
+   flips on grammatical number — almost certainly accidental (the stripper one line below writes
+   `errors?[- ]`). But six realistic narration lines were measured against the widened list and ALL
+   SIX newly flagged as problems. The plural blindness is currently a noise filter suppressing roughly
+   half this class. Widening it is a separate change needing its own evidence.
+2. **`.test()` on a `/g` regex is STATEFUL** — measured true/false/true on one string. The hoisted
+   word list therefore yields TWO regexes: a non-global one for the classifier's `.test()` and a
+   global one used only via `.match()` inside the helper.
+
+### The honest cost, stated rather than omitted
+
+If the user's prompt happens to contain the same problem word as a genuine engine failure that carries
+no failure verb, that failure is downgraded to a step. Bounded by three things — no failure verb,
+EVERY word must be one the user wrote, and the engine's real failures are recorded independently by
+the structured recorders (`BUILD_ERROR`, `TOOL_ERROR`, `SANDBOX_CMD_FAILED`, `PROVIDER_FALLBACK`),
+none of which this touches. Worth it, but it is a trade.
+
+Also out of scope, honestly: the prompt is per-turn, so a user who reports the error once and then
+types only "continue" is not covered.
+
+### Tests
+
+`tests/narrationEchoesPrompt.test.ts` — 12 cases; the existing 169 in `BuildDiagnostics.test.ts` are
+untouched and still pass. Four guards proven by reversion: deleting the clause (5 fail), `some`
+instead of `every` (2), the global regex at the classifier (1), adding `s?` (1).
+
+⚠️ **The stateful-regex guard took THREE attempts, and the first two are recorded because they are the
+lesson.** Draft 1 exercised only the helper (which uses `.match()`, never stateful) and passed with the
+bug installed. Draft 2 sent the same line three times — identical narrations DEDUPE into one issue with
+`repeatCount: 3`, so it failed against correct code as well. Only after measuring the real behaviour
+(three DISTINCT lines → three separate notes) did it bite. **A guard written from a guess is not a
+guard; it has to be measured against the code it guards.**
+## 2026-09-17 — Every link every AI gives a user now opens in the real browser on Android
+
+Admin asked what else was worth upgrading. Measured rather than guessed: **45 bare `target="_blank"`
+links remain across 24 files** (the open item recorded with PR #3000), and **one of them carries more
+of the product's real link traffic than the other 44 combined**.
+
+`LinkedText` (`src/lib/linkify.tsx`) renders the links in every reply from ~70 Professionals
+(`ProfessionalChat`) and NavBharatAI Pro (`FoldableMessage`). Inside a Capacitor WebView a bare
+`target="_blank"` does not open Chrome — it navigates in place, or opens a chromeless child view with
+no address bar and no obvious way back. A user who taps a source link an AI handed them is stranded
+inside what still looks like NavBharatAI.
+
+**Fixed:** the click is handed to `openExternalUrl` (which passes `_system` on native), and three
+properties are pinned by tests because each would be quietly lost by an "obvious" simplification:
+- 🔒 **it is still an `<a href>`** — a button would cost long-press → "Copy link address", the hover
+  URL preview, and the announced screen-reader role. Only the CLICK is redirected;
+- 🔒 **the web path is untouched** — intercepting there would break ctrl/cmd-click and middle-click
+  into a new tab, and could meet a pop-up blocker;
+- 🔒 **a modified click is never intercepted** — the user asking for a new tab themselves is honoured.
+
+🔴 **SIBLING HUNTED, and it was the one that matters most.** My first draft asserted all three AI
+surfaces render through `LinkedText`. **The test failed, and it was right to:** Doctor AI does NOT —
+`SDAChat.tsx` imports only `isSafeHttpUrl` and renders model text through `ReactMarkdown` with its own
+anchor component, carrying the identical defect. **Its links are medical sources**, so being stranded
+in a chromeless view matters most exactly there. Both renderers now share ONE exported handler rather
+than a second copy that would drift.
+
+Tests: `tests/aiLinksOpenInBrowser.test.ts` (7, proven by reversion — removing the native guard fails
+the web-path test, removing the onClick fails two more). The existing `linkify` suite (12) passes
+unchanged.
+
+⚠️ **Still open:** the remaining ~43 bare `target="_blank"` sites (admin panels, settings, the store,
+the Pro panel). Lower traffic and mostly admin-facing, so they stay a recorded sweep rather than a
+rushed one.
+---
+
+## 2026-09-17 — "Continue where you left off" REMOVED from the home screen (admin, same day it shipped)
+
+**Admin, urgently:** *"yeh aaj banaya gaya hai, isko abhi hatao. jaldi delete karo!!! … maine kaha tha,
+jab koi user navbharatai free, navbharatai pro koi chat open kare to use last chat jahan se chori thi
+wahi se dikhna chahiye … homepage se isko pura hatao."*
+
+**PR #2996 shipped TWO things under one title** — *"the app reopens your conversation, and your
+conversations are on Home"*. Only the first was asked for. The second put a list of every past
+conversation on the front page of the product, which is not what "open a chat and see where you left
+off" means, and the admin saw it the day it landed.
+
+**Removed (the home list):** `components/home/RecentConversations.tsx`, `lib/recentConversations.ts`,
+`tests/recentConversations.test.ts`, the `HomeView` section and its two props, and the `homeRecents` /
+`openRecentConversation` block in `App.tsx`. Four now-unused imports went with them —
+`readProfessionalHistory`, `resumeArchived`, `readPlaceActivity`, `buildHistoryIndex` — because an
+unused import keeps its whole module on the load path (`scripts/noUnusedImports.mjs` caught all four).
+
+**KEPT, deliberately — this is the half the admin actually asked for:** `lib/lastPlace.ts` and
+`lib/freeChatResume.ts` are untouched, so reopening NavBharatAI still puts the user back in the
+conversation they were last in. `tests/lastPlace.test.ts`, `tests/freeChatResume.test.ts` and the rest
+of `tests/resumeWiring.test.ts` still cover it — 58 tests, green.
+
+⚠️ **`AppKnowledgeBase.ts` was corrected in the same commit, and that matters more than it looks.**
+Three entries told every AI in the product that a "Continue where you left off" list is on the home
+screen. Leaving them would have made every assistant confidently direct users to a section that no
+longer exists — the same stale-capability class this repo has now paid for twice in one week (the four
+ladder comments on 2026-09-15, and "NavBharatAI cannot add your signing key" on 2026-09-17). Users are
+now pointed at History, which is real.
+
+**The test block asserting the home list was REPLACED WITH A NOTE, not deleted**, so a later session
+reading the history does not "restore" a feature that was removed on purpose.
+
+Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1728 files, 24432 passed, 0 failed** ·
+build · test:bundle · boot:check.

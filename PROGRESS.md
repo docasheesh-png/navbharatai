@@ -64655,16 +64655,19 @@ this build ran 18:51–19:20. It did not run. It would now stop this build at ~m
 minute 1 + 10 quiet). With this change the repair returns in ~5 minutes instead, so the breaker becomes
 the net, not the fix.
 
-🔴 **OPEN (rule 6), each with the reason it is not in this PR:**
-1. **The starvation line lied fifteen times.** *"Our own ceiling, not this provider … the ceiling is
-   FLOOR_TIMEOUT_CAP_MS / AGENTV3_FLOOR_MS_PER_TOKEN"* — but the ask was the fast lane's own
-   `maxTokens: 8000` (five literal sites in `routes/agentv3.ts`), never clamped: a 300 s streamed clock
-   affords 9,833, so neither knob was the ceiling. This is a THIRD case beyond the two #3052 splits
-   (own cap / lane clock): *the caller's ask was the ceiling and nothing reduced it.* Not fixed here
-   because #3052 is mid-flight in exactly `starvedBudgetError` and the `OUTPUT_BUDGET_STARVED` message —
-   racing it to those hunks is what the concurrency rule forbids. **Next, after #3052 lands:** a
-   `reconcileFloorBudget` result already knows `clamped === false && !reasoningUnclamped`; the error
-   needs a fourth wording and the report a fourth branch.
+🔴 **OPEN (rule 6) — and one closed mid-PR, kept in the list so the reasoning stays legible:**
+1. ✅ **CLOSED IN THIS SAME PR — the starvation line lied fifteen times.** *"Our own ceiling, not this
+   provider … the ceiling is FLOOR_TIMEOUT_CAP_MS / AGENTV3_FLOOR_MS_PER_TOKEN"* — but the ask was the
+   fast lane's own `maxTokens: 8000` (five literal sites in `routes/agentv3.ts`), never clamped: a 300 s
+   streamed clock affords 9,833, so neither knob was the ceiling. A THIRD case beyond the two #3052
+   splits (own cap / lane clock): *the caller's ask was the ceiling and nothing reduced it.* It was first
+   recorded here as OPEN because #3052 was mid-flight in exactly those hunks; #3052 merged while this PR
+   was being gated, so it was merged in and the branch added on top: `STARVED_BY_ASK_MARK` +
+   `isAskBoundStarvation` in `floorBudget.ts` — derivable from `granted === requested`, which is
+   precisely `reconcileFloorBudget`'s not-clamped case, so no new plumbing — and a fourth
+   `OUTPUT_BUDGET_STARVED` wording that names the CALLER'S OWN ASK and no knob of that module. Mutually
+   exclusive with both other markers by construction. `tests/aStarvationOnTheCallersOwnAskSaysSo.test.ts`
+   (9), including a source-order guard that the ask branch is consulted before the lane and own-cap ones.
 2. **A starved call's tokens are invisible.** The runner throws before `onTurnComplete`, so ~$0.5 of real
    provider spend on this build entered no ledger — not `liveTokens`, not `AGENTV3_BUILD_COST_CEILING_USD`,
    not the admin cost report. The money-audit class ("a paid call with no governance"). The usage exists on

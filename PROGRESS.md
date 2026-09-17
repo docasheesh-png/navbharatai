@@ -61042,6 +61042,76 @@ the PLATFORM FEATURE that covers it.
 Tests: `tests/questionReadsEveryClause.test.ts` (16), both halves of the fix proven by reversion.
 Existing `IntentClassifier.test.ts` (73) and every classifier-adjacent suite (497 total) pass unchanged.
 
+## 2026-09-17 — Autopsy 2b0a3ed5: the working calculator the user never saw
+
+Admin sent build report `2b0a3ed5`. Prompt: *"Build a calculator app with the standard operations
+(+ − × ÷ %), a clear and a delete key, decimal support, keyboard input, and a running history of
+recent calculations. Big, tappable buttons; light/dark mode."* — a plain build order, correctly
+classified (`simple_app`, complexity 15). Nothing wrong with the routing this time.
+
+### The timeline, and the one fact that matters
+
+| t | what happened |
+|---|---|
+| 1.0 s | workspace ready (warm sandbox) |
+| **6.7 s** | **`GOLDEN_SCAFFOLD` — a tested, CI-proven, WORKING Calculator, 12 files, durably saved** |
+| 6.7 → 62.7 s | **nothing on screen.** One `glm-4.7-flashx` call: 26,569 tokens in, **27 tokens out**, `latencyMs` **55,723** |
+| 62.7 s | the model replies *"I'll quickly check the existing calculator template and finish it up."* |
+| ~64 s | **the user presses Stop** |
+| 65.6 s | `CANCELLED_BUILD_CHARGED` — 50%, **₹0.65**, 64 wallet tokens |
+
+`RELEASE_GATE: RED — no live preview was ever available, so nothing here was proven to RUN.`
+Sandbox: 1.1 min up, **98% idle**.
+
+🔑 **The app they asked for existed, complete and working, at second 7. We showed them a spinner for
+another 56 seconds, and then charged them for giving up.** Against the admin's own bar — *"chutkiyon
+🫰 ka kaam"* — a calculator is the easiest app there is, and this is the worst possible way to lose it.
+
+### Why the existing defences could not help, checked rather than assumed
+
+- **The slow-rung bench (`slowRungBench.ts`) could never fire.** `crossesSlowThresholds` needs
+  `calls >= 3` **and** `observedMs >= 90_000`. This build had **one** call at 55.7 s. ⚠️ Those
+  thresholds are RIGHT — retiring a provider on one unlucky call would be worse, and the file argues
+  it well — so this is **not** a reason to weaken them. It is a reason to stop making the user wait
+  for the model at all when the app already works.
+- **`TIME_TO_FIRST_CALL` saw it perfectly** and said so: *"The first call itself then took 56 s; that
+  is model time, not setup."* The instrument was right and nothing acted on it.
+
+### The fix — show it the moment it exists
+
+The golden scaffold is the ONE case where the app is known to work **before any model call** ("CI-proven
+to parse under esbuild AND compile under the in-browser Babel preview"). Its files were already durable
+one line earlier; what was missing was the `file_changed` events that tell the client's preview to
+render them. `streamingFirstPaint.ts` already owns that mechanism and that wire contract — the scaffold
+simply never used it.
+
+`firstPaintEvents()` extracted so the event shape has ONE definition (the streaming handler now uses it
+too, test-locked so they cannot drift), and the pre-seed emits it **after** its awaited save, behind the
+**same** `AGENTV3_STREAMING_PREVIEW` flag the admin already has on.
+
+⚠️ **Events only — no dev server is started here, deliberately.** The build's own agent runs
+`npm run dev` later; racing it would risk two servers contending for port 5173 and a published URL
+pointing at whichever lost. This costs no model call and no sandbox time, and `off` is byte-identical
+to today.
+
+### Ledger (5 buckets)
+
+- ✅ **Self-healed: 0.**
+- 🔀 **Worked around: 0** — the build never got far enough to route around anything.
+- ⏭️ **Skipped (4):** page-render check, user journey, typecheck, test suite — all for the same reason
+  (`no live preview was ever available`), which is the defect above, not four separate ones.
+- ❌ **Still broken (2):** `RELEASE_GATE` RED; `DESIGN_CONSISTENCY` **68/100 (C)** — 20 distinct
+  colours, 11 off-grid spacings, **in our own golden scaffold**, which is worth fixing at the template
+  rather than healing per build (recorded, not done here).
+- 🥵 **Struggle:** the whole 56-second silence; 0.48 output tokens/second.
+
+### 🔴 OPEN, and honestly stated
+
+1. **The user was charged ₹0.65 for our slowness.** The 50% cancellation charge is the designed
+   behaviour (2026-09-14) and the files WERE saved — but what they stopped was a 56-second blank
+   screen, not their own change of mind. Whether a cancellation inside the first model call, with no
+   preview ever shown, should cost anything is an ADMIN decision, not mine to change unasked.
+2. **Design consistency C on the shipped golden scaffold** — our own template scores 68/100.
 ## 2026-09-17 — "Download app" sent every visitor to a page they could not open
 
 Admin: *"navbharatai.com par jab koi user sidebar menu me 'download app' button par click karta hai, to
@@ -61306,3 +61376,40 @@ includes a great deal of Hindi and Hinglish. Recorded here so the next session d
 `CLAUDE.md`'s own lesson, *"'not invented' is a weaker standard than 'checked'"*, applied to a field that
 looked like a measurement and is a default. The real fix remains giving the fast lane the same request the
 full builder sees — not guessing from a signal that cannot carry the weight.
+## 2026-09-17 — PR #2996's REMAINING half reverted: nothing decides where a reload lands
+
+**Admin:** *"yar aap is pure PR ko hi hata do! mujhe nahi chahiye. jab bhi page reload hota hai,
+navbharatai chat open ho jati hai. mai setting me kam kar raha hu, reload kiya, navbharatai chat open
+ho gayi. hatao isko. mujhe yeh pura kaam reverse kar ke do!!"*
+
+**#3007 removed the home-screen half earlier today and KEPT the reopen**, on the reading that the
+reopen was what had been asked for. It was not, and the admin found out the way users do — working in
+Settings, pressing reload, landing in a chat.
+
+🔴 **THAT IS THE FEATURE BEHAVING EXACTLY AS DESIGNED, WHICH IS THE WHOLE POINT.** The original request
+was about ONE screen: open a CHAT, and find it where you left it. #2996 turned it into an app-wide
+LANDING rule evaluated on every reload from ANY screen. **A reload is not a request to go somewhere
+else** — somebody reloading in Settings is trying to reload Settings. No exclusion list fixes a rule
+aimed at the wrong event, which is why the whole thing goes rather than being narrowed again.
+
+**Removed:** `lib/lastPlace.ts`, `lib/freeChatResume.ts`, their three test files, and every trace in
+`App.tsx` — the boot `readLastPlace`/`decideLanding`, the initial-view landing choice, the free-chat
+transcript resume AND the session-id resume that travelled with it, the `recordLastPlace` write effect
+that fired on every view change, and the login-gated second landing pass. Plus the `AppKnowledgeBase`
+bullet, because a description left behind has every AI in the product confidently describing a feature
+that is gone.
+
+⚠️ **THE SESSION ID HAD TO GO WITH THE TRANSCRIPT, not after it.** `currentSessionId` was resumed
+alongside the messages precisely because restoring one without the other duplicated the conversation on
+every refresh. Removing the transcript and leaving the id would have re-created that bug from the other
+direction, so `currentSessionId` is back to a fresh `Date.now()` in the same change. Test-locked.
+
+🔒 **THE GUARD THAT WAS MISSING: `tests/noAutoReopen.test.ts` (6 cases).** A revert leaves NO failing
+test behind, so nothing notices a feature returning — which is literally what happened between #3007
+and this: half the change survived a removal nobody could see. It pins that the modules are gone, that
+no landing symbol appears in `App.tsx`, that the Free chat opens NEW (both halves), that Home has no
+recents section, that the knowledge base promises neither behaviour — and that the unrelated
+*"YOUR PUBLISHED APPS ARE ON YOUR PROFILE"* bullet, which shares that region of the file, SURVIVED.
+
+Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1730 files, 24432 passed, 0 failed** ·
+build · test:bundle · boot:check.

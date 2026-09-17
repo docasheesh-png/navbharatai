@@ -46,6 +46,12 @@ export interface UseAgentV3Build {
   state: AgentV3ClientState;
   running: boolean;
   error: string | null;
+  /**
+   * True when `error` came from an HTTP refusal raised BEFORE the build stream opened — so no
+   * sandbox ran, no build started and not one file was touched. The UI reads this to decide that
+   * there is no app code a "Fix with AI" could refer to (autopsy fdd59ef8).
+   */
+  errorBeforeBuildStarted: boolean;
   start: (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; frameworkExplicit?: boolean; frameworkResolved?: boolean; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean }) => Promise<void>;
   /** Approve or reject a pending plan/permission gate (P4). */
   respond: (requestId: string, approved: boolean) => Promise<void>;
@@ -317,6 +323,15 @@ export function useAgentV3Build(): UseAgentV3Build {
   const [running, setRunning] = useState(false);
   const [serverBuildRunning, setServerBuildRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Did this error come from an HTTP refusal raised BEFORE the build stream opened?
+   *
+   * 🔴 Autopsy fdd59ef8: a 401 "please sign in" was rendered in the build-error banner with a
+   * "Fix with AI" button under it, which pre-filled the composer with our own notice — and a build
+   * then ran on it. A pre-start refusal means no sandbox, no build, not one file touched, so there is
+   * no app code the error could possibly refer to. This flag is that fact, carried to the UI.
+   */
+  const [errorBeforeBuildStarted, setErrorBeforeBuildStarted] = useState(false);
   // Paid-public (billing PR 5): set when a build is refused pre-start with HTTP 402 INSUFFICIENT_CREDITS.
   // Drives a dedicated "Add credits" screen instead of a bare error banner. Null unless credits ran out.
   const [billingBlock, setBillingBlock] = useState<BillingBlock | null>(null);
@@ -379,6 +394,7 @@ export function useAgentV3Build(): UseAgentV3Build {
     setRunning(false);
     setState(initialAgentV3State());
     setError(null);
+    setErrorBeforeBuildStarted(false);
     setBillingBlock(null);
   }, []);
 
@@ -391,6 +407,7 @@ export function useAgentV3Build(): UseAgentV3Build {
     // Clear any "a build is already running" error — Stop is exactly its resolution, so the banner must
     // not linger and re-tempt the user into the "Fix with AI" retry loop it produced.
     setError(null);
+    setErrorBeforeBuildStarted(false);
     // Truly stop the SERVER build (not just this local stream), so it cannot keep
     // running and block the next build. Send `workspaceId` so that under per-workspace locking (FIX #3)
     // Stop targets THIS app's build, and the Bearer token so the server's identity matches the one the
@@ -416,6 +433,7 @@ export function useAgentV3Build(): UseAgentV3Build {
     setRunning(false);
     setServerBuildRunning(false);
     setError(null);
+    setErrorBeforeBuildStarted(false);
     const workspaceId = workspaceIdRef.current;
     if (!workspaceId) return false; // no server session yet (a message that never reached the server)
     try {
@@ -857,6 +875,7 @@ export function useAgentV3Build(): UseAgentV3Build {
     // confirms one is exactly what produced the contradiction "re-attached live" + "No running build
     // to resume." So it is emitted below ONLY on a confirmed-live attach (reconnectOutcome === 'live').
     setError(null);
+    setErrorBeforeBuildStarted(false);
     setServerBuildRunning(false);
     setRunning(true);
     const controller = new AbortController();
@@ -894,10 +913,12 @@ export function useAgentV3Build(): UseAgentV3Build {
             ?? 'That build isn’t live anymore — it finished, or its connection dropped. Everything is saved and your app is untouched. Just type below whenever you want to continue.';
           setState((prev) => agentV3Reducer(prev, { type: 'narration', agent: 'architect', text, ts: Date.now() }));
           setError(null);
+    setErrorBeforeBuildStarted(false);
         } else if (outcome === 'gone-silent') {
           // The build had already produced its result; a 404 on the tail-reconnect is expected and
           // benign — say nothing, just clean up (no message, no error).
           setError(null);
+    setErrorBeforeBuildStarted(false);
         } else {
           // A genuine, unexpected failure (non-404) — surface it honestly.
           setError(typeof j?.error === 'string' ? j.error : `Resume failed (HTTP ${res.status}).`);
@@ -1278,6 +1299,7 @@ export function useAgentV3Build(): UseAgentV3Build {
         repoUrl: prev.repoUrl,
       }));
       setError(null);
+    setErrorBeforeBuildStarted(false);
       setBillingBlock(null); // a fresh send clears any prior add-credits screen.
       setRunning(true);
       // WATCHDOG — begin the silence window at build start (not stale mount time), so the
@@ -1389,10 +1411,14 @@ export function useAgentV3Build(): UseAgentV3Build {
             // force-clears the account lock server-side. The message tells them exactly that. (The server
             // ALSO auto-reclaims an abandoned lock after its stall window, so this is the fast manual path.)
             setServerBuildRunning(true);
+            setErrorBeforeBuildStarted(true);
             setError('A build is still running on your account. Press ⏹ Stop to end it, then send your message again.');
             setRunning(false);
             return;
           }
+          // The build never started — see `errorBeforeBuildStarted`. The UI uses this to decide that
+          // there is no app code to offer a "Fix with AI" on.
+          setErrorBeforeBuildStarted(true);
           setError(msg);
           setRunning(false);
           return;
@@ -1578,6 +1604,7 @@ export function useAgentV3Build(): UseAgentV3Build {
                 autoContinuedRef.current = true;
                 const last = lastStartRef.current!;
                 setError(null);
+    setErrorBeforeBuildStarted(false);
                 setTimeout(() => { autoStartRef.current = true; void start('please continue', last.opts); }, 400);
               } else {
                 setError('The build stopped responding — your files are saved. Send a message and I\'ll continue from where it left off.');
@@ -1592,5 +1619,5 @@ export function useAgentV3Build(): UseAgentV3Build {
 
   const clearBillingBlock = useCallback(() => setBillingBlock(null), []);
 
-  return { state, running, error, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
+  return { state, running, error, errorBeforeBuildStarted, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
 }

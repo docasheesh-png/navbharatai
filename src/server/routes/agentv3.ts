@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from 'express';
 import { copyName, copyStatus } from '../AgentV3/duplicateApp';
+import { isPlatformFixRequest } from '../../lib/platformFixRequest';
 import { buildRateLimiter, rateLimiter, workspaceRateLimiter, workspacePollRateLimiter, deployOpsRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
 import express from 'express';
 import { HIT_PATH, parseHit, parseBytesReport, requestOptsOut, siteAnalyticsEnabled } from '../lib/siteAnalytics';
@@ -13207,10 +13208,25 @@ async function noteBuildOutcome(
       // a user stop means; nothing new had to learn it.
       dispatcher.setStopBuild((reason) => {
         try {
+          // 🔴 "user said:" MUST NOT QUOTE OUR OWN VOICE (autopsy fdd59ef8, 2026-09-17). That build's
+          // report reads *user said: Please sign in to build with NavBharatAI Pro* — a sentence no
+          // user ever typed. It is OUR 401 notice, wrapped by the "Fix with AI" button and handed to
+          // the builder, which read it as an instruction and stopped. Attributing it to the user made
+          // the one record of what happened blame the person for our own loop.
+          //
+          // The test is on the PROMPT, not the reason: when the build's own prompt was composed by the
+          // platform, NOTHING in that run is the user's words, whatever the model echoed back. The
+          // button can no longer compose such a prompt from a pre-start refusal, so this is the second
+          // net rather than the first.
+          const platformComposed = isPlatformFixRequest(prompt);
           buildDiag.record({
             phase: 'build', severity: 'info', code: 'USER_STOPPED_BUILD', autoResolved: true,
-            message: 'The user asked for this build to stop, and it was stopped.',
-            detail: reason ? `user said: ${reason}` : undefined,
+            message: platformComposed
+              ? 'The build was stopped by the engine while working on a request NavBharatAI itself composed — not by the user.'
+              : 'The user asked for this build to stop, and it was stopped.',
+            detail: reason
+              ? (platformComposed ? `engine gave the reason: ${reason}` : `user said: ${reason}`)
+              : undefined,
           });
         } catch { /* the record must never be what prevents the stop */ }
         abortBuild({ abort: (r?: unknown) => abort.abort(r) }, 'user-stop');

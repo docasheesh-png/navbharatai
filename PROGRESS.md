@@ -61040,6 +61040,40 @@ to today.
    screen, not their own change of mind. Whether a cancellation inside the first model call, with no
    preview ever shown, should cost anything is an ADMIN decision, not mine to change unasked.
 2. **Design consistency C on the shipped golden scaffold** — our own template scores 68/100.
+## 2026-09-17 — Every link every AI gives a user now opens in the real browser on Android
+
+Admin asked what else was worth upgrading. Measured rather than guessed: **45 bare `target="_blank"`
+links remain across 24 files** (the open item recorded with PR #3000), and **one of them carries more
+of the product's real link traffic than the other 44 combined**.
+
+`LinkedText` (`src/lib/linkify.tsx`) renders the links in every reply from ~70 Professionals
+(`ProfessionalChat`) and NavBharatAI Pro (`FoldableMessage`). Inside a Capacitor WebView a bare
+`target="_blank"` does not open Chrome — it navigates in place, or opens a chromeless child view with
+no address bar and no obvious way back. A user who taps a source link an AI handed them is stranded
+inside what still looks like NavBharatAI.
+
+**Fixed:** the click is handed to `openExternalUrl` (which passes `_system` on native), and three
+properties are pinned by tests because each would be quietly lost by an "obvious" simplification:
+- 🔒 **it is still an `<a href>`** — a button would cost long-press → "Copy link address", the hover
+  URL preview, and the announced screen-reader role. Only the CLICK is redirected;
+- 🔒 **the web path is untouched** — intercepting there would break ctrl/cmd-click and middle-click
+  into a new tab, and could meet a pop-up blocker;
+- 🔒 **a modified click is never intercepted** — the user asking for a new tab themselves is honoured.
+
+🔴 **SIBLING HUNTED, and it was the one that matters most.** My first draft asserted all three AI
+surfaces render through `LinkedText`. **The test failed, and it was right to:** Doctor AI does NOT —
+`SDAChat.tsx` imports only `isSafeHttpUrl` and renders model text through `ReactMarkdown` with its own
+anchor component, carrying the identical defect. **Its links are medical sources**, so being stranded
+in a chromeless view matters most exactly there. Both renderers now share ONE exported handler rather
+than a second copy that would drift.
+
+Tests: `tests/aiLinksOpenInBrowser.test.ts` (7, proven by reversion — removing the native guard fails
+the web-path test, removing the onClick fails two more). The existing `linkify` suite (12) passes
+unchanged.
+
+⚠️ **Still open:** the remaining ~43 bare `target="_blank"` sites (admin panels, settings, the store,
+the Pro panel). Lower traffic and mostly admin-facing, so they stay a recorded sweep rather than a
+rushed one.
 ---
 
 ## 2026-09-17 — "Continue where you left off" REMOVED from the home screen (admin, same day it shipped)

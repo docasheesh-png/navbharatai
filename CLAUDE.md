@@ -2712,9 +2712,121 @@ is now **`src/server/AgentV3/tierLadder.ts`**, and the build chain is built from
 
 | Tier (UI) | Internal | The ladder (first → last) | Escalation cap |
 |---|---|---|---|
-| Weak (free) | `weak` | GLM `glm-5.3-flash` → KIMI `kimi-k2.7-code` → GLM `glm-5.3` → Claude **Haiku** | never escalates (NavBharatAI pays) |
-| Normal (paid economy) | `off` | GLM `glm-5.3-flash` → KIMI `kimi-k2.7-code-highspeed` → GLM `glm-5.3` → Claude Sonnet | Sonnet |
+| Weak (free) | `weak` | GLM `glm-4.7-flashx` → KIMI `kimi-k2.7-code` → GLM `glm-5.3` → Claude **Haiku** | never escalates (NavBharatAI pays) |
+| Normal (paid economy) | `off` | GLM `glm-4.7-flashx` → KIMI `kimi-k2.7-code-highspeed` → GLM `glm-5.3` → Claude Sonnet | Sonnet |
 | Strong (paid premium) | `mini` | GLM `glm-5.3` → KIMI `kimi-k3` → Claude Sonnet → Claude **Opus** | Opus (its last rung) |
+
+🧠 **A BIG APP DOES NOT OPEN ON THE CHEAPEST RUNG (admin 2026-09-17, verbatim: "kimi ko bade aur
+complex task dedo, kabhi bhi — starting me bhi de sakte ho, beech me bhi! task chota/bada/mild/complex
+hai code se pata na lage to gptnano se puchwa lo!!").** `AGENTV3_COMPLEX_TO_KIMI` — ⚠️ **NOT set, and
+the code default is ON**; `off` restores the pre-change behaviour exactly (every build opens on rung 1)
+and costs nothing while off. Read by `src/server/AgentV3/complexityRouting.ts`; applied through
+`buildTurnRunner`'s new `complex` flag.
+
+- **A `complex` verdict skips the cheap flash opener**, so on Weak and Normal the first engine to see
+  the app is **KIMI**. Strong has no flash rung and is untouched. "Starting me bhi" is literal.
+- **The line is 40 — `RequestAnalyser`'s OWN top tier boundary**, not a second invented threshold
+  (`simple_app` ≤20 capped, `coding` 30, `debugging` 45, `complex_app` 58, `architecture` 80).
+- 🔑 **THE HOOK WAS ALREADY THERE, UNUSED.** `analyzeRequest`'s docblock has said since the cost-ladder
+  work that it "marks the genuinely ambiguous ones (`ambiguous: true`) so a caller MAY refine them with
+  a cheap LLM analyser" — and nothing ever read that flag. This is that half, so no new scoring concept
+  competes with the existing one.
+- 💸 **A model is asked ONLY within ±3 of the line**, deliberately narrower than `ambiguous` itself
+  (which marks BOTH the 20 and 40 boundaries, because it was written for a three-tier ladder). Only the
+  40 line can flip this binary decision, so asking about a score of 18 would spend a call to move a
+  verdict from `simple` to `simple`. **"Kharcha kam se kam" applies to the classifier too.**
+- 🔒 **It cannot break, hang or mislead a build**: the call is raced at 6 s, and a throw, a timeout, an
+  empty reply and an unparseable reply ALL fall back to the deterministic verdict — never to a guess.
+  `simple` is the default on every doubt, including a NaN score.
+- ⚠️ **What it costs, plainly:** on Weak (which NavBharatAI pays for itself) a complex build opens on
+  `kimi-k2.7-code` ($0.95/$4.00) instead of `glm-4.7-flashx` ($0.07/$0.40) — ~13× the input price for
+  THOSE builds. The bet is that a cheap rung which fails is paid twice, once in the wasted call and
+  once in the heal. **Watch: the share of builds routed complex, and whether their heal count drops.**
+- 🔗 `healLadder` and this router share ONE definition of "the cheap opener"
+  (`withoutCheapFlashLead`), applied by `buildTurnRunner` for `heal || complex`. They stay separate
+  FLAGS — "this is a repair" and "this is a big app" are different questions with the same answer
+  today — and a test asserts the two produce identical ladders so they cannot drift.
+
+🏗️ **`AGENTV3_PROJECT_MODE` — SOFTWARE PROJECT MODE. BUILT, WIRED, TESTED, AND ASLEEP SINCE
+2026-07-04. ⚠️ Recorded here on 2026-09-17 because it was MISSING FROM THIS REGISTRY ENTIRELY** —
+zero mentions in this file, eight in `PROGRESS.md`. That is precisely the drift this registry exists
+to prevent, and it is why the capability is invisible: a session asked to build "milestone building"
+would build a second copy of it, and the admin cannot decide on a feature nobody tells them exists.
+
+**What it is** (`src/server/AgentV3/ProjectPlan.ts`, 592 lines + `ProjectPlanStore.ts`): for a build
+too big for one conversation, the project is decomposed ONCE into modules carrying explicit
+`dependsOn` edges and **frozen export contracts**, persisted durably, and then each turn builds ONE
+module in a FRESH context holding only that module's spec plus the contracts of modules already
+done — never the transcript. Context stays small however big the project is, so size is bounded by
+the plan rather than by the window. It answers the five ceilings by name: context window, the
+80-step cap, the 30–60 min clock, the budget cap, and small-app-tuned verification.
+
+🔒 **The wiring is VERIFIED, not taken from the doc** (`routes/agentv3.ts` ~14272–14356 creates and
+saves the plan and projects the todos, ~18571 marks each module done/failed after its turn, ~19591
+auto-continues to the next buildable module). This is a live path behind a flag, not dead code —
+unlike `EmbeddingSearch`, whose only reader is called from nowhere.
+
+⚠️ **UNSET ⇒ OFF, and every build is byte-identical to today.** The flag takes `on` (everyone),
+`off`/unset (the kill switch), or **anything else as an ALLOWLIST of uids/emails** — built
+deliberately so the admin can enable it for their OWN account and run one real mega-prompt before
+anyone else sees it. Detection (`detectMegaProject`) is HIGH-PRECISION on purpose: an explicit
+"100+ files/pages/screens", or a big-software noun (ERP/CRM/HMS/SaaS platform/marketplace…) with ≥8
+enumerated features, or ≥14 enumerated features. A false positive costs an ordinary app an extra
+planner call; a false negative just builds exactly as it does today. Minimum 3 modules or it falls
+straight back to the normal path.
+
+🔴 **THE STATE IS A PENDING ADMIN DECISION, NOT AN UNFINISHED FEATURE.** `PROGRESS.md` (2026-07-04)
+records it as *"fully built and dormant … ADMIN DECISION NEEDED (asked in chat, safeguard #3)"*,
+with the exact action: set `AGENTV3_PROJECT_MODE=aashishcpmt09@gmail.com` on Cloud Run, send one
+mega-prompt, watch the module plan appear and advance, then `on` for everyone once happy. **That
+question has been open for over two months.** It is recorded here rather than acted on because the
+key lives in a console no session can reach.
+
+⚠️ **Three honest gaps, from that same entry and still open:** an IMPORTED repo never creates a plan
+(creation fires only on a fresh `new_build`); a reopened incomplete plan needs a typed "continue"
+(restore does not re-emit resumable); and contract DRIFT — a module deviating from its own frozen
+contract — is caught only by the whole-workspace `tsc` each turn, not by a dedicated contract check.
+
+🔴 **THE LEAD RUNG CHANGED 2026-09-17 — `glm-5.3-flash` IS OFF EVERY LADDER** (admin, verbatim: *"glm
+5.3 flash ko hata do!"*, with the FlashX price read off docs.z.ai on their own screen). It is replaced,
+on Weak and Normal and as the PLAN rung of both, by **`glm-4.7-flashx` — $0.07 in / $0.40 out / $0.01
+cached**, against 5.3-flash's $0.15 / $0.50 / $0.03. Strong is untouched (it never carried a flash rung).
+
+**This REVERSES half of the 2026-09-14 decision, and the reversal is evidence-led rather than a change
+of mind.** That decision picked 5.3-flash on the rule *"a $0 rung that fails costs more than a $0.15
+rung that succeeds"* — the rule is still right; its premise was false. Three autopsies in three days:
+- **`ee20478d` (09-15)** — 280 hard 400s in ONE build. Every tier opened on a rung that could not
+  succeed, because 5.3-flash cannot be told to stop reasoning.
+- **`b3a2c81e` (09-16)** — 68 GLM failures, 52 `OUTPUT_BUDGET_STARVED`: the model's mandatory thinking
+  spent the whole authorised output ceiling before writing one character.
+- **`dd1f5f60` (09-16)** — 8.65 tokens/second sustained; 29.5 of a 30.1-minute build inside one call.
+
+🔑 **FLASHX IS NOT MERELY CHEAPER — THE FAILURE CLASS CANNOT OCCUR ON IT.** `glmCanDisableThinking`
+(`glmThinking.ts`) is a NUMERIC family test: 5.3-and-newer always reason; 4.x can be told not to. FlashX
+is 4.7, so the turn sends `thinking: disabled` and the entire output budget goes to code rather than to
+reasoning nobody reads. Cheaper AND structurally immune — so this is not a trade between the two aims.
+
+💸 **THE BILLING HALF HAD TO SHIP IN THE SAME COMMIT, and it is the third time this exact trap was set.**
+`glm-4.7-flashx` contains "flash" (→ the FREE `glm-flash` line) and matches `/glm-?4/` (→ the $0.60
+coder line). Either would have been wrong, and a $0 real cost bills the USER ₹0 while we pay Z.ai —
+identical in shape to `kimi-k2.7-code-highspeed` and `glm-5.3-flash`, both caught on 09-16. It now has
+its own row (`RATE_GLM47_FLASHX_IN` / `_OUT` / `_CACHE`) matched BEFORE both rules. **A model may not
+join a ladder until its price is on the card.**
+
+🔁 **A HEAL NOW DROPS THE LEAD RUNG AGAIN — a dormant rule woke up.** `healLadder`'s pattern matched
+only `4.7-flash`, so between 09-14 and 09-17 (while 5.3-flash led) every heal restarted on the very
+rung whose output needed repairing. FlashX matches it, so the 2026-08-13 rule (*"a repair must not begin
+on the model that produced the failing app"*) applies again: a Weak/Normal heal opens on KIMI. It costs
+more per heal ($0.95/$4.00 vs $0.07/$0.40) — intended, because a cheap repair that fails buys a second
+one. The predicate is now the named `isCheapFlashRung`, so this can never again turn on a coincidence.
+
+⚠️ **THE HONEST RISK, recorded rather than discovered later: FlashX's CODING quality is unmeasured here.**
+Z.ai's "X" suffix is the faster, paid variant of a Flash model (GLM-4.5-X, -AirX are all dearer than
+their base), and this file's own 09-14 entry calls the free `glm-4.7-flash` *"weak at coding"* — FlashX
+may share that brain. What changed is the comparison, not the estimate: a model that reasons well and
+delivers nothing is worse than a plainer one that answers. **Watch heal COUNT on the first real builds,
+not cost.** 🔒 Revert with no deploy:
+`AGENTV3_LADDER_WEAK=GLM:glm-5.3-flash,KIMI:kimi-k2.7-code,GLM:glm-5.3,HAIKU` (and `_NORMAL` likewise).
 
 🔴 **KIMI RUNGS REVISED 2026-09-16** (admin, verbatim: *"free wale me kimi 2.6 ki jagah kimi code 2.7 kar
 de! normal wale me kimi code 2.7 highspeed karo strong me kimi k3 bhi add karo"*): Weak's Kimi rung moved

@@ -58592,6 +58592,396 @@ older reports carry no `requestAnalysis` and read as unavailable rather than bei
 truncated prompt. **The 50–100 build analysis is deliberately NOT started**, per the admin, and no
 GLM/Kimi routing change is made.
 
+## 2026-09-16 — Autopsy: the alarm-app build (`b3a2c81e`) — a question that built an app, and the two bugs found chasing it
+
+Admin sent a real build-diagnostics report (workspace `agentv3-myMfCqmTwcd3NmSqTOlrvnFEG1m2-86ca627a…`,
+build `b3a2c81e`). Full forensic autopsy per the fifth absolute rule.
+
+### The ledger, five buckets
+
+- ✅ **Self-healed (2):** the fast lane's timeout handed 1 salvaged file to the full builder instead of
+  losing it (`SIMPLE_BUILD_FALLBACK`/`SIMPLE_BUILD_SALVAGE`); the file-list continuation logic
+  (`1/3, 2/3, 3/3`) recovered from GLM/Kimi `max_tokens` truncation on an oversized response.
+- 🔀 **Worked around (1):** GLM repeatedly failed with `OUTPUT_BUDGET_STARVED` and the ladder fell
+  through to KIMI — the ladder did its job, but at a cost recorded below as a struggle point, not a win.
+- ⏭️ **Skipped (1, now fixed):** the message's real question — "क्या मैं prompt डालूं" ("should I paste
+  the prompt?") — was never read as a question at all. See Root Cause 1.
+- ❌ **Still broken (1, now fixed):** the build's own summary told the user "Nothing had been written
+  yet, so nothing was lost" while, in the SAME response, the billing line correctly charged them 50%
+  for a file it had just denied existed. See Root Cause 2.
+- 🥵 **Struggle points (2):** a 26-attempt GLM retry storm during the shared-contract design step
+  (~84.6s, zero output); a 40-attempt GLM retry storm during file generation whose LOGGED TIMESTAMPS
+  run to **1789590778236 — ~52 minutes AFTER** the build had already been cancelled, billed, and closed
+  (`endedAt: 1789587434781`). This is new, concrete evidence for the OPEN root cause already recorded
+  under `AGENTV3_BUILD_COST_CEILING_USD` ("an abandoned provider call is not cancelled by this stop") —
+  and shows it is not one trailing call but a sustained, unattended retry cascade. **NOT fixed this
+  session** — cancelling an in-flight provider call needs an AbortSignal threaded through the GLM/Kimi
+  HTTP clients themselves, a larger, cross-cutting change that deserves its own dedicated pass rather
+  than a rushed patch under this autopsy's time budget. Recorded here as OPEN (rule 6).
+  🔎 **Cross-reference, not a duplicate:** the `OUTPUT_BUDGET_STARVED` failure THIS build hit — a total
+  wall-clock kill that returns nothing, on the exact prompt/budget shape this report shows — is the
+  named symptom of the **🐢 SLOW-PROVIDER FIX (`AGENTV3_STREAM_BUILD_CALLS`)** that landed in `main` at
+  09:53 UTC the SAME DAY, ~9.7 hours before this build ran at 19:37 UTC. Whether that flag was already
+  live in Cloud Run at 19:37 (and, if so, whether its scope covers the "shared contract" aux call that
+  starved here, not only per-file build calls) is a Cloud Run timeline question this session cannot
+  answer from the repo alone — flagged for whoever is watching that flag's first real builds, not
+  re-diagnosed here. The **post-cancellation persistence** (~52 minutes) is a separate dimension that
+  flag does not touch: it changes how a STALL is detected mid-call, not whether an already-ABORTED
+  build's retry loop stops asking a provider for more.
+
+### Missing subsystem, named
+
+**There is no shared, live "does anything real exist in this workspace right now" answer.** Two
+different code paths in the SAME build — the route's `writtenFiles` Map (billing) and `AgentRunner`'s
+own `totalToolUses` counter (the user-facing summary) — each kept a private, narrower notion of "was
+anything built", and a build that spans a fast-lane handoff is exactly the shape that makes them
+disagree. This is the same class this file already names for the evidence ledger under the "ZERO FILES
+IS NOT NOTHING HAPPENED" entry, one level down: not different SUBSYSTEMS disagreeing, but two READERS
+of the same build disagreeing about a fact neither of them owns.
+
+### Root Cause 1 — a trailing "kya main/hum" asks its real question at the END, and the classifier is Devanagari-blind (FIXED)
+
+`IntentClassifier.readsAsQuestion()` required a question word to OPEN the message. Hindi places "kya"
+right before the verb it questions as often as at the sentence's start — this exact message asked its
+real question ("should I paste the prompt?") only after a declarative lead-in that itself contained a
+build verb ("बनाना चाहता हूं"). Result: HIGH-confidence `new_build`, the LLM upgrade (`classifyIntentSmart`)
+never consulted, a real weak-tier build ran and had to be cancelled by the user.
+
+**Verified separately, and worse: the ENTIRE deterministic classifier has ZERO Devanagari-script
+patterns** (confirmed by scanning the file for the Unicode Devanagari block — none). Every signal array
+(`NEW_BUILD_SIGNALS`, `EDIT_SIGNALS`, `BUILD_SIGNALS`, `WH_OPENERS`, …) is Romanized-only. For a message
+typed in native script, the ENTIRE fast, deterministic layer is blind by construction, and the
+classification rests entirely on one LLM call to the cheapest free-tier model with a one-line prompt.
+
+**Fixed, narrowly:** `readsAsQuestion` now also matches "kya main/mai/aap/tum/hum/hume" (and its
+Devanagari equivalent "क्या मैं/आप/तुम/हम/हमें") ANYWHERE in the sentence, not just at the start. This is
+deliberately the ONE unambiguous pattern added in both scripts — not a general translation of the
+classifier, which would be a much larger, riskier change needing its own dedicated review. Test-locked
+in `tests/capabilityQuestion.test.ts` with the exact reported prompt plus Romanized variants and two
+negative cases (an order containing "main" that isn't the particle; a "kya" that questions a noun, not
+"should I").
+
+🔴 **OPEN ROOT CAUSE, recorded rather than rushed (rule 6):** the classifier's full Devanagari blindness
+is real and larger than this one pattern — `namesSpecificDeliverable`, every signal array, and the
+LONG_MESSAGE_THRESHOLD length check (a Devanagari sentence runs LONGER in UTF-16 code units than the
+same content transliterated, purely from matras/conjuncts, which could bias that threshold against
+native-script users) all deserve a dedicated, carefully-tested pass — NOT a same-day translation
+attempt under this autopsy's time budget. NavBharatAI is an India-first app; this is worth a real slice.
+
+### Root Cause 2 — two different signals answered "did we build anything?", and disagreed (FIXED)
+
+`AgentRunner.ts` decided `builtSomething` at every abort/watchdog/step-cap exit (4 call sites) as
+`totalToolUses > 0` — a counter PRIVATE to that one AgentRunner instance. When the fast lane
+(SimpleBuilder) times out and hands off to the full builder having already salvaged a real file, this
+loop starts with `totalToolUses === 0` even though the workspace genuinely has work to resume from. The
+user cancelled seconds after the handoff and was told "Nothing had been written yet, so nothing was
+lost" — while `CANCELLED_BUILD_CHARGED`, reading the route's own `writtenFiles.size`, correctly billed
+them 50% for "files saved but no app verified running" in the exact same response.
+
+**Fixed at the class, not the instance:** added `hasExistingFiles?: () => boolean` to
+`AgentRunnerOptions` — a LIVE callback (not a value captured at construction, since the fast lane
+salvages files AFTER `baseRunnerOpts` is built), wired once at the route level to
+`() => writtenFiles.size > 0` — the SAME Map the billing decision already trusts. One helper,
+`builtSomethingNow()`, replaces all four `totalToolUses > 0` call sites inside `AgentRunner.ts`, so a
+fifth exit added later inherits the fix by construction instead of needing to remember it. Every OTHER
+`totalToolUses` use (readiness/lint/dep-health/prettier gates, checkpoint nudges) is untouched — those
+legitimately ask "did THIS loop do enough", a different question. Additive: any of the other 15
+`AgentRunner` construction sites that don't pass `hasExistingFiles` behave byte-identically to before.
+Test-locked in `AgentRunner.test.ts` (two new cases: the exact failure shape, and the honest control
+where nothing was salvaged and the "nothing was lost" wording must still fire).
+
+### Proactive layer
+
+**The single highest-value lever here is closing the Devanagari gap properly** — not as a patch, but as
+its own slice: a real transliteration/normalization pass so every existing Romanized signal array works
+for native-script Hindi too, with the same test discipline this fix used (exact reported prompts,
+positive AND negative cases). Until then, EVERY Devanagari-typed ambiguous message pays for a full LLM
+call that a Romanized one would answer in zero-cost regex — a real, structural cost gap between two
+users asking the identical thing in two scripts of the same language, in a product whose whole edge is
+serving India. Proposed as the next slice; not started here (out of this autopsy's safe scope).
+
+**Gate, run last on this change's final state:** `typecheck` clean · `typecheck:server` clean ·
+`noUnusedImports` clean · `npm run build` exit 0 · `test:bundle` within budget · `boot:check` PASS
+("server reached 'Server running'") · `npx vitest run` → **1705 files, 23,980 passed, 1 skipped, 0
+FAIL.**
+
+Branch `claude/build-report-autopsy-tmn3ov`, restarted from `origin/main` this session per the
+merged-PR rule (its prior sole commit had already landed as PR #2947).
+
+## 2026-09-17 — Same autopsy, continued: a classifier that cannot read a script must never claim confidence about it
+
+Admin asked whether GPT Nano should do "these two jobs" (the trailing-question fix and the classifier's
+Devanagari blindness, both from the alarm-app autopsy above). Answer, and what shipped:
+
+**Job 1 (trailing "kya main/hum")** — already fixed for free, by regex, in the previous commit on this
+branch. Routing it through Nano now would spend money and add latency on something that already costs
+₹0 and 0ms. Left untouched.
+
+**Job 2 (the classifier's full Devanagari blindness)** — the admin's instinct was right in spirit
+(GPT Nano's own brief, recorded in `CLAUDE.md`, says it is *for classification/extraction* — intent
+classification is exactly that), but calling an LLM on EVERY message would cost real money on the 90%+
+of messages that are unambiguous Romanized orders, which the "READ THE MOOD FIRST" rule explicitly keeps
+free and instant. Translating every keyword array into Hindi was rejected the same way in yesterday's
+autopsy — too large, too risky to rush.
+
+**What shipped instead: `containsDevanagari()` (`IntentClassifier.ts`).** Every keyword array in this
+file is Romanized-only, so the only way Devanagari text can earn a HIGH-confidence result is by
+ACCIDENT — a stray Romanized/English word inside it tripping a keyword array, or the raw UTF-16 char
+count crossing `LONG_MESSAGE_THRESHOLD` (Devanagari's matras/conjuncts inflate this well past the same
+sentence's length in Roman script, unrelated to actual complexity). `classifyIntentWithConfidence` now
+wraps its own logic and downgrades any `high` result to `low` whenever the input contains Devanagari —
+never invents or removes an intent, only removes an UNEARNED confidence claim, which is what sends the
+message to the LLM upgrade (`classifyIntentSmart`) instead of hard-locking on a coincidence.
+
+**Where Nano actually fits, and where it doesn't.** `classifyIntentSmart`'s LLM call already runs
+through the free chat router, which already includes GPT Nano as a rung (added in PR #2962). This
+change does not hard-pin Nano over that router's own fallback ladder — doing so would trade away the
+resilience the ladder exists for (if Nano is briefly unavailable, GLM-flash still answers). What this
+change DOES do is make sure that LLM step is actually CONSULTED for every Devanagari message, instead of
+being skipped on a false HIGH-confidence match — which is the real gap Nano's presence in the ladder
+could not close on its own.
+
+**The honest cost trade-off, stated plainly:** any message containing Devanagari script — including an
+otherwise-unambiguous Hinglish order with one Hindi word mixed in — now pays one extra free-tier LLM
+call before building, where before (once the trailing-question fix landed) it would have been instant
+for the clear cases. This is the same asymmetry the READ THE MOOD FIRST rule already accepts elsewhere:
+wrong-toward-instant-build costs real money and a cancelled build; one extra cheap classification call
+costs a few hundred milliseconds and, per the admin's own brief, is exactly what Nano is for.
+
+Regression-locked in `src/server/AgentV3/IntentClassifier.test.ts`: `containsDevanagari` in isolation,
+a long mixed-script message with every ingredient of the original hard-lock (length + BUILD_SIGNALS +
+NEW_BUILD_SIGNALS) downgraded to LOW while its Roman-script twin stays HIGH and instant (the control
+case proving the "common path pays nothing" rule is untouched), a Devanagari question already at LOW
+left alone (proving the wrapper only ever removes an unearned HIGH, never invents one), and an
+edit/problem-report signal embedded in Devanagari losing its unearned HIGH the same way a build signal
+does.
+
+**Gate, run last on this change's final state:** `typecheck` clean · `typecheck:server` clean ·
+`noUnusedImports` clean · `npm run build` exit 0 · `test:bundle` within budget · `boot:check` PASS ·
+`npx vitest run` — see the commit for the exact pass count.
+
+Still open, unchanged from yesterday: the classifier's broader Devanagari blindness (every keyword array
+itself, not just the confidence gate around them) remains a separate, larger, deliberately-deferred item.
+
+## 2026-09-17 — The lead rung: glm-5.3-flash off every ladder, glm-4.7-flashx in (item 1 of the admin's build list)
+
+Admin gave a direct instruction — *"glm 5.3 flash ko hata do!"* — and then supplied the missing fact
+this had been blocked on: a screenshot of **docs.z.ai → Pricing** confirming **GLM-4.7-FlashX is real,
+at $0.07 in / $0.40 out / $0.01 cached**. (In an earlier turn I had declined to act on "flashx" without
+the exact id, because a wrong model id fails silently here. The screenshot settled it.)
+
+### Why this reverses a decision made three days ago, and why that is correct
+
+The 2026-09-14 ladder chose `glm-5.3-flash` on the rule *"a $0 rung that fails costs more than a $0.15
+rung that succeeds"*. **The rule holds; its premise did not.** Three autopsies in three days measured
+5.3-flash failing as a lead rung: `ee20478d` (280 hard 400s in one build), `b3a2c81e` (68 GLM failures,
+52 of them `OUTPUT_BUDGET_STARVED`), `dd1f5f60` (8.65 tok/s; 29.5 of 30.1 minutes inside one call).
+
+**The decisive fact is not price — it is that the failure class cannot occur on FlashX.**
+`glmCanDisableThinking` is a numeric family test: 5.3-and-newer always reason, 4.x can be told not to.
+FlashX is 4.7, so its turns send `thinking: disabled` and the whole output budget goes to code instead
+of to mandatory reasoning that never reaches the file. Cheaper *and* structurally immune — the two aims
+("kharcha kam", "app best bane") point the same way here, which is rare enough to state.
+
+### What changed
+
+- `tierLadder.ts` — Weak and Normal lead rung, and the `PLAN_RUNG` of both, 5.3-flash → 4.7-flashx.
+  Strong untouched (it never carried a flash rung). Rungs 2-4 of every tier unchanged.
+- `providerRates.ts` — a new `glm-4.7-flashx` row and a matcher branch placed BEFORE both the generic
+  `flash` rule and the `/glm-?4/` coder rule.
+- `healLadder` — the predicate is now a named `isCheapFlashRung`, matching the 4.7-flash FAMILY.
+
+### 💸 The billing half had to ship in the same commit — the third time this trap was set
+
+`glm-4.7-flashx` trips TWO existing rules that would each price it wrongly: it contains "flash" (→ the
+FREE `glm-flash` $0 line) and it matches `/glm-?4/` (→ $0.60/$2.20, 8.6× its real input). A $0 real cost
+bills the USER ₹0 — the bill is real cost × markup — while we pay Z.ai for every token. Identical in
+shape to `kimi-k2.7-code-highspeed` and `glm-5.3-flash`, both caught on 2026-09-16. **The rule this
+makes explicit: a model may not join a ladder until its price is on the rate card.**
+
+### 🔁 A dormant rule woke up, and it was found by a failing test rather than in production
+
+`healLadder`'s pattern matched only `4.7-flash`. Between 09-14 and 09-17, with 5.3-flash leading, it
+matched nothing — so every heal restarted on the exact rung whose output needed repairing, silently.
+FlashX matches it, so the 2026-08-13 rule ("a repair must not begin on the model that produced the
+failing app") applies again: Weak and Normal heals now open on KIMI. Costs more per heal ($0.95/$4.00
+against $0.07/$0.40) and that is the intended trade — a cheap repair that fails buys a second one.
+`tests/tierChainFidelity.test.ts` caught this as a failure the moment the lead rung changed; its case
+had been NAMED "5.3-flash leads and can repair its own work", which is exactly the assumption that
+expired. Rewritten to assert the heal chain opens on a DIFFERENT VENDOR, pinned explicitly so a future
+lead-rung change that happens to keep GLM first fails there rather than quietly reinstating the old
+behaviour.
+
+### ⚠️ Open risk, stated rather than discovered later
+
+FlashX's CODING quality is unmeasured here. Z.ai's "X" suffix is the faster PAID variant of a Flash
+model (GLM-4.5-X and -AirX are both dearer than their bases), and this repo's own 09-14 entry calls the
+free `glm-4.7-flash` "weak at coding" — FlashX may share that brain. What changed is the comparison, not
+the estimate: a model that reasons well and delivers nothing is worse than a plainer one that answers.
+**Watch heal COUNT on the first real builds, not cost.** Revert is one env var, no deploy:
+`AGENTV3_LADDER_WEAK=GLM:glm-5.3-flash,KIMI:kimi-k2.7-code,GLM:glm-5.3,HAIKU` (and `_NORMAL` likewise).
+
+A second honest unknown: the exact API id. The page prints "GLM-4.7-FlashX"; `glm-4.7-flashx` follows
+the vendor's own lower-case convention (`glm-4.7-flash`, `glm-5.3-flash`). If it is wrong the rung
+errors and the chain falls through to KIMI — safe, but one wasted round-trip per turn until the env
+override corrects it. The rate matcher accepts every casing/separator variant, so billing cannot drift
+on that question (test-locked).
+
+### Not touched, deliberately — other sessions own them
+
+PR **#2983** is building the in-flight-provider-cancellation fix (the ~52-minute zombie chain I recorded
+as OPEN yesterday), and PR **#2985** the slow-rung throughput bench. Per the concurrency rule, a root
+cause another PR names as its work is taken. Neither touches ladder composition, so there is no overlap.
+
+**Gate, run last on the final state:** see the commit.
+
+## 2026-09-17 — Complexity routing: a big app opens on KIMI, and a model is asked only when the code cannot tell (item 2 of the admin's build list)
+
+Admin, verbatim: *"kimi ko bade aur complex task dedo, kabhi bhi — starting me bhi de sakte ho, beech
+me bhi! task chota/bada/mild/complex hai code se pata na lage to gptnano se puchwa lo!!"* Two
+instructions in one sentence; `src/server/AgentV3/complexityRouting.ts` is both halves.
+
+### The hook was already in the codebase, unused — which is why this is small
+
+`RequestAnalyser.analyzeRequest` has scored every request deterministically since the cost-ladder work
+(0-100, plus a `taskType`), and **its own docblock says it "marks the genuinely ambiguous ones
+(`ambiguous: true`) so a caller MAY refine them with a cheap LLM analyser".** Nothing ever read that
+flag: the refinement half was designed and never built. So no new scoring concept was invented, and
+none competes with the existing one — the admin's instruction turned out to name a gap the code had
+already described and left open.
+
+### What it does
+
+- **`complex` ⇒ the build skips the cheap flash opener**, which on Weak and Normal makes KIMI the first
+  engine to see the app. "Starting me bhi" is literal: Kimi is no longer only a fallback.
+- **The line is 40 — `RequestAnalyser`'s own top tier boundary**, not a second invented threshold. For
+  scale, that module scores `simple_app` ≤20 (capped), `coding` 30, `debugging` 45, `complex_app` 58,
+  `architecture` 80. A clear calculator and a clear social network are both decided for free.
+- **A model is asked ONLY within ±3 of that line** — the same margin `isNearBoundary` uses.
+
+### 💸 Deliberately narrower than the flag it builds on, and the difference is money
+
+`ambiguous` marks a score near EITHER of the analyser's boundaries (20 and 40), because it was written
+for a three-tier ladder. This decision is binary, so **only the 40 line can change it**: asking a model
+about a score of 18 would spend a call to move a verdict from `simple` to `simple`. "Kharcha kam se
+kam" applies to the classifier too — a question whose answer cannot change the outcome is not asked.
+Test-locked (`needsSecondOpinion(20) === false`).
+
+### 🔒 It cannot break, hang, or mislead a build
+
+The call is raced at 6s; a throw, a timeout, an empty reply and an unparseable reply all fall back to
+the deterministic verdict that was already computed for free — never to a guess. `parseComplexityAnswer`
+returns `null` on anything it was not asked for, and `null` means "no answer", not a coin toss. Kill
+switch `AGENTV3_COMPLEX_TO_KIMI=off` restores the pre-change behaviour exactly, and costs nothing while
+off (it returns before the call is made). Every one of these paths has its own test.
+
+### One definition of "the cheap opener", shared with healLadder
+
+`withoutCheapFlashLead` is now exported from `tierLadder.ts` and used by BOTH `healLadder` and this
+router, and `buildTurnRunner` applies it for `heal || complex`. They are separate FLAGS — "this is a
+repair" and "this is a big app" are different questions — that happen to have the same answer about the
+same rung today. Two regexes agreeing on the day they were written is exactly how this repo's drifts
+have started; a test asserts the two paths produce identical ladders on all three tiers.
+
+### 💸 What it costs, stated plainly
+
+On Weak — the tier NavBharatAI pays for itself — a complex build now opens on `kimi-k2.7-code`
+($0.95/$4.00) instead of `glm-4.7-flashx` ($0.07/$0.40): roughly **13× the input price for those
+builds**. The bet is the admin's own and it is the same one the ladder note makes in the other
+direction: a cheap rung that fails is paid twice, once in the wasted call and once in the heal. It is
+only worth taking where it is likely to pay, which is why `simple` is the default on every doubt —
+including a NaN score, a disabled flag, and an unavailable model.
+
+### 🔌 The wiring is test-locked against the real route source
+
+Three cases read `routes/agentv3.ts` itself and assert the decision is made, `await`ed (a bare promise
+would route every build as simple), and handed to the runner. This repo has shipped correct-but-unread
+code more than once — `AGENTV3_CACHE_PREFIX`'s dropped re-apply line, `EmbeddingSearch`'s never-read
+index, and `ambiguous` itself. A pure module nobody calls is the failure mode, so the wiring is pinned
+rather than assumed.
+
+**Still to come from the admin's list:** the Hindi→English prompt normalisation (measure first, per the
+earlier turn), and the milestone-building audit.
+
+**Gate, run last on the final state:** see the commit.
+
+---
+
+## 2026-09-17 — Item 6: the answer was NOT translation. The scorer could not READ the request.
+
+The admin delegated this one ("woh aap apne hisab se behtar karo"), and I said I would MEASURE before
+adding cost. I did. **The measurement killed the idea I was about to build, and pointed at a real hole
+next to it.**
+
+### What the seven real build reports actually say
+
+| report | prompt | issues | model calls |
+|---|---|---|---|
+| `58f110de` "Text to image generator app banao asli" | Hinglish | 195 | 23 |
+| `41acada6` "Music player for Android 16" | plain English | **311** | **40** |
+| `e6175ca1` "Can you generate images?" | plain English | 252 | 40 |
+| `1743bdfb` (alarm app) | Devanagari — but a CHAT turn, not a build prompt | 44 | 6 |
+
+- **Not one build prompt in the evidence base is in Devanagari.** The single Devanagari message was a
+  question ("क्या मैं prompt डालूं") misrouted to a build — the defect already fixed this session.
+- The Hinglish build landed **mid-pack on every measure**; the two WORST builds were in plain English.
+- Every Devanagari character in that report is in the model's REPLY. **The generated app's files contain
+  none** — the builder handled a Hinglish request and still wrote an English UI.
+
+**So a translation step would have spent a call and added latency on every non-English build, risked
+losing the user's intent before the builder saw it, and fixed nothing I can find evidence of.** Not built,
+and the reason is recorded here rather than the feature being quietly dropped.
+
+### The real hole, which is the admin's sentence read literally
+
+*"jo language **hamara code** nahi samajh paye"* — the language OUR CODE cannot read. Not the model's.
+
+`RequestAnalyser`'s signals are **all ASCII** — `simpleApp`, `coding`, `debugging`, `architecture`,
+`hardSignal`, and the shared `isComplexAppPrompt` alike. Verified: zero non-Latin characters in the whole
+scoring path. So a Devanagari request for a hospital app with doctor logins, patient records, appointments
+and billing matches nothing, falls to `taskType: 'chat'`, and scores **5**.
+
+🔴 **AND YESTERDAY'S OWN CHANGE MADE THAT WORSE, WHICH IS WHY THIS IS NOT A TIDY-UP.** The complexity
+routing shipped hours earlier asks a second opinion only when the score is within ±3 of the 40 line. A
+score of 5 is not borderline — it is *confidently* simple. So the biggest app in the file would have gone
+to the cheapest rung with **no Kimi and no second opinion**, more silently than the day before.
+
+**Fixed at the class:** `scorerCouldNotRead(prompt)` — script-agnostic, not a Devanagari test, because
+India is not one script (Bengali, Tamil, Telugu, Urdu and the rest are equally unreadable to an ASCII
+regex). It measures the share of LETTERS outside the Latin range (≥25%, min 12 letters), so romanized
+Hinglish stays FALSE — the signals really do read "banao ek todo app" — and one Hindi word inside an
+English sentence is not an unread request. `needsSecondOpinion` now returns true for such a prompt
+**whatever it scored**, and the admin report says WHICH of the two reasons bought the call.
+
+🔒 **It cannot cost more when it fails.** An unread prompt whose second opinion is down falls back to
+`simple` — byte-identical to the behaviour before this change. The ask is the mechanism; the fallback is
+today. Test-locked in `tests/complexityRouting.test.ts` and **proven by reversion** (deleting the one
+guard line fails three cases, confirmed).
+
+### 🔴 TWO OPEN ROOT CAUSES FOUND WHILE HUNTING SIBLINGS (rule 6 — recorded, not patched)
+
+**1. Pipeline DEPTH, the ETA, and the preflight cost estimate have the same blindness — and depth matters
+more than routing.** `complexityFromPrompt` (`BuildTimeEstimator.ts`) counts page/feature words with ASCII
+regexes too. A Devanagari complex app yields `moduleCount 1, featureCount 1` → magnitude 2 → **the FAST
+LANE**, plus a wildly optimistic ETA and a too-low cost estimate. Not fixed here because the fix is a
+thread-through, not a regex: `complexityFromPrompt` runs at route line ~11075 and `estimateBuildCost`
+earlier still, both **before** `decideComplexity` at ~11573. Flooring the counts on "unread" instead would
+send a Devanagari *calculator* down the deep pipeline — wrong in the expensive direction. The real fix is
+to move the one complexity decision earlier and let all three readers share it; that is a design change
+with real blast radius and belongs in its own PR.
+
+**2. 🔴 THE ILLEGAL-CONTENT DETECTION IS BLIND TO DEVANAGARI, AND THIS ONE MUST NOT BE PATCHED CASUALLY.**
+`illegalContentRules.ts` has **zero** Devanagari in its code (comments stripped and re-checked). The Hindi
+in `promptSafety.ts` is the refusal MESSAGE only — the output, not the detection. So the porn ban that
+report `03997004` exists to enforce can be walked past by asking in Hindi.
+**Bounded, not unmitigated:** the models themselves still refuse (that was always the model's virtue, per
+`03997004`), and this session's refusal-is-final and trailing-question fixes stop the retry and the upsell
+that followed. The cost is one build's worth of refusals, **not** a published site.
+**Why it is not fixed in this change:** CLAUDE.md's own ruling is that detection stays PRECISION-FIRST and
+carries an `exempt` stand-down for a sexual-health clinic, a school safety curriculum, a harassment
+reporting tool. Adding Devanagari *subject* patterns without equally careful Devanagari *exempt* patterns
+would show a Hindi-speaking doctor the blunt ban message — the exact harm the admin corrected on
+2026-09-13 ("yeh thoda jyada hi ho gaya"). Both halves ship together or neither does.
 ## 2026-09-16 — App Mart decoupled from "Publish your app" (admin: "ab isko band karo — user saperately apni app khud pest kare")
 
 **The ask, verbatim:** publishing an app to NavBharatAI hosting was also offering an immediate App Mart
@@ -58824,3 +59214,49 @@ exists to refuse.
 **Still open from this autopsy (1, 2, 4, 5):** budget-blind planning, unbounded exploration, idle
 sandbox billing, and mid-build scope explosion. Items 1 and 2 are one change to the architect loop —
 where other sessions are active — and are deliberately NOT started here rather than raced.
+
+---
+
+## 2026-09-17 — Item 7: the "Milestone Building" proposal is ALREADY BUILT. Do not build it again.
+
+The admin forwarded a ChatGPT proposal for "Milestone Building" and flagged it under the
+external-suggestion rule ("dont build! text reply only", then "ek ek kar ke sab build karo"). Audited
+it against the real codebase before designing anything, using safeguard #6's method — **filename
+first**, three vocabularies, whole repo. Both halves of the proposal already exist:
+
+**1. Feature-level dependency ordering ⇒ `ProjectPlan.ts` (Software Project Mode), 592 lines.**
+Modules with explicit `dependsOn`, frozen export contracts, dependency-ordered scheduling, durable
+per-module status, todo projection, and a per-module FRESH context carrying only that module's spec
+plus the contracts of finished modules. **Verified wired, not assumed**: `routes/agentv3.ts` ~14272
+creates and saves the plan, ~18571 marks each module done/failed after its turn, ~19591 auto-continues
+to the next buildable module. Gated by `AGENTV3_PROJECT_MODE`, which defaults OFF.
+
+**2. Protect completed milestones ⇒ `greenFreeze.ts`, and it is STRONGER than the proposal.** The
+proposal wanted finished work protected from later passes. Green Freeze already denies post-green
+overwrites **by construction**, deny-by-default with a small explicit allowlist, built on the same
+AsyncLocalStorage idiom as `noClaudeZone` and `aiSpendZone` — so a pass a future session adds is
+refused automatically because it is not on the list. Its own header records why the convention-based
+version ("add `if (previewGreen) skip` twelve times") was rejected: conventions rot. **Default ON,
+already live in production.**
+
+🔴 **SO THE REAL FINDING IS NOT A MISSING FEATURE — IT IS A PENDING ADMIN DECISION, OPEN SINCE
+2026-07-04.** The 2026-07-04 entry above records Software Project Mode as *"fully built and dormant …
+ADMIN DECISION NEEDED (asked in chat, safeguard #3)"* and gives the exact action:
+`AGENTV3_PROJECT_MODE=aashishcpmt09@gmail.com` on Cloud Run, one real mega-prompt, then `on` for all.
+That question was asked and never answered, and the feature has slept for over two months.
+
+🔴 **AND THE REASON NOBODY COULD SEE IT: the flag was MISSING FROM CLAUDE.md's env registry
+entirely** — zero mentions there against eight in this file. The registry exists precisely to stop
+that drift, and this is the same shape as the idle-minutes default that said "NOT taken" eight days
+after it was taken. **Fixed in this change**: a full entry now records what the mode is, that the
+wiring is verified rather than doc-sourced, the allowlist rollout path, the high-precision detection,
+the pending decision, and the three gaps below.
+
+**Three gaps carried forward honestly** (from the 2026-07-04 entry, re-confirmed still open): an
+IMPORTED repo never creates a plan (creation fires only on a fresh `new_build`); a reopened incomplete
+plan needs a typed "continue"; and contract DRIFT is caught only by the whole-workspace `tsc` each
+turn, not by a dedicated contract check.
+
+**What was deliberately NOT done:** the flag was not flipped and no second planner was written. The
+key lives in a console no session can reach, and building a parallel "milestone" system beside a
+working one is exactly the duplicated work safeguard #6 exists to prevent.

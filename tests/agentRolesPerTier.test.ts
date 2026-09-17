@@ -46,8 +46,12 @@ describe('Judge: a different model from the builder, at the lowest input price t
 
 describe('Plan = the tier\'s plan rung, then its own ladder; Grok no longer plans', () => {
   it('pure: the plan rungs — the cheapest rung that reasons well, per tier', () => {
-    expect(PLAN_RUNG.weak.model).toBe('glm-5.3-flash');
-    expect(PLAN_RUNG.off.model).toBe('glm-5.3-flash');
+    // 2026-09-17: the plan rung follows the LEAD rung, which moved 5.3-flash → 4.7-flashx. Plan is an
+    // input-heavy, output-light call, so it belongs on the cheapest rung that reasons well — and
+    // FlashX is both cheaper ($0.07 vs $0.15 in) and, being 4.x, able to be told to stop reasoning,
+    // which is the exact failure that made 5.3-flash produce 280 hard 400s in one build (ee20478d).
+    expect(PLAN_RUNG.weak.model).toBe('glm-4.7-flashx');
+    expect(PLAN_RUNG.off.model).toBe('glm-4.7-flashx');
     expect(PLAN_RUNG.mini).toEqual({ provider: 'GLM', model: 'glm-5.3' });
     for (const tier of ['weak', 'off', 'mini'] as const) expect(planRunnerChainNames(tier === 'weak', tier)).not.toContain('GROK');
   });

@@ -83,6 +83,18 @@ export function realRateCard(): Record<string, TokenRate> {
     // (Gemini/Grok/Claude rows below) omit it → full input rate (no discount) by construction, so
     // nothing can be under-billed.
     'glm-flash': { inputPerMTok: envRate('RATE_GLM_FLASH_IN', 0), outputPerMTok: envRate('RATE_GLM_FLASH_OUT', 0) },
+    // glm-4.7-flashx — the LEAD rung of Weak and Normal since 2026-09-17. $0.07 in / $0.40 out,
+    // cache-hit $0.01, read off Z.ai's own pricing page (docs.z.ai → Pricing, admin screenshot), not
+    // derived from anything.
+    //
+    // 🔴 IT NEEDED ITS OWN ROW BEFORE IT COULD JOIN A LADDER, and this is the THIRD time this exact
+    // trap has been walked into: `kimi-k2.7-code-highspeed` (2026-09-16) would have billed at HALF
+    // its price through the plain k2.7 fallback, and `glm-5.3-flash` (2026-09-16) would have billed
+    // at ZERO through the row directly above this one. `glm-4.7-flashx` contains "flash", so without
+    // this line and the matcher branch that precedes the generic rule, every FlashX turn would price
+    // at the FREE `glm-flash` line — and a bill is the real cost × markup, so a $0 real cost bills
+    // the user ₹0 while we pay Z.ai. A model may not go on a ladder until its price is on this card.
+    'glm-4.7-flashx': { inputPerMTok: envRate('RATE_GLM47_FLASHX_IN', 0.07), outputPerMTok: envRate('RATE_GLM47_FLASHX_OUT', 0.4), cacheReadPerMTok: envRate('RATE_GLM47_FLASHX_CACHE', 0.01) },
     // glm-5.3-flash (on the WEAK and NORMAL ladders). $0.15 in / $0.50 out, cache-hit $0.03 — all three
     // quoted from Z.ai's published page (2026-09-16), not derived.
     // ⚠️ It must NOT fall into the 'glm-flash' $0 line — a "flash" in the NAME is not a price, and this
@@ -206,6 +218,10 @@ export function realRateFor(provider: string, model?: string): TokenRate {
       // 5.3-flash BEFORE the generic flash rule: the generic rule is the 4.7-flash $0 line, and a
       // "flash" in the name is not a price (see the rate line's own note).
       if (/glm-?5[.\-]?3.*flash/.test(m)) return card['glm-5.3-flash'];
+      // ⚠️ flashX BEFORE the generic flash rule too, and before the /glm-?4/ coder rule — it is a
+      // 4.x id containing "flash", so BOTH of the rules below would price it wrongly: the generic
+      // flash line at $0 (free), the 4.x coder line at $0.60/$2.20 (8.6× its real input price).
+      if (/flash-?x/.test(m)) return card['glm-4.7-flashx'];
       if (m.includes('flash')) return card['glm-flash'];
       if (/glm-?4/.test(m)) return card.glm;              // the known cheap 4.x coder
       return card['glm-5'];                                // 5.x and anything newer/unknown

@@ -12,12 +12,22 @@ const seq = (rungs: readonly { provider: string; model: string }[]): string[] =>
  * The ladder IS the policy, so the policy is asserted literally — rung for rung, in order.
  */
 describe('the three ladders, exactly as the admin listed them', () => {
-  it('WEAK: glm-5.3-flash → kimi-k2.7-code → glm-5.3 → Haiku (Haiku last, as the 2026-07-13 amendment said)', () => {
-    expect(seq(TIER_LADDERS.weak)).toEqual(['GLM:glm-5.3-flash', 'KIMI:kimi-k2.7-code', 'GLM:glm-5.3', 'CLAUDE_HAIKU:haiku']);
+  // 🔴 LEAD RUNG CHANGED 2026-09-17 (admin: "glm 5.3 flash ko hata do!"). glm-5.3-flash is off every
+  // ladder; glm-4.7-flashx leads Weak and Normal. Not a cost tweak: 5.3-and-newer CANNOT be told to
+  // stop reasoning (glmThinking.ts), which produced 280 hard 400s in one build (ee20478d) and 52
+  // OUTPUT_BUDGET_STARVED failures in another (b3a2c81e). FlashX is 4.x, so the defect cannot occur —
+  // and it is cheaper ($0.07/$0.40 against $0.15/$0.50). Rungs 2-4 are untouched on every tier.
+  it('WEAK: glm-4.7-flashx → kimi-k2.7-code → glm-5.3 → Haiku (Haiku last, as the 2026-07-13 amendment said)', () => {
+    expect(seq(TIER_LADDERS.weak)).toEqual(['GLM:glm-4.7-flashx', 'KIMI:kimi-k2.7-code', 'GLM:glm-5.3', 'CLAUDE_HAIKU:haiku']);
     expect(TIER_LADDERS.weak[TIER_LADDERS.weak.length - 1].provider).toBe('CLAUDE_HAIKU');
   });
-  it('NORMAL: glm-5.3-flash → kimi-k2.7-code-highspeed → glm-5.3 → Sonnet', () => {
-    expect(seq(TIER_LADDERS.off)).toEqual(['GLM:glm-5.3-flash', 'KIMI:kimi-k2.7-code-highspeed', 'GLM:glm-5.3', 'CLAUDE:sonnet']);
+  it('NORMAL: glm-4.7-flashx → kimi-k2.7-code-highspeed → glm-5.3 → Sonnet', () => {
+    expect(seq(TIER_LADDERS.off)).toEqual(['GLM:glm-4.7-flashx', 'KIMI:kimi-k2.7-code-highspeed', 'GLM:glm-5.3', 'CLAUDE:sonnet']);
+  });
+  it('the retired glm-5.3-flash is on NO ladder, and on no plan rung either', () => {
+    for (const level of POWER_LEVELS_ORDERED) {
+      for (const r of TIER_LADDERS[level]) expect(r.model).not.toBe('glm-5.3-flash');
+    }
   });
   it('STRONG: glm-5.3 → kimi-k3 → Sonnet → Opus, with Opus LAST ("Opus sirf zarurat par")', () => {
     expect(seq(TIER_LADDERS.mini)).toEqual(['GLM:glm-5.3', 'KIMI:kimi-k3', 'CLAUDE:sonnet', 'CLAUDE_OPUS:opus']);
@@ -85,10 +95,18 @@ describe('overrides are applied whole or not at all', () => {
 });
 
 describe('heal, escalation and availability derive from the ladder — never from another tier', () => {
-  it('a heal drops the leading rung ONLY when it is the known-weak glm-4.7-flash', () => {
-    // 5.3-flash leads every ladder now and is strong enough to repair its own work with the error in hand.
-    expect(seq(healLadder(TIER_LADDERS.weak))).toEqual(seq(TIER_LADDERS.weak));
-    expect(seq(healLadder(TIER_LADDERS.off))).toEqual(seq(TIER_LADDERS.off));
+  it('a heal drops the leading rung when it is the cheap 4.7-flash FAMILY — flash or flashx', () => {
+    // 🔁 A DORMANT RULE WOKE UP ON 2026-09-17, and this case is where it was caught. The 2026-08-13
+    // rule is "a repair must not begin on the model that produced the failing app". Its pattern
+    // matched only `4.7-flash`, so while glm-5.3-flash led (09-14 → 09-17) it matched NOTHING and
+    // every heal silently restarted on the very rung whose output needed repairing. FlashX is 4.7, so
+    // the rule applies again: Weak and Normal heals open on KIMI — a genuinely different vendor.
+    expect(seq(healLadder(TIER_LADDERS.weak))[0]).toBe('KIMI:kimi-k2.7-code');
+    expect(seq(healLadder(TIER_LADDERS.weak))).toEqual(seq(TIER_LADDERS.weak).slice(1));
+    expect(seq(healLadder(TIER_LADDERS.off))[0]).toBe('KIMI:kimi-k2.7-code-highspeed');
+    expect(seq(healLadder(TIER_LADDERS.off))).toEqual(seq(TIER_LADDERS.off).slice(1));
+    // Strong has no flash rung, so its heal ladder is its whole ladder — the "ONLY when" half.
+    expect(seq(healLadder(TIER_LADDERS.mini))).toEqual(seq(TIER_LADDERS.mini));
     // An override that puts 4.7-flash back in front still heals from rung 2…
     expect(seq(healLadder([{ provider: 'GLM', model: 'glm-4.7-flash' }, { provider: 'KIMI', model: 'kimi-k2.6' }]))).toEqual(['KIMI:kimi-k2.6']);
     // …and never empties.
@@ -146,14 +164,16 @@ describe('escalation stays inside the tier', () => {
 
 describe('the plan phase runs on the tier\'s best cheap reasoner, then its own ladder', () => {
   it('plan rungs per tier — never Opus, never Grok, never Sonnet (input-heavy call, cheapest good reasoner)', () => {
-    expect(PLAN_RUNG.weak).toEqual({ provider: 'GLM', model: 'glm-5.3-flash' });
-    expect(PLAN_RUNG.off).toEqual({ provider: 'GLM', model: 'glm-5.3-flash' });
+    // Follows the LEAD rung (moved to 4.7-flashx 2026-09-17): plan is input-heavy and output-light,
+    // so it belongs on the cheapest rung that reasons well — and FlashX can be told how much to reason.
+    expect(PLAN_RUNG.weak).toEqual({ provider: 'GLM', model: 'glm-4.7-flashx' });
+    expect(PLAN_RUNG.off).toEqual({ provider: 'GLM', model: 'glm-4.7-flashx' });
     expect(PLAN_RUNG.mini).toEqual({ provider: 'GLM', model: 'glm-5.3' });
     for (const r of Object.values(PLAN_RUNG)) expect(r.provider).not.toBe('CLAUDE_OPUS');
   });
   it('the plan chain is the plan rung followed by the tier ladder minus that rung — no other tier\'s model', () => {
-    expect(seq(planLadder('weak'))).toEqual(['GLM:glm-5.3-flash', 'KIMI:kimi-k2.7-code', 'GLM:glm-5.3', 'CLAUDE_HAIKU:haiku']);
-    expect(seq(planLadder('off'))).toEqual(['GLM:glm-5.3-flash', 'KIMI:kimi-k2.7-code-highspeed', 'GLM:glm-5.3', 'CLAUDE:sonnet']);
+    expect(seq(planLadder('weak'))).toEqual(['GLM:glm-4.7-flashx', 'KIMI:kimi-k2.7-code', 'GLM:glm-5.3', 'CLAUDE_HAIKU:haiku']);
+    expect(seq(planLadder('off'))).toEqual(['GLM:glm-4.7-flashx', 'KIMI:kimi-k2.7-code-highspeed', 'GLM:glm-5.3', 'CLAUDE:sonnet']);
     expect(seq(planLadder('mini'))).toEqual(['GLM:glm-5.3', 'KIMI:kimi-k3', 'CLAUDE:sonnet', 'CLAUDE_OPUS:opus']);
     expect(seq(planLadder('max'))).toEqual(seq(planLadder('mini')));
   });

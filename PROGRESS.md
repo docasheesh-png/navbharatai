@@ -62504,6 +62504,91 @@ today — and was rewritten to anchor on the block's closing `catch`.
 3. 🥵 Sandbox 87% idle across 26.6 minutes; 115 s to the first model call — unchanged here.
 ---
 
+## 2026-09-17 — A SUCCESSFUL BUILD'S VERDICT CONTRADICTED ITS OWN COUNTS, AND NAMED A CAUSE FOR A FAILURE THAT NEVER HAPPENED (autopsy fdd59ef8, second half)
+
+**Branch `claude/a-verdict-that-contradicts-its-own-counts`. Root cause fixed in
+`src/server/AgentV3/BuildDiagnostics.ts` (`deriveRootCause`).**
+
+### What was wrong — two defects in one branch, pulling in opposite directions
+
+**HALF ONE — the false zero.** Autopsy fdd59ef8 (2026-09-17) found a report announcing *"NO
+unresolved problem was recorded"* while its own header carried `counts.unresolved: 2`. The fix was
+written INLINE, in the one branch that report happened to hit — a build that did **not** succeed.
+**The sibling branch one line below, the one every SUCCESSFUL build reaches, kept the identical
+false sentence verbatim:** `'Build completed successfully with no problems recorded.'`
+
+That sibling is the common path, not the rare one. `DESIGN_CONSISTENCY`, `RELEASE_GATE`,
+`TIME_TO_FIRST_CALL`, `DEPENDENCY_VULNERABILITIES` and `CLAIM_UNSUPPORTED` are all recorded
+`autoResolved: false` and all in `NEVER_ROOT_CAUSE` — so a green build **routinely** ends with a
+non-zero unresolved count and a verdict claiming zero. Six existing tests in this repo asserted that
+exact sentence on inputs that each carried one unresolved item; every one of them encoded the
+contradiction.
+
+**HALF TWO — the causal claim.** When one unresolved item WAS eligible, the branch returned that
+item's bare message into a field called `rootCause`, rendered to the admin as *"Root cause:"*. On a
+build that SUCCEEDED there is no failure for anything to be the cause OF — so the app's own failing
+test suite came out reading as the reason a working app had failed. Same dishonesty the `[CRITICAL]`
+guard and the `PREVIEW_NOT_RENDERED` / `RELEASE_GATE` entries in `NEVER_ROOT_CAUSE` were each written
+for, arriving through the last door still open.
+
+### The fix
+
+- **`ineligibleUnresolvedNote(issues, excluded)`** — one exported pure helper. It counts the items
+  that are candidate-shaped-but-unresolved **through the caller's own `excluded` predicate**, never a
+  private copy of the rule: an item is ineligible for several different reasons (an advisory, the
+  gate's own summary, a dead sandbox, a transient the build recovered from), and a private copy is how
+  the two halves of one verdict drift apart — which is the defect being fixed, one level up.
+- It **names the actual codes** instead of the inline version's hard-coded parenthetical
+  (*"a design/accessibility advisory or the release-gate summary"*), which was true of one report and
+  goes stale the moment a different advisory is the one recorded.
+- **The `ok === true` branch now runs BEFORE the bare `return problem.message`** and never asserts
+  causation: the item is named in full — exactly as the `stillRunning`, `endedWithoutOutcome` and
+  `stoppedByUser` branches already name theirs — with the causal claim withdrawn.
+- 🔒 **A genuinely clean build keeps the old sentence byte-for-byte.**
+
+### 🔎 Sibling sweep (rule 3) — the autopsy had fixed ONE of FOUR
+
+Every branch reached with no `problem` ended on a clause asserting nothing unresolved was recorded,
+and each is the same contradiction in different words. An INELIGIBLE item is still an UNRESOLVED
+item: counted in `counts.unresolved`, printed in the report's header, merely barred from naming a
+cause. All four now flow through one `nothingUnresolved(plain)` helper:
+
+| branch | the claim it used to make unconditionally |
+|---|---|
+| `stillRunning` | *"…no unresolved issue has been recorded so far."* |
+| `endedWithoutOutcome` | *"…and no unresolved issue was recorded either."* |
+| `stoppedByUser` | *"Nothing failed, and no unresolved problem was recorded."* |
+| `problem === resolvedOnly` | fixed by fdd59ef8 — the only one of the four |
+
+### ⚠️ CONSIDERED AND REJECTED: adding `TEST_SUITE` to `NEVER_ROOT_CAUSE`
+
+I opened this branch intending to add it, on the reasoning that its sibling
+`TEST_SUITE_UNVERIFIED` is already in the set and that `releaseGate.ts` deliberately keeps `tests`
+out of `RED_ON_FAILURE`. **Reading the recording site changed my mind and the change was dropped.**
+`TEST_SUITE` at `severity: 'warning', autoResolved: false` is recorded only when the suite genuinely
+**RAN and failed** — that is real evidence about the app, not an advisory, and on a build where
+everything else is clean it is the single most useful finding in the report. `TEST_SUITE_UNVERIFIED`
+is in the set for the **opposite** reason: our sandbox could not run it at all, so it says nothing
+about the app. Silencing a real defect to fix a wording problem would have traded one problem for
+another. The wording is fixed instead; the finding is still named in full. A reversion guard asserts
+`TEST_SUITE` stays OUT of the set and its unverified sibling stays IN, so a later session does not
+re-derive the idea I had and act on it.
+
+### Regression tests — `tests/aVerdictThatContradictsItsOwnCounts.test.ts` (22 cases)
+
+Proven by reversion twice: **14 of 22 fail** with `BuildDiagnostics.ts` reverted, all pass restored.
+The reversion guard reads **CODE with comments stripped** (not a fixed byte window — six brittle
+source-reading guards broke on correct code in this repo on one day), and asserts three structural
+facts the behavioural cases cannot see: all four branches call the shared helper, the `ok === true`
+branch is decided BEFORE the bare `problem.message` return, and the `TEST_SUITE` decision above.
+
+**Six existing assertions were updated, and each kept its original intent** (the advisory is NOT
+promoted to the cause) while dropping the exact sentence that was false on that very input:
+`BuildDiagnostics.test.ts` ×5 and `tests/reportHonesty.test.ts` ×1.
+
+**Full CI gate green on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` ·
+`vitest run` (**24,646 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
+`deps:server-gate`.
 ## 2026-09-17 — Our instrumentation shipped inside the user's published app
 
 From the deep re-autopsy of `9cca1fd5`, and this one **survived three adversarial lenses** while the

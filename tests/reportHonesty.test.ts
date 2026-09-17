@@ -93,8 +93,15 @@ describe('3. an advisory hint can never be a build\'s root cause', () => {
   };
 
   it('the reported case: a SUCCESSFUL build no longer blames a dependency hint', () => {
-    const cause = deriveRootCause({ issues: [advisory], ok: true });
-    expect(cause).toBe('Build completed successfully with no problems recorded.');
+    const cause = deriveRootCause({ issues: [advisory], ok: true }) ?? '';
+    // The reported case: the dependency hint is NOT promoted to the build's cause.
+    expect(cause).not.toContain('@capacitor/android');
+    expect(cause).toContain('Build completed successfully');
+    // 2026-09-17: this case used to assert the flat 'with no problems recorded' sentence, which was
+    // FALSE on exactly this input — one unresolved item WAS recorded and counted in the report's own
+    // header; it simply could not name a cause. See tests/aVerdictThatContradictsItsOwnCounts.test.ts.
+    expect(cause).toContain('1 unresolved item(s) WERE recorded');
+    expect(cause).toContain('INTEGRITY_UNUSED_DEP');
   });
 
   it('and not on a FAILED build either — it explains nothing there either', () => {

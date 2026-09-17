@@ -105,6 +105,7 @@ import { registerExportRoutes } from './src/server/routes/export';
 import { registerApiContractRoutes } from './src/server/lib/apiContract';
 import { registerKnowledgeDocsRoutes } from './src/server/lib/KnowledgeDocs';
 import { registerApiKeyRoutes } from './src/server/routes/apiKeys';
+import { registerDeveloperApiRoutes } from './src/server/routes/developerApi';
 import { apiVersionMiddleware } from './src/server/routes/apiVersion';
 import { tracer, parseCloudTraceContext } from './src/server/observability/Tracer';
 import { registerObservabilityRoutes } from './src/server/routes/observability';
@@ -744,6 +745,7 @@ setInterval(() => {
   registerApiContractRoutes(app); // P-DATA.5 — OpenAPI 3.0.3 contract at /api/openapi.json + /api/docs viewer
   registerKnowledgeDocsRoutes(app); // U-9 — docs site at /guide + machine-readable /api/knowledge-base
   registerApiKeyRoutes(app); // U-7 — public API keys (/api/keys) + key-gated /api/v1/me
+  registerDeveloperApiRoutes(app); // the NavBharatAI API v1 — /usage, /builds, /chat/completions (Developer Tools)
 
   // PWA "App Store" routes — extracted to src/server/routes/pwa.ts (Phase 1).
   registerPwaRoutes(app, pwaStore);

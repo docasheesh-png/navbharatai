@@ -60061,8 +60061,203 @@ broken behaviour"; the broken behaviour is what was removed.
 4. Sandbox 84% idle across a 39.8-minute session.
 5. `AGENTV3_PROJECT_MODE` — admin-only, Cloud Run.
 
+## 2026-09-17 — the project-mode gate never said whether it was on, and that cost a real setup attempt
+
+The admin was asked to canary Software Project Mode on their own account. They set it, in good faith,
+to `doc.asheesh@iclod.com` — one character short of `icloud.com`. `projectModeEnabled` matches EXACTLY
+(lower-cased, no normalisation, no typo tolerance), so that value is `false` for ever.
+
+**The gate recorded NOTHING, on either branch.** So the only way to discover the typo was to send a
+mega-prompt and notice that nothing happened — and that symptom is identical to three other causes:
+
+1. the prompt was below `detectMegaProject`'s deliberately-high threshold,
+2. the mega-app roadmap (default-ON, needs no key) took the build first and project mode stood down,
+3. the feature is broken.
+
+**Four causes, one symptom: silence.** This repo has already paid for that exact shape twice —
+`E2B_USD_PER_HOUR` charged half the real rate for a month with nothing failing anywhere, and
+`ALERT_EMAIL_FROM` read as configured while the provider rejected every send. Both were fixed the same
+way: not by changing the decision, but by making the decision SAY ITSELF.
+
+### The fix
+
+`projectModeDiagnosis()` (`ProjectPlan.ts`, pure) returns one admin-report line naming which of the five
+states the build was in — `not-configured` · `account-not-on-allowlist` · `pre-empted` ·
+`not-a-new-build` · `below-threshold`, or `null` when project mode genuinely took the build. Recorded as
+`PROJECT_MODE` from `routes/agentv3.ts` **before** the gate branches, so a SKIP is explained too — a
+record inside the `if` would only ever explain the branch that ran, i.e. would say nothing in exactly the
+case that needs explaining.
+
+Two details that are not decoration:
+
+- **The identity is MASKED** (`doc***@icloud.com`). `userFacingReport` keeps every issue's `detail`
+  verbatim — it strips provider names and nothing else — so this text can reach the build's own user.
+  That is their own address, so there is no cross-user leak by construction; masking is the second lock.
+  Enough survives to spot a wrong domain, which is the only reason the identity is printed at all.
+- **`enabled` is answered by the REAL gate**, not by a second copy of its rules: `projectModeDiagnosis`
+  calls `projectModeEnabled` with the raw flag. A re-implementation would be free to disagree with the
+  branch the build actually took.
+
+### The 50/50 half — why the problem could arise at all
+
+The thresholds lived only inside `detectMegaProject`, so any explanation of them had to be re-derived.
+`megaProjectSignals()` is now the one place they live and `detectMegaProject` is literally its `fires`
+field, with `MEGA_SCALE_MIN` / `MEGA_BULLETS_WITH_NOUN` / `MEGA_BULLETS_ALONE` named so the report quotes
+the real numbers. **No behaviour change** — a test asserts the two agree across six prompts. This matters
+because four ladder comments in this repo once described a rung that no longer existed, and neither `tsc`
+nor `vitest` can read a comment.
+
+### Tests
+
+`tests/projectModeVisibility.test.ts` — 22 cases, built from the real incident (the `iclod.com` value,
+the admin's own school-ERP test prompt). Three guards proven by REVERSION, each failing exactly one
+targeted test: un-masking the identity, moving the record inside the `if`, and giving `detectMegaProject`
+a drifted second copy of the rules.
+
+⚠️ **Process note, recorded because it cost real work.** Reversion-proving was run on UNCOMMITTED
+changes and `git checkout <file>` discarded them — both source edits had to be rewritten from scratch.
+Safeguard #4 ("commit small, commit often") is not only about credit cutoffs: **commit before testing a
+guard by breaking the code.**
+
+### Still open (rule 6)
+
+1. **The key itself is admin-only.** Nothing here enables project mode — it only makes the gate's answer
+   visible. The recommended value lists both known admin addresses, since the gate reads the SIGN-IN
+   email and an Apple/developer-account address need not be the same one.
+2. **A pre-existing plan is reported as `not-a-new-build`**, which is honest but coarse: telling
+   "a plan exists and is waiting for a continuation" apart from "this is an edit" would need a plan load
+   before the gate, i.e. a Firestore read on every build. Deliberately not paid for.
+
+## 2026-09-17 — the evidence ledger's READ half: the sibling the typecheck fix left behind
+
+Continuing the ChatGPT-sourced reliability review (adapted, not transcribed — external-suggestion rule).
+Its §11/§16 argument is that a release gate must read real evidence rather than its own private signal.
+That is not a new idea here: it is the **open root cause** recorded from autopsy `697b38ee`, whose exact
+words are *"there is no shared EVIDENCE LEDGER… the gates trust only their own."*
+
+🔎 **AND HALF OF IT WAS ALREADY FIXED, WHICH THE SEARCH ONLY FOUND BY LOOKING PROPERLY.** On 2026-09-16
+`typecheckEvidenceFromCommands` (`TscGate.ts`) closed the typecheck case exactly right — it reads the
+build's own command log and fills the gate's evidence when the deterministic gate never ran. **It was
+wired at ONE call site, for ONE fact.** The same autopsy's `tests` case is the identical defect with the
+identical cure, and nothing read it: that report's release gate told the user the app *"has no test suite
+that could be run here"* about a build whose own Playwright suite the agent had installed, run, and
+PASSED — with the passing run sitting in the same report's command log.
+
+That silence was structural, not incidental: `gateEvidence.tests` is written **only** by the vaccine
+pass, which is flag-gated, percentage-gated, and skipped entirely on a build not yet marked `ok`.
+
+### The fix — the generalisation, not a third one-off
+
+`src/server/AgentV3/agentRunEvidence.ts` (pure) is the ONE place a gate asks *"what has already been
+proven?"*. `typecheck` **delegates** to the existing implementation rather than being re-derived — a
+second copy of a verdict is a second copy free to disagree. `testsEvidenceFromCommands` is the new half,
+parsing with the **same** `parseTestOutcome` the vaccine trusts. Read through
+`buildDiag.agentRunEvidence()`, wired once at the release-gate assembly, filling only evidence still at
+`not-run`.
+
+Discipline inherited deliberately from the typecheck harvester: `undefined` means "the log does not
+settle this", never a silent promotion; latest wins; the OUTPUT is parsed rather than the exit code (a
+piped run reports the last stage's code); and **a run that could not EXECUTE is evidence of nothing in
+either direction** — blaming a user's app because our sandbox lacked a browser binary is the Shiv
+Medical Store mistake and must not return through a fallback.
+
+🔒 **CHECKED, NOT ASSUMED — this cannot cost a user money.** A RED release gate flips a build to
+`ok: false` (and therefore FREE) only when `shippingIssueCount('error') > 0`, and test evidence
+contributes nothing to that count; the verdict-correction block says so in its own words. So `passed`
+can only move the gate UP and `failed` only makes the sentence honest.
+
+### Two bugs the tests caught in my own code
+
+1. **`\b--version` never matches anything.** Between a space and a `-` both sides are non-word
+   characters, so the whole flag exclusion was dead and `npx jest --version` was classified as a jest
+   RUN. Flags are now anchored on whitespace.
+2. **A file verb reads as a suite run.** `cat src/tests/login.playwright.test.ts` matched the playwright
+   rule on vocabulary alone — the same "contains the word" trap `looksLikeTypecheckCommand` refuses by
+   requiring `--noEmit`. `FILE_VERB` now excludes it.
+
+### Tests
+
+`tests/agentRunEvidence.test.ts` — 20 cases. Three guards proven by reversion: counting a
+could-not-run as a failure, dropping the `FILE_VERB` guard, and letting the fallback override real gate
+evidence instead of filling a gap.
+
+### Still open (rule 6)
+
+1. **The ledger's WRITE half does not exist.** The autopsy's third false statement — `RUNTIME_UNCHECKED`
+   after three successful browser console reads — cannot be recovered from the shell log at all, because
+   that proof is held by the page checks. It needs an actor recording a proven fact, not a reader
+   harvesting one. Deliberately not guessed at here.
+2. `CLAIM_UNSUPPORTED` ("not one file was changed" two seconds before `Incremental: 2 changed, 2 new`)
+   is the same WRITE-half gap.
 ---
 
+## 2026-09-17 — Journey derivation could not see a form the page COMPOSES (autopsy `e4ebcb5f`, second occurrence)
+
+**Recorded as an OPEN root cause in PR #2988 two days ago; this report is the second occurrence, with
+evidence sharp enough to close it.**
+
+The build was a CHAT app. The agent's own timeline shows it reading `src/App.tsx`,
+`src/components/ChatWindow.tsx` and `src/services/ai.ts`. The report then said:
+
+> `JOURNEY_NOT_DERIVED` — *"No user journey was run — this app has no form for a journey to fill in —
+> nothing here takes user input."*
+
+…and **thirty seconds earlier, in the same report**:
+
+> `ACCESSIBILITY` — *"WCAG 1.3.1: 4 form field(s) with no label"*
+
+**Two of our own scanners, the same files, opposite answers.**
+
+### Root cause
+
+`deriveJourneys` (line ~263) and `noJourneyReason` (line ~360) both read only `files[page]` —
+`inputTags(files[p])`. A React page composes its UI from components, so the `<input>` lived in
+`ChatInput.tsx`, ONE import away, and neither function ever looked. The module's candidate list was
+already shared between the two (a previous fix, for exactly the "the explanation describes a different
+search" class) — but both then narrowed to the page's own text, so sharing the list bought nothing.
+
+### The fix
+
+`formSourcesFor(page, files)` — the page, then the LOCAL components it imports, one level deep, capped
+at `MAX_IMPORTS_PER_PAGE` (12), deterministic order. `resolveLocalImport` handles `./`, `../`, the `@/`
+alias, implicit extensions and `index` files, and returns null for any bare (package) specifier. Both
+call sites now use it, so the derivation and its explanation still cannot describe different searches.
+
+**One level, not a graph walk**: it covers how a page actually composes a form, stays bounded, and
+keeps the result explainable in a report. A test asserts it does NOT recurse.
+
+### 🔒 Why this cannot manufacture a RED gate — checked BEFORE writing it, not after
+
+`journeys` is in `releaseGate`'s `RED_ON_FAILURE`, so a wrongly-failed journey would flip the verdict
+to NOT ok and make the build free — the exact harm the same day's other autopsy was about. Widening
+what gets derived is therefore not a free improvement, and the question had to be settled from the
+runner's code rather than assumed.
+
+It is safe **by construction**: `journeyScript` defaults every journey to `unreachable`, and a missing
+field (`no-fields`) or missing submit (`no-submit`) throws before anything is pressed, leaving that
+default. Only after a submit actually goes through does the script say, in its own comment, *"From here
+on, a failure IS the app's failure"*. So a component that is not rendered on the route yields evidence
+we did not get — never an accusation against the app.
+
+Also deliberate: the journey keeps the **PAGE's** route. A component has none, and `routeForFile` on a
+component's filename would resolve to `/` and drive the browser to the wrong URL — test-locked.
+
+### Tests
+
+`tests/journeySeesFormsInComponents.test.ts` (14), proven by reversion: reverting
+`journeyDerivation.ts` fails 8. The 75 pre-existing journey tests are unchanged and still pass.
+
+⚠️ **One expectation in the new file was mine and wrong, and the code was right.** I asserted a canvas
+game would get the *"a game, a dashboard or a landing page has nothing to save"* wording; it does not,
+because that branch only fires when `pages.length === 0` and the game has an `App.tsx`. It gets the
+"no form for a journey to fill in" sentence instead — which is TRUE for a game. The fix is about which
+apps reach that sentence, not its wording.
+
+### Still open
+
+- The nicer "nothing to save and reload" wording is unreachable for any app that HAS an `App.tsx`,
+  because that branch is gated on `pages.length === 0`. Not touched here: it is a wording question with
+  its own precision risk, and the sentence it falls back to is true in every case that reaches it.
 ## 2026-09-17 — Autopsy `e4ebcb5f`: a rendering app was declared NOT READY and made FREE, over three placeholders in the user's own repository
 
 **The report.** Prompt: *"Fix this error and continue building the app: network error"* — an EDIT of a
@@ -60392,3 +60587,92 @@ the clarity this file asks for.
   a PUBLIC page; it is more honest constant than it was adjustable.
 - **`engines used today` starts at zero on the day this ships** — the store has no history, and
   backfilling it would mean inventing days nobody measured.
+## 2026-09-17 — Autopsy 2c61f648: "Can I use it. Or how to create apk" built an app for 7.3 minutes
+
+Admin sent build report `2c61f648` (user `vasanthakumar9813@gmail.com`, weak tier, `ok: true`,
+release gate YELLOW, and the user immediately reached for Diagnose/Restart).
+
+### What the user asked, and what they got
+
+The prompt was **`"Can I use it. Or how to create apk"`** — a question about a project they ALREADY
+had (51 source files, a React+Vite trading app with a Flask backend). What ran was a full agentic
+build: **438.7 s wall clock**, ~104 provider calls, 28 deliveries, 569k input tokens, 3 of the user's
+own files rewritten (`index.html`, `README.md`, `tsconfig.json`), and the project left **failing
+`tsc`** (`OUTCOME_TYPECHECK_FAILED` — "type errors remained after the agentic build and one repair
+pass"). Sandbox: 7.3 min up, **6.7 min idle (92%)**.
+
+### 🔴 Root cause — and it is a sibling that was named in this file ONE DAY EARLIER
+
+`readsAsQuestion` only ever examined the message's **opening**:
+
+```
+if (text.endsWith('?')) return true;
+if (WH_OPENERS.test(text)) return true;                     // ^-anchored
+if (AUX_OPENERS.test(text)) return AUX_ASKS_US.test(text);  // ^-anchored, and an EARLY RETURN
+return MIDSENTENCE_KYA_QUESTION.test(text);
+```
+
+For this message: no `?`; `WH_OPENERS` is `^`-anchored so the **"how" in the second sentence was
+invisible**; `AUX_OPENERS` matched the leading "can", and the early `return` handed back
+`AUX_ASKS_US` ("can i" ≠ "can you") — **false** — without any later test running. One sentence
+decided the whole message.
+
+Both halves classify as `chat` on their own. Joined they became **`new_build` at HIGH confidence**,
+and HIGH returns from `classifyIntentSmart` **before the LLM intention reader is ever asked** — the
+exact hard lock the 2026-09-13 "read the mood first" rule exists to remove.
+
+🔴 **`MIDSENTENCE_KYA_QUESTION`'s own comment, written 2026-09-16, states the defect verbatim:**
+*"Every other line in `readsAsQuestion` requires the message to OPEN with a question word."* That
+autopsy unanchored the **Hindi** pattern and stopped; the English siblings were never hunted. This is
+that sibling, failing in production the next day. **Third instance of this meta-pattern in this file's
+history** (cf. `a38c6fef`, `4efab9d7`).
+
+**Fixed structurally, not with another special case:** the openers are applied per CLAUSE
+(`CLAUSE_BOUNDARY`, `clauseReadsAsQuestion`), with leading connectives stripped ("or how…" is the same
+question as "how…"), so no future pattern has to remember to be unanchored. The `AUX_OPENERS` early
+`return` became `&&`, which also made yesterday's Hindi rule reachable for every message opening
+"can i / should i / do i" — it had been dead code for that whole shape.
+
+⚠️ Orders are untouched and verified: "build a notes app", "create apk", "ek billing app banao" stay
+`new_build` HIGH; **"do it again" is still a retry**, not small talk.
+
+### 🔴 The second finding: a prompt rule is a suggestion once the loop is running
+
+`systemPrompt.ts` already carries, verbatim: *"If the user asks how to get their app as a real Android
+file … **answer them, do NOT start building**"* and *"**NEVER** tell them to install Android Studio,
+**use the Capacitor CLI**, or set up GitHub Actions themselves."*
+
+The build ran `npm install @capacitor/core @capacitor/cli @capacitor/android`, `npx cap init`,
+`npx cap add android`, `npx cap sync android` — then discovered at 250 s that **Java is not installed**
+and gave up. At **207.8 s** the model had already said *"NavBharatAI has a built-in APK Builder that
+does exactly this for you"* — it recited the rule and violated it in the same sentence.
+
+**The instruction was correct, present and emphatic, and it lost — because routing had already decided
+the turn was a build.** A loop whose job is to act cannot be talked out of acting by a prompt line.
+This is the 50/50 law's other half: the upstream fix IS the routing fix, and that prompt line should
+never have had to fire.
+
+### The ledger (5 buckets)
+
+- ✅ **Self-healed (2):** `update_todo` malformed call; 4 `<script>` tags without SRI.
+- 🔀 **Worked around (4):** GLM benched at 161 s for answering **4.5× slower than budgeted** (139 s of
+  work our clock sizes at 31 s, over 4 calls) → fell to Kimi; APK built by hand → abandoned, notes
+  written instead; Playwright `COULD NOT RUN` (browsers absent); `npm audit fix` exit 1.
+- ⏭️ **Skipped (5):** journey not derived (no form); e2e scaffold skipped; console not captured
+  (`RUNTIME_UNCHECKED`); peak memory unavailable; page-render check skipped.
+- ❌ **Still broken (4):** typecheck fails; design consistency **50/100 (D)** (31 colours, 37 off-grid
+  spacings); 5 dependency vulnerabilities (1 high); release gate **YELLOW**.
+- 🥵 **Struggles:** the whole build; the 42-second Capacitor detour; ~104 calls for a question; 92%
+  sandbox idle.
+
+### Step 2 — the missing subsystem, named
+
+**There is no SANDBOX CAPABILITY CONTRACT.** The agent spent 208–250 s discovering by trial and error
+three FIXED properties of our own image — no Capacitor, no Java, no Android SDK — that the platform
+knows at build time. Nothing tells the builder what the machine cannot do, so infrastructure limits are
+learned by running commands and failing. Recorded as an OPEN root cause (rule 6): the fix is a
+machine-readable capability block injected into the build prompt, naming both the absent toolchain and
+the PLATFORM FEATURE that covers it.
+
+Tests: `tests/questionReadsEveryClause.test.ts` (16), both halves of the fix proven by reversion.
+Existing `IntentClassifier.test.ts` (73) and every classifier-adjacent suite (497 total) pass unchanged.

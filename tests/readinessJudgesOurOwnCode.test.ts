@@ -160,7 +160,16 @@ describe('the wiring — proven by reversion', () => {
   it('the route arms the dispatcher from its OWN writtenFiles, as a thunk', () => {
     // A VALUE here would capture an empty map (the gate asks at the end of the build), and a
     // dispatcher-local tally would miss every sub-agent write — the hole fixed in PR #2988.
-    expect(ROUTE).toContain('dispatcher.setAuthoredFiles(() => writtenFiles.keys());');
+    //
+    // ⚠️ IT IS NO LONGER `writtenFiles.keys()`, AND THIS FILE'S OWN MODULE SAID WHY BEFORE IT WAS
+    // TRUE. `buildAuthorship.ts`'s header states "SCAFFOLD FILES ARE NOT IN THE AUTHORED SET" —
+    // correct for the actuator's boilerplate, which never goes through a write tool, and FALSE for
+    // the golden scaffold, which does `writtenFiles.set(...)` for all of its files. So this gate
+    // would have blamed a build for a placeholder in NavBharatAI's own template (autopsy 2b0a3ed5).
+    // `modelAuthoredPaths` removes exactly the byte-exact seeded entries; a template the model has
+    // since edited stays ours to answer for. Still a thunk, still the route's own map.
+    expect(ROUTE).toContain('dispatcher.setAuthoredFiles(() => modelAuthoredPaths(writtenFiles));');
+    expect(ROUTE).not.toContain('setAuthoredFiles(() => writtenFiles.keys())');
   });
 
   it('the readiness gate splits authenticity findings by authorship before counting blockers', () => {

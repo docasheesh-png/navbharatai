@@ -237,6 +237,27 @@ export function isParallelSafeToolUse(toolUse: ToolUse, opts?: { parallelBuild?:
   return PARALLEL_SAFE_TOOLS.has(toolUse.name);
 }
 
+/**
+ * Could this tool call have PRODUCED anything — a file, a command's effect, a sub-agent's work?
+ *
+ * 🔴 ROOT CAUSE (autopsy 2b0a3ed5, 2026-09-17). A build whose one and only tool call was
+ * `read_file` told the user *"Your files so far are saved — send another message and I'll continue
+ * from here."* Nothing had been written. `builtSomethingNow()` asked `totalToolUses > 0`, and a READ
+ * is a tool use.
+ *
+ * ⚠️ DELIBERATELY NOT `!isParallelSafeToolUse(tu)`, though the sets overlap today. That function
+ * answers *"can this run concurrently?"*, and under `parallelBuild` it calls a `frontend` sub-agent
+ * parallel-safe — which WRITES. Negating it would make a real builder's work read as no work at all,
+ * on exactly the flag that is switched on in production. Two questions, two predicates.
+ */
+export function toolUseCouldProduceWork(toolUse: ToolUse): boolean {
+  if (toolUse?.name === 'task') {
+    const role = typeof toolUse.input?.role === 'string' ? toolUse.input.role : '';
+    return !PARALLEL_SAFE_TASK_ROLES.has(role);
+  }
+  return !PARALLEL_SAFE_TOOLS.has(String(toolUse?.name ?? ''));
+}
+
 /** Run `fn` over `items` with at most `limit` in flight; results keep input order. */
 async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
@@ -363,13 +384,20 @@ export class AgentRunner {
     const budgetStagesSent = new Set<BudgetStage>();
     // Total tool calls across the whole run — a build that never called a tool built nothing.
     let totalToolUses = 0;
+    // …and of those, the ones that could have PRODUCED something. A build that only ever read a file
+    // has not built anything, however many reads it made — see `toolUseCouldProduceWork`.
+    let producingToolUses = 0;
     // ONE place answering "is there something to resume from", so the four abort/timeout/step-cap
     // exits below can never drift into disagreeing with each other (or with the route's own
     // `writtenFiles`-based billing decision — see `hasExistingFiles`'s doc comment for the report
     // this closes). `totalToolUses` alone only sees work done BY THIS loop; a fast-lane handoff can
     // hand this loop a non-empty workspace before it ever runs a turn.
+    //
+    // ⚠️ `producingToolUses`, NOT `totalToolUses` (autopsy 2b0a3ed5): a build whose only tool call was
+    // `read_file` produced nothing, and telling that user their files were saved is precisely the
+    // "never claim the user did something they did not do" rule this module's summary text states.
     const builtSomethingNow = (): boolean =>
-      totalToolUses > 0 || this.opts.hasExistingFiles?.() === true;
+      producingToolUses > 0 || this.opts.hasExistingFiles?.() === true;
     // How many times we've nudged a build that only NARRATED (described its plan / said it would
     // "assign the frontend expert") without calling a single tool. The model often plans out loud
     // on its first turn; terminating there is the "model replied without building" bug. We instead
@@ -853,6 +881,7 @@ export class AgentRunner {
           return { ok, summary, steps, usage, billedUsd: billed() };
         }
         totalToolUses += turn.toolUses.length;
+        producingToolUses += turn.toolUses.filter(toolUseCouldProduceWork).length;
 
         // Execute the requested tools and gather results (in the original order, so tool_use
         // ids resolve). Mutating tools (write/edit/bash, builder sub-agents) run SERIALLY and

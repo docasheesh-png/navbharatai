@@ -61172,3 +61172,62 @@ reading the history does not "restore" a feature that was removed on purpose.
 
 Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1728 files, 24432 passed, 0 failed** ·
 build · test:bundle · boot:check.
+
+## 2026-09-17 — autopsy `8682b6b1`: our own heartbeat hid a 160-second stall
+
+Second fix from the two-report autopsy. `TIME_TO_FIRST_CALL` read:
+
+> *"171s of preparation before the build's first model call began … The longest single stretch with
+> NOTHING recorded was 60s, beginning right after: '⏱ minute 1 — still working …' — that is where to
+> look first."*
+
+The real answer was twenty lines above it in the SAME report:
+
+> `SETUP_TIMING: "Project checked in 161s — nothing needed restoring"`
+> `detail: "durable read 294ms (114 file(s)) · sandbox scan 160493ms"`
+
+**ONE measured step took 160.5s of the 171s**, and the instrument built to find the biggest cost
+pointed at a 60-second gap and at a heartbeat.
+
+### Root cause — a liveness ping counted as activity
+
+`longestSilentGap` treated every recorded entry as a mark of work. The heartbeat writes
+`⏱ minute N — still working` once a minute, and it is emitted *precisely because nothing else is
+happening*. So one 161-second stall was chopped into 56s / 60s / 45s and the largest reported gap was
+60s — the interval between two heartbeats. **The engine's "I am alive" ping was concealing the thing
+it was pinging through.** This is the shared-evidence-ledger class again: the report held the answer
+and the verdict could not read it.
+
+### The fix — two halves, one commit, because either alone is worse than neither
+
+1. **Timer chatter no longer counts as activity** (`isTimerChatter`: `code === 'HEARTBEAT'`, or a
+   message starting `⏱` — the route also emits `⏱️ Still building…` as an `AGENT_STEP`, so the code
+   alone is not the tell). Named against `isProgressNoise` in `activityTimeline.ts` so the two are
+   recognisably one idea.
+2. **The sentence stops claiming "with NOTHING recorded"** — once heartbeats are filtered that is
+   literally false, and fixing a misleading pointer by making an untrue claim is exactly the trade
+   this repo forbids. It now says *"with no work recorded (heartbeats aside)"*.
+
+Plus `until`: every self-timing step in this codebase records at COMPLETION (`PHASE_TIMING`, all four
+`SETUP_TIMING` sites), so **the line that ENDS a silence is usually the step that FILLED it**. On the
+real timeline that is `"Project checked in 161s — nothing needed restoring"` — the answer, named. Still
+hedged in the wording: the line that ended a stall is not proof it caused it.
+
+No schema change was needed. An earlier plan added a `durationMs` field to `BuildIssue` so the warning
+could read step durations; the gap BEFORE a completion-recorded step already *is* its duration, so the
+timeline carried the fact all along.
+
+### Tests
+
+`tests/silenceNamesTheStepThatFilledIt.test.ts` — 10 cases built from the report's real timestamps, so
+the 161s and the old 60s are both reproduced exactly. The existing 169 `BuildDiagnostics` tests are
+unchanged. Three guards proven by reversion: removing the filter (4 fail), dropping `until` (2),
+restoring the old wording (3).
+
+⚠️ **Two of my own test drafts were wrong, and both are recorded because they are the lesson.**
+`163497 - 80000` is 83 seconds, not the 84 I asserted from mental arithmetic. And the honesty guard
+first asserted `String(constructor)`, which never contains a method body — it passed no matter what the
+sentence said. **A guard that cannot fail is not a guard**, and this is the second time in one session
+that lesson had to be paid for. The rewritten guard reads the source and STRIPS COMMENTS, because the
+module's own comment legitimately quotes the old phrase while explaining why it had to go — and the
+first version of that guard flagged the explanation as the bug.

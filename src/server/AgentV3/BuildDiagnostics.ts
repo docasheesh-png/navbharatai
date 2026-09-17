@@ -908,27 +908,51 @@ export class BuildDiagnostics {
    *
    * Returns null when nothing is worth reporting (no gap, or one too short to matter). PURE.
    */
+  /**
+   * A TIMER TICK IS NOT ACTIVITY, AND COUNTING IT AS ACTIVITY HID A 160-SECOND STALL (build 8682b6b1).
+   *
+   * That report's preparation window was 171s, of which ONE measured step — the sandbox scan — took
+   * 160.5s. The warning pointed the reader at a 60-second silence instead, because the heartbeat
+   * writes `⏱ minute 1 — still working` once a minute and every one of those ticks LOOKED like
+   * something happening. A 160-second stall was therefore reported as three 60-second ones, and the
+   * biggest single cost in the build was invisible to the instrument built to find it.
+   *
+   * A heartbeat is the engine saying it is alive; it is by definition emitted while nothing else is
+   *. Same rule as `isProgressNoise` in `activityTimeline.ts` — named so the two are recognisably one
+   * idea rather than two coincidences.
+   */
+  private static isTimerChatter(e: { message?: string; code?: string }): boolean {
+    return e?.code === 'HEARTBEAT' || String(e?.message ?? '').trimStart().startsWith('⏱');
+  }
+
   static longestSilentGap(
-    entries: ReadonlyArray<{ ts: number; message: string }>,
+    entries: ReadonlyArray<{ ts: number; message: string; code?: string }>,
     startedAt: number,
     untilTs: number,
     minSeconds = 20,
-  ): { seconds: number; after: string } | null {
+  ): { seconds: number; after: string; until: string } | null {
     const marks = [...(entries || [])]
       .filter((e) => e && typeof e.ts === 'number' && e.ts >= startedAt && e.ts <= untilTs)
+      .filter((e) => !BuildDiagnostics.isTimerChatter(e))
       .sort((a, b) => a.ts - b.ts);
-    let best: { seconds: number; after: string } | null = null;
+    let best: { seconds: number; after: string; until: string } | null = null;
     // The window from the build's start to its FIRST recorded entry counts too — a build that is silent
     // for four minutes before it says anything is exactly the case worth surfacing.
     let prevTs = startedAt;
     let prevMsg = 'the build started';
     for (const m of [...marks, { ts: untilTs, message: '' }]) {
       const seconds = Math.round((m.ts - prevTs) / 1000);
-      if (seconds > (best?.seconds ?? 0)) best = { seconds, after: prevMsg };
+      // 🔑 `until` — the entry that ENDED the silence, which is usually the entry that EXPLAINS it.
+      // Every self-timing step in this codebase records at COMPLETION (`PHASE_TIMING`, all four
+      // `SETUP_TIMING` sites), so the line that breaks a silence is the line reporting the work that
+      // filled it. `after` alone is structurally the least informative half: it names the last thing
+      // that spoke BEFORE the stall, which is often innocent.
+      if (seconds > (best?.seconds ?? 0)) best = { seconds, after: prevMsg, until: m.message };
       if (m.message) { prevTs = m.ts; prevMsg = m.message; }
     }
     if (!best || best.seconds < minSeconds) return null;
-    return { seconds: best.seconds, after: best.after.split('\n')[0].slice(0, 120) };
+    const trim = (t: string) => t.split('\n')[0].slice(0, 120);
+    return { seconds: best.seconds, after: trim(best.after), until: trim(best.until) };
   }
 
   /**
@@ -1006,8 +1030,18 @@ export class BuildDiagnostics {
     // because the total and the biggest single stretch answer two different questions, and the second
     // one is what an autopsy actually acts on. Only stated when a real gap exists.
     const gap = BuildDiagnostics.longestSilentGap(this.issues, this.startedAt, this.now() - (lat ?? 0));
+    // ⚠️ THE WORDING HAD TO CHANGE IN THE SAME EDIT AS THE FILTER. Once timer ticks stop counting as
+    // activity, "with NOTHING recorded" would be literally false — a heartbeat WAS recorded in that
+    // stretch. Fixing a misleading pointer by making an untrue claim is the trade this repo forbids.
     const withGap = gap
-      ? `${attributed} The longest single stretch with NOTHING recorded was ${gap.seconds}s, beginning right after: "${gap.after}" — that is where to look first (it names when the silence started, not what caused it).`
+      ? `${attributed} The longest single stretch with no work recorded (heartbeats aside) was `
+        + `${gap.seconds}s, beginning right after: "${gap.after}"`
+        + (gap.until
+          // Self-timing steps record at COMPLETION, so this is usually the step that FILLED the
+          // silence — the nearest thing to a cause the timeline can honestly offer. Still hedged: the
+          // line that ended a stall is not proof it caused it.
+          ? `, and ending at: "${gap.until}" — that second line is usually the step that filled it, and is where to look first.`
+          : ' — that is where to look first (it names when the silence started, not what caused it).')
       : attributed;
     this.record({
       phase: 'plan',

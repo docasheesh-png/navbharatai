@@ -200,6 +200,12 @@ export function resolvePmScript(command: string, scripts: Record<string, string>
  */
 export function ensureHostBinding(command: string, framework?: DevFramework, resolvedScript?: string): string {
   if (!command) return command;
+  // THE SECOND, INDEPENDENT GUARD (same autopsy as PM_ONE_SHOT_SUBCOMMAND). The classifier decides
+  // WHETHER a command is a server; this decides WHAT to append to one. A dependency install that
+  // reached here by any route must still leave with the command it arrived with, because appending a
+  // flag to `npm install` does not mis-configure a server — it invents a package name and fails the
+  // install outright. One guard makes the misclassification rare; two make the damage impossible.
+  if (PM_ONE_SHOT_SUBCOMMAND.test(command)) return command;
   // Already binds a host (any interface / explicit flag) — leave untouched.
   if (/--host|-H\b|HOST=|0\.0\.0\.0/.test(command)) return command;
   // A direct Node server (`tsx server/index.ts`, …) takes no --host flag; most Express/Fastify apps read
@@ -278,10 +284,43 @@ export function ensureHostBinding(command: string, framework?: DevFramework, res
  */
 const ONE_SHOT_PREFIX = /^\s*(?:pkill|pgrep|ps|kill|grep|netstat|lsof|fuser|ss|head|tail|wc|find|which|echo|cat|git|mkdir|rmdir|rm|cp|mv|touch|ln|chmod|sed|awk|diff|sort|uniq|cut|tr|basename|dirname|realpath|stat|printf|pwd|date)\b/i;
 
+/**
+ * A package-manager subcommand that INSTALLS, INSPECTS or MODIFIES a dependency tree and exits.
+ *
+ * 🔴 WHY THIS EXISTS (autopsy: "Make an VPN App", 2026-08-23, reproduced on main 2026-09-17).
+ * The keyword test below matches a bare `dev`, and `-` is a word boundary — so **`--save-dev`
+ * contains the word "dev"**. `npm install --save-dev @types/react @types/react-dom` was therefore
+ * classified as a dev-server start, and `ensureHostBinding` appended its flag:
+ *
+ *     npm install --save-dev @types/react @types/react-dom -- --host 0.0.0.0
+ *
+ * npm reads `--host` as a PACKAGE NAME. The real build got:
+ *
+ *     npm error 404 Not Found - GET https://registry.npmjs.org/--host - Not found
+ *     npm error 404  '--host@*' is not in this registry.
+ *
+ * It also took the whole managed dev-server boot — deps check, pre-kill, launch, port-wait, recovery —
+ * so the install that fails costs **76 seconds**. The same install spelled `-D` is not matched, runs
+ * plain, and finished in 0.9 s; that accident is the only reason the build ever got its React types.
+ *
+ * ⚠️ `--save-dev` is npm's own documented spelling, so this fires on the COMMON form and spares the
+ * short one — the worst possible split. And the damage is silent in the way that matters: the model
+ * sees a 404 about a package nobody asked for, with nothing pointing at us.
+ *
+ * `exec` / `dlx` are deliberately ABSENT: `npx vite` and `pnpm dlx serve` really do start servers.
+ * `run` is absent for the same reason — `npm run dev` is the case this whole module is built for.
+ */
+const PM_ONE_SHOT_SUBCOMMAND =
+  /^\s*(?:sudo\s+)?(?:npm|pnpm|yarn|bun)\s+(?:install|i|add|ci|uninstall|remove|un|update|up|upgrade|audit|ls|list|outdated|dedupe|prune|link|unlink|pkg|cache|why|info|view|init|publish|pack|version|rebuild|fund)\b/i;
+
 /** True when a single command segment (no `;`/`&&`/`||` chaining left in it) itself starts a
  *  dev/preview server. Extracted so isLongRunningCommand can apply it PER-SEGMENT of a compound
  *  command (see below) instead of only to the whole string. */
 function isDevServerInvocation(segment: string): boolean {
+  // Installing a package called "dev" is not running one. This is checked FIRST so that every
+  // keyword rule below is spared the option-flag ambiguity, and it lives HERE rather than in
+  // isLongRunningCommand so a future caller inherits it.
+  if (PM_ONE_SHOT_SUBCOMMAND.test(segment)) return false;
   // Any Vite invocation is a dev/preview server EXCEPT `vite build` (compiles then exits).
   const isVite = /\bvite(?:\.js)?\b/i.test(segment) && !/\bvite(?:\.js)?\b[^\n]*\bbuild\b/i.test(segment);
   return (
@@ -292,6 +331,15 @@ function isDevServerInvocation(segment: string): boolean {
     // command timeout (deadline_exceeded), wasting ~10 min per build when the agent tried it and the
     // live preview still never came up. `npm run build` stays excluded (compiles then exits).
     /(?:npm|pnpm|yarn)\s+run\s+(?:dev|start|serve|preview)\b/i.test(segment) ||
+    // `npm start` WITHOUT `run` — the drifted sibling of the `npm run server` fix below, found by
+    // the test written for the --save-dev bug (2026-09-17). Every alternative here demanded the
+    // literal word `run`, so the bare form matched nothing: it took the FOREGROUND path and blocked
+    // until the command timeout, which is the exact failure the `npm run server` note describes.
+    // This repo already treats `start` as a first-class dev script — `resolveDevRunCommand` returns
+    // `npm start` for a project whose package.json names it, which is CoreUI's case in that note.
+    // The asymmetry decides it: routing something named "start" costs the managed boot it wants,
+    // while not routing it costs the whole command timeout.
+    /^\s*(?:npm|pnpm|yarn|bun)\s+start\b/i.test(segment) ||
     // THE BACKEND IS ALSO A LONG-RUNNING SERVER (admin report 2026-08-12, the dukaan stock app).
     //
     // `npm run server` matched NOTHING here: `serve\b` does not match "server", and the script it

@@ -270,9 +270,22 @@ export function detectTestPlan(files: string[], packageJsonRaw?: string): TestPl
   // 1. The project's own test script (skipping the npm-init placeholder), via its package manager.
   if (testScript) {
     const framework = jsRunnerOf(testScript) ?? 'npm-script';
+    // 🔴 THE SIBLING THE 2026-08-25 FIX NEVER REACHED (autopsy, build 9cca1fd5, 2026-09-17). The
+    // Playwright-ownership exclusion below (step 2) only ever fires when the project has NO declared
+    // "test" script — but a project that already has real vitest unit tests almost always DOES declare
+    // one ("test": "vitest"), so it takes THIS branch instead, verbatim, with no exclusion at all.
+    // `e2eAutoScaffold.ts` never touches an existing test script when it drops in Playwright specs
+    // later, so the two features silently collide the moment both are present: vitest's default
+    // include (`**/*.{test,spec}.?(c|m)[jt]s?(x)`) sweeps up `e2e/smoke.spec.ts`, that file fails to
+    // collect (it imports `@playwright/test`, deliberately not installed for vitest to use), and the
+    // app's own 29/29 PASSING unit tests are reported as `vitest: FAIL` — feeding a false RELEASE_GATE
+    // downgrade for an app whose real test suite is entirely green. Same guard, same reasoning, the
+    // other branch: forward `--exclude 'e2e/**'` through the package manager's `--` passthrough, which
+    // every one of npm/yarn/pnpm/bun honours for a `run <script>` invocation.
+    const exclude = framework === 'vitest' && playwrightOwnsE2e(files) ? " -- --exclude 'e2e/**'" : '';
     return {
       framework,
-      command: pmRun(pm, 'test'),
+      command: `${pmRun(pm, 'test')}${exclude}`,
       reason: `package.json defines a real "test" script (${testScript}); running it via ${pmRun(pm, 'test')}.`,
     };
   }

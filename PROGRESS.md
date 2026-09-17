@@ -58592,6 +58592,184 @@ older reports carry no `requestAnalysis` and read as unavailable rather than bei
 truncated prompt. **The 50–100 build analysis is deliberately NOT started**, per the admin, and no
 GLM/Kimi routing change is made.
 
+
+---
+
+## 2026-09-17 — THE PUBLISH CEILING IS GONE. Verified end to end on a real app, and the failure that hid it for five weeks was a NAMESERVER, not code.
+
+**The admin published TaskLite and it opened at `https://a-e3638646f0794cd0da543c9d.mitrify.in`** —
+bucket-only, no Firebase preview channel consumed. ROADMAP §10.3 step 4 is DONE in production, which
+means publishing is no longer capped at ~50 apps per site. That cap had reached 36 of about 50.
+
+### The whole chain, and which link was actually broken
+
+Every piece of this had shipped and been tested. Six were already correct on the day it failed:
+
+| Link | State when it failed |
+|---|---|
+| The server mirrors a publish into the bucket | ✅ (`index.html` 24 KB + `assets/`, fetched at the exact object URL the Worker builds — HTTP 200) |
+| `PUBLISHED_APPS_BUCKET_ONLY=on` skips Firebase entirely | ✅ (the URL came back `a-…`, the bucket-only shape, so no channel was created) |
+| `PUBLISHED_APP_DOMAIN=mitrify.in` | ✅ |
+| The Worker file in the repo | ✅ (`APPS_BUCKET` filled in on 2026-09-15, PR #2956) |
+| The Worker route `*.mitrify.in/*` | ✅ attached to `mitrify-apps-worke` |
+| `*.mitrify.in` resolved to Cloudflare | ✅ (104.21.88.5 / 172.67.149.223) |
+| **The Cloudflare ZONE** | 🔴 **`Pending Nameservers` — and a Worker route does not run on a pending zone.** |
+
+The registrar held `hasslo` + `teagan`; the zone in the account that owns the route had been assigned
+`houston` + `naya`. Two Cloudflare nameserver pairs, both real, neither matching — so the zone never
+activated, the route never fired, and Cloudflare passed the request to the DNS origin instead, which
+answered with **Firebase's "Site Not Found"**. Changing the pair at Hostinger fixed it; the public NS
+now read `houston.ns.cloudflare.com` / `naya.ns.cloudflare.com`.
+
+Two real misconfigurations were corrected on the way, both by the admin:
+- `*.mitrify.in` A records pointed at **Cloudflare's own anycast IPs** (a resolved IP pasted back in as
+  an origin). Replaced with the single documented placeholder, `A * → 192.0.2.1`, Proxied.
+- The Worker deployed at the edge was an older paste than the repo file.
+
+### 🔴 THE ROOT CAUSE THAT MATTERS IS NOT THE NAMESERVER — it is that NOTHING COULD SAY WHICH COPY WAS LIVE
+
+The nameserver was a typo-class mistake, fixed in one screen. What cost an hour was that **five
+explanations fitted the identical symptom** — empty bucket name, missing route, wrong DNS, stale edge
+cache, un-mirrored objects — and not one of them could be ruled out from outside, because this Worker is
+deployed by PASTING a file into the Cloudflare dashboard and had no way to report what it was. Each
+candidate had to be eliminated by a separate investigation, and the admin pasted and re-pasted while the
+real blocker was somewhere neither of us was looking.
+
+**Fixed in PR #2980 (merged, `264caa9`):** `GET /__nbai` on any app host returns the Worker's version, the
+bucket it is reading from, and the exact object URL it looks an app's `index.html` up at. It answers
+BEFORE the edge cache and is `no-store`, because a stale diagnostic is worse than none; `appsBucket` is
+`null` rather than `''` so "Firebase only" and "misconfigured" are distinguishable at a glance. The guard
+is the other half: `WORKER_VERSION` is pinned against a hash of the file excluding its own version line,
+so changing the Worker without bumping it fails CI rather than producing a version string that lies.
+Both proven by reversion (`tests/workerBucketOrigin.test.ts`, 7 cases).
+
+### 🔴 OPEN ROOT CAUSE — this is HALF the cure, and saying so is the point (rule 6)
+
+CI cannot prove what is deployed at the edge, and PR #2980 does not claim to. **The complete fix is
+deploying the Worker from CI with Wrangler so pasting is not a step at all** — which needs
+`CLOUDFLARE_API_TOKEN` as a GitHub repo secret (the token already exists in Cloud Run). Until that
+exists, the repo file remains the only record of what runs, and the class can return — the version
+endpoint only makes it visible in one second instead of an hour.
+
+### Also recorded from this session, because it is the same shape
+
+A session (mine) built the admin's requested "Refer & Earn" Profile card in full — server route, hook,
+card, tests, full gate green — and only then discovered PR #2972 had already shipped exactly that
+feature to `main`. The duplicate was deleted and nothing was pushed. The cause was safeguard #1 applied
+sloppily: `git fetch` was run and the SHA read, but the work began from a branch whose TREE predated it,
+so every search answered a question about a stale `main`. **Fetching is not the check; working from the
+fetched state is.**
+## 2026-09-16 — MANDATORY AUTOPSY: IPL Cricket game build (Bengali prompt). A ~2-hour orphaned zombie chain, root-caused and killed.
+
+Fifth absolute rule, triggered by an admin-attached build-diagnostics report (workspace
+`agentv3-q284tbvovsXjcM6AdJkHilxvDof2-8858838e-2698-42eb-b842-d1e68101cbd6`, weak tier, GLM-led). Read
+end to end (2685 lines) before drawing any conclusion.
+
+### The 5-bucket ledger
+
+- ✅ **Self-healed (3):** `npm audit fix` applied the compatible dependency fixes automatically;
+  `SIMPLE_BUILD_FALLBACK` correctly handed off to the full builder when the fast lane timed out at
+  240s; the thinking-param rejection guard correctly avoided re-sending a field GLM had already refused.
+- 🔀 **Worked around (31, per the report's own `workarounds` count):** mostly file-list continuations
+  ("(1/3)", "(2/3)", "(3/3)") papering over responses too long for one call, and repeated GLM
+  output-budget clamp-downs (8000 → 2116 → 1324 authorised tokens) that never actually produced an
+  answer.
+- ⏭️ **Skipped (1):** the post-build completeness review timed out after 90s + grace on 19 files and
+  was recorded as `REVIEW_INCOMPLETE` — its own findings (mid-sentence: "src/App.tsx | **Stub** — renders
+  `<h1>Hello World</h1>` and nothing else") never reached the user's final summary.
+- ❌ **Still broken / shipped imperfect:** the delivered "IPL cricket game" has NO working App.tsx, NO
+  game engine, NO UI — only isolated data files (`types.ts`, `teams.ts`, `constants.ts`, `equipment.ts`,
+  `stadium.ts`, `coins.ts`, `players.ts`) were ever written. `RELEASE_GATE: UNKNOWN` — nothing was ever
+  proven to run (no preview, no page-render, no typecheck, no test suite). The final user-facing summary
+  ("✅ Here's what I built... 18 files") does not mention any of this.
+- 🥵 **Struggle points, the big one:** a background provider-retry chain ran for roughly **two hours**
+  AFTER the build had already been reviewed, billed and reported to the user as finished — see root
+  cause below. One single call inside that chain reported `latencyMs: 5,006,868` (83.4 minutes).
+  `providerFailures.GLM: 101` (85 output-budget-starved, 14 bad-request, 1 budget-exhausted, 1 timeout)
+  against only 31 real GLM deliveries and 1 Kimi delivery in the whole build.
+
+### The missing subsystem
+
+**An abandoned background closure has no way to learn that the work it is doing has become pointless.**
+The fast lane (`SimpleBuilder.runSimpleBuild`) races its whole file-generation phase against a 240-second
+lane timeout — but when that race is lost and control hands off to the full builder, the LOSING side of
+the race is not the same as CANCELLED: JavaScript promises cannot be cancelled, only abandoned, and an
+abandoned closure keeps running, keeps calling real providers, and keeps costing real money, with nothing
+in the system watching it. The plan and shared-contract calls in this same file already carry a real
+absolute deadline for exactly this reason (see the root cause below); the highest-volume call of the
+three — one per file, including that file's own truncation-continuation retries — did not.
+
+### Root-caused and fixed in this change
+
+**`genOne`'s per-file generation call in `SimpleBuilder.ts` never passed a `deadlineAt`.** Two other call
+sites in the SAME file (the plan call, the shared-contract call) already carry this exact fix, with the
+plan call's own comment stating the defect this closes almost verbatim: *"`withTimeout` only races: the
+lane stopped waiting … while the … rung kept running to its own … timeout, so a build could — and did —
+log provider events 148 s after it had ended."* The per-file call — the one made once per file AND
+retried internally by `fastGenerate`'s own truncation-continuation loop — was missed. Because it carried
+no deadline, every hop down to `OpenAiToolRunner.runTurn` saw an unmeasured budget and used its own
+generous internal clock (60–300s per attempt) instead of the lane's real one, so an abandoned closure
+just kept making real provider calls indefinitely — in this report, for the better part of two hours,
+producing content (`EmptyState.tsx`, a generic `App.tsx` referencing `data/teams`/`data/matches` — not
+even related to the actual cricket game) that could never be used, since the full builder had already
+taken over and built something else entirely.
+
+**Fix:** `genOne` now passes `{ deadlineAt: laneStartedAt + overallMs }` — the SAME absolute instant the
+lane's own 240s race is bound by — to every per-file `deps.generate` call. Once that instant passes,
+`OpenAiToolRunner.runTurn`'s existing "refuse before spending" check (`if (bound.expired) throw …`)
+makes an abandoned closure's next attempt fail instantly instead of starting another multi-minute call
+nobody will ever read. Sibling hunt: confirmed there are exactly three `deps.generate` call sites in
+`SimpleBuilder.ts` (plan, contract, per-file) and all three now carry a real deadline.
+
+Regression-locked in `SimpleBuilder.test.ts`: a new case captures every per-file call's `opts.deadlineAt`
+and asserts it lands on the lane's own absolute budget. Proven by reversion — reverting the one-line fix
+fails the new test with `expected undefined to be defined`.
+
+**The 50/50 law:** the reactive half is the fix above. The other half — why can an abandoned closure run
+at all instead of being genuinely cancelled — is a real, larger, NOT-yet-built answer: threading an
+`AbortSignal` through `deps.generate` → `fastGenerate` → `OpenAiToolRunner`/`ClaudeClient` so a lost race
+actually stops the in-flight HTTP request, not just stops new calls after it. The deadline fix closes the
+*follow-on* damage (no more retries after abandonment); it does not stop the ONE call already in flight
+at the exact moment of abandonment from running to completion on the provider's side and being paid for.
+Recorded as an OPEN root cause below rather than attempted here — CLAUDE.md already carries this exact
+gap ("an abandoned provider call is not cancelled by this stop") from the cost-ceiling work, and this
+report is now the most severe evidence yet of how large that gap can get in practice (minutes → ~2 hours).
+
+### Open root causes (rule 6)
+
+- **True cancellation (AbortSignal) for an abandoned closure — not yet built.** The deadline fix in this
+  change stops an abandoned closure from making NEW calls; it cannot stop the ONE call already in flight
+  when the race is lost. Building this needs threading an abort signal through every provider runner,
+  which is a larger, cross-cutting change deserving its own scoped review.
+- **Possible key-pool-vs-deterministic-failure mismatch, named but NOT verified from code.** 21
+  consecutive `OUTPUT_BUDGET_STARVED` failures landed inside a 45-second window for what looks like a
+  single logical call — consistent with (but not confirmed as) the GLM key-pool rotating through every
+  configured key on a failure that is OUR OWN output-ceiling defect and therefore identical on every key
+  in the pool. If confirmed, retrying a deterministic own-side failure across a whole key pool is pure
+  waste (key rotation only helps with per-key problems like rate limits). Not investigated further this
+  session — flagged for whoever next reads the key-pool retry code.
+
+### Billing on this build — checked against TODAY's own standing rule, not re-litigated
+
+This build's `RELEASE_GATE` was **UNKNOWN** and it was still billed 5,214 tokens (₹52.15) from the user's
+free welcome-bonus balance. Before flagging that as a defect, safeguard #1/#2 apply: two OTHER sessions
+today (`claude/correction-reserve`'s audit → #2976, and `claude/unknown-last-chance-proof` → #2978,
+both merged into `main` above this entry) already did a full, admin-directed audit of exactly this
+UNKNOWN/billing intersection, and the admin gave an explicit standing ruling recorded there: *flipping an
+unproven build to failed (and therefore free) is EXPLICITLY WRONG* — "app bani = preview chala… agar
+preview chala gaya to ₹0 charge karoge to aise to mai barbad ho jaunga" (autopsy `4efab9d7`). **"Not
+proven ≠ proven broken" is now a standing rule, not something this autopsy should re-open.**
+
+Checked against that rule rather than against my own first instinct: this build's OWN reviewer pass that
+appeared to have caught the stub was itself `REVIEW_INCOMPLETE` — timed out, cut off mid-sentence, never
+reached a real verdict. Treating an unfinished read as proof of brokenness would be exactly the invented
+verdict the admin's rule forbids. And the brand-new P1 "last chance proof" (`claude/unknown-last-chance-
+proof`, shipped hours before this report) would ALSO have skipped this build — one of its required
+conditions is a published preview URL, and this build's own summary says "the live preview didn't start
+automatically," so no URL ever existed to check. **This build is real, fresh, same-day corroborating
+evidence for that session's own "still open" line** — *"UNKNOWN still ships… when no browser exists"* —
+not a new question. Recorded here as confirmation rather than a duplicate ask.
+
 ## 2026-09-16 — Autopsy: the alarm-app build (`b3a2c81e`) — a question that built an app, and the two bugs found chasing it
 
 Admin sent a real build-diagnostics report (workspace `agentv3-myMfCqmTwcd3NmSqTOlrvnFEG1m2-86ca627a…`,
@@ -59345,3 +59523,145 @@ derived from the delivery ledger, not from the template of the branch that fired
 completeness findings.
 
 **5. Sandbox 84% idle on a 39.8-minute session** — most of it waiting on 341-second model calls.
+## 2026-09-17 — MANDATORY AUTOPSY: Alarm One splash-screen build. A "nothing changed" verdict on a build that genuinely shipped a feature, root-caused to sub-agent writes never reaching the parent's file tracking — plus its sibling in the vitest/Playwright fix.
+
+**The report:** free-tier user "Continue the build from where it left off and finish the remaining
+steps." on an existing app ("Alarm One" — alarms, math challenge, camera scan, auth, calendar, stats,
+en/hi i18n, 51 source files). `ok: true`, `billedInr: 0`, `buildMs: 1,002,550` (~16.7 min). The
+Architect diagnosed an earlier double-React crash as platform-infrastructure (correct — no fix
+needed), delegated the actual requested work (a splash screen) to a `frontend` sub-agent, which wrote
+`Splash.tsx`, edited `i18n.ts` (both languages), `App.tsx` and `index.css`, ran `tsc`/`vitest`,
+verified in a real browser, and ran a clean production build. **The build's own delivered summary —
+the one text `meta.summary`/`report.summary` shows the user — said: "Nothing needed changing… No file
+was modified, because none had to be."** The build's own LAST log line, three seconds later,
+contradicted it: `"♻️ Incremental: 48/53 file(s) unchanged since the last build (3 changed, 2 new)"`.
+
+### Step 1 — the 5-bucket ledger
+
+- ✅ **Self-healed (1):** the frontend sub-agent caught its own fragile trailing-comment-inside-JSX
+  pattern in `Splash.tsx` mid-generation and rewrote it before finishing — a genuine, harmless
+  self-correction (this is almost certainly the report's `healCount: 1`).
+- 🔀 **Worked around (0 real ones):** none — the Architect's "the frontend agent hit its step limit
+  without completing" was a MISREADING of a sub-agent that had, per the very next check, already
+  finished correctly (`agent_done (frontend)` had fired, `task` returned in 736s). No rework was
+  actually done (the Architect verified first), so this cost verification time, not correctness — filed
+  under struggle points below, not as a workaround.
+- ⏭️ **Skipped (1):** the browser console could not be captured on this run (`RUNTIME_UNCHECKED`) —
+  correctly recorded as "not established" rather than faked clean, but the underlying "why couldn't the
+  console be captured" was never explained. Filed as a minor open question, not reproduced here.
+- ❌ **Still broken / shipped imperfect (3):**
+  1. **THE HEADLINE FINDING** — the delivered summary said "no file was modified" over a build that
+     wrote 5 real files and shipped the requested feature. Root-caused and fixed (below).
+  2. `TEST_SUITE: "vitest: FAIL (29/29 passed)"` — a self-contradictory label. All 29 real unit tests
+     passed; the FAIL came from vitest sweeping up the project's own `e2e/smoke.spec.ts` (a Playwright
+     spec, not vitest's) and failing to collect it. This fed a false `RELEASE_GATE: YELLOW` caveat
+     ("the app's own test suite did not pass") for an app whose real tests are entirely green.
+     Root-caused and fixed (below) — the SIBLING of an already-shipped 2026-08-25 fix that only ever
+     covered half the cases.
+  3. Pre-existing app-wide quality debt: Design Consistency D (50/100, 29 distinct colours, 28
+     off-grid spacing values) and Accessibility C (70/100, 13 unlabeled form fields) across 36 files —
+     real, but accumulated over this app's whole history, not introduced by this turn. No engine defect
+     here; recorded for completeness.
+- 🥵 **Struggle points (2):**
+  1. Of the ~16.7-minute build, the FIRST actual file edit did not happen until ~9.8 minutes in — most
+     of that time was legitimate investigation (confirming the double-React crash was platform
+     infrastructure, reading i18n/CSS conventions before writing matching code), but it is exactly the
+     "the minutes must be WORKING minutes" bar CLAUDE.md measures every autopsy against, and it is
+     the visible cost of item ❌1 below almost firing a false "nothing happened" — the build did more
+     investigation than the size of the actual deliverable (one splash screen) justified.
+  2. The Architect's own confusion about whether the frontend sub-agent's work had genuinely finished
+     (see 🔀 above) burned a re-verification pass that turned out to be unnecessary.
+
+### Step 2 — the missing subsystem
+
+**Sub-agent file writes were invisible to the parent turn's own delivery-tracking.** The Architect
+delegates essentially all real app code to specialist sub-agents by design (documented in this
+repo's own comments: "the Architect delegates ALL app code to sub-agents"). The mechanism that counts
+"how many files did this turn actually change" (`writtenFiles`, fed by one `onFileWrite` callback) was
+wired into the TOP-LEVEL dispatcher only — the CHILD dispatcher every sub-agent runs through was built
+with that callback silently absent. So on the very common shape of build where the Architect itself
+never calls `write_file` directly (it investigates and delegates), `writtenFiles.size` reads **zero**
+regardless of how much the sub-agent actually built — and that zero is exactly the signal
+`verifiedNoChangeSummary` uses to decide whether to tell the user "nothing needed changing."
+
+### Step 3/4 — DNA-level root-cause fixes (both proven by reversion)
+
+**Fix 1 — thread the sub-agent's writes back to the parent's tracking (`src/server/AgentV3/SubAgent.ts`,
+`src/server/routes/agentv3.ts`).** `makeSubAgentSpawn`'s `SubAgentDeps` gained an `onFileWrite` callback,
+passed into the child `ToolDispatcher`'s 11th constructor slot (previously always `undefined`). The
+route wires it via the same forward-reference pattern the code already uses for `ignoreRulesForBuild`
+(a mutable holder declared before the spawn factory, assigned once the real `onFileWrite` closure exists
+a few hundred lines later — safe because no sub-agent can run before that assignment happens). Nothing
+about which tools a sub-agent may call changed — `secondOpinion`/`consensus`/`webSearch`/`deploy` stay
+withheld exactly as before; only the bookkeeping callback was added.
+Regression test in `SubAgent.test.ts` proven by reversion: fails (`expected [] to deeply equal [...]`)
+with the fix reverted, passes restored.
+
+**Fix 2 — the vitest/Playwright sibling the 2026-08-25 fix never reached (`src/server/AgentV3/testRunner.ts`).**
+`detectTestPlan` has two branches: (1) the project's own declared `"test"` script wins, checked FIRST;
+(2) inferred from config/dependencies, checked only when there is no declared script. The 2026-08-25 fix
+(`playwrightOwnsE2e` + `--exclude 'e2e/**'`) was applied ONLY to branch 2 — but a project with real
+vitest unit tests almost always ALSO has `"test": "vitest"` in package.json, which takes branch 1
+instead, verbatim, with zero exclusion. `e2eAutoScaffold.ts` never touches an existing test script when
+it later drops Playwright specs in, so the two features collide the moment both are present — exactly
+what this report shows. Fixed by applying the identical guard to branch 1, forwarded through each
+package manager's own `--` passthrough (`npm run test -- --exclude 'e2e/**'`, `yarn test -- --exclude
+'e2e/**'`, same for pnpm/bun). Four new tests in `tests/vitestSkipsPlaywright.test.ts` (the ORIGINAL
+fix's own test file, which — tellingly — never once used a package.json with a `"test"` script, so it
+could not have caught this) prove: the exclusion now applies to a `"test": "vitest"` script; it does NOT
+fire without a Playwright config; it does NOT fire on a non-vitest test script. Proven by reversion:
+without the fix, both new assertions read `'npm run test'` where `'npm run test -- --exclude
+\'e2e/**\''` was expected.
+
+### 50/50 law — why did these arise, and can the class recur?
+
+- **Fix 1's class:** the SAME shape already bit this repo once for TOKEN usage (`usageSink`, fixed by
+  threading the parent's accumulator into `makeSubAgentSpawn`) — file-write tracking needed the
+  identical treatment and did not get it. The general lesson, restated for whoever adds the NEXT
+  sub-agent-visible side effect: **anything the top-level dispatcher tracks about a turn must be
+  explicitly re-threaded into `makeSubAgentSpawn`'s child dispatcher, because the child is built from
+  scratch, not inherited.** `usageSink` and `onFileWrite` are now both threaded; `checkpointer` already
+  was. Anyone adding a THIRD such callback should grep this exact pattern first.
+- **Fix 2's class:** exactly the "instance fixed, class not" shape CLAUDE.md's own bar names — a
+  two-branch function got its fix applied to one branch, and the ORIGINAL fix's regression test file
+  never exercised the other. The lesson: when a pure function has multiple branches reaching the same
+  external effect (here, "which vitest invocation actually runs"), a regression test for branch N should
+  provoke a reviewer to ask whether branch N-1 needs the identical assertion — the four new tests in
+  `vitestSkipsPlaywright.test.ts` now cover both.
+
+### Open root cause (not closed this pass — recorded honestly, per rule 6)
+
+**`journeyCandidates` (`src/server/AgentV3/journeyDerivation.ts`) cannot see forms that live in
+components rendered BY a page/App file, when those components sit outside its recognized directory
+patterns (`pages|screens|views|routes|app`).** Alarm One's `App.tsx` renders `<AuthScreen />`,
+`<AlarmEditor />`, `<Settings />` — all real forms — but they live under `src/components/`, which
+`isPageFile`'s regex does not match, and `App.tsx` itself (the one special-cased non-page file) has no
+`<input>` directly inline — it only composes child components. So `noJourneyReason` fell through to
+"this app has no form for a journey to fill in — nothing here takes user input", which is false: this
+is one of the most form-heavy apps in the report. This is a caveat on `RELEASE_GATE` (YELLOW,
+"NOT established: no user journey could be derived or run"), not a false success/failure and not a
+billing effect — which is why it was not rushed into a fix this pass. Closing it properly needs
+resolving a page file's LOCAL component imports (one level: parse `import X from './components/Y'`
+inside an already-selected candidate, add the resolved file to the candidate set) rather than a blanket
+"scan every file for inputs" heuristic, which would reintroduce the exact imprecision
+(`hasRenderSurface`/`appHasNoDataEntry`) this module's own docstring already fought to avoid. Left open
+rather than patched with a regex that could pass today's tests while quietly widening false positives on
+a canvas-only game (whose components dir might hold an unrelated `<input>` for, say, a debug panel).
+
+### Proactive layer (sixth step)
+
+**The single highest-value lever from this report: the "verdict vs diff" honesty bug (Fix 1) is not
+fully closed by this one fix — it is closed for `verifiedNoChangeSummary`'s narrow, already-tested
+conditions, but `writtenFiles.size` also feeds `FE_BE_PARTITION`'s frontend/backend split and (per this
+file's own comment) the billing decision surface. This pass fixed the WIRING gap; a follow-up should
+specifically re-verify `effectiveBilledUsd`/`emptyBuildFailureSummary` against a delegated-only build on
+a PAID tier, since a false "empty build" there is a real revenue leak (a genuinely-shipped, sub-agent-only
+feature billing ₹0), not just a misleading free-tier message.** Recommended as the next thing to check
+before this class is called fully closed — not started here to avoid widening this autopsy's already
+two real fixes into a third, less-verified one under the same push.
+
+**Verification:** `tsc --noEmit` × 2, `noUnusedImports`, full `vitest run` (1706 files / 24055 passed, 1
+skipped, 0 FAIL), `npm run build`, `test:bundle`, `boot:check` — all green on the final merged state.
+Both fixes proven by reversion independently.
+
+Branch `claude/subagent-filewrite-tracking`, based on latest `main` (`33d87b171` at fetch time).

@@ -67,14 +67,36 @@ export interface SubAgentDeps {
    */
   ignoreRules?: () => import('./ignoreRules').IgnoreRule[];
 
+  /**
+   * Called with the path + final content on every successful write_file/edit_file A SUB-AGENT MAKES —
+   * the same signal `ToolDispatcher`'s own `onFileWriteRaw` gives the top-level runner.
+   *
+   * 🔴 ROOT CAUSE (autopsy, build 9cca1fd5, 2026-09-17): the Architect delegates ALL app code to
+   * sub-agents by design ("the Architect delegates ALL app code to sub-agents" — see `usageSink`
+   * below, fixed for TOKEN billing the same way). But the child `ToolDispatcher` built here was
+   * constructed with no `onFileWriteRaw` at all, so a sub-agent's writes reached the sandbox and the
+   * live event stream but never the parent turn's `writtenFiles` tracking. Any build whose Architect
+   * made no DIRECT write of its own — the common case, since it explores and delegates — then finished
+   * with `writtenFiles.size === 0` even though the sub-agent had genuinely built the requested feature.
+   * That count is what `verifiedNoChangeSummary`/`emptyBuildFailureSummary` gate on, so the user was
+   * told "Nothing needed changing… No file was modified" over a build that had just shipped a new
+   * screen — the exact class of dishonest verdict the fifth absolute rule exists to catch, reached
+   * through a different hole than the one already fixed for it.
+   */
+  onFileWrite?: (path: string, content: string) => void;
+
 }
 
 export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
   return async (role: AgentRole, instruction: string) => {
     const cfg = roleConfig(role);
     // A child dispatcher with NO spawn capability → workers cannot recurse.
+    // secondOpinion/consensus/webSearch/deploy stay withheld exactly as before (positions 7-10) —
+    // only onFileWrite (position 11) is newly threaded through, so this fix changes nothing about
+    // what tools a sub-agent may call, only whether its writes are counted by the parent turn.
     const childDispatcher = new ToolDispatcher(
       deps.actuator, deps.workspaceId, deps.state, deps.events, undefined, deps.checkpointer,
+      undefined, undefined, undefined, undefined, deps.onFileWrite,
     );
     // C2 — arm the guard on the child too. Read at SPAWN time via the thunk, so it sees the rules
     // however late they were loaded.

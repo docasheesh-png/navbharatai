@@ -128,3 +128,29 @@ export function isThinkingParamRejection(error: unknown): boolean {
   if (!/\bthinking\b|\breasoning(?:_effort)?\b/.test(text)) return false;
   return /\b400\b|invalid|unsupported|unrecognized|unrecognised|not (?:a )?(?:valid|supported)|bad request|must be one of/.test(text);
 }
+
+/**
+ * Will this model reason whether we ask it to or not? PURE.
+ *
+ * 🔴 WHY THIS IS NOT `!glmCanDisableThinking(model)`, AND THE INVERSION THAT MAKES IT A DIFFERENT
+ * QUESTION. That helper answers "may we send `disabled`?" and deliberately denies on anything it does
+ * not recognise — a Kimi id, a Grok id, a typo — because sending an unsupported field is a hard 400.
+ * Denial-on-unknown is the safe answer THERE and the wrong answer HERE: negating it would assert
+ * "kimi-k2.7-code always reasons", which is a claim about a vendor this module has never tested, made
+ * only because the id failed a `startsWith('glm-')` check.
+ *
+ * So this is a POSITIVE test with the same numeric family rule, and it is FALSE for everything it does
+ * not positively know — including every non-GLM vendor. A false answer costs today's behaviour
+ * exactly; a wrongly-true one would hand an unbounded budget to a model on nothing but a guess.
+ */
+export function modelAlwaysReasons(model: string | undefined | null): boolean {
+  const m = String(model ?? '').toLowerCase().trim();
+  if (!m.startsWith('glm-')) return false;             // another vendor → we have not measured it → no claim
+  const version = /^glm-(\d+)(?:\.(\d+))?/.exec(m);
+  if (!version) return false;                          // unparseable → no claim
+  const major = Number(version[1]);
+  const minor = Number(version[2] ?? 0);
+  if (!Number.isFinite(major) || !Number.isFinite(minor)) return false;
+  // 5.3 is the first GLM family that always reasons; every later one inherits it.
+  return major > 5 || (major === 5 && minor >= 3);
+}

@@ -1436,6 +1436,49 @@ the code (it is actually read somewhere) on 2026-07-11.
   next vendor), and an abandoned read is aborted so a call nobody will read stops generating and stops
   billing. Test-locked in `openAiStream.test.ts` (the accumulator, pure) and `openAiStreamRunner.test.ts`
   (the behaviour), both proven by reversion.
+- **🧠 THE FORCED-REASONING UNCLAMP — our own ceiling was the total loss, not the clock (built
+  2026-09-17, autopsy f5351721). ⚠️ NOT set, and the code default is ON**; `AGENTV3_REASONING_UNCLAMP=off`
+  is the instant, no-deploy revert to the pre-2026-09-17 behaviour exactly. Read by
+  `src/server/AgentV3/floorBudget.ts`; the capability question is answered by `modelAlwaysReasons` in
+  `providers/glmThinking.ts` and asked once in `OpenAiToolRunner`.
+  🔴 **WHY: `floorBudget.ts` clamps a turn's token ask to what the clock can carry, and justifies it on
+  one asymmetry — a ceiling hit returns the files written so far, a clock kill returns nothing. For a
+  model that ALWAYS REASONS both halves are false, in opposite directions.** Its thinking is billed to
+  the same `max_tokens` and emitted BEFORE any content, so running out of CEILING is the total loss
+  (`turnStarvedItsBudget` — no text, no tool call), while running out of CLOCK under streaming keeps
+  whatever arrived. The clamp was trading the recoverable outcome for the unrecoverable one.
+  **The evidence (Strong tier, `glm-5.3`, 30 calls): 3 returned reasoning and nothing else, each
+  authorised exactly 9,833 tokens, and the first finished 131 seconds into a 300-second clock — out of
+  ceiling with 58% of its time unused.** The calls that survived used 8,651 / 9,199 / 9,746 tokens
+  against that 9,833 ceiling, so every first turn was a coin flip decided by how long it happened to think.
+  ⚠️ **THE FIX IS NOT A FASTER RATE CONSTANT — that was measured and REJECTED, and the measurement is
+  the reason this entry exists.** Across 73 real calls in the reports to hand,
+  `FLOOR_MS_PER_OUTPUT_TOKEN_DEFAULT` is well calibrated: kimi-k2.6 aggregates to **30.5 ms/token**
+  against our 30, fleet median 25.1, p90 48.1. Lowering it to suit the one fast model would under-bound
+  every slow one and re-open the class `floorBudget.ts` was written for. The rate is right; applying it
+  to tokens that are not the answer is what was wrong. **Do not "simplify" this by retuning the
+  constant** — a test asserts it stayed at 30.
+  🔒 **IT CANNOT MAKE THE WORST CASE WORSE, which is what made it shippable without touching the
+  admin-mandated ladder.** The clock still bounds the call: a slow forced-reasoning rung is cut at the
+  same moment it is cut today, still with no answer, and still throws to the next rung. Only the case
+  where the answer WOULD have fitted changes. Cost is unchanged on a normal turn — authorising tokens
+  does not spend them.
+  ⚠️ **`modelAlwaysReasons` IS A POSITIVE TEST, NOT `!glmCanDisableThinking`, and the difference is a
+  real bug avoided.** That helper denies on anything it does not recognise, because sending an
+  unsupported field is a hard 400 — denial-on-unknown is right THERE. Negating it would assert
+  "kimi-k2.7-code always reasons" purely because the id failed a `startsWith('glm-')` check, handing an
+  unbounded budget to a vendor nobody has measured. So the new predicate is FALSE for every non-GLM
+  vendor, which keeps today's clamp for them exactly.
+  🔴 **STILL OPEN (rule 6): the Kimi sibling.** Report 58fe8254 shows the same `outputTokens: 4833`
+  starvation three times on Kimi, so the class is not GLM-only — but this repo holds no capability fact
+  for Moonshot's models, and inventing one would be a guess. The honest generic fix (remember a rung
+  that starved and unclamp its NEXT call) needs cross-turn state the per-rung runner construction does
+  not currently carry. Recorded, not guessed at.
+  🔒 **Honesty half:** a rung that starves with the clamp ALREADY LIFTED must not be reported as "our
+  own ceiling" — that sentence would send the next autopsy to fix arithmetic that is already correct.
+  `isUnclampedStarvation` splits the two wordings in `BuildDiagnostics`. Test-locked and proven by
+  reversion in `tests/reasoningBudgetUnclamp.test.ts` (19 cases).
+
 - **🐌 THE THROUGHPUT BENCH — the other half of the entry above (built 2026-09-16, autopsy dd1f5f60).
   ⚠️ NOT set, and the code defaults govern: the feature is ON.** `AGENTV3_SLOW_RUNG_BENCH` (`off` is
   the instant, no-deploy revert to the pre-2026-09-16 behaviour exactly), `AGENTV3_SLOW_RUNG_RATIO`

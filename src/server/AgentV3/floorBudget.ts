@@ -109,6 +109,48 @@ export interface FloorBudget {
   clamped: boolean;
   /** The ask the caller made, kept so the report can say what was reduced and why. */
   requested: number;
+  /** True when the clamp was deliberately not applied because this rung always reasons. */
+  reasoningUnclamped?: boolean;
+}
+
+/**
+ * 🔴 THE CLAMP IS INVERTED FOR A MODEL THAT ALWAYS REASONS — autopsy f5351721, 2026-09-17.
+ *
+ * Everything above justifies clamping on ONE asymmetry, stated at the top of this file:
+ *
+ *     TRUNCATION (we ran out of ceiling)  →  the files written so far COME BACK.
+ *     TIMEOUT    (we ran out of clock)    →  NOTHING comes back.
+ *
+ * **For a forced-reasoning rung both halves of that are false, and they are false in opposite
+ * directions.** Its thinking is billed to the same `max_tokens` and emitted BEFORE any content, so
+ * running out of CEILING is the total loss (`finish_reason: 'length'`, no text, no tool call —
+ * `turnStarvedItsBudget`). Meanwhile running out of CLOCK under streaming keeps whatever had already
+ * arrived. The clamp is therefore trading the recoverable outcome for the unrecoverable one — the
+ * exact inversion of the reason it exists.
+ *
+ * THE EVIDENCE, from the build that produced this (Strong tier, `glm-5.3`, 30 calls):
+ *   • 3 calls returned reasoning and nothing else, each authorised exactly 9,833 tokens.
+ *   • The first of them finished **131 seconds** into a 300-second clock. It did not run out of time;
+ *     it ran out of ceiling with **58% of its clock unused.**
+ *   • The calls that DID succeed used 8,651 / 9,199 / 9,746 output tokens — the ceiling is 9,833, so
+ *     every first turn was a coin flip decided by how long the model happened to think.
+ *
+ * ⚠️ AND THE FIX IS NOT A FASTER RATE CONSTANT — that was measured and rejected. Across 73 real calls
+ * in the reports to hand, `FLOOR_MS_PER_OUTPUT_TOKEN_DEFAULT` is well calibrated: kimi-k2.6 aggregates
+ * to **30.5 ms/token** against our 30, and the fleet median is 25.1 with a p90 of 48.1. Lowering it to
+ * suit the one fast model would under-bound every slow one and re-open the class this file was written
+ * for. The rate is right; applying it to tokens that are not the answer is what is wrong.
+ *
+ * 🔒 WHY UNCLAMPING CANNOT MAKE THINGS WORSE, which is what made it shippable without a tier change:
+ * the clock still bounds the call. A slow forced-reasoning rung is still cut at the same moment it is
+ * cut today, still with no answer, and still throws to the next rung — identical. What changes is only
+ * the case where the answer WOULD have fitted and our own ceiling stopped it first.
+ */
+export const REASONING_UNCLAMP_OFF = 'off';
+
+/** Kill switch. `off` restores the pre-2026-09-17 behaviour exactly: every rung is clamped. */
+export function reasoningUnclampEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return String(env.AGENTV3_REASONING_UNCLAMP ?? '').trim().toLowerCase() !== REASONING_UNCLAMP_OFF;
 }
 
 /**
@@ -118,9 +160,19 @@ export interface FloorBudget {
  * with the lane's remaining budget — because a lane with 30 seconds left must not authorise a
  * 32,000-token answer either. The whole rule in one line: ask for what you can be given.
  */
-export function reconcileFloorBudget(requestedMaxTokens: number, timeoutMs: number, env: NodeJS.ProcessEnv = process.env): FloorBudget {
+export function reconcileFloorBudget(
+  requestedMaxTokens: number,
+  timeoutMs: number,
+  env: NodeJS.ProcessEnv = process.env,
+  opts: { alwaysReasons?: boolean } = {},
+): FloorBudget {
   const requested = Number.isFinite(requestedMaxTokens) && requestedMaxTokens > 0 ? Math.floor(requestedMaxTokens) : 0;
   const affordable = floorMaxTokensForTimeout(timeoutMs, env);
+  // A rung whose thinking is billed to this same ceiling keeps the caller's ask; the clock remains the
+  // only bound. See REASONING_UNCLAMP_OFF above for why this is the safe direction and not a widening.
+  if (opts.alwaysReasons && requested > 0 && requested > affordable && reasoningUnclampEnabled(env)) {
+    return { maxTokens: requested, clamped: false, requested, reasoningUnclamped: true };
+  }
   if (requested <= 0) return { maxTokens: affordable, clamped: false, requested };
   if (requested <= affordable) return { maxTokens: requested, clamped: false, requested };
   return { maxTokens: affordable, clamped: true, requested };
@@ -201,10 +253,35 @@ export function isStarvedBudgetError(error: unknown): boolean {
 }
 
 /**
+ * Marks a starvation that happened with the clamp ALREADY LIFTED.
+ *
+ * 🔒 THE HONESTY HALF OF THE UNCLAMP (rule 5). Once a forced-reasoning rung keeps the build loop's full
+ * ask, "our own ceiling" stops being true — and it is the one sentence the admin report leads with. A
+ * rung that starves on the full ask is telling us something completely different from one that starved
+ * on a clamp: the first is a model that cannot finish thinking inside ANY budget one turn can carry,
+ * the second was our arithmetic. Reporting them with the same words would send the next autopsy to the
+ * wrong module.
+ */
+export const STARVED_UNCLAMPED_MARK = 'the ceiling was not reduced';
+
+/** Did this starvation happen on a rung whose ask we had already stopped clamping? PURE. */
+export function isUnclampedStarvation(error: unknown): boolean {
+  const text = error instanceof Error ? error.message : String(error ?? '');
+  return text.includes(STARVED_BUDGET_MESSAGE) && text.includes(STARVED_UNCLAMPED_MARK);
+}
+
+/**
  * The line a starved rung throws — the marker first (the failure classifier reads the first line),
  * then the arithmetic, so the admin report carries the numbers instead of an adjective. PURE.
  */
-export function starvedBudgetError(granted: number, requested: number): Error {
+export function starvedBudgetError(granted: number, requested: number, unclamped = false): Error {
+  if (unclamped) {
+    return new Error(
+      `${STARVED_BUDGET_MESSAGE} — this rung was authorised the full ${granted} output tokens the build `
+      + `asked for (${STARVED_UNCLAMPED_MARK}) and spent every one of them on reasoning before producing `
+      + 'text or a tool call. This model needs more output than one turn can carry, so the ladder moved on.',
+    );
+  }
   const asked = requested > 0 && requested !== granted ? `, cut down from ${requested}` : '';
   return new Error(
     `${STARVED_BUDGET_MESSAGE} — this rung was authorised ${granted} output tokens${asked} `

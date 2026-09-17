@@ -72,7 +72,7 @@ import {
 import { shellQuote } from '../../../../lib/shellQuote';
 import { needsLegacyPeerDeps } from '../../../npmInstallFallback';
 import { buildOutputCandidates, configDumpCommand, parseConfigDump } from '../../../builtSiteCheck';
-import { injectPreviewBridge } from '../../../previewBridge';
+import { injectPreviewBridge, withoutPreviewBridge, PREVIEW_BRIDGE_MARKER } from '../../../previewBridge';
 
 const WORKSPACE_ROOT = '/home/user/workspace';
 
@@ -293,6 +293,39 @@ ${paintWaitJs('page')}
 // a broken API call is otherwise invisible to the auto-fix loop unless the app
 // happens to console.error it. Only 5xx is captured — 4xx (401/403/404) is left
 // out on purpose (auth/probing is routinely intentional and would be noise).
+
+/**
+ * THE PUBLISH PATH IS THE THIRD DOOR (deep re-autopsy of build 9cca1fd5, 2026-09-17).
+ *
+ * `injectPreviewBridge` writes NavBharatAI's console mirror into the SANDBOX's `index.html` so the live
+ * preview can report runtime errors. Vite then copies that same document into `dist/`, and `dist/` is
+ * exactly what this class hands to a publish, to the bucket mirror and to the GitHub push. The comment
+ * at the injection site asserted the opposite in writing — "a download, a publish and the user's own
+ * code never see it" — which is why the gap survived: the claim read like a guarantee.
+ *
+ * 🔒 `withoutPreviewBridge` REMAINS THE ONLY AUTHORITY on what gets stripped. This wrapper exists only
+ * to keep BYTES out of it: `dist/` is mostly images, fonts and hashed JS, and decoding every asset to a
+ * string to ask a question about HTML would be both wasteful and a way to corrupt a binary. The marker
+ * test runs on the raw buffer, so a non-HTML file is returned as the very same Buffer object.
+ *
+ * ⚠️ The sandbox's own `index.html` is deliberately NOT touched — it is the document the running dev
+ * server serves, and stripping it would turn the live console off, which is the thing the bridge is for.
+ *
+ * ⚠️ And this is NOT done in `collectWorkspaceFiles` or in the actuator factory, both of which look like
+ * tidier homes and are traps. `StaticPreview.ts` injects no bridge at all, so stripping at the workspace
+ * level would leave every plain HTML/CSS/JS app with a console drawer that is permanently empty and says
+ * the app has printed nothing — a false statement to the user, worse than the leak. And a delegating
+ * wrapper in `buildActuator()` would silently drop `sandboxHeldSeconds`, which the billing path
+ * duck-types off the actuator — sandbox cost would quietly become ₹0.
+ */
+export function stripBridgeFromBuiltFile(relPath: string, bytes: Buffer): Buffer {
+  // Cheap byte test first: no marker, nothing to do, and the original Buffer is returned untouched.
+  if (!bytes.includes(PREVIEW_BRIDGE_MARKER)) return bytes;
+  const text = bytes.toString('utf8');
+  const stripped = withoutPreviewBridge(relPath, text);
+  return stripped === text ? bytes : Buffer.from(stripped, 'utf8');
+}
+
 const BROWSER_DAEMON_SCRIPT = `
 const {chromium}=require('playwright');
 const fs=require('fs');
@@ -1803,14 +1836,29 @@ export class E2BActuator implements IEngineerActuator {
       // WHY HERE: the block immediately above already reads and rewrites a config file inside the
       // SANDBOX at this exact point, best-effort, to make the preview work. This is the same move on
       // the same seam, for the same reason, and it inherits the same properties: the DURABLE files
-      // are untouched, so a download, a publish and the user's own code never see it; a reboot or a
-      // second update_preview re-injects if the model rewrote the document meanwhile; and any
-      // failure at all just means today's behaviour.
+      // are untouched; a reboot or a second update_preview re-injects if the model rewrote the
+      // document meanwhile; and any failure at all just means today's behaviour.
       //
-      // 🔒 The bridge is stripped back out on the two paths that could carry it into the user's real
-      // code — ToolDispatcher's read_file (so the model never SEES a script it did not write) and its
-      // write path (so a model that reproduced it anyway cannot store it). Both, deliberately:
-      // making that branch unlikely is not the same as making it impossible.
+      // 🔴 CORRECTION (deep re-autopsy of 9cca1fd5, 2026-09-17). The paragraph above used to carry a
+      // third clause, asserting that a download and a publish never see the bridge either.
+      // **The download and the publish DID see it.** Vite copies this very `index.html` into `dist/`,
+      // `downloadDistFiles` reads `dist/` back verbatim, and that Map is what a publish uploads and
+      // what the GitHub push writes into the user's own repository. So our ~18 KB of unminified
+      // instrumentation shipped inside a page that is otherwise a few hundred bytes, visible in
+      // View Source.
+      //
+      // That clause was not merely optimistic — it was the reason nobody looked, because it read like
+      // a guarantee. It is removed above and recorded here, so the next reader knows it was checked
+      // rather than wondering whether anyone ever had.
+      //
+      // 🔒 The bridge is now stripped on the THREE paths that could carry it into the user's real
+      // code — ToolDispatcher's read_file (so the model never SEES a script it did not write), its
+      // write path (so a model that reproduced it anyway cannot store it), and `downloadDistFiles`
+      // (so a publish cannot ship it). All three, deliberately: making that branch unlikely is not
+      // the same as making it impossible.
+      //
+      // ⚠️ The SANDBOX's own copy keeps its bridge, and must: it is the document the running dev
+      // server serves, and the live preview's console mirror is the whole point of injecting it.
       //
       // Frameworks with no index.html (Next, Nuxt) simply get no bridge — an honest limit, not a
       // silent one: the panel says the live console is unavailable rather than showing an empty
@@ -2814,7 +2862,7 @@ ${paintWaitJs('p')}
     const data: Record<string, string> = JSON.parse(raw.trim());
     const files = new Map<string, Buffer>();
     for (const [relPath, base64] of Object.entries(data)) {
-      files.set(relPath, Buffer.from(base64, 'base64'));
+      files.set(relPath, stripBridgeFromBuiltFile(relPath, Buffer.from(base64, 'base64')));
     }
     return files;
   }

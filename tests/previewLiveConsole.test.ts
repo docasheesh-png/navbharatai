@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { braceBlock } from './helpers/sourceSlice';
 
 const read = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
 const actuator = read('src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator.ts');
@@ -17,7 +18,14 @@ describe('the Live preview gets a console — the gap this closes', () => {
   });
 
   it('the injection can never fail a dev server', () => {
-    const block = actuator.slice(actuator.indexOf('THE PREVIEW BRIDGE'), actuator.indexOf('THE PREVIEW BRIDGE') + 3000);
+    // ⚠️ WAS `slice(indexOf('THE PREVIEW BRIDGE'), +3000)`, and it broke on 2026-09-17 against correct
+    // code: a comment correcting a false claim in that same block pushed `.catch(() => false)` past
+    // character 3,000, so the guard reported the invariant violated while it was intact.
+    //
+    // `braceBlock` reads the real `if (…) { … }` this comment introduces, so it keeps asserting the
+    // same thing however the block grows. The helper has existed since 2026-08-06 — written for this
+    // exact failure, and its own doc describes it — and this file simply did not use it.
+    const block = braceBlock(actuator, 'THE PREVIEW BRIDGE');
     // Every sandbox call in the block is guarded — a console is not worth a dead preview for.
     expect(block).toContain('.catch(() => false)');
     expect(block).toMatch(/catch \{[^}]*best-effort/);

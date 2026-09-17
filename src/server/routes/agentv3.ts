@@ -33,6 +33,7 @@ import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
 import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote } from '../AgentV3/etaEvidence';
 import { decideComplexity } from '../AgentV3/complexityRouting';
+import { writeTypecheckSummary, writeTypecheckEnabled } from '../AgentV3/writeTimeTypecheck';
 import { tierLadder, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
 import { describeRunnerChain, chainProviders, firstRungLabel, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
@@ -16848,6 +16849,16 @@ async function noteBuildOutcome(
                 });
               }
             } catch { /* an advisory finding must never affect a build */ }
+            // WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068): how many compiles ran at
+            // write time and how many errors were caught while the model still held the file. Reported
+            // so the next autopsy can say whether the 7-minute endgame grind actually went away.
+            try {
+              const wt = dispatcher.writeTypecheckStats();
+              buildDiag.record({
+                phase: 'build', severity: 'info', code: 'WRITE_TIME_TYPECHECK',
+                message: writeTypecheckSummary(wt, writeTypecheckEnabled()), autoResolved: true,
+              });
+            } catch { /* an advisory line must never affect a build */ }
 
             const stranded = uiWithoutBuildVerdict({ paths: [...entries.keys()].map(String), packageJsonFiles: pkgTexts });
             if (stranded.stranded) {

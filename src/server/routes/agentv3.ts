@@ -20,7 +20,7 @@ import { buildFindingSuggestions } from '../AgentV3/buildFindingSuggestions';
 import { analyzeAppScope } from '../lib/appScopeAnalyzer';
 import { frontendLayoutHint } from '../lib/frontendLayoutHint';
 import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint';
-import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, type MegaRoadmap } from '../lib/megaRoadmap';
+import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, hardConstraintLines, type MegaRoadmap } from '../lib/megaRoadmap';
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
 import { requestedFeatureLabels, renderRequestedFeatureContract } from '../AgentV3/RequirementCoverage';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
@@ -1376,6 +1376,35 @@ export function postBuildCodeGateShouldRun(opts: {
 }): boolean {
   return opts.enabled && !opts.fastLaneGated && opts.buildOk && opts.wroteFiles
     && !opts.isImportTurn && !opts.aborted;
+}
+
+/** Does this path name a TypeScript source the typecheck could be about? Pure. */
+export function isTypeScriptSourcePath(path: string): boolean {
+  return /\.(?:ts|tsx|mts|cts)$/i.test(path) && !/\.d\.ts$/i.test(path);
+}
+
+/**
+ * The TYPECHECK gate specifically: the shared predicate above, plus the one fact that is only true of
+ * `tsc` — it can only be about TypeScript WE wrote.
+ *
+ * 🔴 THE REPORT (build 681bd91b, 2026-09-17). The user asked for ONE self-contained `index.html` — "no
+ * React, no Vite, no npm, no src/main.tsx". The builder wrote exactly that one file. The gate then
+ * type-checked the vite-react SCAFFOLD's untouched `src/*.tsx` — files the user had forbidden and the
+ * build never touched — found "type errors", and spent **26 minutes** on a repair pass for them, on an
+ * app that had been finished and seen rendering at minute 4:45. "These gates verify what WE built" is
+ * the sentence the predicate above was written on; for `tsc`, what we built has to be TypeScript.
+ */
+export function typecheckGateShouldRun(opts: {
+  enabled: boolean;
+  fastLaneGated: boolean;
+  buildOk: boolean;
+  wroteFiles: boolean;
+  isImportTurn: boolean;
+  aborted: boolean;
+  /** Did this build write at least one .ts/.tsx source? Without one there is nothing of ours to check. */
+  wroteTypeScript: boolean;
+}): boolean {
+  return postBuildCodeGateShouldRun(opts) && opts.wroteTypeScript;
 }
 
 /**
@@ -14565,6 +14594,14 @@ async function noteBuildOutcome(
         const step1 = megaRoadmapActive.steps[0];
         const total = megaRoadmapActive.steps.length;
         buildPrompt = `${step1.buildPrompt}\n\n(This is milestone 1 of ${total} for a larger app the user is building step by step: "${step1.title}". Build THIS milestone as a complete, standalone, fully-working and polished app on its own — do NOT stub the later milestones, and do NOT try to build them now. Later milestones will be added in their own separate builds.)`;
+        // 🔴 THE USER'S OWN RULES SURVIVE THE SWAP (build 681bd91b). This line REPLACES the user's words
+        // with the planner's, so "no React, one single file, no fake responses, no placeholder buttons"
+        // reached the builder only if the planner happened to repeat them — and it did not. They are
+        // restated here verbatim, deterministically, so no step can be built in breach of them.
+        const constraints = hardConstraintLines(prompt);
+        if (constraints.length > 0) {
+          buildPrompt += `\n\nNON-NEGOTIABLE CONSTRAINTS from the user's original request — they bind this milestone too:\n${constraints.map((c) => `- ${c}`).join('\n')}`;
+        }
       }
 
       // Universal Language (Layer 73): build in the user's language. If the
@@ -15768,14 +15805,25 @@ async function noteBuildOutcome(
       // pass, then re-checks. It is purely ADDITIVE: it NEVER flips result.ok and NEVER blocks (best-
       // effort, abortable, budget-capped); on persisting errors it records the honest OUTCOME so the
       // report/dashboard sees the true end-state (ship-with-warning, exactly like PREVIEW_FAILED).
+      const tscGateBase = {
+        enabled: process.env.AGENTV3_AGENTIC_TSC_GATE !== 'off',
+        fastLaneGated, buildOk: result.ok, wroteFiles: writtenFiles.size > 0,
+        // !isImportTurn: this gate verifies what WE built; on a survey turn we built nothing, and
+        // the `.env` we write ourselves used to defeat the size-only guard (see the predicate).
+        isImportTurn, aborted: abort.signal.aborted,
+      };
+      const wroteTypeScript = [...writtenFiles.keys()].some(isTypeScriptSourcePath);
+      if (postBuildCodeGateShouldRun(tscGateBase) && !wroteTypeScript) {
+        // Honest, and cheap: a single-file HTML app (or a CSS/JSON-only edit) has no TypeScript of ours
+        // for tsc to judge — see `typecheckGateShouldRun`. The evidence stays 'not-run', which the
+        // agent-command fallback below may still fill from a tsc the agent ran itself.
+        buildDiag.record({
+          phase: 'build', severity: 'info', code: 'TYPECHECK_SKIPPED_NO_TS_WRITTEN', autoResolved: true,
+          message: `Typecheck gate skipped: this build wrote ${writtenFiles.size} file(s) and none is a TypeScript source, so a type error could only be in files it never touched.`,
+        });
+      }
       if (
-        postBuildCodeGateShouldRun({
-          enabled: process.env.AGENTV3_AGENTIC_TSC_GATE !== 'off',
-          fastLaneGated, buildOk: result.ok, wroteFiles: writtenFiles.size > 0,
-          // !isImportTurn: this gate verifies what WE built; on a survey turn we built nothing, and
-          // the `.env` we write ourselves used to defeat the size-only guard (see the predicate).
-          isImportTurn, aborted: abort.signal.aborted,
-        })
+        typecheckGateShouldRun({ ...tscGateBase, wroteTypeScript })
         // Only with comfortable time left for install + tsc + one repair pass.
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
       ) {

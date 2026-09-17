@@ -65,9 +65,16 @@ export function megaRoadmapSystemPrompt(): string {
     'dishonest. Your job: break the ask into an HONEST, incremental roadmap of buildable checkpoints.',
     '',
     'HARD RULES:',
-    '1. Step 1 MUST be a small but REAL, working slice a user can see in a few minutes (e.g. the core',
-    '   screen with its main interaction working on local/mock data) — never an empty shell, never a',
-    '   "setup" step with nothing visible.',
+    '1. Step 1 MUST be a small but REAL, working slice a user can see in a few minutes — never an empty',
+    '   shell, never a "setup" step with nothing visible. Local/sample data is allowed ONLY when the',
+    '   user has not forbidden it AND the product\'s core promise is not the live thing itself: an AI',
+    '   chat\'s reply, a payment, a real search result must be REAL from step 1 (using the user\'s own',
+    '   key or config), never a canned or simulated stand-in.',
+    '7. NEVER plan a placeholder: a button that "logs to the console", a "visual only" control, a fake',
+    '   "connected" status, a simulated response. A control that is not built in this step is simply',
+    '   absent (or visibly disabled with an honest label) until its own step builds it.',
+    '8. The user\'s explicit constraints (a required stack, a forbidden stack, "one single file", "no',
+    '   fake responses") bind EVERY step, not just step 1. Repeat each one inside every buildPrompt.',
     '2. Every step must be a CONCRETE, buildable feature — never vague ("polish", "add more", "etc",',
     '   "finish the app"). Each step adds something the user can SEE and USE.',
     '3. Order steps so each builds on the previous. Keep it to at most 6 checkpoints.',
@@ -92,10 +99,48 @@ export function megaRoadmapSystemPrompt(): string {
 }
 
 /** User prompt for the roadmap call: the original request plus the deterministic scope signals. */
+/**
+ * The user's request, bounded — with its TAIL kept.
+ *
+ * 🔴 `slice(0, 4000)` DROPPED THE CONSTRAINTS (build 681bd91b). A ~9,000-character prompt put "NO FAKE
+ * FEATURES / no simulated model responses / do NOT create buttons that don't work" in its last
+ * sections — exactly where people put rules — and the planner never saw them. It then planned a
+ * "mock assistant that streams canned responses" and "placeholder buttons that log to the console":
+ * the two things the user had forbidden, by our own instruction. Head AND tail are kept; only the
+ * middle is elided, and the elision is marked so the model knows it is reading an excerpt.
+ */
+export function boundedRequest(prompt: string, head = 3000, tail = 1500): string {
+  const text = String(prompt || '');
+  if (text.length <= head + tail) return text;
+  return `${text.slice(0, head)}\n…[middle of the request omitted for length]…\n${text.slice(-tail)}`;
+}
+
+/**
+ * The lines of a request that read as HARD constraints — "do not", "never", "must", "only", "no fake",
+ * "single file". Deterministic and bounded, so they can be restated to a step's builder verbatim after
+ * the roadmap has replaced the user's own words with a step's (see routes/agentv3.ts, the swap).
+ */
+export function hardConstraintLines(prompt: string, max = 24): string[] {
+  const out: string[] = [];
+  for (const raw of String(prompt || '').split(/\r?\n/)) {
+    const line = raw.trim().replace(/^[-*•]\s*/, '');
+    if (line.length < 6 || line.length > 220) continue;
+    if (/\b(?:do\s+not|don'?t|never|must\s+not|must\b|only\b|no\s+(?:fake|mock|simulated|placeholder|react|vite|npm|backend|build\s+(?:step|command|tool))|single\s+(?:self-contained\s+)?(?:html\s+)?file|one\s+single|self-contained)\b/i.test(line)) {
+      out.push(line);
+      if (out.length >= max) break;
+    }
+  }
+  return out;
+}
+
 export function megaRoadmapUserPrompt(prompt: string, famousApp: string | null, signals: string[]): string {
-  const clean = String(prompt || '').slice(0, 4000);
+  const clean = boundedRequest(prompt);
+  const constraints = hardConstraintLines(prompt);
   const lines = [
     `User's request:\n${clean}`,
+    constraints.length
+      ? `\nNON-NEGOTIABLE CONSTRAINTS the user stated (bind EVERY step — restate them in each buildPrompt):\n${constraints.map((c) => `- ${c}`).join('\n')}`
+      : '',
     '',
     famousApp ? `This resembles: ${famousApp}. Build an ORIGINAL app inspired by it — do not copy its brand, logos, or assets.` : '',
     signals.length ? `Scope signals detected: ${signals.join('; ')}.` : '',

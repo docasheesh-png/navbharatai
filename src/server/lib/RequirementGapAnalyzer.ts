@@ -320,6 +320,10 @@ const NON_DOMAIN_USES: RegExp[] = [
   /\bthe\s+products?\s+of\b/gi,
   /\b(?:store|stores|storing|stored)\s+(?:the|this|that|these|those|it|them|all|any|each|every|my|our|your|data|results?|values?|state|items?|files?|everything|locally|in)\b/gi,
   /\b(?:local|session|browser|cloud|object|data|key.?value|file)\s+stores?\b/gi,
+  // "Store:" / "Store —" as a heading or an imperative before a list ("Store:\n- provider\n- endpoint")
+  // is an instruction to persist, never a shop (build 681bd91b: an AI chat app read as ecommerce, and
+  // its build prompt was handed cart, checkout and refunds to include).
+  /\bstor(?:e|es|ed|ing)\s*(?::|—|-\s)/gi,
   // education — "of course" is agreement, not a syllabus.
   /\bof\s+course\b/gi,
   // events — a DOM event is not a conference.

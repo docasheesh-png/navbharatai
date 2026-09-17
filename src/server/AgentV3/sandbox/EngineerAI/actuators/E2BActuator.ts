@@ -300,6 +300,13 @@ const LOG=${JSON.stringify(CONSOLE_LOG)};
 function rec(kind,text){ try{ fs.appendFileSync(LOG, JSON.stringify({t:Date.now(),kind,text:String(text).slice(0,500)})+'\\n'); }catch(e){} }
 (async()=>{
   const browser=await chromium.launch({headless:true,args:['--no-sandbox','--disable-setuid-sandbox','--remote-debugging-port=${CDP_PORT}']});
+  // A CLEAN APP AND A BROWSER THAT NEVER RAN MUST NOT LOOK THE SAME (autopsy 9cca1fd5, 2026-09-17).
+  // \`rec\` is the only writer and it only fires ON AN ERROR, so this file did not exist for a
+  // perfectly clean app either — and getConsoleErrors reads its absence as \`captured:false\`, i.e.
+  // "we never looked". Creating it HERE, immediately after the browser really launched, is what makes
+  // that flag mean something: the file exists if and only if a browser session genuinely existed.
+  // Append, never truncate: a resumed daemon must not erase the errors the previous one recorded.
+  try{ fs.appendFileSync(LOG,''); }catch(e){}
   const seen=new WeakSet();
   function attach(page){
     if(seen.has(page))return; seen.add(page);

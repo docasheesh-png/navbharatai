@@ -62359,6 +62359,90 @@ today — and was rewritten to anchor on the block's closing `catch`.
 3. 🥵 Sandbox 87% idle across 26.6 minutes; 115 s to the first model call — unchanged here.
 ---
 
+## 2026-09-17 — A clean console and an unread one were the same observable, so `RUNTIME_VERIFIED` was unreachable
+
+From the deep re-autopsy of `9cca1fd5`. **Verified myself, and the verification changed the fix twice.**
+
+### What I nearly built, and why it would have been wrong
+
+The workflow reported: *"the `console_errors` tool discards the actuator's `captured` flag."* Reading the
+code showed something more interesting:
+
+1. **`captured` already exists and is already correct** — the live `E2BActuator`
+   (`src/server/AgentV3/sandbox/...`, the one `actuatorFactory` uses) returns it, `LocalActuator`
+   returns it with a comment saying exactly the right thing, and `ActuatorPort` documents it:
+   *"`errors` means 'could NOT check', NOT 'clean'; omitted = unknown."*
+2. **The route already reads it correctly** — `runtimeCaptureAvailable` feeds `claimAudit`, and the
+   choice between `runtimeVerifiedRecord()` and `runtimeUncheckedRecord()` is honest.
+3. ⚠️ **But the flag could never be TRUE for a clean app**, because the sandbox browser daemon's only
+   writer is `rec()`, which fires **only on an error**. A perfectly clean app left no console log, the
+   read threw, and `getConsoleErrors` returned `captured: false` — *"we never looked"*.
+
+So had I only made the tool read the flag, **every clean build would have started reporting "the console
+could not be read"** — a brand-new false negative, worse than the thing I was fixing. Second time today
+the investigation stopped a fix that would have traded one problem for another.
+
+### The actual root cause is one line in the daemon
+
+```js
+const browser = await chromium.launch({...});
+try { fs.appendFileSync(LOG, ''); } catch (e) {}   // ← this
+```
+
+Placed **immediately after the launch**, so the file exists *if and only if a browser session genuinely
+existed* — which is precisely what `captured` is supposed to mean. **Append, never write**, so a resumed
+daemon cannot erase what the previous one recorded. Wrapped in `try`, because the browser matters more
+than the bookkeeping.
+
+**One line makes an entire existing, correct subsystem start working.** `RUNTIME_VERIFIED` has been
+effectively unreachable from the console path: proving a clean run needs `captured === true`, and a
+clean run never produced the file.
+
+### The second half: what the model is told
+
+`console_errors` destructured only `{ errors }` and answered *"the page ran clean"* on an EMPTY result —
+including when nothing had been read. That matters because the model **acts on this string**: told the
+page ran clean, it writes that into its summary. `claimAudit.ts` exists because of exactly that sentence
+— a build claiming "no console errors" in the same report that recorded `RUNTIME_UNCHECKED`.
+
+Three answers now, not two: read-and-clean · could-not-read (with what to do about it) · `undefined` ⇒
+the old wording, as the port's own back-compat rule requires.
+
+🔒 **NEITHER HALF WORKS ALONE**, and a test says so: the tool alone gives every clean build a false
+negative; the daemon alone changes nothing, because nothing reads the flag.
+
+🔒 **Direction check — this can only make verdicts MORE favourable.** `captureAvailable` becomes true
+more often, so `runtimeVerifiedRecord()` fires where `runtimeUncheckedRecord()` used to, and a warning
+becomes a clean verdict. `renderRescueConfirmsSuccess` reads `consoleErrs.length` only and is untouched
+— deliberately, because making that gate stricter would turn working apps into ₹0 builds, which is the
+harm this whole week of autopsies has been about.
+
+⚠️ **One transitional cost, stated rather than discovered later:** a sandbox RESUMED from before this
+change is running a daemon without the touch, so a clean app there still reports "could not be read".
+That is the honest answer for such a sandbox, it is already worded gracefully
+(`runtimeUncheckedRecord({previewRendered:true})` is `autoResolved`), and the 6-minute sandbox lifetime
+ages it out quickly.
+
+`tests/aCleanConsoleIsNotAnUnreadOne.test.ts` — 12 cases. **Proven by reversion:** removing the daemon
+line fails 3; making the tool ignore `captured` fails 5.
+
+### 🔴 The FOURTH self-measuring guard in one day — and this one was mine, minutes old
+
+The daemon guard asserts the script never truncates the log. Its first draft ran over the raw source
+slice and **failed on the word "truncate" inside the comment I had just written explaining that it must
+never truncate.**
+
+| # | guard | measured, instead of the claim |
+|---|---|---|
+| 1 | `engineEventsNeverBlock` | the exact `issues.filter(...)` formatting |
+| 2 | the arity guard in #3019 | commas — including commas inside a doc comment |
+| 3 | `buildOutcomeWiring` | a byte offset from a function header |
+| 4 | this one | a word inside its own explanatory comment |
+
+**Four in one day is not coincidence, it is a class.** The rule that would have prevented all four:
+**a source-reading guard must parse the CODE — strip comments, bound by real syntax (braces,
+parentheses), and assert the claim — never a byte window, a formatting shape, or a bare substring.**
+All four are now fixed that way.
 ## 2026-09-17 — Developer Tools → NavBharatAI API: the keys are real now, every scope opens a door, and a user can run their own AI on a NavBharatAI key
 
 **Admin, on seeing the API Keys card at the bottom of My Profile:** *"'other' -> 'developer tools' —

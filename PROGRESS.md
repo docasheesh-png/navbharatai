@@ -62359,6 +62359,117 @@ today — and was rewritten to anchor on the block's closing `catch`.
 3. 🥵 Sandbox 87% idle across 26.6 minutes; 115 s to the first model call — unchanged here.
 ---
 
+## 2026-09-17 — The admin's cost panel priced every build at its family's dearest rate
+
+From the deep re-autopsy of `9cca1fd5`. Verified by reading the code, not taken from the workflow.
+
+`platformBuildMetrics.ts` carries this promise in its own comment:
+
+> *"Price it with the SAME live rate card the real-cost billing uses, so the admin's cost graph and the
+> admin's bill can never tell two different stories about one build."*
+
+**They told different stories on every build.** The graph was priced from `providerUsage` — a
+per-PROVIDER token blob with no model in it — through `realRateFor(provider)` with the model argument
+simply **omitted**:
+
+```ts
+const realUsd = usageCostUsd({ inputTokens, outputTokens }, realRateFor(provider));
+```
+
+`realRateFor`'s provider-only fallback is deliberately the family's most expensive rate, and says so in
+place: *"an unrecognized model can only ever over-state cost, never under-state it."* **That is exactly
+right as a BILLING safeguard and exactly wrong as a MEASUREMENT.** A build that really ran
+`glm-4.7-flashx` ($0.07 in / $0.40 out) was recorded at the GLM 4.x coder line ($0.60 / $2.20) —
+**8.6× on input, 5.5× on output** — on the one screen used to decide whether engine spend is acceptable.
+
+⚠️ **The error ran the SAFE way**: it OVER-stated our own cost, so nobody was under-charged and no user
+was affected. Same shape as the `E2B_USD_PER_HOUR` incident this file records at length — a wrong number
+on the admin's own cost panel, margin-safe and still wrong.
+
+🔎 **And the exact right number was already in scope, one line away.** The settle destructures
+`realCostUsd: decidedRealCostUsd` from `decideBuildBilledUsd`, commented *"The platform's OWN cost …
+Priced by the same call that priced the bill."* The telemetry call sat beside it and re-derived a worse
+figure from a coarser input.
+
+**The fix.** `priceProviderUsage(providerUsage, entries)` (pure, exported, tested) is now what the
+recorder calls. The two inputs answer two different questions and both are needed:
+
+- `providerUsage` — per-provider totals, already RECONCILED against the billing sink. The authority on
+  **how many** tokens, including spend the per-call ledger could not attribute (plan/judge aux calls).
+- `entries` — the per-call ledger, which knows **which model** ran but not the unattributed remainder.
+
+Every attributed entry is priced at its own model's real rate; whatever the reconciled total holds
+beyond the entries is priced at the provider fallback **exactly as before** — the same split
+`realProviderCostUsd` already makes with its `remainder` argument. Exact where we know, conservative
+where we do not. Absent `entries` ⇒ byte-identical to the old behaviour, test-locked.
+
+🔒 **The reconciled total always wins on TOKENS.** A ledger claiming more than the reconciled figure is
+clamped and priced at the ledger's own average for the share kept — never trusted upward. Trusting a
+double-counted call would make the panel read high, which is the very failure being fixed.
+
+⚠️ **CACHE-HIT INPUT IS NOT ATTRIBUTED, deliberately.** `cacheReadInputTokens` exists only as a
+BUILD-level total — no per-call or per-provider breakdown is recorded anywhere — so splitting it across
+providers would be an invented number, which the billing law forbids even when it flatters us. The
+cached share therefore stays at the full input rate, still slightly over-stating our cost: the safe
+direction for a cost panel, and recorded here rather than left to be discovered.
+
+`tests/adminCostPanelPricesTheModel.test.ts` — 15 cases. **Proven by reversion:** the recorder ignoring
+the entries fails 1; the watchdog finalizer losing them fails 1 — and that second guard exists because
+this repo has already shipped exactly that drift once (Fix 67: the watchdog path billing by the old
+formula while the normal settle used the new one).
+
+### 🔴 CORRECTION, same day, before it merged — that "open item" was my own false claim
+
+I wrote, as the reason for not attributing cache: *"`cacheReadInputTokens` has no per-provider breakdown
+anywhere."* **That is wrong.** It is recorded per (provider, model):
+
+- `captureTurnUsage` passes it into `providerLedger.add` (`routes/agentv3.ts` ~11901);
+- `ProviderTokens` has carried the field since Fix 66;
+- `realProviderCostUsd` hands `e.usage` straight to `usageCostUsd` — so **the BILL has always priced
+  the cached share at the provider's far cheaper cache-read rate.**
+
+⚠️ **What actually hid it was a TYPE.** `BillingLedgerView.entries()` declared its usage as a
+hand-written `{ inputTokens, outputTokens }` — *narrower than the objects it really returns* — so every
+reader typed against that view saw `cacheReadInputTokens: undefined` and priced the cached share at the
+FULL input rate. **A structural type narrower than its value loses data with no error anywhere.**
+
+The interface now names the ledger's own `ProviderModelEntry`, so it cannot drift again, and the panel
+prices the cached share exactly as the bill does. A test asserts the two agree **to nine decimal
+places on the same entry** — which is the parity this module's comment promised all along.
+
+Same shape as the `captured` flag and `WorkspaceMemory.removeFile`: **the data existed, the consumer
+could not see it.** Three instances in one day of "the right thing is already there and unreachable."
+
+### 🔴 Still open from this one
+
+Nothing. The cached share is now attributed and matches the bill.
+
+### 🔴 …and the gate caught a THIRD brittle guard in one day
+
+The full suite failed on `buildOutcomeWiring.test.ts` — a guard that slices a **fixed 9,000 characters**
+from `finalizeOnDeadline`'s header. The three correct lines added above (the `providerEntries` pass and
+its comment) pushed `buildDiagRef?.finish(...)` from offset 8,924 to **9,080** — past the window. The
+code still did exactly what the guard exists to require; the guard failed anyway.
+
+**Third one today, same shape every time:**
+
+| guard | what it measured instead of the claim |
+|---|---|
+| `engineEventsNeverBlock` | the exact `issues.filter(...)` source formatting |
+| my own constructor-arity guard (#3019) | commas — including commas inside a doc comment |
+| `buildOutcomeWiring` | a byte offset from a function header |
+
+**The pattern: the guard measured the TEXT instead of the CLAIM**, so a session then has to decide
+whether the code or the guard is wrong — which is precisely the doubt a guard exists to remove.
+
+Both `finalizeOnDeadline` guards (the 9,000 and the 14,000 window — rule 3, the sibling was hunted)
+now bound by the function's **real extent**, found by matching braces from its header. It cannot be
+outgrown, and it still proves what the assertions mean: these lines are inside THIS function, in THIS
+order.
+
+🔒 **Proven strictly stronger, not weakened** — the required discipline when a guard is touched to get
+green. Two separate reversions were run against the hardened guard and both fail it: replacing the
+honest pause summary with `undefined`, and swapping the two statements so `finish()` comes first.
 ## 2026-09-17 — ONE welcome gift per person: the rule three modules stated and none enforced
 
 **Found while answering the admin's plain question — *"batao mai Cloud Run me kya likho?"*** The answer

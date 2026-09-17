@@ -60060,3 +60060,73 @@ broken behaviour"; the broken behaviour is what was removed.
 3. Post-build review timed out at 210 s on 55 files.
 4. Sandbox 84% idle across a 39.8-minute session.
 5. `AGENTV3_PROJECT_MODE` — admin-only, Cloud Run.
+
+---
+
+## 2026-09-17 — Journey derivation could not see a form the page COMPOSES (autopsy `e4ebcb5f`, second occurrence)
+
+**Recorded as an OPEN root cause in PR #2988 two days ago; this report is the second occurrence, with
+evidence sharp enough to close it.**
+
+The build was a CHAT app. The agent's own timeline shows it reading `src/App.tsx`,
+`src/components/ChatWindow.tsx` and `src/services/ai.ts`. The report then said:
+
+> `JOURNEY_NOT_DERIVED` — *"No user journey was run — this app has no form for a journey to fill in —
+> nothing here takes user input."*
+
+…and **thirty seconds earlier, in the same report**:
+
+> `ACCESSIBILITY` — *"WCAG 1.3.1: 4 form field(s) with no label"*
+
+**Two of our own scanners, the same files, opposite answers.**
+
+### Root cause
+
+`deriveJourneys` (line ~263) and `noJourneyReason` (line ~360) both read only `files[page]` —
+`inputTags(files[p])`. A React page composes its UI from components, so the `<input>` lived in
+`ChatInput.tsx`, ONE import away, and neither function ever looked. The module's candidate list was
+already shared between the two (a previous fix, for exactly the "the explanation describes a different
+search" class) — but both then narrowed to the page's own text, so sharing the list bought nothing.
+
+### The fix
+
+`formSourcesFor(page, files)` — the page, then the LOCAL components it imports, one level deep, capped
+at `MAX_IMPORTS_PER_PAGE` (12), deterministic order. `resolveLocalImport` handles `./`, `../`, the `@/`
+alias, implicit extensions and `index` files, and returns null for any bare (package) specifier. Both
+call sites now use it, so the derivation and its explanation still cannot describe different searches.
+
+**One level, not a graph walk**: it covers how a page actually composes a form, stays bounded, and
+keeps the result explainable in a report. A test asserts it does NOT recurse.
+
+### 🔒 Why this cannot manufacture a RED gate — checked BEFORE writing it, not after
+
+`journeys` is in `releaseGate`'s `RED_ON_FAILURE`, so a wrongly-failed journey would flip the verdict
+to NOT ok and make the build free — the exact harm the same day's other autopsy was about. Widening
+what gets derived is therefore not a free improvement, and the question had to be settled from the
+runner's code rather than assumed.
+
+It is safe **by construction**: `journeyScript` defaults every journey to `unreachable`, and a missing
+field (`no-fields`) or missing submit (`no-submit`) throws before anything is pressed, leaving that
+default. Only after a submit actually goes through does the script say, in its own comment, *"From here
+on, a failure IS the app's failure"*. So a component that is not rendered on the route yields evidence
+we did not get — never an accusation against the app.
+
+Also deliberate: the journey keeps the **PAGE's** route. A component has none, and `routeForFile` on a
+component's filename would resolve to `/` and drive the browser to the wrong URL — test-locked.
+
+### Tests
+
+`tests/journeySeesFormsInComponents.test.ts` (14), proven by reversion: reverting
+`journeyDerivation.ts` fails 8. The 75 pre-existing journey tests are unchanged and still pass.
+
+⚠️ **One expectation in the new file was mine and wrong, and the code was right.** I asserted a canvas
+game would get the *"a game, a dashboard or a landing page has nothing to save"* wording; it does not,
+because that branch only fires when `pages.length === 0` and the game has an `App.tsx`. It gets the
+"no form for a journey to fill in" sentence instead — which is TRUE for a game. The fix is about which
+apps reach that sentence, not its wording.
+
+### Still open
+
+- The nicer "nothing to save and reload" wording is unreachable for any app that HAS an `App.tsx`,
+  because that branch is gated on `pages.length === 0`. Not touched here: it is a wording question with
+  its own precision risk, and the sentence it falls back to is true in every case that reaches it.

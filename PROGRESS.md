@@ -60060,3 +60060,59 @@ broken behaviour"; the broken behaviour is what was removed.
 3. Post-build review timed out at 210 s on 55 files.
 4. Sandbox 84% idle across a 39.8-minute session.
 5. `AGENTV3_PROJECT_MODE` — admin-only, Cloud Run.
+
+## 2026-09-17 — Published apps on My Profile, and on the admin's view of a user
+
+Admin: *"jab user my profile par click kare … kitne app published huyi hai woh bhi dikhe, waha direct
+us app ko open karne ka button ya link ho, aur app ek new page me open ho (chrome ke new page me) …
+sath hi jab admin kisi user ki profile dekhe, to waha bhi woh list dikhe, app open admin bhi kar sake."*
+
+### 🔎 Neither half needed a new server route — and that is the finding, not a footnote
+
+The redundant-work check (safeguard #6) found BOTH data sources already shipped:
+
+- **The owner's side:** `GET /api/agentv3/my-published-apps` has listed the caller's own live apps,
+  with cap and plan, for some time. Its ONLY consumer was `AgentV3Panel` → the Publish sheet → Host on
+  NavBharatAI → a button — four taps deep inside the Pro builder, invisible to anyone not mid-build.
+- **The admin's side:** `GET /api/admin/users/:uid/account` already returned `publishedApps.rows`,
+  each with its url. **The dashboard printed the COUNT and threw the rows away.**
+
+What was missing was never data. It was a screen. Had the search stopped at "does a published-apps
+list exist?", this would have been a second endpoint and a second list.
+
+### Shipped
+
+- **`src/lib/publishedAppsView.ts`** — one normaliser, because the two endpoints disagree: the
+  owner's pre-filters to live apps and drops `status`; the admin's returns every record with it.
+  🔒 A stored URL is validated to http(s) before a row is allowed to offer an Open button — the admin
+  sheet renders whatever is stored against somebody's account, and a `javascript:` address would
+  otherwise become a link an admin is invited to click. Nothing writes one today, which is exactly
+  the assumption a validator is for. An UNRECOGNISED status reads as `held`, never as live.
+- **`src/components/profile/PublishedAppsCard.tsx`** — one component, two screens. Built shared on
+  purpose: separately, an admin would eventually see six apps where the owner sees four and neither
+  would know which screen was wrong. The real differences (status badges, non-live rows) are props.
+- **`ProfilePage`** — "Your Published Apps", above the wallet. `null` ≠ `[]`: "could not read" and
+  "you have none" are opposite statements to make to somebody about their own work.
+- **`AdminDashboard`** — the same card on the account sheet, with statuses.
+
+### 🔴 A wrong number on the screen used to judge an account
+
+`publishedApps.count` is every deployment RECORD, and the sheet printed it under the words
+**"N published apps live"**. An account with four apps of which three were taken down read as four
+live apps — and the copy-to-clipboard summary said the same. The server now sends `liveCount`,
+computed over every row with `isLiveDeployment` (**not** derived from `rows`, which is truncated to
+20 and would under-report a heavy account), and a capped list says so on screen.
+
+### Sibling hunted, and the wider class recorded rather than half-swept
+
+The Publish sheet's own list opened an app with a bare `<a target="_blank">`, which on the Android
+shell opens inside NavBharatAI's own WebView — exactly what *"chrome ke new page me"* rules out. It
+now uses `openExternalUrl` (`_system` on native, scheme re-validated, `noopener,noreferrer` on web),
+the same helper both new screens use.
+
+🔴 **OPEN ROOT CAUSE (rule 6): 45 bare `target="_blank"` links remain across 24 files.** Every one has
+the same defect on the native shell. That is a repo-wide sweep with its own risk surface, not
+something to bury in this change — recorded here so it is a decision rather than an oversight.
+
+Tests: `publishedAppsView.test.ts` (21, the URL guard reversion-proven) ·
+`publishedAppsWiring.test.ts` (13). `AppKnowledgeBase` updated in the same change.

@@ -124,37 +124,14 @@ describe('the place is remembered', () => {
   });
 });
 
-describe('the conversations are on Home, not behind a button', () => {
-  it('Home renders the list, and renders nothing when there is nothing', () => {
-    expect(code(home)).toContain('recentConversations && recentConversations.length > 0 && onOpenRecent');
-    expect(appCode).toContain('recentConversations={homeRecents}');
-    expect(appCode).toContain('onOpenRecent={openRecentConversation}');
-  });
-
-  it('the list is built from LOCAL stores only, and only while Home is on screen', () => {
-    const at = appCode.indexOf('const homeRecents');
-    expect(at).toBeGreaterThan(0);
-    const block = appCode.slice(at, at + 700);
-    expect(block).toContain("if (activeView !== 'home') return [];");
-    expect(block).toContain('readProfessionalHistory()');
-    expect(block).toContain('readPlaceActivity(placeStore())');
-    expect(block).not.toContain('await ');
-    // A list we cannot build is a section that does not render, never a broken Home.
-    expect(block).toMatch(/catch \{[\s\S]{0,80}return \[\];/);
-  });
-
-  it('🔒 an ENDED professional conversation is made live BEFORE its tab opens', () => {
-    // Otherwise the tab reads an empty live slot and shows a blank chat — a row that opens nothing.
-    const at = appCode.indexOf('const openRecentConversation');
-    expect(at).toBeGreaterThan(0);
-    const block = appCode.slice(at, at + 700);
-    expect(block.indexOf('resumeArchived(')).toBeLessThan(block.indexOf('toggleTab(item.view'));
-  });
-
-  it('each kind reuses the path that already knows how to open it', () => {
-    const at = appCode.indexOf('const openRecentConversation');
-    const block = appCode.slice(at, at + 700);
-    expect(block).toContain('handleRestoreUci(item.sessionId)');
-    expect(block).toContain('toggleTab(item.view as ViewType)');
-  });
-});
+/**
+ * ⛔ REMOVED 2026-09-17, on the admin's instruction: *"homepage se isko pura hatao"*.
+ *
+ * This describe block asserted a "Continue where you left off" LIST on the home screen. The admin's
+ * actual request had been the OTHER half of that change — that opening NavBharatAI Free or Pro puts
+ * you back in your last conversation where you left it — and the home-screen list was an addition
+ * nobody asked for. The reopen behaviour is untouched and is still covered by every test above.
+ *
+ * The removal is recorded here rather than deleted silently, so a later session reading the git
+ * history does not "restore" a feature that was taken out on purpose.
+ */

@@ -61244,3 +61244,65 @@ reading the history does not "restore" a feature that was removed on purpose.
 
 Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1728 files, 24432 passed, 0 failed** ·
 build · test:bundle · boot:check.
+
+---
+
+## 2026-09-17 — The release gate printed a falsehood in the same sentence that disproved it
+
+**The evidence** — one `RELEASE_GATE` message, verbatim, from build `8b3dca5c`:
+
+```
+Release gate: RED — Not shippable — 1 build-breaking blocker(s).
+  Proven:          the app came up and rendered; the project typechecks
+  NOT established: the page-render check NEEDS A RUNNING APP AND WAS SKIPPED;
+                   … the app HAS NO TEST SUITE that could be run here
+```
+
+The app had come up, rendered and been screenshotted — the gate's own `proven` list says so on the line
+above. And the same report, **seven seconds later**:
+
+> `TEST_SUITE_UNVERIFIED` — *"This project has a Playwright test suite but `@playwright/test` is not
+> installed here, so it was NOT run."*
+
+**The class.** `WHY_MISSING` phrases every reason as an ABSOLUTE claim about the project — *"there was
+never a preview"*, *"there is no running app"*, *"the app has no test suite"* — while the gate routinely
+holds evidence that contradicts it. The `preview` instance was found on 2026-08-27 (Fight 3D report) and
+fixed **in place, with an inline `else if`**. Its two siblings were never hunted. Rule 3, again.
+
+**The fix.** One exported pure function `whyMissing(key, ev)` now answers *"why is this check unproven?"*
+from the evidence the gate already holds, and the inline `preview` branch moved INTO it — so a fourth
+case is added there rather than as a fourth `else if`, which is what let these two hide.
+
+- `pages` unproven while the preview PASSED (or a URL was published) ⇒ *"the app came up, but its
+  individual page routes were never render-checked here"*. No new input: the gate already holds `preview`.
+- `tests` unproven while a suite exists ⇒ *"this project HAS a test suite, but it could not be run here"*.
+  New optional `testSuitePresent`, set by the vaccine pass in the two branches that already know
+  (`detectTestPlan` found a plan; `suitePresentButRunnerMissing` found a suite with no runner) — the exact
+  `previewUrlPublished` design, whose own doc says an omitted value must keep the original wording.
+
+🔒 **It cannot change a verdict.** Every branch returns a string that lands in `unproven`. A check
+explained more accurately is exactly as unproven as before — saying *"we did not look"* instead of
+*"there was nothing to look at"* is an admission, not partial credit. A test asserts state, headline,
+`proven`, `failures` and the unproven LENGTH are all identical with and without the flags.
+
+⚠️ `CheckKey`'s manual exclusion list did its job again: adding `testSuitePresent` broke three maps at
+compile time until it was named there. Its comment now says not to "tidy" that into a structural filter.
+
+`tests/theGateDoesNotContradictItself.test.ts` — 13 cases. **Proven by reversion:** removing the `pages`
+branch fails 2, the `tests` branch fails 2, the route wiring fails 1. The 85 existing release-gate tests
+pass unchanged — including the one asserting the OLD `pages` wording, which still holds because nothing
+came up in that scenario. This narrows; it does not soften.
+
+### 🔴 An open item CORRECTED before anyone acts on it
+
+`8b3dca5c`'s open item 2 noted that the fast lane plans from the turn's text alone. Its report also shows
+`requestAnalysis: { taskType: "chat", complexityScore: 5 }` — which looks like the platform already
+knowing the prompt named no app.
+
+**It is not, and building a gate on it would have been a real bug.** `detectTaskType` ends with a bare
+`return 'chat'` — **`chat` is the FALLTHROUGH default**, not a positive verdict. Skipping the fast lane on
+`taskType === 'chat'` would skip it for every prompt none of the regexes recognise, which in this product
+includes a great deal of Hindi and Hinglish. Recorded here so the next session does not walk into it:
+`CLAUDE.md`'s own lesson, *"'not invented' is a weaker standard than 'checked'"*, applied to a field that
+looked like a measurement and is a default. The real fix remains giving the fast lane the same request the
+full builder sees — not guessing from a signal that cannot carry the weight.

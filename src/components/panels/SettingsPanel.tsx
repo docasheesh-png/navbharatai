@@ -11,7 +11,7 @@ import { LEGAL_META } from '../../content/legal/meta';
 import { LegalDocPage } from './LegalDocPage';
 import { DangerZone } from '../settings/DangerZone';
 import { AdultContentToggle } from '../settings/AdultContentToggle';
-import { AppLockSettings } from '../settings/AppLockSettings';
+import { AppLockSettings, AppLockRow } from '../settings/AppLockSettings';
 import { AppLockGate } from '../AppLockGate';
 import {
   type MotionMode, getStoredMotionMode, applyMotionMode,
@@ -451,7 +451,7 @@ export function SettingsPanel({
             <Settings className="w-4 h-4 text-white" />
           </div>
           <h3 className="font-bold text-white text-sm">
-            {settingsScreen === 'root' ? 'Settings' : settingsScreen.charAt(0).toUpperCase() + settingsScreen.slice(1).replace(/_/g, ' ')}
+            {settingsScreen === 'root' ? 'Settings' : settingsScreen === 'app_lock' ? 'App Lock' : settingsScreen.charAt(0).toUpperCase() + settingsScreen.slice(1).replace(/_/g, ' ')}
           </h3>
         </div>
         <button
@@ -850,10 +850,12 @@ export function SettingsPanel({
                          guards. It sits directly under Accessibility because it is the other setting that
                          changes how the whole app behaves rather than how one screen looks.
 
-                         ⚠️ Unlike every other control on this screen it does NOT persist on tap — see
-                         AppLockSettings for why (a stray tap would lock somebody out of a screen they use,
-                         and each save costs a PIN entry). */}
-                     <AppLockSettings userId={user?.uid} />
+                         🔴 A BUTTON, NOT THE LIST (admin 2026-09-17: *"app lock aapne setting me aise hi
+                         bahar bana diya — 'app lock' button banao … is app lock ko open karne ke liye bhi
+                         lock chahiye"*). The tick boxes used to sit open on this screen, where anyone
+                         holding the phone could read what is locked. Now this is one row; the screen it
+                         opens (`settingsScreen === 'app_lock'`) is behind the PIN for everyone. */}
+                     <AppLockRow userId={user?.uid} onOpen={() => setSettingsScreen('app_lock')} />
 
                      {/* The "Description" textarea was REMOVED here (admin 2026-08-14). It was
                          uncontrolled (`defaultValue`, no onChange, no save) and nothing anywhere read
@@ -961,6 +963,42 @@ export function SettingsPanel({
                 has a real tile in App Settings; the rest of this screen was a static "Brain Engine"
                 blurb with no controls, so nothing else was lost. Unreachable UI is how the bug
                 happened, so the screen goes rather than staying as a trap for the next reader. */}
+            {/* 🔒 THE APP LOCK SCREEN — ALWAYS behind the PIN (admin 2026-09-17). `always` means the gate
+                asks whether or not the user ticked "Settings": the list of what the PIN guards and the
+                Change PIN control are the one place that must never open on an unlocked phone. With no
+                PIN yet the same gate shows the create-PIN form, so the PIN is made right here rather
+                than by a detour through Secrets & API Keys. `banner` shows the re-lock countdown and a
+                Lock now button, because every save on this screen spends the ticket.
+
+                When "Settings" itself is locked the outer gate above already collected the PIN — the
+                shared unlock is live, so this gate opens straight through. One PIN, never two. */}
+            {settingsScreen === 'app_lock' && (
+              <motion.div
+                key="app_lock"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-6"
+              >
+                <div className="px-1 py-4">
+                   <h2 className="text-2xl font-black text-white tracking-tight">App Lock</h2>
+                   <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">One PIN · you choose what it guards</p>
+                </div>
+                {user ? (
+                  <AppLockGate
+                    userId={user.uid}
+                    area="settings"
+                    always
+                    banner
+                    label="App Lock"
+                    render={() => <AppLockSettings userId={user.uid} />}
+                  />
+                ) : (
+                  <div className="p-6 text-white text-center">Sign in to set a PIN on parts of the app.</div>
+                )}
+              </motion.div>
+            )}
+
             {settingsScreen === 'secrets' && (
               <motion.div
                 key="secrets"

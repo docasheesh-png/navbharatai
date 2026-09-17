@@ -1,49 +1,237 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Lock, ShieldCheck, AlertTriangle, Loader2, KeyRound } from 'lucide-react';
+import { Lock, ShieldCheck, AlertTriangle, Loader2, KeyRound, ChevronRight, RotateCcw } from 'lucide-react';
 import { APP_LOCK_AREAS, coveredByBilling, normaliseLockedAreas, type AppLockArea } from '../../lib/appLockAreas';
 import {
-  appLockStatus, subscribeAppLock, currentUnlock, saveLockedAreas, unlockWithPin, looksLikePin,
-  lockoutMinutes, invalidateAppLockStatus, type AppLockStatus, type VaultError,
+  appLockStatus, cachedAppLockStatus, subscribeAppLock, saveLockedAreas, changePin, clearUnlock,
+  looksLikePin, invalidateAppLockStatus, type AppLockStatus, type VaultError,
 } from '../../lib/appLock';
 
 /**
- * SETTINGS → GENERAL SETTINGS → APP LOCK (admin 2026-09-13).
+ * SETTINGS → GENERAL → [App Lock] → THE APP LOCK SCREEN (admin 2026-09-13; reshaped 2026-09-17).
  *
- * Admin, verbatim: *"setting me general settings me, user ko option do kahan kahan pin lagana hai.
- * settings - general setting - app lock - tick ✅ toggles. 1- api keys and secret (non removal ✅) 2- user
- * chahe to (on/off) default off: navbharatai pro, billings, subscription, wallet recharge, code studio,
- * settings"*.
+ * Admin 2026-09-17, verbatim: *"app lock aapne setting me aise hi bahar bana diya, 'app lock' button banao.
+ * jab user setting ja kar app lock option press kare to yeh option dikhe. sath me change lock ka bhi
+ * option dikhe. aur is app lock ko open karne ke liye bhi lock chahiye."*
  *
- * 🔒 THE ONE THING THAT MAKES THIS MORE THAN A PREFERENCE PANEL: CHANGING A TOGGLE NEEDS THE PIN.
+ * So this file is now TWO things:
+ *  - `AppLockRow` — the button on General. One line of status, a chevron, nothing else. It never shows
+ *    a tick box, because a tick box on an open screen is a lock somebody else can flip.
+ *  - `AppLockSettings` — the screen the row opens. It is rendered INSIDE `AppLockGate` with `always`,
+ *    so by the time anything here draws, the server has accepted the PIN moments ago (or the user has
+ *    just created one). That is why there is no PIN field on this screen any more: the door is the PIN.
  *
- * A lock that somebody holding your unlocked phone can switch off in Settings is not a lock. So this
- * screen asks for the PIN before it will save, and the SERVER demands the same ticket — the check is not
- * the disabled-looking UI, it is `PUT /api/app-lock/:userId/areas` refusing without proof.
+ * 🔒 THE ONE THING THAT MAKES THIS MORE THAN A PREFERENCE PANEL IS UNCHANGED: SAVING NEEDS THE PIN.
+ * The gate guarantees a live ticket on the way in; the SERVER still demands it on `PUT /areas`, and a
+ * ticket that lapses mid-edit re-locks the screen rather than leaving a Save that keeps failing.
  *
- * And `api_keys` is not a toggle at all. Its checkbox is drawn ticked and disabled, but that is only the
- * picture: `normaliseLockedAreas` puts it back whatever the request contains, on both sides, so "unlock my
- * keys permanently" is a request that does not exist rather than one we decline.
+ * `api_keys` is still not a toggle. Its checkbox is drawn ticked and disabled, but that is only the
+ * picture: `normaliseLockedAreas` puts it back whatever the request contains, on both sides.
  *
- * ⚠️ NOTHING IS SAVED UNTIL "Save" IS PRESSED. The rest of this Settings screen persists on tap, which is
- * right for a theme; it is wrong here, because a stray tap on a phone would silently lock the user out of
- * a screen they use, and because every save costs a PIN entry. So the ticks are a draft with an explicit
- * save, and the draft says how it differs from what is stored.
+ * ⚠️ NOTHING IS SAVED UNTIL "Save" IS PRESSED. The rest of Settings persists on tap, which is right for a
+ * theme; it is wrong here, because a stray tap on a phone would silently lock the user out of a screen
+ * they use. The ticks are a draft with an explicit Save and an Undo.
  */
-export const AppLockSettings: React.FC<{ userId: string | undefined }> = ({ userId }) => {
+
+/** How many OPTIONAL areas are locked — what the row on General reports. */
+export function optionalLockedCount(status: AppLockStatus | null): number {
+  if (!status) return 0;
+  return status.areas.filter((a) => !APP_LOCK_AREAS.find((s) => s.id === a)?.mandatory).length;
+}
+
+/** The one-line status the row shows. Pure, so the wording is tested rather than eyeballed. */
+export function appLockRowSubtitle(status: AppLockStatus | null, loadFailed: boolean): string {
+  if (loadFailed) return 'Could not read your lock — tap to retry.';
+  if (!status) return 'Checking…';
+  if (!status.hasPin) return 'No PIN yet — tap to set one up.';
+  const n = optionalLockedCount(status);
+  const optional = APP_LOCK_AREAS.filter((s) => !s.mandatory).length;
+  return n === 0
+    ? 'PIN set · only your API keys are locked.'
+    : `PIN set · ${n} of ${optional} optional areas locked.`;
+}
+
+/**
+ * THE BUTTON on General Settings. Opens the App Lock screen — which is itself behind the PIN.
+ *
+ * It reads the shared status cache, so it costs no request of its own once any gate has asked.
+ */
+export const AppLockRow: React.FC<{ userId: string | undefined; onOpen: () => void }> = ({ userId, onOpen }) => {
+  const [status, setStatus] = useState<AppLockStatus | null>(() => cachedAppLockStatus());
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  useEffect(() => subscribeAppLock(() => setStatus(cachedAppLockStatus())), []);
+
+  const load = useCallback(() => {
+    if (!userId) return;
+    setLoadFailed(false);
+    appLockStatus(userId).then(setStatus).catch(() => setLoadFailed(true));
+  }, [userId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <div className="space-y-3 pt-6 border-t border-white/10">
+      <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2 block pl-1">App Lock</label>
+      <button
+        type="button"
+        onClick={() => { if (loadFailed) load(); onOpen(); }}
+        disabled={!userId}
+        aria-label="Open App Lock"
+        className="w-full flex items-center gap-3 rounded-xl border border-white/10 bg-black/20 p-3 text-left hover:bg-white/5 active:bg-white/10 transition-colors disabled:opacity-60"
+      >
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-500/10">
+          <Lock className="h-5 w-5 text-indigo-300" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-bold text-white">App Lock</span>
+          <span className="block text-[11px] text-gray-400 leading-snug">
+            {userId ? appLockRowSubtitle(status, loadFailed) : 'Sign in to set a PIN on parts of the app.'}
+          </span>
+        </span>
+        <ChevronRight className="h-4 w-4 shrink-0 text-gray-500" />
+      </button>
+      <p className="text-[10px] leading-snug text-gray-500 pl-1">
+        One 4-digit PIN, and you choose what it guards. Opening this screen needs the PIN too.
+      </p>
+    </div>
+  );
+};
+
+const PIN_BOX = 'w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2.5 text-center text-sm font-bold tracking-[0.4em] text-white placeholder-gray-600 outline-none focus:border-indigo-500/50';
+const digits = (v: string) => v.replace(/\D/g, '').slice(0, 4);
+
+/**
+ * CHANGE PIN — with the current PIN, right now.
+ *
+ * The server needs both the live ticket (this card is only reachable behind the gate) AND the current
+ * PIN typed here, because a ticket alone proves only that the PIN was entered in the last five minutes.
+ * A wrong current PIN spends one of the five tries exactly like a wrong unlock; five wrong ones lock the
+ * screen, and the gate then offers the emailed-code reset.
+ */
+const ChangePinCard: React.FC<{ userId: string }> = ({ userId }) => {
+  const [open, setOpen] = useState(false);
+  const [currentPin, setCurrentPin] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [done, setDone] = useState('');
+
+  const reset = () => { setCurrentPin(''); setNewPin(''); setConfirmPin(''); };
+
+  const submit = async () => {
+    setError('');
+    setDone('');
+    if (!looksLikePin(currentPin)) { setError('Enter your current 4-digit PIN.'); return; }
+    if (!looksLikePin(newPin)) { setError('Your new PIN must be exactly 4 digits.'); return; }
+    if (newPin !== confirmPin) {
+      // Checked before the request: a mistyped PIN the server happily accepts locks the user out of
+      // their own screens until they reset it — the one mistake this form must not let through.
+      setError('The two new PINs do not match.');
+      return;
+    }
+    if (newPin === currentPin) { setError('Your new PIN is the same as the current one.'); return; }
+    setBusy(true);
+    try {
+      await changePin(userId, currentPin, newPin);
+      reset();
+      setOpen(false);
+      setDone('Your PIN is changed. Use the new one from now on.');
+    } catch (err) {
+      const e = err as VaultError;
+      setCurrentPin('');
+      setError(e?.message || 'Could not change your PIN. Please try again.');
+      // The server is the authority on lock-outs and on whether the ticket is still good. Either way the
+      // right response is to close the screen: the gate then shows the lock-out (with its reset) or asks
+      // for the PIN again.
+      if (typeof e?.lockedForMs === 'number' || e?.needsUnlock) {
+        invalidateAppLockStatus();
+        clearUnlock();
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="flex items-start gap-2 text-[11px] leading-relaxed text-gray-400">
+          <KeyRound size={14} className="mt-px shrink-0 text-indigo-300" />
+          <span><span className="font-bold text-gray-200">Change PIN.</span> You will need your current PIN.</span>
+        </p>
+        {!open && (
+          <button
+            type="button"
+            onClick={() => { setOpen(true); setDone(''); setError(''); }}
+            className="shrink-0 rounded-lg border border-white/10 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-gray-200 hover:bg-white/5"
+          >
+            Change PIN
+          </button>
+        )}
+      </div>
+
+      {done && !open && (
+        <p className="flex items-start gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2.5 text-[11px] leading-snug text-emerald-300">
+          <ShieldCheck size={14} className="mt-px shrink-0" /> {done}
+        </p>
+      )}
+
+      {open && (
+        <div className="space-y-2.5">
+          <input type="password" inputMode="numeric" autoComplete="current-password" maxLength={4} value={currentPin}
+            onChange={(e) => setCurrentPin(digits(e.target.value))} placeholder="Current PIN" aria-label="Current PIN" className={PIN_BOX} />
+          <input type="password" inputMode="numeric" autoComplete="new-password" maxLength={4} value={newPin}
+            onChange={(e) => setNewPin(digits(e.target.value))} placeholder="New PIN" aria-label="New PIN" className={PIN_BOX} />
+          <input type="password" inputMode="numeric" autoComplete="new-password" maxLength={4} value={confirmPin}
+            onChange={(e) => setConfirmPin(digits(e.target.value))} onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
+            placeholder="Confirm new PIN" aria-label="Confirm new PIN" className={PIN_BOX} />
+          {error && (
+            <p className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/5 p-2.5 text-[11px] leading-snug text-red-300">
+              <AlertTriangle size={14} className="mt-px shrink-0" /> {error}
+            </p>
+          )}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void submit()}
+              disabled={busy || !looksLikePin(currentPin) || !looksLikePin(newPin) || !confirmPin}
+              className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-white hover:bg-indigo-500 disabled:opacity-40"
+            >
+              {busy ? <Loader2 size={13} className="animate-spin" /> : <KeyRound size={13} />}
+              {busy ? 'Changing…' : 'Save new PIN'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setOpen(false); reset(); setError(''); }}
+              className="rounded-lg border border-white/10 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-gray-400 hover:text-white"
+            >
+              Cancel
+            </button>
+          </div>
+          <p className="text-[10px] leading-snug text-gray-500">
+            Avoid 0000 or 1234. Forgot your current PIN? Press <strong className="text-gray-400">Lock now</strong> above,
+            then <strong className="text-gray-400">Forgot PIN?</strong> — a code is emailed and you set a new one.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/**
+ * THE APP LOCK SCREEN. Rendered only behind `AppLockGate always`, so a live unlock is a given on entry.
+ */
+export const AppLockSettings: React.FC<{ userId: string }> = ({ userId }) => {
   const [status, setStatus] = useState<AppLockStatus | null>(null);
   const [loadError, setLoadError] = useState('');
   /** The ticks on screen. `null` until the stored list has been read — a draft must never start from a guess. */
   const [draft, setDraft] = useState<AppLockArea[] | null>(null);
-  const [pin, setPin] = useState('');
-  const [busy, setBusy] = useState<'' | 'unlock' | 'save'>('');
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState('');
-  const [hasTicket, setHasTicket] = useState(() => !!currentUnlock());
-
-  useEffect(() => subscribeAppLock(() => setHasTicket(!!currentUnlock())), []);
 
   const load = useCallback(async () => {
-    if (!userId) return;
     setLoadError('');
     try {
       const s = await appLockStatus(userId, true);
@@ -73,28 +261,9 @@ export const AppLockSettings: React.FC<{ userId: string | undefined }> = ({ user
   const stored = status?.areas ?? [];
   const dirty = !!draft && (draft.length !== stored.length || draft.some((a) => !stored.includes(a)));
 
-  const doUnlock = async () => {
-    if (!userId || !looksLikePin(pin)) { setError('Enter your 4-digit PIN.'); return; }
-    setBusy('unlock');
-    setError('');
-    try {
-      await unlockWithPin(userId, pin);
-      setPin('');
-    } catch (err) {
-      setPin('');
-      setError((err as VaultError)?.message || 'That PIN is not right.');
-      if (typeof (err as VaultError)?.lockedForMs === 'number') {
-        invalidateAppLockStatus();
-        void load();
-      }
-    } finally {
-      setBusy('');
-    }
-  };
-
   const save = async () => {
-    if (!userId || !draft) return;
-    setBusy('save');
+    if (!draft) return;
+    setBusy(true);
     setError('');
     setSaved('');
     try {
@@ -105,35 +274,21 @@ export const AppLockSettings: React.FC<{ userId: string | undefined }> = ({ user
     } catch (err) {
       const e = err as VaultError;
       setError(e?.message || 'Could not save. Please try again.');
-      // The ticket lapsed between unlocking and saving: ask for the PIN again rather than leaving a
-      // "Save" button that will keep failing.
-      if (e?.needsUnlock) setHasTicket(false);
+      // The ticket lapsed between opening and saving: close the screen so the gate asks for the PIN
+      // again, rather than leaving a "Save" button that will keep failing.
+      if (e?.needsUnlock) clearUnlock();
     } finally {
-      setBusy('');
+      setBusy(false);
     }
   };
 
-  if (!userId) {
-    return (
-      <div className="space-y-3 pt-6 border-t border-white/10">
-        <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2 block pl-1">App Lock</label>
-        <p className="text-[11px] text-gray-500 leading-snug pl-1">Sign in to set a PIN on parts of the app.</p>
-      </div>
-    );
-  }
-
-  const noPin = status !== null && !status.hasPin;
-  const lockedOut = !!status?.locked;
-
   return (
-    <div className="space-y-3 pt-6 border-t border-white/10">
-      <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2 block pl-1">App Lock</label>
-
+    <div className="space-y-4">
       <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-3">
         <p className="flex items-start gap-2 text-[11px] leading-relaxed text-gray-400">
           <Lock size={14} className="mt-px shrink-0 text-indigo-300" />
-          One 4-digit PIN, and you choose what it guards. Unlocking once opens every locked screen for five
-          minutes.
+          <span><span className="font-bold text-gray-200">What your PIN guards.</span> Tick a part of the app and it opens only
+          with your PIN. One unlock opens every locked screen for five minutes.</span>
         </p>
 
         {loadError && (
@@ -183,50 +338,6 @@ export const AppLockSettings: React.FC<{ userId: string | undefined }> = ({ user
               })}
             </div>
 
-            {noPin && (
-              <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-2.5 text-[11px] leading-relaxed text-amber-200">
-                You have no PIN yet. Open <strong>Settings → App Settings → Secrets &amp; API Keys</strong> once to
-                create it — we email a code to your account address first. Then come back here to choose what
-                else it locks.
-              </p>
-            )}
-
-            {!noPin && lockedOut && (
-              <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-2.5 text-[11px] leading-relaxed text-amber-200">
-                Too many wrong PINs. Try again in about {lockoutMinutes(status.lockedForMs)} minute
-                {lockoutMinutes(status.lockedForMs) === 1 ? '' : 's'}.
-              </p>
-            )}
-
-            {/* 🔒 THE PIN IS REQUIRED TO SAVE. Shown only once there is something to save, so the field is
-                not a permanent challenge on a settings page nobody is changing. */}
-            {!noPin && !lockedOut && dirty && !hasTicket && (
-              <div className="space-y-2 rounded-lg border border-white/10 bg-black/30 p-2.5">
-                <p className="text-[11px] leading-snug text-gray-300">Enter your PIN to save this change.</p>
-                <div className="flex gap-2">
-                  <input
-                    type="password"
-                    inputMode="numeric"
-                    autoComplete="off"
-                    maxLength={4}
-                    value={pin}
-                    onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                    onKeyDown={(e) => { if (e.key === 'Enter') void doUnlock(); }}
-                    placeholder="••••"
-                    aria-label="Your 4-digit PIN"
-                    className="w-28 rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-center text-sm font-bold tracking-[0.4em] text-white placeholder-gray-600 outline-none focus:border-indigo-500/50"
-                  />
-                  <button
-                    onClick={() => void doUnlock()}
-                    disabled={!!busy || !looksLikePin(pin)}
-                    className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-white hover:bg-indigo-500 disabled:opacity-50"
-                  >
-                    <KeyRound size={13} /> {busy === 'unlock' ? 'Checking…' : 'Confirm'}
-                  </button>
-                </div>
-              </div>
-            )}
-
             {error && (
               <p className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/5 p-2.5 text-[11px] leading-snug text-red-300">
                 <AlertTriangle size={14} className="mt-px shrink-0" /> {error}
@@ -238,41 +349,41 @@ export const AppLockSettings: React.FC<{ userId: string | undefined }> = ({ user
               </p>
             )}
 
-            {!noPin && (
-              <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => void save()}
+                disabled={!dirty || busy}
+                className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-white hover:bg-indigo-500 disabled:opacity-40"
+              >
+                {busy ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />}
+                {busy ? 'Saving…' : 'Save'}
+              </button>
+              {dirty && (
                 <button
-                  onClick={() => void save()}
-                  disabled={!dirty || !hasTicket || !!busy || lockedOut}
-                  className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-white hover:bg-indigo-500 disabled:opacity-40"
+                  onClick={() => { setDraft(stored); setError(''); setSaved(''); }}
+                  className="flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-gray-400 hover:text-white"
                 >
-                  {busy === 'save' ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />}
-                  {busy === 'save' ? 'Saving…' : 'Save'}
+                  <RotateCcw size={12} /> Undo
                 </button>
-                {dirty && (
-                  <button
-                    onClick={() => { setDraft(stored); setError(''); setSaved(''); }}
-                    className="rounded-lg border border-white/10 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-gray-400 hover:text-white"
-                  >
-                    Undo
-                  </button>
-                )}
-                {!dirty && !saved && <span className="text-[10px] text-gray-500">No changes.</span>}
-              </div>
-            )}
-
-            {/* Said once, plainly, rather than implied. The admin is the person who decides whether this
-                trade is acceptable, and they cannot decide it if the screen overstates what it does. */}
-            <p className="text-[10px] leading-snug text-gray-500">
-              Two things are protected on our server, not just on your screen: your API key values stay
-              encrypted until the PIN is accepted, and anything that <strong className="text-gray-400">spends
-              money</strong> — a recharge, buying or renewing a plan, auto-renew — is refused without it, with
-              nothing charged. On the other screens the PIN keeps the screen closed on this device, which is
-              what stops someone who picks up your phone. Money you have already paid is always credited
-              without a PIN.
-            </p>
+              )}
+              {!dirty && !saved && <span className="text-[10px] text-gray-500">No changes.</span>}
+            </div>
           </>
         )}
       </div>
+
+      <ChangePinCard userId={userId} />
+
+      {/* Said once, plainly, rather than implied. The admin is the person who decides whether this
+          trade is acceptable, and they cannot decide it if the screen overstates what it does. */}
+      <p className="text-[10px] leading-snug text-gray-500 px-1">
+        Two things are protected on our server, not just on your screen: your API key values stay
+        encrypted until the PIN is accepted, and anything that <strong className="text-gray-400">spends
+        money</strong> — a recharge, buying or renewing a plan, auto-renew — is refused without it, with
+        nothing charged. On the other screens the PIN keeps the screen closed on this device, which is
+        what stops someone who picks up your phone. Money you have already paid is always credited
+        without a PIN.
+      </p>
     </div>
   );
 };

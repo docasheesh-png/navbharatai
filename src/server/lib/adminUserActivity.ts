@@ -341,3 +341,62 @@ export async function firebaseAuthBatch(): Promise<AuthBatchApi | null> {
     return null;
   }
 }
+
+// ── HOW MANY TOKENS THE CHAT ROUTE ACTUALLY MEASURED ─────────────────────────────────────────────
+//
+// The admin asked for per-user input and output tokens (2026-09-17). `ai_usage_logs` is the ONLY
+// per-request token record the platform keeps, and it is written by the CHAT route alone: a
+// non-streamed turn carries `inputTokens` / `outputTokens` with `usageMeasured: true`; a streamed
+// turn (most of them) carries `usageMeasured: false` and no counts, because a stream does not
+// surface usage today. Builds do not write here at all — their provider tokens live in each build's
+// admin report and their charge in the wallet ledger.
+//
+// 🔒 So this sums ONLY measured rows and COUNTS the rest. Presenting the measured sum as "this user's
+// tokens" would under-state every streaming-heavy account by exactly the amount nobody measured,
+// which is the `usageLedger.ts` rule applied one level down: an unmeasured call is not a free call.
+
+export interface ChatTokenRow {
+  usageMeasured?: unknown;
+  inputTokens?: unknown;
+  outputTokens?: unknown;
+  createdAt?: unknown;
+  ok?: unknown;
+}
+
+export interface ChatTokenSummary {
+  /** Every chat request we have a row for. */
+  requests: number;
+  /** Rows that carried real token counts. */
+  measuredRequests: number;
+  /** Rows that did not — their tokens are unknown, not zero. */
+  unmeasuredRequests: number;
+  inputTokens: number;
+  outputTokens: number;
+  /** Requests the router reported as failed (no answer delivered). */
+  failedRequests: number;
+  lastAtMs: number | null;
+}
+
+export function summariseChatTokens(rows: ReadonlyArray<ChatTokenRow | null | undefined>): ChatTokenSummary {
+  let measuredRequests = 0, unmeasuredRequests = 0, inputTokens = 0, outputTokens = 0, failedRequests = 0;
+  let lastAtMs: number | null = null;
+  let requests = 0;
+  for (const r of rows) {
+    if (!r || typeof r !== 'object') continue;
+    requests++;
+    if (r.ok === false) failedRequests++;
+    const at = msFrom(r.createdAt);
+    if (at && (lastAtMs === null || at > lastAtMs)) lastAtMs = at;
+    const inp = Number(r.inputTokens);
+    const out = Number(r.outputTokens);
+    const measured = r.usageMeasured === true && Number.isFinite(inp) && Number.isFinite(out) && inp >= 0 && out >= 0;
+    if (measured) {
+      measuredRequests++;
+      inputTokens += Math.floor(inp);
+      outputTokens += Math.floor(out);
+    } else {
+      unmeasuredRequests++;
+    }
+  }
+  return { requests, measuredRequests, unmeasuredRequests, inputTokens, outputTokens, failedRequests, lastAtMs };
+}

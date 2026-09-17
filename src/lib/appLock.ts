@@ -229,7 +229,7 @@ export function resetAppLock(): void {
   clearUnlock();
 }
 
-// ── The four calls a screen makes ──────────────────────────────────────────────────────────────────
+// ── The five calls a screen makes ──────────────────────────────────────────────────────────────────
 
 /** Ask the server to email a verification code. The code itself never comes back to the browser. */
 export function sendPinCode(userId: string, purpose: 'create' | 'reset'): Promise<{ sent: boolean; destination: string; resendInMs: number }> {
@@ -263,6 +263,31 @@ export async function unlockWithPin(userId: string, pin: string): Promise<Unlock
   );
   const state = { ticket: out.ticket, method: out.method, expiresAt: Date.now() + out.expiresInMs };
   setUnlock(state);
+  return state;
+}
+
+/**
+ * Change the PIN with the current one (admin 2026-09-17: "change lock ka bhi option dikhe").
+ *
+ * Needs BOTH a live unlock (this is only reachable from the opened App Lock screen) and the current PIN
+ * typed now — the server compares it, and a wrong one counts exactly like a wrong unlock. Returns a
+ * fresh unlock on the new PIN so the screen stays open.
+ */
+export async function changePin(userId: string, currentPin: string, newPin: string): Promise<UnlockState> {
+  const unlock = currentUnlock();
+  if (!unlock) {
+    const err = new Error('Enter your PIN to open App Lock before changing it.') as VaultError;
+    err.needsUnlock = true;
+    throw err;
+  }
+  const out = await call<{ ticket: string; expiresInMs: number; method: UnlockMethod }>(
+    `/api/app-lock/${userId}/pin/change`,
+    jsonBody('POST', { currentPin, newPin }, unlock.ticket),
+    'Could not change your PIN. Please try again.',
+  );
+  const state = { ticket: out.ticket, method: out.method, expiresAt: Date.now() + out.expiresInMs };
+  setUnlock(state);
+  invalidateAppLockStatus();
   return state;
 }
 

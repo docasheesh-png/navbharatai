@@ -30,12 +30,19 @@
 //
 // PURE — no Firestore, no clock, no env.
 
+import { lifetimeMoneySpentInr } from './walletLifetime';
+
 /** The wallet fields this rule reads. Everything is `unknown` because a wallet doc is untyped JSON. */
 export interface GiftWalletView {
   tokenBalance?: unknown;
   /** Maintained by this module. ABSENT on every wallet written before 2026-09-13 — see `giftRemaining`. */
   giftTokensRemaining?: unknown;
-  /** Gross ₹ the user has ever paid us. Set by the real-money credit path only. */
+  /**
+   * Gross ₹ the user has ever paid us. ⚠️ The real-money credit path writes `totalMoneySpent`
+   * (camelCase); `total_money_spent` is only ever initialised to 0. Both are read, through
+   * `walletLifetime.ts`, so a paying user is never mistaken for a gift-only one.
+   */
+  totalMoneySpent?: unknown;
   total_money_spent?: unknown;
   /** ISO timestamp of the last real payment, or null/absent for a user who has never paid. */
   lastRechargeAt?: unknown;
@@ -48,7 +55,7 @@ function num(v: unknown): number {
 /** True when this wallet has never received real money — the one thing we can know for certain. */
 export function hasEverPaid(w: GiftWalletView | null | undefined): boolean {
   const wallet = w || {};
-  if (num(wallet.total_money_spent) > 0) return true;
+  if (lifetimeMoneySpentInr(wallet) > 0) return true;
   const last = wallet.lastRechargeAt;
   return typeof last === 'string' && last.trim() !== '';
 }

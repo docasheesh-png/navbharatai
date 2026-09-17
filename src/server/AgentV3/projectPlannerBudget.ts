@@ -51,12 +51,31 @@ export function projectPlannerTimeoutMs(env: NodeJS.ProcessEnv = process.env): n
 
 /** The error the planner race rejects with — matched by `plannerFailureKind`, so keep them together. */
 export const PROJECT_PLANNER_TIMED_OUT = 'project planner timed out';
+/**
+ * The mega-app roadmap planner's race (`MEGA-APP ROADMAP` in routes/agentv3.ts) — the SIBLING of the
+ * project planner, found by autopsy e706e068 one screen above it with the identical 45 s flat clock and
+ * the identical silence. It shares this module's bound and this module's failure vocabulary on purpose:
+ * two planners with two clocks is how one of them gets fixed and the other forgotten (rule 3).
+ */
+export const ROADMAP_PLANNER_TIMED_OUT = 'roadmap planner timed out';
 
 export type PlannerFailureKind = 'timed-out' | 'threw';
 
 export function plannerFailureKind(err: unknown): PlannerFailureKind {
   const msg = err instanceof Error ? err.message : String(err ?? '');
-  return msg === PROJECT_PLANNER_TIMED_OUT ? 'timed-out' : 'threw';
+  return msg === PROJECT_PLANNER_TIMED_OUT || msg === ROADMAP_PLANNER_TIMED_OUT ? 'timed-out' : 'threw';
+}
+
+/**
+ * The admin-only line for a roadmap planner that did not deliver. Says where the seconds went — the
+ * one fact the School ERP report could not, because nothing was recorded between APP_SCOPE (+8 ms)
+ * and ETA_BASIS (+45,112 ms).
+ */
+export function roadmapPlannerFailedMessage(kind: PlannerFailureKind, timeoutMs: number, err: unknown): string {
+  const detail = err instanceof Error ? err.message : String(err ?? 'unknown error');
+  return kind === 'timed-out'
+    ? `Mega-app roadmap: the planner did not answer within its ${Math.round(timeoutMs / 1000)}s bound — the build proceeded directly. Those seconds were spent waiting on this call.`
+    : `Mega-app roadmap: the planner call failed (${detail.slice(0, 200)}) — the build proceeded directly.`;
 }
 
 /**

@@ -166,10 +166,25 @@ describe('🔒 the wall-clock cap gets its own honest outcome code (admin diagno
    * from the coincidence of the duration, which is the "wrong verdict" the honesty rule forbids.
    */
   it('is recorded right where every build path converges on one `result`', () => {
-    const i = route.indexOf('// result is always set here (OneShot, escalation, or the loop above).');
+    // ⚠️ BOUNDED BY REAL SYNTAX, NOT BY A BYTE DISTANCE (2026-09-17). This assertion used to slice a
+    // fixed 2,200-character window after the anchor, and it has now broken TWICE on insertions that
+    // changed no behaviour at all — a six-line comment once, and the stop back-fill after that. A
+    // guard that fails on the LENGTH of what sits between two statements is a guard someone will
+    // eventually weaken to get green, which is the opposite of what it is for. `PROGRESS.md` records
+    // the rule this now follows: a source-reading guard parses the code and asserts the CLAIM.
+    //
+    // The claim is an ORDER: every build path converges on one `result`, and the timeout outcome is
+    // recorded after that point, from `result`, inside a try/catch — not that it sits within N bytes.
+    const CONVERGES = 'if (!result) result = await runner.run(buildPrompt);';
+    const i = route.indexOf(CONVERGES);
     expect(i).toBeGreaterThan(-1);
-    const body = route.slice(i, i + 2200);
-    expect(body).toContain('if (result.timedOut === true)');
+    const timedOut = route.indexOf('if (result.timedOut === true)', i);
+    expect(timedOut).toBeGreaterThan(i);
+    // …and nothing re-runs the builder in between, so it really is the single convergence point.
+    // The span starts AFTER the anchor statement ends — measuring from inside it would match that
+    // statement's own `runner.run(` and fail on the code it is asserting about.
+    expect(route.slice(i + CONVERGES.length, timedOut)).not.toContain('runner.run(');
+    const body = route.slice(timedOut, route.indexOf('\n      }', timedOut));
     expect(body).toContain("code: 'OUTCOME_BUILD_TIMEOUT'");
     expect(body).toContain('buildDiag.record(');
   });

@@ -161,7 +161,11 @@ describe('🔒 the wiring — every half of this fix, pinned where it lives', ()
   it('the free-tier upsell is suppressed — a fuller wallet buys a different model, not a different ceiling', () => {
     expect(route).toContain('&& buildStarvedItsOutputBudget(buildDiag.providerFailureBreakdown());');
     expect(route).toContain('const emptyCause = misconfigured || starved');
-    expect(route).toContain('if (refused || degraded || misconfigured || starved) {');
+    // ⚠️ Pinned as a SHAPE, not a transcript (autopsy fdd59ef8 added a sixth reason, `stopped`, and a
+    // literal list would have to be re-typed for every future one — the over-specification this
+    // repo's guards keep paying for). What must hold is that `starved` is one of the conditions that
+    // suppresses the upsell; deleting it still fails here.
+    expect(route).toMatch(/if \(refused(?: \|\| \w+)*\|\| starved(?: \|\| \w+)*\) \{|if \([^)]*\bstarved\b[^)]*\) \{/);
   });
 
   it('the user-facing sentence stops claiming the model replied', () => {

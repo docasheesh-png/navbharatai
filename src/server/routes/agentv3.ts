@@ -13223,6 +13223,20 @@ async function noteBuildOutcome(
       // in NavBharatAI's own template. `modelAuthoredPaths` removes exactly the byte-exact seeded
       // entries and nothing else, so a template the model has since edited stays ours to answer for.
       dispatcher.setAuthoredFiles(() => modelAuthoredPaths(writtenFiles));
+      // …AND THE SAME SET MUST FORGET A FILE THE BUILD DELETED (autopsy 8b3dca5c). `writtenFiles` is
+      // what the durable save is derived from, what `integrityFiles` is unioned with, and — through
+      // `modelAuthoredPaths` above — what the authorship gate reads. Leaving a deleted path in it
+      // re-persists the file, restores it into the next sandbox, and hands every later gate a module
+      // the app does not have. Removing it here is therefore correct on all three counts at once: a
+      // file the build deleted is not one it authored into the finished app. The dispatcher has
+      // already confirmed against the sandbox that each of these is genuinely gone before it says so.
+      dispatcher.setFileDeletionSink((paths) => {
+        for (const p of paths) {
+          writtenFiles.delete(p);
+          try { buildDiag.record({ phase: 'build', severity: 'info', code: 'FILE_DELETED', message: `Removed from the project: ${p}`, autoResolved: true }); }
+          catch { /* diagnostics are best-effort */ }
+        }
+      });
       // PUBLISHING NEEDS AN ASK (admin 2026-09-01). On a build turn the agent used to decide for
       // itself — a user typed "continue", the build finished, and their app went live on a public URL
       // with nobody having requested it. Consent is read from THIS message only: consent that carries
@@ -17697,12 +17711,21 @@ async function noteBuildOutcome(
             let pkgRaw: string | undefined;
             try { pkgRaw = await actuator.readFile(workspaceId, 'package.json'); } catch { pkgRaw = undefined; }
             const plan = detectTestPlan(files, pkgRaw);
+            // WHETHER A SUITE EXISTS IS A FACT ABOUT THE PROJECT, AND THE GATE HAD TO GUESS IT
+            // (autopsy 8b3dca5c). Without this the release gate's caveat read "the app has no test
+            // suite that could be run here" in the same report that said, seven seconds later, "This
+            // project HAS a Playwright test suite but @playwright/test is not installed here".
+            // It only changes the WORDING of an unproven check — see `testSuitePresent`.
+            if (plan) gateEvidence.testSuitePresent = true;
             if (!plan) {
               // "Nothing ran" and "there was nothing to run" are different facts, and only the second is
               // good news. A suite whose runner is not installed — which includes the one WE scaffold —
               // now says so instead of going quiet.
               const missing = suitePresentButRunnerMissing(files, pkgRaw);
               if (missing) {
+                // `detectTestPlan` found no RUNNABLE plan, but the suite is on disk — that is exactly
+                // the case whose absence the gate used to announce as the project's own gap.
+                gateEvidence.testSuitePresent = true;
                 buildDiag.record({
                   phase: 'readiness', severity: 'info', code: 'TEST_SUITE_UNVERIFIED',
                   message: missing, autoResolved: true, // not an app defect — nothing for the build to resolve

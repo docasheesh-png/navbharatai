@@ -54,9 +54,29 @@ export const ANDROID_BUILD_FIX_PREFIX = 'My Android build failed on GitHub.';
  * Every opening line NavBharatAI itself writes. A prompt we compose must never be guessed at, so each
  * new platform-composed template adds its prefix HERE — and inherits the stand-down for free.
  */
+/**
+ * 🔴 THE THIRD TEMPLATE, AND IT COST A WHOLE BUILD (autopsy fdd59ef8, 2026-09-17).
+ *
+ * The "Fix with AI" button beside a build error composes this and drops it in the composer. It was
+ * not in this list, so `isPlatformFixRequest` answered FALSE for it — and the message it had wrapped
+ * was **our own sign-in notice**: *"Please sign in to build with NavBharatAI Pro."* The builder was
+ * handed that as an app request, scored it `debugging` at complexity 45, spent 76 seconds and a
+ * sandbox on it, and the model — correctly — replied *"I need to sign in first"* and stopped.
+ *
+ * This is the exact extension #2987 said this file was for: *"a new platform template inherits the
+ * stand-down by adding one prefix."* The design was right; the template was never migrated to it.
+ */
+export const FIX_ERROR_AND_CONTINUE_PREFIX = 'Fix this error and continue building the app:';
+
+/** Compose the "Fix with AI" prompt. The ONE place this sentence exists. */
+export function fixErrorAndContinuePrompt(errorText: string): string {
+  return `${FIX_ERROR_AND_CONTINUE_PREFIX}\n\n${String(errorText ?? '')}`;
+}
+
 export const PLATFORM_COMPOSED_PREFIXES: readonly string[] = [
   PLATFORM_FIX_REQUEST_PREFIX,
   ANDROID_BUILD_FIX_PREFIX,
+  FIX_ERROR_AND_CONTINUE_PREFIX,
 ];
 
 /** The closing instruction, kept beside the prefix so the whole template has one home. */
@@ -105,4 +125,33 @@ export function looksLikeMachineError(message: string | null | undefined): boole
   const text = String(message ?? '').toLowerCase();
   if (!text.trim()) return false;
   return MACHINE_ERROR_SIGNALS.some((s) => text.includes(s));
+}
+
+/**
+ * 🔴 AN ERROR THE SERVER RAISED *BEFORE THE BUILD STARTED* IS NEVER ABOUT THE USER'S CODE.
+ *
+ * Autopsy fdd59ef8: a 401 ("please sign in") was shown in the build-error banner with a **"Fix with
+ * AI"** button under it, exactly as a syntax error would be. The button pre-filled the composer with
+ * our own notice; the user sent it; a build ran on it.
+ *
+ * 🔑 WHY THIS IS A STRUCTURAL TEST AND NOT A KEYWORD LIST. The refusals that produce these errors are
+ * returned with `res.status(...).json(...)` BEFORE `flushHeaders` — no stream, no sandbox, no build,
+ * not one file touched. So "is there any app code this error could refer to?" has a definitive answer
+ * that needs no vocabulary: **no**. A list of message phrases or error codes would need a new entry
+ * for every future refusal, and would be wrong the first time somebody forgot one — which is precisely
+ * how the sign-in case arrived, since the client already had an `errorCode` branch and `signin` had
+ * simply never been added to it.
+ *
+ * ⚠️ DELIBERATELY NARROW. It answers only for the pre-start case. An error that came out of the BUILD
+ * STREAM may well be about the app, so it keeps today's behaviour — the button still appears. Hiding a
+ * useful button on a real code error is a small annoyance; offering it on our own operational notice
+ * is what fed the builder its own voice.
+ */
+export function errorCanBeFixedByEditingTheApp(opts: {
+  /** True when the failure came from an HTTP refusal raised before the build stream opened. */
+  beforeBuildStarted?: boolean;
+  message?: string | null;
+}): boolean {
+  if (opts.beforeBuildStarted) return false;
+  return String(opts.message ?? '').trim() !== '';
 }

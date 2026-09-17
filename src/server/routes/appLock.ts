@@ -6,8 +6,8 @@
  * kahan kahan pin lagana hai … 1- api keys and secret (non removal ✅) 2- user chahe to (on/off) default
  * off: navbharatai pro, billings, subscription, wallet recharge, code studio, settings"*.
  *
- * Five endpoints, and the order a screen uses them: status → send a code → set the PIN → unlock → choose
- * the areas.
+ * Six endpoints, and the order a screen uses them: status → send a code → set the PIN → unlock → choose
+ * the areas → (later) change the PIN with the current one.
  *
  * 🔴 WHY THE PIN IS VERIFIED HERE AND NOT IN THE BROWSER. Four digits are 10,000 guesses; a client-side
  * check would be tried exhaustively in under a second, and a client that is TOLD whether a digit was
@@ -239,6 +239,83 @@ export function registerAppLockRoutes(app: Express): void {
     } catch (err) {
       console.error('[app-lock] unlock failed', err instanceof Error ? err.message : err);
       res.status(500).json({ error: UNLOCK_REFUSED_MESSAGE });
+    }
+  });
+
+  /**
+   * Change the PIN with the CURRENT PIN (admin 2026-09-17: "change lock ka bhi option dikhe").
+   *
+   * 🔒 THE CURRENT PIN IS TYPED AGAIN, RIGHT NOW — a live ticket alone is not enough. The ticket proves
+   * the PIN was entered within the last five minutes; a phone handed over four minutes later still holds
+   * it. A new PIN set on a ticket alone would let that person lock the owner out of their own app, so the
+   * bank rule applies: changing a PIN needs the old one, at that moment. Both are required — the ticket
+   * (so this route can only be reached from an unlocked App Lock screen) AND the current PIN (so the
+   * person at the keypad is the owner).
+   *
+   * A wrong current PIN counts exactly like a wrong unlock — the same counter, the same lock-out — so
+   * this route is not a second, cheaper place to guess. The "Forgot PIN" reset (code by email) stays the
+   * door for somebody who cannot type their current PIN; it is a separate, stronger proof, and it is the
+   * ONLY other way a PIN can change.
+   */
+  app.post('/api/app-lock/:userId/pin/change', requireUserMatch('userId'), async (req: Request, res: Response) => {
+    try {
+      const { userId } = routeParams(req.params);
+      const now = Date.now();
+      const record = await loadLockRecord(userId);
+      if (!hasPin(record)) {
+        res.status(409).json({ error: 'Set up your PIN first.', needsSetup: true });
+        return;
+      }
+      const unlock = ticketFor(req, userId);
+      if (!unlock) {
+        res.status(401).json({ error: 'Enter your PIN to open App Lock before changing it.', needsUnlock: true });
+        return;
+      }
+      const gate = pinGate(record, now);
+      if (gate.locked) {
+        const mins = Math.ceil(gate.lockedForMs / 60_000);
+        res.status(429).json({ error: `Too many wrong PINs. Try again in ${mins} minute${mins === 1 ? '' : 's'}, or use "Forgot PIN".`, lockedForMs: gate.lockedForMs });
+        return;
+      }
+
+      const currentPin = String(req.body?.currentPin ?? '').trim();
+      const newPin = String(req.body?.newPin ?? '').trim();
+      // The NEW PIN is checked before the current one is compared, so a weak choice costs no attempt:
+      // the user is told "too easy" and keeps all five tries.
+      const reject = pinRejectReason(newPin);
+      if (reject) {
+        res.status(400).json({ error: reject });
+        return;
+      }
+      if (!matchesPin(currentPin, record.pinSalt, record.pinHash)) {
+        const next = afterWrongPin(record, now);
+        await saveLockRecord(userId, next);
+        const after = pinGate(next, now);
+        auditVault(userId, 'pin-refused', { attempts_left: after.attemptsLeft, during: 'change' });
+        if (after.locked) {
+          const mins = Math.ceil(after.lockedForMs / 60_000);
+          res.status(429).json({ error: `Too many wrong PINs. Your app lock is held for ${mins} minute${mins === 1 ? '' : 's'}.`, lockedForMs: after.lockedForMs });
+          return;
+        }
+        res.status(401).json({
+          error: `Your current PIN is not right. ${after.attemptsLeft} ${after.attemptsLeft === 1 ? 'try' : 'tries'} left before it locks for a while.`,
+          attemptsLeft: after.attemptsLeft,
+        });
+        return;
+      }
+      if (newPin === currentPin) {
+        res.status(400).json({ error: 'Your new PIN is the same as the current one. Choose a different PIN.' });
+        return;
+      }
+
+      const salt = newSalt();
+      await saveLockRecord(userId, afterCorrectPin({ ...record, pinHash: hashPin(newPin, salt), pinSalt: salt }));
+      auditVault(userId, 'pin-changed', { unlock_method: unlock.method });
+      // A fresh ticket, so the screen the user is standing on stays open on the PIN they just chose.
+      res.json({ success: true, ticket: mintUnlockTicket(userId, now, unlockSecret()), method: 'pin', expiresInMs: TICKET_TTL_MS });
+    } catch (err) {
+      console.error('[app-lock] change failed', err instanceof Error ? err.message : err);
+      res.status(500).json({ error: 'Could not change your PIN just now. Please try again.' });
     }
   });
 

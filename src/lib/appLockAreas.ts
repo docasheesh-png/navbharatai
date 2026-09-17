@@ -80,7 +80,9 @@ export const APP_LOCK_AREAS: readonly AppLockAreaSpec[] = [
   {
     id: 'settings',
     label: 'Settings',
-    hint: 'The Settings screen itself — including this App Lock list, so the PIN is needed to change it.',
+    // The App Lock screen itself is ALWAYS behind the PIN (2026-09-17), whether or not this is ticked —
+    // so the hint no longer claims that ticking it is what protects the list.
+    hint: 'The whole Settings screen — theme, language, connections, everything in it.',
   },
 ];
 

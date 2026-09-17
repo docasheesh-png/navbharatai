@@ -298,7 +298,7 @@ import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanSta
 import { computePlanProgress } from '../AgentV3/PlanProgress';
 import { decideCancelledBuildBill } from '../AgentV3/cancelledBuildBilling';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
-import { projectPlannerTimeoutMs, PROJECT_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, PROJECT_MODE_FALLBACK_NARRATION } from '../AgentV3/projectPlannerBudget';
+import { projectPlannerTimeoutMs, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION } from '../AgentV3/projectPlannerBudget';
 import { projectModeEnabled, projectModeDiagnosis, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
@@ -430,7 +430,7 @@ import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
-import { classifyIntentSmart, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild, userAskedForAnAppToBeBuilt } from '../AgentV3/IntentClassifier';
+import { classifyIntentSmartDetailed, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild, userAskedForAnAppToBeBuilt } from '../AgentV3/IntentClassifier';
 import { looksLikeRefusal } from '../lib/promptSafety';
 import { assessBuildInput } from '../AgentV3/buildableInput';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
@@ -9818,6 +9818,9 @@ async function noteBuildOutcome(
     })();
 
     let intent = classifyIntent(prompt);
+    // The reader's fourth answer: "they want something made but have not said WHAT" (report
+    // d6d664e6). False unless the reader says so, so every path below is unchanged without it.
+    let readerSaysUnclear = false;
     try {
       const freeRouter = AIRouterManager.getRouter('free');
       // Bounded (6s) — this LLM upgrade runs before the deadline timer is armed; a stalled free
@@ -9825,8 +9828,8 @@ async function noteBuildOutcome(
       // The smart classifier now reads INTENTION with project/conversation context, and only the
       // ambiguous (non-high-confidence) cases reach the LLM — clear greetings / explicit builds /
       // continuations stay instant.
-      intent = await raceTimeout(
-        classifyIntentSmart(
+      const smart = await raceTimeout(
+        classifyIntentSmartDetailed(
           prompt,
           (p) => freeRouter.route(p, 'You are a classifier. Reply with one word only.').then((r) => r.response.content),
           { projectExists, recentRequests },
@@ -9834,6 +9837,8 @@ async function noteBuildOutcome(
         6_000,
         'classifyIntentSmart',
       );
+      intent = smart.intent;
+      readerSaysUnclear = smart.unclear;
     } catch { /* LLM upgrade is best-effort — keyword result stands */ }
 
     /**
@@ -9895,9 +9900,23 @@ async function noteBuildOutcome(
      * attachment or an import, and not an edit intent — where a short order legitimately means
      * *carry on* with the app already there.
      */
+    /**
+     * TWO SOURCES, ONE SET OF CONDITIONS. `'no-object'` is the deterministic half — the shapes a word
+     * list can enumerate ("banao", "app banao"), decided in under a millisecond with no model. The
+     * reader's `unclear` is the half a word list can never reach: a typo, a mixed-language sentence,
+     * an unusual phrasing. Admin, 2026-09-17: *"user ka har woh message jo ek limit se chota hai ya
+     * unclear hai, hamesha LLM call karo — woh bata dega."* That call was already being made on every
+     * low-confidence message; what it lacked was a way to say this.
+     *
+     * ⚠️ BOTH pass through the SAME four narrowing conditions, deliberately. The reader already sees
+     * `projectExists` and `recentRequests`, so this is belt AND braces — but the cost of being wrong
+     * is asymmetric in the same direction it always is here, and a second opinion that can only ever
+     * make the gate NARROWER cannot introduce a new way to refuse a real prompt.
+     */
+    const namesNothingToBuild =
+      (!inputCheck.buildable && inputCheck.reason === 'no-object') || readerSaysUnclear;
     const askWhatToBuild =
-      !inputCheck.buildable
-      && inputCheck.reason === 'no-object'
+      namesNothingToBuild
       && intent !== 'edit_existing'
       && !projectExists
       && recentRequests.length === 0
@@ -11855,7 +11874,11 @@ async function noteBuildOutcome(
           severity: 'info',
           code: 'APP_SCOPE',
           message: scope.decision === 'analyze'
-            ? `Scope: LARGE — ${scope.famousApp ? `clone of ${scope.famousApp}; ` : ''}a later phase will offer a step-by-step roadmap (not yet active). Signals: ${scope.signals.join('; ')}.`
+            // The roadmap has been ON by default since 2026-08-14 (`AGENTV3_MEGA_ROADMAP`, kill switch only);
+            // this line said "not yet active" for a month after that, so a reader of the report could not
+            // know a planner call was about to spend up to a minute on this build. Its outcome is recorded
+            // as MEGA_ROADMAP_ACTIVE / MEGA_ROADMAP / MEGA_ROADMAP_FAILED, always.
+            ? `Scope: LARGE — ${scope.famousApp ? `clone of ${scope.famousApp}; ` : ''}the mega-app roadmap planner is asked for a step-by-step plan next (its outcome is recorded as MEGA_ROADMAP_*). Signals: ${scope.signals.join('; ')}.`
             : `Scope: ordinary one-shot app — built directly (today's behaviour). ${scope.signals.join('; ')}.`,
           autoResolved: true,
         });
@@ -12045,6 +12068,17 @@ async function noteBuildOutcome(
             routeStrong ? 'Large project / import build (routeStrong) — the ladder is unchanged; the tier decides the engine.' : '',
           ].filter(Boolean).join(' '),
         });
+        // WHICH RUNG OPENS THIS BUILD, AND WHY — in the report, beside the ladder it applies to. Until
+        // autopsy e706e068 this decision lived only in a server log line, so a report showing 83 flash
+        // calls on a score-63 ERP gave no way to tell "the router said simple" from "the router said
+        // complex and nobody listened". It was the second. Admin-only; names no vendor.
+        buildDiag.record({
+          phase: 'plan', severity: 'info', code: 'COMPLEXITY_ROUTING', autoResolved: true,
+          message: buildIsComplex
+            ? `Complexity: COMPLEX (score ${complexityDecision.score}, ${complexityDecision.source}) — the build opens on the ladder's second rung, past the cheap flash opener.`
+            : `Complexity: simple (score ${complexityDecision.score}, ${complexityDecision.source}) — the build opens on the ladder's first rung.`,
+          detail: complexityDecision.reason,
+        });
       } catch { /* diagnostics are best-effort — never blocks a build */ }
       // The bench is a FACT ABOUT THE ENGINE and must appear in the timeline as one — otherwise the only
       // trace of "KIMI was reached" is the absence of further GLM lines, which nobody can read.
@@ -12097,9 +12131,16 @@ async function noteBuildOutcome(
        * turn "slow for this build" into "blacklisted for everybody".
        */
       const fastLaneDeadRungs = new Map<string, string>();
+      // 🔴 THE FLAG THAT WENT NOWHERE (autopsy e706e068, School ERP). `buildIsComplex` was computed,
+      // logged, and spread into `baseRunnerOpts` — the AgentRunner's options, which never read it —
+      // while the ONLY function that builds a chain, `buildTurnRunner`, was never handed it. So an
+      // 11-feature ERP scored 63 (complex) and still made 83 calls on the cheapest flash rung; KIMI
+      // sat one rung away for 26 minutes. "Starting me bhi" means THIS runner too: the roadmap
+      // planner, the project planner and the fast lane's manifest are the first calls a build makes.
       const makeFastTextRunner = (onUsed?: (used: string) => void): TurnRunner => buildTurnRunner({
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
+        complex: buildIsComplex, // a complex app opens past the flash rung — see the note above
         // Shared across every per-file runner this lane builds — the whole point of the change above.
         // A fresh runner per call is KEPT on purpose: `onUsed` must stay per-call, because the fast lane
         // generates files CONCURRENTLY (SimpleBuilder's mapWithConcurrency) and one shared callback would
@@ -12115,6 +12156,7 @@ async function noteBuildOutcome(
       const client = buildTurnRunner({
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
+        complex: buildIsComplex, // a complex app opens on KIMI, not the flash rung — see makeFastTextRunner
         onProviderUsed: captureProvider,
         onTurnComplete: captureTurnUsage,
         onProviderError: recordProviderFallback,
@@ -12204,8 +12246,34 @@ async function noteBuildOutcome(
               tools: [],
               maxTokens: 4000,
             });
-            const rmTimeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('roadmap planner timed out')), 45_000));
-            const rmT = await Promise.race([rmCall, rmTimeout]);
+            // 🔴 THE SIBLING #3020 NEVER HUNTED (autopsy e706e068, 2026-09-17). The project planner's
+            // hard-coded 60 s clock killed the School ERP decomposition and recorded nothing; THIS call
+            // had the identical shape one screen up — a flat 45 s race, `recordLlmCall` after the race so
+            // a failure was never on the ledger, and an outer `catch` that ate it. The report's clock is
+            // the proof: `APP_SCOPE` at +8 ms, `ETA_BASIS` at +45,112 ms, nothing in between. Forty-five
+            // seconds of every large-app build were going to a planner that was cut off and never named.
+            // The bound is now the inner call's own clock plus slack (projectPlannerBudget.ts), and a
+            // failure is recorded on the ledger and in the report before it is swallowed.
+            const rmTimeoutMs = projectPlannerTimeoutMs();
+            let rmTimer: ReturnType<typeof setTimeout> | undefined;
+            const rmTimeout = new Promise<never>((_, rej) => { rmTimer = setTimeout(() => rej(new Error(ROADMAP_PLANNER_TIMED_OUT)), rmTimeoutMs); });
+            let rmT: Awaited<typeof rmCall>;
+            try {
+              rmT = await Promise.race([rmCall, rmTimeout]);
+            } catch (err) {
+              try {
+                const lbl = fastLaneProviderLabel(rmProvider);
+                buildDiag.recordLlmCall({ model: lbl === 'anthropic' ? fastBuildModel() : rmProvider.toLowerCase(), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - rmStartedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
+                buildDiag.record({
+                  phase: 'plan', severity: 'info', code: 'MEGA_ROADMAP_FAILED',
+                  message: roadmapPlannerFailedMessage(plannerFailureKind(err), rmTimeoutMs, err),
+                  autoResolved: true, // our process, never a finding against the app
+                });
+              } catch { /* diagnostics best-effort */ }
+              throw err;
+            } finally {
+              if (rmTimer) clearTimeout(rmTimer);
+            }
             try {
               const lbl = fastLaneProviderLabel(rmProvider);
               buildDiag.recordLlmCall({ model: lbl === 'anthropic' ? fastBuildModel() : rmProvider.toLowerCase(), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: rmT.text.length, responsePreview: rmT.text, responseChars: rmT.text.length, finishReason: rmT.stopReason, toolCalls: rmT.toolUses.length, inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens, latencyMs: Date.now() - rmStartedAt, ok: true });

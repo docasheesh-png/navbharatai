@@ -63462,6 +63462,167 @@ still a full replace (the gate is what makes that safe).
 `vitest run` (**24,810 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
 `deps:server-gate`.
 
+## 2026-09-17 — APP LOCK GETS ITS OWN DOOR: a button on General, a PIN-gated screen, and Change PIN
+
+Admin, from the live site, verbatim: *"app lock aapne setting me aise hi bahar bana diya, 'app lock'
+button banao. jab user setting ja kar app lock option press kare to yeh option dikhe. sath me change lock
+ka bhi option dikhe. aur is app lock ko open karne ke liye bhi lock chahiye. aap isko aur acche se banao."*
+
+**What was wrong, precisely.** The App Lock checklist (2026-09-13) rendered INLINE on Settings → General.
+Saving needed the PIN — that half was right — but the LIST was readable by anyone holding the phone, and
+it carried its own "Enter your PIN to save" box because it sat on an open screen. A user with no PIN was
+sent on a detour ("open Secrets & API Keys once to create it"). And there was no way to change a PIN you
+still knew: the only door was "Forgot PIN" (emailed code).
+
+**What changed (all wired, all tested):**
+- **`AppLockRow`** (`settings/AppLockSettings.tsx`) — the button on General. One line of status from the
+  shared cache (`appLockRowSubtitle`: "No PIN yet — tap to set one up" / "PIN set · 2 of 6 optional areas
+  locked"), a chevron, never a tick box. Navigates to the new **`settingsScreen === 'app_lock'`**
+  (`SettingsScreen` union in `types/index.ts`; both doorway and room exist, so
+  `settingsScreenReachable.test.ts` stays green).
+- **The screen is ALWAYS behind the PIN.** `AppLockGate` gained `always` (skip the per-area question),
+  `label` (the card names "App Lock" rather than an area) and `banner` (the re-lock countdown + Lock now,
+  because every save spends the ticket). No PIN yet ⇒ the same gate shows the CREATE-PIN form, so the PIN
+  is made where it is managed. When "Settings" itself is ticked, the outer gate collected the PIN already
+  and the shared unlock opens this one straight through — one PIN, never two.
+- **`AppLockSettings`** lost its own PIN box (the door is the PIN); a lapsed ticket now `clearUnlock()`s
+  so the gate asks again instead of leaving a Save that keeps failing.
+- **Change PIN** — `POST /api/app-lock/:userId/pin/change` (`routes/appLock.ts`), client `changePin()`
+  (`lib/appLock.ts`), `ChangePinCard` on the screen. 🔒 **Needs BOTH a live ticket AND the current PIN
+  typed now** — a ticket alone proves the PIN was entered in the last five minutes, and a phone handed
+  over four minutes later still holds it. A wrong current PIN is counted by the SAME counter as a wrong
+  unlock (five ⇒ the same escalating lock-out), so this route is not a cheaper place to guess. A weak new
+  PIN is refused BEFORE the current one is compared (costs no attempt); same-as-current is refused; success
+  mints a fresh ticket so the screen stays open. Audit action `pin-changed`. "Forgot PIN" (emailed code)
+  stays the only other way a PIN changes.
+- **A failed status read on an `always` screen is now honest** — "Could not check your app lock" with a
+  Try again button, instead of "One moment…" for ever (a locked door with no handle).
+- The `settings` area hint no longer claims ticking it is what protects the list.
+- `AppKnowledgeBase`: `settings_app_lock` path/description/howToUse and `settings_general` updated.
+
+**Tests:** `appLockRoutes.test.ts` +7 (change route: happy path proves the store opens on the NEW pin and
+refuses the old; ticket-only refused AND counted; no ticket refused before any compare; weak new PIN costs
+no attempt; same PIN refused; five wrong ⇒ 429 and the right PIN is refused during the hold; no PIN ⇒ 409).
+`appLockWiring.test.ts` rewritten for the new contract (button on General, one `<AppLockSettings>` only on
+the app_lock screen, `always` + `banner` on its gate, no PIN box in the screen, Change PIN present, row
+draws no checkbox).
+## 2026-09-17 — AUTOPSY e706e068 (School ERP, weak/free-list, 26.8 min, NOT ok, ₹0) — the RESIDUE after PRs #3020/#3023/#3025/#3031
+
+Admin sent the report with *"app banne ke bad tut gayi?"*. **Honest answer: no.** The app rendered in a
+real browser, `tsc` was clean, `npm run build` succeeded. What "broke" was three files our own batch
+repair wrote OUTSIDE the app (`App.tsx`, `hooks/useStudents.ts`, `types/student.ts` at the project root);
+the readiness gate read the whole tree, found an unresolved import and placeholder data in those strays,
+and failed a working app. **That whole chain was root-caused and merged by other sessions the same evening
+(#3020 stray-file guard + run-proven verdict + project-planner clock; #3025 verdict-vs-counts; #3031 scan
+only the files the app loads; #2995 provider silence ≠ our budget).** This entry is the residue those PRs
+did NOT reach — verified by reading current `main`, not assumed.
+
+**Ledger (5 buckets, the whole report):** ✅ self-healed 5 (missing import ×2, missing dep, compile batch,
+mockData→Supabase in a STRAY file); 🔀 workarounds 4 (fast lane → full builder after a 60 s silence; E2E
+suite written but not runnable here; RENDER_RESCUE upgrading a not-ok; `PREVIEW_SNAPSHOT_STALE` fallback);
+⏭️ skipped 4 (design heal never ran — `resultOk` was already false on stray-file blockers; page-render check
+"no result" for 6 routes; journey not derived; 3 unused deps installed and never imported); ❌ shipped
+imperfect 3 (the three release-gate blockers, all from strays — fixed on main); 🥵 struggle 6 (45 s silent
+start; 55 s decomposition killed at 60 s; fast-lane manifest silent 60 s; 20 files written before the first
+`tsc`, then a 7-minute compile grind over 21 errors; 8 repeated reads; the heal spending 3 min on a stray).
+
+**🔴 STILL OPEN ON MAIN, FIXED HERE:**
+1. **The "complex apps open on KIMI" flag never reached the chain builder.** `buildIsComplex` (score 63 ⇒
+   COMPLEX) was spread into `baseRunnerOpts` — AgentRunner options, which never read it — and never passed
+   to `buildTurnRunner`. Result: 83 calls on `glm-4.7-flashx`, KIMI one rung away for 26 minutes, and the
+   flash rung's 21-error output ground for seven minutes. Every router test passed because every one tested
+   the DECISION and none the chain. Now `complex: buildIsComplex` is on `makeFastTextRunner` (roadmap
+   planner, project planner, fast-lane manifest) and the main `client`; the decision is RECORDED as
+   `COMPLEXITY_ROUTING`. `tests/complexityRoutingWiring.test.ts` asserts the CONSTRUCTED chain (weak/normal
+   + complex ⇒ first rung KIMI) and pins both runner constructions in the route.
+2. **The mega-roadmap planner was the SIBLING of #3020's project-planner clock.** Flat 45 s race,
+   `recordLlmCall` only on success, outer catch swallowed it — `APP_SCOPE` at +8 ms, `ETA_BASIS` at
+   +45,112 ms, nothing between: forty-five seconds of every large-app build going to a planner nobody could
+   see, while `APP_SCOPE` still said the roadmap was "not yet active" (it has been default-on since
+   2026-08-14). Now it shares `projectPlannerTimeoutMs()` and the planner failure vocabulary
+   (`ROADMAP_PLANNER_TIMED_OUT`, `roadmapPlannerFailedMessage`), records the failed call on the ledger and
+   `MEGA_ROADMAP_FAILED` in the report, clears its timer, and `APP_SCOPE` tells the truth.
+   `tests/roadmapPlannerClock.test.ts`.
+
+**OPEN ROOT CAUSES (rule 6), recorded, not guessed at:**
+- **The E2E suite we scaffold can never run here** — by a deliberate product rule ("we add no packages to
+  your project", after a Next.js build was broken by our own spec file, 2026-08-24). The sandbox template
+  pre-bakes `playwright@1.49.1` in `/home/user/.e-tools` but NOT `@playwright/test`. The complete fix is
+  infra: bake `@playwright/test@1.49.1` into both E2B images beside `playwright` and run OUR scaffolded specs
+  from the tools dir (NODE_PATH), touching nothing in the user's project. Needs a template rebuild
+  (`infra/e2b/build.mjs`) — an admin action this session cannot verify, so it is not coded blind.
+- **The first `tsc` ran after 20 files.** The flash rung's errors were caught 12 minutes in and repaired
+  for 7. The DNA fix is an incremental typecheck after every N writes (or per-file), not at the end —
+  a design change to the write path, proposed to the admin below rather than shipped in an autopsy PR.
+- **The abandoned planner call keeps running on the provider side** (known: PROGRESS 2026-09-13 mid-build
+  cost stop) — same class, still open.
+## 2026-09-17 — Admin Revenue → purchases by USER, and the Users page's "Total Used / Paid" were reading dead fields
+
+**Admin's request** (forwarded from an external ChatGPT brief, with the instruction *"dont build blindly"*): the
+Revenue page must say **which users** the revenue came from — who, what, how many tokens, how much, when,
+transaction id, method, status — and the Users page / account sheet must show each user's **purchased →
+used → remaining** credits and AI usage. Per the external-suggestion rule the brief was AUDITED against the
+code first, and most of what it asked for already existed; this change wires the gaps and fixes one real bug
+the audit found.
+
+### What the audit found (STEP 1–3 of the brief, recorded so nobody re-derives it)
+
+| Asked for | Already existed | Gap |
+|---|---|---|
+| Every purchase with user, amount, tokens, txn id, status, method | `payment_transactions` carries all of it (amountPaid, balanceAdded, paymentProvider, paymentStatus, paymentReference, productType, platformFeeInr, storePriceInr) | Revenue tab showed only 10 rows with a truncated uid — no product, status, method or reference |
+| Revenue = successful money only | `/api/admin/analytics` sums `amountPaid` over SUCCESS rows | "Token Purchases" tile excluded only `WELCOME_BONUS`, so a **coupon redemption counted as a successful payment** |
+| Per-user purchased / used / remaining | Wallet carries `totalTokensPurchased`, `totalTokensUsed`, `tokenBalance`; `walletLedger` holds every credit and debit with `feature` + `buildRef` | 🔴 **Users list, "Top Consuming Users" and the account sheet read `total_output_tokens_used` / `total_money_spent` — fields written ONCE as 0 at wallet creation. Every account showed 0 used, ₹0 paid.** The live writers are `walletDebit.ts` → `totalTokensUsed` and `payments.ts` → `totalMoneySpent` |
+| Per-user input/output tokens, model, cost | `ai_usage_logs` (chat only; tokens only on non-streamed measured turns); build tokens per provider in each admin build report; wallet ledger for what was charged | Nothing summed chat tokens per user; the sheet did not say how many turns carried NO count |
+| Refund handling | — | **No writer produces a REFUNDED status.** The Cashfree webhook and verifier only move PENDING → SUCCESS. A refund issued in the gateway dashboard leaves the row saying SUCCESS |
+| Admin-only access | `verifyAdminToken` (admin.ts) / `requireAdmin` (reports.ts) on every route | none — the new endpoint uses the same gate |
+
+**No database change and no new tracking.** Everything on the new screens is read from documents already
+written; the brief's "implement tracking if missing" clause did not apply.
+
+### What shipped
+
+- **`src/server/lib/purchaseLedger.ts`** (pure) — the ONE reading of a `payment_transactions` row:
+  `purchaseRow` (user, product, paid ₹, credited ₹ and tokens, status, method, our id + gateway ref, fee,
+  store list price), `isRevenueRow` (SUCCESS ∧ paid > 0 ∧ not a free-credit rail), `summarisePurchases`,
+  `filterPurchases` (search / status / date range), `sortPurchases` (date / amount / tokens, ties → the paid
+  row first). `refundTracked: false` rides on every summary so the screen can say refunds are not recorded.
+- **`GET /api/admin/purchases`** (admin.ts, `verifyAdminToken`) — the whole collection read the analytics
+  route already does, joined with wallet name/email, filtered and sorted in memory, paged (≤200). Returns
+  `summary` (filtered set) and `overall` (everything) so the tile never moves when a filter is applied.
+- **`src/server/lib/walletLifetime.ts`** (pure) — `lifetimeMoneySpentInr` / `lifetimeTokensUsed` /
+  `lifetimeTokensPurchased` read BOTH spellings and take the max (never the sum — a merged wallet carries
+  both). Applied in `/api/admin/users` (rows + the `ai_per_day` sort, plus a new `paid` sort and a
+  `totalTokensPurchased` field), the analytics `expensiveUsers`, the account sheet's `totalSpentInr`, and
+  `giftSpend.hasEverPaid` (which had only worked through its `lastRechargeAt` fallback).
+  `accountMerge.mergeWallets` now also carries `totalMoneySpent`, which a merge used to drop.
+- **Analytics** — `tokenPurchaseCount` / `recentPurchases` go through `isRevenueRow`.
+- **Account sheet** (`/api/admin/users/:uid/account`) — `purchases` (every row for that user, newest first,
+  through `purchaseRow`) and `usage` (purchased / used / remaining tokens from the wallet, the ledger's
+  credit and debit totals with its reconcile verdict, and chat tokens via the new
+  `summariseChatTokens`: measured in/out sums PLUS the count of streamed turns that carry no count).
+  The privacy invariants of `adminUserDetail.test.ts` (no transcript collection, no message field) hold.
+- **AdminDashboard** — Revenue tab: a *Purchases — who paid, for what* panel (tiles, search, status filter,
+  date range, sort, pagination, a click-through to the account sheet, and the refund caveat in words);
+  *Top Consuming Users* gains a Purchased column. Users tab: **Purchased** and **Paid ₹** columns, and
+  *Total Used* is finally a real number. Account sheet: a *Credits — purchased, used, remaining* block and
+  the user's purchase list.
+
+### Honest limits, said on the screen too
+
+- **Refunds:** not tracked anywhere; the panel says so. Wiring Cashfree's refund webhook event is a
+  separate change (open item).
+- **Per-user input/output tokens** exist only for chat turns the router measured; streamed turns are
+  COUNTED as unmeasured, never summed as zero. Build-side provider tokens and real API cost stay on each
+  build's admin report; the account sheet points there rather than inventing a per-user figure.
+- **Store rows** record `amountPaid` as the credit value (₹99), not the store list price (₹119); the table
+  shows the list price beside it so the two are not confused. That is what the store path has always
+  written; changing it would rewrite history.
+
+### Tests
+
+`tests/purchaseLedger.test.ts` (18), `tests/walletLifetime.test.ts` (8), `tests/adminChatTokens.test.ts`
+(3) — the wiring guards read the routes with comments stripped and assert the dead snake_case reads are
+gone and the shared modules are what the routes call.
 ## 2026-09-17 — Autopsy `b89ba6f8`: one build told its user THREE different stories about why it ended
 
 Free user (`bvs***@gmail.com`), weak tier, edit of an existing 30-file app. Prompt: *"Continue from
@@ -63551,6 +63712,121 @@ written from a guess had to be rewritten from a measurement.
 3. 🥵 **Sandbox 98% idle** across the session — unchanged, and the same figure every report carries.
 ---
 
+## 2026-09-17 — AUTOPSY cc8c9075: a QUESTION was answered correctly, then called a failed build and re-run
+
+**The prompt was five words of Hinglish:** *"Tumnay jo app banana use main open kase karu"* — *"the app
+you were to build, how do I open it?"* A question about an app the user already had.
+
+**The engine answered it, correctly, at minute 2.5.** Dev server up (`npm run dev`, exit 0), preview
+published at a live URL, screenshot taken, `console_errors` clean, and a reply handing over the
+clickable address. Then it called that answer an **empty build** and re-ran the whole thing one rung
+higher. **The second answer was worse**: it told the user to run `npm run dev` and open
+`localhost:5173` — a URL on a machine they do not have. Total 13.2 minutes; the user stopped it.
+
+### The chain, proven by running the real code rather than reading it
+
+```
+"Tumnay jo app banana use main open kase karu"
+  → readsAsQuestion  = FALSE   (every opener rule is ^-anchored per clause; "kase karu" is at the END)
+  → classifyIntent   = new_build, HIGH, signal "banana"
+  → HIGH skips the LLM intention reader entirely (the 2026-09-13 "read the mood" rule never ran)
+  → userAskedForAnAppToBeBuilt = TRUE   (it read .intent and DISCARDED .confidence)
+  → shouldRetryEmptyBuild's edit-mode exemption cancelled  → EMPTY_BUILD_RETRY
+```
+
+The same probe found the user's SECOND message inverted too: *"Tum mujhe as a app bana kar do … koi
+quiz app **mat banana**"* — an explicit order to build — classified `chat` at HIGH, because the
+negative CONSTRAINT `mat banana` hit `ANSWER_ONLY_PATTERNS`, which is checked above every build signal.
+**Both of the user's messages were classified backwards, in opposite directions.**
+
+### Three DNA-level fixes, each proven by reversion
+
+1. **A verb-final Hindi question is a question.** Hindi is verb-final, so its question word sits near
+   the END. `MIDSENTENCE_KYA_QUESTION` was unanchored for exactly this reason on 2026-09-16 and covers
+   only `kya` + a pronoun; this is that autopsy's own finding applied to the rest of the question words.
+   🔒 It requires a **first-person verb** (`karu`/`karun`/`kholu`…), and a Hindi order is second person
+   (`karo`/`banao`/`do`) — different grammatical persons, so it cannot swallow a build request. The
+   verb list is explicit rather than a `-u$` suffix rule: "you", "run", "sun" and "gun" all end that way.
+2. **A negation can be a CONSTRAINT inside an order, not a refusal of it.** Strip the negated span; if a
+   build order survives, the answer-only verdict keeps its intent but **loses its HIGH lock**. The
+   original case is untouched — strip "build mat karna" out of *"build mat karna, bas yeh batao"* and
+   nothing buildable is left, so it keeps HIGH.
+3. 🔴 **A GUESS MAY NOT AUTHORISE A DUPLICATE BUILD.** `userAskedForAnAppToBeBuilt` now requires
+   `confidence === 'high'`. Its own doc already said why: `intent` answers *"which lane runs this
+   turn?"*, where a LOW guess is cheap and self-correcting; THIS question is *"may a correct zero-file
+   answer be called a failure?"*, where a LOW guess buys a whole second build. **LOW is the classifier
+   reporting that it could not tell — "I could not tell" must never buy the expensive branch.** This is
+   also what finally connects the 2026-09-13 question rule to the retry: that rule demotes rather than
+   flipping (deliberately, so nothing regresses when the reader is down), and this predicate was reading
+   the undemoted intent and answering TRUE anyway. Fix 3 holds even if 1 and 2 are ever loosened.
+
+### Two more real defects in the same report
+
+🔴 **THE TRUNCATION GUARD ASKED FOR THE IDENTICAL THING THAT HAD JUST FAILED.** `src/App.tsx` was cut
+off mid-`content` at **exactly 9,833 output tokens** — the whole authorised ceiling. The guard replied
+*"rewrite each listed file COMPLETELY … write ONE file per response if a file is large"*. It **was**
+writing one file, and that one file does not fit. Same request, same bound, same failure: **two calls,
+158 seconds each — 5.3 minutes of a 13-minute build.** A second attempt under a fixed ceiling cannot
+succeed by trying harder; it succeeds by writing less. A repeat now gets different advice (a smaller
+working file now, the rest via `edit_file`), remembered per-RUNNER because the second cut-off is by
+definition a later turn.
+
+🔴 **A BUILD THE USER STOPPED WAS FILED AS "why it failed is not known".** Its `rootCause` said exactly
+that, while the same document carried the engine's own sentence — *"user stopped the build … charged
+half the work done"* — and the user-facing summary *"Stopped, as you asked."* **Three statements of the
+stop, and the field an autopsy reads first said the cause was unknown.** The class: **one fact written
+under TWO codes, and the reader knew only one.** `stoppedByUser` looked for `USER_STOPPED_BUILD`, which
+the /stop ROUTE writes against a different in-flight diag and which never landed here;
+`CANCELLED_BUILD_CHARGED` is written by the BUILD'S OWN settle path, and `decideCancelledBuildBill`
+returns `applies: true` for nothing but `abortCause === 'user-stop'` — proof, from the one actor that
+cannot be wrong about it. The reader now accepts both, which also repairs every report already stored.
+
+### The five-bucket ledger
+
+| | Count | Items |
+|---|---|---|
+| ✅ Self-healed | 5 | missing `@playwright/test` added · `npm audit fix` ran · dev server restarted with explicit host/port · `edit_file` old_string miss recovered · GLM benched at 17 s so the ladder reached KIMI |
+| 🔀 Worked around | 1 | GLM slow → benched for the run (the bench worked exactly as designed — recorded as debt only because the lead rung failed at all) |
+| ⏭️ Skipped | 3 | typecheck never ran · no user journey derivable · no test suite runnable |
+| ❌ Still broken | 3 | 2 dependency CVEs needing a major bump (vite/esbuild) · `requestAnalysis.startTier: "gemini"` names a tier on **no ladder** since 2026-09-14 · `providerChain` prints `×51` (the key-pool count) as if it were rung repeats |
+| 🥵 Struggle | 4 | **the retry of an already-correct answer** · **2 × 158 s dead calls at the 9,833 ceiling** · 41 s before the first model call (24 s of it silent) · the ETA said "~2–4 min", then said *"still working out how big it is"* for ten more minutes and **never showed a figure** |
+
+### The missing subsystem (step 2)
+
+**There is no ONE PLACE that answers "what did the user want?".** `IntentClassifier` answers it for
+routing, `RequestAnalyser` answers it again for model choice (it said `taskType: "chat"`, correctly, and
+nothing read that), and `userAskedForAnAppToBeBuilt` answers it a third time for the retry decision.
+On this build the three disagreed — chat, new_build, and "yes they wanted an app" — and the most
+expensive of the three won. Fix 3 makes the third one consult the confidence of the second; a single
+shared verdict is the real fix and is recorded here as an **open root cause**.
+
+### Open, not guessed at
+
+- **The Kimi 9,833-token starvation** is the sibling CLAUDE.md already records as open for GLM. This
+  report is a second occurrence, twice in one turn. The honest generic fix (remember a rung that
+  starved and unclamp its NEXT call) still needs cross-turn state the per-rung runner does not carry.
+  The truncation-guard fix above bounds the DAMAGE (no third identical attempt); it does not remove the
+  cause.
+- **The ETA is asserted at t=0 and never reconciled** — already PROGRESS.md open item #6, seen again.
+- **`startTier: "gemini"` and the `×51` chain display** are admin-facing untruths, left for a
+  dedicated pass rather than widened into this change.
+
+### Separately: the build report now copies as JSON (admin, same message)
+
+> *"jab build report copy ki jaye to json formate me hi copy ho. abhi text me copy ho rahi hai."*
+
+The floating admin Copy button copies the page as TEXT — right for an ordinary screen (a browser cannot
+photograph its own window; see `pageSnapshot.ts`) and wrong for a 153-issue report, which a DOM outline
+flattens into something unparseable. It now prefers the open report's JSON. 🔒 The payload is
+**registered, not scraped back out of the DOM**: the dashboard has already resolved the exact JSON, so
+reconstructing it from rendered markup could silently differ from the real report — and a copy that
+looks like the report and is not one is worse than an honest text dump. No report open ⇒ byte-identical
+to today; an empty payload falls back to the page rather than wiping the clipboard while saying
+"copied". ⚠️ This is the sibling of the admin's own 2026-08-09 request in `adminReportParts.ts`, whose
+closing words were *"build report JSON me hi copy ho, text me nahi"* — hunted two days late.
+
+**Gate on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` · **24,951 tests
+passed** · `build` · `test:bundle` · `boot:check` · `deps:server-gate` — all green.
 ## 2026-09-17 — A STALL IS NOT A FAILURE (the two review fixes #3035 merged without — the SECOND push/merge race today)
 
 **Branch `claude/a-stall-is-not-a-failure`, restarted from `main`.**
@@ -63725,6 +64001,47 @@ close it: a prompt whose every word is a placeholder OR a creation verb names no
 bug** — it encoded my incomplete reading of the report, not anything a user needs. Moved into the
 category-word block and corrected, with the reason recorded beside it rather than silently deleted.
 
+### 2026-09-17 (same day) — the intention reader gets its fourth answer: `unclear`
+
+Admin, after the two fixes above: *"user ka har woh message jo ek limit se chota hai ya unclear hai,
+hamesha LLM call karo — woh bata dega."*
+
+**The honest finding, reported back before building anything: that call was ALREADY being made**, on
+every low-confidence message, on the free chain at ₹0, bounded at 6 s — report `d6d664e6` is the proof
+that it ran for `"Bnao"`. **What was missing was somewhere to put the answer.** The reader is handed
+three choices (`chat` / `build` / `edit`) and answered `build`, which is not even wrong: *"make it"* IS
+an order to build. *"They have not told me WHAT"* was not on the menu.
+
+- `classifyIntentSmartDetailed` returns `{ intent, unclear }` and the reader's menu now carries a
+  fourth answer. `classifyIntentSmart` is that function with the flag discarded — **delegating, not
+  duplicating**, the same pattern `classifyIntent` already uses.
+- 🔒 **`intent` deliberately stays at the KEYWORD result when `unclear` is true.** A caller that
+  ignores the flag is byte-identical to before. The flag adds an option; it removes none.
+- The route ORs it with the deterministic `'no-object'` half and sends **both through the same four
+  narrowing conditions** (empty workspace, no earlier request, no attachment/import, not an edit).
+  A second opinion that can only make the gate NARROWER cannot introduce a new way to refuse a real
+  prompt.
+
+⚠️ **What was deliberately NOT done, and why (rule 3, no sycophancy).** The instruction as written —
+*call the LLM on every short message* — would add a provider round trip to `"hi"`, `"ok"`, `"thanks"`,
+`"haan"`: HIGH-confidence messages with no doubt in them, answered instantly and free today. That
+slows the app's most common turn for no gain. The existing design already asks **only when it is
+genuinely unsure**, which is both better and cheaper; a test now pins that a HIGH-confidence message
+never reaches the reader at all. Also recorded: `glm-4.5-flash` is on none of this repo's ladders —
+free chat leads with `glm-4.7-flashx` (₹0), which is already the cheapest rung, and pinning a model id
+in code is the churn Decision A exists to avoid.
+
+🔎 **The bigger lever, named and not yet taken:** the recurring failure is the OPPOSITE shape — a
+**HIGH-confidence hard lock that skips the reader entirely**. Three autopsies now (`5abad374`,
+`cc8c9075`, and `d6d664e6`'s sibling). PR #3040 (another session) is working that seam; this change
+deliberately stays out of `clauseReadsAsQuestion` and `userAskedForAnAppToBeBuilt` so the two do not
+race in one file.
+
+**Tests:** `tests/intentReaderCanSayUnclear.test.ts` (9) + the reader block in
+`objectlessBuildAsks.test.ts`. Reversion-proven in **both** halves — deleting the `unclear` mapping
+fails the reader suite, deleting `|| readerSaysUnclear` fails the route suite. Two source-scanning
+tests had their needles updated (`classifyIntentSmartDetailed`, the widened route window): the symbol
+and the window moved, **the assertions did not**.
 ## 2026-09-17 — WRITE → TYPECHECK → NEXT: the compiler answers after every file (admin: "incremental typecheck wala PR bana do")
 
 From autopsy e706e068's biggest struggle: 20 files written before the first `tsc`, then 21 errors ground for

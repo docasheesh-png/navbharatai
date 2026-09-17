@@ -64360,3 +64360,86 @@ reading that list would otherwise go and work on items that are finished or on a
 against a *different* `main` and nothing had verified the combination: `277a6769` — typecheck ✅,
 no-unused-imports ✅, server typecheck ✅, **25105 passed | 1 skipped, 0 FAIL** ✅, build ✅, bundle ✅,
 boot ✅. The concurrent merges compose cleanly.
+
+---
+
+## 2026-09-17 — `Number('')` is 0: a CLEARED Cloud Run field was impersonating a deliberate zero (12 readers, 9 files)
+
+**Not from a report — from the fourth absolute rule's step 2 applied to something this file already
+shows:** the *"a malformed env value must not fall the dangerous way"* fix has been made here at least
+six separate times (`parseRolloutPercent`, `walletFloor`, `buildCostCeiling`, `referralRewards`,
+`webRiskBudget`, `slowRungBench`'s ratio), each time for one key. **Seven modules literally CITE
+`parseRolloutPercent` in a comment and then hand-implement the rule.** That is the drifted-duplicate
+shape `safeRelPath` → `workspacePath.ts` was centralised for, so the question was whether the copies
+had already diverged. They had.
+
+**The fact behind all of it: `Number('')` is `0`, not `NaN`.** So every reader shaped
+
+```ts
+const n = Number(process.env.X);
+return Number.isFinite(n) && n >= 0 ? n : DEFAULT;   // blank ⇒ 0, never DEFAULT
+```
+
+turns a key that EXISTS and is BLANK into a deliberate zero. An **UNSET** key was always safe
+(`Number(undefined)` is `NaN`) — which is exactly why this never surfaced: **every existing test in
+the repo `delete`s the key rather than emptying it**, so the whole class sat in a blind spot that the
+suites were structurally incapable of entering.
+
+**What a silent zero meant, per site (12 reads, 9 files):**
+
+| Key | A blank value meant |
+|---|---|
+| `WELCOME_BONUS_TOKENS` | the welcome gift is **₹0 for every new account** — and with `AGENTV3_PAID_PUBLIC` on, a ₹0 wallet is REFUSED new builds, so a new user could do **nothing at all** |
+| `WEEKLY_TOPUP_TOKENS` | the weekly gift ladder stops |
+| `AI_TOOL_FREE_DAILY_LIMIT` · `AI_IMAGE_FREE_DAILY_LIMIT` · `AI_IMAGE_PASS_DAILY_LIMIT` | the free daily allowance becomes none |
+| `PROFESSIONAL_FREE_DAILY_LIMIT` | no free professional messages |
+| `AGENTV3_DEPLOY_MAX_MB` | the per-deploy size ceiling is **DISABLED** (0 means off there, by its own comment) |
+| `STORE_FEE_PCT` | the fee split shown on a pack card stops adding up |
+| `MONITOR_SANDBOX_SPIKE_MIN_USD` | every trivial spend is alert-worthy — against the standing 2026-09-12 one-mail-per-episode mandate |
+| `SEMANTIC_MEMORY_MIN_SCORE` | the relevance floor is gone and noise is injected |
+
+🔴 **THE CONDITION IS NOT HYPOTHETICAL IN THIS DEPLOYMENT, and `CLAUDE.md` already records both
+routes to it.** One is the cleared field / dropped paste that `referralRewards.ts` documents. The
+other is worse and is live: **six keys are set TWICE in the running service**, the last row wins, and
+an **empty** last row wins *silently* while the good value sits visible a few rows above it — the
+audit's own sharpest example. So "present but blank" is a state this service can already be in.
+
+**THE FIX IS THE CLASS.** `src/server/lib/envNumber.ts` is the numeric sibling of `envFlag.ts` —
+which exists for the same reason, written the same way, for booleans ("six ways to read an ON flag").
+`parseEnvNumber` returns `number | null` for precisely the reason `parseEnvFlag` returns
+`boolean | null`: **only the caller knows which way its own default falls**, and what range and
+rounding its number has. So each site keeps its own bounds, and none of them keeps its own idea of
+what an empty string means. An explicit `0` is honoured everywhere it is in range — three existing
+suites assert that in words (`walletCredit.test.ts` calls switching the bonus off *"a valid choice"*),
+and those assertions are undisturbed. Nobody types a zero by accident; a cleared box is not a
+decision.
+
+⚠️ **THE EIGHT PUNCTUATION-STRIPPING PARSERS WERE DELIBERATELY LEFT ALONE, and are recorded as
+CHECKED AND SAFE so nobody re-audits them:** `buildCostCeiling`, `walletFloor`, `webRiskBudget`,
+`appAiGateway`, `referralRewards`, `escalationRollout`, `slowRungBench`, `streamWatchdog` all guard
+blank correctly already, and each takes punctuation (`₹`, `$`, `%`, `_`, thousands separators) that
+the shared primitive deliberately does not. Rewriting correct code to share a helper would risk
+weakening a guard for no defect — the same reason the 304-window sweep was declined.
+
+🔴 **ONE FINDING WAS MINE AND WRONG, AND THE CORRECTION IS THE USEFUL PART.** `CaptchaGenerator.ts`
+carried the same shape with the sharpest consequence — a blank floor made the gate `score >= 0`,
+which passes a **certain-bot 0**, inside a function whose own `catch` says *"fail CLOSED"*. I began
+fixing it as NavBharatAI's own bot gate. **It is not ours:** that code lives in a **template literal**
+and is written into the **user's generated app**, which is deliberately dependency-free — NavBharatAI
+has no first-party captcha path at all (verified, not assumed). Importing a server module into
+generated user code would have broken every app built from that recipe, and my backticks broke the
+template outright. Reverted and re-fixed **inline**. An out-of-range value like `5` is left refusing
+everything **on purpose**: that is the safe failure for a bot gate and relaxing it into the default
+would have traded a safe failure for a looser one — the *"a fix must never trade one problem for
+another"* rule, caught inside this very change.
+
+**Tests — `tests/aClearedEnvFieldIsNotAZero.test.ts` (54). Reversion-proven: with the nine files
+reverted, 23 fail.** The prevention half scans for the **SHAPE** rather than a list of files
+(a value read with `Number(env.X)` and accepted at `>= 0` is wrong *whatever it is called*, because
+the blank case is decided before any range test runs), anchored on a **whole-file regex and never on
+a byte window** — this repo has paid for fixed-offset source guards seven times and twice for guards
+that could not fail at all. It therefore carries a case asserting the detector still **FINDS** a
+known-bad sample, because a regex matching nothing would make the sweep pass vacuously. ⚠️ **Its own
+first run flagged its own fix** — `parseEnvNumber(` contains the substring `Number(`, and so does
+`rawNumber(` — which is what the negative lookbehind exists for, and what the "clears the safe shape"
+case caught.

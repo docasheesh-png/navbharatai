@@ -227,6 +227,88 @@ export function journeyCandidates(files: Record<string, string>): string[] {
 const isPageFile = (p: string): boolean =>
   /(^|\/)(pages|screens|views|routes|app)\//i.test(p) && /\.(t|j)sx$/.test(p);
 
+/** How many local imports of one page we will look inside. A barrel file must not explode the search. */
+export const MAX_IMPORTS_PER_PAGE = 12;
+
+/**
+ * Resolve a RELATIVE import specifier against the file map, the way a bundler would. Returns the
+ * matching path or null. Local only: a bare specifier is a package and never resolvable here.
+ */
+export function resolveLocalImport(
+  fromPath: string,
+  spec: string,
+  files: Record<string, string>,
+): string | null {
+  if (!spec || !fromPath) return null;
+  // `@/x` is the near-universal alias for `src/x` in this repo's scaffolds; anything else bare is a package.
+  let base: string;
+  if (spec.startsWith('@/')) base = `src/${spec.slice(2)}`;
+  else if (spec.startsWith('./') || spec.startsWith('../')) {
+    const dir = fromPath.split('/').slice(0, -1);
+    for (const part of spec.split('/')) {
+      if (part === '.' || part === '') continue;
+      if (part === '..') dir.pop();
+      else dir.push(part);
+    }
+    base = dir.join('/');
+  } else return null;
+  for (const cand of [base, `${base}.tsx`, `${base}.jsx`, `${base}.ts`, `${base}.js`,
+    `${base}/index.tsx`, `${base}/index.jsx`, `${base}/index.ts`, `${base}/index.js`]) {
+    if (typeof files?.[cand] === 'string') return cand;
+  }
+  return null;
+}
+
+/**
+ * 🔴 THE FORM IS USUALLY NOT IN THE PAGE (autopsy e4ebcb5f, 2026-09-17 — second occurrence; first
+ * recorded as an open root cause in PR #2988).
+ *
+ * `deriveJourneys` and `noJourneyReason` both used to read ONLY `files[page]`. A React page that
+ * composes its UI from components — which is how React is written — has no `<input>` of its own, so
+ * both concluded the app takes no input at all.
+ *
+ * What that cost, in the report's own words: a CHAT app, whose `ChatInput.tsx` the agent had just
+ * read, was described as *"this app has no form for a journey to fill in — nothing here takes user
+ * input"* — **while `ACCESSIBILITY`, in the same report, found "4 form field(s) with no label".** Two
+ * of our own scanners, the same files, opposite answers. The journey was never derived, so a check
+ * that could have produced real evidence produced a false explanation instead.
+ *
+ * So a page's form sources are the page AND the local components it imports, ONE level deep. One
+ * level, not a graph walk: it covers how a page actually composes a form, stays bounded, and keeps
+ * the result predictable enough to explain in a report.
+ *
+ * 🔒 WHY THIS CANNOT MANUFACTURE A RED GATE, which mattered more than the fix itself — `journeys` is
+ * in `releaseGate`'s `RED_ON_FAILURE`, so a wrongly-failed journey would flip the verdict and make
+ * the build free. It cannot: the runner defaults every journey to `unreachable` and only treats a
+ * failure as the APP's after a submit has actually gone through ("From here on, a failure IS the
+ * app's failure"). A component that is not rendered on the route yields no fields, throws `no-fields`
+ * and stays `unreachable` — evidence we did not get, never an accusation.
+ *
+ * Deterministic: the page first, then its imports in source order. Pure.
+ */
+export function formSourcesFor(
+  page: string,
+  files: Record<string, string>,
+): Array<{ path: string; source: string }> {
+  const out: Array<{ path: string; source: string }> = [];
+  const own = files?.[page];
+  if (typeof own === 'string') out.push({ path: page, source: own });
+  if (typeof own !== 'string') return out;
+  const seen = new Set<string>([page]);
+  // Matches `import X from './x'`, `import { X } from "../x"` and a bare `import './x'` alike.
+  const specs = own.match(/\bfrom\s*["'][^"']+["']|\bimport\s*["'][^"']+["']/g) || [];
+  for (const raw of specs) {
+    if (out.length > MAX_IMPORTS_PER_PAGE) break;
+    const spec = /["']([^"']+)["']/.exec(raw)?.[1];
+    if (!spec) continue;
+    const resolved = resolveLocalImport(page, spec, files);
+    if (!resolved || seen.has(resolved) || !/\.(t|j)sx$/.test(resolved)) continue;
+    seen.add(resolved);
+    out.push({ path: resolved, source: files[resolved] || '' });
+  }
+  return out;
+}
+
 /** The route a page file serves, best-effort, or null. Only used for a label and a starting URL. */
 function routeForFile(path: string, knownRoutes: readonly string[]): string {
   const stem = path.replace(/\.(t|j)sx$/, '').split('/').pop() || '';
@@ -259,23 +341,35 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
 
   for (const path of candidates) {
     if (out.length >= MAX_JOURNEYS) break;
-    const source = files[path] || '';
-    const tags = inputTags(source).filter((t) => !skippableInput(t));
-    if (tags.length === 0) continue;
+    // The page itself, then the local components it composes its UI from — see formSourcesFor. The
+    // ROUTE always stays the PAGE's: a component does not have one, and naming the component's own
+    // filename would send the journey to the wrong URL.
+    let source = '';
+    let fields: JourneyField[] = [];
+    let submit: Target | null = null;
+    for (const candidate of formSourcesFor(path, files)) {
+      const tags = inputTags(candidate.source).filter((t) => !skippableInput(t));
+      if (tags.length === 0) continue;
 
-    const fields: JourneyField[] = [];
-    let addressable = true;
-    for (const tag of tags.slice(0, 6)) {
-      const target = targetForInput(tag);
-      if (!target) { addressable = false; break; }
-      const value = valueForInput(tag, marker);
-      if (value) fields.push({ target, value });
+      const got: JourneyField[] = [];
+      let addressable = true;
+      for (const tag of tags.slice(0, 6)) {
+        const target = targetForInput(tag);
+        if (!target) { addressable = false; break; }
+        const value = valueForInput(tag, marker);
+        if (value) got.push({ target, value });
+      }
+      // One unaddressable field means this form cannot be filled honestly — try the next source.
+      if (!addressable || got.length === 0) continue;
+
+      const btn = submitTargetIn(candidate.source);
+      if (!btn) continue;
+      source = candidate.source;
+      fields = got;
+      submit = btn;
+      break;
     }
-    // One unaddressable field means the form cannot be filled honestly, so no journey at all.
-    if (!addressable || fields.length === 0) continue;
-
-    const submit = submitTargetIn(source);
-    if (!submit) continue;
+    if (!submit || fields.length === 0) continue;
 
     const route = routeForFile(path, routes);
     const listed = rendersList(source);
@@ -357,7 +451,10 @@ export function noJourneyReason(files: Record<string, string>): string {
     }
     return 'no page components were found to derive a user journey from';
   }
-  const anyForm = pages.some((p) => inputTags(files[p] || '').length > 0);
+  // THE SAME SOURCES THE DERIVATION READS, for the same reason the candidate list is shared: a page
+  // composes its form from components, and asking a narrower question here is how this sentence came
+  // to tell a chat app it takes no user input (see formSourcesFor).
+  const anyForm = pages.some((p) => formSourcesFor(p, files).some((s) => inputTags(s.source).length > 0));
   if (!anyForm) return 'this app has no form for a journey to fill in — nothing here takes user input';
   return 'the forms in this app have no field this check could address honestly (no name, id, placeholder, '
     + 'label or test id), so no journey was derived rather than one that would fail for the wrong reason';

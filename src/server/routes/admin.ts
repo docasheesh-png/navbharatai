@@ -123,7 +123,7 @@ import { collectionsNeedingRetention } from '../lib/DataRetentionManager';
  */
 const GROWING_COLLECTIONS: readonly string[] = [
   'app_builds', 'build_sessions', 'user_build_history', 'user_costs', 'server_logs',
-  'metrics_snapshots', 'session_error_hints', 'hosting_usage',
+  'metrics_snapshots', 'session_error_hints', 'hosting_usage', 'site_analytics',
   'workspace_files_v3', 'workspace_assets_v3', 'workspace_checkpoints_v3', 'workspace_embeddings_v3',
   'workspace_memory_v3', 'workspace_diagnostics_v3', 'workspace_manual_edits_v3', 'project_plans_v3',
 ];

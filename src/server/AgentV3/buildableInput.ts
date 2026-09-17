@@ -74,7 +74,8 @@ export const MIN_INSTRUCTION_WORDS = 2;
  *   • A NOUN is never an action word, so **"calculator"** — one word, names a deliverable — still
  *     builds instantly. This is why the existing `'too-short'` reason is deliberately NOT diverted:
  *     it cannot tell "calculator" from "banao". This one can.
- *   • "app banao", "ek billing app banao", "todo app" all carry a non-action word ⇒ untouched.
+ *   • "ek billing app banao", "todo app", "shop app banao" all carry a word that says what the thing
+ *     IS ⇒ untouched. ("app banao" does NOT — see PLACEHOLDER_NOUNS below, added the same day.)
  *   • An EDIT verb ("fix karo") classifies as `edit_existing`, which the route's divert excludes, so
  *     a short order inside a live project still means *carry on* — the continuation amnesia this repo
  *     has already fixed once cannot return through here.
@@ -98,6 +99,34 @@ const BARE_ACTION_WORDS = new Set([
  */
 const BANAO_FAMILY = /^b[a]?n[a]{1,2}(?:o|do|de|deo|dena|dijiye|ye)?$/;
 
+/**
+ * 🔴 "APP BANAO" NAMES NO MORE THAN "BANAO" DOES (admin, 2026-09-17, on reading the fix for report
+ * d6d664e6): *"agar koi user send karega 'app banao' to navbharatai kon sa app banayega?"*
+ *
+ * The honest answer was: **one it invents** — exactly the failure that report was about, one word
+ * wider. `'app'` is a CATEGORY, not a deliverable; so are "website", "page", "kuch", "something".
+ * A prompt built only from these plus a creation verb still tells us nothing to build, and the
+ * verb-only rule above let it straight through because "app" is not a verb.
+ *
+ * 🔒 THE LINE, and it is the same one as above: a REAL noun is never a placeholder. "todo app banao",
+ * "calculator banao", "shop app banao", "website for my bakery" all carry a word that says what the
+ * thing IS, and all still build instantly. Only a prompt whose every single word is a placeholder or
+ * a verb gets the question — and only then when the workspace is empty and nothing was asked before
+ * (the route's four conditions are unchanged).
+ */
+const PLACEHOLDER_NOUNS = new Set([
+  // The category words, English
+  'app', 'apps', 'application', 'website', 'site', 'web', 'webapp', 'webpage', 'page',
+  'software', 'program', 'project', 'thing', 'something', 'anything',
+  // Hindi/Hinglish articles, quantifiers and "some-thing" words that carry no description
+  'ek', 'koi', 'kuch', 'kuchh', 'bhi', 'cheez', 'cheeze',
+]);
+
+/** A word naming a CATEGORY rather than a deliverable ("app", "website", "kuch"). PURE. */
+export function isPlaceholderNoun(word: string): boolean {
+  return PLACEHOLDER_NOUNS.has(String(word ?? '').trim().toLowerCase());
+}
+
 /** Is this single word a bare instruction to produce something, carrying no object? PURE. */
 export function isBareActionWord(word: string): boolean {
   const w = String(word ?? '').trim().toLowerCase();
@@ -114,7 +143,7 @@ export function isBareActionWord(word: string): boolean {
 export function namesNoObject(prompt: string): boolean {
   const words = instructionWords(prompt);
   if (words.length === 0) return false; // 'empty' / 'link-only' own that case, with better messages.
-  return words.every(isBareActionWord);
+  return words.every((w) => isBareActionWord(w) || isPlaceholderNoun(w));
 }
 
 export type UnbuildableReason =

@@ -63251,6 +63251,29 @@ justification for bounding silence rather than duration, and a duration bound wo
 `vitest run` (**24,886 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
 `deps:server-gate`.
 
+### 🔴 TWO DEFECTS FOUND IN THIS CHANGE'S OWN REVIEW, BEFORE IT MERGED
+
+**1. A stall was about to be logged as a `failureReason`.** The streamed turn's usage row already
+wrote `failureReason: outcome.reason`, so introducing `'stalled'` would have filed a turn that
+ANSWERED — `ok: true`, real text on the user's screen — under a field whose name says it failed. Any
+panel counting a present `failureReason` as a failure would have agreed with the name. That is
+exactly the class `isAppFinding` and `NEVER_ROOT_CAUSE` exist for, **arriving through a field name
+rather than a code**. A stall now writes `stalled: true`; a genuine failure still writes
+`failureReason`. Test-locked, and proven by reversion against its own case.
+
+**2. An existing brittle guard broke on the correct code — the SEVENTH this session.**
+`tests/streamRacePolicy.test.ts` asserted `usageMeasured: false` inside a fixed **700-character**
+window from `streamed: true`. Adding one field to the same object pushed it past character 700, so a
+guard about HONEST TOKEN REPORTING failed over an unrelated field's byte offset. **Fixed the guard,
+not the code:** it now brace-matches the object literal that contains the field, so the row can grow
+any number of fields and the guard still measures the claim it is named for.
+
+⚠️ **And one self-inflicted scare worth recording:** while tidying, I ran
+`git checkout -- src/server/routes/chat.ts`, which discards ALL uncommitted work in a file — including
+the `stalled` fix I had just written. Caught by the full suite going red, re-applied, re-gated. The
+lesson is narrow and real: **`git checkout --` is not an undo for the last edit**, and on a file with
+other uncommitted work it silently takes the rest with it.
+
 ### 🔎 Two sweeps the same session that found NOTHING — recorded so nobody repeats them
 
 - **Documented money defaults vs code.** `WALLET_OVERDRAFT_FLOOR_INR` (₹50, cap ₹500),

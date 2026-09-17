@@ -588,7 +588,15 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           ...(outcome?.model ? { modelName: outcome.model } : {}),
           ...(outcome?.provider ? { providerName: outcome.provider } : {}),
           ...(outcome?.raced !== undefined ? { raced: outcome.raced } : {}),
-          ...(outcome?.reason ? { failureReason: outcome.reason } : {}),
+          // 🔴 A STALL IS NOT A FAILURE, AND FILING IT UNDER `failureReason` WOULD SAY IT WAS. Caught in
+          // review of the change that introduced `'stalled'` (2026-09-17): the provider went quiet
+          // mid-stream and we stopped waiting, so `ok` stays TRUE and the text the user was shown
+          // stands. Any panel that counts a present `failureReason` as a failure — the obvious reading
+          // of the name — would have filed a successfully-answered turn as broken. That is the exact
+          // class `isAppFinding` and NEVER_ROOT_CAUSE exist for, arriving through a field name.
+          ...(outcome?.reason === 'stalled'
+            ? { stalled: true }
+            : outcome?.reason ? { failureReason: outcome.reason } : {}),
           usageMeasured: false,
           ok: !!outcome?.ok,
           grounded: !!groundingStatus,

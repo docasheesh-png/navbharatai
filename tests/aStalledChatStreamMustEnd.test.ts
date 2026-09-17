@@ -228,6 +228,22 @@ describe('both streaming paths are bounded, and "stalled" is not reported as a f
     expect(code).not.toContain("ok: false, provider: p.name");
   });
 
+  it('a stall is logged under its OWN field, never as a failureReason', () => {
+    // 🔴 CAUGHT IN REVIEW OF THIS VERY CHANGE. The streamed turn's usage row already wrote
+    // `failureReason: outcome.reason`, so introducing 'stalled' would have filed a turn that
+    // ANSWERED (ok: true, real text on screen) under a field whose name says it failed — and any
+    // panel counting a present `failureReason` as a failure would have agreed. Same class as
+    // `isAppFinding` and NEVER_ROOT_CAUSE, arriving through a field name rather than a code.
+    const chat = readFileSync(join(__dirname, '../src/server/routes/chat.ts'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    expect(chat).toContain("outcome?.reason === 'stalled'");
+    expect(chat).toContain('{ stalled: true }');
+    // The old unconditional form must be gone: it is what made the name wrong.
+    expect(chat).not.toMatch(/\.\.\.\(outcome\?\.reason \? \{ failureReason/);
+    // …and a genuine failure reason still lands in the field that means failure.
+    expect(chat).toContain('{ failureReason: outcome.reason }');
+  });
+
   it('the kill switch reaches BOTH paths', () => {
     expect((code.match(/watchdogLimits\(\)/g) ?? []).length).toBe(2);
   });

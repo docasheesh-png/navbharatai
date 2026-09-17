@@ -54,7 +54,8 @@ export interface ApkFailureReport {
     stage: string | null;
     why: string;
     navbharatCanFixItself: boolean;
-    detail: Record<string, string> | null;
+    /** Facts from the log. A value may be a list — `missing` carries every absent signing secret. */
+    detail: Record<string, string | string[]> | null;
     logExcerpt: string[];
   };
   /** Simple triage, mirroring the AgentV3 inbox's own pattern — set only by an admin action. */

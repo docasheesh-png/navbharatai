@@ -64890,6 +64890,59 @@ literals were the cause; an apostrophe inside text is a different cause and a wi
 it. Reading it correctly needs a real tokenizer over the client sources — **a decision with a real
 cost, not a lint**, and it sits under an absolute rule, so it is recorded here rather than guessed
 at. What is true today: no vendor string is present in any swept tree, prose or code.
+### 2026-09-17 — ADMIN DECISION PENDING: `REFERRAL_REWARDS` — asked, answered "not yet", and why
+
+Admin: *"REFERRAL_REWARDS = on kar du? total kitna kharcha hoga mera fir? abhi vs bad me"*, then
+*"save kar lo bad me batana mujhe"*. **Recorded here because the answer is a sequence of steps only the
+admin can take, and the flag must not be flipped until every one of them is true.**
+
+🔴 **TURNING IT ON TODAY WOULD PAY EVERY NEW USER ₹0.** Read from the code, not assumed:
+
+1. `welcomeGiftExclusion.ts` → `flatWelcomeGiftSuppressed(env)` IS `referralRewardsEnabled(env)`. It is
+   pure env logic, so the moment the flag is on BOTH flat-gift surfaces return 0 — the legacy
+   `welcomeBonus.ts` (₹500) and the v2 `giftPlan.ts` (₹250 / ₹500). That half works instantly.
+2. The ladder pays only on a `verified` device verdict. `deviceCheckConfigured` requires
+   `GOOGLE_PLAY_SA_JSON` **and** `GOOGLE_PLAY_PACKAGE_NAME`; those are the Play-billing keys, and
+   `STORE_BILLING` is unset, so they are almost certainly not set either. Unset ⇒ every check is
+   `unavailable` ⇒ **₹0** (the gate FAILS CLOSED, deliberately).
+3. Even with both keys, a `.aab` carrying `DeviceIntegrityPlugin` must be LIVE on Play. That plugin
+   landed in PR #2953 (2026-09-15); the live release is **versionCode 91** (2026-08-25). **So it is
+   not in the app anybody has installed.**
+4. And `AGENTV3_PAID_PUBLIC=true`, so a ₹0-balance non-free-list user is REFUSED a new build. A new
+   user would sign up, receive nothing, and be unable to build at all.
+
+**The money, at `TOKENS_PER_RUPEE = 100`:**
+
+| | today (ladder off) | ladder on, everything live | ladder on TODAY |
+|---|---|---|---|
+| organic user (no code) | ₹500 | **₹300** | **₹0** |
+| referred user B | ₹500 | **₹400** | **₹0** |
+| referrer A | ₹0 | **₹75** | **₹0** |
+| one referred pair | ₹500 | **₹475** | **₹0** |
+
+Saving once live: **₹200 per organic user (40%)**, ₹25 per referred pair. At 1,000 new users,
+₹5,00,000 → ₹3,00,000. One referrer can ever earn at most **₹1,500** (~20 friends).
+⚠️ Stated plainly (rule 3): per-user cost falls, but the ladder exists to GROW users, so the TOTAL
+bill can still rise. That is the design working, not a defect — but "sasta" must not be read as
+"the bill goes down".
+
+🔴 **THE FOUR THINGS THAT MUST BE TRUE FIRST, IN THIS ORDER — admin-only work, saved at their request:**
+
+1. **Enable the Play Integrity API** in Google Cloud project `gen-lang-client-0866594388`.
+2. **Set `GOOGLE_PLAY_SA_JSON` + `GOOGLE_PLAY_PACKAGE_NAME` in Cloud Run**, and grant that same
+   service account the **`playintegrity`** scope. (A token minted for a scope the account lacks is
+   issued happily and then refused at the call — so this fails silently if skipped.)
+3. **Set `PLAY_INTEGRITY_CLOUD_PROJECT` as a GitHub REPO SECRET** — the project **NUMBER**, not the
+   id (`gen-lang-client-0866594388` is the id; the number sits beside it on the console home; a
+   non-numeric value parses to 0 and reads as "not configured"). Then build a fresh `.aab` and get it
+   **live on Play**.
+4. **Update Play Console → App content → Data safety.** Privacy Policy §3.2 already discloses the
+   device identifier and `tests/privacyPolicyTruth.test.ts` guards it, but a Play declaration that
+   contradicts the policy is a VIOLATION, not a mismatch — the same shape as the 2026-09-02 incident
+   where the policy said "we never share your data with advertisers" while the Meta pixel was built.
+
+Then claim all four steps on a real phone, confirm the money moves, and only then set
+`REFERRAL_REWARDS=on`.
 ---
 
 ## 2026-09-17 — AUTOPSY 681bd91b: done at 4:45, then 26 minutes "fixing" files the user had forbidden

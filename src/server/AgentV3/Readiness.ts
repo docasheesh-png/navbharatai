@@ -33,7 +33,19 @@ export interface ReadinessReport {
  * the full evaluate suite, not just architecture + security.
  */
 export interface ExtraFinding {
-  severity: 'high' | 'medium' | 'low';
+  /**
+   * `observation` is NOT a fourth severity level — it is a statement about AUTHORSHIP: this finding
+   * describes code the build did not write (see `buildAuthorship.ts`). It is listed in `warnings` so
+   * nothing is hidden, and costs ZERO score.
+   *
+   * 🔴 THE ZERO IS THE WHOLE POINT, and 'low' would not have done. Every penalty below is subtracted
+   * from one 100-point budget, and a score under `MIN_READY_SCORE` becomes a blocker in its own right
+   * a few lines further down. So pricing a pre-existing-code note at even 2 points would hand the
+   * exact failure this was written to fix a second door to walk through: a large imported repo with
+   * enough old findings would cross the floor and be condemned for its own history anyway, with the
+   * blocker now reading "readiness score N/100 is below the bar" and naming nothing we did.
+   */
+  severity: 'high' | 'medium' | 'low' | 'observation';
   label: string;
 }
 
@@ -88,6 +100,8 @@ export function assessReadiness(
 ): ReadinessReport {
   const blockers: string[] = [];
   const warnings: string[] = [];
+  /** Labels added at zero cost, so the score-floor blocker below never cites them as its reason. */
+  const observationLabels = new Set<string>();
   let score = 100;
 
   if (arch.unresolvedImports.length) {
@@ -147,7 +161,11 @@ export function assessReadiness(
 
   // Extra signals from the rest of the evaluate suite. High = hard blocker.
   for (const e of extra) {
-    if (e.severity === 'high') {
+    if (e.severity === 'observation') {
+      // Recorded, never priced — see the ExtraFinding doc comment for why zero and not 'low'.
+      warnings.push(e.label);
+      observationLabels.add(e.label);
+    } else if (e.severity === 'high') {
       score -= PENALTY.securityHigh;
       blockers.push(e.label);
     } else if (e.severity === 'medium') {
@@ -165,7 +183,11 @@ export function assessReadiness(
   // score still reports READY. Record an honest reason so the verdict says WHY, never a silent
   // "READY · <low>/100".
   if (score < MIN_READY_SCORE && blockers.length === 0) {
-    const why = warnings.length ? ` — ${warnings.slice(0, 2).join('; ')}${warnings.length > 2 ? ', …' : ''}` : '';
+    // ⚠️ Sample only the warnings that actually COST score. An observation is priced at zero, so
+    // naming one here would tell the user a note about their pre-existing code is why this build
+    // scored badly — a reason that contributed nothing to the number it is being used to explain.
+    const priced = warnings.filter((w) => !observationLabels.has(w));
+    const why = priced.length ? ` — ${priced.slice(0, 2).join('; ')}${priced.length > 2 ? ', …' : ''}` : '';
     blockers.push(`readiness score ${score}/100 is below the ${MIN_READY_SCORE}/100 bar (too many unresolved quality issues${why})`);
   }
   const ready = blockers.length === 0;

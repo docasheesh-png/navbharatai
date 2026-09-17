@@ -24,6 +24,21 @@
 // only worth taking where it is likely to pay, which is why `simple` is the default on every doubt.
 
 import { isCheapFlashRung, withoutCheapFlashLead, type LadderRung } from './tierLadder';
+import { signalsCouldNotRead } from './RequestAnalyser';
+
+/**
+ * 🔒 ONE IMPLEMENTATION, OWNED BY THE MODULE THE FACT IS ABOUT (2026-09-17, later the same day).
+ *
+ * This module introduced the readability test as `scorerCouldNotRead`, and keeping it HERE was a
+ * workaround wearing a fix's clothes: the module that could not read — `RequestAnalyser`, whose every
+ * signal is an ASCII pattern — went on returning `ambiguous: false` for exactly those requests, so
+ * this file's question was answered and the other five readers of `analyzeRequest` were still told
+ * the confident version. The test now lives beside the signals it describes, together with the
+ * deterministic script-neutral floor that makes the FALLBACK honest (when no second opinion is
+ * available, the score that "stands" is no longer a 5). Re-exported under the original name so every
+ * caller and test keeps working.
+ */
+export { signalsCouldNotRead as scorerCouldNotRead, UNREADABLE_LETTER_SHARE, MIN_LETTERS_TO_JUDGE_SCRIPT } from './RequestAnalyser';
 
 export type ComplexityVerdict = 'simple' | 'complex';
 /** Where a verdict came from — recorded in the build report so a routing choice is never a mystery. */
@@ -55,46 +70,27 @@ export const COMPLEX_SCORE_LINE = 40;
  */
 export const BORDERLINE_MARGIN = 3;
 
-/**
- * 🔴 THE SECOND WAY THE CODE CANNOT TELL: IT COULD NOT READ THE REQUEST AT ALL.
- *
- * Admin, 2026-09-17: *"jo language hamara code nahi samajh paye…"* — the language OUR CODE does not
- * understand. That is not the model's problem: seven real build reports show the BUILDER handles Hindi
- * and Hinglish fine (report 58f110de asked in Hinglish, produced an app whose files contain no Hindi at
- * all, and landed mid-pack on every quality measure — the two WORST builds in that set were in plain
- * English). So nothing here translates the user's words; translating would spend a call on every such
- * build, add latency, and risk losing intent before the builder ever sees it.
- *
- * What genuinely cannot read Hindi is `RequestAnalyser`'s scorer. **Every one of its signals is ASCII** —
- * `simpleApp`, `coding`, `debugging`, `architecture`, `hardSignal`, and `isComplexAppPrompt` alike. A
- * Devanagari request for a hospital app with doctor logins, patient records, appointments and billing
- * matches none of them, falls to `taskType: 'chat'`, and scores **5**.
- *
- * ⚠️ AND THE SCORE-BASED ASK ABOVE CANNOT CATCH IT, WHICH IS WHY THIS EXISTS. 5 is nowhere near the 40
- * line, so `needsSecondOpinion` would have answered "not borderline" with total confidence and sent the
- * biggest app on the cheapest rung — a hole this file's own routing change of the same day made matter
- * more than it did the day before. A confident wrong answer is worse than an admitted unknown.
- */
-export const UNREADABLE_LETTER_SHARE = 0.25;
-
-/** Below this many letters there is nothing to classify, and a call would be spent on noise. */
-export const MIN_LETTERS_TO_ASK = 12;
-
-/**
- * PURE. Did the deterministic scorer have anything to read?
- *
- * True when a real share of the request's LETTERS are outside the Latin range the signals are written
- * in. Deliberately script-agnostic rather than a Devanagari test — Bengali, Tamil, Telugu, Marathi,
- * Gujarati, Kannada, Malayalam, Punjabi, Odia, Urdu and Arabic are all just as unreadable to an ASCII
- * regex, and India is not one script. Romanized Hinglish stays FALSE: the signals really do read
- * "banao ek todo app", and one Hindi word inside an English sentence is not an unread request.
- */
-export function scorerCouldNotRead(prompt: string): boolean {
-  const letters = String(prompt ?? '').match(/\p{L}/gu) ?? [];
-  if (letters.length < MIN_LETTERS_TO_ASK) return false;
-  const nonLatin = letters.filter((c) => !/[A-Za-z]/.test(c)).length;
-  return nonLatin / letters.length >= UNREADABLE_LETTER_SHARE;
-}
+// 🔴 THE SECOND WAY THE CODE CANNOT TELL: IT COULD NOT READ THE REQUEST AT ALL.
+//
+// Admin, 2026-09-17: *"jo language hamara code nahi samajh paye…"* — the language OUR CODE does not
+// understand. That is not the model's problem: seven real build reports show the BUILDER handles Hindi
+// and Hinglish fine (report 58f110de asked in Hinglish, produced an app whose files contain no Hindi at
+// all, and landed mid-pack on every quality measure — the two WORST builds in that set were in plain
+// English). So nothing here translates the user's words; translating would spend a call on every such
+// build, add latency, and risk losing intent before the builder ever sees it.
+//
+// What genuinely cannot read Hindi is `RequestAnalyser`'s scorer, and `signalsCouldNotRead` — its own
+// test, re-exported above as `scorerCouldNotRead` — is how it says so. A Devanagari request for a
+// hospital app with doctor logins, patient records, appointments and billing matches none of its ASCII
+// signals and falls through to `taskType: 'chat'`.
+//
+// ⚠️ AND THE SCORE-BASED ASK BELOW CANNOT CATCH IT ON ITS OWN, WHICH IS WHY `needsSecondOpinion`
+// consults the script too. Such a request used to score 5, nowhere near the 40 line, so the ask would
+// have answered "not borderline" with total confidence and sent the biggest app on the cheapest rung.
+// A confident wrong answer is worse than an admitted unknown. (Since the same day `analyzeRequest`
+// also FLOORS such a request on script-neutral evidence — see `scriptNeutralFloor` — so the
+// deterministic fallback here is no longer a 5. Both halves matter: this one buys a better ANSWER,
+// that one makes the answer we already had HONEST.)
 
 /** Kill switch. `off` restores the pre-2026-09-17 behaviour exactly: every build opens on rung 1. */
 export function complexityRoutingEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -116,7 +112,7 @@ export function complexityFromScore(score: number): ComplexityVerdict {
  * the classifier too — a question whose answer cannot change the outcome is not worth asking.
  */
 export function needsSecondOpinion(score: number, prompt?: string): boolean {
-  if (prompt !== undefined && scorerCouldNotRead(prompt)) return true;
+  if (prompt !== undefined && signalsCouldNotRead(prompt)) return true;
   return Number.isFinite(score) && Math.abs(score - COMPLEX_SCORE_LINE) <= BORDERLINE_MARGIN;
 }
 
@@ -171,7 +167,7 @@ export async function decideComplexity(
   if (!complexityRoutingEnabled(opts.env ?? process.env)) {
     return { ...base, verdict: 'simple', source: 'disabled', reason: 'complexity routing is switched off' };
   }
-  const unread = scorerCouldNotRead(input?.prompt ?? '');
+  const unread = signalsCouldNotRead(input?.prompt ?? '');
   if (!needsSecondOpinion(score, input?.prompt) || !llmCall) {
     return {
       ...base,

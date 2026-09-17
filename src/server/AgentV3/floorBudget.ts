@@ -271,10 +271,46 @@ export function isUnclampedStarvation(error: unknown): boolean {
 }
 
 /**
+ * Marks a starvation whose ceiling came from the CALLER'S DEADLINE, not from this module's cap.
+ *
+ * 🔴 THE REPORT WAS SENDING THE NEXT AUTOPSY TO THE WRONG MODULE (autopsy d98dae01, 2026-09-17). A
+ * clamped starvation is reported with the sentence *"the ceiling is FLOOR_TIMEOUT_CAP_MS /
+ * AGENTV3_FLOOR_MS_PER_TOKEN (see floorBudget.ts)"* — true of a rung bounded by its OWN clock, and
+ * false whenever `turnDeadline` picked the lane's remaining budget instead.
+ *
+ * On that build the arithmetic says so exactly: the rung was authorised **2,314** tokens, and
+ * 2,314 × 30 ms + 5,000 = **74,420 ms** — nothing like `FLOOR_TIMEOUT_CAP_MS` (150,000). It was the fast
+ * lane's own plan cap (90 s, `preambleCapMs`) minus the 15.5 s a crawling rung had already spent. **So
+ * raising this module's cap, or its rate constant, would have changed nothing at all** — and those are
+ * the two things the printed sentence points at.
+ *
+ * ⚠️ IT IS MUTUALLY EXCLUSIVE WITH `STARVED_UNCLAMPED_MARK` by construction: an unclamped rung keeps the
+ * caller's full ask, so no clock reduced its ceiling. A test asserts that, because two markers on one
+ * error would make the report choose arbitrarily between two contradictory explanations.
+ */
+export const STARVED_BY_LANE_MARK = 'the clock came from the lane that called it, not our own cap';
+
+/** Did the LANE's remaining budget, rather than our cap, decide this starvation's ceiling? PURE. */
+export function isLaneBoundStarvation(error: unknown): boolean {
+  const text = error instanceof Error ? error.message : String(error ?? '');
+  return text.includes(STARVED_BUDGET_MESSAGE) && text.includes(STARVED_BY_LANE_MARK);
+}
+
+/**
  * The line a starved rung throws — the marker first (the failure classifier reads the first line),
  * then the arithmetic, so the admin report carries the numbers instead of an adjective. PURE.
  */
-export function starvedBudgetError(granted: number, requested: number, unclamped = false): Error {
+export function starvedBudgetError(
+  granted: number,
+  requested: number,
+  unclamped = false,
+  /**
+   * The lane's remaining milliseconds, when THAT is what bounded the call (`turnDeadline`'s
+   * `source === 'deadline'`). Omitted when the rung's own cap bounded it — see `STARVED_BY_LANE_MARK`
+   * for why printing the wrong one costs an autopsy.
+   */
+  laneBoundMs?: number,
+): Error {
   if (unclamped) {
     return new Error(
       `${STARVED_BUDGET_MESSAGE} — this rung was authorised the full ${granted} output tokens the build `
@@ -283,8 +319,13 @@ export function starvedBudgetError(granted: number, requested: number, unclamped
     );
   }
   const asked = requested > 0 && requested !== granted ? `, cut down from ${requested}` : '';
+  const lane = typeof laneBoundMs === 'number' && Number.isFinite(laneBoundMs) && laneBoundMs > 0
+    ? ` ${STARVED_BY_LANE_MARK}: the lane that asked had ${Math.round(laneBoundMs)}ms left, which is what `
+      + `${granted} tokens costs at the floor rate, so raising this engine's own cap or its rate constant `
+      + 'would change nothing here.'
+    : '';
   return new Error(
     `${STARVED_BUDGET_MESSAGE} — this rung was authorised ${granted} output tokens${asked} `
-    + 'and spent every one of them without producing text or a tool call. Our own ceiling, not this provider.',
+    + `and spent every one of them without producing text or a tool call. Our own ceiling, not this provider.${lane}`,
   );
 }

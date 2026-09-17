@@ -64451,6 +64451,119 @@ timeout still consumes the lane's remaining clock, so the rungs BELOW it are aut
 tokens (2,314 instead of ~2,833 on this build) and Kimi was starved by a budget GLM had already spent.
 That is the second half of this autopsy and is next.
 
+### 2026-09-17 (autopsy d98dae01, half 2 of 2) — the rung was starved by a clock nobody named
+
+The timeline, from the report's own timestamps:
+
+```
+t+0.0s   "Planning the file list…"    the fast lane's manifest call, 90 s plan cap
+t+15.5s  GLM abandoned for crawling   glm-4.7-flashx, benched for the rest of the build
+t+49.5s  KIMI starved                 authorised 2,314 output tokens, cut down from 8,000
+```
+
+**2,314 × 30 ms + 5,000 = 74,420 ms**, which is the 90-second plan cap (`preambleCapMs`) minus the
+15.5 seconds the crawling rung had already spent. So the ceiling was decided by the CALLING LANE's
+remaining budget — and the finding printed *"the ceiling is FLOOR_TIMEOUT_CAP_MS /
+AGENTV3_FLOOR_MS_PER_TOKEN (see floorBudget.ts)"*, pointing an autopsy at a 150,000 ms cap that had
+nothing to do with it. **Raising either of the two knobs that sentence names would have changed
+nothing.**
+
+⚠️ **AND MY FIRST DIAGNOSIS, PUT TO THE ADMIN, WAS HALF WRONG — recorded because the correction is the
+useful part.** I described this as *"a failed rung eats the next rung's budget"*, and the crawl does
+cost the rungs below it: 15.5 s of a 90 s cap is the difference between 2,833 tokens and 2,314. But
+**both numbers are below what that model needs to finish thinking**, so removing the crawl entirely
+would not have saved the build. Reading the report's real timestamps rather than reasoning from the
+shape of the problem is what separated the two.
+
+**What shipped:**
+
+- **`kimi-k2.7-code` joins `MEASURED_ALWAYS_REASONS`** (`glmThinking.ts`), a new set
+  `modelAlwaysReasons` consults BEFORE its GLM family rule. Evidence, not a vendor claim: report
+  `58fe8254` shows `outputTokens: 4833` three times (the constant ceiling of a clamped floor rung) and
+  this report shows 2,314 twice — **four starvations of one model id across two nights.** The
+  `-highspeed` variant is the same model served faster, so a prefix match on the measured base id
+  covers it deliberately. `kimi-k3` is NOT listed: nobody has measured it.
+  🔒 That module's docblock objected to asserting *"kimi-k2.7-code always reasons"* **because the id
+  had failed a `startsWith('glm-')` check** — a negated prefix test, not evidence. The principle is
+  unchanged and is what now admits it, and the stale example in that docblock was corrected in place.
+  🔗 `modelStarvedWhileClamped` (built earlier the same day by another session) learns the same fact at
+  runtime and would have caught the SECOND starvation; this set is what stops paying for the FIRST on
+  every fresh process, on the rung that opens a complex Weak or Normal build. Both are needed and a
+  test asserts the runner still consults both.
+  🔒 It cannot make the worst case worse — unclamping changes the ASK, never the clock, so a slow rung
+  is cut at exactly the moment it is cut today. And `glm-5.3`, the rung directly BELOW this one on both
+  ladders, is already unclamped by the family rule: this only makes two adjacent rungs behave alike.
+- **A starvation now says WHICH clock cut the ceiling.** `STARVED_BY_LANE_MARK` +
+  `isLaneBoundStarvation` (`floorBudget.ts`), fed from `bound.source === 'deadline'` — the only place
+  in the stack that fact exists. The report gains a third sentence naming the lane's remaining budget
+  as the constraint and pointing at how much clock a lane reserves for an answer, instead of at this
+  module's cap and rate constant. The two markers are **mutually exclusive by construction** (an
+  unclamped rung keeps the full ask, so no clock reduced its ceiling) and a test asserts it, because
+  two markers on one error would make the report pick between contradictory explanations.
+  🔒 The new sentence is checked against all three failure classifiers it must not match
+  (`isTimeoutProviderError`, the context-length test, `isModelUnavailableError`) — the same constraint
+  `STARVED_BUDGET_MESSAGE` already carries, now test-locked for the addition too.
+
+**Tests:** `tests/aLaneTooShortToAnswerSaysSo.test.ts` (23), anchored on the report's real numbers
+rather than on a scenario — the first two cases prove that 74,420 ms buys exactly the 2,314 tokens the
+report recorded, so every later assertion is tied to evidence. **Reversion-proven in all three parts:**
+emptying the measured set fails 5, dropping the report branch fails 1, dropping the lane clock at the
+throw site fails the wiring guard. That last guard is anchored on the statement's own closing paren,
+not a byte window — the fourth time this repo has paid for that lesson.
+
+🔴 **OPEN ROOT CAUSE (rule 6), and it is the real ceiling behind this report.** The fast lane's plan
+cap is 90 s, and 90 s at the floor rate buys **2,833 output tokens, on any rung, on every build** —
+while the call asks for 8,000. So the manifest call is structurally incapable of being answered by a
+forced-reasoning rung that is still clamped, and the crawl only decides whether the number is 2,833 or
+2,314. **This is the 4efab9d7 defect one level up**: that autopsy compared the runner's own timeout
+against its ask and fixed the runner; nobody then checked the CALLERS' deadlines against the same
+arithmetic. The obvious fix — raise `preambleCapMs` — would re-open the 858f6d7b defect it exists to
+prevent (plan 89 s + contract 70 s = 159 s of a 240 s lane before file one), and reducing the ask does
+not help because the ceiling comes from the clock, not the ask. **What is missing is an instrument, not
+a number**: nothing records a clamp unless it starves, so the frequency and size of the cut are
+unmeasured across the fleet. The honest next step is to measure it the way the sandbox-minutes work was
+measured, then move a number — not to move a number now.
+### 2026-09-17 (same day) — the intention reader gets its fourth answer: `unclear`
+
+Admin, after the two fixes above: *"user ka har woh message jo ek limit se chota hai ya unclear hai,
+hamesha LLM call karo — woh bata dega."*
+
+**The honest finding, reported back before building anything: that call was ALREADY being made**, on
+every low-confidence message, on the free chain at ₹0, bounded at 6 s — report `d6d664e6` is the proof
+that it ran for `"Bnao"`. **What was missing was somewhere to put the answer.** The reader is handed
+three choices (`chat` / `build` / `edit`) and answered `build`, which is not even wrong: *"make it"* IS
+an order to build. *"They have not told me WHAT"* was not on the menu.
+
+- `classifyIntentSmartDetailed` returns `{ intent, unclear }` and the reader's menu now carries a
+  fourth answer. `classifyIntentSmart` is that function with the flag discarded — **delegating, not
+  duplicating**, the same pattern `classifyIntent` already uses.
+- 🔒 **`intent` deliberately stays at the KEYWORD result when `unclear` is true.** A caller that
+  ignores the flag is byte-identical to before. The flag adds an option; it removes none.
+- The route ORs it with the deterministic `'no-object'` half and sends **both through the same four
+  narrowing conditions** (empty workspace, no earlier request, no attachment/import, not an edit).
+  A second opinion that can only make the gate NARROWER cannot introduce a new way to refuse a real
+  prompt.
+
+⚠️ **What was deliberately NOT done, and why (rule 3, no sycophancy).** The instruction as written —
+*call the LLM on every short message* — would add a provider round trip to `"hi"`, `"ok"`, `"thanks"`,
+`"haan"`: HIGH-confidence messages with no doubt in them, answered instantly and free today. That
+slows the app's most common turn for no gain. The existing design already asks **only when it is
+genuinely unsure**, which is both better and cheaper; a test now pins that a HIGH-confidence message
+never reaches the reader at all. Also recorded: `glm-4.5-flash` is on none of this repo's ladders —
+free chat leads with `glm-4.7-flashx` (₹0), which is already the cheapest rung, and pinning a model id
+in code is the churn Decision A exists to avoid.
+
+🔎 **The bigger lever, named and not yet taken:** the recurring failure is the OPPOSITE shape — a
+**HIGH-confidence hard lock that skips the reader entirely**. Three autopsies now (`5abad374`,
+`cc8c9075`, and `d6d664e6`'s sibling). PR #3040 (another session) is working that seam; this change
+deliberately stays out of `clauseReadsAsQuestion` and `userAskedForAnAppToBeBuilt` so the two do not
+race in one file.
+
+**Tests:** `tests/intentReaderCanSayUnclear.test.ts` (9) + the reader block in
+`objectlessBuildAsks.test.ts`. Reversion-proven in **both** halves — deleting the `unclear` mapping
+fails the reader suite, deleting `|| readerSaysUnclear` fails the route suite. Two source-scanning
+tests had their needles updated (`classifyIntentSmartDetailed`, the widened route window): the symbol
+and the window moved, **the assertions did not**.
 ### 2026-09-17 (correction) — three of the four open items from autopsy `d6d664e6` are closed, and ONE OF THEM WAS MY MISTAKE
 
 Recorded here rather than by editing the original entry, per the append-only rule, because a session

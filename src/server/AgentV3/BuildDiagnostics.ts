@@ -2593,6 +2593,49 @@ export function appWasSeenRunning(
   return (issues ?? []).some((i) => i?.code === 'GREEN_GUARD_SAVE' || i?.code === 'PREVIEW_PUBLISHED');
 }
 
+/**
+ * The unresolved items a build recorded that could NEVER have named its cause — and the honest
+ * sentence that says so. Returns null when there are none. PURE.
+ *
+ * 🔴 WHY IT IS SHARED (autopsy fdd59ef8, 2026-09-17, second half). That report carried
+ * `counts.unresolved: 2` while its verdict announced there were none. The fix was written INLINE in
+ * the one branch the report happened to hit — a build that did NOT succeed — and the sibling branch
+ * one line below, the one a SUCCESSFUL build reaches, kept the same false sentence verbatim:
+ * `'Build completed successfully with no problems recorded.'`
+ *
+ * That sibling is the common case, not the rare one. `DESIGN_CONSISTENCY`, `RELEASE_GATE`,
+ * `TIME_TO_FIRST_CALL` and `DEPENDENCY_VULNERABILITIES` are all recorded unresolved and all in
+ * NEVER_ROOT_CAUSE, so nearly every green build ends with a non-zero unresolved count and a verdict
+ * claiming zero. A reader who trusts the sentence stops looking for findings that are sitting right
+ * there in the same document.
+ *
+ * ⚠️ THE ITEMS ARE COUNTED THROUGH THE CALLER'S OWN `excluded` PREDICATE, not re-derived here. An
+ * item is ineligible for several different reasons (an advisory, the gate's own summary, a dead
+ * sandbox, a transient the build recovered from), and a private copy of that rule is how the two
+ * halves of one verdict drift apart — which is the defect being fixed, one level up.
+ *
+ * ⚠️ `observation !== true` matches `counts.unresolved`'s own rule. An observation about the user's
+ * pre-existing code is neither ours nor unresolved, and counting it here would make this sentence
+ * contradict the header in the opposite direction.
+ */
+export function ineligibleUnresolvedNote(
+  issues: readonly BuildIssue[],
+  excluded: (i: BuildIssue) => boolean,
+): string | null {
+  const items = issues.filter(
+    (i) => i.severity !== 'info' && i.autoResolved === false && i.observation !== true && excluded(i),
+  );
+  if (items.length === 0) return null;
+  const codes = [...new Set(items.map((i) => i.code))];
+  // The CODES, not the hard-coded parenthetical the inline version carried ("a design/accessibility
+  // advisory or the release-gate summary"). That phrasing was true of one report and goes stale the
+  // moment a different advisory is the one recorded; naming what is actually there cannot.
+  const shown = codes.slice(0, 5).join(', ');
+  const more = codes.length > 5 ? `, +${codes.length - 5} more` : '';
+  return `${items.length} unresolved item(s) WERE recorded (${shown}${more}), but none of them can name a cause `
+    + '— each is an advisory, a summary of other findings, an infrastructure condition, or something this build recovered from';
+}
+
 export function deriveRootCause(input: {
   issues: readonly BuildIssue[];
   errors?: readonly CapturedError[];
@@ -2683,6 +2726,14 @@ export function deriveRootCause(input: {
       ?? issues.find((i) => i.severity !== 'info' && !excluded(i))));
   const problem = unresolved ?? resolvedOnly;
   /**
+   * 🔎 THE SIBLING SWEEP (rule 3). EVERY branch below that is reached with no `problem` ends on a
+   * clause asserting nothing unresolved was recorded — and each one is the fdd59ef8 contradiction
+   * wearing different words. An INELIGIBLE item is still an UNRESOLVED item: it is counted in
+   * `counts.unresolved`, printed in the report's own header, and merely barred from naming a cause.
+   * Four branches carried that claim and the autopsy had fixed exactly one of them.
+   */
+  const nothingUnresolved = (plain: string): string => ineligibleUnresolvedNote(issues, excluded) ?? plain;
+  /**
    * 🔴 A BUILD THAT NEVER RECORDED AN ENDING MUST NOT HAVE ONE INVENTED FOR IT (admin report 2026-09-10).
    *
    * `ok === undefined` means no terminal event ever reached this report — no `done`, no `finish()`, no
@@ -2726,12 +2777,12 @@ export function deriveRootCause(input: {
   if (input.stillRunning === true) {
     return problem
       ? `This build was STILL RUNNING when this report was taken — it has not ended, so there is no outcome yet and nothing has "stopped". The most severe issue recorded so far, which the build may still be working on: ${problem.message}`
-      : 'This build was STILL RUNNING when this report was taken — it has not ended, so there is no outcome yet, and no unresolved issue has been recorded so far.';
+      : `This build was STILL RUNNING when this report was taken — it has not ended, so there is no outcome yet, and ${nothingUnresolved('no unresolved issue has been recorded so far')}.`;
   }
   if (input.endedWithoutOutcome === true) {
     return problem
       ? `This build ended without recording an outcome (cut off before it could report one) — so the reason it stopped is NOT known. The most severe issue recorded before it stopped, which may or may not be related: ${problem.message}`
-      : 'This build ended without recording an outcome (cut off before it could report one) — the reason it stopped is not known, and no unresolved issue was recorded either.';
+      : `This build ended without recording an outcome (cut off before it could report one) — the reason it stopped is not known, and ${nothingUnresolved('no unresolved issue was recorded either')}.`;
   }
   /**
    * 🔴 A BUILD THE USER STOPPED HAS A KNOWN CAUSE, AND IT IS NOT A DEFECT (autopsy 2b0a3ed5).
@@ -2750,7 +2801,7 @@ export function deriveRootCause(input: {
   if (ok !== true && stoppedByUser(issues)) {
     return problem
       ? `The USER stopped this build — that is why it ended, and no failure of the app or the engine is implied. The most severe thing recorded before the stop, which may be unrelated: ${problem.message}`
-      : 'The USER stopped this build — that is why it ended. Nothing failed, and no unresolved problem was recorded.';
+      : `The USER stopped this build — that is why it ended. Nothing failed, and ${nothingUnresolved('no unresolved problem was recorded')}.`;
   }
   /**
    * 🔴 AN ITEM WE OURSELVES MARKED RESOLVED MUST NOT BE PRESENTED AS THE CAUSE (autopsy fd021c64).
@@ -2774,14 +2825,46 @@ export function deriveRootCause(input: {
     // in NEVER_ROOT_CAUSE, so they were never CANDIDATES; that is a different fact from not existing,
     // and conflating the two makes the report contradict its own header. A reader who trusts the
     // sentence stops looking for the two findings that are sitting right there.
-    const ineligible = issues.filter((i) => i.severity !== 'info' && i.autoResolved === false).length;
-    const note = ineligible > 0
-      ? `${ineligible} unresolved item(s) WERE recorded, but none of them can name a cause (a design/accessibility advisory or the release-gate summary, which only restates other findings)`
-      : 'NO unresolved problem was recorded';
+    const note = nothingUnresolved('NO unresolved problem was recorded');
     return `This build did not succeed, but ${note} — so why it failed is not known from this report. The most severe thing seen, which the engine had already resolved and which may be unrelated: ${problem.message}`;
   }
+  /**
+   * 🔴 A SUCCESSFUL BUILD'S VERDICT MUST NOT READ AS A FAILURE, AND MUST NOT CLAIM A ZERO ITS OWN
+   * HEADER CONTRADICTS. Both halves, because this one branch got them both wrong.
+   *
+   * HALF ONE — the count. See `ineligibleUnresolvedNote` above: the identical false sentence that
+   * autopsy fdd59ef8 removed from the failure branch was left standing here, on the path almost every
+   * green build takes.
+   *
+   * HALF TWO — the causal claim. `return problem.message` hands a bare finding to a field called
+   * `rootCause`, which the admin report renders as "Root cause:". On a build that SUCCEEDED there is
+   * no failure for anything to be the cause OF, so the app's own failing test suite came out reading
+   * as the reason a working app had failed. That is the same dishonesty the `[CRITICAL]` guard above
+   * and the PREVIEW_NOT_RENDERED / RELEASE_GATE entries in NEVER_ROOT_CAUSE were each written for,
+   * arriving through the last door still open.
+   *
+   * ⚠️ AND THE FIX IS NOT TO HIDE THE ITEM — that was considered and rejected. Adding `TEST_SUITE`
+   * to NEVER_ROOT_CAUSE would have silenced the single most useful finding on a build where
+   * everything else is clean: a suite that RAN and failed is real evidence about the app, not an
+   * advisory (its sibling `TEST_SUITE_UNVERIFIED` is in that set for the opposite reason — our
+   * sandbox could not run it). So the item is still named in full, exactly as the `stillRunning`,
+   * `endedWithoutOutcome` and `stoppedByUser` branches above already name theirs; only the claim
+   * that it CAUSED something is withdrawn.
+   *
+   * 🔒 A build with nothing ineligible recorded keeps the old sentence byte-for-byte, so the common
+   * genuinely-clean case is unchanged.
+   */
+  if (ok === true) {
+    if (problem) {
+      return 'This build SUCCEEDED, so nothing recorded here caused a failure. The most severe item still '
+        + `unresolved against the app, which is worth reading but did not stop anything: ${problem.message}`;
+    }
+    const note = ineligibleUnresolvedNote(issues, excluded);
+    return note
+      ? `Build completed successfully. ${note}.`
+      : 'Build completed successfully with no problems recorded.';
+  }
   if (problem) return problem.message;
-  if (ok === true) return 'Build completed successfully with no problems recorded.';
   // No app-level problem was captured, but the sandbox went away mid-build → name the infra honestly
   // instead of the generic "no specific error" (which reads like the app silently failed).
   if (issues.some(isInfra)) {

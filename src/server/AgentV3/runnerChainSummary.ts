@@ -54,17 +54,31 @@ export function describeRunnerChain(chain: readonly ChainRung[], maxRungs = 24):
 
   // Collapse consecutive same-family, same-model rungs. The FAMILY is `reportAs` where the rung has
   // one ('GLM#17' reports as 'GLM') — that field exists precisely to say "these are one engine".
-  const groups: Array<{ label: string; count: number }> = [];
+  const groups: Array<{ label: string; count: number; names: Set<string> }> = [];
   for (const r of rungs) {
     const family = (r.reportAs || r.name).trim();
     const label = r.modelId ? `${family}(${r.modelId})` : family;
     const last = groups[groups.length - 1];
-    if (last && last.label === label) last.count += 1;
-    else groups.push({ label, count: 1 });
+    if (last && last.label === label) { last.count += 1; last.names.add(r.name.trim()); }
+    else groups.push({ label, count: 1, names: new Set([r.name.trim()]) });
   }
 
   const shown = groups.slice(0, Math.max(1, maxRungs));
-  const parts = shown.map((g) => (g.count > 1 ? `${g.label} ×${g.count}` : g.label));
+  // 🔴 SAY WHAT THE NUMBER COUNTS. `×51` alone reads as fifty-one ATTEMPTS, and a careful reader drew
+  // exactly that conclusion: autopsy `d6d664e6` (#3039) recorded an open root cause titled *"a bench
+  // that does not bench"* because `PROVIDER_BENCHED` said "benched for the rest of this build" while
+  // this line showed `GLM(glm-4.7-flashx) ×51`. The bench was working; the label was ambiguous — those
+  // 51 are KEY-POOL RUNGS STANDING THERE, not 51 tries, and the count has always meant that (see the
+  // note above: *"the count still says how many keys stood there"*).
+  //
+  // 🔑 THE DISCRIMINATOR IS REAL, NOT A GUESS. A pool rung carries its own `name` (`GLM#2`) under a
+  // shared `reportAs` (`GLM`) — that is what `isPoolMember` keys off in `MultiProviderTurnRunner`. So
+  // a collapsed group whose rungs had DISTINCT names is a key pool and says so; a group of genuinely
+  // identical rungs keeps today's bare `×N`.
+  const parts = shown.map((g) => {
+    if (g.count <= 1) return g.label;
+    return g.names.size > 1 ? `${g.label} ×${g.count} keys` : `${g.label} ×${g.count}`;
+  });
   const rest = groups.length - shown.length;
   return rest > 0 ? `${parts.join(' → ')} … and ${rest} more` : parts.join(' → ');
 }

@@ -64044,6 +64044,52 @@ tests had their needles updated (`classifyIntentSmartDetailed`, the widened rout
 and the window moved, **the assertions did not**.
 ---
 
+## 2026-09-17 — A KEY COUNT IS NOT AN ATTEMPT COUNT: the bare `×N` that bought a phantom root cause
+
+**Branch `claude/a-key-count-is-not-an-attempt-count`. One word of label, in
+`runnerChainSummary.ts`.**
+
+### What it closes, and it is not a bug in the bench
+
+#3039's autopsy of build `d6d664e6` recorded an open item titled **"a bench that does not bench"**:
+`PROVIDER_BENCHED` fired three times saying *"benched for the rest of this build"* while the report's
+chain line read `GLM(glm-4.7-flashx) ×51`. Fifty-one reads as fifty-one **attempts**, so the two
+statements looked like a flat contradiction and an engine defect was recorded.
+
+**Reading the code disproved it. The bench was working; the LABEL was ambiguous.** `describeRunnerChain`
+collapses consecutive same-family, same-model rungs and its own doc comment already says what the
+number means — *"the count still says how many keys stood there"* — but the rendered line never said
+"keys". A reader had to know the module's internals to read its output correctly, and a careful reader
+(another session, mid-autopsy) reasonably did not.
+
+**A phantom open root cause is not free:** it sends the next session to read code that is already
+correct, and it sits in `PROGRESS.md` looking like debt.
+
+### The fix
+
+`×51` → **`×51 keys`**, and only where that is true.
+
+🔑 **The discriminator is real, not a guess.** A pool rung carries its own `name` (`GLM#2`) under a
+shared `reportAs` (`GLM`) — exactly what `isPoolMember` keys off in `MultiProviderTurnRunner`. So a
+collapsed group whose rungs had **distinct names** is a key pool and says so; a group of genuinely
+identical rungs keeps today's bare `×N`. A test pins both halves.
+
+### ⚠️ The existing test's own title carried the same imprecision
+
+It read *"a key pool reports HOW MANY keys were **tried**"*. The chain records what was **BUILT** —
+that is this module's first line — so three rungs means three keys **standing there**, whether the run
+reached one of them or all three. Retitled, and the reason recorded beside it, because that sentence
+is the misreading in miniature.
+
+Two existing assertions pinned the exact old string and were updated; a new case reproduces the
+reported `×51` and asserts the bare reading is no longer available (`not.toMatch(/×51(?! keys)/)`).
+
+### Tests — `tests/runnerChainSummary.test.ts` (16 cases, +3)
+
+Proven by reversion: **3 of 16 fail** with `runnerChainSummary.ts` reverted.
+
+**Full CI gate green on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` ·
+`vitest run` (**25,011 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
 ## 2026-09-17 — THE FUTILITY BREAKER: a build that is going nowhere now stops (open item from #3039, closed)
 
 **Branch `claude/a-build-going-nowhere-must-stop`. New module

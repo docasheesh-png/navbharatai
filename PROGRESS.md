@@ -62273,6 +62273,73 @@ no guard: it teaches the next reader that the thing it measures is noisy. Same l
 
 ---
 
+## 2026-09-17 — THE HOLLOW GRAPH, MEASURED BEFORE IT IS FILLED (open root cause #2 — instrumented, deliberately NOT fixed)
+
+**Branch `claude/the-hollow-graph-is-measured`. Zero behaviour change: nothing branches on the new
+measurement, and a test pins that `warmIndexFiles` still behaves exactly as it did.**
+
+### The mechanism, confirmed by reading two functions
+
+`restoreWorkspaceMemory` (`FirestoreWorkspaceMemoryStore.ts`) indexes every previously-known file
+with the placeholder `/* restored */`, because the snapshot stores **paths, not content**. That puts
+the file into `graph.files`. `warmIndexFiles` (`WorkspaceMemory.ts`) then builds
+`known = new Set(mem.graph().files)` and filters its targets to `!known.has(f)` — **so every file the
+restore stubbed is skipped, and keeps EMPTY facts for the whole build**: no imports, no exports, no
+components, no routes, no symbols.
+
+`recall`, `evaluate`, the architecture analysis and the readiness score then all reason about a
+project that looks, to them, like a list of blank files.
+
+🔴 **THE TWO COMMENTS AT THE RESTORE SITE CONTRADICTED EACH OTHER, AND THE FALSE ONE IS THE ONE A
+READER WOULD ACT ON.** They read, one line apart:
+
+> *"content empty — warmIndexFiles will fill them later"*
+> *"This populates the graph.files set so warmIndexFiles skips already-known files."*
+
+Only the second is true. Both are now replaced by one accurate note that points at the open root
+cause, so the next session does not re-derive the false half and "simplify" the stub away.
+
+### ⚠️ WHY THE FIX IS STILL REFUSED (rule 6 — recorded, not rushed)
+
+Filling the graph moves a real build's verdict in **both** directions, and which one dominates has
+never been measured:
+
+- **Toward failing a working app:** restoring real imports can fire `unresolvedImport`, a **25-point
+  hard blocker** ⇒ `ready:false` ⇒ `ok:false` ⇒ "working app or free" ⇒ **₹0 on an app that works**.
+- **Toward under-scoring every resumed build:** a hollow graph gives every restored file NO imports,
+  so every component looks un-imported — `PENALTY.orphanComponent` (6 points each) against a project
+  that is perfectly well wired. #3014's evidence shows those penalties really do bite (38 → 44, still
+  under the 50 threshold).
+
+So this change ships the **number**, not the fix — the same discipline `sandboxSessions.ts` used for
+E2B minutes, and the same one this session used to refuse the fix in the first place.
+
+### What shipped
+
+- `RESTORED_STUB` — the placeholder as one exported constant, so the single writer and the single
+  counter cannot drift apart on a string literal.
+- `WorkspaceMemory.restoredStubPaths()` — backed by a set maintained **inside `indexFile`**, so a file
+  re-indexed with real content stops being a stub automatically and a future writer cannot forget;
+  `removeFile` clears it too, so a deleted file leaves no phantom blind spot.
+- `GRAPH_RESTORED_STUBS` — an admin-only report line at the resume site: *"N of M file(s) in the
+  project graph carry PLACEHOLDER facts from a cold resume."* Recorded at **`severity: 'info'`**, so it
+  can never be picked as a rootCause on either of `deriveRootCause`'s passes and never inflates the
+  unresolved count — a measurement recorded as a warning is exactly how `TIME_TO_FIRST_CALL` once
+  headlined a successful build.
+
+### Tests — `tests/theHollowGraphIsMeasured.test.ts` (10 cases)
+
+Proven by reversion: **9 of 10 fail** with the three source files reverted, all pass restored.
+
+One case deliberately pins the DEFECT as-is — `warmIndexFiles` still skips a stubbed file — with a
+comment saying that this is the assertion a future fix must update **deliberately, with the
+measurement in hand**, rather than drift past. The reversion guard reads CODE with comments stripped
+and asserts the shared constant is used at the restore site, that the measurement reaches the report,
+and that it is recorded as `info`.
+
+**Full CI gate green on the final state**, re-run after this branch was re-cut from a `main` that had
+moved (PR #3018 merged in the meantime): `typecheck` · `noUnusedImports` · `typecheck:server` ·
+`vitest run` · `build` · `test:bundle` · `boot:check` · `deps:server-gate`.
 ## 2026-09-17 — 🔴 THE FLAT GIFT IS RETIRED. ₹475 IS THE MOST ONE USER MAY EVER COST.
 
 **Admin, verbatim:** *"nahi welcom bonus ₹500 band karna hai! sirf refer aur verification wale ₹400
@@ -62497,6 +62564,133 @@ cannot fail is not a test" lesson this repo keeps paying for.
 PR #3025's content and moved onto a fresh branch from `main`): `typecheck` · `noUnusedImports` ·
 `typecheck:server` · `vitest run` (**24,621 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` ·
 `boot:check` · `deps:server-gate`.
+## 2026-09-17 — Our instrumentation shipped inside the user's published app
+
+From the deep re-autopsy of `9cca1fd5`, and this one **survived three adversarial lenses** while the
+other candidate from the same investigation did not (see below).
+
+### The defect
+
+`injectPreviewBridge` writes NavBharatAI's console mirror into the **sandbox's** `index.html` so the
+live preview can report runtime errors — correct, and it must stay. But Vite copies that same document
+into `dist/`, `downloadDistFiles` reads `dist/` back verbatim, and that Map is what a publish uploads,
+what the bucket mirror serves, and what the GitHub push writes into the user's own repository.
+
+🔴 **The comment at the injection site asserted the opposite, in writing:**
+
+> *"the DURABLE files are untouched, so a download, a publish and the user's own code never see it"*
+
+**That clause is why the gap survived: it read like a guarantee, so nobody checked it.** It is removed
+from the assertion and recorded as a correction in place.
+
+⚠️ **Severity, honestly, after the adversarial pass — and it is LESS than I first told the admin.**
+The scarier reading does not hold: the bridge's inbound gate is satisfied only by a script already
+running IN that page, which already has full DOM access, so it grants an attacker nothing on a
+top-level page. One claimed secondary effect was simply false (`outboundUrls.ts` needs a literal
+`http(s)://`, which the bridge has none of, so it never polluted the outbound scan). What remains is
+~18 KB of unminified NavBharatAI code inside a page that is otherwise a few hundred bytes, visible in
+View Source and pushed into the user's repo. **A white-label and trust defect, not a security incident.**
+
+### The fix — one call, and two tidier homes that are traps
+
+`stripBridgeFromBuiltFile(relPath, bytes)` inside `E2BActuator.downloadDistFiles`. A cheap byte test on
+the raw Buffer first, then `withoutPreviewBridge` — which **remains the only authority** on what gets
+stripped; this wrapper adds no rule, it only keeps binaries out of a string decode.
+
+🔒 **The sandbox's own `index.html` keeps its bridge, deliberately** — it is the document the running
+dev server serves, and stripping it would switch the live console off, which is the point of injecting it.
+
+⚠️ **NOT in `collectWorkspaceFiles`.** `StaticPreview.ts` injects no bridge at all, so stripping at the
+workspace level would leave every plain HTML/CSS/JS app with a console drawer that is permanently empty
+and says the app has printed nothing — **a false statement to the user, worse than the leak.**
+
+⚠️ **NOT a wrapper in `buildActuator()`.** A plain delegating object there silently drops
+`sandboxHeldSeconds`, which the billing path **duck-types off the actuator** — sandbox cost would
+quietly become ₹0. The adversarial pass caught this one; I had it on my own shortlist of "tidier homes".
+
+🔴 **Honest residual:** this cleans the **published app**. The **source copy** (Files tab, IDE, GitHub
+push of the workspace rather than of `dist/`) stays contaminated until `StaticPreview.ts` gets its own
+bridge — a second, larger piece of work, recorded as LATER rather than bundled in.
+
+🔎 **One thing only a live observation settles**, and nobody has looked: `curl -s https://<a-published-app>/
+| grep -c __nbaiPreviewBridgeInstalled` on a real published page.
+
+`tests/ourScriptStaysOutOfThePublishedApp.test.ts` — 16 cases. **Proven by reversion:** removing the
+strip fails 1; removing the byte pre-filter fails 1.
+
+### ⚠️ A test of mine that over-claimed, caught by its own reversion
+
+The binary block was called *"binaries are never decoded, let alone rewritten"*. Removing the pre-filter
+left all of it **passing** — because the helper's `stripped === text ? bytes : …` line already returns
+the ORIGINAL Buffer when nothing changed. **Correctness never depended on the pre-filter; it is a COST
+guard.** The block is renamed to what it actually proves, and the pre-filter's own reason is asserted
+from the source, where it is a claim about work avoided rather than about bytes.
+
+Claiming a guarantee a test does not prove is how a suite comes to be trusted for the wrong reasons.
+
+### 🔴 The OTHER candidate from the same investigation: DIAGNOSIS RIGHT, CURE REFUSED
+
+The cold-resume hollow-graph defect (`restoreWorkspaceMemory` replaying files as `/* restored */` stubs,
+which `warmIndexFiles` and `seedGraphFromWorkspace` then skip as already-known, and which the resumed
+build re-persists) is **real and confirmed**. **The fix I designed lost, on three independent grounds,
+and is NOT being shipped:**
+
+1. A "never shrink the saved graph" writer is **the opposite of what unsend needs** — `routes/agentv3.ts`
+   deletes a message and relies on `merge:false` to stop it coming back.
+2. `WorkspaceMemory.removeFile()` has **no caller**, so deletion works today *only* because of the full
+   overwrite. Remove it and the document grows forever against Firestore's 1 MB limit — at which point
+   saves fail permanently and the workspace gets **no snapshot at all**, strictly worse than the bug.
+3. 🔴 **Restoring real imports could start firing `unresolvedImport`** — 25 points, a hard blocker →
+   `ready:false` → `ok=false` → *"working app or free"* → **₹0 on a working app.** Today the hollow graph
+   is falsely *clean*, so this never fires. That is precisely the outcome the admin has objected to all
+   week, and it would have arrived as a side effect of a fix for something else.
+
+**Before anything touches that area:** there is **no report code anywhere for a restore**, so the real
+rate is unmeasured and no autopsy can see it. Measure first. A separable one-line candidate with no
+identified trade also came out of it: the Planner/Advisor lane saves a memory it **never restored**,
+destroying episode history including `PLAN_STATE`, and the conversation turn is already persisted three
+lines later — that deserves its own look, not folding into the big fix.
+
+### 🔴 SIX brittle guards in one day — and the right tool has existed since 2026-08-06, unused
+
+Fixing the false comment above broke `previewLiveConsole.test.ts`, whose guard slices a fixed **3,000**
+characters from a marker. My correction text pushed `.catch(() => false)` past it, and the guard
+reported the invariant violated while it was intact.
+
+**That is the sixth today**, and the pattern is identical every time: *the guard measured the TEXT
+instead of the CLAIM*, so the author has to decide whether the code or the guard is wrong — precisely
+the doubt a guard exists to remove.
+
+🔎 **And then the real finding: `tests/helpers/sourceSlice.ts` already exists.** Written on 2026-08-06,
+for exactly this failure, and its own doc comment describes it better than I could:
+
+> *"That window is a guess about how long the code happens to be, so it is not testing the invariant it
+> claims to — it is testing that nobody made the code longer… A test that cries wolf teaches you to
+> widen the number and move on, which is how a real regression eventually slips through one of them."*
+
+It exports `braceBlock`, `enclosingBlock` and `sectionUntil`. **Ten test files use it. One hundred and
+forty-five still slice by a magic number.**
+
+**Measured, so the sweep can be scoped rather than guessed at:**
+
+| window size | occurrences | |
+|---|---|---|
+| ≥ 3,000 chars | **39** | spans a whole function — breaks on any real growth |
+| 1,000–2,999 | **112** | same class |
+| < 1,000 | 148 | usually a tight local window near a unique marker; mostly fine |
+
+**299 windows across 145 files; 83 files carry at least one ≥ 1,000.**
+
+⚠️ **NOT swept here, deliberately.** Rewriting 151 fragile windows across 83 files in a PR about the
+preview bridge would be exactly the scope creep this repo's rules warn against, and a mass edit to 83
+test files is its own risk. `previewLiveConsole.test.ts` is fixed because THIS change broke it; the rest
+is put to the admin as a measured proposal.
+
+🔴 **This is the FOURTH "the right thing already exists and nothing uses it" found today**, after
+`WorkspaceMemory.removeFile()` (zero callers), the actuator's `captured` flag (correct, and defeated by
+a daemon that never created the file), and `BillingLedgerView`'s type (narrower than its own value).
+Four in one day is worth naming as a class of its own: **this codebase's most common defect is not a
+missing capability, it is a built capability nothing reaches.**
 ## 2026-09-17 — A clean console and an unread one were the same observable, so `RUNTIME_VERIFIED` was unreachable
 
 From the deep re-autopsy of `9cca1fd5`. **Verified myself, and the verification changed the fix twice.**

@@ -125,7 +125,9 @@ describe('what must keep building — an app builder that argues is not an app b
 
 describe('the route only asks when NOTHING else can say what to build', () => {
   const source = readFileSync(resolve(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
-  const block = source.slice(source.indexOf('const askWhatToBuild ='), source.indexOf('const askWhatToBuild =') + 900);
+  // The window starts at `namesNothingToBuild` because the reader's fourth answer (2026-09-17) is
+  // OR-ed in there, above `askWhatToBuild` — both sources must still pass the same four conditions.
+  const block = source.slice(source.indexOf('const namesNothingToBuild ='), source.indexOf('const namesNothingToBuild =') + 1200);
 
   // REVERSION GUARD. Each of these four narrows the divert, and dropping any one of them turns a
   // fix into the thing it was written to prevent: asking a user who really did describe an app.
@@ -194,4 +196,22 @@ describe('a category word is not a deliverable', () => {
       expect(assessBuildInput(prompt).buildable).toBe(true);
     });
   }
+});
+
+/**
+ * THE READER'S FOURTH ANSWER — the half a word list can never reach (admin, 2026-09-17: "user ka har
+ * woh message jo ek limit se chota hai ya unclear hai, hamesha LLM call karo — woh bata dega").
+ */
+describe('the intention reader can finally say "I do not know what they want"', () => {
+  const source = readFileSync(resolve(__dirname, '../src/server/AgentV3/IntentClassifier.ts'), 'utf8');
+
+  it('offers the reader four answers, not three', () => {
+    expect(source).toContain('chat, build, edit, or unclear');
+    expect(source).not.toContain('Reply with ONLY one word: chat, build, or edit.');
+  });
+
+  it('the route reads the flag and ORs it with the deterministic half', () => {
+    const route = readFileSync(resolve(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
+    expect(route).toContain('|| readerSaysUnclear');
+  });
 });

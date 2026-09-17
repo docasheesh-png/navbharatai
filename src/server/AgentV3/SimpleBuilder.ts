@@ -770,7 +770,20 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           const depBlock = produced.length
             ? (signatureContextEnabled() ? signatureDependencyContext(produced) : dependencyContext(produced))
             : '';
-          const text = await deps.generate(fileSystemPrompt(deps.framework), fileUserPrompt(deps.prompt, spec, manifest, contract, depBlock));
+          // 🔴 THE SAME INVERSION THE PLAN CALL ALREADY CLOSED (line ~697), MISSED HERE — this is the
+          // highest-volume call site in the whole lane and the one a real report caught running away
+          // (build 782da7b7, 2026-09-16): a file's OWN truncation-continuation loop (fastGenerate's
+          // "(1/3)" → "(2/3)" → "(3/3)") kept retrying GLM for the better part of TWO HOURS after this
+          // lane had already lost its 240s race and the full builder had taken over and finished a
+          // completely different app. `lapsed` (checked above and below) only stops a NEW genOne from
+          // STARTING; it does nothing for a call already in flight or for the next continuation attempt
+          // inside fastGenerate's own while loop, because — unlike the plan and contract calls just
+          // above — this one passed no deadlineAt at all, so every hop down to OpenAiToolRunner saw an
+          // unmeasured budget and used its own generous per-call clock instead of the lane's real one.
+          // Anchoring every file call to the SAME absolute instant the lane's own race is bound by means
+          // an abandoned closure's next attempt hits `bound.expired` and REFUSES BEFORE SPENDING — see
+          // OpenAiToolRunner.runTurn — instead of starting another multi-minute call nobody will read.
+          const text = await deps.generate(fileSystemPrompt(deps.framework), fileUserPrompt(deps.prompt, spec, manifest, contract, depBlock), { deadlineAt: laneStartedAt + overallMs });
           if (lapsed) return null; // timed out while this call was in flight — discard, don't log
           const blocks = parseFileBlocks(text);
           const match = blocks.find((b) => b.path === spec.path) ?? blocks[0];

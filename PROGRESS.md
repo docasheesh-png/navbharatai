@@ -58591,6 +58591,116 @@ Nothing is measured yet — this makes measurement possible. The data accrues fr
 older reports carry no `requestAnalysis` and read as unavailable rather than being back-filled from a
 truncated prompt. **The 50–100 build analysis is deliberately NOT started**, per the admin, and no
 GLM/Kimi routing change is made.
+## 2026-09-16 — MANDATORY AUTOPSY: IPL Cricket game build (Bengali prompt). A ~2-hour orphaned zombie chain, root-caused and killed.
+
+Fifth absolute rule, triggered by an admin-attached build-diagnostics report (workspace
+`agentv3-q284tbvovsXjcM6AdJkHilxvDof2-8858838e-2698-42eb-b842-d1e68101cbd6`, weak tier, GLM-led). Read
+end to end (2685 lines) before drawing any conclusion.
+
+### The 5-bucket ledger
+
+- ✅ **Self-healed (3):** `npm audit fix` applied the compatible dependency fixes automatically;
+  `SIMPLE_BUILD_FALLBACK` correctly handed off to the full builder when the fast lane timed out at
+  240s; the thinking-param rejection guard correctly avoided re-sending a field GLM had already refused.
+- 🔀 **Worked around (31, per the report's own `workarounds` count):** mostly file-list continuations
+  ("(1/3)", "(2/3)", "(3/3)") papering over responses too long for one call, and repeated GLM
+  output-budget clamp-downs (8000 → 2116 → 1324 authorised tokens) that never actually produced an
+  answer.
+- ⏭️ **Skipped (1):** the post-build completeness review timed out after 90s + grace on 19 files and
+  was recorded as `REVIEW_INCOMPLETE` — its own findings (mid-sentence: "src/App.tsx | **Stub** — renders
+  `<h1>Hello World</h1>` and nothing else") never reached the user's final summary.
+- ❌ **Still broken / shipped imperfect:** the delivered "IPL cricket game" has NO working App.tsx, NO
+  game engine, NO UI — only isolated data files (`types.ts`, `teams.ts`, `constants.ts`, `equipment.ts`,
+  `stadium.ts`, `coins.ts`, `players.ts`) were ever written. `RELEASE_GATE: UNKNOWN` — nothing was ever
+  proven to run (no preview, no page-render, no typecheck, no test suite). The final user-facing summary
+  ("✅ Here's what I built... 18 files") does not mention any of this.
+- 🥵 **Struggle points, the big one:** a background provider-retry chain ran for roughly **two hours**
+  AFTER the build had already been reviewed, billed and reported to the user as finished — see root
+  cause below. One single call inside that chain reported `latencyMs: 5,006,868` (83.4 minutes).
+  `providerFailures.GLM: 101` (85 output-budget-starved, 14 bad-request, 1 budget-exhausted, 1 timeout)
+  against only 31 real GLM deliveries and 1 Kimi delivery in the whole build.
+
+### The missing subsystem
+
+**An abandoned background closure has no way to learn that the work it is doing has become pointless.**
+The fast lane (`SimpleBuilder.runSimpleBuild`) races its whole file-generation phase against a 240-second
+lane timeout — but when that race is lost and control hands off to the full builder, the LOSING side of
+the race is not the same as CANCELLED: JavaScript promises cannot be cancelled, only abandoned, and an
+abandoned closure keeps running, keeps calling real providers, and keeps costing real money, with nothing
+in the system watching it. The plan and shared-contract calls in this same file already carry a real
+absolute deadline for exactly this reason (see the root cause below); the highest-volume call of the
+three — one per file, including that file's own truncation-continuation retries — did not.
+
+### Root-caused and fixed in this change
+
+**`genOne`'s per-file generation call in `SimpleBuilder.ts` never passed a `deadlineAt`.** Two other call
+sites in the SAME file (the plan call, the shared-contract call) already carry this exact fix, with the
+plan call's own comment stating the defect this closes almost verbatim: *"`withTimeout` only races: the
+lane stopped waiting … while the … rung kept running to its own … timeout, so a build could — and did —
+log provider events 148 s after it had ended."* The per-file call — the one made once per file AND
+retried internally by `fastGenerate`'s own truncation-continuation loop — was missed. Because it carried
+no deadline, every hop down to `OpenAiToolRunner.runTurn` saw an unmeasured budget and used its own
+generous internal clock (60–300s per attempt) instead of the lane's real one, so an abandoned closure
+just kept making real provider calls indefinitely — in this report, for the better part of two hours,
+producing content (`EmptyState.tsx`, a generic `App.tsx` referencing `data/teams`/`data/matches` — not
+even related to the actual cricket game) that could never be used, since the full builder had already
+taken over and built something else entirely.
+
+**Fix:** `genOne` now passes `{ deadlineAt: laneStartedAt + overallMs }` — the SAME absolute instant the
+lane's own 240s race is bound by — to every per-file `deps.generate` call. Once that instant passes,
+`OpenAiToolRunner.runTurn`'s existing "refuse before spending" check (`if (bound.expired) throw …`)
+makes an abandoned closure's next attempt fail instantly instead of starting another multi-minute call
+nobody will ever read. Sibling hunt: confirmed there are exactly three `deps.generate` call sites in
+`SimpleBuilder.ts` (plan, contract, per-file) and all three now carry a real deadline.
+
+Regression-locked in `SimpleBuilder.test.ts`: a new case captures every per-file call's `opts.deadlineAt`
+and asserts it lands on the lane's own absolute budget. Proven by reversion — reverting the one-line fix
+fails the new test with `expected undefined to be defined`.
+
+**The 50/50 law:** the reactive half is the fix above. The other half — why can an abandoned closure run
+at all instead of being genuinely cancelled — is a real, larger, NOT-yet-built answer: threading an
+`AbortSignal` through `deps.generate` → `fastGenerate` → `OpenAiToolRunner`/`ClaudeClient` so a lost race
+actually stops the in-flight HTTP request, not just stops new calls after it. The deadline fix closes the
+*follow-on* damage (no more retries after abandonment); it does not stop the ONE call already in flight
+at the exact moment of abandonment from running to completion on the provider's side and being paid for.
+Recorded as an OPEN root cause below rather than attempted here — CLAUDE.md already carries this exact
+gap ("an abandoned provider call is not cancelled by this stop") from the cost-ceiling work, and this
+report is now the most severe evidence yet of how large that gap can get in practice (minutes → ~2 hours).
+
+### Open root causes (rule 6)
+
+- **True cancellation (AbortSignal) for an abandoned closure — not yet built.** The deadline fix in this
+  change stops an abandoned closure from making NEW calls; it cannot stop the ONE call already in flight
+  when the race is lost. Building this needs threading an abort signal through every provider runner,
+  which is a larger, cross-cutting change deserving its own scoped review.
+- **Possible key-pool-vs-deterministic-failure mismatch, named but NOT verified from code.** 21
+  consecutive `OUTPUT_BUDGET_STARVED` failures landed inside a 45-second window for what looks like a
+  single logical call — consistent with (but not confirmed as) the GLM key-pool rotating through every
+  configured key on a failure that is OUR OWN output-ceiling defect and therefore identical on every key
+  in the pool. If confirmed, retrying a deterministic own-side failure across a whole key pool is pure
+  waste (key rotation only helps with per-key problems like rate limits). Not investigated further this
+  session — flagged for whoever next reads the key-pool retry code.
+
+### Billing on this build — checked against TODAY's own standing rule, not re-litigated
+
+This build's `RELEASE_GATE` was **UNKNOWN** and it was still billed 5,214 tokens (₹52.15) from the user's
+free welcome-bonus balance. Before flagging that as a defect, safeguard #1/#2 apply: two OTHER sessions
+today (`claude/correction-reserve`'s audit → #2976, and `claude/unknown-last-chance-proof` → #2978,
+both merged into `main` above this entry) already did a full, admin-directed audit of exactly this
+UNKNOWN/billing intersection, and the admin gave an explicit standing ruling recorded there: *flipping an
+unproven build to failed (and therefore free) is EXPLICITLY WRONG* — "app bani = preview chala… agar
+preview chala gaya to ₹0 charge karoge to aise to mai barbad ho jaunga" (autopsy `4efab9d7`). **"Not
+proven ≠ proven broken" is now a standing rule, not something this autopsy should re-open.**
+
+Checked against that rule rather than against my own first instinct: this build's OWN reviewer pass that
+appeared to have caught the stub was itself `REVIEW_INCOMPLETE` — timed out, cut off mid-sentence, never
+reached a real verdict. Treating an unfinished read as proof of brokenness would be exactly the invented
+verdict the admin's rule forbids. And the brand-new P1 "last chance proof" (`claude/unknown-last-chance-
+proof`, shipped hours before this report) would ALSO have skipped this build — one of its required
+conditions is a published preview URL, and this build's own summary says "the live preview didn't start
+automatically," so no URL ever existed to check. **This build is real, fresh, same-day corroborating
+evidence for that session's own "still open" line** — *"UNKNOWN still ships… when no browser exists"* —
+not a new question. Recorded here as confirmation rather than a duplicate ask.
 
 ## 2026-09-16 — Autopsy: the alarm-app build (`b3a2c81e`) — a question that built an app, and the two bugs found chasing it
 

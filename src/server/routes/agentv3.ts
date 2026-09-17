@@ -314,6 +314,7 @@ import {
   reconcileWithSink,
   perTierBilledUsd,
   providerBaselineCostUsd,
+  type ProviderModelEntry,
 } from '../AgentV3/ProviderUsageLedger';
 import OpenAI from 'openai';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
@@ -1468,7 +1469,21 @@ export function livePreviewChargeLine(b: Pick<UserCostBreakdown, 'livePreviewSec
 
 /** Minimal shape of the per-provider ledger the billing decision needs (structural — no import cycle). */
 export interface BillingLedgerView {
-  entries: () => Array<{ provider: string; model?: string; usage: { inputTokens: number; outputTokens: number } }>;
+  /**
+   * ⚠️ The usage type is `ProviderModelEntry['usage']`, NOT a hand-written pair, because the
+   * hand-written pair silently DISCARDED a field the ledger really carries (2026-09-17).
+   *
+   * `ProviderTokens` has included `cacheReadInputTokens` since Fix 66, and `captureTurnUsage` really
+   * populates it per (provider, model). `realProviderCostUsd` passes `e.usage` straight to
+   * `usageCostUsd`, so the BILL has always priced the cached share at the provider's far cheaper
+   * cache-read rate. This interface narrowed the same objects to `{inputTokens, outputTokens}` — so
+   * anything typed against THIS view saw `cacheReadInputTokens: undefined` and priced the cached
+   * share at the full input rate. The admin's cost panel was one such reader.
+   *
+   * A structural type narrower than the value it describes loses data with no error anywhere. Naming
+   * the ledger's own type is what makes that impossible to repeat.
+   */
+  entries: () => ProviderModelEntry[];
   byProvider: () => Record<string, { inputTokens: number; outputTokens: number }>;
   total: () => { inputTokens: number; outputTokens: number };
 }
@@ -11238,6 +11253,9 @@ async function noteBuildOutcome(
             isEdit: isEditMode,
             ms: Date.now() - (billingCtx.buildStartedAt ?? Date.now()),
             providerUsage: decided.reconciledProviderUsage,
+            // …and WHICH RUNG ran, so the admin's cost panel prices the model instead of the family's
+            // dearest rate. The same entries the bill is priced from, one line above.
+            providerEntries: billingCtx.providerLedger.entries(),
             sandboxSeconds: watchdogLivePreview.measuredSeconds,
           });
           buildDiagRef?.setProviderTokens(decided.reconciledProviderUsage);
@@ -19326,6 +19344,9 @@ async function noteBuildOutcome(
         isEdit: isEditMode,
         ms: Date.now() - buildStartedAt,
         providerUsage: reconciledProviderUsage,
+        // …and WHICH RUNG ran. Without this the panel priced every provider at its family's dearest
+        // rate — a `glm-4.7-flashx` build read 8.6× high on the screen used to judge engine spend.
+        providerEntries: providerLedger.entries(),
         // OUR VM cost, measured whether or not the user was charged for it.
         sandboxSeconds: livePreviewCharge.measuredSeconds,
       });

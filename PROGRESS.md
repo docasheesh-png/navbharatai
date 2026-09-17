@@ -60167,3 +60167,109 @@ Tests: `tests/autopsyFdd59ef8Remainder.test.ts` (10 cases), each proven by rever
    reported a C as a problem of the user's app.
 5. **`rootCause` contradicts `counts` in the same document**: it says "NO unresolved problem was
    recorded" while `counts.unresolved` is 2.
+
+---
+
+## 2026-09-17 — The admin dashboard tells you where the work is, and the AI Engines page stops lying
+
+**Admin, in their own words:** *"us sub header me naam ke sath number bhi chahiye … jisse admin ko ek
+nazar me pata lag jaye, kaha kaam abhi karna hai"* and, in the same message, *"ai engine wale page ko
+bhi update karo, woh fake hai abhi"*.
+
+Both halves were right, and the second one was a real second-absolute-rule breach, not a cosmetic
+complaint.
+
+### 1 · The sub-header counters
+
+Nine tabs, and nothing on any of them said which one needed a person. The admin was opening each page
+in turn to find out. Each tab now carries the pair they asked for:
+
+| Tab | Badge | Source |
+|---|---|---|
+| Monitor | things needing attention | in-memory provider error counters — the SAME figure the Monitor's own health score uses, so the badge and the page cannot disagree |
+| Users | visitors today / registered | `site_analytics` (website + app, one UTC day — the store the "Who came" card is already built on) + `user_token_wallets` |
+| AI Engines | engines that served today / engines holding a key | `agentv3_engine_use` (new, below) + the real tier ladders |
+| Revenue | today / all time | `payment_transactions`, SUCCESS only, today bounded on the SERVER clock |
+| Build / User / APK Reports | never opened / not yet fixed | `reportTriage`'s existing `reportStatus` + `openReportCount` — the words already exist, a second vocabulary is how a badge starts disagreeing with the page it points at |
+
+🔴 **THE ONE RULE THE WHOLE MODULE EXISTS TO ENFORCE: `null` IS NOT `0`.** On this bar a zero is a
+promise — *"I looked, and there is no work here"* — and the admin acts on it by not opening the page.
+Every source behind these numbers can fail (a Firestore read, an instance that just booted, an older
+server mid-deploy), and a failure that silently became a calm zero is exactly the forbidden state: a
+status indicator that does not reflect real state. So `value: null` renders **nothing at all**, a
+*measured* zero still renders, a failed fetch sets `null` rather than an empty payload, and a pair
+whose total could not be read still shows its numerator ("54 people came today" answers the question
+on its own; a denominator alone does not).
+
+Colour means work waiting and nothing else: only an `attention` badge above zero is red. Colouring a
+zero, or colouring healthy activity, is what trains a person to stop seeing colour.
+
+`src/lib/adminTabBadges.ts` is PURE — no fetch, no clock, no env — precisely so that rule is testable.
+`tests/adminTabBadges.test.ts` (19 cases, reversion-proven: making `formatBadge` treat `null` as `0`
+fails 5 of them).
+
+### 2 · The AI Engines page was fake in three separate ways
+
+Not fabricated — **mis-sourced, and one control was inert.** Each is fixed at the cause:
+
+1. 🔴 **The engines it listed are not the engines that build apps.** Every card came from
+   `getProviderStats()`, the CHAT router's counter. GLM and KIMI lead the first rung of all three
+   tiers and do nearly all of the platform's work; they appeared **nowhere** on a page called AI
+   Engines. The root cause is one this repo already knew and had never acted on: every AI number in
+   the admin panel comes from `ai_usage_logs`, **which the chat route writes and an AgentV3 build
+   never touches.**
+2. 🔴 **The status was this instance, since boot**, presented as the platform's — it resets on every
+   deploy and cannot see sibling instances. Worse, a provider with **zero requests** displayed a green
+   *"Healthy"*: the most misleading state a status light can have, because it reads as "checked and
+   fine" when nothing was ever checked. It now reads **"Not used yet"**, grey, with `—` for latency.
+3. 🔴 **THE KILL SWITCHES DID NOTHING.** The panel said *"Disable a provider to prevent new requests
+   from routing to it. Changes take effect immediately on next request."* `serverStats.providerEnabled`
+   is read by exactly two places in the whole repo — the settings route that echoes it back, and the
+   health check that COUNTS it — and by **not one routing decision**. It was also in-memory only, so
+   it could not have survived a deploy or reached another instance even if something had read it.
+   **Removed, not recaptioned** — a button that does not do what it says is the forbidden state, and
+   the fix is never a softer caption.
+
+**What replaces it is what actually decides a build:** the three tier ladders, rung by rung, read from
+`TIER_LADDERS` itself (never re-typed into the route — a second copy is a second thing to drift), each
+rung marked with whether its key is present *in this environment*, each tier marked with the same
+`tierEngineAvailable` predicate the build route refuses on. Beside each rung: how many calls it really
+served today.
+
+Where the switches genuinely are is stated on the panel — `AGENTV3_LADDER_*`, `AGENTV3_CHEAP_FLOOR` in
+Cloud Run — rather than building a second, weaker copy of a mechanism that already exists and works
+across instances and restarts.
+
+### 3 · The missing subsystem, named: nothing recorded which engine served a BUILD
+
+`src/server/AgentV3/engineUseStore.ts` — one document per UTC day, `FieldValue.increment` per engine
+FAMILY. Deliberately patterned on `agentv3_sandbox_starts`, so it adds no new idea and inherits a
+storage shape already proven in production. A per-CALL row would be a second `ai_usage_logs`
+(unbounded, and the very cost this panel exists to watch).
+
+- **Families, not keys.** A 50-key pool reports `GLM`, `GLM#2`, `GLM#17`. Counting those as fifty
+  engines would make "engines used today" a measure of our key list, jumping the day somebody buys
+  keys.
+- **`null` for unreadable, `{}` for a genuinely empty day** — the caller must be able to tell "nothing
+  built today" from "we could not look", because the badge above renders a number for one and nothing
+  for the other.
+- **An observation must never block a build.** Every write is best-effort and swallowed, and the call
+  site is `void recordEngineUse(providerTurns)` at settle, where the fact is already known.
+
+Tests: `tests/aiEnginesPageIsReal.test.ts` (14 cases), reversion-proven — restoring the kill-switch
+panel fails it. One assertion is worth noting for later sessions: every "this is gone" check runs
+against source **with comments stripped**, because the comment that replaced each removed panel names
+it on purpose, and a test that cannot tell an explanation from the thing it explains punishes exactly
+the clarity this file asks for.
+
+### ⚠️ Honest boundaries
+
+- **The Monitor badge counts provider errors since this instance booted**, not a platform-wide total —
+  the load board would be the truer source and was rejected on cost (it calls Cloud Monitoring and the
+  sandbox provider, which is the right price for a page somebody opened and far too much for a header
+  that draws on every visit).
+- **`/api/health`'s "AI engines: N of M available" is now always N = M**, because the only thing that
+  could change it was the inert switch. That count was a hand-set note presented as a health check on
+  a PUBLIC page; it is more honest constant than it was adjustable.
+- **`engines used today` starts at zero on the day this ships** — the store has no history, and
+  backfilling it would mean inventing days nobody measured.

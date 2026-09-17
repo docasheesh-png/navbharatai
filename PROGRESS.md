@@ -59370,3 +59370,146 @@ turn, not by a dedicated contract check.
 **What was deliberately NOT done:** the flag was not flipped and no second planner was written. The
 key lives in a console no session can reach, and building a parallel "milestone" system beside a
 working one is exactly the duplicated work safeguard #6 exists to prevent.
+
+## 2026-09-17 — MANDATORY AUTOPSY: Alarm One splash-screen build. A "nothing changed" verdict on a build that genuinely shipped a feature, root-caused to sub-agent writes never reaching the parent's file tracking — plus its sibling in the vitest/Playwright fix.
+
+**The report:** free-tier user "Continue the build from where it left off and finish the remaining
+steps." on an existing app ("Alarm One" — alarms, math challenge, camera scan, auth, calendar, stats,
+en/hi i18n, 51 source files). `ok: true`, `billedInr: 0`, `buildMs: 1,002,550` (~16.7 min). The
+Architect diagnosed an earlier double-React crash as platform-infrastructure (correct — no fix
+needed), delegated the actual requested work (a splash screen) to a `frontend` sub-agent, which wrote
+`Splash.tsx`, edited `i18n.ts` (both languages), `App.tsx` and `index.css`, ran `tsc`/`vitest`,
+verified in a real browser, and ran a clean production build. **The build's own delivered summary —
+the one text `meta.summary`/`report.summary` shows the user — said: "Nothing needed changing… No file
+was modified, because none had to be."** The build's own LAST log line, three seconds later,
+contradicted it: `"♻️ Incremental: 48/53 file(s) unchanged since the last build (3 changed, 2 new)"`.
+
+### Step 1 — the 5-bucket ledger
+
+- ✅ **Self-healed (1):** the frontend sub-agent caught its own fragile trailing-comment-inside-JSX
+  pattern in `Splash.tsx` mid-generation and rewrote it before finishing — a genuine, harmless
+  self-correction (this is almost certainly the report's `healCount: 1`).
+- 🔀 **Worked around (0 real ones):** none — the Architect's "the frontend agent hit its step limit
+  without completing" was a MISREADING of a sub-agent that had, per the very next check, already
+  finished correctly (`agent_done (frontend)` had fired, `task` returned in 736s). No rework was
+  actually done (the Architect verified first), so this cost verification time, not correctness — filed
+  under struggle points below, not as a workaround.
+- ⏭️ **Skipped (1):** the browser console could not be captured on this run (`RUNTIME_UNCHECKED`) —
+  correctly recorded as "not established" rather than faked clean, but the underlying "why couldn't the
+  console be captured" was never explained. Filed as a minor open question, not reproduced here.
+- ❌ **Still broken / shipped imperfect (3):**
+  1. **THE HEADLINE FINDING** — the delivered summary said "no file was modified" over a build that
+     wrote 5 real files and shipped the requested feature. Root-caused and fixed (below).
+  2. `TEST_SUITE: "vitest: FAIL (29/29 passed)"` — a self-contradictory label. All 29 real unit tests
+     passed; the FAIL came from vitest sweeping up the project's own `e2e/smoke.spec.ts` (a Playwright
+     spec, not vitest's) and failing to collect it. This fed a false `RELEASE_GATE: YELLOW` caveat
+     ("the app's own test suite did not pass") for an app whose real tests are entirely green.
+     Root-caused and fixed (below) — the SIBLING of an already-shipped 2026-08-25 fix that only ever
+     covered half the cases.
+  3. Pre-existing app-wide quality debt: Design Consistency D (50/100, 29 distinct colours, 28
+     off-grid spacing values) and Accessibility C (70/100, 13 unlabeled form fields) across 36 files —
+     real, but accumulated over this app's whole history, not introduced by this turn. No engine defect
+     here; recorded for completeness.
+- 🥵 **Struggle points (2):**
+  1. Of the ~16.7-minute build, the FIRST actual file edit did not happen until ~9.8 minutes in — most
+     of that time was legitimate investigation (confirming the double-React crash was platform
+     infrastructure, reading i18n/CSS conventions before writing matching code), but it is exactly the
+     "the minutes must be WORKING minutes" bar CLAUDE.md measures every autopsy against, and it is
+     the visible cost of item ❌1 below almost firing a false "nothing happened" — the build did more
+     investigation than the size of the actual deliverable (one splash screen) justified.
+  2. The Architect's own confusion about whether the frontend sub-agent's work had genuinely finished
+     (see 🔀 above) burned a re-verification pass that turned out to be unnecessary.
+
+### Step 2 — the missing subsystem
+
+**Sub-agent file writes were invisible to the parent turn's own delivery-tracking.** The Architect
+delegates essentially all real app code to specialist sub-agents by design (documented in this
+repo's own comments: "the Architect delegates ALL app code to sub-agents"). The mechanism that counts
+"how many files did this turn actually change" (`writtenFiles`, fed by one `onFileWrite` callback) was
+wired into the TOP-LEVEL dispatcher only — the CHILD dispatcher every sub-agent runs through was built
+with that callback silently absent. So on the very common shape of build where the Architect itself
+never calls `write_file` directly (it investigates and delegates), `writtenFiles.size` reads **zero**
+regardless of how much the sub-agent actually built — and that zero is exactly the signal
+`verifiedNoChangeSummary` uses to decide whether to tell the user "nothing needed changing."
+
+### Step 3/4 — DNA-level root-cause fixes (both proven by reversion)
+
+**Fix 1 — thread the sub-agent's writes back to the parent's tracking (`src/server/AgentV3/SubAgent.ts`,
+`src/server/routes/agentv3.ts`).** `makeSubAgentSpawn`'s `SubAgentDeps` gained an `onFileWrite` callback,
+passed into the child `ToolDispatcher`'s 11th constructor slot (previously always `undefined`). The
+route wires it via the same forward-reference pattern the code already uses for `ignoreRulesForBuild`
+(a mutable holder declared before the spawn factory, assigned once the real `onFileWrite` closure exists
+a few hundred lines later — safe because no sub-agent can run before that assignment happens). Nothing
+about which tools a sub-agent may call changed — `secondOpinion`/`consensus`/`webSearch`/`deploy` stay
+withheld exactly as before; only the bookkeeping callback was added.
+Regression test in `SubAgent.test.ts` proven by reversion: fails (`expected [] to deeply equal [...]`)
+with the fix reverted, passes restored.
+
+**Fix 2 — the vitest/Playwright sibling the 2026-08-25 fix never reached (`src/server/AgentV3/testRunner.ts`).**
+`detectTestPlan` has two branches: (1) the project's own declared `"test"` script wins, checked FIRST;
+(2) inferred from config/dependencies, checked only when there is no declared script. The 2026-08-25 fix
+(`playwrightOwnsE2e` + `--exclude 'e2e/**'`) was applied ONLY to branch 2 — but a project with real
+vitest unit tests almost always ALSO has `"test": "vitest"` in package.json, which takes branch 1
+instead, verbatim, with zero exclusion. `e2eAutoScaffold.ts` never touches an existing test script when
+it later drops Playwright specs in, so the two features collide the moment both are present — exactly
+what this report shows. Fixed by applying the identical guard to branch 1, forwarded through each
+package manager's own `--` passthrough (`npm run test -- --exclude 'e2e/**'`, `yarn test -- --exclude
+'e2e/**'`, same for pnpm/bun). Four new tests in `tests/vitestSkipsPlaywright.test.ts` (the ORIGINAL
+fix's own test file, which — tellingly — never once used a package.json with a `"test"` script, so it
+could not have caught this) prove: the exclusion now applies to a `"test": "vitest"` script; it does NOT
+fire without a Playwright config; it does NOT fire on a non-vitest test script. Proven by reversion:
+without the fix, both new assertions read `'npm run test'` where `'npm run test -- --exclude
+\'e2e/**\''` was expected.
+
+### 50/50 law — why did these arise, and can the class recur?
+
+- **Fix 1's class:** the SAME shape already bit this repo once for TOKEN usage (`usageSink`, fixed by
+  threading the parent's accumulator into `makeSubAgentSpawn`) — file-write tracking needed the
+  identical treatment and did not get it. The general lesson, restated for whoever adds the NEXT
+  sub-agent-visible side effect: **anything the top-level dispatcher tracks about a turn must be
+  explicitly re-threaded into `makeSubAgentSpawn`'s child dispatcher, because the child is built from
+  scratch, not inherited.** `usageSink` and `onFileWrite` are now both threaded; `checkpointer` already
+  was. Anyone adding a THIRD such callback should grep this exact pattern first.
+- **Fix 2's class:** exactly the "instance fixed, class not" shape CLAUDE.md's own bar names — a
+  two-branch function got its fix applied to one branch, and the ORIGINAL fix's regression test file
+  never exercised the other. The lesson: when a pure function has multiple branches reaching the same
+  external effect (here, "which vitest invocation actually runs"), a regression test for branch N should
+  provoke a reviewer to ask whether branch N-1 needs the identical assertion — the four new tests in
+  `vitestSkipsPlaywright.test.ts` now cover both.
+
+### Open root cause (not closed this pass — recorded honestly, per rule 6)
+
+**`journeyCandidates` (`src/server/AgentV3/journeyDerivation.ts`) cannot see forms that live in
+components rendered BY a page/App file, when those components sit outside its recognized directory
+patterns (`pages|screens|views|routes|app`).** Alarm One's `App.tsx` renders `<AuthScreen />`,
+`<AlarmEditor />`, `<Settings />` — all real forms — but they live under `src/components/`, which
+`isPageFile`'s regex does not match, and `App.tsx` itself (the one special-cased non-page file) has no
+`<input>` directly inline — it only composes child components. So `noJourneyReason` fell through to
+"this app has no form for a journey to fill in — nothing here takes user input", which is false: this
+is one of the most form-heavy apps in the report. This is a caveat on `RELEASE_GATE` (YELLOW,
+"NOT established: no user journey could be derived or run"), not a false success/failure and not a
+billing effect — which is why it was not rushed into a fix this pass. Closing it properly needs
+resolving a page file's LOCAL component imports (one level: parse `import X from './components/Y'`
+inside an already-selected candidate, add the resolved file to the candidate set) rather than a blanket
+"scan every file for inputs" heuristic, which would reintroduce the exact imprecision
+(`hasRenderSurface`/`appHasNoDataEntry`) this module's own docstring already fought to avoid. Left open
+rather than patched with a regex that could pass today's tests while quietly widening false positives on
+a canvas-only game (whose components dir might hold an unrelated `<input>` for, say, a debug panel).
+
+### Proactive layer (sixth step)
+
+**The single highest-value lever from this report: the "verdict vs diff" honesty bug (Fix 1) is not
+fully closed by this one fix — it is closed for `verifiedNoChangeSummary`'s narrow, already-tested
+conditions, but `writtenFiles.size` also feeds `FE_BE_PARTITION`'s frontend/backend split and (per this
+file's own comment) the billing decision surface. This pass fixed the WIRING gap; a follow-up should
+specifically re-verify `effectiveBilledUsd`/`emptyBuildFailureSummary` against a delegated-only build on
+a PAID tier, since a false "empty build" there is a real revenue leak (a genuinely-shipped, sub-agent-only
+feature billing ₹0), not just a misleading free-tier message.** Recommended as the next thing to check
+before this class is called fully closed — not started here to avoid widening this autopsy's already
+two real fixes into a third, less-verified one under the same push.
+
+**Verification:** `tsc --noEmit` × 2, `noUnusedImports`, full `vitest run` (1706 files / 24055 passed, 1
+skipped, 0 FAIL), `npm run build`, `test:bundle`, `boot:check` — all green on the final merged state.
+Both fixes proven by reversion independently.
+
+Branch `claude/subagent-filewrite-tracking`, based on latest `main` (`33d87b171` at fetch time).

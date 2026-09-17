@@ -46,6 +46,55 @@ describe('vitest is not handed a Playwright spec to run', () => {
   });
 });
 
+/**
+ * 🔴 THE SIBLING THE 2026-08-25 FIX NEVER REACHED (autopsy, build 9cca1fd5, 2026-09-17).
+ *
+ * Every test above declares `vitest` as a bare DEPENDENCY, with no `"test"` script in package.json —
+ * so every one of them exercises ONLY step 2 of `detectTestPlan` (the config/dependency inference
+ * branch). A real app almost never looks like that: once it has real vitest unit tests, its
+ * package.json nearly always ALSO carries `"scripts": { "test": "vitest" }`, and `e2eAutoScaffold.ts`
+ * never touches that script when it drops Playwright specs in later. `detectTestPlan` checks the
+ * project's OWN test script FIRST (step 1) and returns immediately — so the exclusion two tests above
+ * prove exists was, for the overwhelmingly common case, unreachable code. The live report: an app
+ * whose 29/29 real unit tests passed was told `vitest: FAIL`, because its own `"test": "vitest run"`
+ * script swept up `e2e/smoke.spec.ts` exactly as the original bug described — one call-site fixed,
+ * the other never hunted.
+ */
+describe('the same exclusion applies to the project\'s OWN "test" script (step 1), not just step 2', () => {
+  const withTestScript = (script: string) => JSON.stringify({ scripts: { test: script }, devDependencies: { vitest: '^2.0.0' } });
+
+  it('excludes e2e/ when the declared test script is vitest and a Playwright config owns e2e/', () => {
+    const plan = detectTestPlan(
+      ['package.json', 'playwright.config.ts', 'e2e/smoke.spec.ts', 'src/a.test.ts'],
+      withTestScript('vitest run'),
+    );
+    expect(plan?.framework).toBe('vitest');
+    // Passed through the package manager's own `--` forwarding, which npm requires and yarn/pnpm/bun
+    // all honour identically for a `run <script>` invocation.
+    expect(plan?.command).toBe(`npm run test -- --exclude 'e2e/**'`);
+  });
+
+  it('still runs the user\'s own package manager, with the same forwarding syntax', () => {
+    const pkg = withTestScript('vitest');
+    const files = ['package.json', 'playwright.config.ts', 'e2e/smoke.spec.ts', 'yarn.lock'];
+    expect(detectTestPlan(files, pkg)?.command).toBe(`yarn test -- --exclude 'e2e/**'`);
+  });
+
+  it('does NOT exclude when there is no Playwright config — those may be the user\'s own vitest tests', () => {
+    const plan = detectTestPlan(['package.json', 'e2e/checkout.spec.ts'], withTestScript('vitest run'));
+    expect(plan?.command).toBe('npm run test');
+  });
+
+  it('does NOT exclude a non-vitest test script, even with a Playwright config present', () => {
+    // The script is jest's, not vitest's — vitest's `--exclude` flag would be meaningless to it, and
+    // jest's own default testMatch does not sweep up Playwright specs the way vitest's does.
+    const pkg = JSON.stringify({ scripts: { test: 'jest --ci' }, devDependencies: { jest: '^29' } });
+    const plan = detectTestPlan(['package.json', 'playwright.config.ts', 'e2e/smoke.spec.ts'], pkg);
+    expect(plan?.framework).toBe('jest');
+    expect(plan?.command).toBe('npm run test');
+  });
+});
+
 describe('playwrightOwnsE2e — narrow on purpose', () => {
   it('needs BOTH the config and a spec inside e2e/', () => {
     expect(playwrightOwnsE2e(['playwright.config.ts', 'e2e/smoke.spec.ts'])).toBe(true);

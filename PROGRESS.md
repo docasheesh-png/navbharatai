@@ -60127,3 +60127,65 @@ guard by breaking the code.**
 2. **A pre-existing plan is reported as `not-a-new-build`**, which is honest but coarse: telling
    "a plan exists and is waiting for a continuation" apart from "this is an edit" would need a plan load
    before the gate, i.e. a Firestore read on every build. Deliberately not paid for.
+
+## 2026-09-17 — the evidence ledger's READ half: the sibling the typecheck fix left behind
+
+Continuing the ChatGPT-sourced reliability review (adapted, not transcribed — external-suggestion rule).
+Its §11/§16 argument is that a release gate must read real evidence rather than its own private signal.
+That is not a new idea here: it is the **open root cause** recorded from autopsy `697b38ee`, whose exact
+words are *"there is no shared EVIDENCE LEDGER… the gates trust only their own."*
+
+🔎 **AND HALF OF IT WAS ALREADY FIXED, WHICH THE SEARCH ONLY FOUND BY LOOKING PROPERLY.** On 2026-09-16
+`typecheckEvidenceFromCommands` (`TscGate.ts`) closed the typecheck case exactly right — it reads the
+build's own command log and fills the gate's evidence when the deterministic gate never ran. **It was
+wired at ONE call site, for ONE fact.** The same autopsy's `tests` case is the identical defect with the
+identical cure, and nothing read it: that report's release gate told the user the app *"has no test suite
+that could be run here"* about a build whose own Playwright suite the agent had installed, run, and
+PASSED — with the passing run sitting in the same report's command log.
+
+That silence was structural, not incidental: `gateEvidence.tests` is written **only** by the vaccine
+pass, which is flag-gated, percentage-gated, and skipped entirely on a build not yet marked `ok`.
+
+### The fix — the generalisation, not a third one-off
+
+`src/server/AgentV3/agentRunEvidence.ts` (pure) is the ONE place a gate asks *"what has already been
+proven?"*. `typecheck` **delegates** to the existing implementation rather than being re-derived — a
+second copy of a verdict is a second copy free to disagree. `testsEvidenceFromCommands` is the new half,
+parsing with the **same** `parseTestOutcome` the vaccine trusts. Read through
+`buildDiag.agentRunEvidence()`, wired once at the release-gate assembly, filling only evidence still at
+`not-run`.
+
+Discipline inherited deliberately from the typecheck harvester: `undefined` means "the log does not
+settle this", never a silent promotion; latest wins; the OUTPUT is parsed rather than the exit code (a
+piped run reports the last stage's code); and **a run that could not EXECUTE is evidence of nothing in
+either direction** — blaming a user's app because our sandbox lacked a browser binary is the Shiv
+Medical Store mistake and must not return through a fallback.
+
+🔒 **CHECKED, NOT ASSUMED — this cannot cost a user money.** A RED release gate flips a build to
+`ok: false` (and therefore FREE) only when `shippingIssueCount('error') > 0`, and test evidence
+contributes nothing to that count; the verdict-correction block says so in its own words. So `passed`
+can only move the gate UP and `failed` only makes the sentence honest.
+
+### Two bugs the tests caught in my own code
+
+1. **`\b--version` never matches anything.** Between a space and a `-` both sides are non-word
+   characters, so the whole flag exclusion was dead and `npx jest --version` was classified as a jest
+   RUN. Flags are now anchored on whitespace.
+2. **A file verb reads as a suite run.** `cat src/tests/login.playwright.test.ts` matched the playwright
+   rule on vocabulary alone — the same "contains the word" trap `looksLikeTypecheckCommand` refuses by
+   requiring `--noEmit`. `FILE_VERB` now excludes it.
+
+### Tests
+
+`tests/agentRunEvidence.test.ts` — 20 cases. Three guards proven by reversion: counting a
+could-not-run as a failure, dropping the `FILE_VERB` guard, and letting the fallback override real gate
+evidence instead of filling a gap.
+
+### Still open (rule 6)
+
+1. **The ledger's WRITE half does not exist.** The autopsy's third false statement — `RUNTIME_UNCHECKED`
+   after three successful browser console reads — cannot be recovered from the shell log at all, because
+   that proof is held by the page checks. It needs an actor recording a proven fact, not a reader
+   harvesting one. Deliberately not guessed at here.
+2. `CLAIM_UNSUPPORTED` ("not one file was changed" two seconds before `Incremental: 2 changed, 2 new`)
+   is the same WRITE-half gap.

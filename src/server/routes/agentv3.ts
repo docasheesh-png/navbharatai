@@ -17651,6 +17651,19 @@ async function noteBuildOutcome(
         gateEvidence.preview = previewVerifiedRendered ? 'passed' : previewVerifiedFailed ? 'failed' : 'not-run';
         // Only changes the WORDING of an unproven preview, never the verdict — see previewUrlPublished.
         gateEvidence.previewUrlPublished = Boolean(lastPreviewUrl);
+        // THE SAME FALLBACK THE TYPECHECK ALREADY HAS, FOR THE SIBLING IT LEFT BEHIND (autopsy
+        // 697b38ee). `gateEvidence.tests` is written ONLY by the vaccine pass — flag-gated,
+        // percentage-gated, and skipped entirely on a build not yet marked `ok` — so an agent that ran
+        // the suite itself left the gate telling the user the app had no suite that could be run, in a
+        // report whose own command log held the passing run. Fills a gap only; never overrides the real
+        // evidence set above, and a suite that could not EXECUTE is not counted in either direction.
+        // Safe for billing by construction: a RED gate flips a build to free only on
+        // shippingIssueCount('error'), which test evidence does not contribute to.
+        try {
+          const proven = buildDiag.agentRunEvidence();
+          if (gateEvidence.typecheck === 'not-run' && proven.typecheck) gateEvidence.typecheck = proven.typecheck;
+          if (gateEvidence.tests === 'not-run' && proven.tests) gateEvidence.tests = proven.tests;
+        } catch { /* evidence recovery is best-effort and must never touch a build */ }
         const gateFindings = () => ({
           // Counted from what this build actually recorded, so the gate and the report cannot disagree.
           blockers: buildDiag.shippingIssueCount('error'),

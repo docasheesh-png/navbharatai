@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import { WebAppPlayer } from './WebAppPlayer';
 import { authedHeaders } from '../../lib/authHeaders';
+import { authedFetch } from '../../lib/authedFetch';
+import { LONG_REQUEST_TIMEOUT_MS, isFetchTimeout } from '../../lib/longRequest';
 import { resolveApiHref } from '../../lib/apiBase';
 import { isNativeApp } from '../../lib/mobileNative';
 import { adultBadge } from '../../lib/adultContent';
@@ -297,6 +299,14 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
    * button cannot widen what the store accepts. Its refusals are specific and useful (a hardcoded key
    * with its file and line, "this app needs a server", a size cap) — so they are shown VERBATIM. A
    * generic "publishing failed" here would throw away the one sentence that tells the user what to fix.
+   *
+   * 🔒 A BUTTON THAT CAN SPIN FOREVER IS A BUG, WHATEVER THE SERVER IS DOING (the same class the admin
+   * reported on 2026-08-27 for this exact endpoint — "app mart me publish kar rahe hai, to infinity
+   * loading hoti ja rahi hai"). This is now the ONLY door that publishes to App Mart (the embedded
+   * card that used to live in the "Publish your app" hosting sheet was removed, admin 2026-09-16 — App
+   * Mart is a separate decision from hosting), so the timeout that endpoint's other caller carried
+   * must not be lost with it. `authedFetch` bounds the wait and honestly distinguishes "we stopped
+   * waiting" from "the request never reached the server" — see lib/longRequest.ts.
    */
   const publishChosenApp = useCallback(async () => {
     if (pubBusy || !pickWs) return;
@@ -305,9 +315,9 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
     setPubBusy(true);
     setPubResult(null);
     try {
-      const res = await fetch('/api/nav-store/web/publish', {
+      const res = await authedFetch('/api/nav-store/web/publish', {
         method: 'POST',
-        headers: { ...(await authedHeaders()), 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           workspaceId: pickWs,
           name,
@@ -315,7 +325,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
           ...(pickDesc.trim() ? { description: pickDesc.trim() } : {}),
           ...(pickIcon ? { iconDataUrl: pickIcon } : {}),
         }),
-      });
+      }, LONG_REQUEST_TIMEOUT_MS.storePublish);
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) {
         setPubResult({ ok: false, message: data?.error || 'Publishing failed — nothing was published.' });
@@ -331,8 +341,11 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
           : 'Published! Your link works right now (copied) — the store listing goes live after a quick human review.',
       });
       void loadWebMine();
-    } catch {
-      setPubResult({ ok: false, message: 'Could not reach NavBharatAI — nothing was published.' });
+    } catch (e) {
+      const timedOut = isFetchTimeout(e);
+      setPubResult({ ok: false, message: timedOut
+        ? 'Publishing is taking longer than expected, so we stopped waiting. Check "My apps" below — if it is not there yet, try again.'
+        : 'Could not reach NavBharatAI — nothing was published.' });
     } finally {
       setPubBusy(false);
     }

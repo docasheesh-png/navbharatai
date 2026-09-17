@@ -128,6 +128,8 @@ const GROWING_COLLECTIONS: readonly string[] = [
 ];
 import { adminLockoutEnabled, checkAdminLock, recordAdminFail, recordAdminSuccess } from '../lib/adminLoginGuard';
 import { routeParam, routeParams } from '../lib/expressCompat';
+import { lifetimeMoneySpentInr, lifetimeTokensUsed, lifetimeTokensPurchased } from '../lib/walletLifetime';
+import { isRevenueRow, purchaseRow, filterPurchases, sortPurchases, summarisePurchases, type PurchaseRowWithUser, type PurchaseStatusFilter, type PurchaseSort } from '../lib/purchaseLedger';
 
 /**
  * Admin dashboard routes extracted from the server.ts monolith (Phase 1).
@@ -1579,16 +1581,21 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         env: process.env.CASHFREE_ENV || (clientSecretSample && (clientSecretSample.toLowerCase().includes('test') || clientSecretSample.toLowerCase().includes('sandbox') || clientSecretSample.toLowerCase().includes('sim_')) ? 'sandbox' : 'production')
       };
 
+      // 🔴 READ THROUGH `walletLifetime.ts` (2026-09-17). This sorted and printed
+      // `total_output_tokens_used` / `total_money_spent` — fields written once, as 0, at wallet
+      // creation and never incremented. The live figures are `totalTokensUsed` / `totalMoneySpent`,
+      // so every user showed 0 tokens and ₹0 here. One reader, both spellings.
       const expensiveUsers = [...wallets]
-        .sort((a: any, b: any) => (b.total_output_tokens_used || 0) - (a.total_output_tokens_used || 0))
+        .sort((a: any, b: any) => lifetimeTokensUsed(b) - lifetimeTokensUsed(a))
         .slice(0, 10)
         .map((w: any) => ({
           userId: w.userId,
           email: w.userEmail || 'unknown@example.com',
           name: w.userName || 'NavBharat user',
           remaining_balance: w.remaining_balance || 0,
-          tokens_used: w.total_output_tokens_used || 0,
-          money_spent: w.total_money_spent || 0
+          tokens_used: lifetimeTokensUsed(w),
+          tokens_purchased: lifetimeTokensPurchased(w),
+          money_spent: lifetimeMoneySpentInr(w),
         }));
 
       // New stats additions
@@ -1624,7 +1631,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         .sort((a, b) => b.requests - a.requests);
 
       // Token purchases
-      const successfulPurchases = transactions.filter((tx: any) => tx.paymentStatus === 'SUCCESS' && tx.paymentProvider !== 'WELCOME_BONUS');
+      // ONE rule for "is this row money?" (purchaseLedger.ts). This used to exclude only the welcome
+      // gift, so every coupon redemption — a SUCCESS row with amountPaid 0 — counted as a payment.
+      const successfulPurchases = transactions.filter((tx: any) => isRevenueRow(tx));
       const tokenPurchaseCount = successfulPurchases.length;
       const recentPurchases = [...successfulPurchases]
         .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -1903,6 +1912,66 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   });
 
   // ── Full user list with sort ──────────────────────────────────────────────
+  // ── PURCHASES — who paid, for what, and which rows are revenue (admin 2026-09-17) ─────────────
+  //
+  // The Revenue tab had a total and ten rows with a truncated user id. Every fact needed to answer
+  // "this revenue came from which users?" was already in `payment_transactions`; this reads that
+  // collection through `purchaseLedger.ts` (the same rule the analytics tiles use) and joins each
+  // row with the wallet's name and email so the admin sees a person, not an id.
+  //
+  // Same whole-collection read the analytics route does, for the same reason: filters and search
+  // run over the full set in memory (Firestore cannot substring-search), and the payload is bounded
+  // by `limit`. Admin-only; nothing here is reachable by a user token.
+  app.get('/api/admin/purchases', verifyAdminToken, async (req: Request, res: Response) => {
+    const db = getDb() as any;
+    try {
+      const [txSnap, walletSnap] = await Promise.all([
+        getDocs(collection(db, 'payment_transactions')),
+        getDocs(collection(db, 'user_token_wallets')),
+      ]);
+      const who = new Map<string, { email: string; name: string }>();
+      for (const d of walletSnap.docs) {
+        const w = d.data() as any;
+        const uid = String(w?.userId || d.id);
+        who.set(uid, { email: String(w?.userEmail || ''), name: String(w?.userName || '') });
+      }
+      const all: PurchaseRowWithUser[] = txSnap.docs.map((d: any) => {
+        const row = purchaseRow(d.id, d.data());
+        const u = who.get(row.userId);
+        return { ...row, email: u?.email || '', name: u?.name || '' };
+      });
+      const statusRaw = String(req.query.status || 'all').toLowerCase();
+      const status: PurchaseStatusFilter = (['all', 'revenue', 'success', 'pending', 'failed', 'free'] as const).includes(statusRaw as PurchaseStatusFilter)
+        ? (statusRaw as PurchaseStatusFilter) : 'all';
+      const sortRaw = String(req.query.sort || 'date').toLowerCase();
+      const sort: PurchaseSort = (['date', 'amount', 'tokens'] as const).includes(sortRaw as PurchaseSort) ? (sortRaw as PurchaseSort) : 'date';
+      const dir: 'asc' | 'desc' = String(req.query.dir || 'desc').toLowerCase() === 'asc' ? 'asc' : 'desc';
+      const filtered = sortPurchases(filterPurchases(all, {
+        search: String(req.query.search || ''),
+        status,
+        from: String(req.query.from || ''),
+        to: String(req.query.to || ''),
+      }), sort, dir);
+      const limitRaw = Number(req.query.limit);
+      const limit = Math.min(200, Math.max(1, Number.isFinite(limitRaw) && limitRaw > 0 ? Math.floor(limitRaw) : 25));
+      const offsetRaw = Number(req.query.offset);
+      const offset = Number.isFinite(offsetRaw) && offsetRaw > 0 ? Math.floor(offsetRaw) : 0;
+      res.json({
+        rows: filtered.slice(offset, offset + limit),
+        total: filtered.length,
+        offset,
+        limit,
+        // Over the FILTERED set, so a date range answers "how much came in that week".
+        summary: summarisePurchases(filtered),
+        // Over everything, so the tile at the top never moves when a filter is applied.
+        overall: summarisePurchases(all),
+      });
+    } catch (e: any) {
+      console.error('[ADMIN] /purchases failed:', e?.message);
+      res.status(500).json({ error: 'Failed to load purchases', detail: e?.message || String(e) });
+    }
+  });
+
   app.get('/api/admin/users', verifyAdminToken, async (req: Request, res: Response) => {
     const db = getDb() as any;
     try {
@@ -1921,7 +1990,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
 
       if (sort === 'alpha') users.sort((a: any, b: any) => (a.userEmail || '').localeCompare(b.userEmail || ''));
       else if (sort === 'tokens') users.sort((a: any, b: any) => (b.tokenBalance || 0) - (a.tokenBalance || 0));
-      else if (sort === 'ai_per_day') users.sort((a: any, b: any) => (b.total_output_tokens_used || 0) - (a.total_output_tokens_used || 0));
+      else if (sort === 'ai_per_day') users.sort((a: any, b: any) => lifetimeTokensUsed(b) - lifetimeTokensUsed(a));
+      else if (sort === 'paid') users.sort((a: any, b: any) => lifetimeMoneySpentInr(b) - lifetimeMoneySpentInr(a));
       else if (sort === 'recent') users.sort((a: any, b: any) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
 
       // WHEN DID THEY JOIN, AND WHEN WERE THEY LAST HERE (admin 2026-09-11)?
@@ -1979,9 +2049,12 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
           email: u.userEmail || '–',
           name: u.userName || 'NavBharat User',
           tokenBalance: u.tokenBalance || 0,
-          totalTokensUsed: u.total_output_tokens_used || 0,
+          // Lifetime figures through the ONE reader (walletLifetime.ts) — the snake_case fields this
+          // used to print are initialised to 0 and never incremented, so "Total Used" read 0 for all.
+          totalTokensUsed: lifetimeTokensUsed(u),
+          totalTokensPurchased: lifetimeTokensPurchased(u),
           remainingBalance: u.remaining_balance || 0,
-          moneySpent: u.total_money_spent || 0,
+          moneySpent: lifetimeMoneySpentInr(u),
           banned: u.banned || false,
           createdAt: u.updatedAt || u.createdAt || '',
           joinedAt: joined.atMs,

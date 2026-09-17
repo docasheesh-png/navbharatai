@@ -44,6 +44,7 @@ import { initMetaPixel, fetchPixelIdFromServer } from './lib/metaPixel';
 import { syncNativeMetaConsent, nativeMetaConsentGranted } from './lib/metaNativeConsent';
 import { installNativeShellPolish, loadNativeShellContext } from './lib/nativeShell';
 import { installErrorCapture } from './lib/recentErrors';
+import { HARDWARE_BACK_EVENT } from './lib/androidBack';
 
 // Top-level crash fallback — guarantees the app NEVER shows a full white page.
 // Any uncaught render error anywhere in the tree lands here with a recovery option.
@@ -309,9 +310,16 @@ requestAnimationFrame(() => {
   // status-bar theme, no haptics and, most visibly on Android, no hardware Back handling at all).
   void loadNativeShellContext()
     .then((ctx) => installNativeShellPolish(ctx, () => {
-      // Somewhere to go back to → go. (A genuinely empty back stack is handled inside the installer,
-      // which exits the app rather than trapping the user on the screen.)
-      window.history.back();
+      // 🔴 THIS USED TO BE `window.history.back()`, AND IT COULD NEVER HAVE WORKED. This app
+      // navigates with React state (`setActiveView`), never `history.pushState`, so the WebView's
+      // history has one entry and there is nothing to go back TO — and the installer's old
+      // `canGoBack === false ⇒ exitApp()` rule then closed the app from every screen.
+      //
+      // Back is now the APP's decision, because only the app knows which screen is showing and what
+      // is open over it. `main.tsx` has none of that state, so it forwards the press as an event and
+      // App.tsx answers it (see `androidBack.ts`) — the same pattern `navbharat:navigate` already
+      // uses to reach the root component.
+      window.dispatchEvent(new CustomEvent(HARDWARE_BACK_EVENT));
     }))
     .catch(() => { /* polish is best-effort — it must never block the app from starting */ });
 });

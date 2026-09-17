@@ -138,19 +138,48 @@ export function installBackButtonHandler(ctx: NativeShellContext, onBack: (info?
 
   try {
     const listener = ctx.App.addListener('backButton', (data?: { canGoBack?: boolean }) => {
-      // Android's expectation, in order: go back if there is anywhere to go, otherwise leave the app.
-      // Passing canGoBack through lets the caller decide with its own navigation state; only when the
-      // stack is genuinely empty do we exit — silently swallowing Back would trap the user instead.
-      if (data?.canGoBack === false && ctx.App?.exitApp) {
-        ctx.App.exitApp();
-        return;
-      }
+      // 🔴 THIS USED TO EXIT THE APP HERE, AND THAT WAS THE BUG (admin 2026-09-17: *"kisi bhi page
+      // par back button press karta hai, app band ho jati hai"*).
+      //
+      // The old rule was `canGoBack === false ⇒ exitApp()`, which is right for an app whose screens
+      // are browser history entries and WRONG for this one. NavBharatAI navigates with
+      // `setActiveView` — React state — and never calls `history.pushState`, so the WebView stack
+      // holds one entry for the life of the app and `canGoBack` is false on EVERY screen. The exit
+      // branch was therefore not an edge case; it was the only branch that ever ran.
+      //
+      // The fix is not a better guess at the stack: it is to stop guessing. Every press is forwarded
+      // to the app, which owns the only state that can answer the question (see `androidBack.ts`),
+      // and leaving is now something the USER confirms rather than something a plugin flag decides.
+      //
+      // ⚠️ `canGoBack` is still passed through, unused by today's caller, because it is the
+      // plugin's own fact and throwing it away would make a future caller re-derive it wrongly.
       onBack(data);
     });
     return () => listener.remove();
   } catch (e) {
     // Plugin may not be available — best effort.
     return () => {};
+  }
+}
+
+/**
+ * Leave the app — the ONLY place NavBharatAI ever calls `exitApp()`.
+ *
+ * It sits here, beside the handler that used to call it implicitly, so that "the app closed" always
+ * has exactly one cause that can be searched for and tested. The caller reaches this only after the
+ * user has pressed Exit in the confirmation dialog.
+ *
+ * Returns whether it actually ran: false on web, false without the plugin, false if the call throws.
+ * A caller must never report the app as closing on the strength of having asked — on any false the
+ * user is still sitting in front of the screen, and the dialog has to behave accordingly.
+ */
+export function exitNativeApp(ctx: NativeShellContext): boolean {
+  if (!isNativeShell(ctx) || !ctx.App?.exitApp) return false;
+  try {
+    ctx.App.exitApp();
+    return true;
+  } catch {
+    return false;
   }
 }
 

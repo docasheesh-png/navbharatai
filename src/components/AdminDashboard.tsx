@@ -5,6 +5,7 @@ import { usePagedList } from '../hooks/usePagedList';
 import { LoadMore } from './common/LoadMore';
 import { stampLabel, dayLabel, signInMethodWords } from '../lib/adminUserDisplay';
 import { adultOptInSummary } from '../lib/adultContent';
+import { appStatusView, canUnpublish, canBan, matchesAppQuery, confirmCopy } from '../lib/adminAppModeration';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
 import { XSquare as BanIcon } from 'lucide-react';
 import { summarizeCostTelemetry, type CostLadderSummary } from '../lib/agentV3CostSummary';
@@ -753,6 +754,90 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken]);
 
+  /**
+   * PUBLISHED APPS — the moderation list (admin 2026-09-17: *"published app ko, admin jab chahe
+   * unpublish ya ban kar sake"*).
+   *
+   * 🔴 THE SERVER FOR THIS HAS EXISTED ALL ALONG AND NOTHING EVER CALLED IT. `GET
+   * /api/admin/deployments` and the takedown beside it were built with the Phase 0 abuse guard, fully
+   * working, and no screen anywhere in the app reached either — verified three ways before this panel
+   * was written, because rebuilding a working server would have been the expensive mistake here. So
+   * the ONLY thing missing was the door, and this is the door.
+   *
+   * ⚠️ The two actions are deliberately NOT the same button:
+   *   • Unpublish — the site goes offline and the OWNER can publish it again. The everyday action.
+   *   • Ban       — the site goes offline and the workspace can NEVER publish again. Permanent, and
+   *                  nothing in this panel or any other can undo it.
+   * A moderator reaches for the first far more often than the second, which is why the second is the
+   * one that has to be typed into rather than tapped.
+   */
+  const [deployments, setDeployments] = useState<Array<{
+    workspaceId: string; userId?: string; status?: string; url?: string; updatedAt?: number;
+    fileCount?: number; sizeMb?: number; firstParty?: boolean;
+  }> | null>(null);
+  const [deploymentsError, setDeploymentsError] = useState('');
+  const [deploymentsLoading, setDeploymentsLoading] = useState(false);
+  const [deployStatusFilter, setDeployStatusFilter] = useState('');
+  const [deployQuery, setDeployQuery] = useState('');
+  /** The app awaiting confirmation, and which of the two actions was asked for. */
+  const [moderating, setModerating] = useState<{ workspaceId: string; action: 'unpublish' | 'ban' } | null>(null);
+  const [moderateReason, setModerateReason] = useState('');
+  const [moderateBusy, setModerateBusy] = useState(false);
+
+  const fetchDeployments = useCallback(async () => {
+    setDeploymentsLoading(true);
+    try {
+      const q = deployStatusFilter ? `?status=${encodeURIComponent(deployStatusFilter)}&limit=200` : '?limit=200';
+      const r = await fetch(`/api/admin/deployments${q}`, { headers });
+      const d = await r.json();
+      if (Array.isArray(d?.deployments)) { setDeployments(d.deployments); setDeploymentsError(''); return; }
+      // An unreadable list is NOT an empty one — showing "no published apps" over a failed read would
+      // tell the admin the opposite of the truth on the screen they moderate from.
+      setDeployments(null);
+      setDeploymentsError(d?.error || 'Could not read the published-app list.');
+    } catch (e) { console.error(e); setDeployments(null); setDeploymentsError('Could not read the published-app list.'); }
+    finally { setDeploymentsLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken, deployStatusFilter]);
+
+  /**
+   * Run the confirmed action. Both routes delete the LIVE site first and only then touch the
+   * registry, and both answer 502 when the delete could not be confirmed — so a failure here is
+   * reported as a failure, never softened into "done". The list is re-read either way, because after
+   * a partial failure the admin needs the real state rather than our optimistic guess at it.
+   */
+  const runModeration = useCallback(async () => {
+    if (!moderating) return;
+    const { workspaceId, action } = moderating;
+    setModerateBusy(true);
+    try {
+      const path = action === 'ban' ? 'takedown' : 'unpublish';
+      const r = await fetch(`/api/admin/deployments/${encodeURIComponent(workspaceId)}/${path}`, {
+        method: 'POST', headers, body: JSON.stringify({ reason: moderateReason.trim() }),
+      });
+      const d = await r.json();
+      if (d?.ok) {
+        toast(action === 'ban' ? `Banned — ${workspaceId} can never publish again.` : `Unpublished — the owner can publish again.`);
+        setModerating(null);
+        setModerateReason('');
+      } else {
+        toast(d?.error || 'Failed — the live site was NOT confirmed removed.');
+      }
+    } catch (e) { console.error(e); toast('Failed — the live site was NOT confirmed removed.'); }
+    finally { setModerateBusy(false); void fetchDeployments(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken, moderating, moderateReason, fetchDeployments]);
+
+  /**
+   * The rows actually on screen. The STATUS filter is applied by the server (it is a real query on
+   * the store) and the TEXT search here, because a moderator working from a report types whichever
+   * of the three identifiers the reporter happened to send them.
+   */
+  const visibleDeployments = useMemo(
+    () => (deployments || []).filter((d) => matchesAppQuery(d, deployQuery)),
+    [deployments, deployQuery],
+  );
+
   const reclaimChannel = useCallback(async (channelId: string) => {
     setReclaiming(channelId);
     try {
@@ -1262,7 +1347,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     } catch (e) { console.error(e); setMfaStatus(null); }
   }, [adminToken]);
 
-  useEffect(() => { if (activeTab === 'security') { fetchMfaStatus(); fetchLicenceExposure(); void fetchAdultOptIns(); void fetchSafetyFlags(); } }, [activeTab, fetchMfaStatus, fetchLicenceExposure, fetchAdultOptIns, fetchSafetyFlags]);
+  useEffect(() => { if (activeTab === 'security') { fetchMfaStatus(); fetchLicenceExposure(); void fetchAdultOptIns(); void fetchSafetyFlags(); void fetchDeployments(); } }, [activeTab, fetchMfaStatus, fetchLicenceExposure, fetchAdultOptIns, fetchSafetyFlags, fetchDeployments]);
 
   const startMfaEnroll = async () => {
     setMfaBusy(true);
@@ -1370,6 +1455,77 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           {toastMsg}
         </div>
       )}
+
+
+      {/* ── CONFIRM UNPUBLISH / BAN ──────────────────────────────────────────────────────────
+          Rendered at the root rather than inside the Security tab so the answer cannot be lost by a
+          tab change mid-decision.
+
+          🔒 THE GUARDS, and each exists because the ban half is IRREVERSIBLE:
+            • The whole panel is the app's id in plain sight — you confirm against what you tapped.
+            • Ban and Unpublish read DIFFERENT sentences (`confirmCopy`), never one with a word swapped.
+            • A BAN requires a typed reason. Not bureaucracy: it is a deliberate half-second between
+              the impulse and a permanent act, and the 180-day record (IT Rules 2021 Rule 3(1)(g)) is
+              written from it — an empty reason there is a record that explains nothing.
+            • The backdrop does not dismiss, so a stray tap answers nothing. */}
+      {moderating && (() => {
+        const copy = confirmCopy(moderating.action);
+        const isBan = moderating.action === 'ban';
+        const reasonMissing = isBan && !moderateReason.trim();
+        return (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-5 bg-black/70 backdrop-blur-sm" role="presentation">
+            <div role="alertdialog" aria-modal="true" aria-label={copy.title}
+                 className="w-full max-w-[420px] rounded-2xl bg-[#161b22] border border-white/10 shadow-2xl p-5">
+              <div className="flex items-center gap-2.5 mb-2">
+                <span className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 border ${
+                  isBan ? 'bg-red-500/10 border-red-500/20' : 'bg-white/5 border-white/10'}`}>
+                  {isBan ? <BanIcon size={16} className="text-red-400" /> : <Globe size={16} className="text-white/70" />}
+                </span>
+                <h2 className="text-base font-bold text-white">{copy.title}</h2>
+              </div>
+
+              <p className="text-[11px] font-mono text-white/70 bg-black/30 border border-white/5 rounded-lg px-2.5 py-1.5 mb-3 truncate">
+                {moderating.workspaceId}
+              </p>
+              <p className={`text-sm leading-relaxed mb-4 ${isBan ? 'text-red-200/90' : 'text-white/60'}`}>{copy.body}</p>
+
+              <label className="block text-[10px] font-black uppercase tracking-wider text-[#8b949e] mb-1.5">
+                Reason {isBan ? '(required)' : '(optional)'}
+              </label>
+              <input
+                value={moderateReason}
+                onChange={(e) => setModerateReason(e.target.value)}
+                placeholder={isBan ? 'Why is this app being banned?' : 'Why is it being taken offline?'}
+                className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-[12px] text-white placeholder:text-[#484f58] mb-1 focus:outline-none focus:border-sky-500/40"
+              />
+              <p className="text-[10px] text-[#484f58] mb-4 leading-relaxed">
+                Kept for 180 days as the record of this removal. The owner is not shown what you type.
+              </p>
+
+              <div className="flex gap-2.5">
+                {/* Cancel first, so the safe choice is the one nearest the thumb and the one a stray
+                    Enter reaches — the destructive button never leads. */}
+                <button
+                  onClick={() => { setModerating(null); setModerateReason(''); }}
+                  disabled={moderateBusy}
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-white text-sm font-bold disabled:opacity-40"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => void runModeration()}
+                  disabled={moderateBusy || reasonMissing}
+                  title={reasonMissing ? 'A ban needs a reason' : undefined}
+                  className={`flex-1 px-4 py-2.5 rounded-xl text-white text-sm font-bold disabled:opacity-40 ${
+                    isBan ? 'bg-red-600 hover:bg-red-500' : 'bg-white/20 hover:bg-white/30'}`}
+                >
+                  {moderateBusy ? 'Working…' : copy.cta}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Header — logout always pinned top-right, visible on all screen sizes */}
       <div className="relative flex items-start justify-between gap-4 border-b border-white/5 pb-6">
@@ -3881,6 +4037,147 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           {/* ── SECURITY TAB ── */}
           {activeTab === 'security' && (
             <div className="space-y-6">
+              {/* ── PUBLISHED APPS — unpublish or ban (admin 2026-09-17) ──────────────────────
+                  *"published app ko, admin jab chahe unpublish ya ban kar sake!"*
+
+                  🔴 THE SERVER COULD ALREADY DO THIS AND NOTHING CALLED IT. `POST …/takedown` has
+                  existed since 2026-08-21; no client in the repo ever reached it, so from the admin's
+                  side the capability did not exist. A capability with no way to invoke it is exactly
+                  what CLAUDE.md's second absolute rule forbids, and this panel is the missing half.
+
+                  ⚠️ THE TWO BUTTONS ARE NOT SIBLINGS, and the layout says so on purpose:
+                  Unpublish is the ordinary action and sits in plain grey; Ban is permanent — the
+                  workspace can NEVER publish again — so it is red, it is second, and its
+                  confirmation is a different sentence rather than the same one with a word swapped.
+                  See `adminAppModeration.ts` for why that copy lives outside this file. */}
+              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-5 space-y-3">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <h3 className="flex items-center gap-2 text-sm font-black text-white uppercase tracking-tight">
+                    <Globe size={15} className="text-sky-400" /> Published apps
+                    {Array.isArray(deployments) && (
+                      <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-white/15 text-[#8b949e]">
+                        {deployments.filter((d) => appStatusView(d.status).live).length} live
+                      </span>
+                    )}
+                  </h3>
+                  <button
+                    onClick={() => void fetchDeployments()}
+                    disabled={deploymentsLoading}
+                    className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-wider text-white hover:border-sky-500/40 transition-all disabled:opacity-40"
+                  >
+                    {deploymentsLoading ? 'Loading…' : 'Refresh'}
+                  </button>
+                </div>
+                <p className="text-[11px] text-[#8b949e] leading-relaxed">
+                  Every app users have published. <span className="text-white/70">Unpublish</span> takes a site
+                  off the internet and the owner can publish it again themselves.{' '}
+                  <span className="text-red-300">Ban</span> removes it and stops that workspace publishing ever
+                  again — permanent, and nothing here can undo it.
+                </p>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="relative flex-1 min-w-[180px]">
+                    <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#484f58]" />
+                    <input
+                      value={deployQuery}
+                      onChange={(e) => setDeployQuery(e.target.value)}
+                      placeholder="Search by app id, owner or link"
+                      className="w-full bg-black/30 border border-white/10 rounded-lg pl-8 pr-3 py-1.5 text-[11px] text-white placeholder:text-[#484f58] focus:outline-none focus:border-sky-500/40"
+                    />
+                  </div>
+                  <select
+                    value={deployStatusFilter}
+                    onChange={(e) => setDeployStatusFilter(e.target.value)}
+                    className="bg-black/30 border border-white/10 rounded-lg px-2.5 py-1.5 text-[11px] text-white focus:outline-none focus:border-sky-500/40"
+                  >
+                    <option value="">All states</option>
+                    <option value="active">Live only</option>
+                    <option value="unpublished">Offline</option>
+                    <option value="taken_down">Banned</option>
+                    <option value="held">Held</option>
+                  </select>
+                </div>
+
+                {/* An unreadable list is reported as unreadable. Showing an empty list here would tell
+                    the admin "nothing is published", which on a moderation screen is the worst
+                    possible lie. */}
+                {deploymentsError && (
+                  <p className="text-[11px] text-amber-300">
+                    {deploymentsError}{' '}
+                    <button onClick={() => void fetchDeployments()} className="underline">Retry</button>
+                  </p>
+                )}
+                {!deploymentsError && deployments !== null && visibleDeployments.length === 0 && (
+                  <p className="text-[11px] text-[#8b949e]">
+                    {deployments.length === 0 ? 'No published apps yet.' : 'Nothing matches that search.'}
+                  </p>
+                )}
+
+                {!deploymentsError && visibleDeployments.length > 0 && (
+                  <div className="space-y-1.5 max-h-[520px] overflow-y-auto pr-1">
+                    {visibleDeployments.slice(0, 200).map((d) => {
+                      const view = appStatusView(d.status);
+                      return (
+                        <div key={d.workspaceId} className="rounded-xl bg-black/20 border border-white/5 px-3 py-2.5">
+                          <div className="flex items-start justify-between gap-3 flex-wrap">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${
+                                  view.tone === 'live' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                                  : view.tone === 'banned' ? 'bg-red-500/10 border-red-500/30 text-red-400'
+                                  : view.tone === 'warn' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                                  : 'bg-white/5 border-white/10 text-[#8b949e]'}`}>
+                                  {view.label}
+                                </span>
+                                <span className="text-[11px] font-mono text-white/80 truncate">{d.workspaceId}</span>
+                              </div>
+                              <p className="text-[10px] text-[#8b949e] mt-1 leading-relaxed">{view.meaning}</p>
+                              <div className="flex items-center gap-2.5 mt-1 flex-wrap">
+                                {d.url && (
+                                  <a href={d.url} target="_blank" rel="noreferrer"
+                                     className="inline-flex items-center gap-1 text-[10px] text-sky-400 hover:underline">
+                                    <ExternalLink size={10} /> Open the app
+                                  </a>
+                                )}
+                                {d.userId && (
+                                  <button onClick={() => void openAccount(d.userId as string)}
+                                          className="text-[10px] text-[#8b949e] hover:text-white underline">
+                                    Owner
+                                  </button>
+                                )}
+                                {typeof d.updatedAt === 'number' && d.updatedAt > 0 && (
+                                  <span className="text-[10px] text-[#484f58]">
+                                    {new Date(d.updatedAt).toLocaleDateString('en-IN', { dateStyle: 'medium' })}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {canUnpublish(d.status) && (
+                                <button
+                                  onClick={() => { setModerating({ workspaceId: d.workspaceId, action: 'unpublish' }); setModerateReason(''); }}
+                                  className="px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[10px] font-black uppercase tracking-wider text-white/70 hover:text-white"
+                                >
+                                  Unpublish
+                                </button>
+                              )}
+                              {canBan(d.status) && (
+                                <button
+                                  onClick={() => { setModerating({ workspaceId: d.workspaceId, action: 'ban' }); setModerateReason(''); }}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-600/10 hover:bg-red-600/20 border border-red-500/30 text-[10px] font-black uppercase tracking-wider text-red-300"
+                                >
+                                  <BanIcon size={11} /> Ban
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
               {/* ── THE SAFETY QUEUE ───────────────────────────────────────────────────────────
                   🔒 NOT a chat browser, and the difference is structural: a clean message writes no
                   document at all, so there is nothing else here to browse. Each row is something the

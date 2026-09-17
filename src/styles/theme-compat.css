@@ -193,6 +193,7 @@ html[data-theme] .bg-white\/10  { background-color: color-mix(in srgb, var(--tex
 html[data-theme] .bg-white\/15  { background-color: color-mix(in srgb, var(--text-primary) 15%, transparent); }
 html[data-theme] .bg-white\/20  { background-color: color-mix(in srgb, var(--text-primary) 20%, transparent); }
 html[data-theme] .bg-white\/25  { background-color: color-mix(in srgb, var(--text-primary) 25%, transparent); }
+html[data-theme] .bg-white\/30  { background-color: color-mix(in srgb, var(--text-primary) 30%, transparent); }
 html[data-theme] .bg-white\/80  { background-color: color-mix(in srgb, var(--text-primary) 80%, transparent); }
 html[data-theme] .bg-white\/90  { background-color: color-mix(in srgb, var(--text-primary) 90%, transparent); }
 
@@ -246,6 +247,7 @@ html[data-theme] .hover\:bg-white\/15:hover { background-color: color-mix(in srg
 html[data-theme] .hover\:bg-white\/2:hover { background-color: color-mix(in srgb, var(--text-primary) 2%, transparent); }
 html[data-theme] .hover\:bg-white\/20:hover { background-color: color-mix(in srgb, var(--text-primary) 20%, transparent); }
 html[data-theme] .hover\:bg-white\/25:hover { background-color: color-mix(in srgb, var(--text-primary) 25%, transparent); }
+html[data-theme] .hover\:bg-white\/30:hover { background-color: color-mix(in srgb, var(--text-primary) 30%, transparent); }
 html[data-theme] .hover\:bg-white\/3:hover { background-color: color-mix(in srgb, var(--text-primary) 3%, transparent); }
 html[data-theme] .hover\:bg-white\/5:hover { background-color: color-mix(in srgb, var(--text-primary) 5%, transparent); }
 html[data-theme] .hover\:bg-white\/8:hover { background-color: color-mix(in srgb, var(--text-primary) 8%, transparent); }
@@ -273,6 +275,8 @@ html[data-theme] .placeholder-white\/20::placeholder { color: color-mix(in srgb,
 html[data-theme] .placeholder-white\/25::placeholder { color: color-mix(in srgb, var(--text-primary) 25%, transparent); }
 html[data-theme] .placeholder-white\/30::placeholder { color: color-mix(in srgb, var(--text-primary) 30%, transparent); }
 html[data-theme] .ring-white\/10 { --tw-ring-color: color-mix(in srgb, var(--text-primary) 10%, transparent); }
+html[data-theme] .ring-white\/30 { --tw-ring-color: color-mix(in srgb, var(--text-primary) 30%, transparent); }
+html[data-theme] .focus\:ring-white\/30:focus { --tw-ring-color: color-mix(in srgb, var(--text-primary) 30%, transparent); }
 html[data-theme] .ring-white\/40 { --tw-ring-color: color-mix(in srgb, var(--text-primary) 40%, transparent); }
 html[data-theme] .via-white { --tw-gradient-via: var(--text-primary); }
 

@@ -351,3 +351,32 @@ export function describeLadder(rungs: readonly LadderRung[]): string {
 export function tierDisplayName(level: PowerLevel): 'Weak' | 'Normal' | 'Strong' {
   return level === 'weak' ? 'Weak' : level === 'off' ? 'Normal' : 'Strong';
 }
+
+/**
+ * Does the RETRY ladder actually begin on a different engine from the one that just failed? PURE.
+ *
+ * 🔴 WHY THIS IS A FUNCTION AND NOT A SENTENCE IN A TEMPLATE (autopsy f5351721, 2026-09-17). The
+ * empty-build retry told the user it was "rebuilding with a stronger model", told the admin report it
+ * had "retried the whole build on a stronger model (Sonnet in normal mode; Opus only in power mode)",
+ * and recorded the delivery as `sonnet`. In the build that produced this, **all 30 calls were
+ * `glm-5.3` and no Claude rung ever ran.** Three claims, one template, zero evidence.
+ *
+ * 🔑 THE CAUSE IS ARCHITECTURAL DRIFT, NOT A TYPO. Those sentences were written when a tier PINNED one
+ * model, so `resolveModel(tier)` really did decide what ran. Since the three-tier ladders (2026-09-14)
+ * the CHAIN decides, and the retry passes `heal: true` — so it runs `healLadder`, which drops only a
+ * leading cheap-flash rung. On Weak and Normal that genuinely starts a rung higher (KIMI instead of
+ * FlashX) and the claim was true; **Strong has no flash rung, so its retry restarts on the identical
+ * engine** and the claim was false. One template, two different truths, and nothing checked which.
+ *
+ * So the claim is DERIVED here instead: same comparison the retry itself makes, asked of the ladder.
+ * A caller that cannot honestly say "stronger" must not say it — see the narration at the call site.
+ */
+export function retryLeadsHigher(
+  level: PowerLevel | string | boolean | null | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const build = tierLadder(level, env).rungs;
+  const retry = healLadder(build);
+  if (build.length === 0 || retry.length === 0) return false;
+  return retry[0].provider !== build[0].provider || retry[0].model !== build[0].model;
+}

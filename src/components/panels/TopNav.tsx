@@ -37,6 +37,9 @@ export interface TopNavProps {
   undoCode: () => void;
   redoCode: () => void;
   user: FirebaseUser | null;
+  /** Open the Report a problem sheet on the conversation list — passed down to the notification bell,
+   *  so a "New message from NavBharatAI" is one tap rather than a set of directions. */
+  onOpenReports?: () => void;
   setShowAuth: (v: boolean) => void;
   auth: any;
   /** Enter Focus Mode — hides the header (this bar) + the mobile bottom nav so only the
@@ -56,7 +59,7 @@ export function TopNav({
   setIsMenuOpen, openTabs, activeView, setActiveView, toggleTab, closeTab,
   menuItems, hasGeneratedCode, canUndo, canRedo, undoCode, redoCode,
   user, setShowAuth, auth, onEnterFocusMode,
-  onOpenProfile, onOpenSettings, isAdmin,
+  onOpenProfile, onOpenSettings, isAdmin, onOpenReports,
 }: TopNavProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -254,7 +257,7 @@ export function TopNav({
           </button>
         )}
         {/* Admin → user messages (admin 2026-07-30): renders null when signed out. */}
-        <NotificationBell user={user} />
+        <NotificationBell user={user} {...(onOpenReports ? { onOpenReports } : {})} />
         {!user ? (
           <button
             onClick={() => setShowAuth(true)}

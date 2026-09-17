@@ -211,6 +211,21 @@ export default function App() {
   // iOS will not give a page motion access unasked). `reportOpen` lives at the app root so the sheet
   // is available on every screen rather than being re-implemented per surface.
   const [reportOpen, setReportOpen] = useState(false);
+  /**
+   * WHICH SCREEN THE REPORT SHEET OPENS ON, and how many replies are waiting.
+   *
+   * ADMIN 2026-09-17. The sheet now has two doors (file something new / read our replies), and two
+   * things need to reach it from out here: a tapped "New message from NavBharatAI" must land on the
+   * conversation list rather than the menu, and the SIDEBAR needs its unread dot without opening the
+   * sheet at all.
+   *
+   * 🔑 THE COUNT IS POLLED SEPARATELY AND DELIBERATELY SO. `/api/report/unread` answers with a single
+   * number; the alternative — reusing `/api/report/mine` — ships every conversation on a timer to
+   * decide whether to draw a six-pixel dot, which is how a feature nobody notices becomes the reason
+   * a phone on a slow connection stalls.
+   */
+  const [reportMode, setReportMode] = useState<'choose' | 'list'>('choose');
+  const [unreadReports, setUnreadReports] = useState(0);
   // Persist the chosen View Mode so it survives reloads (Settings → View Mode).
   useEffect(() => { try { localStorage.setItem('navbharat_device_mode', deviceMode); } catch { /* ignore */ } }, [deviceMode]);
 
@@ -1384,7 +1399,33 @@ export default function App() {
   // A code typed on the sign-in screen is applied here, once, the moment there is an account for it.
   // Returns a message either way; it can never throw into the screen the user just signed in to.
   useHeldReferralCode(user?.uid ?? null, referralProgress.refresh);
-  useShakeToReport(useCallback(() => setReportOpen(true), []));
+  useShakeToReport(useCallback(() => { setReportMode('choose'); setReportOpen(true); }, []));
+
+  /**
+   * Keep the sidebar's unread dot honest.
+   *
+   * Refreshed on sign-in, every three minutes, and once more whenever the sheet CLOSES — that last
+   * one is what makes the dot go out immediately after somebody reads a reply, instead of lingering
+   * for up to a poll interval on a menu they are still looking at.
+   *
+   * A failed poll leaves the previous number alone rather than clearing it: guessing zero would hide
+   * a real reply, and guessing anything else would invent one.
+   */
+  useEffect(() => {
+    let alive = true;
+    const pull = async () => {
+      if (!user) { if (alive) setUnreadReports(0); return; }
+      try {
+        const res = await fetch('/api/report/unread', { headers: await authedHeaders() });
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        if (alive && typeof data?.unread === 'number') setUnreadReports(data.unread);
+      } catch { /* leave the last known number — see above */ }
+    };
+    void pull();
+    const t = setInterval(() => void pull(), 180_000);
+    return () => { alive = false; clearInterval(t); };
+  }, [user, reportOpen]);
 
   // Persist ONLY the v5.0 view so a reload lands back in Pro v5.0 (see activeView init). Any other
   // view clears the flag, so leaving v5.0 and reloading correctly returns to Home.
@@ -2860,6 +2901,7 @@ export default function App() {
       {/* Focus Mode hides the header entirely — the floating corner button (below) or Esc bring it back. */}
       {!focusMode && (
         <TopNav
+          onOpenReports={() => { setReportMode('list'); setReportOpen(true); }}
           themeClasses={themeClasses}
           effectiveDeviceMode={effectiveDeviceMode}
           isSidebarCollapsed={isSidebarCollapsed}
@@ -2890,7 +2932,8 @@ export default function App() {
       <div className={`flex flex-1 w-full min-h-0`}>
 
       <SidebarNav
-        onReportProblem={() => setReportOpen(true)}
+        onReportProblem={() => { setReportMode('choose'); setReportOpen(true); }}
+        unreadReports={unreadReports}
         themeClasses={themeClasses}
         effectiveDeviceMode={effectiveDeviceMode}
         isSidebarCollapsed={isSidebarCollapsed}
@@ -3057,7 +3100,7 @@ export default function App() {
 
           {/* Reachable from every screen: shake, or the sidebar's "Report a problem". It portals to
               document.body, so being rendered here costs nothing in layout. */}
-          <ReportSheet open={reportOpen} onClose={() => setReportOpen(false)} view={activeView} />
+          <ReportSheet open={reportOpen} onClose={() => setReportOpen(false)} view={activeView} initialMode={reportMode} />
 
           {/* WE ARE STILL TESTING — say so once per app open, on the home screen, and hand over the
               way to report rather than only asking for it. Rendered beside the sheet it opens, so
@@ -3065,7 +3108,7 @@ export default function App() {
           {shouldShowTestingNotice({ activeView, alreadyShown: !testingNoticeOpen }) && (
             <TestingNotice
               theme={theme}
-              onReport={() => setReportOpen(true)}
+              onReport={() => { setReportMode('choose'); setReportOpen(true); }}
               onDone={() => setTestingNoticeOpen(false)}
               // Empty everywhere but a signed-in Android app with something unclaimed, so the notice
               // behaves exactly as it did before for everyone else. See lib/referralChecklist.ts.

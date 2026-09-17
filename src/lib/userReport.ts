@@ -222,6 +222,24 @@ export interface UserReport {
   handledAt?: number;
   /** The conversation on this report, oldest first. Absent on every report filed before replies existed. */
   messages?: ReportMessage[];
+  /**
+   * When the REPORTER last opened this conversation. The whole unread system rests on this one field.
+   *
+   * 🔴 WHY IT HAD TO EXIST, and why the old badge was not it (admin 2026-09-17). The sheet showed a
+   * green "Reply" chip whenever `messages.filter(m => m.from === 'admin').length > 0` — which says
+   * *"a reply arrived at some point"*, never *"a reply is NEW"*. It could not clear, because nothing
+   * anywhere recorded that the person had read anything. A badge that never goes out is not a badge;
+   * it is decoration, and people stop seeing it within a day.
+   *
+   * 🔒 IT LIVES ON THE SERVER, NOT IN THE BROWSER, and that is a decision rather than a default. Read
+   * state kept in `localStorage` comes back empty in a private window, on a second device, and after
+   * clearing site data — so every old conversation would light up as unread again. For a thing that
+   * imitates a messaging inbox, that is the one failure people do not forgive.
+   *
+   * Absent means "never opened since this shipped". See `hasUnreadAdminReply` for why that is
+   * deliberately NOT treated as unread.
+   */
+  reporterReadAt?: number;
 }
 
 /** Enough to be actionable, short enough to store. */
@@ -319,4 +337,77 @@ export function reportHeadline(r: Pick<UserReport, 'target' | 'message'> & { pro
   const what = r.target.kind === 'app' ? 'App' : r.target.kind === 'user' ? 'User' : (kindLabel || 'Problem');
   const first = r.message.replace(/\s+/g, ' ').trim().slice(0, 80);
   return `${what} · ${first}${r.message.length > 80 ? '…' : ''}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// THE UNREAD RULE — one place, because three screens ask the same question
+//
+// The dot appears in three places at once (the sidebar entry, the "Old reports" choice, and the one
+// conversation), and they must never disagree: a dot on the sidebar that leads to a list with no dot
+// is worse than no dot at all, because the person taps, finds nothing, and learns to ignore it.
+// Every one of them is computed from the functions below and from nothing else.
+//
+// PURE — no clock of their own, no I/O. `at` values come from the stored record.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** When NavBharatAI last wrote on this report, or `null` if it never has. */
+export function lastAdminMessageAt(messages: readonly ReportMessage[] | undefined): number | null {
+  let latest: number | null = null;
+  for (const m of messages ?? []) {
+    if (m?.from !== 'admin') continue;
+    const at = typeof m.at === 'number' && Number.isFinite(m.at) ? m.at : null;
+    if (at !== null && (latest === null || at > latest)) latest = at;
+  }
+  return latest;
+}
+
+/** The most recent activity on a report — any message, or the report itself if none. Used for ordering. */
+export function lastActivityAt(r: Pick<UserReport, 'at' | 'messages'>): number {
+  let latest = typeof r.at === 'number' && Number.isFinite(r.at) ? r.at : 0;
+  for (const m of r.messages ?? []) {
+    const at = typeof m?.at === 'number' && Number.isFinite(m.at) ? m.at : 0;
+    if (at > latest) latest = at;
+  }
+  return latest;
+}
+
+/**
+ * Is there a NavBharatAI reply this person has not seen?
+ *
+ * ⚠️ A REPORT WITH NO `reporterReadAt` IS TREATED AS **READ**, AND THAT IS THE CAREFUL CHOICE.
+ * Every conversation that existed before this shipped has no read stamp, so the other reading —
+ * "never opened ⇒ unread" — would light up the sidebar for every past user on the day it deployed,
+ * including for replies they read months ago in the old sheet. The first dot somebody ever sees would
+ * then be a false one, which is exactly how a notification dot stops meaning anything.
+ *
+ * The cost is bounded and self-correcting: at worst one genuinely-unread old reply shows no dot until
+ * the next reply arrives, and from that moment every conversation carries a real stamp.
+ */
+export function hasUnreadAdminReply(r: Pick<UserReport, 'messages' | 'reporterReadAt'>): boolean {
+  const last = lastAdminMessageAt(r.messages);
+  if (last === null) return false;                       // nothing from us ⇒ nothing to read
+  const read = typeof r.reporterReadAt === 'number' && Number.isFinite(r.reporterReadAt) ? r.reporterReadAt : null;
+  if (read === null) return false;                       // legacy: never opened ⇒ not "new" (see above)
+  return last > read;
+}
+
+/** How many of these conversations carry an unread reply — the number behind every dot. */
+export function unreadReportCount(reports: readonly Pick<UserReport, 'messages' | 'reporterReadAt'>[]): number {
+  return reports.reduce((n, r) => n + (hasUnreadAdminReply(r) ? 1 : 0), 0);
+}
+
+/**
+ * The inbox order: most recently active first, exactly as a messaging app behaves.
+ *
+ * ADMIN 2026-09-17, verbatim: *"sabse upar woh chat ho, jis chat me admin ka latest reply hai"*. The
+ * list used to be ordered by when the report was FILED, so a fresh reply on an old complaint stayed
+ * buried under newer reports nobody was waiting on — the person taps a notification and lands on a
+ * list whose top row is not the thing the notification was about.
+ *
+ * Sorting by last ACTIVITY rather than by last ADMIN reply is deliberate: a conversation the user
+ * themselves just added to is also the one they are thinking about, and the two rules agree on the
+ * case the admin named. Returns a new array; the input is not mutated.
+ */
+export function sortReportsByActivity<T extends Pick<UserReport, 'at' | 'messages'>>(reports: readonly T[]): T[] {
+  return [...reports].sort((a, b) => lastActivityAt(b) - lastActivityAt(a));
 }

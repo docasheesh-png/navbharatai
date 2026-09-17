@@ -58591,3 +58591,96 @@ Nothing is measured yet — this makes measurement possible. The data accrues fr
 older reports carry no `requestAnalysis` and read as unavailable rather than being back-filled from a
 truncated prompt. **The 50–100 build analysis is deliberately NOT started**, per the admin, and no
 GLM/Kimi routing change is made.
+
+---
+
+## 2026-09-17 — Report a problem becomes a real inbox: two doors, a conversation, and three dots that agree
+
+**Admin asked for it in their own words:** *"report a problem par click kare, to popup me 2 option
+dikhe, 1. report new problem, 2- old report … old report yeh inbox ke jaisa kam kare … ek dam social
+media message ke tarah"*, with a green dot on the sidebar entry, on "Old reports" and on the
+conversation, all three clearing once the latest message is read. Then a correction the same day:
+the notification should say only *"New message From Navbharatai"*, and **tapping it** should open the
+reports folder with the newest reply at the top.
+
+### First, the question they actually asked — answered from code, not memory
+
+*"kya admin ka message user ko dikhta hai?"* **Yes, in two places, and it already did.**
+`POST /api/admin/reports/:id/reply` saved a notification, and `ReportSheet` already listed the
+person's own reports with the full thread and a reply box. **The backend was complete.** What was
+missing was not a feature but a SHAPE — and one thing that genuinely did not exist.
+
+### 🔴 The one thing that did not exist: any record of having read anything
+
+The sheet showed a green **"Reply"** chip whenever `messages.filter(m => m.from === 'admin').length > 0`.
+That says *"a reply arrived at some point"*, never *"a reply is NEW"* — so **it could not clear**.
+Nothing anywhere recorded that the person had read anything. A badge that never goes out is not a
+badge; it is decoration, and people stop seeing it within a day.
+
+So `UserReport.reporterReadAt` is the new field the whole system rests on, and
+`src/lib/userReport.ts` gained the one rule every screen reads: `lastAdminMessageAt`,
+`hasUnreadAdminReply`, `unreadReportCount`, `lastActivityAt`, `sortReportsByActivity` — all pure.
+
+🔒 **THE STAMP LIVES ON THE SERVER, NOT IN THE BROWSER.** Read state in `localStorage` comes back
+empty in a private window, on a second device and after clearing site data — so every old
+conversation would light up as unread again. For something imitating a messaging inbox that is the
+one failure people do not forgive.
+
+⚠️ **A REPORT WITH NO STAMP IS TREATED AS *READ*, AND THAT IS THE CAREFUL CHOICE.** Every
+conversation predating this has no stamp, so "never opened ⇒ unread" would light up the sidebar for
+every past user on deploy day — including for replies they read months ago. **The first dot anybody
+ever saw would be a false one**, which is exactly how a dot stops meaning anything. The cost is
+bounded and self-correcting: at worst one genuinely-unread old reply shows no dot until the next
+reply arrives, and from that moment every conversation carries a real stamp.
+
+### The three dots cannot disagree, by construction
+
+Sidebar entry · the "Old reports" door · the one conversation — all three computed from
+`hasUnreadAdminReply` / `unreadReportCount` and from nothing else. A dot on the sidebar that leads to
+a list with nothing marked is worse than no dot: the person taps, finds nothing, and learns to ignore
+it. The sidebar's is also spelled out ("2 new") and announced to a screen reader — colour alone says
+nothing to somebody who cannot see it.
+
+**The dot clears on OPEN, never on FETCH.** Clearing it when the list loads would let somebody who
+glances at the menu and taps away silently "read" a reply they never saw, and that reply is then
+invisible for ever. Marking is optimistic locally and written in the background: a failed write means
+the dot returns next time, which is the safe direction — it shows a message again rather than hiding
+one. The stamp uses the **server's** clock (a fast device would otherwise stamp the future and
+silence its own dot for ever) and never moves backwards (two open tabs must not un-read a thread).
+
+### The notification is now one tap, not three clauses of directions
+
+`'New message from NavBharatAI'` + `action: 'open-reports'`. 🔒 **The action is a NAME from a closed
+set, never a stored URL** — a free-form link on a broadcast record would turn the admin's message form
+into a way to send every user a tappable address. An unrecognised value renders as a plain message,
+and a row becomes a button only when the action is one this build can perform.
+
+The list is ordered by **last activity**, not by filing date (`sortReportsByActivity`), so the row the
+notification was about is the row on top — which is the whole point of taking somebody there.
+
+### New routes
+
+`GET /api/report/unread` (a single number for the sidebar — polling whole conversations to decide
+whether to draw a six-pixel dot is how an unnoticed feature becomes the reason a slow phone stalls)
+and `POST /api/report/:id/read`. Both scoped to the verified uid, never a parameter; ownership checked
+**inside** the transaction against the stored document; "not yours" and "does not exist" give the same
+answer, as every other report route does.
+
+### ⚠️ Four existing tests failed, and one was a REAL bug I had introduced
+
+- **`mobileScrollGeometry`** — I wrote `max-h-[60vh]` with no `dvh` companion. That is the
+  large-viewport trap this repo has been bitten by twice; the rule is repo-wide precisely because of
+  that. **A real defect, fixed in the code**, not in the test.
+- **`adminUserMessaging`** pinned `'<NotificationBell user={user} />'` verbatim, **`reportConversation`**
+  pinned the old badge expression, **`testingNoticeWiring`** pinned a handler's exact body. All three
+  were transcripts rather than assertions about behaviour; each was re-anchored on what it actually
+  protects, with the reason recorded in place.
+- 🔎 And one of them was **already passing vacuously**: `indexOf('Your earlier reports')` returned −1
+  after that string was removed, and −1 is less than everything, so the layout assertion protected
+  nothing. Replaced with a real one.
+
+**Gate, run last on the final state:** typecheck · typecheck:server · noUnusedImports · build ·
+test:bundle · boot:check · `vitest run` → **1707 files, 24,015 passed, 1 skipped, 0 FAIL.**
+New: `tests/reportUnread.test.ts` (19, the arithmetic) and `tests/reportInbox.test.ts` (27, the
+wiring and the security properties). `AppKnowledgeBase` updated in the same change, as the standing
+rule requires.

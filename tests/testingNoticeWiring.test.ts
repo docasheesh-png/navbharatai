@@ -33,7 +33,14 @@ describe('it is actually rendered, and only where it should be', () => {
 
 describe('the button opens the REAL report sheet', () => {
   it('App wires onReport to the same state the sidebar and the shake gesture open', () => {
-    expect(app).toMatch(/onReport=\{\(\)\s*=>\s*setReportOpen\(true\)\}/);
+    // ⚠️ THE HANDLER GAINED A LINE, AND THE ASSERTION HAD TO STOP BEING A TRANSCRIPT (2026-09-17).
+    // It matched the handler's exact body, so adding `setReportMode('choose')` — which opens the
+    // sheet on its new chooser rather than wherever it was left — failed a test that has no opinion
+    // about which screen it opens on. What it PROTECTS is unchanged and is asserted below: this
+    // button opens the same `reportOpen` state the sidebar and the shake gesture use, not a second
+    // sheet of its own. The mode is checked too, so the notice cannot silently land somewhere else.
+    expect(app).toMatch(/onReport=\{\(\)\s*=>\s*\{[^}]*setReportOpen\(true\)/);
+    expect(app).toMatch(/onReport=\{\(\)\s*=>\s*\{\s*setReportMode\('choose'\)/);
     // …and that state is the one ReportSheet actually reads.
     expect(app).toMatch(/<ReportSheet open=\{reportOpen\}/);
   });

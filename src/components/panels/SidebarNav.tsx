@@ -42,6 +42,15 @@ export interface SidebarNavProps {
   setErrorContext: (v: any) => void;
   /** Open the app-wide "Report a problem" sheet (the same one a phone shake opens). */
   onReportProblem?: () => void;
+  /**
+   * How many of this person's reports carry a NavBharatAI reply they have not read yet.
+   *
+   * 🟢 THE FIRST OF THREE DOTS, and the only one visible without opening anything. It is a COUNT
+   * rather than a boolean so the menu can say how many — and so the number comes from the same
+   * `unreadReportCount` the sheet uses, instead of each screen deciding for itself what "new" means.
+   * Zero (or absent) draws nothing at all: a dot that is ever wrong is a dot people stop believing.
+   */
+  unreadReports?: number;
   /** Reopen a past chat (routes v5.0 → Pro v5.0, others → their own surface). Unused by this
    *  component (the "Recent Chats" menu block was removed 2026-07-01, admin request) — kept on the
    *  props interface only so App.tsx's existing call site doesn't need touching. */
@@ -111,6 +120,7 @@ export function SidebarNav({
   activeView, toggleTab, setActiveView, hasGeneratedCode, user, setShowAuth,
   addLog, theme, setTheme, isThemePickerOpen, setIsThemePickerOpen,
   setErrorContext, onReportProblem,
+  unreadReports,
 }: SidebarNavProps) {
   // Git lives in App Settings now (admin 2026-08-01: "Git option sidebar se App Settings me move karo"),
   // so it is excluded from the rail/drawer here. It stays in `menuItems` so its header tab + view still
@@ -282,8 +292,28 @@ export function SidebarNav({
                       onClick={() => { onReportProblem(); setIsMenuOpen(false); }}
                       className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all group border border-white/10 bg-white/[0.03] text-[#8b949e] hover:text-white hover:bg-white/[0.06]"
                     >
-                      <Flag className="w-4.5 h-4.5 group-hover:scale-110 transition-transform" />
-                      <span className="text-sm font-bold tracking-tight">Report a problem</span>
+                      <span className="relative shrink-0">
+                        <Flag className="w-4.5 h-4.5 group-hover:scale-110 transition-transform" />
+                        {(unreadReports ?? 0) > 0 && (
+                          <span
+                            aria-hidden
+                            className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-[#0d1117]"
+                          />
+                        )}
+                      </span>
+                      <span className="text-sm font-bold tracking-tight flex-1 text-left">Report a problem</span>
+                      {/* The count is spelled out beside the dot, and read out for a screen reader —
+                          a coloured dot alone says nothing to somebody who cannot see it. */}
+                      {(unreadReports ?? 0) > 0 && (
+                        <span className="shrink-0 text-[10px] font-black uppercase tracking-widest text-emerald-300">
+                          {unreadReports} new
+                        </span>
+                      )}
+                      {(unreadReports ?? 0) > 0 && (
+                        <span className="sr-only">
+                          {unreadReports} unread {unreadReports === 1 ? 'reply' : 'replies'} from NavBharatAI
+                        </span>
+                      )}
                     </button>
                   )}
 

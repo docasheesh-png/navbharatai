@@ -21,12 +21,34 @@ export type NotificationTarget =
   | { type: 'all' }
   | { type: 'user'; userId?: string | null; email?: string | null };
 
+/**
+ * What tapping a notification should DO, when it should do anything.
+ *
+ * ⚠️ A CLOSED SET OF OUR OWN NAMES, NEVER A URL. A free-form link stored on a record and followed by
+ * the client is an open-redirect waiting to be written: the admin broadcast form would become a way
+ * to send every user a tappable address. A name the client already knows how to handle cannot point
+ * anywhere we did not build.
+ *
+ * `open-reports` opens the Report a problem sheet on the conversation list.
+ */
+export type NotificationAction = 'open-reports';
+
+export const NOTIFICATION_ACTIONS: readonly NotificationAction[] = ['open-reports'];
+
+/** Accept only an action this build knows. Anything else becomes "no action" — a plain message. */
+export function readNotificationAction(raw: unknown): NotificationAction | undefined {
+  const v = typeof raw === 'string' ? raw.trim() : '';
+  return (NOTIFICATION_ACTIONS as readonly string[]).includes(v) ? (v as NotificationAction) : undefined;
+}
+
 export interface AdminNotification {
   id: string;
   message: string;
   target: NotificationTarget;
   createdAt: number;
   createdBy: string;
+  /** Where tapping it goes. Absent on every ordinary broadcast, which stays a plain message. */
+  action?: NotificationAction;
 }
 
 /**
@@ -75,15 +97,19 @@ function getDb(): admin.firestore.Firestore | null {
 }
 
 /** Persist one notification. Best-effort; returns the stored object (or null under VITEST/failure). */
-export async function saveNotification(input: { message: string; target: NotificationTarget; createdBy?: string }): Promise<AdminNotification | null> {
+export async function saveNotification(input: { message: string; target: NotificationTarget; createdBy?: string; action?: NotificationAction }): Promise<AdminNotification | null> {
   const message = (input.message ?? '').trim();
   if (!message) return null;
+  const action = readNotificationAction(input.action);
   const note: AdminNotification = {
     id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     message,
     target: input.target,
     createdAt: Date.now(),
     createdBy: input.createdBy || 'admin',
+    // Omitted rather than stored as undefined: Firestore rejects an undefined field value, and a
+    // notification that fails to save is a reply the person is never told about.
+    ...(action ? { action } : {}),
   };
   if (process.env.VITEST) return note;
   const db = getDb();

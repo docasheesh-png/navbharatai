@@ -134,6 +134,22 @@ export interface AdminBuildReportMeta {
   rootCause: string | null;
   summary: string | null;
   /**
+   * HOW THE BUILD'S OWN ETA HELD UP, projected into the meta so the admin list can count estimate
+   * accuracy without fetching every full report — the same reasoning as `healCount` below.
+   *
+   * 🔴 IT IS HERE BECAUSE THIS IS THE SURFACE THE ADMIN ACTUALLY READS. Both halves of the fact — the
+   * promise made at t=0 and the two timestamps — have always been in the full record, and were never
+   * put side by side anywhere: "ETA ~2–4 min" and a 16.7-minute build, in one document, unremarked.
+   *
+   * `undefined` means this record predates the field or the turn showed no ETA — never "it was
+   * accurate". A legacy row must be excluded from any rate, not counted as a hit.
+   */
+  etaRatio?: number;
+  /** True when the build landed inside the band the user was shown. Pairs with `etaRatio`. */
+  etaWithinBand?: boolean;
+  /** False when no figure was shown to the user (unevidenced ⇒ they saw a phase, not a promise). */
+  etaEvidenced?: boolean;
+  /**
    * FIRST-PASS QUALITY (ROADMAP #1 Phase 0.2) — how many defects the engine had to repair in its OWN
    * output, and how many it left unresolved. Projected into the meta at write time so the admin list
    * can compute the clean-first-pass rate WITHOUT fetching every full report.
@@ -349,6 +365,11 @@ export function buildAdminReportRecord(
       billedUsd: typeof trimmed.billing?.billedUsd === 'number' ? trimmed.billing.billedUsd : null,
       buildMs,
       rootCause: cap(trimmed.rootCause, 400),
+      // Guarded field-by-field rather than spread: a legacy or malformed record must leave these
+      // undefined ("not known"), never land a NaN that a later average would silently swallow.
+      etaRatio: Number.isFinite(Number(trimmed.etaAccuracy?.ratio)) ? Number(trimmed.etaAccuracy?.ratio) : undefined,
+      etaWithinBand: typeof trimmed.etaAccuracy?.withinBand === 'boolean' ? trimmed.etaAccuracy.withinBand : undefined,
+      etaEvidenced: typeof trimmed.etaAccuracy?.evidenced === 'boolean' ? trimmed.etaAccuracy.evidenced : undefined,
       // Already sanitised at the route boundary; sanitised again here so a direct caller (a test, a
       // future path) cannot write raw control characters into the admin table.
       userNote: sanitizeUserNote(ctx.userNote),

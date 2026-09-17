@@ -62504,6 +62504,66 @@ today — and was rewritten to anchor on the block's closing `catch`.
 3. 🥵 Sandbox 87% idle across 26.6 minutes; 115 s to the first model call — unchanged here.
 ---
 
+## 2026-09-17 — THE BUILD'S ETA WAS ASSERTED AT t=0 AND NEVER RECONCILED (open root cause #6, closed)
+
+**Branch `claude/the-eta-is-measured-against-the-clock`. Purely additive: 144 insertions, 0 deletions.**
+
+### What was wrong
+
+A build report carried `ETA ~2–4 min` and, in the **same document**, a `startedAt` and an `endedAt`
+**16.7 minutes apart**. Both facts were recorded. Nothing ever put them side by side.
+
+So every autopsy that wanted to know whether the estimate holds did the arithmetic by hand, and the
+admin's panels could not count ETA accuracy at all — which is the one number that says whether the
+ETA work of **2026-08-11** (learn from real past builds) and **2026-09-14** (show a number only where
+it is measured) actually landed. This is rule 5's honesty step applied to our own promise: the report
+already knew, and did not say.
+
+### The fix
+
+- **`etaAccuracy(promise, startedAt, endedAt)`** — a pure reconciler. Returns the ratio, whether the
+  build landed inside the band the user was shown, and one honest sentence.
+- **`setEtaPromise()`** — one call site, beside the `ETA_BASIS` record that already computes the
+  estimate. The numbers are stored **structured**, not parsed back out of that line's prose: reading
+  our own sentences to recover facts we had in hand is the mistake `buildFailureCategory.ts`
+  documents at length (*"`listAllDiagnostics` projects `rootCause` and drops the issue codes"*).
+- **Derived at serialization**, in `report()`, so **no ending path can forget it** — the same
+  reasoning `endedWithoutOutcome` already uses one level down. `report()` stays pure and safe to call
+  repeatedly mid-build.
+- Surfaced as `ETA      : …` in the `.txt` report, on the line directly under `Duration`, and as
+  `etaRatio` / `etaWithinBand` / `etaEvidenced` in the admin-inbox meta — the surface the admin
+  actually reads, projected field-by-field so a legacy row stays `undefined` ("not known") rather
+  than landing a `NaN` a later average would silently swallow.
+
+### ⚠️ Two decisions that are the whole reason it is safe
+
+1. **It is a MEASUREMENT, not a defect, and is deliberately NOT recorded as an issue.** A missed
+   estimate is no fault of the user's app — and this repo has repeatedly watched a measurement
+   recorded as a warning become the headline `rootCause` of a SUCCESSFUL build (`POST_ANSWER_TIMING`
+   and `TIME_TO_FIRST_CALL` are both in `NEVER_ROOT_CAUSE` for exactly that). A derived field keeps
+   it out of `counts`, out of the cause pick, and out of the user's bill.
+2. **An UNEVIDENCED estimate is said to be one.** Since 2026-09-14 a build with no history shows the
+   user a PHASE, not a number, so scoring its hidden midpoint as a broken promise would invent a
+   promise nobody made. The ratio is still computed — it is what teaches the estimator — but the line
+   says plainly that no figure was shown.
+
+### Tests — `tests/theEtaIsMeasuredAgainstTheClock.test.ts` (18 cases)
+
+Proven by reversion: **16 of 18 fail** with the three source files reverted, all pass restored.
+Includes the reported case verbatim (`~2–4 min` vs 16.7 min → 5.6×), the inside-band and
+faster-than-band cases, seven no-claim cases (no estimate, zero-length build, ended-before-started,
+NaN), a purity check on repeated `report()` calls, and a reversion guard reading CODE with comments
+stripped that pins the structured hand-over and asserts nothing regexes our own ETA sentence.
+
+⚠️ **My first draft of the class tests used a FROZEN clock** (`now: () => 1`), which makes
+`startedAt === endedAt` and correctly yields **no accuracy at all** — so the tests measured nothing
+and the code was right. Fixed with a moving clock; recorded because it is the same "a test that
+cannot fail is not a test" lesson this repo keeps paying for.
+
+**Full CI gate green on the final state of THIS branch** (re-run after the change was re-anchored off
+PR #3025's content and moved onto a fresh branch from `main`): `typecheck` · `noUnusedImports` ·
+`typecheck:server` · `vitest run` (**24,621 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` ·
+`boot:check` · `deps:server-gate`.
 ## 2026-09-17 — A SUCCESSFUL BUILD'S VERDICT CONTRADICTED ITS OWN COUNTS, AND NAMED A CAUSE FOR A FAILURE THAT NEVER HAPPENED (autopsy fdd59ef8, second half)
 
 **Branch `claude/a-verdict-that-contradicts-its-own-counts`. Root cause fixed in

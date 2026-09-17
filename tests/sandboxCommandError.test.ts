@@ -101,8 +101,16 @@ describe('the SWEEP — no call site may re-invent the lossy version (rule 3)', 
      * 10 → 11 on 2026-08-15: the transient-fs-race install retry (`_npmInstall` step 2.5, from the
      * Mitrify ENOTEMPTY report a876b7bb) runs `npm install` once more — through the shared helper,
      * because if the RETRY also fails, its log is the only proof the failure was not transient after all.
+     *
+     * 11 → 14 on 2026-09-17: the three BROWSER call sites in the AgentV3 actuator finally joined the
+     * helper they sit beside. This file's own header describes their old shape exactly — `browseUrl`
+     * and the element scan carried `2>/dev/null` AND `.catch(() => null)`, so a browser that could not
+     * launch left no trace at all, and `screenshot`'s crafted "Screenshot failed: <what the browser
+     * said>" was unreachable because the SDK's bare rejection escaped first. The class had been fixed
+     * here for the npm-install sites and the browser ones were never hunted — which is the whole point
+     * of this tripwire, caught by it on the way in rather than by a report six weeks later.
      */
     const total = FILES.reduce((n, f) => n + (read(f).match(/commandFailureResult\(err\)/g) || []).length, 0);
-    expect(total).toBe(11);
+    expect(total).toBe(14);
   });
 });

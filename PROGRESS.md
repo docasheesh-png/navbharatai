@@ -62025,3 +62025,89 @@ no guard: it teaches the next reader that the thing it measures is noisy. Same l
    killed child left behind.
 6. **The build's ETA is asserted at t=0 and never reconciled** — *"ETA ~2–4 min"* on a 16.7-minute
    build, in the same document that carries both timestamps.
+
+## 2026-09-17 — Autopsy `e706e068`, second half: the three doors that were still open after #3009
+
+**The admin's instruction, verbatim:** *"aapko teeno a b c karne hai! aur itna strong solve karo ki app
+banne ke bad apne aap tute na. ek bar app ban jati hai, preview chalta bhi hai. par achanak se build
+fails aur bill = 0₹ isko specialy fix karna hai."* PR #3009 (another session, merged the same morning)
+had already closed one door — a "the build will fail" prediction is superseded by `PROD_BUILD_OK`, and
+one defect is counted once. Re-checked against `main` before starting (safeguard #6): even with #3009,
+the School ERP would STILL have been flipped, because its third blocker, *"2 fake/incomplete code
+issue(s)"*, is not a build prediction and stood on its own. Three fixes, three modules, three tests.
+
+### A · The project planner's clock, and the silence when it ran out
+
+`AGENTV3_PROJECT_MODE` **was working** — the report's `🏗️ decomposing…` line at 10:18:30 is the
+allowlist gate AND `detectMegaProject` both firing. What nobody could see: `ppGenerate` raced the
+model against a hard-coded **60 s** timer, the outer `catch` swallowed the rejection, and
+`recordLlmCall` sat AFTER the race, so no failed call reached the ledger. The user was promised a
+module-by-module build and the promise trailed off.
+
+- **`projectPlannerBudget.ts`** — the outer timeout is now the INNER call's own bound plus slack
+  (stream hard cap 300 s when build calls are streamed, the 150 s floor ceiling when not; env
+  override `AGENTV3_PROJECT_PLANNER_TIMEOUT_MS`, clamped 30–600 s, malformed ignored). A backstop,
+  never a second tighter clock — the same reasoning `OpenAiToolRunner` records for its SDK client.
+  Tier-awareness is inherited: the ladders differ, a legitimate call's length does not.
+- A failed planner call is recorded `ok: false` on the model-call ledger; the outer catch records
+  **`PROJECT_MODE_FAILED`** (process-only — never counted against the app); and if the decomposition
+  had been ANNOUNCED, the user is told it was withdrawn (`PROJECT_MODE_FALLBACK_NARRATION`).
+
+### B · The batch repair wrote whatever path came back — and that is where the strays came from
+
+The three root files (`App.tsx`, `hooks/useStudents.ts`, `types/student.ts`) are timestamped inside
+the Endgame batch-repair window and appear in none of the model's tool calls. The batch call was
+handed `src/App.tsx` and returned its content as `App.tsx`; `runEndgameRepair` wrote it. Nothing
+imported the copies (so `npm run build` and the browser never saw them), while the readiness gate
+read the whole tree and found an unresolved import and placeholder data IN THE STRAYS.
+
+- **`resolveRepairTarget`** (EndgameRepair.ts): a returned path is written only if it is an existing
+  file, names exactly ONE existing file by its tail (remapped — the dropped-prefix case), or is a
+  module a TS2307 error says the app already imports (`referencedMissingModules`). Anything else is
+  refused, counted (`llmFilesRejected`) and named in the log. Refusing is the safe direction.
+- This is the 50/50 upstream half: with the strays never written, the feature-heal that spent
+  3 minutes and 22 KIMI calls "fixing" the dead `hooks/useStudents.ts` has nothing to fix.
+
+### C/D · THE CLASS, closed at the room rather than at a door — `runProvenApp.ts`
+
+Every earlier fix (isAppFinding, buildFailurePrediction, recordReadinessRecovery) closed the one
+static finding that had flipped a rendering app that week. `runProvenApp` asks the question all of
+them were approximations of: **has this app already been proven to RUN, by evidence a static finding
+cannot outrank?** A real-browser render (`shot.source === 'browser'` only — a curl shell proves
+nothing, the Green Freeze rule), the production build not FAILED (`not-run` neither helps nor hurts:
+the render alone is then the evidence, which is the admin's 4efab9d7 rule verbatim), no runtime check
+failed (preview / pages / journey), no deterministic runtime-crash proof, not a refusal, not stopped.
+
+**All THREE late flips of `ok → false` in the route now ask it first**: the release gate's RED
+(`OUTCOME_RELEASE_GATE_RED`), the final syntax re-verify (`OUTCOME_SYNTAX_ERROR`), and the reviewer's
+unresolved [CRITICAL]s (`OUTCOME_REVIEW_CRITICAL`). Held ⇒ `VERDICT_HELD_BY_RUN` (process-only) names
+both sides; the findings stay on the timeline, the health card and the gate's own RED sentence. What is
+refused is only "not built / not charged" about an app on the screen. The dukaan case (2026-08-12:
+missing modules AND failing page routes) is still flipped — pages `failed` vetoes — and a test says so.
+
+⚠️ **Stated plainly:** the release gate's headline still says *"N build-breaking blocker(s)"* on a held
+build; that wording lives in `releaseGate.ts`, which PR #3018 is mid-flight in, so it is left for that
+file's next change rather than raced (CLAUDE.md, concurrent sessions rule 4). The VERDICT line beside it
+explains the contradiction.
+
+### Tests — all proven by reversion
+
+| file | cases | reverted → fails |
+|---|---|---|
+| `tests/endgameRepairNeverCreatesStrayFiles.test.ts` | 9 (the real three strays, replayed) | the target guard → 1 |
+| `tests/projectPlannerBudget.test.ts` | 13 | the 60 s literal restored → 1 |
+| `tests/runProvenApp.test.ts` | 18 (the real 10:44:08 evidence) | the gate hold → 1; the prod-build veto → 1 |
+
+The route guards parse the CODE (comments stripped, bounded by real anchors). My first draft of one
+used a 1,200-character window and failed on its own — the byte-window trap this file records four times
+today — and was rewritten to anchor on the block's closing `catch`.
+
+### Still open (rule 6)
+
+1. 🔴 **No reachability concept anywhere in the post-build suite.** Readiness, the fake-code scan and
+   the feature heal all read the WHOLE tree; a file the entry never imports is judged, healed and paid
+   for exactly like the app. Fix B stops one source of such files; it does not teach the gates to ask
+   "does the app load this?". The import graph already exists in `ArchitectureAnalysis` — a transitive
+   closure from `index.html → src/main.tsx` is the missing subsystem.
+2. `releaseGate.ts` wording on a held build (above).
+3. 🥵 Sandbox 87% idle across 26.6 minutes; 115 s to the first model call — unchanged here.

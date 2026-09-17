@@ -150,7 +150,7 @@ export { reviewEdit, formatReviewResult } from './PostEditReviewer';
 export type { PostEditReview } from './PostEditReviewer';
 export { reviewBuild, formatReview } from './ReviewerAgent';
 export type { ReviewResult, ReviewIssue } from './ReviewerAgent';
-export { saveWorkspaceMemory, loadWorkspaceMemory, restoreWorkspaceMemory } from './FirestoreWorkspaceMemoryStore';
+export { saveWorkspaceMemory, saveWorkspaceMemoryFor, loadWorkspaceMemory, loadWorkspaceMemoryResult, restoreWorkspaceMemory } from './FirestoreWorkspaceMemoryStore';
 export { getEmbeddingStore, _clearEmbeddingStores } from './EmbeddingSearch';
 export type { EmbeddingEntry } from './EmbeddingSearch';
 export { analyzeWithAST } from './ASTAnalyzer';

@@ -17546,6 +17546,17 @@ async function noteBuildOutcome(
               // marking it auto-resolved would file it away as handled when nothing has handled it.
               autoResolved: verdict.code !== 'PROD_BUILD_FAILED',
             });
+            // A MEASUREMENT BEATS A PREDICTION ABOUT THE SAME THING (autopsy e706e068 — the full
+            // story is in `buildFailurePrediction.ts`). The readiness gate forecasts `npm run build`
+            // from the import graph; we have just RUN it. When it succeeded, a finding that said it
+            // would fail is superseded — otherwise the falsified forecast goes on to turn the release
+            // gate RED and make a rendering, publishable app free.
+            //
+            // Bounded to predictions recorded BEFORE this run, and only on a build that really ran
+            // and exited 0 — `judgeProdBuild`'s own verdict, never a guess.
+            try {
+              buildDiag.resolveBuildFailurePredictions({ ran, code: verdict.code, before: Date.now() });
+            } catch { /* diagnostics are best-effort — never break the build */ }
             const note = prodBuildUserNote(verdict);
             if (note) events.emit({ type: 'narration', agent: 'architect', text: note, ts: Date.now() });
             // A FINISHED APP SHOULD NOT NEED A RENTED COMPUTER TO STAY ALIVE (previewSnapshot.ts).

@@ -58982,6 +58982,56 @@ carries an `exempt` stand-down for a sexual-health clinic, a school safety curri
 reporting tool. Adding Devanagari *subject* patterns without equally careful Devanagari *exempt* patterns
 would show a Hindi-speaking doctor the blunt ban message — the exact harm the admin corrected on
 2026-09-13 ("yeh thoda jyada hi ho gaya"). Both halves ship together or neither does.
+## 2026-09-16 — App Mart decoupled from "Publish your app" (admin: "ab isko band karo — user saperately apni app khud pest kare")
+
+**The ask, verbatim:** publishing an app to NavBharatAI hosting was also offering an immediate App Mart
+listing right inside the same "Publish your app" sheet — a green "Put it on App Mart" card sat beside
+the hosting card, with its own icon/screenshot pickers and a "Publish to the store" button, all reachable
+without leaving the hosting flow. The admin (who built this coupling himself, 2026-09-01) reversed the
+decision: hosting and App Mart submission must be two fully separate, independent user decisions, each
+made on its own screen.
+
+**What was NOT true, checked before touching anything:** the App Mart card was never a true one-click
+auto-publish — it already required its own name field and an explicit "Publish to the store" press
+(`publishConsent.ts`'s own principle: "publishing your app and showing it to strangers are two different
+decisions"). The real defect was PLACEMENT — the two decisions being offered from the same sheet at the
+same moment made them read, and feel, like one action rather than two.
+
+**Fix:** removed the entire embedded "Put it on App Mart" card (icon upload/paste/make, screenshots, name
+field, publish button, and their ~140 lines of state/handlers) from `HostingChooser.tsx` — the "Publish
+your app" hosting sheet now offers only its three hosting/APK paths. The `onMakeIcon` prop (which existed
+solely to open AI Image Gen for this card) was removed from `HostingChooserProps` and its wiring in
+`AgentV3Panel.tsx`.
+
+App Mart submission remains fully available — it already had its OWN separate, dedicated entry point:
+Home → App Mart → Publish (`NavAppStore.tsx`, built 2026-08-26), with a dropdown listing every app the
+user has built, its own icon/description fields, and its own "Publish to App Mart" button. This is now
+the ONLY door. `AppKnowledgeBase.ts`'s `nav_store_instant_apps` entry updated so every AI in NavBharatAI
+gives the new, correct path instead of directing users to the removed card.
+
+**Sibling hunted and fixed (fourth absolute rule):** `NavAppStore.tsx`'s own publish handler used a plain
+`fetch` with no timeout — it had never needed one while `HostingChooser.tsx`'s copy (which DID carry the
+2026-08-27 "spins forever" fix, `LONG_REQUEST_TIMEOUT_MS.storePublish` + `authedFetch` + honest
+timed-out-vs-failed messaging) was the more heavily used door. Now that `NavAppStore.tsx` is the SOLE
+remaining caller of `/api/nav-store/web/publish`, leaving it without that protection would have
+silently reintroduced an already-fixed, admin-reported bug class the moment the other copy was deleted.
+Ported the identical fix (`authedFetch` + `LONG_REQUEST_TIMEOUT_MS.storePublish` + `isFetchTimeout`) into
+`NavAppStore.tsx`'s `publishChosenApp`.
+
+**Regression tests:** `tests/appMartPrompt.test.ts` (tested only the removed embedded card) deleted
+outright — the feature it locked no longer exists. `tests/longRequest.test.ts` and
+`tests/publishRegressions.test.ts`'s "App Mart publish must not hang" checks re-anchored to
+`NavAppStore.tsx` (the new sole caller) instead of `HostingChooser.tsx`, so the "button can never spin
+forever" guarantee still holds on the door that actually ships. `tests/appMart.test.ts` updated for the
+`authedFetch(` call shape. `HostingChooser.test.tsx` and `src/lib/appIcon.test.ts` had their
+App-Mart-specific describe blocks removed; one stale, unrelated `toContain('Free')` assertion (which had
+been passing only because it coincidentally matched the removed card's "Free — for you and for them"
+bullet, not anything the test's own name was about) was also cleaned up.
+
+**Verification:** `tsc --noEmit` × 2, `noUnusedImports`, full `vitest run` (1704 files / 23960 passed, 1
+skipped, 0 FAIL), `npm run build`, `test:bundle`, `boot:check` — all green on the final state.
+
+Branch `claude/appmart-decouple-hosting`, based on latest `main` (`d3d1d480a` at fetch time).
 ---
 
 ## 2026-09-16 — AUTOPSY dd1f5f60: a provider that ANSWERS is not a provider that WORKS (the throughput bench)

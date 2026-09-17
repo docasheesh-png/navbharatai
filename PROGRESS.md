@@ -60117,7 +60117,40 @@ passed — the frontend tsconfig excludes `src/server/**`. Only `typecheck:serve
 documented gap between the two-command habit and the real CI gate, hit live. A test now pins that the
 route imports what it uses.
 
-### 🔴 Still open from this report (rule 6 — found, not fixed here)
+### ✅ ALL FOUR OF THE BELOW WERE CLOSED THE SAME DAY — the admin asked "sabhi problem fix huye?"
+
+The honest answer was **no, two of six**, so the remaining four were done rather than left recorded.
+Kept below as written, because the reasoning for deferring them is part of the record:
+
+1. **The upsell on a STOPPED build** — fixed. `stopped = buildDiag.toolWasUsed('stop_build')` is the
+   SIXTH reason not to ask for money, and it is tested **first**: a stopped build never reached the
+   point of having a capability to judge, so refused / degraded / misconfigured / starved are all
+   reasoning about evidence that was never gathered. The signal reads the timeline the report itself
+   prints, so it cannot drift from what an admin sees.
+2. **"build budget reached" on a 60 s silence** — fixed. `clockMessage` decided by `bound.source`,
+   which describes the TOTAL clock, so the IDLE bound firing was reported as our budget. The test is
+   arithmetic: `idleMs = min(streamIdleMs(), timeoutMs)`, so `idleMs < timeoutMs` means the lane had
+   more clock than the silence window and the provider simply said nothing.
+   🔑 **And the mislabel was disabling its own repair:** `BUDGET_REACHED_MESSAGE` deliberately never
+   benches a provider, so a rung silent for a full minute was never benched and the ladder stayed on
+   GLM.
+3. **~104 GLM rungs before KIMI** — NOT a separate defect, and this is the honest reading rather than
+   a fix. The pool is enumerated by design (429 rotation) and the FAMILY bench is what bounds it —
+   which item 2 had switched off. With silence recognised again, two timeouts retire the family and
+   the length stops mattering. Nothing changed here on purpose.
+4. **`DESIGN_CONSISTENCY` on a 0-file build** — fixed. `integrityFiles` is `storeFiles ∪
+   writtenFiles` plus the entry files read from the sandbox, so with the first two empty it held only
+   OUR scaffold: we graded NavBharatAI's starter template and filed the C against the user's app. The
+   existing `null` guard could not catch it (the scaffold IS lintable — it is simply not theirs).
+   A CONTINUE build still grades the whole app, so the 2026-08-15 whole-app fix is untouched.
+5. **`rootCause` contradicting `counts`** — fixed. It announced "NO unresolved problem was recorded"
+   while the same document counted 2. Both were in `NEVER_ROOT_CAUSE`, so they were never
+   *candidates* — a different fact from not existing, and conflating them sends a reader past the two
+   findings sitting right there.
+
+Tests: `tests/autopsyFdd59ef8Remainder.test.ts` (10 cases), each proven by reversion.
+
+### 🔴 Originally recorded as still open (rule 6 — kept for the record)
 
 1. **The upsell fired on a STOPPED build.** `freeTierBuildActive && !result.ok` reached *"Add credits
    and I will complete it on the best engine"* for a user whose problem was signing in. The guard

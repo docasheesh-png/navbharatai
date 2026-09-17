@@ -11,7 +11,7 @@
 import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
 import { audit } from '../lib/audit';
-import { capProblems, type BuildDiagnosticsReport } from './BuildDiagnostics';
+import { capProblems, outcomeCodeOf, severityOfOutcome, appWasSeenRunning, type BuildDiagnosticsReport } from './BuildDiagnostics';
 import { redactSecrets } from './SecretRedactor';
 import { summarizeModelPerformance, type ModelPerformanceSummary } from './modelPerformance';
 
@@ -638,6 +638,40 @@ export interface AllDiagnosticsEntry extends DiagnosticsHistoryEntry {
    * nothing, so "no models recorded" and "this field was never computed" stay distinguishable.
    */
   modelPerformance?: ModelPerformanceSummary | null;
+  /**
+   * THE BUILD'S OWN `OUTCOME_*` CODE — the machine fact it recorded about how it ended.
+   *
+   * 🔴 WHY IT IS PROJECTED (admin 2026-09-17, the 40.8% failure panel). Every failure reason on that
+   * panel read "Other (not yet in the known pattern list)" — 92 of 107 in its biggest row. The panel
+   * classified failures by READING THE PROSE of `rootCause` and looking for compiler words, and v5
+   * does not fail with compiler words: it fails with sentences we wrote ourselves ("After one creation
+   * pass, 3 local module(s) are STILL missing"). Six real outcome messages were run through that
+   * classifier and ALL SIX came back `other`.
+   *
+   * `BuildRetrospectiveEngine.ts` had already root-caused this class on 2026-09-12, in writing:
+   * *"The diagnostic CODE is a machine fact recorded by the build itself. Reading it is not pattern
+   * matching, it is just looking."* The code was sitting in `r.issues` the whole time — this query
+   * reads the WHOLE document already — and was being dropped on the floor.
+   *
+   * 🔑 IT COSTS NO EXTRA I/O, the same argument `modelPerformance` above makes: the report is already
+   * in memory, and this is one reverse scan of its issue list.
+   */
+  outcomeCode?: string | null;
+  /**
+   * The severity that outcome was recorded at — REQUIRED, not decoration.
+   *
+   * ⚠️ One code can mean opposite things: `OUTCOME_STOPPED` at `warning` is the 2-minute advisory cap
+   * on an app that WAS built, and at `error` it is a build that never converged (see
+   * `advisoryCapOutcome.ts`). Classifying on the code alone would file every perfectly good build of
+   * the first kind as "incomplete" — trading one wrong answer for another.
+   */
+  outcomeSeverity?: string | null;
+  /**
+   * True when the app was opened in a real browser and seen rendering, or a preview URL was really
+   * served. A build marked FAILED that carries this is a candidate WRONG VERDICT, not a failure —
+   * see `appWasSeenRunning`.
+   */
+  appSeenRunning?: boolean | null;
 }
 
 /**
@@ -673,6 +707,11 @@ export async function listAllDiagnostics(limit = 100, sinceMs?: number | null): 
         ok: r.ok,
         summary: r.summary,
         rootCause: r.rootCause,
+        // The machine fact behind the prose — see the field's own note. Free: `r` is already read.
+        outcomeCode: outcomeCodeOf(r.issues) || null,
+        outcomeSeverity: severityOfOutcome(r.issues),
+        // Was this app ever SEEN running? The only way to tell a real failure from a wrong verdict.
+        appSeenRunning: appWasSeenRunning(r.issues),
         counts: r.counts,
         prompt: typeof r.prompt === 'string' ? r.prompt.slice(0, HISTORY_PROMPT_MAX) : undefined,
         // Read defensively: `billing` is absent on a legacy or unsettled report, and a number that is

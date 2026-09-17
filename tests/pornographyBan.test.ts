@@ -182,7 +182,13 @@ describe('the wiring — both surfaces, and no upsell after a refusal', () => {
     const end = route.indexOf('zeroBillForUnrenderedPreview(', start);
     expect(end).toBeGreaterThan(start);
     const block = route.slice(start, end);
-    expect(block).toContain('const refused = looksLikeRefusal(result.summary);');
+    // ⚠️ FOURTH OVER-SPECIFICATION, SAME ASSERTION, AND THIS FILE PREDICTED IT TWICE ABOVE. Autopsy
+    // fdd59ef8 added a SIXTH suppression reason — a build that was STOPPED was still asked for money —
+    // so the assignment became `const refused = !stopped && looksLikeRefusal(...)`. The guard is
+    // strictly stronger and this anchor failed anyway. Pinned on the CALL now, which is the intent:
+    // the model's own answer is read. How that answer is combined with later readings is exactly the
+    // thing that keeps legitimately changing.
+    expect(block).toContain('looksLikeRefusal(result.summary)');
     // The narration — the upsell OR the degraded notice — is reachable only when there was no refusal.
     //
     // ⚠️ MATCHED AS "the guard STARTS with !refused", not as one exact expression, so a fifth honest

@@ -132,7 +132,13 @@ describe('🔒 the wiring — every half of this fix, pinned where it lives', ()
   const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
 
   it('the rung THROWS instead of returning a turn nobody can use', () => {
-    expect(runner).toContain('if (turnStarvedItsBudget(result)) throw starvedBudgetError(budget.maxTokens, budget.requested);');
+    // ⚠️ The pinned literal gained a third argument on 2026-09-17 (autopsy f5351721). The behaviour
+    // this case guards — throw, never return an unusable turn — is unchanged; the flag only tells the
+    // report whether the ceiling that ran out was OURS or the full ask, so an unclamped starvation
+    // cannot be mis-reported as our arithmetic. Updated rather than loosened: a substring match on
+    // `throw starvedBudgetError(` would have survived this edit and every future one, which is the
+    // opposite of what a reversion guard is for.
+    expect(runner).toContain('if (turnStarvedItsBudget(result)) throw starvedBudgetError(budget.maxTokens, budget.requested, budget.reasoningUnclamped);');
   });
 
   it('the chain retires the starved rung by MODEL, so sibling rungs and the backstop survive', () => {

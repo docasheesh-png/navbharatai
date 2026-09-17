@@ -19,7 +19,7 @@ import { sandboxCost, describeSandboxCost } from './sandboxCost';
 import { redactProvidersText } from '../lib/providerRedaction';
 import { costAlertAdvisory, costAlertThresholdUsd } from './costAlert';
 import { isModelUnavailableError } from './providerErrorClass';
-import { isStarvedBudgetError } from './floorBudget';
+import { isStarvedBudgetError, isUnclampedStarvation } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
 import { isBudgetEndedError } from './turnDeadline';
 import { typecheckEvidenceFromCommands } from './TscGate';
@@ -1453,9 +1453,19 @@ export class BuildDiagnostics {
           phase: 'provider',
           severity: 'warning',
           code: 'OUTPUT_BUDGET_STARVED',
-          message: `The ${name} rung answered inside its clock and produced nothing, because our own output ceiling was spent before the answer began — "${detail}". `
-            + 'This is NOT a provider outage and NOT the user\'s prompt: a reasoning model bills its thinking to the same ceiling, so a ceiling below its thinking returns a truncated reply with no text and no tool call. '
-            + 'The ceiling is FLOOR_TIMEOUT_CAP_MS / AGENTV3_FLOOR_MS_PER_TOKEN (see floorBudget.ts); the rung was retired for the rest of this build so the ladder could reach a vendor that fits.',
+          // 🔒 TWO DIFFERENT FACTS, TWO DIFFERENT SENTENCES (autopsy f5351721). Since the clamp is lifted
+          // for a rung known to always reason, "our own output ceiling" is no longer true of every
+          // starvation — and it is the clause the admin reads first. One that starves on the FULL ask
+          // is a model that cannot finish thinking inside any budget a turn can carry; saying "our
+          // ceiling" there would send the next autopsy to floorBudget.ts to fix arithmetic that is
+          // already correct.
+          message: isUnclampedStarvation(reason)
+            ? `The ${name} rung answered inside its clock and produced nothing — "${detail}". `
+              + 'Its ceiling was NOT reduced by us: this rung always reasons, so it keeps the build loop\'s full per-turn ask, and it still spent every token thinking before any text or tool call appeared. '
+              + 'That is the model, not our arithmetic; the rung was retired for the rest of this build so the ladder could reach a vendor that fits.'
+            : `The ${name} rung answered inside its clock and produced nothing, because our own output ceiling was spent before the answer began — "${detail}". `
+              + 'This is NOT a provider outage and NOT the user\'s prompt: a reasoning model bills its thinking to the same ceiling, so a ceiling below its thinking returns a truncated reply with no text and no tool call. '
+              + 'The ceiling is FLOOR_TIMEOUT_CAP_MS / AGENTV3_FLOOR_MS_PER_TOKEN (see floorBudget.ts); the rung was retired for the rest of this build so the ladder could reach a vendor that fits.',
           autoResolved: false,
         });
       }

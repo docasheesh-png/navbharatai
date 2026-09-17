@@ -138,7 +138,13 @@ describe('🔒 the wiring — the two numbers can never drift apart again', () =
   });
 
   it('the ask is clamped from the EFFECTIVE clock (after the lane deadline), not the configured one', () => {
-    expect(runner).toContain('reconcileFloorBudget(params.maxTokens ?? this.opts.defaultMaxTokens ?? 8000, timeoutMs)');
+    // ⚠️ The call became multi-line on 2026-09-17 (autopsy f5351721 added the forced-reasoning flag),
+    // so the literal is pinned as its ARGUMENT LIST instead. The invariant is the same one and is still
+    // load-bearing: the ask must be reconciled against `timeoutMs` — the deadline-reconciled clock —
+    // and never against `configuredMs`, which ignores a lane that has already run out of time.
+    expect(runner).toContain('params.maxTokens ?? this.opts.defaultMaxTokens ?? 8000,\n      timeoutMs,');
+    expect(runner).not.toContain('8000, configuredMs');
+    expect(runner).not.toMatch(/reconcileFloorBudget\([^)]*configuredMs/s);
     expect(runner).toContain('max_tokens: budget.maxTokens,');
     expect(runner).not.toContain('max_tokens: params.maxTokens ?? this.opts.defaultMaxTokens ?? 8000');
     // `timeoutMs` here is `bound.timeoutMs` — the reconciled one.

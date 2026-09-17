@@ -59665,3 +59665,65 @@ skipped, 0 FAIL), `npm run build`, `test:bundle`, `boot:check` — all green on 
 Both fixes proven by reversion independently.
 
 Branch `claude/subagent-filewrite-tracking`, based on latest `main` (`33d87b171` at fetch time).
+
+## 2026-09-17 — Autopsy f5351721, open item #1 closed: the clamp was inverted for a forced-reasoning rung
+
+Follow-up to the f5351721 autopsy (PR #2987, merged). That entry recorded `OUTPUT_BUDGET_STARVED` on
+Strong as an OPEN root cause with two options put to the admin. No reply came, so under the 60-second
+auto-answer rule the recommended option was adopted — the one that does **not** touch the
+admin-mandated tier ladder.
+
+**What the evidence actually said, and where my own note was wrong.** The autopsy line said the
+streaming ceiling "still exceeded" glm-5.3's thinking and left it there. Reading the report's 30
+`llmCalls` properly:
+
+- 3 calls returned reasoning and nothing else, each authorised exactly **9,833** tokens.
+- The first of them finished **131 s into a 300 s clock** — it ran out of CEILING with **58% of its
+  time unused**. It was never a clock problem.
+- The calls that survived used **8,651 / 9,199 / 9,746** output tokens against that 9,833 ceiling.
+  Every first turn was a coin flip decided by how long the model happened to think.
+
+**A fix I nearly shipped and the measurement killed.** My first hypothesis was that 30 ms/token is
+pessimistic and the ceiling should be sized from a faster rate. Measured across **73 real calls** in
+every report to hand before touching code: kimi-k2.6 aggregates to **30.5 ms/token** against our 30,
+fleet median 25.1, p90 48.1. The constant is well calibrated. Lowering it would have under-bounded
+every slow model and re-opened the exact class `floorBudget.ts` exists for. Discarded, and a test now
+pins the constant at 30 so nobody re-derives it.
+
+**The real root cause (DNA level).** `floorBudget.ts` justifies clamping on one asymmetry: a ceiling
+hit returns the files written so far, a clock kill returns nothing. **For a model that always reasons
+both halves are false, in opposite directions** — its thinking is billed to the same `max_tokens` and
+emitted before any content, so the ceiling is the total loss, while a streamed clock kill keeps what
+arrived. The clamp was trading the recoverable outcome for the unrecoverable one. The module's own
+comment names this behaviour and the arithmetic never acted on it.
+
+**The fix.** A rung known to always reason keeps the build loop's full ask; the clock stays the only
+bound. `modelAlwaysReasons` (GLM 5.3+) is a POSITIVE capability test, deliberately not
+`!glmCanDisableThinking` — negating that would assert "kimi-k2.7-code always reasons" purely because
+the id failed a `startsWith('glm-')` check, handing an unbounded budget to an unmeasured vendor. Kill
+switch `AGENTV3_REASONING_UNCLAMP=off`.
+
+**Why it cannot make the worst case worse:** a slow forced-reasoning rung is still cut at the same
+moment, still with no answer, still throws to the next rung. Only the case where the answer would have
+fitted changes. Authorising tokens does not spend them, so a normal turn costs the same.
+
+**Honesty (rule 5).** A rung that starves with the clamp already lifted must not be reported as "our
+own ceiling" — that wording would send the next autopsy to fix arithmetic that is already correct.
+`isUnclampedStarvation` splits the two wordings in the admin report.
+
+**Tests.** `tests/reasoningBudgetUnclamp.test.ts`, 19 cases, proven by reversion (deleting the branch
+fails 3). Two pre-existing reversion guards pinned the old single-line call and were UPDATED rather
+than loosened — a substring match on `throw starvedBudgetError(` would have survived this edit and
+every future one, which is the opposite of what a guard is for. Both re-proven by reversion.
+
+### Still open from this autopsy
+
+1. **The Kimi sibling.** Report 58fe8254 shows the same `outputTokens: 4833` starvation three times on
+   Kimi, so the class is not GLM-only. This repo holds no capability fact for Moonshot's models and
+   inventing one would be a guess. The honest generic fix — remember a rung that starved and unclamp
+   its NEXT call — needs cross-turn state the per-rung runner construction does not carry today.
+   Recorded, not guessed at.
+2. `hmr: false` is still a workaround for the E2B proxy not bridging Vite's HMR websocket.
+3. The retry's "stronger model" claim must be derived from the delivery ledger, not the branch template.
+4. Post-build review timed out at 210 s on 55 files — a paying build silently lost its findings.
+5. Sandbox 84% idle across a 39.8-minute session.

@@ -60832,3 +60832,54 @@ the PLATFORM FEATURE that covers it.
 
 Tests: `tests/questionReadsEveryClause.test.ts` (16), both halves of the fix proven by reversion.
 Existing `IntentClassifier.test.ts` (73) and every classifier-adjacent suite (497 total) pass unchanged.
+
+## 2026-09-17 — "Download app" sent every visitor to a page they could not open
+
+Admin: *"navbharatai.com par jab koi user sidebar menu me 'download app' button par click karta hai, to
+pata nahi kahan redirect ho jata hai."*
+
+### Root cause — a default that outlived its premise
+
+`src/lib/appDownload.ts` set `DEFAULT_LISTING_URL = INTERNAL_TEST_URL`
+(`https://play.google.com/apps/internaltest/4701220640641478442`). The reasoning beside it was correct
+**at the time it was written**: *"The app is currently in INTERNAL TESTING, so the PUBLIC store listing
+does not exist yet (a public visitor would get 'item not found')."*
+
+The app reached **production on Play on 2026-08-25** (release 91 — `ANDROID_LATEST_VERSION_CODE`). The
+premise changed; the default did not. An internal-test opt-in link opens for nobody except the ≤100
+testers the admin added by hand, so every ordinary visitor tapping the button landed somewhere useless —
+exactly the "pata nahi kahan" the admin saw.
+
+### ⚠️ The escape hatch the old comment promised could not be used
+
+It said the migration needed *"no code change — just point `VITE_PLAY_LISTING_URL` at the public
+listing"*. **That was false.** `import.meta.env.VITE_*` is frozen when the Docker image is BUILT, and
+**neither `VITE_PLAY_LISTING_URL` nor `VITE_APK_DOWNLOAD_URL` is passed as a build `ARG`** — verified
+against `Dockerfile` and `cloudbuild.yaml`, which pass only `VITE_PREVIEW_ORIGIN`. Setting either in
+Cloud Run changes NOTHING, with no error anywhere to reveal it: the same silent-drift class this file
+already records for `VITE_META_PIXEL_ID`.
+
+So the **code default is the only value that can reach a user today**, which is why the fix is the
+default itself rather than a configuration note. Wiring an override up later is a deliberate four-line
+change (an `ARG`+`ENV` pair in `Dockerfile`, a `--build-arg` and a substitution in `cloudbuild.yaml`),
+named in the module header so nobody re-derives it — and so nobody "fixes" this again by setting a Cloud
+Run variable that cannot reach the browser.
+
+### The fix
+
+`DEFAULT_LISTING_URL = PUBLIC_LISTING_URL`
+(`https://play.google.com/store/apps/details?id=com.navbharat.ai`), and **`INTERNAL_TEST_URL` is DELETED
+rather than demoted** — a constant sitting one assignment away from being the default again is how this
+bug returns (the 50/50 law: make the wrong branch impossible, not merely unchosen).
+
+`AppKnowledgeBase.ts` needed no edit: it already told every AI that the button *"opens the Google Play
+listing (com.navbharat.ai)"*. That description was **wrong before this change and is true after it** —
+another quiet instance of the docs describing intended behaviour while the code did something else.
+
+### Tests
+
+`src/lib/appDownload.test.ts` — 10 cases. The guard asserts the **source**, not just the export:
+re-introducing an internal-test URL anywhere in the module fails CI even if nothing assigns it to the
+default yet, and every `play.google.com` URL in the module must be the public listing. Comments are
+stripped first, so the header may keep explaining the incident. Proven by reversion: restoring the old
+default fails 4 of the 10.

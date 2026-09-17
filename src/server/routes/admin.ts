@@ -2031,6 +2031,53 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     }
   });
 
+  /**
+   * ADMIN UNPUBLISH — take a live app OFFLINE without banning it (admin 2026-09-17: *"published app
+   * ko, admin jab chahe unpublish ya ban kar sake"*).
+   *
+   * 🔴 WHY THIS EXISTS BESIDE THE TAKEDOWN ABOVE, AND WHY IT IS NOT THE SAME BUTTON. `taken_down`
+   * is checked by the deploy choke point, so it is PERMANENT: the owner can never publish that
+   * workspace again, by design, because that is what a ban has to mean. Until now it was also the
+   * ONLY thing an admin could do — so every removal, including a mistake and including "this looks
+   * wrong, park it while I ask", cost a real user their app forever with no way back.
+   *
+   * A moderator needs the reversible option far more often than the permanent one. This is it:
+   * the live site really goes (same delete, same honesty), the status becomes `unpublished`, and
+   * the OWNER can publish again from their own screen. Nothing here can be undone by us — it is
+   * undone by the person whose app it is, which is the right way round.
+   *
+   * ⚠️ IT STILL WRITES THE 180-DAY LEDGER ROW. We removed somebody's live site; that is the fact
+   * the record exists to hold (IT Rules, 2021 Rule 3(1)(g)), and whether they may republish does not
+   * change it. The reason is stamped so the two actions are never confused when the record is read
+   * back — a row that could not say which one happened would be worse than no row.
+   */
+  app.post('/api/admin/deployments/:workspaceId/unpublish', verifyAdminToken, async (req: Request, res: Response) => {
+    const { workspaceId } = routeParams(req.params);
+    const { reason } = req.body || {};
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId required' });
+    try {
+      // The live channel goes FIRST, exactly as the takedown does — the registry must never say a
+      // site is offline while it is still serving. A throw here means we do NOT touch the status.
+      await new FirebaseHostingDeployer().deleteChannel(workspaceId);
+      const marked = await deploymentStore.setStatus(workspaceId, 'unpublished');
+      audit('ADMIN_APP_UNPUBLISH', { workspaceId, reason: reason || '', ip: req.ip });
+      const owner = await deploymentStore.get(workspaceId).catch(() => null);
+      await recordTakedown({
+        surface: 'navbharat_hosting',
+        contentId: workspaceId,
+        ownerUid: owner?.userId,
+        reason: `[unpublished — owner may republish] ${typeof reason === 'string' ? reason : ''}`.trim(),
+        actor: 'admin',
+        removedBy: 'admin',
+        removedAt: Date.now(),
+      });
+      res.json({ ok: true, workspaceId, status: 'unpublished', registryUpdated: marked });
+    } catch (e: any) {
+      console.error('[ADMIN] Unpublish error:', e?.message);
+      res.status(502).json({ error: 'Unpublish failed — the live site was NOT confirmed removed.', detail: e?.message || String(e) });
+    }
+  });
+
   // ── THE PUBLISH CEILING — see how full it is, and reclaim what is wasted (ROADMAP §10) ─────
   //
   // Every published app holds ONE Firebase Hosting channel and the pool is capped per site. Past the

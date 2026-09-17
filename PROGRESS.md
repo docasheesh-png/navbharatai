@@ -64930,3 +64930,35 @@ invocation that lacks the path or carries `2>/dev/null`, and on a browse block t
 `.catch(() => null)`. Comments are stripped before the scan — the first version of that assertion was
 defeated by the fix's own comment, which names the lossy spelling it replaced. Proven by reversion
 both ways.
+
+### The same day, correcting the entry above: the "real tokenizer" was one import
+
+The entry immediately above recorded an OPEN root cause — the apostrophe flaw in the code trees —
+and justified leaving it open on the grounds that reading client sources correctly *"needs a real
+tokenizer, not a wider regex — a decision with a real cost, not a lint"*.
+
+🔴 **That cost claim was WRONG, and it is corrected here rather than quietly acted on.**
+`typescript` is already a dependency of this repo and is **already imported by four existing tests**
+(`tests/game3dObjects.test.ts`, `TsconfigGuard.test.ts`, `GameSystemsGenerator.test.ts`,
+`generatedGameCode.test.ts`). The parser costs one import. An estimate that sends a real defect to
+the "open, too expensive" pile is worse than no estimate, because nothing ever revisits it.
+
+**The AST tells text from code by KIND rather than by punctuation**, which retires all three regex
+flaws at once and one more nobody had noticed: string literals, template literals (head plus every
+span — an interpolation is code, and its own literals are visited separately) and **JSX TEXT, which
+a string-literal scan never saw at all**. Property names, module paths, identifiers and type names
+are excluded by kind, so `{ claude: '' }` can never again be read as something a screen shows.
+
+Six inline cases pin it, each one a case the regex got wrong — the apostrophe case, the
+empty-literal neighbourhood, a literal past the old 200-char ceiling, JSX text, the four things
+that cannot reach a screen, and the literal spans of an interpolated template. They run over a
+PURE extractor, so none of them can go vacuous the way the file-level probe did.
+
+`src/content` is folded back into the main sweep (it was excluded only because a regex cannot read
+prose). **The whole-text prose sweep STAYS**, for a reason that is not redundancy: the AST is
+correct only while a file PARSES, and a content file that failed to parse would yield no literals
+and pass in silence — the exact failure mode this file has now paid for twice in one day. Proven to
+overlap: with the probe planted, **BOTH** sweeps fail, not one.
+
+Result: **zero vendor strings across every client tree under correct parsing** — and that is now a
+statement about what the code contains, rather than about what a regex happened to look at.

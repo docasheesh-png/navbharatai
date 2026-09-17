@@ -60969,3 +60969,68 @@ the PLATFORM FEATURE that covers it.
 
 Tests: `tests/questionReadsEveryClause.test.ts` (16), both halves of the fix proven by reversion.
 Existing `IntentClassifier.test.ts` (73) and every classifier-adjacent suite (497 total) pass unchanged.
+
+---
+
+## 2026-09-17 — Referral: the analysis said ~90% built, and the missing 10% was the SHARE button
+
+**Admin:** *"navbharatai me referral system already bana hua hai. mai jo bana raha hu, woh check karo hai
+ya nahi, nahi to bana do… isko pahle analysis karo, sayad 80-90% ban chuka hai!!"* — and that estimate
+was right.
+
+### What ALREADY existed (verified against the code, not assumed)
+
+| Requirement | State |
+|---|---|
+| Referral box on first open, before an account exists | ✅ `lib/pendingReferralCode.ts` — HOLDS the typed code and applies it the moment sign-in completes, offered exactly once |
+| A code minted for every user | ✅ `ensureCode()` on `GET /api/referral/:userId`; `referralCode.ts` mints 6 chars from a 31-symbol alphabet with no `0/O/1/I/L`, matched case-insensitively |
+| Code shown on the profile with COPY | ✅ `ProfilePage.tsx` referral card |
+| ₹1,500 | ✅ `referrerLifetimeCapTokens()`, default 1500, surfaced as `capRupees` |
+| Apply a friend's code | ✅ `POST /api/referral/:userId/redeem`, device-gated |
+| Who used my code | ✅ `ReferralEarningsSheet` + `GET /api/referral/:userId/referred` |
+| A share MESSAGE | ✅ `referralShareMessage(code)` — already returned by the API |
+
+### 🔴 What was genuinely missing — the share ACTION
+
+`ReferralPanel.tsx` had a `Share2` ICON next to a paragraph of text and **no share behind it**.
+`navigator.share` appears exactly ONCE in this entire repo — in `AIImageGenerator.tsx`. So a user could
+COPY the code and never SHARE it, and *"copy this, now go and find WhatsApp yourself"* is precisely the
+step where most people stop. The 90% that existed could not deliver its own purpose.
+
+**Built:** `src/lib/shareReferral.ts` — the device's own share sheet, so the code reaches WhatsApp,
+Instagram, Facebook or anything else installed. ONE helper used by BOTH the profile card and the
+billing panel, so the two surfaces can never drift.
+
+⚠️ **Why the OS sheet and not three per-app buttons:** a WhatsApp/FB/Instagram row is three
+integrations that each break on their own schedule, cannot reach the app the user actually wants, and
+on Android duplicate a sheet the OS draws better. One call offers every app on that phone — which is
+literally what was asked ("jahan share karna chahe").
+
+🔒 **THREE OUTCOMES, AND THE MIDDLE ONE IS THE EASY BUG.** `navigator.share` REJECTS when the user
+backs out of the sheet, so a naive `catch` tells somebody who simply changed their mind that *"sharing
+failed"*. `isUserDismissal` (AbortError / NotAllowedError) makes a dismissal **silent**, and a
+dismissal deliberately does NOT fall back to copying — claiming an action the user declined. A device
+with no share sheet copies and says so, so the button is never dead.
+
+### Also changed: the headline leads with what the user EARNS
+
+The card said "Your Referral Code". It now reads **"Refer & earn tokens worth ₹{capRupees}"**, read from
+the SERVER's own cap — never typed into the component, so retuning `REFERRER_LIFETIME_CAP_TOKENS` cannot
+leave a stale number promising money on a user's screen. Test-locked.
+
+### 🔴 THE REASON NONE OF IT IS VISIBLE TODAY — and it is one Cloud Run key
+
+`REFERRAL_REWARDS` is **UNSET**, so `referralRewardsEnabled()` is false, the API answers
+`enabled: false`, and `{referral.enabled && …}` renders **nothing at all**. The entire referral surface
+— code, copy, earnings, and now share — is invisible on every screen until that key is set to `on`.
+That is almost certainly why this looked unbuilt. **Nothing in this PR changes that; the switch is the
+admin's.**
+
+⚠️ Before flipping it, the key's own registry entry still applies: claiming is Android-only behind a
+Play Integrity device check, and that needs `PLAY_INTEGRITY_CLOUD_PROJECT` (a GitHub repo secret) plus
+the `playintegrity` scope on the Play service account, plus a `.aab` carrying `DeviceIntegrityPlugin`.
+Until those hold, every check is `unavailable`, which pays ₹0 — the gate fails CLOSED. **Sharing and
+copying a code work regardless; only CLAIMING money is gated.**
+
+Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1733 files, 24521 passed, 0 failed** ·
+build · test:bundle · boot:check. `tests/shareReferral.test.ts`, 16 cases.

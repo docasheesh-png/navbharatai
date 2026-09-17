@@ -363,20 +363,49 @@ export function tierDisplayName(level: PowerLevel): 'Weak' | 'Normal' | 'Strong'
  *
  * 🔑 THE CAUSE IS ARCHITECTURAL DRIFT, NOT A TYPO. Those sentences were written when a tier PINNED one
  * model, so `resolveModel(tier)` really did decide what ran. Since the three-tier ladders (2026-09-14)
- * the CHAIN decides, and the retry passes `heal: true` — so it runs `healLadder`, which drops only a
- * leading cheap-flash rung. On Weak and Normal that genuinely starts a rung higher (KIMI instead of
- * FlashX) and the claim was true; **Strong has no flash rung, so its retry restarts on the identical
- * engine** and the claim was false. One template, two different truths, and nothing checked which.
+ * the CHAIN decides, and the retry ran `healLadder`, which drops only a leading cheap-flash rung. On
+ * Weak and Normal that genuinely started a rung higher (KIMI instead of FlashX) and the claim was
+ * true; **Strong has no flash rung, so its retry restarted on the identical engine** and the claim was
+ * false. One template, two different truths, and nothing checked which.
  *
- * So the claim is DERIVED here instead: same comparison the retry itself makes, asked of the ladder.
- * A caller that cannot honestly say "stronger" must not say it — see the narration at the call site.
+ * ✅ SINCE 2026-09-17 THE RETRY ITSELF WAS FIXED (admin: *"app 100% band, failed likh kar na aye"*) —
+ * it now runs `ladderAfterLeadRung`, so it never restarts on the rung that produced nothing, on any
+ * tier. This predicate is therefore normally true; it stays because it is what the message is DERIVED
+ * from, and it still answers `false` for the one case that remains real: a single-rung ladder (an env
+ * override with one rung), which has nowhere higher to go. A caller that cannot honestly say
+ * "stronger" must not say it — see the narration at the call site.
  */
+/**
+ * The ladder a RETRY runs after the first attempt produced NOTHING. PURE.
+ *
+ * 🔴 THE RULE, and it is the one this file already lives by, applied where it was missing: **a retry
+ * must never begin on the rung that just produced nothing.** The 2026-08-13 heal rule says the same
+ * thing about repairs ("a heal must not begin on the model that produced the failing app"), but it is
+ * implemented as `withoutCheapFlashLead` — it drops the lead only when the lead is a cheap FLASH rung.
+ * Weak and Normal have one, so they were already covered by accident of shape. **Strong has no flash
+ * rung, so its empty-build retry re-ran the identical engine** — a retry loop around a deterministic
+ * failure, which the fourth absolute rule forbids by name. Autopsy f5351721 is that loop: 30 calls,
+ * every one `glm-5.3`, zero files.
+ *
+ * Dropping by POSITION rather than by rung NAME is deliberate. `ladderFrom(rungs, provider)` finds the
+ * FIRST rung of a provider, which is correct only while no provider appears twice — and Weak's ladder
+ * already carries GLM at two positions. A rule this file depends on may not rest on a coincidence.
+ *
+ * 🔒 IT NEVER EMPTIES THE LADDER. A one-rung tier keeps its rung: a slow app beats no app, and the
+ * same reasoning `canBenchAnother` uses for the last engine applies here. It also cannot reach a model
+ * the tier does not own — the rungs are this tier's own, so Weak still ends at Haiku and Sonnet/Opus
+ * remain impossible there (`enforceNoClaude` is still the final net).
+ */
+export function ladderAfterLeadRung(rungs: readonly LadderRung[]): LadderRung[] {
+  return rungs.length > 1 ? rungs.slice(1) : [...rungs];
+}
+
 export function retryLeadsHigher(
   level: PowerLevel | string | boolean | null | undefined,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   const build = tierLadder(level, env).rungs;
-  const retry = healLadder(build);
+  const retry = ladderAfterLeadRung(build);
   if (build.length === 0 || retry.length === 0) return false;
   return retry[0].provider !== build[0].provider || retry[0].model !== build[0].model;
 }

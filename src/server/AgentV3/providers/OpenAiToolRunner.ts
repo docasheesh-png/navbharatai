@@ -210,6 +210,45 @@ export function _resetThinkingParamMemo(): void {
 }
 
 /**
+ * Models OBSERVED to spend a clamped output budget entirely on reasoning, remembered for the process.
+ *
+ * 🔴 THE QUESTION THIS ANSWERS WITHOUT GUESSING (autopsy f5351721 + report 58fe8254). `modelAlwaysReasons`
+ * knows about GLM 5.3+ because this repo has a numeric family rule for GLM. **It knows nothing about
+ * Moonshot's models** — and report 58fe8254 shows the identical `outputTokens: 4833` starvation three
+ * times on Kimi. The tempting fix was to assert that Kimi always reasons; that would be a claim about a
+ * vendor nobody here has measured, which is exactly the kind of invention the rules forbid.
+ *
+ * 🔑 SO THE ENGINE LEARNS IT INSTEAD OF BEING TOLD. The FIRST time any model burns a clamped budget
+ * without producing text or a tool call, that is a measurement — the strongest evidence there is that
+ * its thinking does not fit our ceiling. Every later call to that model skips the clamp, exactly as if
+ * the capability had been known in advance. Vendor-agnostic, so a model nobody has heard of yet is
+ * covered on the day it ships.
+ *
+ * ⚠️ IT ONLY EVER RECORDS A *CLAMPED* STARVATION. A rung that starved with the clamp already lifted has
+ * proved the opposite — more budget did not help — so remembering it would buy nothing and would make
+ * the memo mean two different things.
+ *
+ * 🔒 Process-scoped, like the thinking-param memo above and for the same reason: a runner is built per
+ * rung per build, so a per-instance memo would re-pay the same wasted call on every build. A stale
+ * entry is harmless by construction — it can only RAISE a ceiling, and the clock still bounds the call
+ * (proven in the unclamp change: the worst case is identical to today, never worse).
+ */
+const starvedWhileClampedBy = new Set<string>();
+
+function rememberStarvedWhileClamped(model: string | undefined): void {
+  if (model) starvedWhileClampedBy.add(model.toLowerCase().trim());
+}
+
+export function modelStarvedWhileClamped(model: string | undefined): boolean {
+  return Boolean(model) && starvedWhileClampedBy.has(String(model).toLowerCase().trim());
+}
+
+/** Test-only: forget what was learned, so one case cannot leak into the next. */
+export function _resetStarvedBudgetMemo(): void {
+  starvedWhileClampedBy.clear();
+}
+
+/**
  * A TurnRunner backed by an OpenAI-compatible chat-completions client with native
  * function calling. Usable for Grok (xAI) and any OpenAI-style endpoint.
  */
@@ -280,7 +319,8 @@ export class OpenAiToolRunner implements TurnRunner {
       params.maxTokens ?? this.opts.defaultMaxTokens ?? 8000,
       timeoutMs,
       process.env,
-      { alwaysReasons: modelAlwaysReasons(thinkingModel) },
+      // Known in advance (GLM 5.3+), or LEARNED from this model's own first clamped starvation.
+      { alwaysReasons: modelAlwaysReasons(thinkingModel) || modelStarvedWhileClamped(thinkingModel) },
     );
     const request = {
         // The OpenAI-compatible provider has its own model ids, so an explicit option
@@ -376,7 +416,12 @@ export class OpenAiToolRunner implements TurnRunner {
     //
     // Throwing puts it where it belongs: the chain falls to the NEXT rung, which is a different
     // vendor and usually not a forced-thinking one, and the build proceeds instead of ending empty.
-    if (turnStarvedItsBudget(result)) throw starvedBudgetError(budget.maxTokens, budget.requested, budget.reasoningUnclamped);
+    if (turnStarvedItsBudget(result)) {
+      // Learn it, so this model is never clamped again in this process. Only a CLAMPED starvation is
+      // evidence — see `modelStarvedWhileClamped`.
+      if (!budget.reasoningUnclamped) rememberStarvedWhileClamped(thinkingModel);
+      throw starvedBudgetError(budget.maxTokens, budget.requested, budget.reasoningUnclamped);
+    }
 
     // Hand the visible text to the caller in one shot — unless the streamed path already delivered it
     // delta by delta, in which case repeating it here would print the answer twice.

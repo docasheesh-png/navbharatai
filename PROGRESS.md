@@ -59790,3 +59790,81 @@ exactly the "fix A, create X" the rules forbid. It needs its own change with its
 3. **The fast-lane telemetry sibling above.**
 4. Post-build review timed out at 210 s on 55 files.
 5. Sandbox 84% idle across a 39.8-minute session.
+
+## 2026-09-17 — "app 100% band, failed likh kar na aye": the retry no longer repeats the rung that failed
+
+The admin, non-technical, handed back all three open questions with one instruction: *"navbharatai ki
+strong bana hai, app 100% band. failed likh kar na aye!!"* Two of the three could be answered in code;
+the third genuinely cannot be, and is stated as such.
+
+### Q1 — should Strong's empty-build retry genuinely escalate? **YES, and it now does.**
+
+The empty-build retry ran `healLadder`, which drops only a leading cheap-FLASH rung. Weak and Normal
+have one, so they were covered **by accident of shape**; Strong has none, so it re-ran the identical
+engine that had just written zero files — a retry loop around a deterministic failure, which the fourth
+absolute rule forbids by name. That loop is what autopsy `f5351721` spent 23 extra minutes inside before
+showing the user a failure.
+
+`ladderAfterLeadRung` drops the failed rung **by POSITION** on every tier, and the retry call site uses
+it (`afterLeadRung: true`, with `heal: false` made explicit). Chosen over `fromProvider` deliberately:
+`ladderFrom` finds the FIRST rung of a provider and **Weak already carries GLM at two rungs**, so a
+name-based rule would have returned the whole ladder unchanged. A rule this file depends on may not rest
+on a coincidence.
+
+**Blast radius, stated precisely: Weak and Normal are byte-identical** (a test asserts their retry ladder
+equals what `healLadder` gave). Only Strong changes, from `glm-5.3 → …` to `kimi-k3 → Sonnet → Opus`.
+Weak still cannot reach Sonnet or Opus — the rungs are the tier's own, and `enforceNoClaude` is still the
+final net; a test asserts it. The ladder is never emptied: a one-rung tier keeps its rung, on the same
+"a slow app beats no app" reasoning as `canBenchAnother`.
+
+**Why this is also the cheaper answer**, which is worth stating because it looks like the dearer one: the
+retry only fires when the first attempt wrote ZERO files, a failed build is never charged, and re-running
+a rung that just failed costs money and returns nothing. Escalating is both stronger and cheaper in
+expectation.
+
+### Q2 — the Kimi sibling. **The engine LEARNS it instead of me guessing.**
+
+`modelAlwaysReasons` knows GLM 5.3+ because this repo has a numeric family rule for GLM. It knows nothing
+about Moonshot's models, and report `58fe8254` shows the same `outputTokens: 4833` starvation three times
+on Kimi. Asserting "Kimi always reasons" would be a claim about a vendor nobody here has measured.
+
+So `modelStarvedWhileClamped` mirrors the **existing** `modelRejectsThinkingParam` memo in the same file:
+the FIRST time any model burns a *clamped* budget with no text and no tool call, that is a measurement,
+and every later call to that model skips the clamp. Vendor-agnostic, so a model nobody has heard of yet
+is covered on the day it ships. **Only a CLAMPED starvation is recorded** — one that starved with the
+clamp already lifted has proved the opposite, and remembering it would make the memo mean two things.
+
+A stale entry is harmless by construction: it can only RAISE a ceiling, and the clock still bounds the
+call — the worst case is identical to today, which the unclamp change already proved.
+
+**This closes the sibling recorded as open in the entry above.**
+
+### Q3 — `AGENTV3_PROJECT_MODE`. **Only the admin can do this one (rule 6).**
+
+The key lives in Cloud Run, which no session can reach. Recommendation unchanged and deliberately
+canary-first, because the path has never run in production: set it to the admin's own email, send one
+mega-prompt, watch the module plan appear and advance, then `on` for everyone.
+
+### Tests
+
+`tests/retryNeverRepeatsFailedRung.test.ts` (13 cases) + the updated `retryStrongerClaim.test.ts`, all
+reversion-proven: reverting the retry to the heal ladder, removing the learned memo, and disabling
+`ladderAfterLeadRung` each fail.
+
+⚠️ **One expectation was INVERTED, and the reason is recorded rather than buried.**
+`retryStrongerClaim.test.ts` asserted `retryLeadsHigher('mini') === false` — correct when that PR's only
+job was to stop the engine LYING about a retry that was not stronger. Now the retry *is* stronger, so the
+expectation records a behaviour that got better. That is not the forbidden "change the test to match
+broken behaviour"; the broken behaviour is what was removed.
+
+⚠️ The wiring guard is **scoped to the retry block**: nine other sites legitimately call
+`buildTurnRunner(healRunnerOpts())` — the HEAL gates, whose flash-only drop is the admin's tuned
+2026-08-13 behaviour and was deliberately left alone.
+
+### Still open
+
+1. `hmr: false` — a workaround for the E2B proxy not bridging Vite's HMR websocket.
+2. The fast-lane telemetry sibling (see the entry above — it moves the cheap-review judge).
+3. Post-build review timed out at 210 s on 55 files.
+4. Sandbox 84% idle across a 39.8-minute session.
+5. `AGENTV3_PROJECT_MODE` — admin-only, Cloud Run.

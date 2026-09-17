@@ -166,13 +166,25 @@ describe('🔒 WHITE-LABEL LAW — the reporter is answered by NavBharatAI, neve
 describe('the user can actually find it', () => {
   const sheet = read('src/components/ReportSheet.tsx');
 
-  it('past reports are loaded when the sheet opens, and sit ABOVE the new-report form', () => {
+  it('past reports are loaded when the sheet opens, and have a door of their own', () => {
     expect(sheet).toContain("fetch('/api/report/mine'");
-    expect(sheet.indexOf('Your earlier reports')).toBeLessThan(sheet.indexOf('What kind of problem is it?'));
+    // ⚠️ THIS USED TO ASSERT THE LIST SAT *ABOVE* THE FORM, and that arrangement is gone (2026-09-17):
+    // filing a complaint and reading an answer became two separate screens behind a chooser, because
+    // one scroll doing both jobs made each get in the other's way. The old assertion compared
+    // `indexOf('Your earlier reports')` — a string that no longer exists — against another, so once
+    // it vanished the check passed VACUOUSLY (-1 is less than everything) and protected nothing.
+    // What it protects now is the thing that actually matters: the conversations are reachable.
+    expect(sheet).toContain('Old reports');
+    expect(sheet).toContain("setMode('list')");
   });
 
   it('a thread with an answer in it is marked, so it is worth opening', () => {
-    expect(sheet).toContain("r.messages.filter((m) => m.from === 'admin').length");
+    // ⚠️ THE MARK CHANGED, AND IT IS STRICTLY STRONGER. It used to be
+    // `messages.filter(m => m.from === 'admin').length > 0` — "a reply arrived at some point", which
+    // could never clear because nothing recorded that anything had been read. `hasUnreadAdminReply`
+    // marks a thread only while the reply is genuinely NEW, and is the same rule the sidebar dot and
+    // the "Old reports" dot use. See `tests/reportUnread.test.ts` for its arithmetic.
+    expect(sheet).toContain('const isUnread = hasUnreadAdminReply(r);');
   });
 
   it('the screen shows what the SERVER stored, not what we hoped it stored', () => {

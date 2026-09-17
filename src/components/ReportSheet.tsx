@@ -26,10 +26,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Send, Image as ImageIcon, Check, Loader2, MessageSquare } from 'lucide-react';
+import { X, Send, Image as ImageIcon, Check, Loader2, MessageSquare, ChevronLeft, AlertCircle } from 'lucide-react';
 import { authedHeaders } from '../lib/authHeaders';
 import {
   MESSAGE_MAX, PROBLEM_KINDS, REPLY_MAX, problemKindAsk, problemKindLabel, validateReplyPayload,
+  hasUnreadAdminReply, unreadReportCount,
   type ProblemKind, type ReportMessage, type ReportTargetKind,
 } from '../lib/userReport';
 import { compressForReport } from '../lib/reportImage';
@@ -48,6 +49,14 @@ export interface ReportSheetProps {
   target?: { kind: ReportTargetKind; id?: string };
   /** The screen they were on, for the admin. */
   view?: string;
+  /**
+   * Which screen the sheet opens on.
+   *
+   * `list` is what a tapped "New message from NavBharatAI" notification passes: the person already
+   * knows what they want, and making them pass through a menu to reach it is the notification failing
+   * to do the one job it had. Everything else opens on the chooser.
+   */
+  initialMode?: 'choose' | 'list';
 }
 
 /** One of the reporter's own reports, as `/api/report/mine` returns it (never the screenshot). */
@@ -60,7 +69,18 @@ interface MyReport {
   messages: ReportMessage[];
 }
 
-export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
+/**
+ * The three screens this sheet is, since 2026-09-17.
+ *
+ * ADMIN: *"jab user report a problem par click kare, to popup me 2 option dikhe"*. Before this, the
+ * running conversations and the new-report form were stacked in ONE scroll — so somebody with three
+ * open threads had to scroll past all of them to file a fourth, and somebody filing their first
+ * report saw an empty list they had no use for. One sheet was doing two unrelated jobs.
+ */
+type SheetMode = 'choose' | 'new' | 'list';
+
+export function ReportSheet({ open, onClose, target, view, initialMode }: ReportSheetProps) {
+  const [mode, setMode] = useState<SheetMode>('choose');
   const [kind, setKind] = useState<ProblemKind | ''>('');
   const [message, setMessage] = useState('');
   const [shot, setShot] = useState('');
@@ -82,6 +102,13 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const replyFileRef = useRef<HTMLInputElement>(null);
 
+  /**
+   * How many conversations carry a reply this person has not seen — the number behind the dot on the
+   * "Old reports" door. Derived from `mine` with the SAME function the sidebar and each row use, so
+   * the three dots cannot disagree with one another.
+   */
+  const unread = unreadReportCount(mine ?? []);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !busy) onClose(); };
@@ -95,6 +122,9 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
     if (open) {
       setKind(''); setMessage(''); setShot(''); setNote(''); setDone(false);
       setOpenThread(''); setReply(''); setReplyShot(''); setMine(null);
+      // A sheet opened ABOUT something (an app, a person) is already a decision — showing a menu
+      // whose two answers are "the thing you just chose" and "something else" is a step for nobody.
+      setMode(target ? 'new' : (initialMode ?? 'choose'));
       void (async () => {
         try {
           const res = await fetch('/api/report/mine', { headers: await authedHeaders() });
@@ -107,7 +137,35 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
         }
       })();
     }
-  }, [open]);
+  }, [open, target, initialMode]);
+
+  /**
+   * OPEN ONE CONVERSATION, AND MARK IT SEEN.
+   *
+   * ⚠️ THE DOT CLEARS ON *OPEN*, NEVER ON FETCH. Clearing it when the list loads would mean somebody
+   * who glances at the menu and taps away has silently "read" a reply they never saw — and that reply
+   * is then invisible for ever, with nothing to bring it back. The dot must survive everything except
+   * the conversation being on screen.
+   *
+   * The local state is updated OPTIMISTICALLY and the server is told in the background: the person is
+   * looking at the message, so the dot going out is a statement about what is on their screen, not
+   * about whether a POST succeeded. A failed write simply means the dot returns on the next open —
+   * which is the safe direction, since it shows a message again rather than hiding one.
+   */
+  const openReport = useCallback((reportId: string) => {
+    setOpenThread(reportId);
+    setReply(''); setReplyShot(''); setNote('');
+    // Stamped locally with a value that is certainly past the last message shown; the SERVER writes
+    // its own clock, and that is the one the next fetch will carry.
+    setMine((prev) => (prev ?? []).map((r) => (r.id === reportId ? { ...r, reporterReadAt: Date.now() } : r)));
+    void (async () => {
+      try {
+        await fetch(`/api/report/${encodeURIComponent(reportId)}/read`, {
+          method: 'POST', headers: await authedHeaders({ 'Content-Type': 'application/json' }),
+        });
+      } catch { /* best-effort: the dot comes back next time, which is the safe way to be wrong */ }
+    })();
+  }, []);
 
   /** The SAME compression path the first report uses — one rule, so one can never accept what the other refuses. */
   const pickReplyShot = useCallback(async (file: File | undefined) => {
@@ -227,13 +285,36 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 mb-3">
-          <div>
-            <h2 className="text-base font-bold text-white">Report a problem</h2>
-            <p className="text-[11px] text-zinc-500 mt-0.5">
-              {target?.kind === 'app' ? 'About this app.' : target?.kind === 'user' ? 'About this person.' : 'Tell us what went wrong — a person reads every report.'}
-            </p>
+          <div className="flex items-start gap-2 min-w-0">
+            {/* BACK, not a second close. Inside a conversation the back arrow returns to the list and
+                the list returns to the chooser — so a person who taps the wrong thing is one gesture
+                from where they meant to be, instead of having to reopen the whole sheet.
+                It is hidden when `target` sent us straight to the form: there is nothing behind it. */}
+            {!target && (mode !== 'choose' || openThread) && (
+              <button
+                onClick={() => { if (openThread) setOpenThread(''); else setMode('choose'); }}
+                disabled={busy}
+                aria-label="Back"
+                className="p-2 -ml-2 rounded-xl text-zinc-400 hover:bg-white/5 hover:text-white disabled:opacity-40 shrink-0"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+            )}
+            <div className="min-w-0">
+              <h2 className="text-base font-bold text-white truncate">
+                {openThread ? 'Your report' : mode === 'list' ? 'Your reports' : 'Report a problem'}
+              </h2>
+              <p className="text-[11px] text-zinc-500 mt-0.5">
+                {target?.kind === 'app' ? 'About this app.'
+                  : target?.kind === 'user' ? 'About this person.'
+                  : openThread ? 'NavBharatAI replies here.'
+                  : mode === 'list' ? 'Your reports and our replies.'
+                  : mode === 'new' ? 'Tell us what went wrong — a person reads every report.'
+                  : 'A person reads every report.'}
+              </p>
+            </div>
           </div>
-          <button onClick={onClose} disabled={busy} aria-label="Close" className="p-2 rounded-xl text-zinc-500 hover:bg-white/5 hover:text-white disabled:opacity-40">
+          <button onClick={onClose} disabled={busy} aria-label="Close" className="p-2 rounded-xl text-zinc-500 hover:bg-white/5 hover:text-white disabled:opacity-40 shrink-0">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -244,11 +325,65 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
             <p className="text-sm font-semibold text-white">Sent. Thank you.</p>
             <p className="text-[11px] text-zinc-500 mt-1">A person will read it.</p>
           </div>
-        ) : (
+        ) : mode === 'choose' ? (
+          /* ── THE TWO DOORS ──────────────────────────────────────────────────────────────────────
+             ADMIN 2026-09-17: *"popup me 2 option dikhe, 1. report new problem, 2- old report"*.
+             Filing a complaint and reading an answer are different errands, and stacking them in one
+             scroll made each one get in the other's way — somebody with three open threads scrolled
+             past all of them to file a fourth, and a first-time reporter met an empty list they had
+             no use for. */
+          <div className="space-y-2.5">
+            <button
+              onClick={() => setMode('new')}
+              className="w-full flex items-center gap-3 p-4 rounded-2xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.07] text-left transition-colors"
+            >
+              <span className="shrink-0 w-9 h-9 rounded-xl bg-indigo-500/15 border border-indigo-400/25 flex items-center justify-center">
+                <AlertCircle className="w-4 h-4 text-indigo-300" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-bold text-white">Report a new problem</span>
+                <span className="block text-[11px] text-zinc-500 mt-0.5">Something went wrong — tell us what.</span>
+              </span>
+            </button>
+
+            <button
+              onClick={() => setMode('list')}
+              className="w-full flex items-center gap-3 p-4 rounded-2xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.07] text-left transition-colors"
+            >
+              <span className="shrink-0 w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center relative">
+                <MessageSquare className="w-4 h-4 text-zinc-300" />
+                {/* 🟢 THE SECOND OF THE THREE DOTS. Same rule as the sidebar's and the row's — all
+                    three read `hasUnreadAdminReply`, so a dot here can never lead to a list with
+                    nothing marked in it. That mismatch is precisely how people learn to ignore dots. */}
+                {unread > 0 && (
+                  <span
+                    aria-hidden
+                    className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-[#0d1117]"
+                  />
+                )}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-bold text-white">
+                  Old reports
+                  {unread > 0 && (
+                    <span className="ml-2 align-middle text-[10px] font-black uppercase tracking-widest text-emerald-300">
+                      {unread} new
+                    </span>
+                  )}
+                </span>
+                <span className="block text-[11px] text-zinc-500 mt-0.5">
+                  {mine === null ? 'Loading…'
+                    : mine.length === 0 ? 'You have not reported anything yet.'
+                    : unread > 0 ? 'NavBharatAI has replied.'
+                    : `${mine.length} report${mine.length === 1 ? '' : 's'} · your conversations.`}
+                </span>
+              </span>
+            </button>
+          </div>
+        ) : mode === 'list' ? (
           <>
-            {/* YOUR EARLIER REPORTS, AND WHAT WE SAID BACK. Above the new-report form on purpose:
-                somebody opening this sheet for the second time is usually here about the first one,
-                and a reply they cannot find is a reply that was never sent. */}
+            {/* YOUR EARLIER REPORTS, AND WHAT WE SAID BACK. Its own screen since 2026-09-17 — see the
+                chooser above for why it stopped sharing one with the form. */}
             {/* ONE input, shared by every thread — only one is open at a time, and a picker per
                 report would be a DOM node per report for no behaviour anyone can see. */}
             <input
@@ -259,27 +394,47 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
               onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; void pickReplyShot(f); }}
             />
 
-            {(mine?.length ?? 0) > 0 && (
-              <div className="mb-4 rounded-2xl border border-white/10 bg-black/20 p-3">
-                <p className="text-[11px] font-semibold text-zinc-300 mb-2">Your earlier reports</p>
-                <div className="space-y-1.5 max-h-64 overflow-y-auto">
+            {mine === null ? (
+              <p className="py-8 text-center text-[11px] text-zinc-500">Loading your reports…</p>
+            ) : mine.length === 0 ? (
+              <div className="py-8 text-center">
+                <MessageSquare className="w-7 h-7 text-zinc-600 mx-auto mb-2" />
+                <p className="text-sm font-semibold text-zinc-300">Nothing here yet</p>
+                <p className="text-[11px] text-zinc-500 mt-1">Reports you send will appear here with our replies.</p>
+                <button
+                  onClick={() => setMode('new')}
+                  className="mt-4 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-[12px] font-bold text-white"
+                >
+                  Report a problem
+                </button>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+                <div className="space-y-1.5 max-h-[60vh] supports-[height:100dvh]:max-h-[60dvh] overflow-y-auto">
                   {(mine ?? []).map((r) => {
                     const isOpen = openThread === r.id;
-                    const fromUs = r.messages.filter((m) => m.from === 'admin').length;
+                    // 🟢 THE THIRD DOT, and the reason the old badge was replaced. The chip here used
+                    // to appear whenever ANY admin message existed (`fromUs > 0`) — which says "a
+                    // reply arrived once", never "a reply is NEW", and so it could never go out.
+                    // `hasUnreadAdminReply` is the same rule the sidebar and the chooser use.
+                    const isUnread = hasUnreadAdminReply(r);
                     return (
-                      <div key={r.id} className="rounded-xl border border-white/10 bg-white/[0.03]">
+                      <div key={r.id} className={`rounded-xl border bg-white/[0.03] ${isUnread ? 'border-emerald-400/40' : 'border-white/10'}`}>
                         <button
-                          onClick={() => { setOpenThread(isOpen ? '' : r.id); setReply(''); setReplyShot(''); }}
-                          className="w-full text-left px-3 py-2"
+                          onClick={() => { if (isOpen) setOpenThread(''); else openReport(r.id); }}
+                          className="w-full text-left px-3 py-2.5"
                           aria-expanded={isOpen}
                         >
                           <span className="flex items-center gap-2">
-                            <span className="text-[11px] text-zinc-300 flex-1 truncate">
+                            {isUnread && (
+                              <span aria-hidden className="shrink-0 w-2 h-2 rounded-full bg-emerald-400" />
+                            )}
+                            <span className={`text-[11px] flex-1 truncate ${isUnread ? 'text-white font-semibold' : 'text-zinc-300'}`}>
                               {problemKindLabel(r.problemKind) || 'Problem'} — {r.message}
                             </span>
-                            {fromUs > 0 && (
+                            {isUnread && (
                               <span className="shrink-0 inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-emerald-300">
-                                <MessageSquare className="w-2.5 h-2.5" /> Reply
+                                <MessageSquare className="w-2.5 h-2.5" /> New
                               </span>
                             )}
                           </span>
@@ -360,7 +515,10 @@ export function ReportSheet({ open, onClose, target, view }: ReportSheetProps) {
                 </div>
               </div>
             )}
-
+            {note && <p className="mt-3 text-[11px] text-amber-300 leading-relaxed">{note}</p>}
+          </>
+        ) : (
+          <>
             {/* ONE TAP BEFORE THE BOX, and it is what makes the rest of the report legible.
                 A real report read "App is not responsive and sometimes it does not work in Mobile
                 phones" — which could be a layout bug, a hang, or a dead button, and we had no way to

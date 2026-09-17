@@ -33,9 +33,28 @@ interface NotificationItem {
   message: string;
   createdAt: number;
   read: boolean;
+  /**
+   * Where tapping it goes, when it goes anywhere.
+   *
+   * ⚠️ A NAME THIS BUILD KNOWS, NEVER A URL. The server stores a closed set of our own action names
+   * (see AdminNotificationStore) precisely so a stored value cannot point somewhere we did not build
+   * — a free-form link on a broadcast record would turn the admin's message form into a way to send
+   * every user a tappable address. An unrecognised value simply renders as a plain message.
+   */
+  action?: 'open-reports';
 }
 
-export function NotificationBell({ user }: { user: FirebaseUser | null }) {
+export function NotificationBell({ user, onOpenReports }: {
+  user: FirebaseUser | null;
+  /**
+   * Open the Report a problem sheet on the conversation list.
+   *
+   * ADMIN 2026-09-17: *"us par tap karne se report a problem wala hi folder open ho"*. Without this
+   * the reply notification could only TELL somebody where to go — three clauses of directions for a
+   * journey the tap should have made for them.
+   */
+  onOpenReports?: () => void;
+}) {
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
@@ -297,8 +316,22 @@ export function NotificationBell({ user }: { user: FirebaseUser | null }) {
                       <span className="block text-[10px] text-[#8b949e] mt-1.5">{new Date(n.createdAt).toLocaleString()}</span>
                     </>
                   );
-                  // Not selecting: a plain, unclickable row. Nothing here can destroy anything.
+                  // Not selecting: a plain row. It becomes a BUTTON only when the message carries an
+                  // action this build can perform — a row that looks tappable and does nothing is
+                  // worse than one that never invited the tap.
                   if (!selecting) {
+                    if (n.action === 'open-reports' && onOpenReports) {
+                      return (
+                        <button
+                          key={n.id}
+                          onClick={() => { setOpen(false); onOpenReports(); }}
+                          className="w-full text-left px-4 py-3 hover:bg-white/[0.04] transition-colors"
+                        >
+                          {row}
+                          <span className="block text-[10px] font-bold text-emerald-300 mt-1">Tap to open →</span>
+                        </button>
+                      );
+                    }
                     return <div key={n.id} className="px-4 py-3">{row}</div>;
                   }
                   return (

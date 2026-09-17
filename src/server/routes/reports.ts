@@ -17,11 +17,12 @@ import { verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { requireAdmin } from '../lib/adminAuth';
 import { rateLimiter } from '../lib/authMiddleware';
 import {
-  validateReport, validateReplyPayload, awaitingAdmin, newShotId, isShotId, type ReportContext,
+  validateReport, validateReplyPayload, awaitingAdmin, newShotId, isShotId,
+  sortReportsByActivity, unreadReportCount, type ReportContext,
 } from '../../lib/userReport';
 import {
   buildReport, saveReport, listReports, getReport, getReportScreenshot, setReportStatus,
-  countReportsAgainst, listReportsByReporter, addReportMessage,
+  countReportsAgainst, listReportsByReporter, addReportMessage, markReportReadByReporter,
   saveReportMessageShot, getReportMessageShot,
 } from '../lib/userReportStore';
 import { saveNotification } from '../lib/AdminNotificationStore';
@@ -184,16 +185,70 @@ export function registerReportRoutes(app: Express): void {
     if (!me?.uid) return res.status(401).json({ error: 'Sign in to see your reports.' });
     const rows = await listReportsByReporter(me.uid, 20);
     res.json({
-      reports: rows.map((r) => ({
+      // INBOX ORDER, not filing order (admin 2026-09-17: "sabse upar woh chat ho, jis chat me admin ka
+      // latest reply hai"). Sorting by when a report was FILED buried a fresh reply on an old
+      // complaint under newer reports nobody was waiting on — so somebody tapping the notification
+      // landed on a list whose top row was not the thing the notification was about.
+      reports: sortReportsByActivity(rows).map((r) => ({
         id: r.id,
         at: r.at,
         status: r.status,
         problemKind: r.problemKind,
         message: r.message,
         messages: r.messages ?? [],
+        // The read stamp travels WITH the thread so the client computes its dots from the same rule
+        // the server does (hasUnreadAdminReply) rather than a second opinion that can drift.
+        ...(typeof r.reporterReadAt === 'number' ? { reporterReadAt: r.reporterReadAt } : {}),
       })),
     });
   });
+
+  /**
+   * HOW MANY CONVERSATIONS HAVE A REPLY THIS PERSON HAS NOT SEEN.
+   *
+   * The sidebar needs its dot WITHOUT opening the sheet, so it cannot use `/api/report/mine` — that
+   * route ships every thread, and polling whole conversations to decide whether to draw a 6-pixel dot
+   * is how a feature nobody notices becomes the reason a phone on a slow connection stalls.
+   *
+   * Returns a NUMBER and nothing else. Same verified-uid scoping as the list; an unreadable store
+   * answers `0`, never an error, because a failed poll must not put a red mark on somebody's menu.
+   */
+  app.get('/api/report/unread', async (req: Request, res: Response) => {
+    const me = await verifyFirebaseIdentity(req);
+    if (!me?.uid) return res.json({ unread: 0 });
+    try {
+      const rows = await listReportsByReporter(me.uid, 20);
+      res.json({ unread: unreadReportCount(rows) });
+    } catch {
+      res.json({ unread: 0 });
+    }
+  });
+
+  /**
+   * "I have seen this conversation." Written when the reporter actually OPENS one.
+   *
+   * ⚠️ MARKED ON OPEN, NOT ON DELIVERY. The alternative — clearing the dot when the list is fetched —
+   * would mean a person who glances at their menu and taps away has silently "read" a reply they
+   * never saw, and the reply is then invisible for ever. The dot must survive everything except the
+   * conversation being on screen.
+   *
+   * The timestamp is the SERVER's (see the store): a device with a fast clock would otherwise stamp
+   * the future and permanently silence its own dot.
+   */
+  app.post(
+    '/api/report/:id/read',
+    rateLimiter({ name: 'report-read', authed: 240, anon: 0, noun: 'reads' }),
+    async (req: Request, res: Response) => {
+      const me = await verifyFirebaseIdentity(req);
+      if (!me?.uid) return res.status(401).json({ error: 'Sign in first.' });
+      const reportId = String(routeParam(req.params.id) || '');
+      const ok = await markReportReadByReporter(reportId, me.uid, Date.now());
+      // 🔒 ONE ANSWER for "not yours" and "does not exist", exactly as the reply route does — telling
+      // them apart would let anyone probe which report ids are real.
+      if (!ok) return res.status(404).json({ error: 'That report could not be found.' });
+      res.json({ ok: true });
+    },
+  );
 
   /**
    * The reporter answers. Only on their OWN report, and the ownership check happens inside the
@@ -300,10 +355,15 @@ export function registerReportRoutes(app: Express): void {
 
     let notified = false;
     try {
+      // ADMIN 2026-09-17, verbatim: the notification says only *"New message from NavBharatAI"*, and
+      // TAPPING it opens the conversation list. The old line spent three clauses telling somebody
+      // where to go — which is what a notification has to do when it cannot take them there. Now it
+      // can, so the words are the message and the tap is the direction.
       const saved = await saveNotification({
-        message: 'NavBharatAI replied to your problem report. Open "Report a problem" to read it and answer.',
+        message: 'New message from NavBharatAI',
         target: { type: 'user', userId: report.reporterUid },
         createdBy: 'reports',
+        action: 'open-reports',
       });
       notified = !!saved;
     } catch {

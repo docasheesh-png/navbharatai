@@ -181,6 +181,42 @@ export async function listReportsByReporter(uid: string, limit = 20): Promise<Us
 }
 
 /**
+ * Mark ONE conversation as read by the person who filed it.
+ *
+ * 🔒 THE OWNERSHIP CHECK IS INSIDE THE TRANSACTION, against the stored document — the same rule
+ * `addReportMessage` follows and for the same reason. Checking a copy the route read a moment earlier
+ * leaves a window, and on the other side of that window is somebody else's conversation. A read stamp
+ * is a smaller prize than a message, but the route that writes it would be an equally good IDOR.
+ *
+ * ⚠️ THE CLOCK IS THE SERVER'S, NEVER THE BROWSER'S. A device whose clock runs fast would otherwise
+ * stamp a read time in the future and permanently silence every reply that followed — the dot would
+ * simply stop working for that person, with nothing anywhere to show why.
+ *
+ * Never moves the stamp BACKWARDS: two tabs open at once must not let the older one un-read a
+ * conversation the newer one just showed.
+ */
+export async function markReportReadByReporter(id: string, reporterUid: string, at: number): Promise<boolean> {
+  const d = db();
+  if (!d || !id || !reporterUid || !Number.isFinite(at)) return false;
+  const ref = d.collection(COLLECTION).doc(id);
+  try {
+    return await d.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) return false;
+      const report = snap.data() as UserReport;
+      if (report.reporterUid !== reporterUid) return false;
+      const prev = typeof report.reporterReadAt === 'number' && Number.isFinite(report.reporterReadAt)
+        ? report.reporterReadAt : 0;
+      if (at <= prev) return true; // already at least this fresh — a no-op, not a failure
+      tx.set(ref, { reporterReadAt: at }, { merge: true });
+      return true;
+    });
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Add one message to a report's conversation.
  *
  * ⚠️ A TRANSACTION, AND IT HAS TO BE. Read-modify-write on an array is exactly where a lost update

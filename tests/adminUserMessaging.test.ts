@@ -49,7 +49,11 @@ describe('Admin UI — Message Users', () => {
 
 describe('User UI — notification bell', () => {
   it('the bell is mounted in the top bar and reads the user endpoint', () => {
-    expect(topnav).toContain('<NotificationBell user={user} />');
+    // ⚠️ ANCHORED ON THE MOUNT, NOT ON THE WHOLE TAG (2026-09-17). This asserted the exact string
+    // `<NotificationBell user={user} />`, so adding the `onOpenReports` prop — which is what makes a
+    // reply notification tappable — failed a test that has no opinion about that prop. What it
+    // PROTECTS is unchanged: the bell is mounted in the top bar and is handed the signed-in user.
+    expect(topnav).toContain('<NotificationBell user={user}');
     const bell = read('src/components/NotificationBell.tsx');
     expect(bell).toContain("'/api/notifications'");
     expect(bell).toContain("'/api/notifications/read'");

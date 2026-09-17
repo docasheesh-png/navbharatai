@@ -182,6 +182,23 @@ export function findOrphanComponents(graph: ProjectGraph): string[] {
   return [...orphans].sort();
 }
 
+/**
+ * The file half of one `findOrphanComponents` entry.
+ *
+ * Entries are composed one line above as `${sym.file} (${sym.name})`, and two readers now need the
+ * path back out of that string: the readiness gate, to ask who wrote the file, and the build report.
+ * The parser lives HERE, beside the only place the format is produced, so the pair cannot drift —
+ * a split in the consumer would keep compiling for ever after the format changed.
+ *
+ * Returns '' for anything that is not that shape, which callers treat as "cannot attribute" and
+ * therefore as ours (see `buildAuthorship`'s safe-direction note). Pure; never throws.
+ */
+export function orphanComponentFile(entry: string | null | undefined): string {
+  if (typeof entry !== 'string') return '';
+  const m = /^(.*?)\s+\([^()]*\)\s*$/.exec(entry.trim());
+  return (m ? m[1] : entry).trim();
+}
+
 /** Analyse the project graph for real architectural defects. */
 export function analyzeArchitecture(graph: ProjectGraph): ArchitectureReport {
   const files = new Set(graph.files);

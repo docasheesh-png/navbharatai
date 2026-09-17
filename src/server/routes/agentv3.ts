@@ -13190,6 +13190,18 @@ async function noteBuildOutcome(
       // only honest answer to "did this build write that file?". Passed as a thunk because the gate
       // asks at the END of the build and the map is empty right now.
       dispatcher.setAuthoredFiles(() => writtenFiles.keys());
+      // …AND THE SAME SET MUST FORGET A FILE THE BUILD DELETED (autopsy 8b3dca5c). `writtenFiles` is
+      // what the durable save is derived from and what `integrityFiles` is unioned with, so leaving a
+      // deleted path in it re-persists the file, restores it into the next sandbox, and hands every
+      // later gate a module the app does not have. The dispatcher has already confirmed against the
+      // sandbox that each of these is genuinely gone before it says so.
+      dispatcher.setFileDeletionSink((paths) => {
+        for (const p of paths) {
+          writtenFiles.delete(p);
+          try { buildDiag.record({ phase: 'build', severity: 'info', code: 'FILE_DELETED', message: `Removed from the project: ${p}`, autoResolved: true }); }
+          catch { /* diagnostics are best-effort */ }
+        }
+      });
       // PUBLISHING NEEDS AN ASK (admin 2026-09-01). On a build turn the agent used to decide for
       // itself — a user typed "continue", the build finished, and their app went live on a public URL
       // with nobody having requested it. Consent is read from THIS message only: consent that carries

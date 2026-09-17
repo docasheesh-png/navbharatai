@@ -62331,9 +62331,10 @@ refused is only "not built / not charged" about an app on the screen. The dukaan
 missing modules AND failing page routes) is still flipped — pages `failed` vetoes — and a test says so.
 
 ⚠️ **Stated plainly:** the release gate's headline still says *"N build-breaking blocker(s)"* on a held
-build; that wording lives in `releaseGate.ts`, which PR #3018 is mid-flight in, so it is left for that
-file's next change rather than raced (CLAUDE.md, concurrent sessions rule 4). The VERDICT line beside it
-explains the contradiction.
+build; that wording lives in `releaseGate.ts`, which PR #3018 was mid-flight in while this was written
+(it merged during this change's gate run, and the whole gate was re-run on the merged tree). Teaching the
+gate itself about run-proof is a separate design change to its evidence shape, deliberately not folded
+in here. The VERDICT line beside it explains the contradiction.
 
 ### Tests — all proven by reversion
 

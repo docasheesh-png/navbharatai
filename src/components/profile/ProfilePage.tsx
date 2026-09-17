@@ -15,7 +15,6 @@ import { User, Wallet, Clock, CheckCircle2, Circle, AlertCircle, ChevronRight, E
 import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { ApiKeysCard } from './ApiKeysCard';
 import { PublishedAppsCard } from './PublishedAppsCard';
 import { publishedAppRows, type PublishedAppRow } from '../../lib/publishedAppsView';
 import { panelWidth, panelColumns, type DeviceMode } from '../../lib/panelWidth';
@@ -927,8 +926,8 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
           </button>
         </div>
 
-        {/* ── API Keys (U-7) ───────────────────────────────────────────────── */}
-        <ApiKeysCard getToken={idToken} />
+        {/* API keys MOVED to Home → Developer Tools (admin 2026-09-17) — a developer's tool does not
+            belong at the bottom of the page a non-technical user meets first. Not copied: one door. */}
 
         {/* ── Logout ───────────────────────────────────────────────────────── */}
         <div className="border-t border-white/5 pt-4">

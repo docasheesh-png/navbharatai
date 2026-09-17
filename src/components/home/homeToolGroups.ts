@@ -14,7 +14,7 @@
 // stays the catalogue of what exists; that file says what is switched on.
 
 import type { ComponentType } from 'react';
-import { Bot, MessageSquare, Wand2, Bug, Code, TestTube, Globe, GitBranch, Gauge, Minimize2, Palette, Layout, Puzzle, LayoutTemplate, Moon, Rocket, Smartphone, Search, Package, IndianRupee, Users2, TrendingUp, Share2, Database, Languages, FlaskConical } from 'lucide-react';
+import { Bot, MessageSquare, Wand2, Bug, Code, TestTube, Globe, GitBranch, Gauge, Minimize2, Palette, Layout, Puzzle, LayoutTemplate, Moon, Rocket, Smartphone, Search, Package, IndianRupee, Users2, TrendingUp, Share2, Database, Languages, FlaskConical, Key } from 'lucide-react';
 import { Figma } from '../ui/BrandIcons';
 
 /** A lucide icon component (version-independent — the package's type export name has changed across releases). */
@@ -62,6 +62,14 @@ export const HOME_TOOL_GROUPS: HomeToolGroup[] = [
     color: 'text-emerald-400',
     icon: Code,
     items: [
+      // THE NAVBHARATAI API (admin 2026-09-17: `"other" -> "developer tools"` — "developer tools ke
+      // andar yeh pura system bana kar dalo … api keys farzi nahi ho"). Moved here from My Profile,
+      // where a developer's tool sat on the page a non-technical user meets first. It is the ONE live
+      // tile in this group: every other tool here stays "Coming soon" until the admin has tested it,
+      // and this one is live because the admin asked for it, working, today. Keys, the scopes that
+      // decide what each key may read or do, a per-key daily ₹ limit, and an OpenAI-compatible chat
+      // endpoint so a user can run their own AI program on a NavBharatAI key.
+      { id: 'devapi', label: 'NavBharatAI API', icon: Key },
       // Database Studio was fully built (browse your own DB + read-only SQL runner + edit + CSV) but had
       // NO doorway — nothing set activeView='dbstudio', so users could not reach it. This tile is that
       // doorway (D1 gap, 2026-08-19). "See your data" is a developer/data tool, so it lives here.

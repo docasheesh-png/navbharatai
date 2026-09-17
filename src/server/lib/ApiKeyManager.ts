@@ -10,9 +10,37 @@
 
 import crypto from 'crypto';
 
-/** The scopes a key can be granted. Keep this the single source of truth. */
-export const API_SCOPES = ['read:profile', 'read:usage', 'read:builds'] as const;
+/**
+ * The scopes a key can be granted. Keep this the single source of truth.
+ *
+ * 🔴 EVERY SCOPE HERE MUST HAVE AN ENDPOINT THAT REQUIRES IT (admin 2026-09-17: "api keys farzi nahi
+ * ho"). Until this date `read:usage` and `read:builds` were tickable in the UI and required by NOTHING —
+ * a user could grant them, and nothing anywhere changed. That is the second absolute rule's forbidden
+ * state, the same one the inert "Provider Kill Switches" were removed for. `developerApi.test.ts`
+ * asserts each scope against the route that enforces it, so a fifth scope cannot ship as a label.
+ *
+ *   read:profile  → GET  /api/v1/me
+ *   read:usage    → GET  /api/v1/usage   (and the usage half of /me)
+ *   read:builds   → GET  /api/v1/builds
+ *   ai:chat       → POST /api/v1/chat/completions — NavBharatAI's AI, on the holder's wallet
+ */
+export const API_SCOPES = ['read:profile', 'read:usage', 'read:builds', 'ai:chat'] as const;
 export type ApiScope = (typeof API_SCOPES)[number];
+
+/**
+ * What each scope lets a key do, in the words the user reads when choosing it.
+ *
+ * Scopes are how the user controls WHAT they share (admin 2026-09-17: "user is api se kya kya share
+ * karna chahta hai, woh bhi control kar sake"). A code like `read:usage` is not a description, so the
+ * screen shows this beside it — and it is served by the server, not typed twice in the client, so the
+ * two cannot drift.
+ */
+export const API_SCOPE_DESCRIPTIONS: Readonly<Record<ApiScope, { title: string; detail: string }>> = {
+  'read:profile': { title: 'Profile', detail: 'Your display name and account id.' },
+  'read:usage': { title: 'Usage & balance', detail: "Your wallet balance and this month's builds and spend." },
+  'read:builds': { title: 'Your apps', detail: 'The list of apps you have built, with their live links.' },
+  'ai:chat': { title: "NavBharatAI's AI", detail: 'Ask NavBharatAI questions from your own program or app. Costs come from your wallet, up to the daily limit you set on the key.' },
+};
 
 export const KEY_PREFIX = 'nbai_';
 

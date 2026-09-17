@@ -35,10 +35,16 @@ describe('the held-back tool list matches what the admin actually named', () => 
     }
   });
 
-  it('Developer Tools: the WHOLE group is off ("developer tool sabhi")', () => {
+  it('Developer Tools: the WHOLE group is off ("developer tool sabhi") — except the NavBharatAI API', () => {
+    // ⚠️ ONE EXEMPTION, ordered by the admin two days after the hold-back (2026-09-17): "developer
+    // tools ke andar yeh pura system bana kar dalo … system working hona chahiye". The API tile was
+    // built to that order and is live; every OTHER tool in the group stays held back until tested.
     const dev = idsIn('Developer Tools');
-    expect(dev.length).toBeGreaterThan(0);
-    for (const id of dev) expect(isComingSoonTool(id), `${id} should be held back`).toBe(true);
+    expect(dev).toContain('devapi');
+    expect(isComingSoonTool('devapi'), 'the NavBharatAI API is the one live tile in this group').toBe(false);
+    const rest = dev.filter((id) => id !== 'devapi');
+    expect(rest.length).toBeGreaterThan(0);
+    for (const id of rest) expect(isComingSoonTool(id), `${id} should be held back`).toBe(true);
   });
 
   it('Publish & Deploy: everything off EXCEPT Custom Domain ("custom domain ko chor ke sabhi")', () => {
@@ -56,10 +62,10 @@ describe('the held-back tool list matches what the admin actually named', () => 
     for (const id of mon) expect(isComingSoonTool(id), `${id} should be held back`).toBe(true);
   });
 
-  it('exactly seven tools remain usable — the count the admin signed off on', () => {
+  it('exactly eight tools remain usable — the seven the admin signed off on, plus the API they ordered', () => {
     const live = allTools.filter((t) => !isComingSoonTool(t.id)).map((t) => t.id);
     expect(new Set(live)).toEqual(
-      new Set(['botbuilder', 'imagegen', 'api', 'versioning', 'minifier', 'apk', 'domain']),
+      new Set(['botbuilder', 'imagegen', 'api', 'versioning', 'minifier', 'apk', 'domain', 'devapi']),
     );
   });
 });

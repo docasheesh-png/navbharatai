@@ -427,6 +427,12 @@ export interface BuildDiagnosticsReport {
   cacheReadInputTokens?: number;
   /** Billing & tier facts (free/paid user, actual charge, wallet debit, why-free). */
   billing?: BuildBillingRecord;
+  /**
+   * HOW THE BUILD'S OWN ETA HELD UP — derived at serialization from the promise made at t=0 and the
+   * two timestamps this record already carried. Admin/forensic only; see `etaAccuracy`. Absent on a
+   * turn that showed no ETA (chat), on a legacy record, and on a build that has not ended.
+   */
+  etaAccuracy?: EtaAccuracy;
   /** The post-build quality reviewer's FULL findings (every small problem it listed) — not the
    *  400-char timeline snippet. This is what makes the report's "all problems" list complete. */
   review?: string;
@@ -566,6 +572,8 @@ export class BuildDiagnostics {
   private sandboxCostRecord?: { seconds: number; usd: number; estimated: true };
   private cacheReadInputTokens?: number;
   private billing?: BuildBillingRecord;
+  /** What the user was promised at t=0 — see `etaAccuracy`. Absent on turns that show no ETA. */
+  private etaPromise?: EtaPromise;
   private reviewText?: string;
   private manifest?: BuildManifestV1;
   private priorFailedBuilds: number | undefined;
@@ -1582,6 +1590,27 @@ export class BuildDiagnostics {
   }
 
   /** Billing & tier facts, written once at settle time from the REAL charge (admin 2026-07-11). */
+  /**
+   * Record the ETA the build opened with, so the ENDING can be measured against it.
+   *
+   * One call site, beside the `ETA_BASIS` record that already computes the estimate — the numbers are
+   * stored STRUCTURED rather than parsed back out of that line's prose, because reading our own
+   * sentences to recover facts we had in hand is the mistake `buildFailureCategory.ts` documents at
+   * length. Never throws; a malformed estimate is simply not stored, and the report then says nothing
+   * about accuracy rather than something wrong.
+   */
+  setEtaPromise(p: EtaPromise): void {
+    const estimateMs = Number(p?.estimateMs);
+    if (!Number.isFinite(estimateMs) || estimateMs <= 0) return;
+    this.etaPromise = {
+      estimateMs,
+      lowMs: Number.isFinite(Number(p?.lowMs)) ? Number(p.lowMs) : estimateMs,
+      highMs: Number.isFinite(Number(p?.highMs)) ? Number(p.highMs) : estimateMs,
+      evidenced: p?.evidenced === true,
+      ...(typeof p?.shown === 'string' && p.shown ? { shown: p.shown } : {}),
+    };
+  }
+
   setBilling(b: BuildBillingRecord): void {
     this.billing = b;
     this.notify();
@@ -1943,6 +1972,9 @@ export class BuildDiagnostics {
       sandboxCost: this.sandboxCostRecord,
       cacheReadInputTokens: this.cacheReadInputTokens,
       billing: this.billing,
+      // DERIVED AT SERIALIZATION, so no ending path can forget it — the same reasoning as
+      // `endedWithoutOutcome` above. Pure: `report()` stays safe to call repeatedly mid-build.
+      etaAccuracy: etaAccuracy(this.etaPromise, this.startedAt, this.endedAt) ?? undefined,
       review: this.reviewText,
       priorFailedBuilds: this.priorFailedBuilds,
       session: this.session,
@@ -2510,6 +2542,83 @@ export function importTurnObservation(
   };
 }
 
+/** What the user was actually PROMISED at t=0, kept so the ending can be measured against it. */
+export interface EtaPromise {
+  /** The midpoint the estimator produced, in ms. */
+  estimateMs: number;
+  /** The band the user was shown, in ms. */
+  lowMs: number;
+  highMs: number;
+  /** True when the figure was backed by this workspace's own past builds (see etaEvidence.ts). */
+  evidenced: boolean;
+  /** The exact sentence the user saw, so the report can never claim a promise that was not made. */
+  shown?: string;
+}
+
+/** How the promise held up. `ratio` is actual ÷ midpoint; `overBandBy` is 0 when it landed inside. */
+export interface EtaAccuracy {
+  promisedMs: number;
+  lowMs: number;
+  highMs: number;
+  actualMs: number;
+  ratio: number;
+  withinBand: boolean;
+  evidenced: boolean;
+  line: string;
+}
+
+/**
+ * MEASURE THE PROMISE AGAINST THE CLOCK — the half that was missing (open root cause #6, 2026-09-17).
+ *
+ * 🔴 WHY IT EXISTS. A build report carried `ETA ~2–4 min` and, in the SAME document, a `startedAt`
+ * and an `endedAt` 16.7 minutes apart. Both facts were recorded; nothing ever put them side by side.
+ * So every autopsy that wanted to know whether the estimate holds had to do the arithmetic by hand,
+ * and the admin's panels could not count ETA accuracy at all — the one number that says whether the
+ * ETA work of 2026-08-11 and 2026-09-14 actually landed.
+ *
+ * This is rule 5's honesty step applied to our own promise: the report already knew, and did not say.
+ *
+ * ⚠️ IT IS A MEASUREMENT, NOT A DEFECT, and it is deliberately NOT recorded as an issue. A missed
+ * estimate is not a fault of the user's app, and this repo has repeatedly watched a measurement
+ * recorded as a warning become the headline `rootCause` of a successful build — `POST_ANSWER_TIMING`
+ * and `TIME_TO_FIRST_CALL` are both in NEVER_ROOT_CAUSE for exactly that. Recording it as a derived
+ * field keeps it out of `counts`, out of the cause pick, and out of the user's bill.
+ *
+ * ⚠️ AND AN UNEVIDENCED ESTIMATE IS SAID TO BE ONE. Since 2026-09-14 a build with no history shows
+ * the user a PHASE, not a number, so scoring its hidden midpoint as a broken promise would invent a
+ * promise nobody made. The ratio is still computed — it is what teaches the estimator — but the line
+ * says plainly that no figure was shown.
+ *
+ * PURE. Returns null when there was no estimate or no usable clock, which is the side that makes no
+ * claim rather than the side that makes one.
+ */
+export function etaAccuracy(
+  promise: EtaPromise | null | undefined,
+  startedAt: number | null | undefined,
+  endedAt: number | null | undefined,
+): EtaAccuracy | null {
+  const promisedMs = Number(promise?.estimateMs);
+  const a = Number(startedAt);
+  const b = Number(endedAt);
+  if (!Number.isFinite(promisedMs) || promisedMs <= 0) return null;
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return null;
+  const actualMs = b - a;
+  const lowMs = Number.isFinite(Number(promise?.lowMs)) ? Number(promise?.lowMs) : promisedMs;
+  const highMs = Number.isFinite(Number(promise?.highMs)) ? Number(promise?.highMs) : promisedMs;
+  const ratio = actualMs / promisedMs;
+  const withinBand = actualMs >= lowMs && actualMs <= highMs;
+  const mins = (ms: number) => `${(ms / 60000).toFixed(1)} min`;
+  const evidenced = promise?.evidenced === true;
+  const band = `${mins(lowMs)}–${mins(highMs)}`;
+  const head = evidenced
+    ? `The user was shown ${band} (midpoint ${mins(promisedMs)})`
+    : `No figure was shown to the user (unevidenced — they saw the PHASE). The estimator's own midpoint was ${mins(promisedMs)}, band ${band}`;
+  const verdict = withinBand
+    ? 'the build landed INSIDE that band'
+    : `the build took ${mins(actualMs)} — ${ratio.toFixed(1)}× the midpoint and ${actualMs > highMs ? 'OVER' : 'UNDER'} the band`;
+  return { promisedMs, lowMs, highMs, actualMs, ratio, withinBand, evidenced, line: `${head}; ${verdict}.` };
+}
+
 /**
  * The build's own verdict CODE — the last `OUTCOME_*` issue it recorded, or '' when it recorded none.
  *
@@ -2946,6 +3055,10 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
   if (typeof r.startedAt === 'number' && typeof r.endedAt === 'number') {
     lines.push(`Duration : ${Math.max(0, Math.round((r.endedAt - r.startedAt) / 1000))}s`);
   }
+  // THE PROMISE, MEASURED. Both halves of this line were already in the record — the ETA at t=0 and
+  // the two timestamps — and were never put side by side, so "ETA ~2–4 min" sat in the same document
+  // as a 16.7-minute build and nothing said so (open root cause #6, 2026-09-17).
+  if (r.etaAccuracy) lines.push(`ETA      : ${r.etaAccuracy.line}`);
   lines.push(`Issues   : ${r.counts.total} total — ${r.counts.errors} error(s), ${r.counts.warnings} warning(s), ${r.counts.autoResolved} auto-resolved, ${r.counts.unresolved} unresolved${r.counts.observations ? `, ${r.counts.observations} observation(s) about your existing code` : ''}`);
   lines.push('');
   // ROOT CAUSE first — the single most important line, so nobody has to read the whole timeline

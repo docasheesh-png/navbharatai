@@ -3,6 +3,7 @@ import type { WorkspaceState } from './WorkspaceState';
 import type { ClaudeToolDef, TurnRunner, TurnUsage, ToolUse, TurnResult } from './ClaudeClient';
 import type { ToolDispatcher } from './ToolDispatcher';
 import type { AgentRole } from './types';
+import { startWorkingHeartbeat, workingLine } from './workingHeartbeat';
 import type { ConversationStore, ConversationStatus } from './ConversationStore';
 import { compactMessagesForPersist, compactTranscriptForModel } from './SessionTimeline';
 import { billedAmountUsd } from './pricing';
@@ -629,9 +630,23 @@ export class AgentRunner {
             onThinking: (delta) =>
               events.emit({ type: 'stream_delta', agent: agentRole, id: turnId, kind: 'thinking', delta, ts: Date.now() }),
           });
-          turn = turnTimeoutMs > 0
-            ? await withTimeout(turnCall, turnTimeoutMs, `model turn ${steps}`)
-            : await turnCall;
+          // 🔴 THE SCREEN GOES BLANK EXACTLY HERE (autopsy 2b0a3ed5). Everything the user sees comes
+          // from events, and between sending this call and receiving its answer there are none — so a
+          // 55.7-second turn showed them nothing for 55.7 seconds, and they stopped the build.
+          //
+          // An elapsed clock is a MEASUREMENT, not an estimate, so it may always be shown; the module
+          // it comes from explains why that distinction is the whole justification. It carries a
+          // stable `id`, so the surface replaces one line instead of appending a new one every 15 s.
+          const stopWorkingHeartbeat = startWorkingHeartbeat((elapsedMs) => {
+            events.emit({ type: 'narration', agent: agentRole, text: workingLine(elapsedMs), ts: Date.now(), id: 'working' });
+          });
+          try {
+            turn = turnTimeoutMs > 0
+              ? await withTimeout(turnCall, turnTimeoutMs, `model turn ${steps}`)
+              : await turnCall;
+          } finally {
+            stopWorkingHeartbeat();
+          }
         } catch (err) {
           // #4 — capture the FAILED model turn before it propagates (provider error, timeout, …).
           try {

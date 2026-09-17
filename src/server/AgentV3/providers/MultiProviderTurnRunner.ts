@@ -17,7 +17,7 @@ import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 import { pacerEnabled, getSharedPacer } from '../RateLimitPacer';
 import { parseEnvFlag } from '../../lib/envFlag';
 import { isModelUnavailableError } from '../providerErrorClass';
-import { isBudgetEndedError } from '../turnDeadline';
+import { isBudgetEndedError, isSlowStreamAbandon } from '../turnDeadline';
 import { isStarvedBudgetError } from '../floorBudget';
 import {
   EMPTY_SLOW_RUNG_STATE, canBenchAnother, describeSlowRung, isRungTooSlow, recordSlowSample,
@@ -614,6 +614,8 @@ export function makeMultiProviderTurnRunner(
   const slowKeyFor = (entry: NamedRunner): string => `${entry.reportAs ?? entry.name}::${entry.modelId ?? ''}`;
   const slowRungs = new Map<string, SlowRungState>();
   const slowBenched = new Set<string>();
+  // One slow-stream abandon per build — see `canAbandonSlowStream` for why it is capped.
+  let abandonedSlowRung = false;
   /** Rungs judged slow but KEPT (the last engine). Remembered only so the report says it once. */
   const slowKeptAnyway = new Set<string>();
   const distinctSlowRungs = new Set(chain.map(slowKeyFor)).size;
@@ -666,7 +668,20 @@ export function makeMultiProviderTurnRunner(
         // under and stays right when those are retuned.
         const attemptStartedAt = now();
         try {
-          const result = await runner.runTurn(params);
+          /**
+           * 🔴 MAY WE WALK AWAY FROM THIS RUNG IF IT CRAWLS? (autopsy 2b0a3ed5, 2026-09-17.)
+           *
+           * Two conditions, and each removes a different way this guard could make a build worse:
+           *
+           *  • THERE MUST BE SOMEWHERE ELSE TO GO. Abandoning the last rung would manufacture a
+           *    failure out of a slow success — the exact thing `canBenchAnother` already refuses for
+           *    the post-call bench, for the same reason: a slow app beats no app.
+           *  • ONCE PER BUILD. If the next rung crawls too, we ride it out rather than walking the
+           *    whole ladder and failing. That caps the total cost of this guard at ONE abandoned
+           *    call, however bad the weather is at every vendor.
+           */
+          const canAbandonSlowStream = () => !abandonedSlowRung && i + 1 < chain.length;
+          const result = await runner.runTurn({ ...params, canAbandonSlowStream });
           timeoutStreak.delete(reportName); // a success resets the family's consecutive-timeout streak
           rateLimitStreak.delete(name); // …and the consecutive-429 streak (the provider recovered)
           cooldowns.clear(name); // …and the SHARED cooldown — the provider is back for everyone
@@ -732,6 +747,34 @@ export function makeMultiProviderTurnRunner(
           //
           // ⚠️ The message deliberately does NOT say "all providers failed". They did not. Naming our
           // own budget is what lets the next reader see the real cause instead of hunting a vendor.
+          /**
+           * 🔴 A RUNG WE ABANDONED FOR CRAWLING IS BENCHED AT ONCE (autopsy 2b0a3ed5, 2026-09-17).
+           *
+           * Without this the guard would defeat itself: we walk away at ~18 s, the call never
+           * completes, so it reports no usage, so the POST-CALL slow bench never sees a sample — and
+           * the very next turn goes straight back to the same crawling rung. The abandon has to carry
+           * its own verdict.
+           *
+           * It is the one ending where a single sample is enough without argument, because we did not
+           * merely observe slowness: we measured it against a floor and acted on it. `canBenchAnother`
+           * still guards the last engine, and `abandonedSlowRung` makes this at most once per build.
+           */
+          if (isSlowStreamAbandon(err)) {
+            abandonedSlowRung = true;
+            try {
+              const slowKey = slowKeyFor(chain[i]);
+              if (!slowBenched.has(slowKey) && canBenchAnother(slowBenched.size, distinctSlowRungs)) {
+                slowBenched.add(slowKey);
+                const elapsedMs = Math.max(0, now() - attemptStartedAt);
+                opts.onProviderBenched?.(
+                  reportName,
+                  `${chain[i].modelId ? `${chain[i].modelId} ` : ''}was answering far below a usable rate after `
+                  + `${Math.round(elapsedMs / 1000)}s — abandoned mid-answer and skipped for the rest of this build, `
+                  + 'so the ladder can reach the next engine instead of waiting it out',
+                );
+              }
+            } catch { /* the bench is bookkeeping — it must never replace the error below */ }
+          }
           if (isBudgetEndedError(err)) {
             const reason1 = err instanceof Error ? err.message : String(err);
             throw new Error(`This build's time budget ended before the step could finish (${reason1}). No provider failed — the work was stopped by our own deadline.`);

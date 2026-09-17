@@ -12,7 +12,7 @@
 // orchestrator can fall through to the next (ultimately Claude) provider.
 
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
-import { turnDeadline, BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE } from '../turnDeadline';
+import { turnDeadline, BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE, SLOW_STREAM_MESSAGE } from '../turnDeadline';
 import { glmThinkingParam, isThinkingParamRejection, modelAlwaysReasons, type GlmThinkingLevel } from './glmThinking';
 import { reconcileFloorBudget, turnStarvedItsBudget, starvedBudgetError } from '../floorBudget';
 import {
@@ -28,6 +28,7 @@ import {
   buildStreamingEnabled,
   streamHardCapMs,
   streamIdleMs,
+  streamIsCrawling,
   type OpenAiStreamChunkLike,
   type StreamStopCause,
 } from './openAiStream';
@@ -103,9 +104,27 @@ function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> 
 async function readStream(
   stream: OpenAiChatStream,
   acc: OpenAiStreamAccumulator,
-  opts: { idleMs: number; endAt: number; onText?: (t: string) => void; now?: () => number },
+  opts: {
+    idleMs: number;
+    endAt: number;
+    onText?: (t: string) => void;
+    /** The provider's own thinking, streamed as it arrives — see the reasoning note below. */
+    onReasoning?: (t: string) => void;
+    /**
+     * May this read ABANDON a crawling provider and let the chain fall to the next rung?
+     *
+     * 🔒 THE CALLER OWNS THIS, AND IT IS WHAT KEEPS THE FLOOR SAFE. `readStream` cannot see the
+     * ladder, so it must never decide on its own to give up on the LAST engine — a slow app beats no
+     * app, and manufacturing a failure where a slow success was coming is the one way this guard
+     * could make a build worse. Absent ⇒ never abandon, i.e. today's behaviour exactly.
+     */
+    canAbandon?: () => boolean;
+    startedAt?: number;
+    now?: () => number;
+  },
 ): Promise<StreamStopCause> {
   const now = opts.now ?? (() => Date.now());
+  const startedAt = typeof opts.startedAt === 'number' ? opts.startedAt : now();
   const iterator = stream[Symbol.asyncIterator]();
   const abort = () => { try { stream.controller?.abort(); } catch { /* best-effort */ } };
 
@@ -144,12 +163,28 @@ async function readStream(
       if (step.done) return 'complete';
 
       const before = acc.textSoFar().length;
+      const reasoningBefore = acc.reasoningSoFar().length;
       acc.push(step.value);
       // REAL incremental text now, not one block at the end: the loop's onText contract finally
       // receives the answer as it is written, which is what a user watching a build sees.
       if (opts.onText) {
         const delta = acc.textSoFar().slice(before);
         if (delta) opts.onText(delta);
+      }
+      // 🔴 THE PROVIDER'S THINKING WAS ARRIVING AND BEING THROWN AWAY (autopsy 2b0a3ed5). The
+      // accumulator has collected `reasoning_content` since streaming shipped, and the event that
+      // carries it to the screen — `stream_delta` with `kind: 'thinking'` — has existed since Claude
+      // got extended thinking. Nothing joined them, so on a tier that reasons the user watched an
+      // empty panel while a perfectly busy model thought. The bytes are already paid for.
+      if (opts.onReasoning) {
+        const delta = acc.reasoningSoFar().slice(reasoningBefore);
+        if (delta) opts.onReasoning(delta);
+      }
+      // …and the THIRD state: answering, but so slowly that waiting costs more than moving on. Judged
+      // only when the caller says another rung is available — see `canAbandon`.
+      if (opts.canAbandon?.() && streamIsCrawling({ producedChars: acc.producedChars(), elapsedMs: now() - startedAt })) {
+        abort();
+        return 'slow';
       }
     }
   } catch (err) {
@@ -406,7 +441,12 @@ export class OpenAiToolRunner implements TurnRunner {
       const stop = await readStream(raw, acc, {
         idleMs,
         endAt: startedAt + timeoutMs,
+        startedAt,
         onText: params.onText,
+        // The provider's own thinking, straight to the screen — see the reasoning note in the loop.
+        onReasoning: params.onThinking,
+        // Only the ladder knows whether there is somewhere else to go; absent ⇒ never abandon.
+        canAbandon: params.canAbandonSlowStream,
       });
 
       // 🔑 THE POINT OF THE WHOLE CHANGE. A stall used to destroy the call; now it keeps the answer
@@ -417,6 +457,14 @@ export class OpenAiToolRunner implements TurnRunner {
       // With NOTHING salvageable it must still be a provider failure, not a quiet empty answer:
       // thrown so the chain falls to the next vendor AND `isTimeout` can bench a rung that keeps
       // stalling. Reasoning alone is not salvageable — see `hasAnswer`.
+      // 🔴 A CRAWLING PROVIDER IS ABANDONED WHOLE, answer or not (autopsy 2b0a3ed5). By definition
+      // it produced almost nothing — that is what put it under the floor — so there is no partial
+      // answer worth the turn it would cost to keep. Thrown with the marker below so the ladder can
+      // tell this apart from a hung provider and bench the FAMILY immediately, rather than sending
+      // the next turn back to the same crawling rung.
+      if (stop === 'slow') {
+        throw new Error(`${SLOW_STREAM_MESSAGE} after ${Math.max(0, Date.now() - startedAt)}ms`);
+      }
       if (stop !== 'complete' && !acc.hasAnswer()) {
         throw new Error(stop === 'deadline' ? BUDGET_REACHED_MESSAGE : clockMessage(idleMs));
       }

@@ -61133,8 +61133,109 @@ the PLATFORM FEATURE that covers it.
 Tests: `tests/questionReadsEveryClause.test.ts` (16), both halves of the fix proven by reversion.
 Existing `IntentClassifier.test.ts` (73) and every classifier-adjacent suite (497 total) pass unchanged.
 
+## 2026-09-17 — The cancellation bill counted OUR template as the user's work
+
+Admin delegated both open decisions: *"mai non technical hu… navbharatai ke bhale ke liye jo bhi theek
+hai, karo. navbharatai strong ho, log jude rahe."* This is the first of the two.
+
+### It was never a policy question
+
+The admin's 2026-09-14 cancellation rule is right and is **unchanged**. `decideCancelledBuildBill`
+already says *"nothing delivered, nothing charged"*. What was wrong was the NUMBER that rule reads.
+
+The golden-scaffold pre-seed writes its template straight into the build's `writtenFiles` map
+(`writtenFiles.set(gp, gc)`), so `filesWritten` was **12** in autopsy 2b0a3ed5 — twelve files the
+user's build never produced. Rule 4 therefore **could not fire for any prompt that has a template**,
+which is exactly the set of builds where a user can quit before anything of their own exists.
+
+What it cost that user: a calculator asked for, our template on disk at 6.7 s, one model call
+returning **27 tokens in 55.7 s**, Stop at 64 s having seen no preview at all — billed 50%, **₹0.65**.
+
+**Fixed:** `preseededUnchanged` is counted in the module (not at the call site, so the rule keeps one
+address) and compared by **CONTENT**, so a template file the builder REWRITES is still paid for. Absent
+⇒ 0 ⇒ today's behaviour for every caller with no template. `writtenFiles` itself is deliberately NOT
+filtered — `shouldRetryEmptyBuild` and the render rescue read its size and mean something different.
+
+### 🔴 The loophole I nearly shipped, caught by my own test
+
+My first attempt put the nothing-delivered rule ahead of the rendering check. That would have made
+**"seed a template → let it render → press Stop" free for ever.** `CLAUDE.md` settles that case in as
+many words (autopsy 4efab9d7): *"a zero-write turn that renders is billed by it"* — the user is holding
+a working app, and what produced it is our business, not theirs.
+
+### 🔒 And two prior decisions that were NOT mine to flip
+
+Reordering then broke two existing tests, both encoding *"when the evidence contradicts itself, do not
+charge"*: **zero files written but a render claimed** is free, and **junk file counts** land on the free
+side. Rule 4 is now in two halves — `written === 0` stays FIRST and unchanged (contradiction ⇒ free),
+and the new delivered-files rule sits after the rendering check (a real, expected state ⇒ free only
+when nothing rendered either). All 20 existing tests pass untouched.
+
+Tests: `tests/cancelBillCountsRealWork.test.ts` (16), including the loophole and both prior decisions.
 ---
 
+## 2026-09-17 — Referral: the analysis said ~90% built, and the missing 10% was the SHARE button
+
+**Admin:** *"navbharatai me referral system already bana hua hai. mai jo bana raha hu, woh check karo hai
+ya nahi, nahi to bana do… isko pahle analysis karo, sayad 80-90% ban chuka hai!!"* — and that estimate
+was right.
+
+### What ALREADY existed (verified against the code, not assumed)
+
+| Requirement | State |
+|---|---|
+| Referral box on first open, before an account exists | ✅ `lib/pendingReferralCode.ts` — HOLDS the typed code and applies it the moment sign-in completes, offered exactly once |
+| A code minted for every user | ✅ `ensureCode()` on `GET /api/referral/:userId`; `referralCode.ts` mints 6 chars from a 31-symbol alphabet with no `0/O/1/I/L`, matched case-insensitively |
+| Code shown on the profile with COPY | ✅ `ProfilePage.tsx` referral card |
+| ₹1,500 | ✅ `referrerLifetimeCapTokens()`, default 1500, surfaced as `capRupees` |
+| Apply a friend's code | ✅ `POST /api/referral/:userId/redeem`, device-gated |
+| Who used my code | ✅ `ReferralEarningsSheet` + `GET /api/referral/:userId/referred` |
+| A share MESSAGE | ✅ `referralShareMessage(code)` — already returned by the API |
+
+### 🔴 What was genuinely missing — the share ACTION
+
+`ReferralPanel.tsx` had a `Share2` ICON next to a paragraph of text and **no share behind it**.
+`navigator.share` appears exactly ONCE in this entire repo — in `AIImageGenerator.tsx`. So a user could
+COPY the code and never SHARE it, and *"copy this, now go and find WhatsApp yourself"* is precisely the
+step where most people stop. The 90% that existed could not deliver its own purpose.
+
+**Built:** `src/lib/shareReferral.ts` — the device's own share sheet, so the code reaches WhatsApp,
+Instagram, Facebook or anything else installed. ONE helper used by BOTH the profile card and the
+billing panel, so the two surfaces can never drift.
+
+⚠️ **Why the OS sheet and not three per-app buttons:** a WhatsApp/FB/Instagram row is three
+integrations that each break on their own schedule, cannot reach the app the user actually wants, and
+on Android duplicate a sheet the OS draws better. One call offers every app on that phone — which is
+literally what was asked ("jahan share karna chahe").
+
+🔒 **THREE OUTCOMES, AND THE MIDDLE ONE IS THE EASY BUG.** `navigator.share` REJECTS when the user
+backs out of the sheet, so a naive `catch` tells somebody who simply changed their mind that *"sharing
+failed"*. `isUserDismissal` (AbortError / NotAllowedError) makes a dismissal **silent**, and a
+dismissal deliberately does NOT fall back to copying — claiming an action the user declined. A device
+with no share sheet copies and says so, so the button is never dead.
+
+### Also changed: the headline leads with what the user EARNS
+
+The card said "Your Referral Code". It now reads **"Refer & earn tokens worth ₹{capRupees}"**, read from
+the SERVER's own cap — never typed into the component, so retuning `REFERRER_LIFETIME_CAP_TOKENS` cannot
+leave a stale number promising money on a user's screen. Test-locked.
+
+### 🔴 THE REASON NONE OF IT IS VISIBLE TODAY — and it is one Cloud Run key
+
+`REFERRAL_REWARDS` is **UNSET**, so `referralRewardsEnabled()` is false, the API answers
+`enabled: false`, and `{referral.enabled && …}` renders **nothing at all**. The entire referral surface
+— code, copy, earnings, and now share — is invisible on every screen until that key is set to `on`.
+That is almost certainly why this looked unbuilt. **Nothing in this PR changes that; the switch is the
+admin's.**
+
+⚠️ Before flipping it, the key's own registry entry still applies: claiming is Android-only behind a
+Play Integrity device check, and that needs `PLAY_INTEGRITY_CLOUD_PROJECT` (a GitHub repo secret) plus
+the `playintegrity` scope on the Play service account, plus a `.aab` carrying `DeviceIntegrityPlugin`.
+Until those hold, every check is `unavailable`, which pays ₹0 — the gate fails CLOSED. **Sharing and
+copying a code work regardless; only CLAIMING money is gated.**
+
+Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1733 files, 24521 passed, 0 failed** ·
+build · test:bundle · boot:check. `tests/shareReferral.test.ts`, 16 cases.
 ## 2026-09-17 — AUTOPSY 2b0a3ed5: the calculator build a user stopped after 66 seconds, and was right to
 
 **The run.** Weak tier, free, a starter-chip calculator prompt. 7 s of setup, then ONE model call that
@@ -61550,6 +61651,49 @@ reading the history does not "restore" a feature that was removed on purpose.
 Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1728 files, 24432 passed, 0 failed** ·
 build · test:bundle · boot:check.
 
+## 2026-09-17 — Every golden scaffold graded C or D, and only ONE of the two reasons was real
+
+Admin's second delegated decision. Build report `2b0a3ed5` reported `DESIGN_CONSISTENCY 68/100 (C)` on
+a **calculator** build, and I proposed "fix the calculator template's design". **Measuring first showed
+that premise was wrong** — and acting on it would have damaged a correct design system.
+
+### What the measurement showed
+
+Scoring all **40** golden scaffolds with the build's own linter (`lintBuiltApp`): **every one was C or
+D**, and 38 carried *identical* numbers ("20 distinct colours", "11 off-grid spacings"). Identical
+numbers across apps with different code means the cause is in a file they all share — not in any app.
+Per-file scoring confirmed it: each app's own `src/App.tsx` scores **100/A**; the grade came entirely
+from the shared `src/index.css` (70/C) and `src/theme.tsx` (82/B).
+
+### The two complaints, settled in opposite directions
+
+🔴 **"20 distinct colours" — FALSE, and the fix is in the LINTER.** All 19 colours are **token
+declarations** in `DESIGN_KIT_CSS` — `--accent: #4f46e5`, `--bg: #0d0d12` — and **not one is ad-hoc**.
+That is a palette, not a violation of one. Worse, a kit with a dark mode declares every token TWICE by
+construction, so **a well-built two-theme system fails the rule harder the more complete it is.**
+`extractTokenColors` now excludes declared tokens from the palette budget.
+
+⚠️ `hardcoded-colors` deliberately still reads **every** colour: it asks a different question ("many
+colours and NO tokens at all"), and filtering its input would have made it near-unreachable — a file
+that half-adopted tokens would have its real problem hidden by the very tokens it did declare.
+
+✅ **"11 spacing values off the 4px grid" — TRUE, and the fix is in the CSS.** `designKit.ts` really
+did use 9/14/6/10/22px padding, margin and gap. Snapped to the grid.
+
+🔒 **The constraint that made this a measurement rather than a bulk replace:** `button, .btn` and
+`input, textarea, select` deliberately **share their vertical padding** so a button lines up with an
+input beside it in a form row. Snapping one to 8 and the other to 10 would have broken control
+alignment in every app NavBharatAI generates. Both moved to 8 together; test-pinned.
+
+### Result
+
+All 40 scaffolds now grade **100/A** — through one linter change and one shared stylesheet, not 40
+template edits. The linter is **not** blinded: `puzzle` still carries its own real 12-colour tile ramp,
+`arcade` 2 and `calculator` 1, and a file with 14 genuinely ad-hoc colours is still caught at 86/B.
+
+Tests: `tests/designKitTruth.test.ts` (10), both halves proven by reversion. The existing
+`designLinter`, `buildQualityLint`, `goldenScaffolds` and `autopsyFdd59ef8Remainder` suites (360) pass
+unchanged.
 ---
 
 ## 2026-09-17 — The release gate printed a falsehood in the same sentence that disproved it
@@ -61611,6 +61755,101 @@ includes a great deal of Hindi and Hinglish. Recorded here so the next session d
 `CLAUDE.md`'s own lesson, *"'not invented' is a weaker standard than 'checked'"*, applied to a field that
 looked like a measurement and is a default. The real fix remains giving the fast lane the same request the
 full builder sees — not guessing from a signal that cannot carry the weight.
+## 2026-09-17 — The first call the user sits through: a throughput floor, and a clock
+
+Autopsy 2b0a3ed5 left three items open (rule 6). The admin read them and asked for the best answer to
+each; this closes the first two. **The third — sandbox 98% idle — is deliberately not touched, because
+the honest next step there is to READ a measurement we already collect, not to write code.**
+
+### 1 · 🔴 THE THROUGHPUT FLOOR — the third state a streamed call can be in
+
+Streaming bounded a call by SILENCE, which assumes two kinds of provider: healthy, and stalled. **A
+provider that trickles is a third.** It never goes quiet, so the 60 s idle bound never fires; it always
+has an answer eventually, so the 300 s ceiling returns a truncated SUCCESS. The reported call sat in
+that gap for **55.7 seconds and produced 27 tokens**, and reached no escalation path at all (the
+timeout bench needs a throw, the 429 bench a 429, the post-call slow bench three calls).
+
+`streamIsCrawling` judges one stream, live: past a **15 s grace period**, below **6 characters per
+second**, it is abandoned and the chain falls to the next rung.
+
+🔑 **REASONING IS COUNTED, AND THAT IS THE ENTIRE SAFETY ARGUMENT.** GLM 5.3+ always reasons and emits
+its thinking BEFORE any content. A floor watching only answer text would read a perfectly healthy
+reasoning turn as producing nothing and abandon it — on exactly the tier that reasons most. This was
+the reason I recorded the fix as open yesterday; the accumulator turned out to already track
+`reasoning` separately, so what was missing was one counter, not a subsystem. **I over-stated the
+difficulty and the record now says so.**
+
+Characters, not tokens: tokens are not known until the final chunk, and inventing a count from text
+length is the estimate the wallet law forbids. This decides ROUTING, never a bill.
+
+🔒 **THREE THINGS BOUND THE DOWNSIDE, and each removes a different way this could make a build worse:**
+
+| guard | what it prevents |
+|---|---|
+| `canAbandon` is supplied by the LADDER, never by the stream | abandoning the **last** engine, turning a slow success into a failure |
+| `i + 1 < chain.length` | the same, checked per rung |
+| **once per build** (`abandonedSlowRung`) | walking the whole ladder when every vendor is having a bad hour — the total cost is capped at ONE abandoned call |
+
+⚠️ **AND THE ABANDON CARRIES ITS OWN VERDICT, or the guard defeats itself.** We walk away before the
+call completes, so it reports no usage, so the POST-CALL slow bench never sees a sample — and the very
+next turn would go straight back to the same crawling rung. `isSlowStreamAbandon` benches the FAMILY
+immediately (still behind `canBenchAnother`). Because the skip is inside the rung loop, a 104-key GLM
+pool is skipped in the same turn and the ladder reaches KIMI at once.
+
+The error reads as a timeout **and** is tellable from one: it must bench like a hung rung, but it is
+the one ending where the rung would probably have answered eventually, so it earns an immediate bench
+rather than a second slow turn proving the same thing. Keys: `AGENTV3_STREAM_MIN_CHARS_PER_SEC` (6,
+explicit `0` disables) and `AGENTV3_STREAM_THROUGHPUT_GRACE_MS` (15000, floor 5000). Both unset.
+
+### 2 · 🔴 THE ELAPSED CLOCK — and the reason it is allowed where an ETA was not
+
+Of the build's 66 seconds, **63 showed the user nothing**: the scaffold narration fired at 6.7 s and
+the next line arrived at 62.7 s. A blank screen and a crashed app look identical.
+
+The ETA was withheld, and that was right — the only estimate available was a prompt-word heuristic,
+and a heuristic is not evidence. **But an elapsed clock is a measurement.** "34 seconds have passed"
+cannot be wrong and promises nothing. That distinction is the whole justification, and `workingLine`
+is asserted to contain no prediction of any kind.
+
+- Silent for the first **12 s** (most turns answer inside it; a line that appeared at once would
+  flicker on every call and teach the user to ignore it), then every **15 s**.
+- Emitted with a stable `id: 'working'`, so the reducer **replaces one line** instead of appending —
+  the same mechanism the `eta-live` line already uses. **No client change was needed.**
+- Wrapped in `finally`, so a thrown turn can never leave a timer emitting into a dead build.
+- 🔒 **Recorded in the build report ONCE.** Every narration lands on the timeline, so a 30-minute build
+  would file its own reassurance a hundred times and bury the report it sits beside. `lastActivity` is
+  still refreshed on every tick, so the still-running detector is unaffected.
+
+### 3 · 🔎 THE PROVIDER'S OWN THINKING WAS ARRIVING AND BEING THROWN AWAY
+
+Found while building the above. `OpenAiStreamAccumulator` has collected `reasoning_content` since
+streaming shipped, and `stream_delta` with `kind: 'thinking'` has existed since Claude got extended
+thinking — **nothing joined them.** So on a tier that reasons, the user watched an empty panel while a
+perfectly busy model thought. One line each side. The bytes were already paid for, the reducer already
+renders that kind, and the client needed no change.
+
+### ⏭️ Item 3 (sandbox 98% idle) — deliberately NOT built, and why
+
+It was ~₹0.26 on this build, the least valuable of the three, and **the report's own
+`started-by=files` line says the machine was created by a file-list request, not by the build.** If
+opening a workspace starts a VM, that is where the money is — and the admin panel's *"Where does a
+sandbox's billed time go?"* card already answers it under "Why machines started". This repo's own rule
+for sandbox changes is **measure first**; writing code here before reading that screen would repeat the
+`E2B_USD_PER_HOUR` mistake — a confident-looking derivation that was half wrong.
+
+### ⏸️ Also not built, and waiting on the admin: hedging
+
+The fastest possible answer to the wait is to start the next rung **in parallel** after ~20 s and take
+whichever answers first, so a good answer is never lost. It is not built because it is the same
+mechanism the money audit deliberately removed from free chat (*"A RACE IS A PURCHASE OF SPEED, SO IT
+BELONGS WHERE SOMEONE IS PAYING"*). The cost profile is very different — it would fire only after
+demonstrated slowness rather than on every turn — but that is the admin's decision to revisit, not
+mine to take quietly.
+
+**Tests:** `tests/firstCallIsVisible.test.ts` (22 cases). Three guarantees proven by reversion —
+removing the crawl check, removing the record-once guard, and dropping reasoning from `producedChars`
+each fail it. The existing stream suites pass unchanged, because `canAbandon` absent means today's
+behaviour exactly.
 ## 2026-09-17 — PR #2996's REMAINING half reverted: nothing decides where a reload lands
 
 **Admin:** *"yar aap is pure PR ko hi hata do! mujhe nahi chahiye. jab bhi page reload hota hai,
@@ -61648,3 +61887,87 @@ recents section, that the knowledge base promises neither behaviour — and that
 
 Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1730 files, 24432 passed, 0 failed** ·
 build · test:bundle · boot:check.
+
+---
+
+## 2026-09-17 — Deep re-autopsy of `9cca1fd5`: 45 confirmed findings, and 17 of them are ONE call site
+
+**Method.** The admin re-sent build `9cca1fd5` (the Alarm app, already autopsied for merged PR #2988).
+Rather than re-read the timeline, a 54-agent workflow mined it across six dimensions — attribution,
+honesty, sub-agents, time, verification, money — and **adversarially verified every candidate against
+current `main`** before keeping it. 11.5M tokens, 2.4 hours, 45 confirmed + 8 completeness-critic items.
+
+### The clusters
+
+| | count | what |
+|---|---|---|
+| 🔴 **`makeSubAgentSpawn`** | **17** | the call that builds every specialist |
+| 🔴 console evidence | 5 | `console_errors` discards the actuator's `captured` flag; a clean app never creates the log file, so "clean" and "could not read" are the same observable — `RUNTIME_VERIFIED` is unreachable |
+| 🔴 page-render check | 4 | routes derived from `writtenFiles` alone ⇒ silently never runs on an edit turn. **One half fixed in PR #3018** |
+| 🔴 whole-workspace filed as this turn's | 3 | `DESIGN_CONSISTENCY` + `ACCESSIBILITY` never got #2997's authorship rule — the sibling of PR #3014's class |
+| 🔴 cold-resume graph | 1 (high) | `restoreWorkspaceMemory` replays files as `/* restored */` stubs and DISCARDS the persisted graph; `warmIndexFiles` and `seedGraphFromWorkspace` both skip them as already-known, and the hollow graph is then re-persisted — worse on every resume |
+| 🔴 money / report | 5 | the admin cost donut prices a cached GLM build **11.9× high**; margin subtracts token cost while the bill is `tieredMarkup(tokens + sandbox)` |
+
+### 🔴 The one this change fixes: eleven of thirteen
+
+`SubAgent.ts` builds the specialist that **writes the app** — the Architect delegates all app code to
+it by design. Its child `ToolDispatcher` was constructed with **11 of the constructor's 13 positional
+parameters**, and its child `AgentRunner` with five of its options missing. Verified by reading both,
+not taken from the workflow.
+
+**PR #2988 had already fixed ONE dropped argument here, for THIS EXACT BUILD** — `onFileWrite`,
+position 11. The comment it left reads *"only onFileWrite (position 11) is newly threaded through"*.
+That sentence is how 12 and 13 stayed invisible: a fix that names what it added, beside a call that
+counts nothing.
+
+| missing | cost |
+|---|---|
+| `onCommand` (13) | **not one sub-agent shell command has ever reached a build report** |
+| `framework` (12) | every child dispatcher silently assumed `vite-react` |
+| `onLlmCall` | the majority of a build's model calls appear in no `llmCalls` log |
+| `signal` | **Stop and the mid-build cost ceiling could not end a delegated run** — it kept spending |
+| `maxBuildMs` | the child never learned the build had a deadline |
+| `expectsArtifacts` | `ok = expectsArtifacts && builtSomething` at the step cap, so a capped sub-agent was ALWAYS *"Stopped without completing"* however much it built — and the bounded one-time step extension, gated on the same flag, could never fire either |
+
+**The fix threads all of them**, each optional and absent ⇒ today's behaviour exactly.
+`expectsArtifacts` is additionally gated on `roleExpectsArtifacts(cfg.tools)` — derived from the role's
+OWN tool set, so a read-only researcher keeps today's verdict and a role added later classifies itself
+without anyone remembering a flag. `remainingBuildMs` is a THUNK returning the time LEFT, because
+`AgentRunner` measures its deadline from its own start: handing a child the build's total would give a
+sub-agent spawned at minute 25 a fresh thirty. Every thunk is called inside a `try`.
+
+🔒 **The four withheld capabilities stay withheld** (`spawnSubAgent`, `secondOpinion`, `consensus`,
+`webSearch`, `deploy`): this threads WIRING, never new powers, and a test asserts each stays `undefined`.
+
+### 🔒 The 50/50 half: the class is now counted, not remembered
+
+`subAgentGetsTheWholeWiring.test.ts` reads `ToolDispatcher`'s constructor, counts its real parameters,
+counts the arguments `SubAgent.ts` passes, and asserts they match. **A fourteenth parameter added later
+fails CI here** instead of becoming the next thing nobody threaded. That is the only guard in this
+change that would have caught the original defect before it shipped.
+
+⚠️ **And the first draft of that guard was WRONG, in the most instructive way.** It reported the
+constructor as taking **14** parameters against correct code, because the doc block above
+`onFileWriteRaw` contains *"not relying on a later, sometimes-empty, sandbox listFiles"* — commas at
+bracket depth zero. The parser now strips comments first. A guard whose parser is wrong is worse than
+no guard: it teaches the next reader that the thing it measures is noisy. Same lesson as this morning's
+`engineEventsNeverBlock` guard, which pinned formatting instead of behaviour.
+
+### 🔴 Still open from this re-autopsy (rule 6 — recorded, not rushed)
+
+1. **The preview bridge ships inside the built app.** `withoutPreviewBridge` guards the durable store,
+   `read_file` and the project graph — but **not `downloadDistFiles`**, the path that uploads the built
+   app to hosting. The dev-server launch writes the bridge into the sandbox's `index.html`, and
+   `npm run build` copies that file into `dist/`. Mechanism verified by reading the call sites; NOT
+   observed on a live deployed app. Deserves its own change: this is our code inside a user's published
+   site, which the White-Label Law speaks to directly.
+2. **Cold-resume hollows the project graph, permanently.** The high-severity finding above. Needs a
+   `restoreGraph` on `WorkspaceMemory`, or for restore to index nothing so `warmIndexFiles` refills it.
+3. **`console_errors` discards `captured`**, so an unread console is reported to the model as "the page
+   ran clean" — and a clean app never creates the log file, so the two states are indistinguishable.
+4. **The admin cost donut prices AgentV3 builds at the provider-FAMILY fallback rate**, no model, no
+   cache: a cached GLM build reads 11.9× high on the panel used to judge engine spend.
+5. **A step-capped sub-agent's scratch files stay in the user's project** — nothing reconciles what a
+   killed child left behind.
+6. **The build's ETA is asserted at t=0 and never reconciled** — *"ETA ~2–4 min"* on a 16.7-minute
+   build, in the same document that carries both timestamps.

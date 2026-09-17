@@ -59439,6 +59439,90 @@ turn, not by a dedicated contract check.
 key lives in a console no session can reach, and building a parallel "milestone" system beside a
 working one is exactly the duplicated work safeguard #6 exists to prevent.
 
+---
+
+## 2026-09-17 — Autopsy f5351721: the platform did not recognise its own voice (35.6 min, ₹261.77)
+
+**Build:** Alarm One, Strong tier (`mini`), `glm-5.3`, 35.57 min, billed ₹261.77 (real cost $0.584).
+Ran 00:14–00:50 UTC, i.e. **2½ h BEFORE** last night's merge — so it carried none of those fixes.
+
+### The five buckets (299 items)
+
+- ✅ **Self-healed (6):** found the dev server dead and restarted it; published the preview; typecheck
+  clean; the project's own 29/29 vitest suite passed.
+- 🔀 **Worked around (3):** **`hmr: false` in `vite.config.ts`** — a curtain, not a fix (see open #2);
+  3 starved GLM turns retried on the same rung.
+- ⏭️ **Skipped (4):** browser console not capturable (`RUNTIME_UNCHECKED`); no journey derivable;
+  **post-build review TIMED OUT at 210 s on 55 files**, so its completeness findings do not exist for
+  this build; E2E scaffold correctly skipped (project has tests).
+- ❌ **Still broken (7):** 2 vulnerable deps (vite 5.4.21, vitest 2.1.9); **design 50/100 grade D** —
+  29 distinct colours, 30 off-grid spacings; **accessibility 70/100** — 13 form fields with no label;
+  HMR now permanently off in the user's app.
+- 🥵 **Struggle (7):** the 23 wasted minutes below; 3× `OUTPUT_BUDGET_STARVED`; first model call alone
+  **341 s**; ETA said **5–11 min**, actual **35.6**; sandbox **84% idle** (39.8 min up, 6.2 min of
+  operations); 63% of file reads re-read unchanged files; review timeout.
+
+### 🔴 The root cause: NavBharatAI wrote the prompt, then failed to recognise it
+
+The prompt was not typed by the user. It is the preview **"Fix error" button**
+(`AgentV3Panel.tsx`, `App.tsx`), and our own template says *"The in-browser preview failed to **build**
+with this error … fix it so the app **builds** and runs."*
+
+Verified by running the real code rather than reasoning about it:
+`userAskedForAnAppToBeBuilt(<our own template>)` → **`true`**, `intent: new_build, confidence: high`.
+
+`PROBLEM_SIGNALS` is a list of how a **human** says something is broken ("doesn't work", "blank
+screen", "nahi chala"). This is **machine** error text; it matches none of them, and it contains the
+word "build" twice. So the guard that decides *"may a zero-file outcome be called a failure?"* said yes.
+
+**What that cost.** At issue #74 the agent had already written *"✅ Fixed — the preview is live again …
+this was **not** a Vite/HMR configuration [issue]"* — it correctly diagnosed a dead dev server,
+restarted it, and wrote **zero files, which was the right answer**. At minute 12 the platform declared
+*"First attempt produced no files"* and re-ran the whole build for 23 more minutes.
+⚠️ It also told the user the retry used **"a stronger model"**. `providerTokens` carries GLM only and
+all 30 calls are `glm-5.3` — **no stronger model ever ran**. That claim is false and is open item #3.
+
+### The fix: a prompt we compose is never guessed at
+
+`src/lib/platformFixRequest.ts` holds the template **once**. The client BUILDS the message with
+`platformFixRequestPrompt`, the server RECOGNISES it with `isPlatformFixRequest`; one string, so the
+two cannot drift. Rule 3 found a **sibling** — `routes/mobileShip.ts`'s `failureReport()`
+(*"My Android build failed on GitHub…"*), which is worse because it dispatches with `autoSend: true`;
+verified `true` against the real guard and now covered by the same contract. A narrow
+`MACHINE_ERROR_SIGNALS` list covers the same class typed by hand.
+
+⚠️ **What was deliberately NOT done:** adding "error"/"failed" to `PROBLEM_SIGNALS`. That list is also
+read by intent ROUTING (step 4), where a match returns `edit_existing` at **high** confidence — so
+*"what does this error mean?"* would enter the build lane at a confidence the LLM reader cannot
+overturn, re-opening the 29-minute "a question built an app" class. Fixing one problem by creating
+another is forbidden. Every signal added is a multi-word machine phrase; bare "error"/"failed"/"fix"
+are absent so *"build me a dashboard that shows error rates"* keeps its old answer (test-locked).
+
+Test-locked in `tests/platformFixRequest.test.ts` (18 cases) and **proven by reversion** — deleting
+the two guard lines fails the two cases that matter. Two cases read the client and server files, so
+re-hardcoding the sentence fails CI rather than going quiet.
+
+### 🔴 OPEN ROOT CAUSES
+
+**1. `OUTPUT_BUDGET_STARVED` IS STILL LIVE ON STRONG — and that is last night's miss, mine.** The
+FlashX change fixed Weak and Normal's lead rung and recorded "Strong untouched". Strong leads with
+**`glm-5.3`**, and `glmCanDisableThinking('glm-5.3')` is **false** — it always reasons, so its thinking
+is billed to the same ceiling. Re-verified against current `main` today. It starved 3 of 30 calls here.
+Streaming raised the ceiling 4,833 → 9,833 and `glm-5.3` still exceeded it. **Not changed unilaterally:
+Strong's ladder is admin-mandated ("CONFIRM WITH ADMIN BEFORE CHANGING").** Two honest options — give a
+known-reasoning rung a ceiling sized for thinking, or change Strong's lead rung. The admin's call.
+
+**2. `hmr: false` is a workaround, not a fix.** The real cause is that the E2B preview proxy cannot
+bridge Vite's HMR websocket. Every app "fixed" this way loses hot-reload permanently. The real fix is
+the proxy carrying the websocket, or the scaffold shipping a correct `hmr.clientPort` for the proxy.
+
+**3. The retry announced a "stronger model" that never ran.** A message asserting an escalation must be
+derived from the delivery ledger, not from the template of the branch that fired.
+
+**4. Post-build review timed out at 210 s on 55 files**, so a paying build silently lost its
+completeness findings.
+
+**5. Sandbox 84% idle on a 39.8-minute session** — most of it waiting on 341-second model calls.
 ## 2026-09-17 — MANDATORY AUTOPSY: Alarm One splash-screen build. A "nothing changed" verdict on a build that genuinely shipped a feature, root-caused to sub-agent writes never reaching the parent's file tracking — plus its sibling in the vitest/Playwright fix.
 
 **The report:** free-tier user "Continue the build from where it left off and finish the remaining
@@ -59581,3 +59665,65 @@ skipped, 0 FAIL), `npm run build`, `test:bundle`, `boot:check` — all green on 
 Both fixes proven by reversion independently.
 
 Branch `claude/subagent-filewrite-tracking`, based on latest `main` (`33d87b171` at fetch time).
+
+## 2026-09-17 — Autopsy f5351721, open item #1 closed: the clamp was inverted for a forced-reasoning rung
+
+Follow-up to the f5351721 autopsy (PR #2987, merged). That entry recorded `OUTPUT_BUDGET_STARVED` on
+Strong as an OPEN root cause with two options put to the admin. No reply came, so under the 60-second
+auto-answer rule the recommended option was adopted — the one that does **not** touch the
+admin-mandated tier ladder.
+
+**What the evidence actually said, and where my own note was wrong.** The autopsy line said the
+streaming ceiling "still exceeded" glm-5.3's thinking and left it there. Reading the report's 30
+`llmCalls` properly:
+
+- 3 calls returned reasoning and nothing else, each authorised exactly **9,833** tokens.
+- The first of them finished **131 s into a 300 s clock** — it ran out of CEILING with **58% of its
+  time unused**. It was never a clock problem.
+- The calls that survived used **8,651 / 9,199 / 9,746** output tokens against that 9,833 ceiling.
+  Every first turn was a coin flip decided by how long the model happened to think.
+
+**A fix I nearly shipped and the measurement killed.** My first hypothesis was that 30 ms/token is
+pessimistic and the ceiling should be sized from a faster rate. Measured across **73 real calls** in
+every report to hand before touching code: kimi-k2.6 aggregates to **30.5 ms/token** against our 30,
+fleet median 25.1, p90 48.1. The constant is well calibrated. Lowering it would have under-bounded
+every slow model and re-opened the exact class `floorBudget.ts` exists for. Discarded, and a test now
+pins the constant at 30 so nobody re-derives it.
+
+**The real root cause (DNA level).** `floorBudget.ts` justifies clamping on one asymmetry: a ceiling
+hit returns the files written so far, a clock kill returns nothing. **For a model that always reasons
+both halves are false, in opposite directions** — its thinking is billed to the same `max_tokens` and
+emitted before any content, so the ceiling is the total loss, while a streamed clock kill keeps what
+arrived. The clamp was trading the recoverable outcome for the unrecoverable one. The module's own
+comment names this behaviour and the arithmetic never acted on it.
+
+**The fix.** A rung known to always reason keeps the build loop's full ask; the clock stays the only
+bound. `modelAlwaysReasons` (GLM 5.3+) is a POSITIVE capability test, deliberately not
+`!glmCanDisableThinking` — negating that would assert "kimi-k2.7-code always reasons" purely because
+the id failed a `startsWith('glm-')` check, handing an unbounded budget to an unmeasured vendor. Kill
+switch `AGENTV3_REASONING_UNCLAMP=off`.
+
+**Why it cannot make the worst case worse:** a slow forced-reasoning rung is still cut at the same
+moment, still with no answer, still throws to the next rung. Only the case where the answer would have
+fitted changes. Authorising tokens does not spend them, so a normal turn costs the same.
+
+**Honesty (rule 5).** A rung that starves with the clamp already lifted must not be reported as "our
+own ceiling" — that wording would send the next autopsy to fix arithmetic that is already correct.
+`isUnclampedStarvation` splits the two wordings in the admin report.
+
+**Tests.** `tests/reasoningBudgetUnclamp.test.ts`, 19 cases, proven by reversion (deleting the branch
+fails 3). Two pre-existing reversion guards pinned the old single-line call and were UPDATED rather
+than loosened — a substring match on `throw starvedBudgetError(` would have survived this edit and
+every future one, which is the opposite of what a guard is for. Both re-proven by reversion.
+
+### Still open from this autopsy
+
+1. **The Kimi sibling.** Report 58fe8254 shows the same `outputTokens: 4833` starvation three times on
+   Kimi, so the class is not GLM-only. This repo holds no capability fact for Moonshot's models and
+   inventing one would be a guess. The honest generic fix — remember a rung that starved and unclamp
+   its NEXT call — needs cross-turn state the per-rung runner construction does not carry today.
+   Recorded, not guessed at.
+2. `hmr: false` is still a workaround for the E2B proxy not bridging Vite's HMR websocket.
+3. The retry's "stronger model" claim must be derived from the delivery ledger, not the branch template.
+4. Post-build review timed out at 210 s on 55 files — a paying build silently lost its findings.
+5. Sandbox 84% idle across a 39.8-minute session.

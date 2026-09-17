@@ -61133,6 +61133,45 @@ the PLATFORM FEATURE that covers it.
 Tests: `tests/questionReadsEveryClause.test.ts` (16), both halves of the fix proven by reversion.
 Existing `IntentClassifier.test.ts` (73) and every classifier-adjacent suite (497 total) pass unchanged.
 
+## 2026-09-17 — The cancellation bill counted OUR template as the user's work
+
+Admin delegated both open decisions: *"mai non technical hu… navbharatai ke bhale ke liye jo bhi theek
+hai, karo. navbharatai strong ho, log jude rahe."* This is the first of the two.
+
+### It was never a policy question
+
+The admin's 2026-09-14 cancellation rule is right and is **unchanged**. `decideCancelledBuildBill`
+already says *"nothing delivered, nothing charged"*. What was wrong was the NUMBER that rule reads.
+
+The golden-scaffold pre-seed writes its template straight into the build's `writtenFiles` map
+(`writtenFiles.set(gp, gc)`), so `filesWritten` was **12** in autopsy 2b0a3ed5 — twelve files the
+user's build never produced. Rule 4 therefore **could not fire for any prompt that has a template**,
+which is exactly the set of builds where a user can quit before anything of their own exists.
+
+What it cost that user: a calculator asked for, our template on disk at 6.7 s, one model call
+returning **27 tokens in 55.7 s**, Stop at 64 s having seen no preview at all — billed 50%, **₹0.65**.
+
+**Fixed:** `preseededUnchanged` is counted in the module (not at the call site, so the rule keeps one
+address) and compared by **CONTENT**, so a template file the builder REWRITES is still paid for. Absent
+⇒ 0 ⇒ today's behaviour for every caller with no template. `writtenFiles` itself is deliberately NOT
+filtered — `shouldRetryEmptyBuild` and the render rescue read its size and mean something different.
+
+### 🔴 The loophole I nearly shipped, caught by my own test
+
+My first attempt put the nothing-delivered rule ahead of the rendering check. That would have made
+**"seed a template → let it render → press Stop" free for ever.** `CLAUDE.md` settles that case in as
+many words (autopsy 4efab9d7): *"a zero-write turn that renders is billed by it"* — the user is holding
+a working app, and what produced it is our business, not theirs.
+
+### 🔒 And two prior decisions that were NOT mine to flip
+
+Reordering then broke two existing tests, both encoding *"when the evidence contradicts itself, do not
+charge"*: **zero files written but a render claimed** is free, and **junk file counts** land on the free
+side. Rule 4 is now in two halves — `written === 0` stays FIRST and unchanged (contradiction ⇒ free),
+and the new delivered-files rule sits after the rendering check (a real, expected state ⇒ free only
+when nothing rendered either). All 20 existing tests pass untouched.
+
+Tests: `tests/cancelBillCountsRealWork.test.ts` (16), including the loophole and both prior decisions.
 ---
 
 ## 2026-09-17 — Referral: the analysis said ~90% built, and the missing 10% was the SHARE button

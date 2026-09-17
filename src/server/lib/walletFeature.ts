@@ -30,6 +30,7 @@ export const WALLET_FEATURES = [
   { id: 'professionals', label: 'Professionals AI' },
   { id: 'tools', label: 'AI tools' },
   { id: 'app-assistant', label: "Your app's own assistant" },
+  { id: 'api', label: 'Developer API' },
   { id: 'voice', label: 'Voice chat' },
   { id: 'other', label: 'Other' },
 ] as const;

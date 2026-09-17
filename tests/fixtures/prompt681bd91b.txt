@@ -1,0 +1,554 @@
+Build a complete AI Chat Web App as ONE SINGLE self-contained HTML file named index.html.
+
+IMPORTANT:
+- Do NOT use React.
+- Do NOT use Vite.
+- Do NOT use npm.
+- Do NOT create src/main.tsx, package.json, or multiple files.
+- Everything must be inside one index.html.
+- Use only HTML5, CSS3 and vanilla JavaScript.
+- External CDN libraries are allowed only if absolutely necessary.
+- The app must work directly by opening index.html in a modern mobile browser.
+
+APP NAME:
+Universal AI Chat
+
+MAIN GOAL:
+Create a professional ChatGPT-style AI chat application where the user can enter their own API provider, API key, endpoint and model from the 3-dot Settings menu and then chat with that model.
+
+SUPPORTED PROVIDERS:
+1. OpenRouter
+2. Google Gemini
+3. Custom OpenAI-compatible API
+
+The user must NOT be locked to one provider.
+
+--------------------------------------------------
+1. MAIN CHAT UI
+--------------------------------------------------
+
+Create a clean premium dark mobile-first chat interface.
+
+Top header:
+- Hamburger/menu button
+- App name: Universal AI
+- Current model/provider indicator
+- New Chat button
+- 3-dot Settings button
+
+Chat area:
+- User messages on the right
+- AI messages on the left
+- Markdown-style formatting
+- Code blocks
+- Copy button for code
+- Copy response button
+- Regenerate response
+- Stop generating button
+- Loading/typing animation
+- Error messages displayed clearly
+- Auto-scroll while generating
+- Smooth message animation
+
+Bottom composer:
+- Large text input
+- Attach button UI
+- Send button
+- Enter = send
+- Shift + Enter = new line
+- Disable send button while empty
+- Stop button while AI is generating
+
+Mobile responsive design:
+- Must look excellent on Android phones
+- No horizontal overflow
+- Keyboard-friendly
+- Safe-area support
+- Bottom composer must remain usable when keyboard opens
+
+--------------------------------------------------
+2. THREE-DOT SETTINGS
+--------------------------------------------------
+
+When the user taps the 3-dot button, open a premium Settings drawer/modal.
+
+Sections:
+
+API PROVIDER
+
+Provider dropdown:
+- OpenRouter
+- Google Gemini
+- Custom OpenAI Compatible
+
+API KEY:
+- Password input
+- Show/hide key button
+- Never display the complete key after saving
+
+API ENDPOINT:
+
+For OpenRouter default:
+https://openrouter.ai/api/v1/chat/completions
+
+For Gemini:
+Use the Gemini REST API endpoint automatically.
+
+For Custom:
+Allow the user to enter any OpenAI-compatible chat completion endpoint.
+
+MODEL:
+
+Provide a model text input.
+
+Also provide:
+"Load Models" button where possible.
+
+For OpenRouter:
+Allow the user to enter/select models such as:
+- openai/gpt-4o-mini
+- google/gemini-2.5-flash
+- meta-llama/llama-3.3-70b-instruct
+- qwen/qwen3-8b
+
+Do not hardcode these as the only models.
+The user must be able to type ANY valid model ID.
+
+For Gemini:
+Allow models such as:
+- gemini-2.5-flash
+- gemini-2.5-pro
+
+Again, model must be editable.
+
+For Custom OpenAI-compatible APIs:
+The user can enter any model ID.
+
+--------------------------------------------------
+3. API CONNECTION
+--------------------------------------------------
+
+Implement actual API calls using fetch().
+
+OpenRouter:
+Use:
+POST https://openrouter.ai/api/v1/chat/completions
+
+Headers:
+Authorization: Bearer USER_API_KEY
+Content-Type: application/json
+
+Body:
+{
+  model: selectedModel,
+  messages: conversationMessages,
+  stream: true
+}
+
+Support streaming responses if available.
+
+Gemini:
+Use the official Gemini REST API format.
+
+Build the request dynamically from:
+- API key
+- selected Gemini model
+- conversation history
+
+Support streaming where the selected Gemini endpoint supports it.
+
+Custom OpenAI-compatible:
+Use:
+POST userConfiguredEndpoint
+
+Headers:
+Authorization: Bearer USER_API_KEY
+Content-Type: application/json
+
+Body:
+{
+  model: selectedModel,
+  messages: conversationMessages,
+  stream: true
+}
+
+If streaming is not supported:
+Automatically fall back to normal JSON response.
+
+IMPORTANT:
+Do not assume every custom provider supports streaming.
+
+--------------------------------------------------
+4. API TEST BUTTON
+--------------------------------------------------
+
+Inside Settings add:
+
+[ Test Connection ]
+
+When clicked:
+- Check API key
+- Check endpoint
+- Check model
+- Send a very small test request
+- Show:
+  ✓ Connection successful
+or
+  ✕ Connection failed
+
+Display useful error information without exposing the API key.
+
+--------------------------------------------------
+5. SAVE API CONFIGURATION
+--------------------------------------------------
+
+Add:
+
+[ Save Configuration ]
+
+Store:
+- provider
+- endpoint
+- model
+- API key
+
+Use localStorage.
+
+On app reload:
+- Restore the selected provider
+- Restore model
+- Restore endpoint
+- Restore API key
+
+IMPORTANT SECURITY NOTE:
+Show a small warning:
+"API keys are stored locally in this browser. Do not use this app on a shared/public device."
+
+Never send API keys anywhere except the endpoint selected by the user.
+
+Do not create any backend server.
+
+--------------------------------------------------
+6. MULTIPLE API PROFILES
+--------------------------------------------------
+
+Allow users to create multiple API profiles.
+
+Example:
+
+OpenRouter - My Account
+Gemini - Personal
+Custom API - My Server
+
+Buttons:
++ Add Profile
+Edit
+Delete
+Set Active
+
+Each profile stores:
+- Name
+- Provider
+- Endpoint
+- API key
+- Model
+
+The active profile should appear in the header.
+
+--------------------------------------------------
+7. CHAT HISTORY
+--------------------------------------------------
+
+Add a left-side menu/drawer containing:
+
+New Chat
+
+Chat History:
+- Today
+- Yesterday
+- Older
+
+Automatically save conversations to localStorage.
+
+Each chat should have:
+- Title generated from the first user message
+- Date/time
+- Delete option
+- Rename option
+
+Clicking a history item opens that conversation.
+
+Add:
+"Delete All Chats"
+
+Ask for confirmation before deleting all chats.
+
+--------------------------------------------------
+8. MODEL SWITCHING
+--------------------------------------------------
+
+Add a model selector in Settings.
+
+The user should be able to change models without losing the current conversation.
+
+Example:
+
+Provider:
+OpenRouter
+
+Model:
+[ google/gemini-2.5-flash ]
+
+Then user can change to:
+[ openai/gpt-4o-mini ]
+
+The conversation remains intact.
+
+--------------------------------------------------
+9. SYSTEM PROMPT
+--------------------------------------------------
+
+Inside Settings add:
+
+System Prompt
+
+Large textarea.
+
+Default:
+"You are a helpful AI assistant."
+
+Allow the user to customize it.
+
+Use the system prompt when the selected API supports system messages.
+
+--------------------------------------------------
+10. CHAT CONTROLS
+--------------------------------------------------
+
+For every AI response provide:
+
+Copy
+Regenerate
+Delete
+
+For code blocks:
+- Copy Code button
+- Proper monospace formatting
+- Horizontal scrolling only inside code blocks
+
+Support:
+- Bold
+- Italic
+- Headings
+- Lists
+- Numbered lists
+- Inline code
+- Code blocks
+- Links
+
+Do not execute code returned by the AI.
+
+--------------------------------------------------
+11. ERROR HANDLING
+--------------------------------------------------
+
+Handle:
+
+Invalid API key
+Invalid model
+Insufficient credits
+Rate limit
+Network error
+CORS error
+Provider unavailable
+Malformed response
+Streaming failure
+
+Show user-friendly messages.
+
+Example:
+
+"API request failed.
+Check your API key, model and endpoint in Settings."
+
+For CORS:
+"Your selected provider does not allow browser requests from this app. Use a CORS-enabled endpoint or a backend proxy."
+
+Do not hide errors silently.
+
+--------------------------------------------------
+12. SECURITY
+--------------------------------------------------
+
+Never hardcode a real API key.
+
+Never send API keys to analytics services.
+
+No tracking.
+
+No external backend.
+
+No fake AI responses.
+
+No simulated model responses.
+
+Every AI answer must come from the configured API.
+
+--------------------------------------------------
+13. EXPORT
+--------------------------------------------------
+
+Settings should include:
+
+Export Chat
+Import Chat
+Clear Current Chat
+
+Export current conversation as JSON.
+
+Import JSON conversation.
+
+--------------------------------------------------
+14. UI DESIGN
+--------------------------------------------------
+
+Premium modern dark interface.
+
+Use:
+- Black/very dark background
+- Glass-like panels
+- Soft borders
+- Rounded corners
+- Subtle shadows
+- Purple/blue accent
+- Smooth transitions
+
+Do not make the interface cluttered.
+
+The 3-dot Settings menu should be especially clean.
+
+Settings structure:
+
+API
+  Provider
+  API Key
+  Endpoint
+  Model
+  Test Connection
+  Save Configuration
+
+CHAT
+  System Prompt
+  Temperature if supported
+  Max Tokens if supported
+
+PROFILES
+  Saved API Profiles
+
+DATA
+  Export Chat
+  Import Chat
+  Clear Chat
+  Delete All Chats
+
+ABOUT
+  Universal AI
+  Version
+
+--------------------------------------------------
+15. IMPORTANT MOBILE BEHAVIOR
+--------------------------------------------------
+
+The entire application must be optimized for mobile.
+
+On Android:
+- Full viewport
+- No page zoom problems
+- No horizontal scrolling
+- Composer fixed at bottom
+- Settings drawer fits screen
+- Buttons large enough to tap
+- Input remains visible above keyboard
+- Use viewport-fit=cover
+- Respect env(safe-area-inset-bottom)
+
+--------------------------------------------------
+16. NO FAKE FEATURES
+--------------------------------------------------
+
+Do NOT create buttons that don't work.
+
+Do NOT create fake model lists pretending to come from an API.
+
+Do NOT create fake streaming.
+
+Do NOT show fake "Connected" status.
+
+Test the actual API configuration.
+
+If an API cannot be accessed directly from browser because of CORS, clearly show the real error.
+
+--------------------------------------------------
+17. SINGLE FILE REQUIREMENT
+--------------------------------------------------
+
+FINAL OUTPUT MUST BE:
+
+index.html
+
+Everything must be inside this one file:
+
+<html>
+  <head>
+    CSS
+  </head>
+
+  <body>
+    UI
+    JavaScript
+  </body>
+</html>
+
+No separate CSS file.
+No separate JS file.
+No React.
+No npm.
+No build command.
+
+The finished index.html must be directly usable in a browser.
+
+--------------------------------------------------
+18. FINAL QUALITY CHECK
+--------------------------------------------------
+
+Before finishing, test all important UI interactions:
+
+- New Chat
+- Send message
+- Streaming response
+- Stop generation
+- Regenerate
+- Copy response
+- Copy code
+- 3-dot Settings
+- Provider selection
+- API key input
+- Endpoint input
+- Model input
+- Test Connection
+- Save Configuration
+- Multiple profiles
+- Model switching
+- System prompt
+- Chat history
+- Rename chat
+- Delete chat
+- Export
+- Import
+- Mobile layout
+
+Fix JavaScript errors before delivering the final index.html.
+
+Do not explain the code first.
+
+Generate the complete working single-file index.html.

@@ -19,6 +19,7 @@ import { parseEnvFlag } from '../../lib/envFlag';
 import { isModelUnavailableError } from '../providerErrorClass';
 import { isBudgetEndedError, isSlowStreamAbandon } from '../turnDeadline';
 import { isStarvedBudgetError } from '../floorBudget';
+import { reasoningAwareAsk } from '../reasoningAsk';
 import {
   EMPTY_SLOW_RUNG_STATE, canBenchAnother, describeSlowRung, isRungTooSlow, recordSlowSample,
   type SlowRungState,
@@ -550,9 +551,17 @@ export function makeMultiProviderTurnRunner(
    * turns share the single bench name 'KIMI'. Retiring 'KIMI' would have turned one wasted round-trip
    * per call into a build with no Kimi at all.
    */
+  //
+  // 🔴 KEYED BY FAMILY::MODEL, NOT NAME::MODEL (build 681bd91b, 2026-09-17). Every key in a pool has a
+  // DISTINCT `name` ('GLM', 'GLM#2', … 'GLM#51') and the SAME model. A starvation is a fact about the
+  // MODEL at this budget — it cannot come out differently on another key — yet keyed by name it retired
+  // one key at a time, so a 51-key pool re-proved the identical starvation on the next key, and the
+  // next: **fourteen times in twenty-six minutes** on a repair call, on an app that had already been
+  // finished and seen rendering. The faa98da9 case above is preserved exactly: `kimi-k2.5` and
+  // `kimi-k2.6` share a family and DIFFER in model, so retiring `KIMI::kimi-k2.5` still leaves k2.6 alive.
   const deadKeyFor = (entry: NamedRunner, err: unknown): string =>
     ((isModelUnavailableError(err) || isStarvedBudgetError(err)) && entry.modelId)
-      ? `${entry.name}::${entry.modelId}`
+      ? `${entry.reportAs ?? entry.name}::${entry.modelId}`
       : entry.name;
   /**
    * 🔴 THE TIMEOUT STREAK IS KEYED BY PROVIDER FAMILY, NOT BY KEY (autopsy 4efab9d7, 2026-09-15).
@@ -654,6 +663,8 @@ export function makeMultiProviderTurnRunner(
         // (a rung whose id this account cannot reach). Checked in that order; both mean "do not spend
         // another round-trip re-proving an answer that cannot change".
         const fatalReason = deadForRun.get(name)
+          ?? (chain[i].modelId ? deadForRun.get(`${reportName}::${chain[i].modelId}`) : undefined)
+          // Older memories (and non-pool rungs, whose family IS their name) are still honoured.
           ?? (chain[i].modelId ? deadForRun.get(`${name}::${chain[i].modelId}`) : undefined);
         if (fatalReason !== undefined) {
           // Known-fatal from an earlier turn — skipping saves the whole re-grind (the report's build
@@ -681,7 +692,12 @@ export function makeMultiProviderTurnRunner(
            *    call, however bad the weather is at every vendor.
            */
           const canAbandonSlowStream = () => !abandonedSlowRung && i + 1 < chain.length;
-          const result = await runner.runTurn({ ...params, canAbandonSlowStream });
+          // A rung measured to reason before every answer is never asked for less than it needs to
+          // begin one — see reasoningAsk.ts (build 681bd91b: `maxTokens: 8000` starved glm-5.3 for 26 min).
+          const result = await runner.runTurn({
+            ...params, canAbandonSlowStream,
+            maxTokens: reasoningAwareAsk(params.maxTokens, chain[i].modelId),
+          });
           timeoutStreak.delete(reportName); // a success resets the family's consecutive-timeout streak
           rateLimitStreak.delete(name); // …and the consecutive-429 streak (the provider recovered)
           cooldowns.clear(name); // …and the SHARED cooldown — the provider is back for everyone

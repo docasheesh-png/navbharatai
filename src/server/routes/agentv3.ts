@@ -11236,6 +11236,9 @@ async function noteBuildOutcome(
             isEdit: isEditMode,
             ms: Date.now() - (billingCtx.buildStartedAt ?? Date.now()),
             providerUsage: decided.reconciledProviderUsage,
+            // …and WHICH RUNG ran, so the admin's cost panel prices the model instead of the family's
+            // dearest rate. The same entries the bill is priced from, one line above.
+            providerEntries: billingCtx.providerLedger.entries(),
             sandboxSeconds: watchdogLivePreview.measuredSeconds,
           });
           buildDiagRef?.setProviderTokens(decided.reconciledProviderUsage);
@@ -19207,6 +19210,9 @@ async function noteBuildOutcome(
         isEdit: isEditMode,
         ms: Date.now() - buildStartedAt,
         providerUsage: reconciledProviderUsage,
+        // …and WHICH RUNG ran. Without this the panel priced every provider at its family's dearest
+        // rate — a `glm-4.7-flashx` build read 8.6× high on the screen used to judge engine spend.
+        providerEntries: providerLedger.entries(),
         // OUR VM cost, measured whether or not the user was charged for it.
         sandboxSeconds: livePreviewCharge.measuredSeconds,
       });

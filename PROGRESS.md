@@ -64831,6 +64831,72 @@ invocation that lacks the path or carries `2>/dev/null`, and on a browse block t
 defeated by the fix's own comment, which names the lossy spelling it replaced. Proven by reversion
 both ways.
 
+### 2026-09-17 (admin Monitor capture) — the publish ceiling was reported twice with two numbers, its advice named a switch already thrown, and a recurring error had its own fix truncated away
+
+**Branch `claude/charming-bell-htxb9u`.** The admin sent the Monitor page as text and asked for a
+fold/unfold control on Publish Capacity plus "isme kuch fix kar sakte ho?". Four things, three of them
+defects the capture proves on its own face.
+
+**1. 🔴 THE SAME CEILING, TWO NUMBERS, ONE SCREEN.** The capture carries `Publish load 44 / 50
+channels` and, one panel below, `Published Apps 43 / 50` — both read from the same channel list at the
+same instant. `loadBoard`'s reading was `chan.channels.length`, which includes the site's own `live`
+channel, and **the cap is on PREVIEW channels, which `live` is not.** `channelCeilingVerdict` had
+root-caused precisely this off-by-one on 2026-09-14 and says so in its own comment — *"with it counted,
+'N of about 50' was off by one on every site, always"* — and the load board kept the old arithmetic.
+The drifted-sibling class again: fixed in one reader, never hunted in the other. The route now filters
+with `isDefaultChannel`, the same predicate `state !== 'default'` reduces to, so no registry read is
+added to a route that must stay cheap.
+
+**2. 🔴 A NOTE THAT PRESCRIBED WORK ALREADY DONE.** The tile said, unconditionally, *"Bucket-only
+publishing takes no channel at all — that is the fix."* `PUBLISHED_APPS_BUCKET_ONLY=on` went live and
+was verified on a real published app **earlier the same day**. So the one panel the admin consults to
+decide what to do was sending them to switch on a thing that had been on for hours, while the action
+that would actually move the number — reclaiming the 34 channels no live app is using — went unnamed.
+`LoadReadings.publishBucketOnly` (undefined ⇒ today's wording exactly) fixes the sentence, and **only
+the sentence**: a frozen ceiling is still 43 of 50 channels really in use, so the LEVEL is untouched
+and a test asserts that. Grading a backlog as `ok` because it cannot grow would be the next mistake.
+
+**3. 🔴 THE FIX WAS IN THE PART WE CUT OFF.** `DIAGNOSTICS_READ_FAILED` appears ~15 times across two
+days in the capture, every row reading *"The query requires an index. You can create it here:
+https://console.firebase.google.com/…?create_composite=Clpwcm9qZWN0…"* and stopping mid-token.
+**Firestore answers a missing-index error with a link that CREATES the index — the entire remedy is one
+click, and the click was never recorded.** Two independent `slice(0, 300)` calls destroyed it: the
+store's, writing `meta.error`, and `persistedAuditEntry`'s, building the row. Either alone was enough.
+`truncateForAudit` keeps the budget for ordinary text (a long stack trace is still cut at 300) and
+carries a URL that straddles the cut to its end, bounded by a hard 2,000 so "keep the URL" can never
+mean "keep anything". Applied at all four diagnostics sites, not just the one the capture showed.
+⚠️ **This does not fix the missing index** — it makes the fix reachable. The error itself needs the
+full URL opened once from a live row (or the Cloud Run log, which was never truncated).
+
+**4. The fold control the admin asked for.** `Publish Capacity` grows one row per wasted channel; the
+capture carried 34, each with its own Reclaim button. It folds now, remembered per browser through
+`safeLS`, default OPEN so nothing moves for an admin who never presses it, and an unreadable
+`localStorage` opens rather than folds. 🔒 **Folding hides the LIST, never the ALARM:** the level badge
+stays outside the folded body and the collapsed header gains `used / cap · N reclaimable`, so a
+critical ceiling is still legible from a closed card. A control that could silently conceal a warning
+would be worse than a long card.
+
+**Tests:** `tests/thePublishCeilingPanelTellsTheTruth.test.ts` (10),
+`tests/theFixWasInThePartWeCutOff.test.ts` (10), `tests/publishCapacityFolds.test.ts` (8). All three
+reversion-proven (4 fail with the server halves reverted, 1 with the fold reverted).
+
+⚠️ **AND ONE OF MY OWN TESTS WAS SILENTLY NOT RUNNING.** The fold test was written as `.test.tsx`;
+`vitest.config`'s include is `tests/**/*.test.ts` plus `src/**/*.test.{ts,tsx}`, so a `.tsx` file under
+`tests/` is collected by nothing. It passed locally only because I named it explicitly on the command
+line — the reversion proof is what exposed it, by failing to fail. Renamed to `.test.ts` (it has no
+JSX). **Swept: no other `tests/**/*.test.tsx` exists**, so this was mine and not a standing hole.
+
+🔴 **REPORTED TO THE ADMIN, NOT FIXED IN CODE (rule 6): `GRIEVANCE_OFFICER_NAME` is genuinely not
+set.** The Monitor still shows the amber *"Grievance Officer not named"*. `grievanceOfficer()` reads
+the env directly and `grievanceOfficerFrom` trims, so there is no trailing-space trap here — the
+warning is the self-verifying signal this file's own 2026-09-12 queue table names, and it says the key
+is missing. That entry recorded the count as unreconciled for exactly this reason; this is the
+reconciliation for that row.
+
+**Not added to `AppKnowledgeBase.ts`, deliberately:** a collapse toggle on an admin-only card that has
+no knowledge-base entry is not a user-facing capability, and inventing one for it would make the KB
+describe the admin panel to end users who cannot open it.
+
 ## 2026-09-17 — AUTOPSY `baa0b3c7` ("Make an VPN App") — a report from 25 DAYS AGO, and one bug in it is still live today
 
 Admin forwarded a build report. **First finding, because it reframes everything else: this build ran on

@@ -550,10 +550,28 @@ export function makeMultiProviderTurnRunner(
    * turns share the single bench name 'KIMI'. Retiring 'KIMI' would have turned one wasted round-trip
    * per call into a build with no Kimi at all.
    */
-  const deadKeyFor = (entry: NamedRunner, err: unknown): string =>
-    ((isModelUnavailableError(err) || isStarvedBudgetError(err)) && entry.modelId)
-      ? `${entry.name}::${entry.modelId}`
-      : entry.name;
+  const deadKeyFor = (entry: NamedRunner, err: unknown): string => {
+    if (!entry.modelId) return entry.name;
+    // 🔴 A STARVATION IS A FACT ABOUT THE MODEL AT THIS ASK — NEVER ABOUT THE KEY THAT CARRIED IT
+    // (autopsy 57875eb3, 2026-09-17). Keyed on `name`, every key of a pool has a DISTINCT name
+    // ('GLM', 'GLM#2', …), so a ~50-key `glm-5.3` pool re-proved the identical starvation on key
+    // after key: thirteen calls of ~2 minutes each, eight thousand reasoning tokens apiece and not one
+    // character of answer, until the 29-minute wall clock ended the build — while CLAUDE_HAIKU, the
+    // next rung of the ladder, sat unreached the whole time. The retirement below said "retired for
+    // the rest of this build" and was true of ONE key out of fifty-one.
+    //
+    // This is the 4efab9d7 defect (the timeout streak keyed per key) in its starvation sibling, which
+    // that autopsy did not hunt. Same cure: the FAMILY (`reportAs ?? name`), because a model that
+    // cannot finish thinking inside this ceiling cannot finish on any other key of the same service.
+    // Still qualified by MODEL, so a starved `glm-5.3` never retires a healthy `glm-4.7-flashx` rung
+    // of the same family. `starvedKeyFor` is the one reader of this shape; keep them together.
+    if (isStarvedBudgetError(err)) return starvedKeyFor(entry);
+    // A model-not-found stays keyed on the KEY that saw it: a pool may span accounts whose model
+    // access differs, and re-proving a 404 costs one round-trip, not two minutes of reasoning.
+    return isModelUnavailableError(err) ? `${entry.name}::${entry.modelId}` : entry.name;
+  };
+  /** The retirement key for a starved rung: provider FAMILY + model. See `deadKeyFor`. */
+  const starvedKeyFor = (entry: NamedRunner): string => `${entry.reportAs ?? entry.name}::${entry.modelId ?? ''}`;
   /**
    * 🔴 THE TIMEOUT STREAK IS KEYED BY PROVIDER FAMILY, NOT BY KEY (autopsy 4efab9d7, 2026-09-15).
    *
@@ -654,7 +672,9 @@ export function makeMultiProviderTurnRunner(
         // (a rung whose id this account cannot reach). Checked in that order; both mean "do not spend
         // another round-trip re-proving an answer that cannot change".
         const fatalReason = deadForRun.get(name)
-          ?? (chain[i].modelId ? deadForRun.get(`${name}::${chain[i].modelId}`) : undefined);
+          ?? (chain[i].modelId ? deadForRun.get(`${name}::${chain[i].modelId}`) : undefined)
+          // …or this MODEL starved on ANY key of this family earlier in the run (see `deadKeyFor`).
+          ?? (chain[i].modelId ? deadForRun.get(starvedKeyFor(chain[i])) : undefined);
         if (fatalReason !== undefined) {
           // Known-fatal from an earlier turn — skipping saves the whole re-grind (the report's build
           // burned 8+ minutes re-discovering the same "credit balance too low" answer).

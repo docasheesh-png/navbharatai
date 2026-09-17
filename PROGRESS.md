@@ -61912,3 +61912,68 @@ no guard: it teaches the next reader that the thing it measures is noisy. Same l
    killed child left behind.
 6. **The build's ETA is asserted at t=0 and never reconciled** — *"ETA ~2–4 min"* on a 16.7-minute
    build, in the same document that carries both timestamps.
+
+---
+
+## 2026-09-17 — ONE welcome gift per person: the rule three modules stated and none enforced
+
+**Found while answering the admin's plain question — *"batao mai Cloud Run me kya likho?"*** The answer
+was going to be `REFERRAL_REWARDS=on`. Checking what that switch actually does first is what surfaced
+this.
+
+### 🔴 The hole
+
+`referralRewards.ts` states the rule in its own words:
+
+> *"The two plans must never both pay: together they would hand one person ₹500 + ₹400."*
+
+**That sentence was a COMMENT, enforced by nothing.** The plans are gated by two INDEPENDENT env keys —
+`WALLET_GIFT_V2` (the flat welcome gift) and `REFERRAL_REWARDS` (the ladder) — and neither read the
+other. `giftPlan.ts` contains no reference to referrals at all; verified by grep.
+
+**Setting `REFERRAL_REWARDS=on` would have paid every new user ₹500 + ₹400 = ₹900, plus ₹75 to the
+referrer: ₹975 per referred user against a plan costed at ₹475.** Nothing would have failed, and no
+number on any screen would have looked wrong — the two systems would each have been behaving correctly
+in isolation.
+
+⚠️ **AND THERE ARE THREE GRANT SURFACES, NOT TWO.** A fix written into `giftPlan.ts` alone would have
+left the other paying:
+- `welcomeBonus.ts` — the LEGACY flat bonus (`WELCOME_BONUS_TOKENS`), live whenever `WALLET_GIFT_V2` is OFF
+- `giftPlan.ts` — the v2 plan (₹250/₹500), live when it is ON, via TWO decision points
+  (`decideSignupGrant` AND `decidePhoneClaim`, the second being the other half of the same ₹500)
+- `referralRewards.ts` — the ladder
+
+Whichever welcome plan is active, the ladder stacked on top of it.
+
+### The fix
+
+`src/server/lib/welcomeGiftExclusion.ts` — one pure rule, consulted by every flat-gift decision point.
+**The ladder wins**, because it was designed as a REPLACEMENT: its own plan pays a referred user ₹400
+and an organic one ₹300, both deliberately at or below the ₹500 flat gift they replace.
+
+🔒 **THE DIRECTION IS THE SAFE ONE.** With `REFERRAL_REWARDS` unset — today — the rule returns false and
+every grant path behaves byte for byte as it does now. It can only ever REMOVE a double payment, never
+introduce one. That is what makes it shippable without waiting on a decision.
+
+**Test-locked** in `tests/welcomeGiftExclusion.test.ts` (8 cases), **proven by reversion**. The last two
+assert the call sites BY NAME rather than trusting a future grant path to remember — the entire defect
+was a rule that existed only as prose, and a fourth surface added later must appear there too.
+
+### 🔴 The class, for the fourth time this week
+
+*The code was correct and a sentence was lying.* Stale model-ladder comments (09-15), *"NavBharatAI
+cannot add your signing key"* (09-17), the knowledge base describing a removed home-screen list
+(09-17), and now a money rule written as a comment beside the code that ignores it. **Tests cannot see
+prose, and `tsc` cannot either.** Each one was found by a human reading, or by a question that happened
+to touch it — never by the gate.
+
+### What the admin still has to decide
+
+`REFERRAL_REWARDS=on` is now SAFE to set: the flat gift stands down automatically and a referred user
+costs ₹475 as planned. What it changes, stated plainly so the switch is a decision and not a surprise:
+every new user's welcome credit stops being ₹500 up-front and becomes ₹300–₹400 earned across
+verification steps. **That is the plan working as designed — but it IS a change to what a brand-new user
+sees on day one**, and it is the admin's call.
+
+Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1741 files, 24611 passed, 0 failed** ·
+build · test:bundle · boot:check.

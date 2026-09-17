@@ -44,6 +44,8 @@ function usePinFlow(userId: string) {
   const [busy, setBusy] = useState<'' | 'unlock' | 'code' | 'save'>('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  /** The status read itself failed. Shown ONLY on a screen that cannot open without it (`always`). */
+  const [statusError, setStatusError] = useState('');
   const [secondsLeft, setSecondsLeft] = useState(() => secondsRemaining(currentUnlock()));
 
   // ONE subscription to the shared store, so every gate re-renders together when the ticket is minted or
@@ -57,6 +59,7 @@ function usePinFlow(userId: string) {
     try {
       const s = await appLockStatus(userId, force);
       setStatus(s);
+      setStatusError('');
       // A brand-new account goes straight to the setup form — asking for a PIN that does not exist yet is
       // the kind of dead end that makes people think the feature is broken.
       setMode(s.hasPin ? 'unlock' : 'setup');
@@ -66,6 +69,7 @@ function usePinFlow(userId: string) {
       // NOT set as a blocking error: a failed status read must not put a red banner on a screen the user
       // can still use. `shouldGate(area, null)` decides what happens, and it is documented in appLock.ts.
       console.warn('[app-lock] status unavailable', (err as Error)?.message);
+      setStatusError((err as Error)?.message || 'Could not check your app lock. Please try again.');
       return null;
     }
   }, [userId]);
@@ -169,7 +173,7 @@ function usePinFlow(userId: string) {
 
   return {
     status, unlock, mode, setMode, pin, setPinValue, newPin, setNewPin, confirmPin, setConfirmPin,
-    code, setCode, codeSentTo, busy, error, setError, notice, setNotice, secondsLeft,
+    code, setCode, codeSentTo, busy, error, setError, notice, setNotice, secondsLeft, statusError,
     doUnlock, requestCode, savePin, signInAgain, relock, refreshStatus,
   };
 }
@@ -180,17 +184,17 @@ const PIN_BOX = 'w-full rounded-xl border border-white/10 bg-black/30 px-3 py-3 
 const PRIMARY = 'bg-indigo-600 text-white hover:bg-indigo-500';
 
 /** The PIN card itself. Presentational — every decision is made in `usePinFlow`. */
-const PinScreen: React.FC<{ area: AppLockArea; flow: PinFlow; embedded?: boolean }> = ({ area, flow, embedded }) => {
+const PinScreen: React.FC<{ area: AppLockArea; flow: PinFlow; embedded?: boolean; label?: string }> = ({ area, flow, embedded, label }) => {
   const {
     status, mode, setMode, pin, setPinValue, newPin, setNewPin, confirmPin, setConfirmPin,
-    code, setCode, codeSentTo, busy, error, setError, notice, setNotice,
-    doUnlock, requestCode, savePin, signInAgain,
+    code, setCode, codeSentTo, busy, error, setError, notice, setNotice, statusError,
+    doUnlock, requestCode, savePin, signInAgain, refreshStatus,
   } = flow;
 
   const lockedForMs = status?.locked ? status.lockedForMs : 0;
   const noEmail = status?.channel === 'fresh-sign-in';
   const noContact = status?.channel === 'none';
-  const what = areaLabel(area);
+  const what = label ?? areaLabel(area);
 
   return (
     <div className={embedded ? 'py-6' : 'py-10'}>
@@ -223,7 +227,17 @@ const PinScreen: React.FC<{ area: AppLockArea; flow: PinFlow; embedded?: boolean
           </p>
         )}
 
-        {status === null ? (
+        {status === null && statusError ? (
+          /* Honest and retryable. Before 2026-09-17 a failed status read left "One moment…" on screen
+             for ever — on a screen that cannot open without the answer, that is a locked door with no
+             handle. */
+          <div className="mt-5 space-y-2">
+            <p className="rounded-xl border border-red-500/20 bg-red-500/5 p-3 text-left text-[11px] leading-relaxed text-red-300">{statusError}</p>
+            <button onClick={() => void refreshStatus(true)} className={`w-full rounded-xl px-4 py-3 text-sm font-bold ${PRIMARY}`}>
+              Try again
+            </button>
+          </div>
+        ) : status === null ? (
           <p className="mt-5 flex items-center justify-center gap-2 text-xs text-gray-500">
             <Loader2 size={14} className="animate-spin" /> One moment…
           </p>
@@ -419,6 +433,17 @@ export interface AppLockGateProps {
   render: (unlock: UnlockState | null, relock: () => void) => React.ReactNode;
   /** Tighter chrome for a panel inside another screen. */
   embedded?: boolean;
+  /**
+   * Gate REGARDLESS of which areas the user ticked (admin 2026-09-17: "is app lock ko open karne ke
+   * liye bhi lock chahiye"). Used by the App Lock screen itself: the list of what the PIN guards, and
+   * the control to change the PIN, are the one place that must never open on an unlocked phone. With
+   * no PIN yet, the setup form is shown instead — so the PIN is created right where it is managed.
+   */
+  always?: boolean;
+  /** What the PIN card says it is opening, when the screen is not one of the seven areas. */
+  label?: string;
+  /** Show the "Unlocked · re-locks in m:ss · Lock now" strip above the opened content. */
+  banner?: boolean;
 }
 
 /**
@@ -428,19 +453,22 @@ export interface AppLockGateProps {
  * Code Studio and WRONG for the Pro builder — that surface is deliberately kept mounted across tab
  * switches so an in-flight build survives. Use `AppLockOverlay` there.
  */
-export const AppLockGate: React.FC<AppLockGateProps> = ({ userId, area, render, embedded }) => {
+export const AppLockGate: React.FC<AppLockGateProps> = ({ userId, area, render, embedded, always, label, banner }) => {
   const flow = usePinFlow(userId);
   const { status, unlock, secondsLeft, relock } = flow;
 
   // Not locked for this user ⇒ the gate is invisible. No banner, no wrapper div, nothing to lay out
   // around: a screen nobody locked must look exactly as it did before this feature existed.
-  if (!shouldGate(area, status)) return <>{render(unlock, relock)}</>;
+  // `always` skips that question entirely: the App Lock screen is locked for everyone who has a PIN,
+  // and offers to create one for everyone who has not.
+  if (!always && !shouldGate(area, status)) return <>{render(unlock, relock)}</>;
 
   if (unlockIsLive(unlock)) {
     // The countdown strip is shown only where the unlock is doing continuous work — on the keys screen,
-    // where a sudden re-lock mid-edit would look like a bug. Elsewhere it would be chrome on top of a
-    // screen the user opened for another reason entirely.
-    if (area === 'api_keys') {
+    // where a sudden re-lock mid-edit would look like a bug, and on the App Lock screen, where every
+    // save spends the ticket. Elsewhere it would be chrome on top of a screen the user opened for
+    // another reason entirely.
+    if (area === 'api_keys' || banner) {
       return (
         <div className="space-y-3">
           <UnlockedBanner secondsLeft={secondsLeft} onRelock={relock} />
@@ -451,7 +479,7 @@ export const AppLockGate: React.FC<AppLockGateProps> = ({ userId, area, render, 
     return <>{render(unlock, relock)}</>;
   }
 
-  return <PinScreen area={area} flow={flow} embedded={embedded} />;
+  return <PinScreen area={area} flow={flow} embedded={embedded} label={label} />;
 };
 
 /**

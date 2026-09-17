@@ -64587,3 +64587,42 @@ generate-all → verify → repair loop; this is the agentic builder's path.
 its first checkpoint — the endgame's "N compile errors left" should drop toward zero, and
 `REPEATED_READS`/edit loops with it. Tests: `tests/writeTimeTypecheck.test.ts` (note wording on the real
 ERP tsc output, path normalisation, caps, queue coalescing, summary, dispatcher + route wiring).
+
+### Same day, the BOOLEAN sibling — and the guard that could not see it (rule 3, applied to my own fix)
+
+Fixing the numeric class exposed a gap in **my own** prevention guard: it walked `src/server` only.
+Asking whether the 2026-08-09 boolean sweep's guard had the same scope answered itself —
+`tests/envFlag.test.ts` walks `find src/server`, and **there was a live instance sitting in the gap**.
+
+🔴 **Root `server.ts` gated the P-DATA.4 retention purge on
+`process.env.DATA_RETENTION_PURGE_ENABLED === 'true'`** — the strictest of the six dialects
+`envFlag.ts` was written to abolish. **The admin turns features on by writing `on`**; this file
+records several flags set exactly that way. So `on`, `1`, `yes` and `TRUE` would each have left an
+opt-in **deletion** job switched off, with nothing in any log to say so — and `purgeExpired` has
+exactly ONE caller in the whole repo, this one. Now `envFlag('DATA_RETENTION_PURGE_ENABLED')`.
+
+It is the *"I searched `src/` and the wiring was in `server.ts`"* mistake this file already records
+once, this time inside a test that exists to prevent a class. **A guard is only as wide as its walk**,
+and neither guard's narrowness could fail anything. Both are widened: mine to `src`/`scripts`/`infra`/
+`server.ts` plus the client's `import.meta.env` shape, the boolean one to `src/server`/`scripts`/
+`infra`/`server.ts`, each with a case asserting the walk really reached outside its old scope —
+because a walk that found nothing would pass vacuously. Reversion-proven: restoring `=== 'true'`
+fails the widened guard naming `server.ts:807`.
+
+⚠️ **Client code is deliberately still OUT of the boolean guard's scope, and that is a decision:**
+`envFlag` reads `process.env` and is a server module, so a browser file cannot call it, and a guard
+demanding a fix nobody can write is worse than none. Zero boolean-dialect env reads exist in client
+code today (swept the same day). If one appears it needs a client-side helper first.
+
+🔴 **OPEN, AND NOT MINE TO SETTLE (rule 6) — has the retention purge EVER run?**
+`DATA_RETENTION_PURGE_ENABLED` appears **nowhere in this file**, including in the 84-key audit read
+off the live Cloud Run console on 2026-08-20 — which listed every name on the service. If the key is
+unset, the purge has never run, while the published Privacy Policy states its windows as fact:
+technical logs **90 days**, safety-check and removal records **180 days**, post-deletion erasure
+**30 days**, published-app visitor counts **30 days**. That is the shape of the 2026-09-02 incident
+(the policy said *"we never share your data with advertisers"* while the pixel was being built), and
+`tests/privacyPolicyTruth.test.ts` exists because that drift produced no failure of any kind.
+**It cannot be verified from a Claude session** — Cloud Run is not readable here, and the audit is
+four weeks old, so the admin may have set it since. Recorded as an open question with the one-line
+check rather than asserted either way. The dialect fix above is what makes the key *settable the way
+the admin actually sets keys*, which is a precondition for answering it at all.

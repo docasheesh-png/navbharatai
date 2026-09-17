@@ -92,10 +92,31 @@ describe('envKillSwitch', () => {
 describe('the old dialects cannot come back', () => {
   // The class fix is only real if a new call site cannot re-introduce it. This walks the actual
   // server source rather than trusting review.
+  //
+  // 🔴 WIDENED 2026-09-17 PAST `src/server`, AND THAT GAP HAD A LIVE INSTANCE IN IT.
+  // `server.ts` sits at the repo ROOT, and `scripts/` and `infra/` are live Node code, so a guard
+  // scoped to `src/server` could not see them. What was hiding there: the P-DATA.4 retention purge,
+  // gated `process.env.DATA_RETENTION_PURGE_ENABLED === 'true'` — so setting it to `on`, the way
+  // CLAUDE.md records this admin setting flags, left an opt-in DELETION job switched off with
+  // nothing to say so, while the Privacy Policy states 30/90/180-day deletion windows as fact.
+  // It is the same "I searched `src/` and the wiring was in `server.ts`" mistake this repo has
+  // already paid for once.
+  //
+  // ⚠️ CLIENT code under `src/` is deliberately still OUT of scope: `envFlag` reads `process.env`
+  // and is a server module, so a browser file cannot call it, and a guard demanding a fix that
+  // cannot be written is worse than none. There are ZERO boolean-dialect env reads in client code
+  // today (swept the same day); if one ever appears it needs a client-side helper first, which is a
+  // decision, not a lint.
   const files = execSync(
-    "find src/server -name '*.ts' | grep -v '\\.test\\.' | grep -v goldenScaffolds | grep -v 'generator/templates'",
+    "find src/server scripts infra server.ts -name '*.ts' -o -name '*.mjs' -o -name '*.cjs' 2>/dev/null"
+    + " | grep -v '\\.test\\.' | grep -v goldenScaffolds | grep -v 'generator/templates'",
     { encoding: 'utf8' },
   ).trim().split('\n').filter(Boolean);
+
+  it('the walk really reaches outside src/server — an empty reach would pass vacuously', () => {
+    expect(files).toContain('server.ts');
+    expect(files.length).toBeGreaterThan(200);
+  });
 
   /**
    * The source of one file, with every TEMPLATE LITERAL blanked out. Generators such as
@@ -149,6 +170,16 @@ describe('the old dialects cannot come back', () => {
     expect(featureFlag).toContain("envFlag('AGENTV3_ENABLED')");
     const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
     expect(route).toContain("envFlag('AGENTV3_REALCOST_BILLING', true)");
+  });
+
+  it('the flag that gates an automated DELETION goes through the shared parser', () => {
+    // P-DATA.4's retention purge is opt-in, and it is the ONLY caller of `purgeExpired` in the repo.
+    // Under `=== 'true'` an admin writing `on` left it off silently — while the Privacy Policy states
+    // 30/90/180-day deletion windows as fact. Pinned positively, not just by the dialect sweep above,
+    // so the gate cannot be "fixed" by hand-rolling a second spelling list at the call site.
+    const boot = readFileSync('server.ts', 'utf8');
+    expect(boot).toContain("envFlag('DATA_RETENTION_PURGE_ENABLED')");
+    expect(boot).toContain("import { envFlag } from './src/server/lib/envFlag';");
   });
 
   it('never leaks the helper into code we EMIT into a user\'s app', () => {

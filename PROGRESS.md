@@ -62690,3 +62690,84 @@ sees on day one**, and it is the admin's call.
 
 Gate: typecheck · typecheck:server · noUnusedImports · **vitest 1741 files, 24611 passed, 0 failed** ·
 build · test:bundle · boot:check.
+
+---
+
+## 2026-09-17 — ONE PLANNER CHAT TURN COULD DELETE A WORKSPACE'S ENTIRE MEMORY
+
+**Branch `claude/a-chat-turn-must-not-erase-the-project`. Root cause fixed as a CLASS, in
+`FirestoreWorkspaceMemoryStore.ts` + `WorkspaceMemory.ts`; five call sites converted.**
+
+### What was wrong
+
+The Planner/Advisor role-chat lane (`routes/agentv3.ts` ~9362) did this, under a comment claiming it
+persisted *"exactly like the plain-chat lane"*:
+
+```ts
+const mem = getWorkspaceMemory(roleWorkspaceId);
+mem.recordRequest(prompt);
+void saveWorkspaceMemory(roleWorkspaceId, mem.snapshot());
+```
+
+The plain-chat lane has **one more line**, and its own comment says why: *"ensure durable episodes
+are loaded first"*. Without it, on a **COLD instance** — after every deploy, and after any 2-hour
+memory-cache eviction — `getWorkspaceMemory` returns an EMPTY object, `recordRequest` gives it
+exactly one episode, and `saveWorkspaceMemory` writes that over the durable document with
+**`{ merge: false }`**.
+
+**So one Planner chat turn destroyed the workspace's whole episode history AND its persisted project
+graph** — every recorded error, fix, note and request, plus the `PLAN_STATE` note that
+`routes/agentv3.ts` reads back (at ~3574 and ~13028) to resume an unfinished todo list on a
+"continue". `roleWorkspaceId` is derived identically to `intentWorkspaceId` and `chatWsId`, so it is
+the *same* workspace the build lane later reopens; and the role-chat branch returns long before the
+intent-time restore at ~9781 ever runs.
+
+### A SECOND defect in the same path, found while fixing the first
+
+`loadWorkspaceMemory` answers `null` for BOTH *"there is no snapshot"* and *"the read failed"* — its
+`catch` swallows the difference. Paired with a `{ merge: false }` write, a **transient Firestore blip
+is indistinguishable from an empty workspace**, and "start fresh" becomes "delete everything". That
+one needed no cold instance at all.
+
+### The fix — as a class, because a rule written into one caller is one the next caller never hears
+
+- **`loadWorkspaceMemoryResult()`** — `{ ok: true, snapshot } | { ok: false }`. An **absent** document
+  is `ok: true` (a real answer: there is nothing to lose); a **thrown** read is `ok: false`, and is
+  never a licence to overwrite. No Firestore configured at all is also a known state, not a failure.
+- **`WorkspaceMemory.isHydrationConfirmed()`** — a flag separate from `isHydrated()`, and the
+  difference is the whole point. `isHydrated()` is marked **before** the read, deliberately, as a
+  re-entrancy guard so two concurrent restores cannot replay the same episodes twice. It is not an
+  answer to *"do I hold the durable history?"* — and a 3-second timeout race leaves it set while the
+  read never landed. Only a genuine read sets the new one.
+- **`saveWorkspaceMemoryFor(workspaceId, mem)`** — hydrates first, and **refuses to write** when the
+  read is still unconfirmed. Losing one turn's episode is strictly better than deleting every earlier
+  one, and the next turn on a healthy instance persists it anyway.
+- **All five save sites converted** (role-chat, plain-chat, suggestions, import, build-end), and the
+  raw `saveWorkspaceMemory` now documents plainly what it does. The route calls it nowhere.
+
+### Tests — `tests/aChatTurnMustNotEraseTheProject.test.ts` (9 cases)
+
+Proven by reversion: **8 of 9 fail** with the four source files reverted, all pass restored.
+
+The store's real path needs Firestore, which is stubbed under VITEST, so the load-bearing facts are
+asserted **structurally, on source with comments stripped**: the route never calls the raw write, all
+five sites were converted, the refusal comes **before** the write rather than after it, confirmation
+is set **after** the `ok` check rather than before it, and the load really does distinguish an absent
+document from a failed read.
+
+**Full CI gate green on the final state** (branch cut from the current `main`): `typecheck` ·
+`noUnusedImports` · `typecheck:server` · `vitest run` (**24,659 passed, 1 skipped, 0 failed**) ·
+`build` · `test:bundle` · `boot:check` · `deps:server-gate`.
+
+### 🔎 Open item #5 — searched for, NOT found (safeguard #6's wording, deliberately)
+
+The 2026-09-17 re-autopsy's open item #5 reads *"a step-capped sub-agent's scratch files stay in the
+user's project — nothing reconciles what a killed child left behind."* Searching `ToolCatalog.ts`,
+`SubAgent.ts` and `AgentRunner.ts` for a scratch/temporary-file concept returns **one match, and it
+is the word "scratch" inside an unrelated comment**. There is no scratch-file mechanism to reconcile.
+
+So: **I could not find it** — which is a different claim from "it does not exist", and the honest one.
+The charitable reading (a capped child leaves half-written REAL files) is not sub-agent-specific: the
+architect's own capped turn leaves the same state, and `tsc` catches the syntactic half for both.
+Recorded here rather than acted on, because building a reconciler for a mechanism nobody can point at
+is exactly the speculative fix rule 6 forbids.

@@ -63983,6 +63983,60 @@ must-still-build boundary set, and **reversion guards proven to fail** when the 
    `Cannot read properties of undefined (reading 'title')`. A deterministic, model-free, two-file
    question that nothing asks.
 
+---
+
+## 2026-09-17 — THE INTENTION READER IS THE DEFAULT; the builder learns where its own buttons are
+
+**Admin, verbatim:** *"navbharatai pro, ko app self awareness nahi hai kya? preview kaise chalega, batana
+chahiye … navbharatai ko simple question ke simple anser dene sikhao. … user ka har woh messge jo ek
+limit se chota hai ya unclear hai, hamesa llm call karo?"* — and then *"aap batao kuch best option?"*
+
+### Two honest answers first
+
+**Self-awareness: NO, the builder did not have it.** `systemPrompt.ts` says so in its own words
+(2026-08-04): *"Every OTHER AI in NavBharatAI … is fed the AppKnowledgeBase … AgentV3 is not."* The one
+assistant that BUILDS the app was the only one that could not say where the Preview tab is — which is
+why report cc8c9075's answer was `npm run dev` and `localhost:5173`. The KB has had an `agentv3_preview`
+entry with the keyword `preview kaise` all along; the builder was never handed it (the full KB would
+break the cached prompt prefix).
+
+**The LLM-on-every-unclear-message proposal: right, and ~80 % already built.** `classifyIntentSmart`
+already consults the ₹0 free-chat reader — but only when confidence is LOW, and **five autopsies this
+week (5abad374, 2c61f648, the alarm app, f5351721, cc8c9075) were all HIGH-confidence hard-locks that
+skipped it.** Each added a regex; the class never closed. Regex reads words, the reader reads grammar.
+**Message LENGTH was declined as the trigger** — "build me a todo app" is five clear words, the
+cc8c9075 question was nine unclear ones — and object-less orders are already answered by #3039.
+
+### What shipped — A, B, C (each proven by reversion)
+
+- **A. Doubt → reader.** A HIGH verdict from a build/edit verb now survives only with NO question (the
+  strengthened `readsAsQuestion`) and NO negation in the sentence (`hasNegation`: `mat/nahi/don't/not/
+  no`…). Either one costs the lock, never the intent. A plain order keeps HIGH and pays nothing — a test
+  counts zero reader calls across four orders.
+- **B. Reader down on a QUESTION ⇒ chat, not build.** This REVERSES a deliberate 2026-09-13 pin
+  (*"the keyword answer still stands when the reader cannot run"*), on the admin's own asymmetry:
+  wrong-toward-chat is one message (the reply already offers to build), wrong-toward-build is a whole
+  build. A statement or order with the reader down keeps the keyword verdict exactly as before, so
+  "add a payment button" stays an edit when GLM is slow. `tests/capabilityQuestion.test.ts` records the
+  change in-file rather than silently.
+- **C. `help` is a fourth reader answer, and `NAVBHARATAI_UI_MAP` gives the builder its bearings.**
+  Fifteen static lines — Preview tab, Publish, Files/ZIP, History → Restore, Stop, Report, Download APK
+  — each tagged with its `AppKnowledgeBase` id, opening with *"Do NOT tell them to run npm, open a
+  terminal, or visit localhost: they are inside NavBharatAI on a phone."* 🔒 **ONE constant, TWO
+  readers**: the architect prompt (static side, so the cache prefix is untouched — a test asserts no
+  date/user/project interpolation) and the plain-chat lane's inline prompt in `routes/agentv3.ts`,
+  which has its OWN system prompt and would otherwise have kept answering like a generic bot.
+
+### What this does NOT do, stated so nobody re-derives it
+
+- It does not call the reader on every message — an unmistakable order still pays nothing.
+- It does not inject the whole KnowledgeBase into the build prompt (cache prefix).
+- It does not make the reader's verdict FINAL when it answers `build` on a question — that still goes
+  through `userAskedForAnAppToBeBuilt` (#3040), which now requires HIGH and so cannot re-run a build
+  on a guess.
+
+**Gate on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` · **25,001 tests
+passed** · `build` · `test:bundle` · `boot:check` · `deps:server-gate` — all green.
 ### 2026-09-17 (same day, follow-up) — "app banao" names no more than "banao" does
 
 The admin read the fix above and asked the one question that tested it: *"agar koi user send karega

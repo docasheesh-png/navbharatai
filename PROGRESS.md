@@ -65777,6 +65777,54 @@ parser, so no early-close happens) and it is not what caused the crop — record
 Gate on the final merged state: typecheck · noUnusedImports · typecheck:server · vitest
 **25554 passed | 1 skipped** · build · test:bundle · boot:check · deps:server-gate — all green.
 
+### 2026-09-18 — 🇮🇳 domain knowledge is GENERATED, not LISTED: the long tail finally gets the help a hospital always had
+
+Admin, verbatim, one day after I had made the domain list LONGER instead of asking why it was a list:
+*"aap yeh kya bana rahe ho? kya ham app ka store bana rahe hai… jo aap pre-define karoge wohi
+NavBharatAI bana payega? hame to app generator banana tha na?"*
+
+**They were right about the smell, and the honest answer had two halves.** NavBharatAI is a real
+generator — a `general` verdict injects nothing and the app builds from the user's own words, which is
+why a calculator, a stopwatch and a photoshop-like image editor all build today (the corpus test
+asserts exactly that). But the KNOWLEDGE layer was sixteen hand-written domains, so a hospital app got
+RBAC, an audit trail and EMR privacy while a **mandir donation app**, a **machhli-palan tracker** and a
+**shaadi card designer** got nothing at all. Not a ceiling on what can be BUILT; a very real ceiling on
+who gets HELPED — and one that grew by a code change per domain. **That is store-shaped, and I should
+have raised it myself.**
+
+🔑 **The fix is not a bigger list.** `src/server/lib/domainKnowledge.ts` asks the sixteen enumerated
+domains FIRST and a model only where they are silent, so the knowledge exists for any domain a model
+knows — which is all of them.
+
+💸 **The cost design is what makes "kharcha kam se kam" and "har app ko madad" the same change:**
+- a listed domain ⇒ **zero calls, byte-identical to today** (and a generated answer can never override
+  a listed one — test-locked);
+- a prompt too thin to HAVE a domain (`"a calculator"`, `"ek stopwatch banao"`, under
+  `MIN_WORDS_FOR_DOMAIN` real instruction words) ⇒ **no call either**, because asking what a calculator
+  needs spends money to be told nothing;
+- everything else ⇒ ONE call on the FREE chain (glm-flash led, ₹0), raced at 6 s.
+
+🔒 **It can only ever ADD.** A throw, a timeout, an empty reply, an unparseable reply, an explicit
+"nothing special" and a domain with no needs ALL resolve to `source: 'none'`, which injects nothing.
+⚠️ **The empty answer is the main safety property, not politeness** — this repo's own corpus records a
+to-do app handed moderation and media upload, *"bloat that lengthens the build"*. A model told to
+produce a list will produce one, so the prompt names the empty answer explicitly and the parser treats
+a refusal as a first-class result.
+
+**Wired in both lanes from ONE helper** (`learnDomain` in `routes/agentv3.ts`): Plan mode gets the
+questions; the BUILDER gets only the needs, gated on `!reqGuidance` so every existing build prompt is
+unchanged — **and it still never asks a question, so the 2026-07-20 friction-free decision stands.**
+Kill switch `AGENTV3_DOMAIN_LEARN=off` leaves the deterministic list working exactly as before.
+
+**Tests:** `tests/domainKnowledgeIsGenerated.test.ts` (21) + the updated planner suite, reversion-proven
+on both the cost gates and the builder wiring. ⚠️ **Two of my own first test guesses were wrong again
+and are recorded beside the cases rather than swapped out quietly:** `"todo app"` is a LISTED domain
+(`productivity`), and `"ek rang badalne wala toy"` is five words, so it is correctly ABOVE the floor and
+does ask. `AppKnowledgeBase` updated in the same commit.
+
+🔴 **What this deliberately does NOT change:** the ~24 SCAFFOLDS stay a finite list, and that is
+correct — they are FRAMEWORKS (React, Vue, Svelte…), of which there really are about twenty-five. The
+thing that must never be a list is what an app is ABOUT, and that is now generated.
 ## 2026-09-18 — THE THEME SYSTEM IS REPLACED, PR A of N: tokens, the ratchet, and the palette fixed (admin: "pura theme system badlo, plan ke hisab se shuru karo")
 
 **The audit that ordered it** (same day, published as an artifact for the admin): 72 screens × 5 themes

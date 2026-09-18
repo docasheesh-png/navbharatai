@@ -65776,3 +65776,75 @@ parser, so no early-close happens) and it is not what caused the crop — record
 
 Gate on the final merged state: typecheck · noUnusedImports · typecheck:server · vitest
 **25554 passed | 1 skipped** · build · test:bundle · boot:check · deps:server-gate — all green.
+
+---
+
+## 2026-09-18 — AI Image Gen: a flex-overflow, a resolution mistake that made images blurrier, and the paid tier (PR pending)
+
+Admin, four items in one message: the STYLE column overlapping its neighbour, free images coming out
+"bahut blur", a free⇄paid toggle in place of the static "Free" badge, and a paid tier on **FLUX.2
+Klein 4B at ₹2/image with a world-class UI of its own** — "google home page jaisa … par results
+inputbox ke upar ane chahiye aur inputbox niche footer me ho", handling text→image, image→image and
+image+text→image.
+
+**1. The STYLE overlap was `min-width: auto`.** A flex item will not shrink below its content, so the
+label column held each chip wider than its `grid-cols-3` cell and spilled over the neighbour. The cell
+was never too small — the child would not fit into it. `min-w-0` on the button and the text column
+restores shrinking; `truncate` decides the boundary. The **Size row one grid over is the identical
+shape** with the file's longest label (`1536×864`) and is fixed in the same change (rule 3) though it
+was never reported.
+
+🔴 **2. THE BLUR WAS OUR OWN RESOLUTION REQUEST, AND THE PREVIOUS FIX HAD MADE IT WORSE.** The prompt
+was excluded as the cause first — it already asks for "sharp" and already lists "blurry, out of focus,
+low resolution" as negatives. On **2026-08-16** these sizes went 512 → 1280 to cure a softness the
+admin had reported, reasoning that a bigger free image costs the same as a small one. **True of the
+bill, false of the picture.** A latent-diffusion model asked for materially more than the ~1 MP it was
+trained at does not render more detail — it smears and repeats texture. So 512 was soft for being
+under-sampled and 1280×1280 (1.64 MP) was soft for the *opposite* reason, and the admin reported the
+blur again with the bigger numbers already live. Sizes are now at or just under native ~1 MP, on exact
+aspect ratios, every dimension a multiple of 16; `icon` stays 1024 (already native, and a hard store
+requirement). A **per-call seed** is the other half: without one Pollinations derives the seed from the
+prompt, so the same brief returned the same picture and "generate again" — the user's only recourse for
+a soft result — did nothing at all.
+
+⚠️ **The 864px-short-edge pin encoded the very premise being corrected**, so it is replaced in-file
+with the real invariant (megapixels inside the trained band) plus two constraints it never had. The
+regression it actually guarded — a return to 512 — is still caught by the band's lower bound.
+
+**3. The toggle is a CONTROL where a LABEL used to be**, persisted, defaulting to free, and rendered
+*outside* the free-only header block — because every Pro failure message tells the user to switch back
+to Free, and that instruction has to be followable. A test pins that ordering: hiding the toggle in Pro
+would make it a one-way door.
+
+**4. The paid tier.** `imageProGen.ts` + `POST /api/image/pro/generate` + `ImageStudioPro.tsx`.
+- **The mode is DERIVED from the payload, not chosen** — words alone, a reference alone, or both. A
+  bare reference stays closer to the original (strength 0.65) than a directed edit (0.85); if those two
+  are ever equal, one of the two jobs is being done badly.
+- **The money order is the point:** refuse an empty wallet BEFORE any provider call (an image request
+  has no later pre-flight gate), generate, then charge only for images genuinely delivered — against
+  `delivered.length`, never the requested count. A failure or timeout charges ₹0 and says so.
+- **Half-configured is NOT configured:** both a key and an endpoint, and a whitespace-only key reads as
+  unset (the `BRAVE_API_KEY` lesson). Missing either gives an honest "Pro is not switched on" — never a
+  silent fall back to the free provider, which would charge ₹2 for a picture available for nothing.
+- **White-label by construction:** one failure-message function, no user-facing string names the model
+  or vendor, and a URL result is fetched server-side and re-served as a data URL so the browser never
+  touches the vendor. "Unconfigured" and "host errored" deliberately read alike.
+
+🔴 **TWO THINGS THE ADMIN MUST DECIDE, recorded rather than guessed (rule 6).**
+- **`IMAGE_PRO_ENDPOINT` + `IMAGE_PRO_KEY` are unset, so the paid tier is honestly unavailable today.**
+  The model is served by several hosts and no host was chosen; the adapter is endpoint-configured with
+  defensive parsing for the four response shapes in use (`images[].url`, `data[].b64_json`,
+  `result.sample`, `output[]`), so whichever the admin signs up for works without a deploy.
+- **THE ₹2 MARGIN IS UNVERIFIED FROM INSIDE THE CODE.** ₹2 is the admin's set price, so the user is
+  told ₹2 and charged ₹2 and nothing is invented — but whether ₹2 clears what the host charges per
+  image is a question only the provider's invoice can answer. This is deliberately NOT the real-cost +
+  markup model a build uses: an image provider returns no token usage to price from, and the
+  one-wallet law forbids estimating one.
+
+**Gate on the final state:** typecheck · noUnusedImports · typecheck:server · vitest **25615 passed |
+1 skipped**, 0 FAIL · build · test:bundle · boot:check · deps:server-gate — all green. The first full
+run caught three real failures in the repo's anti-rot sweeps (`text-[30px]`/`text-[38px]` with no rem
+rule, `disabled:bg-white/10` and `disabled:text-white/25` with no light-theme remap, `to-white/60`
+with no gradient stop). All four were added to the compat layers rather than designed around — a
+disabled SEND button rendering white-on-white would have told a light-theme user the button had
+vanished, not that it was disabled.

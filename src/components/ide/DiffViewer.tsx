@@ -58,24 +58,24 @@ const PasteMode: React.FC<{
 
   return (
     <div className="flex flex-col gap-3 p-4 h-full">
-      <p className="text-gray-400 text-sm">
+      <p className="text-muted text-sm">
         No previous version provided. Paste the old code below to compare.
       </p>
       <div className="flex gap-3 flex-1 min-h-0">
         <div className="flex-1 flex flex-col gap-1">
-          <span className="text-xs font-semibold text-red-400 uppercase tracking-wider">Old Code</span>
+          <span className="text-xs font-semibold text-danger uppercase tracking-wider">Old Code</span>
           <textarea
-            className="flex-1 bg-[#161b22] border border-red-900/40 text-gray-300 font-mono text-xs p-3 rounded resize-none outline-none focus:border-red-500/60"
+            className="flex-1 bg-card border border-red-900/40 text-muted font-mono text-xs p-3 rounded resize-none outline-none focus:border-red-500/60"
             placeholder="Paste the old version here…"
             value={oldCode}
             onChange={(e) => setOldCode(e.target.value)}
           />
         </div>
         <div className="flex-1 flex flex-col gap-1">
-          <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wider">New Code</span>
+          <span className="text-xs font-semibold text-success uppercase tracking-wider">New Code</span>
           <textarea
             readOnly
-            className="flex-1 bg-[#161b22] border border-emerald-900/40 text-gray-300 font-mono text-xs p-3 rounded resize-none outline-none"
+            className="flex-1 bg-card border border-emerald-900/40 text-muted font-mono text-xs p-3 rounded resize-none outline-none"
             value={newCode}
           />
         </div>
@@ -83,7 +83,7 @@ const PasteMode: React.FC<{
       <button
         onClick={() => onCompare(oldCode)}
         disabled={!oldCode.trim()}
-        className="self-end px-4 py-2 text-sm bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded transition-colors"
+        className="self-end px-4 py-2 text-sm bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed text-on-accent rounded transition-colors"
       >
         Compare
       </button>
@@ -96,19 +96,19 @@ const PasteMode: React.FC<{
 const UnifiedDiffLine: React.FC<{ line: DiffLine }> = ({ line }) => {
   const base =
     line.type === 'added'
-      ? 'bg-emerald-900/30 text-emerald-400'
+      ? 'bg-emerald-500/10 text-success'
       : line.type === 'removed'
-        ? 'bg-red-900/30 text-red-400'
-        : 'text-gray-400';
+        ? 'bg-red-500/10 text-danger'
+        : 'text-muted';
 
   const prefix = line.type === 'added' ? '+ ' : line.type === 'removed' ? '- ' : '  ';
 
   return (
     <div className={cn('flex min-w-0 leading-5', base)}>
-      <span className="select-none w-10 inline-block text-right pr-3 shrink-0 font-mono text-xs text-red-700/50">
+      <span className="select-none w-10 inline-block text-right pr-3 shrink-0 font-mono text-xs text-danger">
         {line.type !== 'added' ? (line.oldLineNo ?? '') : ''}
       </span>
-      <span className="select-none w-10 inline-block text-right pr-3 shrink-0 font-mono text-xs text-emerald-700/50">
+      <span className="select-none w-10 inline-block text-right pr-3 shrink-0 font-mono text-xs text-success">
         {line.type !== 'removed' ? (line.newLineNo ?? '') : ''}
       </span>
       <span className="font-mono text-xs whitespace-pre px-2 truncate">
@@ -251,36 +251,36 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ files, previousFiles, on
       <div
         ref={ref}
         className={cn(
-          'flex-1 overflow-auto min-w-0 bg-[#0d1117] border-t',
+          'flex-1 overflow-auto min-w-0 bg-surface border-t',
           side === 'old' ? 'border-red-900/30' : 'border-emerald-900/30',
         )}
       >
         {rows.length === 0 && (
-          <div className="p-4 text-gray-600 text-sm italic">No changes</div>
+          <div className="p-4 text-faint text-sm italic">No changes</div>
         )}
         {rows.map((row, idx) => {
           const isEmpty = row.type === 'empty';
           const bg =
             row.type === 'added'
-              ? 'bg-emerald-900/30'
+              ? 'bg-emerald-500/10'
               : row.type === 'removed'
-                ? 'bg-red-900/30'
+                ? 'bg-red-500/10'
                 : isEmpty
-                  ? 'bg-gray-900/20'
+                  ? 'bg-raised'
                   : '';
           const textColor =
             row.type === 'added'
-              ? 'text-emerald-400'
+              ? 'text-success'
               : row.type === 'removed'
-                ? 'text-red-400'
-                : 'text-gray-400';
+                ? 'text-danger'
+                : 'text-muted';
 
           return (
             <div key={idx} className={cn('flex min-w-0 leading-5 h-5', bg)}>
               <span
                 className={cn(
                   'select-none w-10 inline-block text-right pr-3 shrink-0 font-mono text-xs',
-                  side === 'old' ? 'text-red-700/50' : 'text-emerald-700/50',
+                  side === 'old' ? 'text-danger' : 'text-success',
                   (isEmpty || row.lineNo === null) && 'opacity-0',
                 )}
               >
@@ -296,15 +296,15 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ files, previousFiles, on
     );
 
     return (
-      <div className="flex flex-1 min-h-0 divide-x divide-gray-800">
+      <div className="flex flex-1 min-h-0 divide-x divide-line">
         <div className="flex flex-col flex-1 min-w-0">
-          <div className="px-3 py-1 text-xs font-semibold text-red-400 bg-red-900/10 border-b border-red-900/30 uppercase tracking-wider shrink-0">
+          <div className="px-3 py-1 text-xs font-semibold text-danger bg-red-500/10 border-b border-red-900/30 uppercase tracking-wider shrink-0">
             Before
           </div>
           {renderPanel(oldRows, 'old', leftPanelRef)}
         </div>
         <div className="flex flex-col flex-1 min-w-0">
-          <div className="px-3 py-1 text-xs font-semibold text-emerald-400 bg-emerald-900/10 border-b border-emerald-900/30 uppercase tracking-wider shrink-0">
+          <div className="px-3 py-1 text-xs font-semibold text-success bg-emerald-500/10 border-b border-emerald-900/30 uppercase tracking-wider shrink-0">
             After
           </div>
           {renderPanel(newRows, 'new', rightPanelRef)}
@@ -316,13 +316,13 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ files, previousFiles, on
   // ── Unified renderer ───────────────────────────────────────────────────────
 
   const renderUnified = () => (
-    <div className="flex-1 overflow-auto bg-[#0d1117]" ref={leftPanelRef}>
+    <div className="flex-1 overflow-auto bg-surface" ref={leftPanelRef}>
       {hunks.length === 0 && (
-        <div className="p-4 text-gray-600 text-sm italic">No changes</div>
+        <div className="p-4 text-faint text-sm italic">No changes</div>
       )}
       {hunks.map((hunk, hi) => (
-        <div key={hi} className="border-b border-gray-800/50">
-          <div className="flex items-center gap-2 px-3 py-0.5 bg-gray-900/60 text-gray-500 font-mono text-xs">
+        <div key={hi} className="border-b border-line">
+          <div className="flex items-center gap-2 px-3 py-0.5 bg-raised text-faint font-mono text-xs">
             <span>@@ hunk {hi + 1} @@</span>
             <span className="flex-1" />
             {/* Put back THIS change only. The reason the whole feature is worth building: without it
@@ -332,7 +332,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ files, previousFiles, on
               <button
                 onClick={() => handleRevertHunk(hi)}
                 title={`Undo this change only — every other change in ${selectedFile} stays`}
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-gray-700 text-gray-400 hover:bg-gray-800 hover:text-white transition-colors"
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-line text-muted hover:bg-raised hover:text-ink transition-colors"
               >
                 <RotateCcw size={10} />
                 <span>Revert</span>
@@ -350,9 +350,9 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ files, previousFiles, on
   // ── Header ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col h-full bg-[#0d1117] text-gray-300 overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 shrink-0">
-        <GitBranch size={14} className="text-gray-500 shrink-0" />
+    <div className="flex flex-col h-full bg-surface text-muted overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-line shrink-0">
+        <GitBranch size={14} className="text-faint shrink-0" />
 
         {/* File selector */}
         {fileNames.length > 1 ? (
@@ -360,7 +360,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ files, previousFiles, on
             <select
               value={selectedFile}
               onChange={(e) => setSelectedFile(e.target.value)}
-              className="appearance-none bg-gray-900 border border-gray-700 text-gray-300 text-xs rounded px-2 py-1 pr-6 outline-none focus:border-gray-500 cursor-pointer"
+              className="appearance-none bg-card border border-line text-muted text-xs rounded px-2 py-1 pr-6 outline-none focus:border-line cursor-pointer"
             >
               {fileNames.map((f) => (
                 <option key={f} value={f}>
@@ -370,31 +370,31 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ files, previousFiles, on
             </select>
             <ChevronDown
               size={12}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-faint pointer-events-none"
             />
           </div>
         ) : (
-          <span className="text-xs text-gray-400 font-mono">{selectedFile}</span>
+          <span className="text-xs text-muted font-mono">{selectedFile}</span>
         )}
 
         {/* Stats */}
         {hasDiff && (
           <div className="flex items-center gap-2 text-xs ml-1">
             {stats.added > 0 && (
-              <span className="text-emerald-400">+{stats.added} lines added</span>
+              <span className="text-success">+{stats.added} lines added</span>
             )}
             {stats.removed > 0 && (
-              <span className="text-red-400">-{stats.removed} lines removed</span>
+              <span className="text-danger">-{stats.removed} lines removed</span>
             )}
             {stats.added === 0 && stats.removed === 0 && (
-              <span className="text-gray-500">no changes</span>
+              <span className="text-faint">no changes</span>
             )}
           </div>
         )}
 
         {/* P-DEV.4 — conflict indicator */}
         {fileHasConflicts && (
-          <span className="flex items-center gap-1 text-xs ml-1 text-amber-400 font-semibold">
+          <span className="flex items-center gap-1 text-xs ml-1 text-warn font-semibold">
             <GitMerge size={12} /> merge conflicts
           </span>
         )}
@@ -407,7 +407,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ files, previousFiles, on
           <button
             onClick={handleRevertFile}
             title={`Undo every change to ${selectedFile} and restore the version from before this build`}
-            className="flex items-center gap-1 px-2 py-1 text-xs border rounded transition-colors bg-gray-900 border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white"
+            className="flex items-center gap-1 px-2 py-1 text-xs border rounded transition-colors bg-card border-line text-muted hover:bg-raised hover:text-ink"
           >
             <RotateCcw size={12} />
             <span>Revert file</span>
@@ -422,8 +422,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ files, previousFiles, on
             className={cn(
               'flex items-center gap-1 px-2 py-1 text-xs border rounded transition-colors',
               mergeMode
-                ? 'bg-amber-600 border-amber-500 text-white'
-                : 'bg-gray-900 border-amber-700/50 text-amber-400 hover:bg-gray-800',
+                ? 'bg-amber-600 border-amber-500 text-on-accent'
+                : 'bg-card border-amber-700/50 text-warn hover:bg-raised',
             )}
           >
             <GitMerge size={12} />
@@ -433,13 +433,13 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ files, previousFiles, on
 
         {/* View toggle */}
         {hasDiff && !mergeMode && (
-          <div className="flex items-center bg-gray-900 border border-gray-700 rounded overflow-hidden">
+          <div className="flex items-center bg-card border border-line rounded overflow-hidden">
             <button
               onClick={() => setUnified(false)}
               title="Side-by-side"
               className={cn(
                 'px-2 py-1 text-xs flex items-center gap-1 transition-colors',
-                !unified ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-200',
+                !unified ? 'bg-raised text-ink' : 'text-muted hover:text-body',
               )}
             >
               <Columns size={12} />
@@ -449,7 +449,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ files, previousFiles, on
               title="Unified"
               className={cn(
                 'px-2 py-1 text-xs flex items-center gap-1 transition-colors',
-                unified ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-200',
+                unified ? 'bg-raised text-ink' : 'text-muted hover:text-body',
               )}
             >
               <AlignLeft size={12} />
@@ -462,10 +462,10 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ files, previousFiles, on
           <button
             onClick={handleCopy}
             title="Copy patch"
-            className="flex items-center gap-1 px-2 py-1 text-xs bg-gray-900 border border-gray-700 rounded hover:bg-gray-800 transition-colors text-gray-400 hover:text-gray-200"
+            className="flex items-center gap-1 px-2 py-1 text-xs bg-card border border-line rounded hover:bg-raised transition-colors text-muted hover:text-body"
           >
             {copied ? (
-              <Check size={12} className="text-emerald-400" />
+              <Check size={12} className="text-success" />
             ) : (
               <Copy size={12} />
             )}
@@ -476,7 +476,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ files, previousFiles, on
         {onClose && (
           <button
             onClick={onClose}
-            className="ml-1 text-gray-500 hover:text-gray-300 text-xs px-1.5 py-1 rounded hover:bg-gray-800 transition-colors"
+            className="ml-1 text-faint hover:text-muted text-xs px-1.5 py-1 rounded hover:bg-raised transition-colors"
           >
             ✕
           </button>

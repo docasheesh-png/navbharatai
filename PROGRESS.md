@@ -66269,3 +66269,79 @@ Billing, Admin, Profile, Preview, Database, Deploy, Files, Components, Security,
 Still open and NOT in G's files: the `apk` view (APKBuilder, later PR), ConnectMyWebsitePanel's
 `text-red-200/90` on a red tint (1.18:1 on Light, later PR), Studio's `Editor.tsx` tabs and Monaco, and
 the systemic white-on-`emerald-600` fill recorded under F.
+
+## 2026-09-18 — THE THEME SYSTEM IS REPLACED, PR H of N: thirteen files, and the rule that a FIXED box fixes everything inside it
+
+**🔴 The finding came from the first file of the batch, and it was MY OWN PR G rule misfiring.**
+`SEOOptimizer.tsx` renders Google-search, Facebook-card and Twitter-card PREVIEWS — mockups of three
+other companies' surfaces. PR G's "a resting fill names its own label colour" rule stamped
+**`text-on-accent` (white) onto Facebook's `bg-[#f0f2f5]`**, which is near-white: 1.1:1, invisible. And
+the Twitter card's `text-white` title became `text-ink`, which goes near-black on Light — inside a box
+that is `bg-black` on every theme. Caught before either reached `main`.
+
+**Two root causes, both general, both now fixed in `scripts/themeMigrate.mjs`:**
+1. **A FIXED background fixes everything inside it.** `bg-black`, `bg-white` and any non-chrome
+   `bg-[#hex]` are colours the theme can never repaint (`mapToken` already refuses to map them), so
+   every colour NESTED in that subtree is fixed too. `fillScopes` now opens a scope for all three —
+   previously only a hex or a brand hue did, which is exactly why a `text-white` four levels under
+   `bg-black` was themed into invisibility.
+2. **The fill's LUMINANCE decides the label, never an assumption.** `fixedFill()` computes WCAG
+   luminance: white must clear 4.5:1 against the fill to be a legitimate label. A **light** fixed fill
+   returns `'light'` and the codemod then **leaves its labels exactly as written** — neither white nor
+   a dark token is ours to choose inside somebody else's mockup. SEOOptimizer's 26 remaining literals
+   are precisely those three previews, left whole and counted by the ratchet.
+
+**Two more looseness bugs found by the sibling hunt, each fixed at the class:**
+- 🔴 **A WASH gradient is not a fill.** `SOLID_FILL` matched `bg-gradient-` unconditionally, so a 1px
+  gradient BORDER around a `bg-surface` card, and a translucent tint like
+  `from-indigo-950/40 to-black/30`, both opened a "fixed fill" scope. A scan of the whole client
+  flagged 7 labels under such wrappers (AgentV3Panel's Full-Team card, GitPanel's two hubs) — all
+  false alarms, but the looseness would have painted the NEXT file's labels white.
+  `gradientIsWash()` now stands them down, and **an element declaring its own themed surface
+  (`bg-card`) ends any fixed subtree it sits in**, whatever encloses it.
+- 🔴 **A HOVER background is not the element's own background.** The nesting guard read
+  `hover:bg-emerald-500/10` as "this element has its own background" and skipped it — so
+  DoseCalculator's suggestion rows got `text-ink` inside a fixed `bg-[#0a1018]` dropdown, invisible on
+  Light. The guard now tests for a RESTING background only, the same distinction PR G's `RESTING_FILL`
+  already drew. The one row already written was repaired by hand; every future file is covered by the
+  rule.
+
+**Thirteen files:** APITester 107 → 0 · DoseCalculator 106 → 1 · MonetizationWizard 96 → 2 (black text
+on amber, correct as written) · SEOOptimizer 92 → 26 (the three previews) · AuthComponent 90 → 10 ·
+PerformanceAnalyzer 86 → 1 · LocalizationManager 83 → 0 · SecretManager 82 → 0 · DiffViewer 81 → 0 ·
+FileExplorer 81 → 0, plus three the sweep caught on the way: DonationPanel 37 → 6 · OtherAIView 15 → 0
+· NBIChatPanel 14 → 0. Baseline **4,581 → 3,663** (150 files).
+
+**Two MORE the crawl caught after the first gate was already green, both class bugs, both fixed at the
+source rather than by hand:**
+- 🔴 **An INLINE fixed background opens a subtree too.** `fillScopes` read only `className=`, so
+  PerformanceAnalyzer's live-metrics panel — `style={{ background: '#12141c' }}`, a near-black box —
+  had its labels themed: `text-body` measured **1.26:1** on Light. `inlineFillKind()` now measures an
+  inline background the same way `fixedFill()` measures a class one, and opens the scope. An inline
+  colour that is an EXPRESSION (`config.primaryColor`, the user's own brand) stays 'dark' — the
+  behaviour PR G shipped and the crawl verified.
+- 🔴 **A background under FIXED hex ink is never themed.** SEOOptimizer's meta-tag code block is
+  `bg-[#0d1117] text-[#a5d6ff]` — a dark block with pale-blue syntax, coherent as written. The codemod
+  themed the background and left the ink, giving pale blue on near-white: **1.47:1**. `mapToken` now
+  refuses to map a background when the same element carries a fixed hex text colour it has no row for.
+  Neither half is ours to guess, so the pair stays whole and the ratchet counts it.
+
+**And a THIRD round, because the re-crawl kept paying:** two more Light misses, one class between
+them — **a brand-coloured label on a FIXED fill must keep its literal.** PerformanceAnalyzer's
+`text-amber-400` became `text-warn`, which is dark amber on Light: **2.59:1** on that same near-black
+panel. Figma's `text-[#a259ff]` logo became `text-accent-text` on its own `bg-[#1e1333]` chip, and
+DonationPanel's labels the same on `bg-indigo-600`. Both the hue row and the hex-brand row now return
+NULL when the element sits on a fixed fill: the box never repaints, so neither may the ink.
+⚠️ **The same round corrected a wrong conclusion of my own from an hour earlier.** I had reasoned that
+SEOOptimizer's `bg-[#0d1117] text-[#a5d6ff]` code block was "coherent as written" and left the pair
+whole — but `theme-compat.css` line 25 REPAINTS `bg-[#0d1117]` per theme, so on Light the block went
+near-white under a pale-blue ink and stayed at 1.47:1. While the compat layer exists, no GitHub-dark
+literal is self-coherent. That block is now `bg-surface text-info`, themed on both halves, which is
+the same fix PR G applied to the service-worker sample. The general rule (never theme a background
+under unmappable fixed ink) stands and is still right; it simply cannot rescue a literal compat
+already owns.
+
+**Test-locked and proven by reversion** in `themeMigrate.test.ts` (67 cases in that file): removing the luminance
+check fails 3; removing the wash and themed-surface checks fails 3; the hover-guard case fails on its
+own. Two scanners were written for the sibling hunt and both now report clean across every client
+file: *a theme token inside a fixed subtree*, and *white text on a light fixed fill*.

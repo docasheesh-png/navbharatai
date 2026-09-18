@@ -111,6 +111,41 @@ export function hasHexBrandFill(span) {
   return false;
 }
 
+/** WCAG relative luminance of a 6-digit hex. */
+function hexLuminance(hex) {
+  const ch = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map((v) => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)));
+  return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+}
+
+/**
+ * A FIXED background — one the theme can never repaint — and which way its labels must go.
+ *
+ * `bg-black`, `bg-white` and a non-chrome `bg-[#hex]` are all fixed: `mapToken` already refuses to
+ * map them, so the box keeps its colour on every theme. Everything NESTED inside such a box is
+ * therefore fixed too, and that is the half this function exists for — a `text-white` deep inside a
+ * `bg-black` Twitter-card mockup must stay white, not become `text-ink` and go near-black on Light.
+ *
+ * ⚠️ The DIRECTION is decided by the fill's own luminance, never assumed. White on Facebook's
+ * `bg-[#f0f2f5]` is 1.1:1 — invisible. So a LIGHT fixed fill returns 'light', and the codemod then
+ * leaves its labels alone rather than guessing a dark token inside somebody else's mockup.
+ *
+ * Brand-hue fills (`bg-indigo-600`, gradients — the SOLID_FILL set) are deliberately NOT judged here:
+ * they keep the 'dark' verdict they have had since PR C, and the handful whose hue is genuinely light
+ * (amber-500 and friends) are the separate, already-recorded `bg-success` fill-token item.
+ */
+export function fixedFill(span) {
+  for (const m of span.matchAll(/(?<![\w-])(?:[a-z-]+:)*bg-(\[#([0-9a-fA-F]{6})\]|black|white)(?![\w/-])/g)) {
+    const raw = m[1].toLowerCase();
+    if (raw === 'black') return 'dark';
+    if (raw === 'white') return 'light';
+    if (CHROME_HEX.has(raw)) continue; // a chrome hex becomes a surface token — not a fixed fill
+    // White text needs 4.5:1 against the fill to be a legitimate label colour.
+    return 1.05 / (hexLuminance(m[2].toLowerCase()) + 0.05) >= 4.5 ? 'dark' : 'light';
+  }
+  return null;
+}
+
 /**
  * An inline `style={{ backgroundColor: brand }}` on the same line — a fill the theme never changes (a
  * white-label preview's buttons, a collaborator's avatar in their own colour). A `var(--…)` background
@@ -121,13 +156,41 @@ export function hasInlineFill(line) {
   return /style=\{\{[^}]*\bbackground(?:Color)?\s*:(?!\s*['"`]?var\()/.test(line);
 }
 
-export function fillContext(line, idx, insideFill = false) {
+/**
+ * The same inline background, but as a DIRECTION — and it opens a subtree, not just an element.
+ * `style={{ background: '#12141c' }}` is a near-black panel the theme never repaints, so the labels
+ * inside it must be fixed too; reading the `className` alone missed it and put `text-body` (near-black
+ * on Light) on a near-black panel.
+ *
+ * An inline colour we cannot read (`backgroundColor: config.primaryColor` — the user's own brand)
+ * stays 'dark', which is the behaviour PR G shipped and the crawl verified: white on a brand fill.
+ */
+export function inlineFillKind(line) {
+  const m = line.match(/style=\{\{[^}]*\bbackground(?:Color)?\s*:\s*([^,}]+)/);
+  if (!m) return null;
+  const value = m[1].trim();
+  if (/^['"`]?var\(/.test(value)) return null; // follows the theme
+  const hex = value.match(/#([0-9a-fA-F]{6})/);
+  if (!hex) return 'dark'; // an expression we cannot read — today's behaviour
+  return 1.05 / (hexLuminance(hex[1].toLowerCase()) + 0.05) >= 4.5 ? 'dark' : 'light';
+}
+
+export function fillContext(line, idx, insideFill = null) {
   const span = enclosingSpan(line, idx);
-  if (SOLID_FILL.test(span) || hasHexBrandFill(span) || hasInlineFill(line)) return 'yes';
+  // A LIGHT fixed fill first: white on it is invisible, so neither the white nor the dark token is
+  // ours to choose — the literal is left exactly as the author wrote it.
+  const ownFill = fixedFill(span);
+  if (ownFill === 'light') return 'fixed-light';
+  const inlineKind = inlineFillKind(line);
+  if (inlineKind === 'light') return 'fixed-light';
+  if (ownFill === 'dark' || SOLID_FILL.test(span) || inlineKind === 'dark') return 'yes';
   // A label INSIDE a filled box — an element with no background of its own, nested (by indentation)
   // under an opener whose className carries a solid fill. The same-element rule cannot see a parent,
   // and this shape (an avatar badge, a status bar's labels) is where the audit found labels going dark.
-  if (insideFill && !/(?<![\w-])(?:[a-z-]+:)*bg-/.test(span)) return 'yes';
+  // ⚠️ A RESTING background only. `hover:bg-emerald-500/10` paints nothing at rest, so an element
+  // carrying just that is still sitting on whatever encloses it — and reading it as "has its own
+  // background" is what put a `text-ink` label on a fixed near-black dropdown (invisible on Light).
+  if (insideFill && !/(?<![\w-:])bg-/.test(span)) return insideFill === 'light' ? 'fixed-light' : 'yes';
   const start = lineStart(line, idx);
   const bounded = line[start - 1] === '`' || line[start + span.length] === '`';
   if (!bounded) return 'no';
@@ -146,7 +209,7 @@ function lineStart(line, idx) {
  * The token for one literal utility (variant prefix already stripped), or null to leave it alone.
  * `kind` says which row it was, so the CLI can report how many pixels a run changed on purpose.
  */
-export function mapToken(base, { onSolidFill = false } = {}) {
+export function mapToken(base, { onSolidFill = false, fixedInkOnSameElement = false } = {}) {
   const m = base.match(/^(text|bg|border(?:-[trblxy])?|divide|placeholder|ring|decoration|from|via|to)-(.+?)(?:\/(\d{1,3}))?$/);
   if (!m) return null;
   const [, prop, value, opacityRaw] = m;
@@ -173,11 +236,24 @@ export function mapToken(base, { onSolidFill = false } = {}) {
     if (inSet(TEXT_BODY_FIX, value)) return { token: `${prop}-body`, kind: 'fix' };
     if (inSet(TEXT_MUTED_FIX, value)) return { token: `${prop}-muted`, kind: 'fix' };
     if (inSet(TEXT_FAINT_FIX, value)) return { token: `${prop}-faint`, kind: 'fix' };
-    if (HEX_BRAND[value]) return { token: `${prop}-${HEX_BRAND[value]}`, kind: 'fix' };
+    // Same rule as the hue row below: on a FIXED fill the ink stays the literal the author chose
+    // (Figma's `#a259ff` on its own dark purple chip), because neither half of the pair ever repaints.
+    if (HEX_BRAND[value]) return onSolidFill ? null : { token: `${prop}-${HEX_BRAND[value]}`, kind: 'fix' };
     // 50–500: a LIGHT shade as text (unreadable on light). 600–700: a DARK shade as text (3.3:1 on dark).
     // The role token is the readable shade on every theme.
     const hue = value.match(/^([a-z]+)-(50|100|200|300|400|500|600|700)$/);
-    if (hue && HUE_TOKEN[hue[1]]) return { token: `${prop}-${HUE_TOKEN[hue[1]]}`, kind: 'fix' }; // opacity dropped: it only lowers contrast
+    if (hue && HUE_TOKEN[hue[1]]) {
+      // On a FIXED fill the box never changes, so the ink must not either: `text-amber-400` on a
+      // near-black panel reads on every theme, while `text-warn` goes dark-amber on Light — 2.59:1.
+      if (onSolidFill) return null;
+      return { token: `${prop}-${HUE_TOKEN[hue[1]]}`, kind: 'fix' }; // opacity dropped: it only lowers contrast
+    }
+    return null;
+  }
+  if (prop === 'bg' && fixedInkOnSameElement) {
+    // The element carries a FIXED hex text colour the table cannot map (a code block's syntax blue).
+    // Theming the background under it is what makes the pair unreadable — `bg-surface` is near-white
+    // on Light and `#a5d6ff` is a pale blue: 1.47:1. Neither half is ours to guess, so both stay.
     return null;
   }
   if (prop === 'bg') {
@@ -243,18 +319,38 @@ export function mapToken(base, { onSolidFill = false } = {}) {
  * line until the next line at indent ≤ k. Only the opener's OWN className span is judged (a fill in a
  * ternary branch elsewhere on the line does not count), so this cannot over-reach.
  */
+/**
+ * A gradient that is a WASH, not a fill: any stop that is translucent (`to-black/30`) or already a theme
+ * token (`from-raised`) means the page's own surface shows through, so the labels on top are themed
+ * normally. This repo is full of such wrappers — a 1px gradient border around a `bg-surface` card, a
+ * tinted panel over the page — and treating them as fixed fills would paint their labels white.
+ */
+function gradientIsWash(span) {
+  if (!/(?<![\w-])(?:[a-z-]+:)*bg-gradient-/.test(span)) return false;
+  return /(?<![\w-])(?:from|via|to)-(?:\[?#?[\w.]*\]?-?\d{2,3}\/\d{1,3}|surface|card|raised|well|line|ink|body|muted|faint|transparent)(?![\w-])/.test(span)
+    || /(?<![\w-])(?:from|via|to)-\w+-\d{2,3}\/\d{1,3}(?![\w-])/.test(span);
+}
+
+/** A themed surface the element declares for ITSELF — it ends any fixed subtree it sits in. */
+function declaresThemedSurface(span) {
+  return /(?<![\w-])(?:[a-z-]+:)*bg-(?:surface|card|raised|well)(?![\w-])/.test(span);
+}
+
 export function fillScopes(lines) {
-  const stack = [];
+  const stack = []; // { indent, kind: 'dark' | 'light' | null }  — null ends a fixed subtree
   return lines.map((line) => {
     const trimmed = line.trim();
-    if (trimmed === '') return stack.length > 0;
     const indent = line.length - line.trimStart().length;
-    while (stack.length && indent <= stack[stack.length - 1]) stack.pop();
-    const inside = stack.length > 0;
+    if (trimmed !== '') while (stack.length && indent <= stack[stack.length - 1].indent) stack.pop();
+    const inside = stack.length ? stack[stack.length - 1].kind : null;
     const at = line.indexOf('className=');
-    if (at >= 0 && !/<\/\w+>\s*$/.test(trimmed) && !/\/>\s*$/.test(trimmed)) {
+    if (trimmed !== '' && at >= 0 && !/<\/\w+>\s*$/.test(trimmed) && !/\/>\s*$/.test(trimmed)) {
       const span = enclosingSpan(line, at + 'className="'.length);
-      if (SOLID_FILL.test(span) || hasHexBrandFill(span)) stack.push(indent);
+      const fixed = fixedFill(span) || inlineFillKind(line);
+      // Its own themed surface wins: the children sit on THAT, whatever encloses it.
+      if (declaresThemedSurface(span) && !fixed) stack.push({ indent, kind: null });
+      else if (fixed) stack.push({ indent, kind: fixed });
+      else if (SOLID_FILL.test(span) && !gradientIsWash(span)) stack.push({ indent, kind: 'dark' });
     }
     return inside;
   });
@@ -284,7 +380,12 @@ export function migrate(src) {
     const base = m.slice(variant.length);
     const ctx = /^(?:text|placeholder)-/.test(base) ? fillContext(line, offset, insideFill[i]) : 'no';
     if (ctx === 'mixed') { left[`${m} (mixed fills in one template — split by hand)`] = (left[`${m} (mixed fills in one template — split by hand)`] || 0) + 1; return m; }
-    const r = mapToken(base, { onSolidFill: ctx === 'yes' });
+    if (ctx === 'fixed-light') { left[`${m} (inside a LIGHT fixed fill — somebody else's surface, by hand)`] = (left[`${m} (inside a LIGHT fixed fill — somebody else's surface, by hand)`] || 0) + 1; return m; }
+    // A fixed hex TEXT colour on this same element that the table has no row for.
+    const span = enclosingSpan(line, offset);
+    const fixedInk = [...span.matchAll(/(?<![\w-])(?:[a-z-]+:)*text-(\[#[0-9a-fA-F]{6}\])(?![\w/-])/g)]
+      .some((h) => mapToken(`text-${h[1]}`) === null);
+    const r = mapToken(base, { onSolidFill: ctx === 'yes', fixedInkOnSameElement: fixedInk });
     if (!r) { left[m] = (left[m] || 0) + 1; return m; }
     const to = variant + r.token;
     const label = `${m} → ${to}`;
@@ -306,6 +407,7 @@ export function migrate(src) {
       if (m2.slice(offset, offset + q.length) !== q) return q; // embedded source — never touched
       const body = q.slice(1, -1);
       if (!RESTING_FILL.test(body) || HAS_TEXT_COLOUR.test(body) || /bg-clip-text/.test(body)) return q;
+      if (fixedFill(body) === 'light') return q; // white on a light fixed fill is invisible — never stamped
       if (!/(?:^|\s)(?:[a-z-]+:)*(?:bg|text|rounded|px|py|p|flex|w|h|border|font|shadow|inline|block)[\w-]*(?:\s|$)/.test(body)) return q; // not a class list
       changed[INHERITED_LABEL] = (changed[INHERITED_LABEL] || 0) + 1; fix++;
       return `${q[0]}${body} text-on-accent${q[0]}`;

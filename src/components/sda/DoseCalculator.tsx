@@ -118,35 +118,35 @@ export function DoseCalculator({ onClose }: { onClose: () => void }) {
     pick({ kind: 'custom', medicine: kept });
   };
 
-  const field = 'mt-1 w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-[#30363d] focus:outline-none focus:border-emerald-500';
-  const label = 'text-[9px] font-black uppercase tracking-widest text-[#484f58]';
+  const field = 'mt-1 w-full bg-well border border-line rounded-lg px-3 py-2 text-sm text-ink placeholder:text-faint focus:outline-none focus:border-emerald-500';
+  const label = 'text-[9px] font-black uppercase tracking-widest text-faint';
 
   return (
     // `nb-sheet-overlay-flush` (admin 2026-09-06): z-50 is BELOW the global tab bar's z-150, so the
     // bar covered this sheet's bottom — and because the sheet IS the scroll container, scrolling to
     // its end still left those controls underneath the bar. The shared overlay reserves the bar's real
     // height, and reserves nothing where the bar is not rendered.
-    <div className="nb-sheet-overlay-flush fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center" onClick={onClose}>
+    <div className="nb-sheet-overlay-flush fixed inset-0 z-50 bg-scrim flex items-end sm:items-center justify-center" onClick={onClose}>
       <div
         // 92% is the DESIGN's height; `nb-sheet-partial` clamps it to what is actually left once the
         // tab bar and insets are reserved. Unclamped, 92dvh exceeds the remaining room on any phone
         // under ~700px tall, and a bottom-anchored sheet loses that overflow off the TOP.
         style={{ '--nb-sheet-cap': '92dvh' } as CSSProperties}
-        className="w-full sm:max-w-lg nb-sheet-partial overflow-y-auto bg-[#0d1520] border border-emerald-900/40 rounded-t-2xl sm:rounded-2xl shadow-2xl"
+        className="w-full sm:max-w-lg nb-sheet-partial overflow-y-auto bg-surface border border-emerald-900/40 rounded-t-2xl sm:rounded-2xl shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="sticky top-0 bg-[#0d1520] border-b border-emerald-900/30 px-4 py-3 flex items-center justify-between z-10">
+        <div className="sticky top-0 bg-surface border-b border-emerald-900/30 px-4 py-3 flex items-center justify-between z-10">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-emerald-900/40 border border-emerald-700/40 flex items-center justify-center">
-              <Pill className="w-3.5 h-3.5 text-emerald-400" />
+            <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-700/40 flex items-center justify-center">
+              <Pill className="w-3.5 h-3.5 text-success" />
             </div>
             <div>
-              <p className="text-[12px] font-black text-white tracking-wide">Emergency Dose Calculator</p>
-              <p className="text-[9px] text-emerald-600 font-medium">Your medicines + Govt. of UP FBNC chart · works offline</p>
+              <p className="text-[12px] font-black text-ink tracking-wide">Emergency Dose Calculator</p>
+              <p className="text-[9px] text-success font-medium">Your medicines + Govt. of UP FBNC chart · works offline</p>
             </div>
           </div>
-          <button onClick={onClose} aria-label="Close" className="p-1.5 hover:bg-white/10 rounded-lg text-[#484f58] hover:text-white">
+          <button onClick={onClose} aria-label="Close" className="p-1.5 hover:bg-raised rounded-lg text-faint hover:text-ink">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -162,18 +162,18 @@ export function DoseCalculator({ onClose }: { onClose: () => void }) {
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search any medicine — spelling mistakes are fine"
               autoFocus
-              className="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder:text-[#30363d] focus:outline-none focus:border-emerald-500"
+              className="w-full bg-well border border-line rounded-xl px-3.5 py-2.5 text-sm text-ink placeholder:text-faint focus:outline-none focus:border-emerald-500"
             />
             {suggestions.length > 0 && (
-              <div className="mt-1.5 rounded-xl border border-white/10 bg-[#0a1018] overflow-hidden">
+              <div className="mt-1.5 rounded-xl border border-line bg-[#0a1018] overflow-hidden text-on-accent">
                 {suggestions.map((s) => (
                   <button
                     key={s.kind === 'chart' ? `d_${s.drug.id}` : `c_${s.medicine.id}`}
                     onClick={() => pick(s.kind === 'chart' ? { kind: 'chart', drug: s.drug } : { kind: 'custom', medicine: s.medicine })}
-                    className="w-full text-left px-3.5 py-2.5 text-[13px] text-white hover:bg-emerald-900/30 flex items-center justify-between border-b border-white/5 last:border-b-0"
+                    className="w-full text-left px-3.5 py-2.5 text-[13px] text-on-accent hover:bg-emerald-500/10 flex items-center justify-between border-b border-line last:border-b-0"
                   >
                     <span className="font-bold">{s.label}</span>
-                    <span className="text-[9px] font-black uppercase tracking-widest text-[#484f58]">
+                    <span className="text-[9px] font-black uppercase tracking-widest text-on-accent">
                       {s.kind === 'custom' ? 'yours' : 'FBNC chart'}
                     </span>
                   </button>
@@ -183,15 +183,15 @@ export function DoseCalculator({ onClose }: { onClose: () => void }) {
             {query.trim() && suggestions.length === 0 && (
               /* NOT FOUND — the honest panel. No number from anyone's memory; the fix is the doctor's
                  own 30-second entry, which then works instantly, offline, forever. */
-              <div className="mt-1.5 rounded-xl border border-amber-700/40 bg-amber-950/20 p-3">
-                <p className="text-[12px] text-amber-200 leading-relaxed">
+              <div className="mt-1.5 rounded-xl border border-amber-700/40 bg-amber-500/10 p-3">
+                <p className="text-[12px] text-warn leading-relaxed">
                   “{query.trim()}” is not in your medicines or the chart, and NavBharatAI never gives a
                   dose from memory. Add it yourself from your unit protocol — it takes ~30 seconds and
                   then it is instant, offline, every time.
                 </p>
                 <button
                   onClick={() => { openEdit('new'); setForm((f) => ({ ...f, name: query.trim() })); }}
-                  className="mt-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest bg-amber-900/40 border border-amber-600/40 text-amber-200 hover:bg-amber-800/40"
+                  className="mt-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest bg-amber-500/10 border border-amber-600/40 text-warn hover:bg-amber-500/10"
                 >
                   <Plus className="w-3 h-3" /> Add “{query.trim()}” as my medicine
                 </button>
@@ -206,19 +206,19 @@ export function DoseCalculator({ onClose }: { onClose: () => void }) {
               <div className="flex items-center gap-1">
                 {customList.length > 0 && (
                   <button onClick={() => setManageMode((p) => !p)} title="Edit or delete your medicines"
-                    className={cn('p-1.5 rounded-lg', manageMode ? 'bg-emerald-900/50 text-emerald-300' : 'text-[#484f58] hover:text-white')}>
+                    className={cn('p-1.5 rounded-lg', manageMode ? 'bg-emerald-500/10 text-success' : 'text-faint hover:text-ink')}>
                     <Pencil className="w-3 h-3" />
                   </button>
                 )}
                 <button onClick={() => openEdit('new')} title="Add a medicine from your unit protocol"
-                  className="p-1.5 rounded-lg text-[#484f58] hover:text-emerald-300">
+                  className="p-1.5 rounded-lg text-faint hover:text-success">
                   <Plus className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
             {customList.length === 0 ? (
               <button onClick={() => openEdit('new')}
-                className="w-full rounded-xl border border-dashed border-white/15 px-3 py-3 text-[12px] text-[#8b949e] hover:text-white hover:border-emerald-700/50 text-left">
+                className="w-full rounded-xl border border-dashed border-line px-3 py-3 text-[12px] text-muted hover:text-ink hover:border-emerald-700/50 text-left">
                 + Add your emergency medicines once (adrenaline, dopamine, hydrocortisone…) — dose/kg,
                 mg per mL and route from your own protocol. Then every dose is one tap.
               </button>
@@ -231,8 +231,8 @@ export function DoseCalculator({ onClose }: { onClose: () => void }) {
                       className={cn(
                         'px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-all',
                         selected?.kind === 'custom' && selected.medicine.id === m.id
-                          ? 'bg-emerald-900/50 border-emerald-500/60 text-emerald-200'
-                          : 'bg-white/5 border-white/10 text-[#c9d1d9] hover:text-white hover:bg-white/10',
+                          ? 'bg-emerald-500/10 border-emerald-500/60 text-success'
+                          : 'bg-raised border-line text-body hover:text-ink hover:bg-raised',
                         manageMode && 'rounded-r-none border-r-0',
                       )}
                     >
@@ -242,7 +242,7 @@ export function DoseCalculator({ onClose }: { onClose: () => void }) {
                       <button
                         onClick={() => { setCustomList(deleteCustomMedicine(m.id)); if (selected?.kind === 'custom' && selected.medicine.id === m.id) setSelected(null); }}
                         title={`Delete ${m.name}`}
-                        className="px-1.5 py-1.5 rounded-r-lg border border-red-900/50 bg-red-950/30 text-red-400 hover:text-red-200"
+                        className="px-1.5 py-1.5 rounded-r-lg border border-red-900/50 bg-red-500/10 text-danger hover:text-danger"
                       >
                         <Trash2 className="w-3 h-3" />
                       </button>
@@ -255,8 +255,8 @@ export function DoseCalculator({ onClose }: { onClose: () => void }) {
 
           {/* ADD / EDIT FORM — the doctor's protocol, in the doctor's hands. Validated, never coerced. */}
           {editing !== null && (
-            <div className="rounded-xl border border-emerald-800/40 bg-emerald-950/20 p-3 space-y-3">
-              <p className="text-[10px] font-black uppercase tracking-widest text-emerald-500">
+            <div className="rounded-xl border border-emerald-800/40 bg-emerald-500/10 p-3 space-y-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-success">
                 {editing === 'new' ? 'Add medicine (from your unit protocol)' : `Edit ${editing.name}`}
               </p>
               <div className="grid grid-cols-2 gap-3">
@@ -287,12 +287,12 @@ export function DoseCalculator({ onClose }: { onClose: () => void }) {
                   <input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="e.g. dilute before use, give slowly" className={field} />
                 </label>
               </div>
-              {formProblem && <p className="text-[11px] text-amber-300">⚠️ {formProblem}</p>}
+              {formProblem && <p className="text-[11px] text-warn">⚠️ {formProblem}</p>}
               <div className="flex gap-2">
-                <button onClick={submitForm} className="flex-1 px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest bg-emerald-900/50 border border-emerald-600/50 text-emerald-200 hover:bg-emerald-800/50">Save medicine</button>
-                <button onClick={() => setEditing(null)} className="px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest bg-white/5 border border-white/10 text-[#8b949e] hover:text-white">Cancel</button>
+                <button onClick={submitForm} className="flex-1 px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest bg-emerald-500/10 border border-emerald-600/50 text-success hover:bg-emerald-500/10">Save medicine</button>
+                <button onClick={() => setEditing(null)} className="px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest bg-raised border border-line text-muted hover:text-ink">Cancel</button>
               </div>
-              <p className="text-[9px] text-[#484f58] leading-relaxed">
+              <p className="text-[9px] text-faint leading-relaxed">
                 You are the source for this entry — NavBharatAI stores and calculates it, on this device
                 only, and prints “your own entry” on every answer.
               </p>
@@ -301,7 +301,7 @@ export function DoseCalculator({ onClose }: { onClose: () => void }) {
 
           {/* 3 — THE FBNC CHART, one fold down: verified newborn regimens, led by the ER's own set. */}
           <div>
-            <button onClick={() => setChartOpen((p) => !p)} className="flex items-center gap-1 mb-1.5 text-[#484f58] hover:text-white">
+            <button onClick={() => setChartOpen((p) => !p)} className="flex items-center gap-1 mb-1.5 text-faint hover:text-ink">
               {chartOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
               <span className={label}>Newborn chart (Govt. of UP FBNC)</span>
             </button>
@@ -314,8 +314,8 @@ export function DoseCalculator({ onClose }: { onClose: () => void }) {
                     className={cn(
                       'px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-all',
                       selected?.kind === 'chart' && selected.drug.id === d.id
-                        ? 'bg-emerald-900/50 border-emerald-500/60 text-emerald-200'
-                        : 'bg-white/5 border-white/10 text-[#8b949e] hover:text-white hover:bg-white/10',
+                        ? 'bg-emerald-500/10 border-emerald-500/60 text-success'
+                        : 'bg-raised border-line text-muted hover:text-ink hover:bg-raised',
                     )}
                   >
                     {d.label}
@@ -345,7 +345,7 @@ export function DoseCalculator({ onClose }: { onClose: () => void }) {
                 {INDICATIONS.map((i) => (
                   <button key={i.id} onClick={() => setIndication(i.id)}
                     className={cn('flex-1 px-2 py-2 rounded-lg text-[11px] font-bold border transition-all',
-                      indication === i.id ? 'bg-emerald-900/50 border-emerald-500/60 text-emerald-200' : 'bg-white/5 border-white/10 text-[#8b949e] hover:text-white')}>
+                      indication === i.id ? 'bg-emerald-500/10 border-emerald-500/60 text-success' : 'bg-raised border-line text-muted hover:text-ink')}>
                     {i.label}
                   </button>
                 ))}
@@ -354,11 +354,11 @@ export function DoseCalculator({ onClose }: { onClose: () => void }) {
           )}
           {selected?.kind === 'chart' && !selected.drug.infusion && (
             <div>
-              <p className={cn(label, 'mb-1.5')}>Vial / ampoule <span className="text-[#30363d] normal-case font-medium">(for mL — optional)</span></p>
+              <p className={cn(label, 'mb-1.5')}>Vial / ampoule <span className="text-faint normal-case font-medium">(for mL — optional)</span></p>
               {knownVial && !vialText ? (
-                <div className="flex items-center justify-between bg-emerald-950/40 border border-emerald-800/40 rounded-lg px-3 py-2">
-                  <span className="text-[11px] text-emerald-300 font-bold">{knownVial.label}</span>
-                  <button onClick={() => setVials(forgetVial(selected.drug.id))} title="Forget this vial (stock changed)" className="p-1 text-[#484f58] hover:text-red-400">
+                <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-800/40 rounded-lg px-3 py-2">
+                  <span className="text-[11px] text-success font-bold">{knownVial.label}</span>
+                  <button onClick={() => setVials(forgetVial(selected.drug.id))} title="Forget this vial (stock changed)" className="p-1 text-faint hover:text-danger">
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
@@ -368,7 +368,7 @@ export function DoseCalculator({ onClose }: { onClose: () => void }) {
                   <button
                     onClick={() => { if (typedVial) { setVials(saveVial(selected.drug.id, typedVial)); setVialText(''); } }}
                     disabled={!typedVial}
-                    className="px-3 rounded-lg text-[10px] font-black uppercase tracking-widest bg-emerald-900/40 border border-emerald-700/40 text-emerald-300 disabled:opacity-40">
+                    className="px-3 rounded-lg text-[10px] font-black uppercase tracking-widest bg-emerald-500/10 border border-emerald-700/40 text-success disabled:opacity-40">
                     Save
                   </button>
                 </div>
@@ -378,30 +378,30 @@ export function DoseCalculator({ onClose }: { onClose: () => void }) {
 
           {/* THE ANSWER — chart path (verified regimens, asks its own questions) */}
           {selected?.kind === 'chart' && chartResult && (
-            <div className={cn('rounded-xl border p-3', chartResult.ok ? 'bg-emerald-950/30 border-emerald-700/40' : 'bg-white/5 border-white/10')}>
+            <div className={cn('rounded-xl border p-3', chartResult.ok ? 'bg-emerald-500/10 border-emerald-700/40' : 'bg-raised border-line')}>
               {chartResult.ok ? (
                 <div className="space-y-2.5">
                   {chartResult.parts.map((part) => (
                     <div key={part.label}>
                       <div className="flex items-baseline justify-between gap-2">
-                        <span className="text-[10px] font-black uppercase tracking-widest text-emerald-600">{part.label}</span>
-                        <span className="text-[10px] text-[#484f58]">{[part.frequency, part.route, part.over].filter(Boolean).join(' · ')}</span>
+                        <span className="text-[10px] font-black uppercase tracking-widest text-success">{part.label}</span>
+                        <span className="text-[10px] text-faint">{[part.frequency, part.route, part.over].filter(Boolean).join(' · ')}</span>
                       </div>
-                      <p className="text-xl font-black text-white leading-tight">
+                      <p className="text-xl font-black text-ink leading-tight">
                         {part.amount}
-                        {part.volume && <span className="text-emerald-300"> = {part.volume}</span>}
+                        {part.volume && <span className="text-success"> = {part.volume}</span>}
                       </p>
-                      <p className="text-[10px] text-[#8b949e] font-mono">{part.workings}</p>
-                      {part.duration && <p className="text-[10px] text-[#484f58]">Duration: {part.duration}</p>}
+                      <p className="text-[10px] text-muted font-mono">{part.workings}</p>
+                      {part.duration && <p className="text-[10px] text-faint">Duration: {part.duration}</p>}
                     </div>
                   ))}
                 </div>
               ) : (
-                <p className="text-[12px] text-amber-300 leading-relaxed">{chartResult.message}</p>
+                <p className="text-[12px] text-warn leading-relaxed">{chartResult.message}</p>
               )}
               {chartResult.warnings.length > 0 && (
-                <div className="mt-2.5 pt-2.5 border-t border-white/10 space-y-1">
-                  {chartResult.warnings.map((w) => <p key={w} className="text-[10px] text-amber-400/90 leading-snug">⚠️ {w}</p>)}
+                <div className="mt-2.5 pt-2.5 border-t border-line space-y-1">
+                  {chartResult.warnings.map((w) => <p key={w} className="text-[10px] text-warn leading-snug">⚠️ {w}</p>)}
                 </div>
               )}
             </div>
@@ -409,31 +409,31 @@ export function DoseCalculator({ onClose }: { onClose: () => void }) {
 
           {/* THE ANSWER — the doctor's own medicine */}
           {selected?.kind === 'custom' && (
-            <div className="rounded-xl border border-emerald-700/40 bg-emerald-950/30 p-3">
+            <div className="rounded-xl border border-emerald-700/40 bg-emerald-500/10 p-3">
               {weightKg === null ? (
-                <p className="text-[12px] text-[#8b949e]">Enter the weight — the dose appears instantly.</p>
+                <p className="text-[12px] text-muted">Enter the weight — the dose appears instantly.</p>
               ) : customResult && customResult.ok ? (
                 <div className="space-y-1.5">
                   <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-emerald-600">{selected.medicine.name}</span>
-                    <span className="text-[10px] text-[#484f58]">{customResult.line.route}</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-success">{selected.medicine.name}</span>
+                    <span className="text-[10px] text-faint">{customResult.line.route}</span>
                   </div>
-                  <p className="text-xl font-black text-white leading-tight">
+                  <p className="text-xl font-black text-ink leading-tight">
                     {customResult.line.amount}
-                    {customResult.line.volume && <span className="text-emerald-300"> = {customResult.line.volume}</span>}
+                    {customResult.line.volume && <span className="text-success"> = {customResult.line.volume}</span>}
                   </p>
-                  <p className="text-[10px] text-[#8b949e] font-mono">{customResult.line.workings}</p>
-                  {customResult.line.capped && <p className="text-[10px] text-amber-400/90">⚠️ {customResult.line.capped}</p>}
-                  {customResult.line.notes && <p className="text-[10px] text-[#c9d1d9]">📝 {customResult.line.notes}</p>}
-                  <p className="text-[9px] text-emerald-700 pt-1">{customResult.line.sourceLine}</p>
+                  <p className="text-[10px] text-muted font-mono">{customResult.line.workings}</p>
+                  {customResult.line.capped && <p className="text-[10px] text-warn">⚠️ {customResult.line.capped}</p>}
+                  {customResult.line.notes && <p className="text-[10px] text-body">📝 {customResult.line.notes}</p>}
+                  <p className="text-[9px] text-success pt-1">{customResult.line.sourceLine}</p>
                 </div>
               ) : (
-                <p className="text-[12px] text-amber-300">{customResult?.ok === false ? customResult.problem : ''}</p>
+                <p className="text-[12px] text-warn">{customResult?.ok === false ? customResult.problem : ''}</p>
               )}
             </div>
           )}
 
-          <p className="text-[9px] text-[#484f58] leading-relaxed pb-2">
+          <p className="text-[9px] text-faint leading-relaxed pb-2">
             {DOSING_SOURCE}. {DOSING_CAUTION}
           </p>
           </>}

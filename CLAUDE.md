@@ -2753,6 +2753,26 @@ is now enforced at the source, by CI.**
   RESTING solid fill without a text colour (never to a `hover:`-only fill, never to `bg-clip-text`), and
   an inline `style={{ backgroundColor: … }}` that is not a `var(--…)` counts as a fixed fill. By hand:
   never rely on inheritance for text on a fill.
+- **🔴 A FIXED box fixes everything inside it, and its LUMINANCE picks the label (PR H, 2026-09-18).**
+  `bg-black`, `bg-white` and any non-chrome `bg-[#hex]` are colours the theme can never repaint, so
+  every colour nested in that subtree is fixed too — a `text-white` four levels under `bg-black` must
+  stay white, not become `text-ink` and vanish on Light. And white is only a legitimate label where it
+  clears 4.5:1: `fixedFill()` measures it, and on a LIGHT fixed fill (Facebook's `bg-[#f0f2f5]`) the
+  codemod leaves the labels exactly as written rather than guessing inside somebody else's mockup.
+  **A third-party preview — a Google result, a Facebook card, a Twitter card — is that case**, and its
+  literals stay counted by the ratchet rather than migrated.
+  Five further distinctions the same PR had to draw, each from a real miss: a **wash** gradient (a
+  translucent or themed stop, a 1px gradient border round a themed card) is NOT a fill; an element
+  declaring its **own themed surface** ends any fixed subtree it sits in; a **hover** background is
+  not the element's own background (`hover:bg-…` paints nothing at rest); an **inline**
+  `style={{ background: '#…' }}` opens a fixed subtree and is measured like any other fill; and a
+  background is **never themed while a fixed hex ink sits on the same element**. And on a fixed fill a
+  **brand-coloured label keeps its literal** — `text-amber-400` stays, because `text-warn` is dark
+  amber on Light and the panel under it is near-black on every theme (2.59:1); same for a hex brand
+  ink such as Figma's `#a259ff` on its own dark chip.
+  ⚠️ **While `theme-compat.css` still exists, a GitHub-dark literal is NOT self-coherent** — compat
+  repaints `bg-[#0d1117]` per theme, so a fixed ink left on it goes invisible on Light. A code block
+  whose background compat owns must have its ink themed too (`bg-surface text-info`), not frozen.
 - **A dark tint is a Light defect; a dark shade as text is a Dark defect.** `bg-emerald-900/30` →
   `bg-emerald-500/10` (≤ 60% only — above that it is an opaque panel, by hand) and `text-emerald-600` →
   `text-success`. Both are counted by the census since PR G, so the ratchet sees them.

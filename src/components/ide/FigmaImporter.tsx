@@ -470,7 +470,7 @@ ${generatedCode}
             <div className="flex items-center gap-2">
               {/* Figma F logo */}
               <div className="w-7 h-7 rounded-md bg-[#1e1333] flex items-center justify-center text-on-accent">
-                <span className="text-accent-text font-black text-sm leading-none">F</span>
+                <span className="text-[#a259ff] font-black text-sm leading-none">F</span>
               </div>
               <h2 className="text-sm font-semibold text-body">Import Design from Figma</h2>
             </div>
@@ -696,7 +696,7 @@ ${generatedCode}
           {!generatedCode ? (
             <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center px-8">
               <div className="w-16 h-16 rounded-2xl bg-[#1e1333] border border-[#a259ff]/20 flex items-center justify-center text-on-accent">
-                <span className="text-accent-text font-black text-3xl leading-none">F</span>
+                <span className="text-[#a259ff] font-black text-3xl leading-none">F</span>
               </div>
               <div>
                 <p className="text-sm font-medium text-muted">

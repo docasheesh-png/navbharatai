@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { mapToken, migrate, enclosingSpan, fillContext, SOLID_FILL, TOKEN_VAR } from '../scripts/themeMigrate.mjs';
+import { mapToken, migrate, enclosingSpan, fillContext, SOLID_FILL, TOKEN_VAR, fixedFill, inlineFillKind } from '../scripts/themeMigrate.mjs';
 import { literalsIn, maskEmbeddedSources } from '../scripts/themeColourBaseline.mjs';
 
 const compat = readFileSync(resolve(__dirname, '../src/styles/theme-compat.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, ' ');
@@ -223,10 +223,15 @@ describe('migrate — mechanics', () => {
     expect(once).toBe('"text-ink bg-surface text-success bg-well border-line"');
   });
   it('reports what changed, how (exact vs fix), and what it left', () => {
-    const r = migrate('"text-white text-white/40 bg-white text-black"');
+    // Two SEPARATE class strings: since PR H a `bg-white` in the same string marks a LIGHT fixed fill,
+    // and its labels are deliberately left for a hand (white on white is nobody's readable default).
+    const r = migrate('"text-white text-white/40" "bg-white text-black"');
     expect(r.exact).toBe(1);
     expect(r.fix).toBe(1);
-    expect(r.left).toEqual({ 'bg-white': 1, 'text-black': 1 });
+    expect(r.left).toEqual({
+      'bg-white': 1,
+      "text-black (inside a LIGHT fixed fill — somebody else's surface, by hand)": 1,
+    });
     expect(r.changed).toEqual({ 'text-white → text-ink': 1, 'text-white/40 → text-faint': 1 });
   });
   it('an arbitrary opacity is normalised first, so bg-white/[0.02] cannot become a 2% raised surface', () => {
@@ -276,6 +281,136 @@ describe('🔒 a fixed fill decides its label — PR G rows, each from a real cr
     expect(mapToken('text-emerald-600')).toEqual({ token: 'text-success', kind: 'fix' });
     expect(mapToken('text-red-700')).toEqual({ token: 'text-danger', kind: 'fix' });
     expect(literalsIn('<p className="text-emerald-600">x</p>').map((h) => h.token)).toEqual(['text-emerald-600']);
+  });
+});
+
+describe('🔒 a FIXED background fixes everything inside it, and its luminance picks the label (PR H)', () => {
+  it('bg-black / bg-white / a non-chrome hex are fixed; a chrome hex is not', () => {
+    expect(fixedFill('rounded bg-black p-2')).toBe('dark');
+    expect(fixedFill('bg-white rounded')).toBe('light');
+    expect(fixedFill('bg-[#16181c] h-40')).toBe('dark');   // Twitter's card
+    expect(fixedFill('bg-[#f0f2f5] px-3')).toBe('light');  // Facebook's card
+    expect(fixedFill('bg-[#161b22] p-2')).toBeNull();      // chrome — becomes bg-card
+    expect(fixedFill('bg-indigo-600 px-3')).toBeNull();    // a brand hue, judged by SOLID_FILL
+  });
+
+  it('a text-white deep inside a bg-black mockup stays white (the Twitter card preview)', () => {
+    const src = [
+      '<div className="rounded-2xl overflow-hidden border border-[#2f3336] bg-black">',
+      '  <div className="p-3 flex gap-3">',
+      '    <div className="min-w-0">',
+      '      <p className="text-white text-sm font-bold truncate">{title}</p>',
+      '    </div>',
+      '  </div>',
+      '</div>',
+    ].join('\n');
+    expect(migrate(src).out).toContain('text-on-accent text-sm font-bold');
+    expect(migrate(src).out).not.toContain('text-ink');
+  });
+
+  it("a label inside a LIGHT fixed fill is LEFT ALONE — white would be invisible on it", () => {
+    const src = [
+      '<div className="rounded-lg bg-[#f0f2f5]">',
+      '  <p className="text-[#606770] text-xs">{site}</p>',
+      '</div>',
+    ].join('\n');
+    const r = migrate(src);
+    expect(r.out).toBe(src);
+    expect(Object.keys(r.left).join(' ')).toContain('LIGHT fixed fill');
+  });
+
+  it('the inherited-label rule never stamps white on a light fixed fill', () => {
+    expect(migrate('<div className="rounded bg-[#f0f2f5] px-3">x</div>').out)
+      .toBe('<div className="rounded bg-[#f0f2f5] px-3">x</div>');
+    // …while a DARK fixed fill still gets it
+    expect(migrate('<div className="rounded bg-[#007acc] px-3">x</div>').out)
+      .toContain('text-on-accent');
+  });
+
+  it('a WASH gradient is not a fill: a 1px gradient border around a themed card keeps themed labels', () => {
+    const src = [
+      '<div className="rounded-xl p-[1px] bg-gradient-to-r from-indigo-500 to-amber-400">',
+      '  <div className="rounded-[11px] bg-surface px-3 py-2">',
+      '    <span className="text-white/40 font-normal">{n} agents</span>',
+      '  </div>',
+      '</div>',
+    ].join('\n');
+    expect(migrate(src).out).toContain('text-faint font-normal'); // themed, not text-on-accent
+  });
+
+  it('a translucent gradient stop makes it a wash (from-indigo-950/40 to-black/30)', () => {
+    const src = [
+      '<div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-950/40 to-black/30">',
+      '  <p className="text-[10px] text-[#8b949e] font-medium">Cloud Deployment Hub</p>',
+      '</div>',
+    ].join('\n');
+    expect(migrate(src).out).toContain('text-muted font-medium');
+  });
+
+  it('an element that declares its own themed surface ends the fixed subtree', () => {
+    const src = [
+      '<div className="bg-black rounded">',
+      '  <div className="bg-card p-2">',
+      '    <p className="text-white">{x}</p>',
+      '  </div>',
+      '</div>',
+    ].join('\n');
+    expect(migrate(src).out).toContain('text-ink'); // on bg-card, not on the black
+  });
+
+  it('a HOVER background is not the element\'s own background (the DoseCalculator dropdown)', () => {
+    const src = [
+      '<div className="rounded-xl bg-[#0a1018] overflow-hidden">',
+      '  <button className="w-full px-3 text-[#c9d1d9] hover:bg-emerald-500/10">{label}</button>',
+      '</div>',
+    ].join('\n');
+    expect(migrate(src).out).toContain('text-on-accent hover:bg-emerald-500/10');
+  });
+
+  it('an INLINE fixed background opens a fixed subtree and is measured (PerformanceAnalyzer\'s panel)', () => {
+    expect(inlineFillKind("<div style={{ background: '#12141c' }}>")).toBe('dark');
+    expect(inlineFillKind("<div style={{ background: '#f0f2f5' }}>")).toBe('light');
+    expect(inlineFillKind("<div style={{ background: 'var(--surface-card)' }}>")).toBeNull();
+    expect(inlineFillKind('<div style={{ backgroundColor: config.primaryColor }}>')).toBe('dark');
+    const src = [
+      "<div className=\"rounded-xl p-4\" style={{ background: '#12141c' }}>",
+      '  <span className="text-sm font-semibold text-white">Live performance</span>',
+      '</div>',
+    ].join('\n');
+    expect(migrate(src).out).toContain('text-on-accent');
+  });
+
+  it('a background under FIXED hex ink is never themed — both halves stay (a code block)', () => {
+    const pair = '<pre className="p-4 bg-[#0d1117] text-[#a5d6ff]">x</pre>';
+    expect(migrate(pair).out).toBe(pair);
+    // …while the same background under mappable ink still migrates
+    expect(migrate('<pre className="p-4 bg-[#0d1117] text-white">x</pre>').out)
+      .toBe('<pre className="p-4 bg-surface text-ink">x</pre>');
+  });
+
+  it('a brand-hue label on a FIXED fill keeps its literal — the box never changes, nor may the ink', () => {
+    const src = [
+      "<div className=\"rounded-xl p-4\" style={{ background: '#12141c' }}>",
+      '  <p className="mt-2 text-[11px] text-amber-400">Open your preview once</p>',
+      '</div>',
+    ].join('\n');
+    expect(migrate(src).out).toContain('text-amber-400'); // NOT text-warn
+    // the same rule for a hex brand ink on a fixed chip (Figma's purple on its own dark tile)
+    expect(migrate('<div className="bg-[#1e1333] text-[#a259ff]">F</div>').out)
+      .toBe('<div className="bg-[#1e1333] text-[#a259ff]">F</div>');
+    // …while off a fill it still becomes the role token
+    expect(migrate('<p className="text-amber-400">x</p>').out).toContain('text-warn');
+  });
+
+  it('a chrome background still themes its children normally (no false fixed scope)', () => {
+    const src = [
+      '<div className="bg-[#161b22] p-2">',
+      '  <p className="text-white">{x}</p>',
+      '</div>',
+    ].join('\n');
+    const out = migrate(src).out;
+    expect(out).toContain('bg-card');
+    expect(out).toContain('text-ink');
   });
 });
 

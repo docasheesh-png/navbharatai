@@ -213,21 +213,21 @@ export function LocalizationManager() {
   const previewLangObj = SUPPORTED_LANGUAGES.find(l => l.code === previewLang);
 
   return (
-    <div className="h-full flex flex-col bg-[#0d1117] text-white overflow-hidden">
+    <div className="h-full flex flex-col bg-surface text-ink overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5 bg-[#161b22]">
+      <div className="flex items-center gap-3 px-6 py-4 border-b border-line bg-card">
         <div className="w-10 h-10 bg-amber-600/20 rounded-xl flex items-center justify-center">
-          <Languages className="w-5 h-5 text-amber-400" />
+          <Languages className="w-5 h-5 text-warn" />
         </div>
         <div>
-          <h2 className="font-semibold text-white text-base">Localization Manager</h2>
-          <p className="text-xs text-white/40">Translate your app into multiple languages — 18 languages supported</p>
+          <h2 className="font-semibold text-ink text-base">Localization Manager</h2>
+          <p className="text-xs text-faint">Translate your app into multiple languages — 18 languages supported</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <button onClick={() => setShowImport(!showImport)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-[#0d1117] border border-white/10 rounded-lg text-white/50 hover:text-white transition-all">
+          <button onClick={() => setShowImport(!showImport)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-surface border border-line rounded-lg text-muted hover:text-ink transition-all">
             <Upload className="w-3.5 h-3.5" /> Import JSON
           </button>
-          <button onClick={exportAll} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-[#0d1117] border border-white/10 rounded-lg text-white/50 hover:text-white transition-all">
+          <button onClick={exportAll} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-surface border border-line rounded-lg text-muted hover:text-ink transition-all">
             <Download className="w-3.5 h-3.5" /> Export All
           </button>
         </div>
@@ -235,18 +235,18 @@ export function LocalizationManager() {
 
       {/* Import Panel */}
       {showImport && (
-        <div className="px-6 py-3 border-b border-white/5 bg-[#161b22]">
+        <div className="px-6 py-3 border-b border-line bg-card">
           <div className="flex gap-2">
             <textarea
-              className="flex-1 bg-[#0d1117] border border-white/10 rounded-xl p-2.5 text-xs font-mono text-white/70 resize-none focus:outline-none focus:border-amber-500/50"
+              className="flex-1 bg-surface border border-line rounded-xl p-2.5 text-xs font-mono text-body resize-none focus:outline-none focus:border-amber-500/50"
               rows={3}
               placeholder='{"welcome": {"en": "Welcome", "hi": "स्वागत है"}, ...}'
               value={importText}
               onChange={e => setImportText(e.target.value)}
             />
             <div className="flex flex-col gap-1.5">
-              <button onClick={importJson} disabled={!importText.trim()} className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 rounded-lg text-xs transition-all">Import</button>
-              <button onClick={() => setShowImport(false)} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs text-white/40">Cancel</button>
+              <button onClick={importJson} disabled={!importText.trim()} className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 rounded-lg text-xs transition-all text-on-accent">Import</button>
+              <button onClick={() => setShowImport(false)} className="px-3 py-1.5 bg-raised hover:bg-raised rounded-lg text-xs text-faint">Cancel</button>
             </div>
           </div>
         </div>
@@ -254,12 +254,12 @@ export function LocalizationManager() {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left: Language Panel */}
-        <div className="w-52 flex flex-col border-r border-white/5 overflow-y-auto">
-          <div className="p-3 border-b border-white/5">
+        <div className="w-52 flex flex-col border-r border-line overflow-y-auto">
+          <div className="p-3 border-b border-line">
             <button
               onClick={autoTranslate}
               title="Fills the built-in translations for common UI strings (Welcome, Login, Save, Search…) across every active language. Strings it doesn't recognise are left for you to translate."
-              className="w-full py-2 bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/30 rounded-xl text-xs text-amber-300 flex items-center justify-center gap-1.5 transition-all"
+              className="w-full py-2 bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/30 rounded-xl text-xs text-warn flex items-center justify-center gap-1.5 transition-all"
             >
               <Languages className="w-3.5 h-3.5" /> Fill common strings
             </button>
@@ -272,26 +272,26 @@ export function LocalizationManager() {
               return (
                 <div
                   key={lang.code}
-                  className={`flex items-center gap-2 p-2 rounded-xl cursor-pointer transition-all ${isActive ? 'bg-[#161b22] border border-white/5' : 'opacity-40 hover:opacity-70'}`}
+                  className={`flex items-center gap-2 p-2 rounded-xl cursor-pointer transition-all ${isActive ? 'bg-card border border-line' : 'opacity-40 hover:opacity-70'}`}
                   onClick={() => toggleLanguage(lang.code)}
                 >
                   <span className="text-base">{lang.flag}</span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-medium text-white truncate">{lang.name}</span>
-                      {lang.rtl && <span className="text-[7px] text-amber-400 bg-amber-500/10 px-1 rounded">RTL</span>}
+                      <span className="text-[10px] font-medium text-ink truncate">{lang.name}</span>
+                      {lang.rtl && <span className="text-[7px] text-warn bg-amber-500/10 px-1 rounded">RTL</span>}
                     </div>
                     {isActive && (
                       <div className="flex items-center gap-1 mt-0.5">
-                        <div className="flex-1 h-1 bg-white/5 rounded-full overflow-hidden">
-                          <div className={`h-full rounded-full ${rate === 100 ? 'bg-emerald-500' : rate > 50 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${rate}%` }} />
+                        <div className="flex-1 h-1 bg-raised rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${rate === 100 ? 'bg-emerald-500 text-on-accent' : rate > 50 ? 'bg-amber-500 text-on-accent' : 'bg-red-500 text-on-accent'}`} style={{ width: `${rate}%` }} />
                         </div>
-                        <span className="text-[8px] text-white/30">{rate}%</span>
+                        <span className="text-[8px] text-faint">{rate}%</span>
                       </div>
                     )}
                   </div>
                   {isActive && lang.code !== 'en' && (
-                    <button onClick={e => { e.stopPropagation(); exportLang(lang.code); }} className="p-0.5 text-white/20 hover:text-white/60">
+                    <button onClick={e => { e.stopPropagation(); exportLang(lang.code); }} className="p-0.5 text-faint hover:text-muted">
                       <Download className="w-3 h-3" />
                     </button>
                   )}
@@ -304,52 +304,52 @@ export function LocalizationManager() {
         {/* Main: Translation Table */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Toolbar */}
-          <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 bg-[#161b22]">
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-line bg-card">
             <div className="relative flex-1 max-w-xs">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-white/30" />
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-faint" />
               <input
-                className="w-full bg-[#0d1117] border border-white/10 rounded-lg pl-7 pr-3 py-1.5 text-xs text-white placeholder-white/20 focus:outline-none focus:border-amber-500/50"
+                className="w-full bg-surface border border-line rounded-lg pl-7 pr-3 py-1.5 text-xs text-ink placeholder-faint focus:outline-none focus:border-amber-500/50"
                 placeholder="Search keys..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
               />
             </div>
-            <button onClick={() => setShowAddKey(!showAddKey)} className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 bg-amber-600/20 border border-amber-500/30 rounded-lg text-amber-300 hover:bg-amber-600/30 transition-all">
+            <button onClick={() => setShowAddKey(!showAddKey)} className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 bg-amber-600/20 border border-amber-500/30 rounded-lg text-warn hover:bg-amber-600/30 transition-all">
               <Plus className="w-3.5 h-3.5" /> Add Key
             </button>
-            <span className="text-xs text-white/30 ml-auto">{translationKeys.length} keys</span>
+            <span className="text-xs text-faint ml-auto">{translationKeys.length} keys</span>
           </div>
 
           {/* Add Key row */}
           {showAddKey && (
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 bg-amber-500/5">
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-line bg-amber-500/5">
               <input
                 autoFocus
-                className="bg-[#0d1117] border border-amber-500/30 rounded-lg px-3 py-1.5 text-xs text-white placeholder-white/20 focus:outline-none w-48"
+                className="bg-surface border border-amber-500/30 rounded-lg px-3 py-1.5 text-xs text-ink placeholder-faint focus:outline-none w-48"
                 placeholder="New key (e.g. btn_pay)"
                 value={newKeyInput}
                 onChange={e => setNewKeyInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') addKey(); if (e.key === 'Escape') { setShowAddKey(false); setNewKeyInput(''); } }}
               />
-              <button onClick={addKey} disabled={!newKeyInput.trim()} className="p-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 rounded-lg"><Check className="w-3.5 h-3.5" /></button>
-              <button onClick={() => { setShowAddKey(false); setNewKeyInput(''); }} className="p-1.5 bg-white/5 rounded-lg"><X className="w-3.5 h-3.5 text-white/40" /></button>
+              <button onClick={addKey} disabled={!newKeyInput.trim()} className="p-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 rounded-lg text-on-accent"><Check className="w-3.5 h-3.5" /></button>
+              <button onClick={() => { setShowAddKey(false); setNewKeyInput(''); }} className="p-1.5 bg-raised rounded-lg"><X className="w-3.5 h-3.5 text-faint" /></button>
             </div>
           )}
 
           {/* Table */}
           <div className="flex-1 overflow-auto">
             <table className="w-full text-xs border-collapse min-w-0">
-              <thead className="sticky top-0 bg-[#161b22] z-10">
-                <tr className="border-b border-white/5">
-                  <th className="text-left px-3 py-2 text-[10px] text-white/30 uppercase tracking-wider w-36 font-normal">Key</th>
+              <thead className="sticky top-0 bg-card z-10">
+                <tr className="border-b border-line">
+                  <th className="text-left px-3 py-2 text-[10px] text-faint uppercase tracking-wider w-36 font-normal">Key</th>
                   {activeLanguages.map(lang => {
                     const l = SUPPORTED_LANGUAGES.find(x => x.code === lang);
                     return (
-                      <th key={lang} className="text-left px-2 py-2 text-[10px] text-white/30 font-normal min-w-[120px]">
+                      <th key={lang} className="text-left px-2 py-2 text-[10px] text-faint font-normal min-w-[120px]">
                         <div className="flex items-center gap-1">
                           <span>{l?.flag}</span>
                           <span>{l?.name}</span>
-                          <span className={`text-[8px] ml-auto ${completionRate(lang) === 100 ? 'text-emerald-400' : 'text-white/20'}`}>{completionRate(lang)}%</span>
+                          <span className={`text-[8px] ml-auto ${completionRate(lang) === 100 ? 'text-success' : 'text-faint'}`}>{completionRate(lang)}%</span>
                         </div>
                       </th>
                     );
@@ -361,12 +361,12 @@ export function LocalizationManager() {
                 {filtered.map((tk, keyIdx) => {
                   const realIdx = translationKeys.findIndex(t => t.key === tk.key);
                   return (
-                    <tr key={tk.key} className="border-b border-white/3 hover:bg-white/2 group">
+                    <tr key={tk.key} className="border-b border-line hover:bg-raised group">
                       <td className="px-3 py-2 font-mono">
                         <div className="flex items-center gap-1.5">
-                          <span className="text-white/60 truncate max-w-[100px]">{tk.key}</span>
+                          <span className="text-muted truncate max-w-[100px]">{tk.key}</span>
                           <button onClick={() => copyUsageCode(tk.key)} className="opacity-0 group-hover:opacity-100 transition-opacity">
-                            {copied === tk.key ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Copy className="w-2.5 h-2.5 text-white/30 hover:text-white/60" />}
+                            {copied === tk.key ? <Check className="w-2.5 h-2.5 text-success" /> : <Copy className="w-2.5 h-2.5 text-faint hover:text-muted" />}
                           </button>
                         </div>
                       </td>
@@ -379,7 +379,7 @@ export function LocalizationManager() {
                             {isEditing ? (
                               <input
                                 autoFocus
-                                className="w-full bg-[#0d1117] border border-amber-500/50 rounded-lg px-2 py-1 text-xs text-white focus:outline-none"
+                                className="w-full bg-surface border border-amber-500/50 rounded-lg px-2 py-1 text-xs text-ink focus:outline-none"
                                 dir={isRtl ? 'rtl' : 'ltr'}
                                 value={editValue}
                                 onChange={e => setEditValue(e.target.value)}
@@ -390,7 +390,7 @@ export function LocalizationManager() {
                               <div
                                 onClick={() => startEdit(realIdx, lang)}
                                 dir={isRtl ? 'rtl' : 'ltr'}
-                                className={`px-2 py-1 rounded-lg cursor-text hover:bg-white/5 min-h-[26px] transition-colors ${val ? 'text-white/70' : 'text-white/20 italic'}`}
+                                className={`px-2 py-1 rounded-lg cursor-text hover:bg-raised min-h-[26px] transition-colors ${val ? 'text-body' : 'text-faint italic'}`}
                               >
                                 {val || '— translate —'}
                               </div>
@@ -399,7 +399,7 @@ export function LocalizationManager() {
                         );
                       })}
                       <td className="px-1 py-1">
-                        <button onClick={() => deleteKey(tk.key)} className="opacity-0 group-hover:opacity-100 p-1 text-white/20 hover:text-red-400 transition-all">
+                        <button onClick={() => deleteKey(tk.key)} className="opacity-0 group-hover:opacity-100 p-1 text-faint hover:text-danger transition-all">
                           <Trash2 className="w-3 h-3" />
                         </button>
                       </td>
@@ -412,11 +412,11 @@ export function LocalizationManager() {
         </div>
 
         {/* Right: Preview Panel */}
-        <div className="w-52 flex flex-col border-l border-white/5">
-          <div className="p-3 border-b border-white/5">
-            <p className="text-[10px] text-white/30 uppercase tracking-wider mb-2">Live Preview</p>
+        <div className="w-52 flex flex-col border-l border-line">
+          <div className="p-3 border-b border-line">
+            <p className="text-[10px] text-faint uppercase tracking-wider mb-2">Live Preview</p>
             <select
-              className="w-full bg-[#0d1117] border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none"
+              className="w-full bg-surface border border-line rounded-lg px-2 py-1.5 text-xs text-ink focus:outline-none"
               value={previewLang}
               onChange={e => setPreviewLang(e.target.value)}
             >
@@ -428,16 +428,16 @@ export function LocalizationManager() {
           </div>
           <div className="flex-1 p-3 overflow-y-auto space-y-1.5" dir={previewLangObj?.rtl ? 'rtl' : 'ltr'}>
             {translationKeys.slice(0, 12).map(tk => (
-              <div key={tk.key} className="bg-[#161b22] rounded-lg px-2.5 py-2 border border-white/5">
-                <p className="text-[8px] text-white/20 mb-0.5">{tk.key}</p>
-                <p className="text-[10px] text-white/80">{tk.values[previewLang] || tk.values['en'] || '—'}</p>
+              <div key={tk.key} className="bg-card rounded-lg px-2.5 py-2 border border-line">
+                <p className="text-[8px] text-faint mb-0.5">{tk.key}</p>
+                <p className="text-[10px] text-body">{tk.values[previewLang] || tk.values['en'] || '—'}</p>
               </div>
             ))}
           </div>
-          <div className="p-3 border-t border-white/5">
-            <div className="bg-[#161b22] rounded-xl p-2.5 border border-white/5 space-y-1">
-              <p className="text-[9px] text-white/30 font-medium">Usage in Code</p>
-              <pre className="text-[8px] font-mono text-emerald-300">{`import { useTranslation } from 'react-i18next';\n\nconst { t } = useTranslation();\n<p>{t('welcome')}</p>`}</pre>
+          <div className="p-3 border-t border-line">
+            <div className="bg-card rounded-xl p-2.5 border border-line space-y-1">
+              <p className="text-[9px] text-faint font-medium">Usage in Code</p>
+              <pre className="text-[8px] font-mono text-success">{`import { useTranslation } from 'react-i18next';\n\nconst { t } = useTranslation();\n<p>{t('welcome')}</p>`}</pre>
             </div>
           </div>
         </div>

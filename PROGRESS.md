@@ -67376,6 +67376,80 @@ curl count as proof, and making the gate fill unconditional — each turns the s
 - **The `useState of null` from autopsy `95598899` remains unexplained** — it needs the failing file's
   contents, which the report does not carry, and no plausible-sounding guess is recorded in its place.
 
+## 2026-09-18 — Admin Security → BUILT APPS: every user's built app, twelve at a time, each with a preview (branch `claude/every-built-app-has-a-preview`)
+
+Admin, verbatim, with a screenshot of the Security tab: *"1. admin panel ki security me jitni bhi apps dikh
+rahi hai, chahe woh live hai ya offline, sabhi ka preview chalna chahiye. 2. is security wale option me
+sabhi users ki build app dikhni chahiye. 3. ek dam se sara data load na ho, 12-12 ke set me load karwo."*
+
+### What the old panel read, and why it could answer none of the three
+
+`GET /api/admin/deployments` is the PUBLISH registry (`agentv3_deployments`): a record exists only once
+an app has been published, and the panel pulled 200 rows in one request. So a user's app that was built
+and never published was invisible, an offline app had no preview (its only "preview" was the live link it
+no longer had), and everything arrived at once.
+
+**And the screenshot showed a fourth defect nobody had asked about: rows reading LIVE or OFFLINE with
+NOTHING after the badge — no id, no link, no owner.** Root cause in `DeploymentStore`: `setStatus`,
+`markOrphaned` and `setOutboundVerdict` wrote with `set(…, { merge: true })`, which CREATES the document
+when it is absent. Unpublish and restore call `setStatus` for whatever workspace id they were handed, so
+a moderation on an app whose registry record had already been deleted minted a doc holding only
+`{ status, updatedAt }`. A status describes a publish; it cannot be the first thing written about one.
+
+### What ships
+
+- **The source of "built" is the durable FILE store, not the publish registry.** `listWorkspaceAppsPage`
+  (`WorkspaceFileStore.ts`) pages `workspace_files_v3` newest-save-first, resumed from a DOCUMENT
+  SNAPSHOT cursor (exact under this ordering with no composite index), skipping green-guard snapshot
+  keys and emptied indexes and refilling the page (bounded) so twelve means twelve. `ok: false` is a
+  failed read, never "no apps". `getWorkspaceAppsMany` is the batched join for the other direction.
+- **Each page is joined in ONE batched read per store** — `deploymentStore.getMany` (existing) and the
+  new `sandboxStore.getMany` — so a page costs three round trips, never thirty-six.
+- **`adminBuiltApps.ts` (pure):** `parseAppsQuery` (a workspace id → exact; a uid → owner prefix range;
+  a link → registry equality; a fragment → `text`, filtered client-side over loaded rows, said so on
+  screen — a fragment answered server-side is the full scan the admin asked to stop), `publishStateOf`
+  (`live` requires a URL via `isLiveDeployment`, the one definition; a status-only ghost reads **"Not
+  published"**, never Live), `builtAppRow` / `joinBuiltAppRows` (order kept), opaque cursor codec that
+  only ever decodes to a workspace id, `clampPageSize` (default 12, hard cap 48).
+- **`GET /api/admin/apps`** — one page of `BUILT_APPS_PAGE_SIZE`; a `status` filter pages the REGISTRY
+  instead (equality + `__name__` order, the one paging an equality filter can do without a composite
+  index; the response says `order: 'id'`). Orphaned live publishes (`orphaned: true`, files purged, so
+  the file-store list cannot reach them) ride the first page as their own strip — a live site nobody
+  can moderate is the hole `markOrphaned` exists to close. 502 on a failed read.
+- **`POST /api/admin/apps/:workspaceId/preview`** — renders the DURABLE files with the same
+  `renderPreview` the user's pane uses. 🔒 **Never touches a sandbox**: an admin looking at somebody's
+  app must not resume that user's E2B machine. Test-locked by grep against the route block.
+- **`previewPlan` (client):** the SAVED COPY of the last green build (`snapshotUrl`, a real `dist/` on
+  its own subdomain) wins when the row has one; else the in-browser render (labelled "frontend only");
+  else an honest "nothing to preview". Live or offline makes no difference to whether a preview exists.
+- **`admin/BuiltAppsPanel.tsx`** — the list, "Load 12 more", search (Enter), state filter, the preview
+  modal (sandboxed iframe: `src` for the copy, `srcDoc` for the render). Unpublish/Ban still open the
+  dashboard's confirmation dialog (the copy that guards a permanent act was not moved); after an action
+  the panel re-reads THAT row and swaps it in place, so the page and scroll position survive. Ban is
+  offered only where a registry record exists to hold it — on a never-published app it would "succeed"
+  and change nothing.
+- **Ghost writes fixed at the class:** the three methods use `update()` (refuses a missing doc →
+  `false`); `recordFromDoc` names every record by its DOCUMENT id so an old ghost at least shows its id.
+  `listPage`, `listOrphaned`, `findByUrl` added. `src/declarations.d.ts` gains lucide's `Ban` (the
+  dashboard's `XSquare` sits behind a `@ts-ignore`; the shim is the right place).
+- `AppKnowledgeBase`: `admin-built-apps`.
+
+### Tests
+
+`tests/everyBuiltAppHasAPreview.test.ts` — page-size clamp, every query mode, the ghost as "never",
+the three-source join, cursor opacity, owner offset paging, every state's words, the preview plan for
+live AND offline, and source-anchored guards: the three store methods `update` and never merge-set
+(comments stripped), the preview route reads durable files and no actuator/sandbox, the panel asks for
+12. `BuiltAppsPanel.render.test.tsx` — first paint promises nothing it has not read.
+`tests/adminAppModeration.test.ts` re-anchored on the panel (reason recorded in place).
+
+### Open (rule 6)
+
+- The state filter pages by app id, not by date (equality + `__name__` needs no index; equality +
+  `updatedAt` would). The screen says so. A composite index would give date order — an admin console
+  decision, not code.
+- A never-published app cannot be BANNED (nothing in the registry for the deploy gate to re-check). If
+  the admin wants "this workspace may never publish", that is a new pre-publish block, not this panel.
 ---
 
 ## 2026-09-18 — 🔎 THE STACK NAMED THE FILE, AND THREE CAPTURES THREW IT AWAY (closing the `95598899` blocker)

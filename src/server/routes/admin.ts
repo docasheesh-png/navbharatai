@@ -91,6 +91,15 @@ import { eventStore } from '../lib/eventStore';
 import { rotateAllSecrets, getLatestKeyVersion, encrypt, decrypt } from '../lib/secrets';
 import { generateTotpSecret, verifyTotp, totpAuthUri } from '../lib/totp';
 import { deploymentStore, isLiveDeployment, type DeploymentStatus } from '../AgentV3/DeploymentStore';
+import { listWorkspaceAppsPage, getWorkspaceAppsMany, listUserWorkspaceApps, loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import {
+  BUILT_APPS_PAGE_SIZE, clampPageSize, parseAppsQuery, joinBuiltAppRows, builtAppRow, encodeCursor, decodeCursor,
+  sliceOwnerPage, type BuiltAppRow,
+} from '../AgentV3/adminBuiltApps';
+import { VirtualFileSystem } from '../project/ProjectModel';
+import { renderPreview } from '../runtime/renderPreview';
+import { isReactProject } from '../runtime/ReactPreview';
+import { isVueProject } from '../runtime/VuePreview';
 import { FirebaseHostingDeployer } from '../AgentV3/Deployment';
 import { classifyChannels, channelCeilingVerdict, channelCap, isDefaultChannel } from '../AgentV3/channelInventory';
 import { bucketOnlyPublishEnabled } from '../AgentV3/bucketOnlyPublish';
@@ -2288,6 +2297,132 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         : await deploymentStore.list({ status, limit });
       res.json({ deployments });
     } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
+  });
+
+  // ── EVERY BUILT APP, TWELVE AT A TIME (admin 2026-09-18) ──────────────────────────────────────
+  //
+  //   "sabhi users ki build app dikhni chahiye … 12-12 ke set me load karwo … sabhi ka preview chalna chahiye."
+  //
+  // The list above (`/api/admin/deployments`) is the PUBLISH registry: an app appears there only once
+  // it has been published, and it arrives up to 500 rows at a time. This one is keyed on the DURABLE
+  // FILE STORE — every Pro v5 build persists there, published or not — and hands back one page of
+  // BUILT_APPS_PAGE_SIZE with an opaque cursor for the next. Each page is joined against the registry
+  // and the sandbox records in ONE batched read each (`getMany`), so a page costs three round trips,
+  // never twelve. See adminBuiltApps.ts for the decisions; this handler is the I/O.
+  //
+  // Query modes (parseAppsQuery): nothing → newest saves first; a workspace id → that one app; a uid →
+  // that owner's apps (prefix range, paged by offset); a public link → the registry record at that URL;
+  // anything else → `mode: 'text'` with NO rows, and the screen filters what it already holds. A
+  // `status` filter pages the REGISTRY instead (ordered by id, the one order an equality filter can
+  // page on without a composite index) and joins the file metadata the other way round.
+  //
+  // `ok: false` (502) is a failed read and is shown as one — never as "no built apps".
+  app.get('/api/admin/apps', verifyAdminToken, async (req: Request, res: Response) => {
+    const limit = clampPageSize(req.query.limit ?? BUILT_APPS_PAGE_SIZE);
+    const rawCursor = typeof req.query.cursor === 'string' ? req.query.cursor : '';
+    const status = typeof req.query.status === 'string' && req.query.status ? (req.query.status as DeploymentStatus) : undefined;
+    const query = parseAppsQuery(req.query.q);
+    try {
+      const enrich = async (ids: string[]) => {
+        const [deployments, sandboxes] = await Promise.all([deploymentStore.getMany(ids), sandboxStore.getMany(ids)]);
+        return { deployments, sandboxes };
+      };
+
+      if (query.mode === 'text') {
+        res.json({ ok: true, mode: 'text', rows: [], nextCursor: null, pageSize: limit });
+        return;
+      }
+
+      if (query.mode === 'exact') {
+        const id = query.workspaceId;
+        const [metas, { deployments, sandboxes }] = await Promise.all([getWorkspaceAppsMany([id]), enrich([id])]);
+        const meta = metas.get(id) ?? null;
+        const rec = deployments.get(id) ?? null;
+        const rows: BuiltAppRow[] = meta || rec ? [builtAppRow(meta, rec, sandboxes.get(id), id)] : [];
+        res.json({ ok: true, mode: 'exact', rows, nextCursor: null, pageSize: limit });
+        return;
+      }
+
+      if (query.mode === 'url') {
+        const rec = await deploymentStore.findByUrl(query.url);
+        if (!rec) { res.json({ ok: true, mode: 'url', rows: [], nextCursor: null, pageSize: limit }); return; }
+        const [metas, { sandboxes }] = await Promise.all([getWorkspaceAppsMany([rec.workspaceId]), enrich([rec.workspaceId])]);
+        res.json({ ok: true, mode: 'url', rows: [builtAppRow(metas.get(rec.workspaceId) ?? null, rec, sandboxes.get(rec.workspaceId))], nextCursor: null, pageSize: limit });
+        return;
+      }
+
+      if (query.mode === 'owner') {
+        // One owner's apps are bounded (a prefix range of at most 200), so the page is a slice and the
+        // cursor is the next offset — no store-level cursor needed.
+        const all = await listUserWorkspaceApps(query.uid, 200);
+        const { page, nextOffset } = sliceOwnerPage(all, rawCursor, limit);
+        const ids = page.map((a) => a.workspaceId);
+        const { deployments, sandboxes } = await enrich(ids);
+        res.json({ ok: true, mode: 'owner', rows: joinBuiltAppRows(page, deployments, sandboxes), nextCursor: nextOffset, pageSize: limit });
+        return;
+      }
+
+      if (status) {
+        // A state filter is a question about the REGISTRY, so the registry is what is paged.
+        const after = rawCursor ? decodeCursor(rawCursor) : null;
+        const pageRes = await deploymentStore.listPage({ status, limit, afterDocId: after });
+        if (!pageRes.ok) { res.status(502).json({ ok: false, error: 'Could not read the published-app registry.' }); return; }
+        const ids = pageRes.records.map((r) => r.workspaceId);
+        const [metas, sandboxes] = await Promise.all([getWorkspaceAppsMany(ids), sandboxStore.getMany(ids)]);
+        const rows = pageRes.records.map((r) => builtAppRow(metas.get(r.workspaceId) ?? null, r, sandboxes.get(r.workspaceId), r.workspaceId));
+        res.json({ ok: true, mode: 'status', order: pageRes.order, rows, nextCursor: encodeCursor(pageRes.nextAfterDocId), pageSize: limit });
+        return;
+      }
+
+      // The default: every built app, newest save first.
+      const after = rawCursor ? decodeCursor(rawCursor) : null;
+      const pageRes = await listWorkspaceAppsPage({ limit, afterDocId: after });
+      if (!pageRes.ok) { res.status(502).json({ ok: false, error: 'Could not read the built-app list.' }); return; }
+      const ids = pageRes.apps.map((a) => a.workspaceId);
+      const { deployments, sandboxes } = await enrich(ids);
+      const rows = joinBuiltAppRows(pageRes.apps, deployments, sandboxes);
+      // Published apps whose owner deleted the workspace have no durable files left, so this list cannot
+      // reach them — and a live site nobody can moderate is the hole markOrphaned exists to close. They
+      // ride the FIRST page only, as their own strip.
+      const orphaned = after ? [] : (await deploymentStore.listOrphaned(50)).map((r) => builtAppRow(null, r, undefined, r.workspaceId));
+      res.json({ ok: true, mode: 'all', rows, orphaned, nextCursor: encodeCursor(pageRes.nextAfterDocId), pageSize: limit });
+    } catch (e: any) {
+      console.error('[ADMIN] built-apps list error:', e?.message);
+      res.status(500).json({ ok: false, error: 'Internal server error.' });
+    }
+  });
+
+  // PREVIEW ANY BUILT APP — live or offline — WITHOUT WAKING A MACHINE (admin 2026-09-18).
+  //
+  // 🔒 Reads the DURABLE files only (`loadWorkspaceFiles`), never the sandbox: an admin looking at
+  // somebody's app must not resume that user's E2B machine (a resume is billed by the minute and the
+  // owner did not ask for it). The render is the same `renderPreview` the user's own in-browser pane
+  // uses — the frontend compiled in the browser, so a full-stack app's API calls do not run here; the
+  // screen says so. The saved COPY of the last green build (`snapshotUrl` on the row) is the more
+  // faithful source when it exists, and the client prefers it; this route is the one that always works.
+  app.post('/api/admin/apps/:workspaceId/preview', verifyAdminToken, async (req: Request, res: Response) => {
+    const { workspaceId } = routeParams(req.params);
+    if (!workspaceId || workspaceId.includes('/')) return res.status(400).json({ error: 'workspaceId required' });
+    try {
+      const files = await loadWorkspaceFiles(workspaceId);
+      const count = Object.keys(files).length;
+      if (count === 0) {
+        res.json({ html: '', kind: '', count: 0, empty: true, note: 'No saved files for this app — nothing to render.' });
+        return;
+      }
+      // The compiler is loaded by absolute same-origin URL inside the srcDoc iframe (see the user route).
+      const bodyOrigin = typeof req.body?.origin === 'string' && /^https?:\/\/[^\s/]+$/i.test(req.body.origin) ? req.body.origin : '';
+      const hdrHost = req.get('host');
+      const hdrOrigin = hdrHost ? `${(req.headers['x-forwarded-proto'] as string) || req.protocol || 'https'}://${hdrHost}` : '';
+      const vfs = VirtualFileSystem.fromRecord(files);
+      const html = renderPreview(vfs, bodyOrigin || hdrOrigin || undefined, workspaceId);
+      const kind = isReactProject(vfs) ? 'react' : isVueProject(vfs) ? 'vue' : 'static';
+      audit('ADMIN_APP_PREVIEW', { workspaceId, kind, count, ip: req.ip });
+      res.json({ html, kind, count, empty: false });
+    } catch (e: any) {
+      console.error('[ADMIN] app preview error:', e?.message);
+      res.status(500).json({ error: 'Could not render this app from its saved files.' });
+    }
   });
 
   // Take a live app down: delete its real Firebase Hosting channel, then mark it taken_down so it can

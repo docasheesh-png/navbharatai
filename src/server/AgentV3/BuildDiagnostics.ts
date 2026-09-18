@@ -13,6 +13,7 @@
 import { startBandLabel } from './RequestAnalyser';
 import { toolCallDetail } from './toolCallTarget';
 import { isPlatformFixRequest, looksLikeMachineError, PLATFORM_COMPOSED_PREFIXES } from '../../lib/platformFixRequest';
+import { isProjectSummaryNarration } from './ProjectSummary';
 import { isTransientStatusLine } from './workingHeartbeat';
 import type { AgentEvent } from './types';
 import { parseNpmAuditSummary, npmAuditNote, auditSeverity, looksLikeDependencyInstall } from './npmAuditSummary';
@@ -1430,7 +1431,12 @@ export class BuildDiagnostics {
         // severity=error AGENT_NOTE and even became the report's rootCause. Only a SHORT status-like
         // line (no markdown headings/tables, bounded length) can be classified as a problem — a
         // multi-paragraph analysis is a deliverable, not a struggle.
-        const statusLike = t.length <= 300 && !/(^|\n)#{1,4}\s|\n\s*\|/.test(t);
+        // THE PROJECT RECAP IS A DELIVERABLE, NEVER A PROBLEM (the "Top failure patterns" autopsy,
+        // 2026-09-17). "🔍 I analyzed your project — no files were changed" is the platform's own
+        // honest sentence about a turn with nothing to change; "no files" is a problem word (it catches
+        // "no files were produced"), so a short recap was filed as a WARNING and, on an empty build,
+        // became the report's root cause. Exempted by exact headline, so a model's prose cannot claim it.
+        const statusLike = t.length <= 300 && !/(^|\n)#{1,4}\s|\n\s*\|/.test(t) && !isProjectSummaryNarration(t);
         // BENIGN COMPOUNDS ARE NOT PROBLEMS (ShopKhata autopsy 2026-07-17): "Now let me create the App
         // component with routing and error boundary:" was recorded severity=error because \berror\b
         // matched inside "error boundary". Building error-UX (boundaries, handling, messages, toasts)

@@ -44,6 +44,8 @@ const PROCESS_ONLY_CODES = new Set([
   'JOURNEY_NOT_DERIVED', 'RELEASE_GATE',
   // Our own journey runner produced nothing — a statement about OUR check, never about their app.
   'JOURNEY_NOT_RUN',
+  // How this turn was ROUTED is a fact about our engine, never a finding about the user's app.
+  'BUILD_ORDER_READ_AS_EDIT',
   // Project mode could not steer the build — the build itself is unaffected (projectPlannerBudget.ts).
   'PROJECT_MODE_FAILED',
   // The gate said RED and a real run said otherwise — a statement about OUR verdict (runProvenApp.ts).

@@ -501,6 +501,7 @@ import { renderRescueEligible, renderRescueConfirmsSuccess } from '../AgentV3/re
 import { runProvenApp, verdictHeldMessage, type ProdBuildOutcome, type LateFlip } from '../AgentV3/runProvenApp';
 import { shouldAttemptPlatformPreview, platformPreviewBudgetMs, platformPreviewPort } from '../AgentV3/deliveryProof';
 import { floorTimeoutForTokens } from '../AgentV3/floorBudget';
+import { readyOverrunNote } from '../AgentV3/doneSignal';
 import { parseDevServerHealthLine } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { analyzeDesignCoverage, designRepairInstruction, designCoverageSummary } from '../AgentV3/DesignCoverage';
@@ -15752,6 +15753,19 @@ async function noteBuildOutcome(
        * genuinely produced and saved (the common, resumable case — the user just sends another message),
        * `error` when nothing was built at all (the build never got moving, worth real attention).
        */
+      // THE DONE SIGNAL's measurement (doneSignal.ts, admin 2026-09-18). How much of this build ran
+      // AFTER the platform's own readiness scan already judged the app finished. Recorded on EVERY
+      // build, including the ones that never got there, because "never judged finished" and "finished
+      // and stopped immediately" are opposite facts and a missing line would read as the second.
+      // This is the number the open decision needs — whether the loop should END itself at that point
+      // rather than merely say so — and nobody has it today.
+      try {
+        buildDiag.record({
+          phase: 'build', severity: 'info', code: 'READY_BEFORE_END',
+          message: readyOverrunNote(result.readyAt, result.steps, Date.now() - buildStartedAt),
+          autoResolved: true,
+        });
+      } catch { /* an advisory line must never affect a build */ }
       if (result.timedOut === true) {
         try {
           buildDiag.record({

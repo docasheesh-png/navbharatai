@@ -66752,3 +66752,56 @@ The guard is what makes that discoverable instead of silent.
 📌 Note for whoever reads this next: `ImageStudioPro.tsx` was migrated to design tokens by another
 session's theme work (PRs C and G) after #3071 merged. That file was deliberately NOT touched here —
 this change is server-side only.
+
+## 2026-09-18 — THE DONE SIGNAL: the engine computed "this app is finished" and threw the answer away
+
+Admin asked for this by name. What shipped is **the measurement first and the steer second**, and the
+reason for that order is recorded here because it contradicts what I told the admin the night before.
+
+**THE GAP IS REAL AND NARROW.** `assessBuildReadiness` is free, deterministic, and already runs inside
+the build loop (`shouldRunWeakCheckpoint`, every 20 steps on a weak build). It returns score, blockers,
+warnings and `ready`. `weakCheckpointSteer` reads **only the blockers**. When the answer is "this app is
+finished and healthy", nothing is said, nothing is recorded, and the loop runs on until the model itself
+stops or the step cap ends it.
+
+**🔴 THE EVIDENCE FOR THE CURE IS THINNER THAN THE EVIDENCE FOR THE GAP, AND I OVERSTATED IT.** I told
+the admin this was the second-biggest lever, citing autopsy `681bd91b` — an app finished, rendering and
+preview-published at 4:45, then 26 minutes ending in failure. Re-read against the code: **those 26
+minutes were the TYPECHECK GATE grinding a Vite scaffold the user had explicitly forbidden, not the
+model choosing to polish** — and PR #3059 already fixed that at its own root. In the other reports to
+hand (`baa0b3c7`, `e706e068`, `dd1f5f60`) the builds were genuinely BROKEN and grinding; a readiness
+scan would have said "not ready" and this signal would correctly have stayed silent.
+
+So the honest position is: **nobody knows whether builds overrun after they are done.** Building a
+loop-ending mechanism on that belief would be the E2B-rate mistake again — a derivation that sounds
+rigorous and contains a step that cannot fail.
+
+**WHAT SHIPPED.** `src/server/AgentV3/doneSignal.ts` (pure), wired in two places:
+- **The measurement (the deliverable).** `readyAt` records step, elapsed ms and score the first time a
+  build is judged finished; the route reports `READY_BEFORE_END` on EVERY build — including the ones
+  that never got there, because "never judged finished" and "finished and stopped immediately" are
+  opposite facts and a missing line would read as the second. Within days this turns the belief into a
+  number.
+- **The steer (free, and cannot break anything).** One message, once per build, riding the same user
+  message `truncationSteer` / `loopSteer` / `budgetSteer` already use. No model call, no file read.
+
+**🔒 THE BAR IS HIGHER THAN `ready`, DELIBERATELY.** `ready` answers "is anything blocking?" and its
+floor is `MIN_READY_SCORE` = 50 — chosen so a working app is never condemned. "You may stop now" is a
+much stronger claim, and saying it at 50/100 would tell a model to walk away from an app with half its
+defect budget spent. `DONE_SCORE` = 85.
+
+**🔒 IT IS A STEER, NOT A STOP — and that is a decision, not timidity.** Ending the loop ourselves would
+ship whatever exists the moment a deterministic CODE scan says 'ready'. Nothing in the loop has seen the
+app render, and the scan cannot know whether the user's request was met. Cutting a build on that trades
+a slow app for a missing one — the wrong direction under the one absolute rule. The steer therefore
+states its evidence and explicitly tells the model to **ignore it** if something requested is still
+missing.
+
+**OPEN (rule 6): should the loop END itself at the ready point?** That is the decision this measurement
+exists to answer. It must not be taken until `READY_BEFORE_END` has produced real numbers across real
+builds — and if the overruns turn out to be small, the right answer is to do nothing more.
+
+Flag `AGENTV3_DONE_SIGNAL=off` reverts to the pre-change behaviour exactly; tunables
+`AGENTV3_DONE_SIGNAL_EVERY` (10) and `_MIN_STEP` (8) fall back to their defaults on a blank or
+malformed value, never to zero. Tests: `tests/theDoneSignal.test.ts` (25 cases), both wiring halves
+proven by reversion.

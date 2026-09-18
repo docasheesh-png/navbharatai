@@ -81,12 +81,12 @@ export function PublishToNavStore({ owner, repo, artifactId, ghHeaders, defaultA
   if (done) {
     return (
       <div className="rounded-xl border border-green-500/25 bg-green-500/5 p-3">
-        <p className="flex items-start gap-2 text-sm text-green-300 leading-snug">
+        <p className="flex items-start gap-2 text-sm text-success leading-snug">
           <CheckCircle2 size={15} className="shrink-0 mt-0.5" />
           <span>
             {done}
             {/* Never "published" — an admin decides, and saying otherwise would break the store's one rule. */}
-            <span className="block text-[11px] text-white/50 mt-1">
+            <span className="block text-[11px] text-muted mt-1">
               It is waiting for review. You will find it under your submissions once a reviewer has looked at it.
             </span>
           </span>
@@ -99,7 +99,7 @@ export function PublishToNavStore({ owner, repo, artifactId, ghHeaders, defaultA
     return (
       <button
         onClick={() => setOpen(true)}
-        className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/10 transition-colors"
+        className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold border border-emerald-500/30 text-success hover:bg-emerald-500/10 transition-colors"
       >
         <Store size={16} />
         Publish to App Mart
@@ -125,13 +125,13 @@ export function PublishToNavStore({ owner, repo, artifactId, ghHeaders, defaultA
     <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.04] p-4 space-y-3">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <h4 className="text-sm font-bold text-white flex items-center gap-1.5"><Store size={14} /> Publish to App Mart</h4>
-          <p className="text-[11px] text-white/50 leading-snug mt-0.5">
+          <h4 className="text-sm font-bold text-ink flex items-center gap-1.5"><Store size={14} /> Publish to App Mart</h4>
+          <p className="text-[11px] text-muted leading-snug mt-0.5">
             NavBharatAI sends this build straight to the store — you do not need to upload the file.
             A reviewer checks every app before it goes live.
           </p>
         </div>
-        <button onClick={() => setOpen(false)} className="text-white/40 hover:text-white shrink-0" aria-label="Close">
+        <button onClick={() => setOpen(false)} className="text-faint hover:text-ink shrink-0" aria-label="Close">
           <X size={16} />
         </button>
       </div>
@@ -141,33 +141,33 @@ export function PublishToNavStore({ owner, repo, artifactId, ghHeaders, defaultA
             moment it is satisfied. Derived from the same rules the button uses, so the two can never
             disagree about whether this form is submittable. */}
         <input value={form.appName} onChange={set('appName')} placeholder="App name"
-          className="w-full bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30" />
-        {problemFor('appName') && <p className="text-[11px] text-amber-300/90 -mt-1 leading-snug">{problemFor('appName')}</p>}
+          className="w-full bg-surface border border-line rounded-lg px-3 py-2 text-sm text-ink placeholder:text-faint" />
+        {problemFor('appName') && <p className="text-[11px] text-warn -mt-1 leading-snug">{problemFor('appName')}</p>}
         <input value={form.shortDescription} onChange={set('shortDescription')} placeholder="One line about your app"
-          className="w-full bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30" />
-        {problemFor('shortDescription') && <p className="text-[11px] text-amber-300/90 -mt-1 leading-snug">{problemFor('shortDescription')}</p>}
+          className="w-full bg-surface border border-line rounded-lg px-3 py-2 text-sm text-ink placeholder:text-faint" />
+        {problemFor('shortDescription') && <p className="text-[11px] text-warn -mt-1 leading-snug">{problemFor('shortDescription')}</p>}
         <textarea value={form.description} onChange={set('description')} placeholder="What does your app do? (at least 30 characters)" rows={3}
-          className="w-full bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30" />
-        {problemFor('description') && <p className="text-[11px] text-amber-300/90 -mt-1 leading-snug">{problemFor('description')}</p>}
+          className="w-full bg-surface border border-line rounded-lg px-3 py-2 text-sm text-ink placeholder:text-faint" />
+        {problemFor('description') && <p className="text-[11px] text-warn -mt-1 leading-snug">{problemFor('description')}</p>}
         <div className="grid grid-cols-2 gap-2">
           <select value={form.category} onChange={set('category')}
-            className="bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-white">
+            className="bg-surface border border-line rounded-lg px-3 py-2 text-sm text-ink">
             {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
           <input value={form.versionName} onChange={set('versionName')} placeholder="Version (e.g. 1.0.0)"
-            className="bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30" />
+            className="bg-surface border border-line rounded-lg px-3 py-2 text-sm text-ink placeholder:text-faint" />
         </div>
         <div className="grid grid-cols-2 gap-2">
           <input value={form.developerName} onChange={set('developerName')} placeholder="Your name"
-            className="bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30" />
+            className="bg-surface border border-line rounded-lg px-3 py-2 text-sm text-ink placeholder:text-faint" />
           <input value={form.developerEmail} onChange={set('developerEmail')} placeholder="Your email" type="email"
-            className="bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30" />
+            className="bg-surface border border-line rounded-lg px-3 py-2 text-sm text-ink placeholder:text-faint" />
         </div>
-        {problemFor('developerName') && <p className="text-[11px] text-amber-300/90 -mt-1 leading-snug">{problemFor('developerName')}</p>}
-        {problemFor('developerEmail') && <p className="text-[11px] text-amber-300/90 -mt-1 leading-snug">{problemFor('developerEmail')}</p>}
+        {problemFor('developerName') && <p className="text-[11px] text-warn -mt-1 leading-snug">{problemFor('developerName')}</p>}
+        {problemFor('developerEmail') && <p className="text-[11px] text-warn -mt-1 leading-snug">{problemFor('developerEmail')}</p>}
       </div>
 
-      <label className="flex items-start gap-2.5 text-[11px] text-white/60 leading-relaxed cursor-pointer">
+      <label className="flex items-start gap-2.5 text-[11px] text-muted leading-relaxed cursor-pointer">
         <input
           type="checkbox"
           checked={form.acceptedTerms}
@@ -183,7 +183,7 @@ export function PublishToNavStore({ owner, repo, artifactId, ghHeaders, defaultA
       <button
         onClick={() => void submit()}
         disabled={busy || !ready}
-        className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
+        className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-on-accent transition-colors"
       >
         {busy ? <Loader2 size={16} className="animate-spin" /> : <Store size={16} />}
         {busy ? 'Sending your app…' : 'Send for review'}
@@ -194,20 +194,20 @@ export function PublishToNavStore({ owner, repo, artifactId, ghHeaders, defaultA
           specific next step rather than a list, because a wall of complaints on a form somebody thinks
           is finished reads as rejection. */}
       {!busy && !ready && (
-        <p className="flex items-start gap-1.5 text-[11px] text-amber-300/90 leading-snug">
+        <p className="flex items-start gap-1.5 text-[11px] text-warn leading-snug">
           <AlertTriangle size={13} className="shrink-0 mt-px" />
           <span>{storeSubmissionBlockedReason(form)}</span>
         </p>
       )}
 
       {busy && (
-        <p className="text-[11px] text-white/45 leading-snug">
+        <p className="text-[11px] text-muted leading-snug">
           Your app is being fetched from the build and scanned for malware. This takes a moment.
         </p>
       )}
 
       {error && (
-        <p className="flex items-start gap-1.5 text-[11px] text-amber-300 leading-snug">
+        <p className="flex items-start gap-1.5 text-[11px] text-warn leading-snug">
           <AlertTriangle size={13} className="shrink-0 mt-px" /><span>{error}</span>
         </p>
       )}

@@ -69,18 +69,18 @@ function mapServerFindings(r: ServerReview): ReviewIssue[] {
 }
 
 const SEV_CONFIG: Record<Severity, { label: string; color: string; bg: string; border: string; icon: any }> = {
-  critical: { label: 'Critical', color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', icon: Bug },
-  warning: { label: 'Warning', color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/30', icon: AlertCircle },
-  info: { label: 'Info', color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', icon: Info },
-  suggestion: { label: 'Suggestion', color: 'text-violet-400', bg: 'bg-violet-500/10', border: 'border-violet-500/30', icon: Lightbulb },
+  critical: { label: 'Critical', color: 'text-danger', bg: 'bg-red-500/10', border: 'border-red-500/30', icon: Bug },
+  warning: { label: 'Warning', color: 'text-warn', bg: 'bg-amber-500/10', border: 'border-amber-500/30', icon: AlertCircle },
+  info: { label: 'Info', color: 'text-info', bg: 'bg-blue-500/10', border: 'border-blue-500/30', icon: Info },
+  suggestion: { label: 'Suggestion', color: 'text-accent-text', bg: 'bg-violet-500/10', border: 'border-violet-500/30', icon: Lightbulb },
 };
 
 const CAT_CONFIG: Record<Category, { label: string; color: string; icon: any }> = {
-  bugs: { label: 'Bugs', color: 'text-red-400', icon: Bug },
-  performance: { label: 'Performance', color: 'text-amber-400', icon: Zap },
-  security: { label: 'Security', color: 'text-rose-400', icon: Shield },
-  bestpractice: { label: 'Best Practices', color: 'text-blue-400', icon: Star },
-  accessibility: { label: 'Accessibility', color: 'text-emerald-400', icon: CheckCircle2 },
+  bugs: { label: 'Bugs', color: 'text-danger', icon: Bug },
+  performance: { label: 'Performance', color: 'text-warn', icon: Zap },
+  security: { label: 'Security', color: 'text-danger', icon: Shield },
+  bestpractice: { label: 'Best Practices', color: 'text-info', icon: Star },
+  accessibility: { label: 'Accessibility', color: 'text-success', icon: CheckCircle2 },
 };
 
 function analyzeCode(code: string): ReviewIssue[] {
@@ -357,11 +357,11 @@ function ScoreRing({ score }: { score: number }) {
 
 // D13: map score to letter grade
 function scoreToGrade(score: number): { grade: string; color: string; bg: string; border: string } {
-  if (score >= 90) return { grade: 'A', color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30' };
-  if (score >= 75) return { grade: 'B', color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30' };
-  if (score >= 60) return { grade: 'C', color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/30' };
-  if (score >= 40) return { grade: 'D', color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30' };
-  return { grade: 'F', color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30' };
+  if (score >= 90) return { grade: 'A', color: 'text-success', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30' };
+  if (score >= 75) return { grade: 'B', color: 'text-info', bg: 'bg-blue-500/10', border: 'border-blue-500/30' };
+  if (score >= 60) return { grade: 'C', color: 'text-warn', bg: 'bg-amber-500/10', border: 'border-amber-500/30' };
+  if (score >= 40) return { grade: 'D', color: 'text-warn', bg: 'bg-orange-500/10', border: 'border-orange-500/30' };
+  return { grade: 'F', color: 'text-danger', bg: 'bg-red-500/10', border: 'border-red-500/30' };
 }
 
 export function AICodeReview({ generatedCode, onCodeUpdate, sessions, githubToken }: Props) {
@@ -549,15 +549,15 @@ export function AICodeReview({ generatedCode, onCodeUpdate, sessions, githubToke
   };
 
   return (
-    <div className="h-full flex flex-col bg-[#0d1117] text-white overflow-hidden">
+    <div className="h-full flex flex-col bg-surface text-ink overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5 bg-[#161b22]">
+      <div className="flex items-center gap-3 px-6 py-4 border-b border-line bg-card">
         <div className="w-10 h-10 bg-red-600/20 rounded-xl flex items-center justify-center">
-          <Code className="w-5 h-5 text-red-400" />
+          <Code className="w-5 h-5 text-danger" />
         </div>
         <div>
-          <h2 className="font-semibold text-white text-base">AI Code Review</h2>
-          <p className="text-xs text-white/40">Connect a NavBharatAI app or GitHub repo for a real AI review — security, quality, performance</p>
+          <h2 className="font-semibold text-ink text-base">AI Code Review</h2>
+          <p className="text-xs text-faint">Connect a NavBharatAI app or GitHub repo for a real AI review — security, quality, performance</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           {/* D13: quality grade badge */}
@@ -567,13 +567,13 @@ export function AICodeReview({ generatedCode, onCodeUpdate, sessions, githubToke
             </div>
           ); })()}
           {reviewed && (
-            <button onClick={exportReport} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-[#0d1117] border border-white/10 rounded-lg text-white/50 hover:text-white transition-all">
+            <button onClick={exportReport} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-surface border border-line rounded-lg text-muted hover:text-ink transition-all">
               <Download className="w-3.5 h-3.5" /> Export Report
             </button>
           )}
           <button
             onClick={() => setConnectOpen(o => !o)}
-            className={`flex items-center gap-1.5 text-sm px-4 py-2 rounded-xl font-medium transition-all border ${connectOpen ? 'bg-red-600 border-red-500 text-white' : 'bg-[#0d1117] border-white/10 text-white/70 hover:text-white'}`}
+            className={`flex items-center gap-1.5 text-sm px-4 py-2 rounded-xl font-medium transition-all border ${connectOpen ? 'bg-red-600 border-red-500 text-on-accent' : 'bg-surface border-line text-body hover:text-ink'}`}
           >
             <Zap className="w-4 h-4" /> Connect App
           </button>
@@ -582,20 +582,20 @@ export function AICodeReview({ generatedCode, onCodeUpdate, sessions, githubToke
 
       {/* Connect App panel — pick a real app source, then run a real AI review on its actual code */}
       {connectOpen && (
-        <div className="px-6 py-4 border-b border-white/5 bg-[#0f141b] space-y-3">
+        <div className="px-6 py-4 border-b border-line bg-[#0f141b] space-y-3 text-on-accent">
           {/* Step 1 — choose the source (exactly one) */}
           <div>
-            <p className="text-[10px] text-white/30 uppercase tracking-wider mb-1.5">Source</p>
+            <p className="text-[10px] text-on-accent uppercase tracking-wider mb-1.5">Source</p>
             <div className="flex gap-2">
               <button
                 onClick={() => selectSource('nbai')}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm transition-all ${source === 'nbai' ? 'border-red-500/60 bg-red-500/10 text-red-300' : 'border-white/5 bg-[#161b22] text-white/50 hover:border-white/10'}`}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm transition-all ${source === 'nbai' ? 'border-red-500/60 bg-red-500/10 text-red-300' : 'border-line bg-card text-muted hover:border-line'}`}
               >
                 <Box className="w-4 h-4" /> NavBharatAI apps
               </button>
               <button
                 onClick={() => selectSource('github')}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm transition-all ${source === 'github' ? 'border-red-500/60 bg-red-500/10 text-red-300' : 'border-white/5 bg-[#161b22] text-white/50 hover:border-white/10'}`}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm transition-all ${source === 'github' ? 'border-red-500/60 bg-red-500/10 text-red-300' : 'border-line bg-card text-muted hover:border-line'}`}
               >
                 <Github className="w-4 h-4" /> GitHub apps
               </button>
@@ -605,7 +605,7 @@ export function AICodeReview({ generatedCode, onCodeUpdate, sessions, githubToke
           {/* Step 2 — dependent dropdown, populated by the chosen source */}
           {source && (
             <div>
-              <p className="text-[10px] text-white/30 uppercase tracking-wider mb-1.5">
+              <p className="text-[10px] text-on-accent uppercase tracking-wider mb-1.5">
                 {source === 'nbai' ? 'Your NavBharatAI apps' : 'Your GitHub repositories'}
               </p>
               <div className="relative">
@@ -613,7 +613,7 @@ export function AICodeReview({ generatedCode, onCodeUpdate, sessions, githubToke
                   value={selectedKey}
                   onChange={e => setSelectedKey(e.target.value)}
                   disabled={reposLoading || reviewing}
-                  className="w-full appearance-none bg-[#161b22] border border-white/10 rounded-xl px-3 py-2.5 pr-9 text-sm text-white focus:outline-none focus:border-red-500/50 disabled:opacity-50"
+                  className="w-full appearance-none bg-card border border-line rounded-xl px-3 py-2.5 pr-9 text-sm text-ink focus:outline-none focus:border-red-500/50 disabled:opacity-50"
                 >
                   <option value="">
                     {source === 'nbai'
@@ -628,7 +628,7 @@ export function AICodeReview({ generatedCode, onCodeUpdate, sessions, githubToke
                         <option key={r.fullName} value={r.fullName}>{r.fullName}{r.private ? ' 🔒' : ''}</option>
                       ))}
                 </select>
-                <ChevronDown className="w-4 h-4 text-white/30 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <ChevronDown className="w-4 h-4 text-on-accent absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               </div>
             </div>
           )}
@@ -644,7 +644,7 @@ export function AICodeReview({ generatedCode, onCodeUpdate, sessions, githubToke
             <button
               onClick={runConnectedReview}
               disabled={!canRunConnected}
-              className="flex items-center gap-1.5 text-sm px-4 py-2.5 bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl font-medium transition-all"
+              className="flex items-center gap-1.5 text-sm px-4 py-2.5 bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl font-medium transition-all text-on-accent"
             >
               {reviewing ? <><TirangaLoader className="w-4 h-4" /> Reviewing…</> : <><Play className="w-4 h-4" /> Review Code</>}
             </button>
@@ -654,7 +654,7 @@ export function AICodeReview({ generatedCode, onCodeUpdate, sessions, githubToke
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left: Score + Filters */}
-        <div className="w-52 flex flex-col border-r border-white/5 p-4 gap-4">
+        <div className="w-52 flex flex-col border-r border-line p-4 gap-4">
           {reviewed && (
             <div className="flex flex-col items-center gap-1">
               <ScoreRing score={score} />
@@ -675,13 +675,13 @@ export function AICodeReview({ generatedCode, onCodeUpdate, sessions, githubToke
           {!reviewed && !reviewing && (
             <div className="flex flex-col items-center gap-3 py-4 text-center">
               <div className="w-14 h-14 bg-red-500/10 rounded-2xl flex items-center justify-center border border-red-500/20">
-                <Zap className="w-7 h-7 text-red-400" />
+                <Zap className="w-7 h-7 text-danger" />
               </div>
-              <p className="text-xs text-white/30">Press <span className="text-white/60 font-medium">Connect App</span> to review a NavBharatAI app or a GitHub repo</p>
+              <p className="text-xs text-faint">Press <span className="text-muted font-medium">Connect App</span> to review a NavBharatAI app or a GitHub repo</p>
               {generatedCode.trim() && (
                 <button
                   onClick={runReview}
-                  className="text-[11px] text-white/40 hover:text-white/70 underline underline-offset-2"
+                  className="text-[11px] text-faint hover:text-body underline underline-offset-2"
                 >
                   Or quick-check the current in-editor code
                 </button>
@@ -694,14 +694,14 @@ export function AICodeReview({ generatedCode, onCodeUpdate, sessions, githubToke
               <div className="w-14 h-14 bg-red-500/10 rounded-2xl flex items-center justify-center border border-red-500/20 animate-pulse">
                 <TirangaLoader className="w-7 h-7" />
               </div>
-              <p className="text-xs text-white/40">Analyzing code...</p>
+              <p className="text-xs text-faint">Analyzing code...</p>
             </div>
           )}
 
           {reviewed && (
             <>
-              <div className="h-px bg-white/5" />
-              <p className="text-[10px] text-white/30 uppercase tracking-wider">Filter</p>
+              <div className="h-px bg-raised" />
+              <p className="text-[10px] text-faint uppercase tracking-wider">Filter</p>
               {categories.map(cat => {
                 const catIssues = cat.key === 'all' ? issues.length : issues.filter(i => i.category === cat.key).length;
                 return (
@@ -709,11 +709,11 @@ export function AICodeReview({ generatedCode, onCodeUpdate, sessions, githubToke
                     key={cat.key}
                     onClick={() => setSelectedCategory(cat.key)}
                     className={`w-full flex items-center justify-between px-3 py-2 rounded-xl border text-xs transition-all ${
-                      selectedCategory === cat.key ? 'border-red-500/50 bg-red-500/10 text-red-300' : 'border-white/5 bg-white/2 text-white/40 hover:border-white/10'
+                      selectedCategory === cat.key ? 'border-red-500/50 bg-red-500/10 text-danger' : 'border-line bg-raised text-faint hover:border-line'
                     }`}
                   >
                     <span>{cat.label}</span>
-                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-white/5">{catIssues}</span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-raised">{catIssues}</span>
                   </button>
                 );
               })}
@@ -727,18 +727,18 @@ export function AICodeReview({ generatedCode, onCodeUpdate, sessions, githubToke
             <div className="flex flex-col items-center justify-center h-full gap-4">
               <div className="grid grid-cols-2 gap-3 max-w-sm w-full">
                 {Object.entries(CAT_CONFIG).map(([k, v]) => (
-                  <div key={k} className="flex items-center gap-2 p-3 rounded-xl border border-white/5 bg-[#161b22]">
+                  <div key={k} className="flex items-center gap-2 p-3 rounded-xl border border-line bg-card">
                     <v.icon className={`w-4 h-4 ${v.color}`} />
-                    <span className="text-xs text-white/50">{v.label}</span>
+                    <span className="text-xs text-muted">{v.label}</span>
                   </div>
                 ))}
               </div>
-              <p className="text-sm text-white/30 text-center max-w-xs">
+              <p className="text-sm text-faint text-center max-w-xs">
                 Connect a NavBharatAI app or a GitHub repo — the AI reviews its real code for security, quality, and performance issues
               </p>
               <button
                 onClick={() => setConnectOpen(true)}
-                className="flex items-center gap-2 text-sm px-4 py-2 bg-red-600 hover:bg-red-500 rounded-xl font-medium transition-all"
+                className="flex items-center gap-2 text-sm px-4 py-2 bg-red-600 hover:bg-red-500 rounded-xl font-medium transition-all text-on-accent"
               >
                 <Zap className="w-4 h-4" /> Connect App
               </button>
@@ -747,20 +747,20 @@ export function AICodeReview({ generatedCode, onCodeUpdate, sessions, githubToke
 
           {/* Real AI summary of the connected app that was reviewed */}
           {reviewed && (reviewedApp || serverSummary) && (
-            <div className="mb-3 bg-[#161b22] border border-white/10 rounded-xl px-4 py-3">
+            <div className="mb-3 bg-card border border-line rounded-xl px-4 py-3">
               {reviewedApp && (
-                <p className="text-xs text-white/80 font-medium flex items-center gap-1.5 mb-1">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> Reviewed: {reviewedApp}
+                <p className="text-xs text-body font-medium flex items-center gap-1.5 mb-1">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-success" /> Reviewed: {reviewedApp}
                 </p>
               )}
-              {serverSummary && <p className="text-[11px] text-white/50 leading-relaxed">{serverSummary}</p>}
+              {serverSummary && <p className="text-[11px] text-muted leading-relaxed">{serverSummary}</p>}
             </div>
           )}
 
           {reviewed && filtered.length === 0 && (
             <div className="flex flex-col items-center justify-center h-40 gap-2">
-              <CheckCircle2 className="w-10 h-10 text-emerald-400" />
-              <p className="text-sm text-white/40">No issues in this category</p>
+              <CheckCircle2 className="w-10 h-10 text-success" />
+              <p className="text-sm text-faint">No issues in this category</p>
             </div>
           )}
 
@@ -782,23 +782,23 @@ export function AICodeReview({ generatedCode, onCodeUpdate, sessions, githubToke
                       <SevIcon className={`w-4 h-4 ${sevCfg.color} shrink-0`} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-0.5">
-                          <span className="text-xs font-medium text-white truncate">{issue.title}</span>
+                          <span className="text-xs font-medium text-ink truncate">{issue.title}</span>
                         </div>
                         <div className="flex items-center gap-1.5">
                           <span className={`text-[9px] px-1.5 py-0.5 rounded-md border font-medium ${sevCfg.color} ${sevCfg.bg} ${sevCfg.border}`}>{sevCfg.label}</span>
                           <CatIcon className={`w-3 h-3 ${catCfg.color}`} />
                           <span className={`text-[9px] ${catCfg.color}`}>{catCfg.label}</span>
                           {issue.lineHint && (
-                            <span className="text-[9px] text-white/30 ml-1">@ {issue.lineHint}</span>
+                            <span className="text-[9px] text-faint ml-1">@ {issue.lineHint}</span>
                           )}
                         </div>
                       </div>
-                      <ChevronRight className={`w-3.5 h-3.5 text-white/20 shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                      <ChevronRight className={`w-3.5 h-3.5 text-faint shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
                       {/* D12: dismiss finding */}
                       <button
                         onClick={(e) => { e.stopPropagation(); setDismissedIds(prev => new Set([...prev, issue.id])); }}
                         title="Dismiss finding"
-                        className="p-1 rounded hover:bg-white/10 text-white/20 hover:text-white/60 shrink-0 ml-1"
+                        className="p-1 rounded hover:bg-raised text-faint hover:text-muted shrink-0 ml-1"
                       >
                         <X className="w-3 h-3" />
                       </button>
@@ -806,22 +806,22 @@ export function AICodeReview({ generatedCode, onCodeUpdate, sessions, githubToke
 
                     {/* D10: stopPropagation prevents accidental collapse when clicking inside expanded content */}
                     {isExpanded && (
-                      <div onClick={(e) => e.stopPropagation()} className="border-t border-white/10 px-4 py-3 space-y-3">
-                        <p className="text-xs text-white/60">{issue.description}</p>
+                      <div onClick={(e) => e.stopPropagation()} className="border-t border-line px-4 py-3 space-y-3">
+                        <p className="text-xs text-muted">{issue.description}</p>
 
                         {issue.fix && (
-                          <div className="bg-[#0d1117] rounded-xl p-3 border border-white/5">
-                            <p className="text-[10px] text-emerald-400 font-medium mb-1.5 flex items-center gap-1">
+                          <div className="bg-surface rounded-xl p-3 border border-line">
+                            <p className="text-[10px] text-success font-medium mb-1.5 flex items-center gap-1">
                               <Check className="w-3 h-3" /> Fix: {issue.fix}
                             </p>
                             {issue.fixCode && (
                               <div className="relative">
-                                <pre className="text-[9px] font-mono text-emerald-300 overflow-x-auto whitespace-pre-wrap">{issue.fixCode}</pre>
+                                <pre className="text-[9px] font-mono text-success overflow-x-auto whitespace-pre-wrap">{issue.fixCode}</pre>
                                 <button
                                   onClick={() => copyFix(issue.fixCode || '')}
-                                  className="absolute top-0 right-0 p-1 text-white/30 hover:text-white/60"
+                                  className="absolute top-0 right-0 p-1 text-faint hover:text-muted"
                                 >
-                                  {copiedId === (issue.fixCode || '').slice(0, 20) ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                                  {copiedId === (issue.fixCode || '').slice(0, 20) ? <Check className="w-3 h-3 text-success" /> : <Copy className="w-3 h-3" />}
                                 </button>
                               </div>
                             )}

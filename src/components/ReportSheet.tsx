@@ -280,7 +280,7 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
       onClick={() => { if (!busy) onClose(); }}
     >
       <div
-        className="w-full sm:max-w-md bg-[#0d1117] border border-white/10 rounded-t-3xl sm:rounded-3xl p-5"
+        className="w-full sm:max-w-md bg-surface border border-line rounded-t-3xl sm:rounded-3xl p-5"
         style={{ paddingBottom: 'calc(1.25rem + env(safe-area-inset-bottom, 0px))' }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -295,16 +295,16 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
                 onClick={() => { if (openThread) setOpenThread(''); else setMode('choose'); }}
                 disabled={busy}
                 aria-label="Back"
-                className="p-2 -ml-2 rounded-xl text-zinc-400 hover:bg-white/5 hover:text-white disabled:opacity-40 shrink-0"
+                className="p-2 -ml-2 rounded-xl text-muted hover:bg-raised hover:text-ink disabled:opacity-40 shrink-0"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
             )}
             <div className="min-w-0">
-              <h2 className="text-base font-bold text-white truncate">
+              <h2 className="text-base font-bold text-ink truncate">
                 {openThread ? 'Your report' : mode === 'list' ? 'Your reports' : 'Report a problem'}
               </h2>
-              <p className="text-[11px] text-zinc-500 mt-0.5">
+              <p className="text-[11px] text-faint mt-0.5">
                 {target?.kind === 'app' ? 'About this app.'
                   : target?.kind === 'user' ? 'About this person.'
                   : openThread ? 'NavBharatAI replies here.'
@@ -314,16 +314,16 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
               </p>
             </div>
           </div>
-          <button onClick={onClose} disabled={busy} aria-label="Close" className="p-2 rounded-xl text-zinc-500 hover:bg-white/5 hover:text-white disabled:opacity-40 shrink-0">
+          <button onClick={onClose} disabled={busy} aria-label="Close" className="p-2 rounded-xl text-faint hover:bg-raised hover:text-ink disabled:opacity-40 shrink-0">
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {done ? (
           <div className="py-8 text-center">
-            <Check className="w-8 h-8 text-emerald-400 mx-auto mb-2" />
-            <p className="text-sm font-semibold text-white">Sent. Thank you.</p>
-            <p className="text-[11px] text-zinc-500 mt-1">A person will read it.</p>
+            <Check className="w-8 h-8 text-success mx-auto mb-2" />
+            <p className="text-sm font-semibold text-ink">Sent. Thank you.</p>
+            <p className="text-[11px] text-faint mt-1">A person will read it.</p>
           </div>
         ) : mode === 'choose' ? (
           /* ── THE TWO DOORS ──────────────────────────────────────────────────────────────────────
@@ -335,23 +335,23 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
           <div className="space-y-2.5">
             <button
               onClick={() => setMode('new')}
-              className="w-full flex items-center gap-3 p-4 rounded-2xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.07] text-left transition-colors"
+              className="w-full flex items-center gap-3 p-4 rounded-2xl border border-line bg-raised hover:bg-raised-hover text-left transition-colors"
             >
               <span className="shrink-0 w-9 h-9 rounded-xl bg-indigo-500/15 border border-indigo-400/25 flex items-center justify-center">
-                <AlertCircle className="w-4 h-4 text-indigo-300" />
+                <AlertCircle className="w-4 h-4 text-accent-text" />
               </span>
               <span className="min-w-0">
-                <span className="block text-sm font-bold text-white">Report a new problem</span>
-                <span className="block text-[11px] text-zinc-500 mt-0.5">Something went wrong — tell us what.</span>
+                <span className="block text-sm font-bold text-ink">Report a new problem</span>
+                <span className="block text-[11px] text-faint mt-0.5">Something went wrong — tell us what.</span>
               </span>
             </button>
 
             <button
               onClick={() => setMode('list')}
-              className="w-full flex items-center gap-3 p-4 rounded-2xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.07] text-left transition-colors"
+              className="w-full flex items-center gap-3 p-4 rounded-2xl border border-line bg-raised hover:bg-raised-hover text-left transition-colors"
             >
-              <span className="shrink-0 w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center relative">
-                <MessageSquare className="w-4 h-4 text-zinc-300" />
+              <span className="shrink-0 w-9 h-9 rounded-xl bg-raised border border-line flex items-center justify-center relative">
+                <MessageSquare className="w-4 h-4 text-muted" />
                 {/* 🟢 THE SECOND OF THE THREE DOTS. Same rule as the sidebar's and the row's — all
                     three read `hasUnreadAdminReply`, so a dot here can never lead to a list with
                     nothing marked in it. That mismatch is precisely how people learn to ignore dots. */}
@@ -363,15 +363,15 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
                 )}
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block text-sm font-bold text-white">
+                <span className="block text-sm font-bold text-ink">
                   Old reports
                   {unread > 0 && (
-                    <span className="ml-2 align-middle text-[10px] font-black uppercase tracking-widest text-emerald-300">
+                    <span className="ml-2 align-middle text-[10px] font-black uppercase tracking-widest text-success">
                       {unread} new
                     </span>
                   )}
                 </span>
-                <span className="block text-[11px] text-zinc-500 mt-0.5">
+                <span className="block text-[11px] text-faint mt-0.5">
                   {mine === null ? 'Loading…'
                     : mine.length === 0 ? 'You have not reported anything yet.'
                     : unread > 0 ? 'NavBharatAI has replied.'
@@ -395,21 +395,21 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
             />
 
             {mine === null ? (
-              <p className="py-8 text-center text-[11px] text-zinc-500">Loading your reports…</p>
+              <p className="py-8 text-center text-[11px] text-faint">Loading your reports…</p>
             ) : mine.length === 0 ? (
               <div className="py-8 text-center">
-                <MessageSquare className="w-7 h-7 text-zinc-600 mx-auto mb-2" />
-                <p className="text-sm font-semibold text-zinc-300">Nothing here yet</p>
-                <p className="text-[11px] text-zinc-500 mt-1">Reports you send will appear here with our replies.</p>
+                <MessageSquare className="w-7 h-7 text-faint mx-auto mb-2" />
+                <p className="text-sm font-semibold text-muted">Nothing here yet</p>
+                <p className="text-[11px] text-faint mt-1">Reports you send will appear here with our replies.</p>
                 <button
                   onClick={() => setMode('new')}
-                  className="mt-4 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-[12px] font-bold text-white"
+                  className="mt-4 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-[12px] font-bold text-on-accent"
                 >
                   Report a problem
                 </button>
               </div>
             ) : (
-              <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+              <div className="rounded-2xl border border-line bg-well p-3">
                 <div className="space-y-1.5 max-h-[60vh] supports-[height:100dvh]:max-h-[60dvh] overflow-y-auto">
                   {(mine ?? []).map((r) => {
                     const isOpen = openThread === r.id;
@@ -419,7 +419,7 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
                     // `hasUnreadAdminReply` is the same rule the sidebar and the chooser use.
                     const isUnread = hasUnreadAdminReply(r);
                     return (
-                      <div key={r.id} className={`rounded-xl border bg-white/[0.03] ${isUnread ? 'border-emerald-400/40' : 'border-white/10'}`}>
+                      <div key={r.id} className={`rounded-xl border bg-raised ${isUnread ? 'border-emerald-400/40' : 'border-line'}`}>
                         <button
                           onClick={() => { if (isOpen) setOpenThread(''); else openReport(r.id); }}
                           className="w-full text-left px-3 py-2.5"
@@ -429,11 +429,11 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
                             {isUnread && (
                               <span aria-hidden className="shrink-0 w-2 h-2 rounded-full bg-emerald-400" />
                             )}
-                            <span className={`text-[11px] flex-1 truncate ${isUnread ? 'text-white font-semibold' : 'text-zinc-300'}`}>
+                            <span className={`text-[11px] flex-1 truncate ${isUnread ? 'text-ink font-semibold' : 'text-muted'}`}>
                               {problemKindLabel(r.problemKind) || 'Problem'} — {r.message}
                             </span>
                             {isUnread && (
-                              <span className="shrink-0 inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-emerald-300">
+                              <span className="shrink-0 inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-success">
                                 <MessageSquare className="w-2.5 h-2.5" /> New
                               </span>
                             )}
@@ -443,7 +443,7 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
                         {isOpen && (
                           <div className="px-3 pb-3 space-y-2">
                             {r.messages.length === 0 ? (
-                              <p className="text-[11px] text-zinc-500">
+                              <p className="text-[11px] text-faint">
                                 No reply yet. A person reads every report.
                               </p>
                             ) : (
@@ -452,8 +452,8 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
                                   key={`${m.at}-${i}`}
                                   className={`text-[11px] leading-relaxed rounded-xl px-3 py-2 ${
                                     m.from === 'admin'
-                                      ? 'bg-indigo-500/10 border border-indigo-400/25 text-indigo-100'
-                                      : 'bg-white/5 border border-white/10 text-zinc-200'
+                                      ? 'bg-indigo-500/10 border border-indigo-400/25 text-accent-text'
+                                      : 'bg-raised border border-line text-body'
                                   }`}
                                 >
                                   {/* 🔒 WHITE-LABEL LAW: to the user this is always NavBharatAI.
@@ -479,7 +479,7 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
                                 onChange={(e) => setReply(e.target.value.slice(0, REPLY_MAX))}
                                 rows={2}
                                 placeholder="Answer here…"
-                                className="flex-1 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-[12px] text-white placeholder-zinc-600 outline-none focus:border-indigo-500/60 resize-none"
+                                className="flex-1 bg-well border border-line rounded-xl px-3 py-2 text-[12px] text-ink placeholder-faint outline-none focus:border-indigo-500/60 resize-none"
                               />
                               <button
                                 onClick={() => void sendReply(r.id)}
@@ -487,7 +487,7 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
                                    is usually the whole answer — so an empty box with a picture
                                    attached must not be a dead button. */
                                 disabled={replying || (reply.trim().length === 0 && !replyShot)}
-                                className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-[11px] font-bold text-white"
+                                className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-[11px] font-bold text-on-accent"
                               >
                                 {replying ? '…' : 'Send'}
                               </button>
@@ -496,14 +496,14 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
                               <button
                                 onClick={() => replyFileRef.current?.click()}
                                 disabled={replying}
-                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/10 bg-white/5 text-[10px] font-semibold text-zinc-300 hover:bg-white/10 disabled:opacity-40"
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-line bg-raised text-[10px] font-semibold text-muted hover:bg-raised-hover disabled:opacity-40"
                               >
                                 <ImageIcon className="w-3 h-3" /> {replyShot ? 'Change screenshot' : 'Add screenshot'}
                               </button>
                               {replyShot && (
                                 <>
-                                  <img src={replyShot} alt="Screenshot to send" className="w-7 h-7 rounded object-cover border border-white/10" />
-                                  <button onClick={() => setReplyShot('')} className="text-[10px] text-zinc-500 hover:text-zinc-300 underline">Remove</button>
+                                  <img src={replyShot} alt="Screenshot to send" className="w-7 h-7 rounded object-cover border border-line" />
+                                  <button onClick={() => setReplyShot('')} className="text-[10px] text-faint hover:text-muted underline">Remove</button>
                                 </>
                               )}
                             </div>
@@ -515,7 +515,7 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
                 </div>
               </div>
             )}
-            {note && <p className="mt-3 text-[11px] text-amber-300 leading-relaxed">{note}</p>}
+            {note && <p className="mt-3 text-[11px] text-warn leading-relaxed">{note}</p>}
           </>
         ) : (
           <>
@@ -524,7 +524,7 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
                 phones" — which could be a layout bug, a hang, or a dead button, and we had no way to
                 ask. The tap settles that before the ambiguity is created, and it changes the question
                 the box asks so the answer lands on the right thing. */}
-            <p className="text-[11px] font-semibold text-zinc-300 mb-2">What kind of problem is it?</p>
+            <p className="text-[11px] font-semibold text-muted mb-2">What kind of problem is it?</p>
             <div className="flex flex-wrap gap-1.5 mb-3">
               {PROBLEM_KINDS.map((k) => (
                 <button
@@ -534,8 +534,8 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
                   aria-pressed={kind === k.id}
                   className={`px-2.5 py-1.5 rounded-xl text-[11px] font-semibold border transition-colors ${
                     kind === k.id
-                      ? 'bg-indigo-600 border-indigo-500 text-white'
-                      : 'bg-white/5 border-white/10 text-zinc-300 hover:bg-white/10'
+                      ? 'bg-indigo-600 border-indigo-500 text-on-accent'
+                      : 'bg-raised border-line text-muted hover:bg-raised'
                   }`}
                 >
                   {k.label}
@@ -549,7 +549,7 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
               rows={4}
               autoFocus
               placeholder={kind ? problemKindAsk(kind) : 'Pick one above, then tell us what happened.'}
-              className="w-full bg-black/40 border border-white/10 rounded-2xl px-3.5 py-3 text-sm text-white placeholder-zinc-600 outline-none focus:border-indigo-500/60 resize-none"
+              className="w-full bg-well border border-line rounded-2xl px-3.5 py-3 text-sm text-ink placeholder-faint outline-none focus:border-indigo-500/60 resize-none"
             />
 
             <div className="flex items-center gap-2 mt-3">
@@ -563,24 +563,24 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
               <button
                 onClick={() => fileRef.current?.click()}
                 disabled={busy}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-white/10 bg-white/5 text-[11px] font-semibold text-zinc-200 hover:bg-white/10 disabled:opacity-40"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-line bg-raised text-[11px] font-semibold text-body hover:bg-raised-hover disabled:opacity-40"
               >
                 <ImageIcon className="w-3.5 h-3.5" /> {shot ? 'Change screenshot' : 'Add screenshot'}
               </button>
               {shot && (
                 <>
-                  <img src={shot} alt="Attached screenshot" className="w-9 h-9 rounded-lg object-cover border border-white/10" />
-                  <button onClick={() => setShot('')} className="text-[11px] text-zinc-500 hover:text-zinc-300 underline">Remove</button>
+                  <img src={shot} alt="Attached screenshot" className="w-9 h-9 rounded-lg object-cover border border-line" />
+                  <button onClick={() => setShot('')} className="text-[11px] text-faint hover:text-muted underline">Remove</button>
                 </>
               )}
             </div>
 
-            {note && <p className="mt-3 text-[11px] text-amber-300 leading-relaxed">{note}</p>}
+            {note && <p className="mt-3 text-[11px] text-warn leading-relaxed">{note}</p>}
 
             <button
               onClick={() => void send()}
               disabled={busy || !kind || message.trim().length < 5}
-              className="mt-4 w-full py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-bold text-white flex items-center justify-center gap-2"
+              className="mt-4 w-full py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-bold text-on-accent flex items-center justify-center gap-2"
             >
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
               {busy ? 'Sending…' : 'Send report'}
@@ -590,7 +590,7 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
                 the build and the recent errors were attached. A promise that quietly goes stale is
                 worse than no promise, so it now names what is actually sent, and nothing is sent that
                 is not named here. Test-locked in `tests/reportCapture.test.ts`. */}
-            <p className="mt-2 text-[10px] text-zinc-600 leading-relaxed">
+            <p className="mt-2 text-[10px] text-faint leading-relaxed">
               So the problem can be found without asking you for details, we attach: the screen you were
               on, your screen size, your device and app version, whether you were online, and any error
               messages your browser had just recorded. No page content, and nothing you typed elsewhere.

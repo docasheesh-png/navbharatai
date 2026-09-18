@@ -68554,3 +68554,70 @@ On `b6f88a72` this is the ₹12 of real cost — **₹50 of the user's ₹152.90
 (the lean reviewer on a green app) has since landed, so on a green build that spend should now
 largely not happen at all. This is the net beneath it: the saving is not spending the tokens, and
 this only guarantees that when they ARE spent for nothing, the user does not pay for them.
+
+---
+
+## 2026-09-18 — A build-time secret that reached nothing, and the switch-on order for referral rewards
+
+**The admin asked to turn the referral rewards on** (*"refral money abhi jo hai (250+250) ko hata kar
+woh 400 new on kare?"*). Reading the code to answer produced two findings and one fix.
+
+### 🔴 The fix: `PLAY_INTEGRITY_CLOUD_PROJECT` was never passed to the build
+
+`android/app/build.gradle` reads `System.getenv("PLAY_INTEGRITY_CLOUD_PROJECT")` and bakes it into
+`BuildConfig`. **`.github/workflows/android-aab.yml`'s gradle step did not pass it** — its `env:`
+block carried the keystore values, the version numbers and the two Facebook secrets, and nothing else.
+
+So the whole chain would have been: admin sets the repo secret → CI green → bundle ships → app
+installs → gradle read an EMPTY string → baked `"0"` → *not configured* → every integrity check
+`unavailable` → **every referral claim pays ₹0**, with nothing failing anywhere. That is the exact
+shape CLAUDE.md records for `VITE_META_PIXEL_ID`: a value set in the right-sounding place that
+silently reaches nothing. It would have cost a Play review cycle and users earning zero.
+
+🔒 **`tests/aSecretThatReachesNothing.test.ts` is DERIVED, not a list.** It extracts every
+`System.getenv(...)` from `build.gradle` and asserts the workflow passes each one, so a build-time
+variable added later is covered the day it appears without anyone remembering the file exists. It
+carries its own "the sweep actually sees something" case, because a guard that silently stops
+matching guards nothing. Proven by reversion.
+
+**Why the gap existed at all, named so it is recognised again:** the two halves live in different
+files, in different languages, and nothing connected them. A name present in one and absent from the
+other is invisible to `tsc`, to vitest and to CI.
+
+### ⚠️ The second finding: the SERVER gate needs two Cloud Run keys as well
+
+`deviceCheckConfigured` (`deviceIntegrity.ts:69`) is `GOOGLE_PLAY_SA_JSON && GOOGLE_PLAY_PACKAGE_NAME`
+— both **Cloud Run** keys. Either missing ⇒ every check is `unavailable` ⇒ nothing pays, however
+correct the Android half is. An Android-only checklist is therefore an incomplete one.
+
+### 🔴 THE ORDER, AND WHY ORDER IS THE WHOLE POINT
+
+`flatWelcomeGiftSuppressed()` is exactly `referralRewardsEnabled()`, so **turning on
+`REFERRAL_REWARDS` stands the flat ₹500 welcome gift down by construction** — the admin does not
+"remove the 250+250" separately, and removing it would switch both off. That is correct and is also
+the trap: with the ladder on and the device check not configured, a new user gets **the flat gift
+suppressed AND ₹0 from the ladder — nothing at all**, silently, because the gate fails CLOSED by
+design (there is no later gate to catch a wrong "yes").
+
+So, in this order, and `REFERRAL_REWARDS` LAST:
+
+1. **Play Integrity API enabled** in `gen-lang-client-0866594388` (console display name
+   `navBharat ai real`) — the Play Integrity API, not Safe Browsing and not Play Developer.
+2. **The `GOOGLE_PLAY_SA_JSON` service account holds the `playintegrity` scope.** A token minted for
+   a scope the account lacks is issued happily and refused at the call, so "it was created" is not
+   "it will work".
+3. **`PLAY_INTEGRITY_CLOUD_PROJECT`** = the project **NUMBER** (digits), as a **GitHub repo secret** —
+   not a Cloud Run key, because it is baked into the `.aab`. A non-numeric value parses to 0 and reads
+   as not-configured, which is the safe direction.
+4. **The workflow fix above** (shipped here) — without it step 3 is inert.
+5. **`GOOGLE_PLAY_SA_JSON` + `GOOGLE_PLAY_PACKAGE_NAME`** (`com.navbharat.ai`) set in Cloud Run.
+6. **A `.aab` carrying `DeviceIntegrityPlugin` is LIVE on Play.** The plugin exists and is registered
+   in `MainActivity`, but release 91 and earlier do not have it. Play → App content → **Data safety**
+   must be updated before that rollout: the build collects a device identifier, Privacy Policy §3.2
+   already discloses it, and a Play declaration that contradicts the policy is a violation.
+7. **Then** `REFERRAL_REWARDS=on`. Referred user ₹400, organic ₹300, referrer ₹75, lifetime cap ₹1,500.
+
+**How to verify it really works, rather than looks configured:** on a phone running the new bundle,
+create an account and verify email. **₹100 arriving means the whole chain is live.** Nothing arriving
+means one link is broken, and it is one of the seven above. ⚠️ The website will never pay ₹1 — that is
+the design (*"websites par kuch bhi nahi dena"*), not a fault.

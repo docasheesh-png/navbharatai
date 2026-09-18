@@ -130,6 +130,25 @@ jobs:
           # Data safety — that build collects the advertising ID and app events.
           FACEBOOK_APP_ID: ${{ secrets.FACEBOOK_APP_ID }}
           FACEBOOK_CLIENT_TOKEN: ${{ secrets.FACEBOOK_CLIENT_TOKEN }}
+          # PLAY INTEGRITY — the device check behind every referral rupee (deviceIntegrity.ts).
+          #
+          # 🔴 WITHOUT THIS LINE THE SECRET REACHES NOTHING, AND NOTHING FAILS. build.gradle reads
+          # `System.getenv("PLAY_INTEGRITY_CLOUD_PROJECT")` and bakes the value into BuildConfig; a step
+          # that does not pass it hands gradle an empty string, which the lenient parse turns into "0"
+          # — "not configured". The build is green, the bundle ships, the app installs, and every
+          # integrity check comes back `unavailable`, which pays ₹0. That is the exact shape CLAUDE.md
+          # records for VITE_META_PIXEL_ID: a value set in the right-sounding place that silently
+          # changes nothing. Found 2026-09-18 while writing the admin's own switch-on guide, BEFORE a
+          # release was cut on it.
+          #
+          # It is the PROJECT NUMBER (digits), never the project id — a non-numeric value parses to 0,
+          # which is the safe direction and is why the parse is lenient rather than fatal. Unset is
+          # equally safe: the feature stays off and the app is byte-identical to today.
+          #
+          # ⚠️ Before rolling out a bundle built WITH this set, update Play Console → App content →
+          # Data safety — that build collects a device identifier (Privacy Policy §3.2 already discloses
+          # it, and a Play declaration that contradicts the policy is a violation, not a mismatch).
+          PLAY_INTEGRITY_CLOUD_PROJECT: ${{ secrets.PLAY_INTEGRITY_CLOUD_PROJECT }}
         # bundleRelease → the .aab for Play. assembleRelease → a SIGNED universal .apk for the website's
         # "Download app" button (a direct sideload — Play only accepts the .aab). Both use the same
         # release signingConfig, so the APK is genuinely installable.

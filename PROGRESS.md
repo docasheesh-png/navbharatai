@@ -66792,3 +66792,80 @@ The guard is what makes that discoverable instead of silent.
 📌 Note for whoever reads this next: `ImageStudioPro.tsx` was migrated to design tokens by another
 session's theme work (PRs C and G) after #3071 merged. That file was deliberately NOT touched here —
 this change is server-side only.
+
+## 2026-09-18 — A request the signals read every letter of and recognised NOTHING is not a greeting either
+
+**The sibling of the 2026-09-17 script fix, which was never hunted (rule 3).** `signalsCouldNotRead`
+covers a request whose SCRIPT the ASCII patterns cannot read. This is the case where they read every
+letter and recognise nothing — and it is the commoner one by far.
+
+Measured on `main` before the change, with `analyzeRequest({ prompt })`:
+
+```
+ 58 | complex_app  | ecommerce website
+  5 | chat         | E commerce website          ← one SPACE
+  5 | chat         | restaurant billing app with menu, KOT, GST invoice, table mgmt
+  5 | chat         | kirana store billing software with stock, customers, udhaar khata
+  5 | chat         | medical store app — batch wise stock, expiry alert, GST bill, ledger
+  5 | chat         | gym management app: members, plans, fee reminders, attendance
+  5 | chat         | coaching institute app with batches, fees, tests, results
+  5 | chat         | salon appointment app with services, staff, slots, bills
+  5 | chat         | society management app: flats, maintenance bills, complaints, visitors
+```
+
+**Five is the score of the word "hi".** The kirana app's full verdict was
+`startTier: 'gemini'`, `escalationPath: ['gemini','haiku','sonnet']`, **`ambiguous: false`** — a
+confident wrong answer about exactly the apps NavBharatAI exists to build. And `complexityRouting`
+reads that 5 against a line of 40 with a ±3 margin, so `AGENTV3_COMPLEX_TO_KIMI` — shipped ON by
+default on 2026-09-17 to open big apps on KIMI — could not fire for any of them.
+
+### The fix introduces no new number, and no new keyword
+
+1. **`classify()`** returns the task type AND whether any signal actually matched. `detectTaskType`
+   ended in a bare `return 'chat'`, so "this is a greeting" and "nothing fired" were the same answer.
+   One list of signals, not two — a predicate that re-tested them would be free to drift.
+2. **`signalsFoundNothing`** is that state, exported and pure. Deliberately NOT a new keyword list:
+   adding "billing", "kirana", "salon" would fix today's five and leave tomorrow's five.
+3. The floor is **`scriptNeutralFloor`, unchanged** — the same function, the same `BASE_SCORE` bands,
+   the same raise-only rule. Its evidence (enumerated parts, length) never needed a vocabulary, so it
+   was always equally valid for English; it had simply only been wired to the script case.
+4. **`needsSecondOpinion`** fires for the same state, gated on `scriptNeutralFloor > 0` so a greeting,
+   a question or a three-word ask buys no model call at all.
+5. **`e-?commerce` → `e[\s-]?commerce`.** Same keyword, one separator wider. This is PR #3077's
+   recorded open case, and it was a one-space defect rather than a routing question.
+
+After, measured:
+
+```
+  5 | gemini  | ask-model: no  | hi / thanks bhai / what can you generate?
+ 15 | gemini  | ask-model: no  | build a todo app
+ 58 | sonnet  | ask-model: no  | ecommerce website  AND  E commerce website
+ 30 | haiku   | ask-model: YES | kirana store billing software …
+ 30 | haiku   | ask-model: YES | society management app: flats, maintenance bills …
+ 58 | sonnet  | ask-model: no  | ek hospital management system banao …
+```
+
+### Why the score and not the tier (rule 6, said plainly)
+
+PR #3077 recorded this class and did not fix it, for a stated reason: *"that score also drives
+`startTier` and `escalationPath`, so changing it trades one problem for a possible other."* That is
+right, and it is why **no threshold moved**. The floor lands on `BASE_SCORE.coding` (30), a band this
+module's own docblock already reasons about — *"the light band keeps the one-shot and simple lanes
+and the same 80-step ceiling; only the score-58 band changes any of those."* And `ambiguous` was
+traced first: **nothing outside `RequestAnalyser` reads it.**
+
+🔴 **STILL OPEN:** a `complex` verdict from the refiner drives only the KIMI opener (`buildIsComplex`);
+it does not raise `startTier`. So a kirana app now starts in the light band and opens on KIMI, but a
+model saying "complex" still cannot move it to the standard band. That is a second change with its
+own evidence, not a line to slip in here.
+
+### Tests
+
+`tests/theSignalsReadEveryLetterAndRecognisedNothing.test.ts` — 9 cases: the seven real requests, the
+things that must cost nothing, the raise-only rule, the three e-commerce spellings, and a regression
+guard on the script case this is a sibling of.
+
+**Proven by reversion** — each of these turns the suite red, and each was restored:
+- `const unread = unreadable || signalsFoundNothing(prompt)` → `unreadable`
+- removing the new branch in `needsSecondOpinion`
+- `e[\s-]?commerce` → `e-?commerce`

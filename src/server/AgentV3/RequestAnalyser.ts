@@ -127,20 +127,62 @@ const RE = {
   hardSignal: /\b(production|secure|security|scalable|optimi[sz]e|performance|concurrency|multi[- ]tenant)\b/i,
 };
 
-function detectTaskType(p: string): TaskType {
+/**
+ * Internal: the task type AND whether any signal actually matched it.
+ *
+ * 🔴 THE SECOND HALF IS THE POINT. `detectTaskType` ends in a bare `return 'chat'`, so "this is a
+ * greeting" and "not one of my patterns fired" left this function as the SAME answer — and every
+ * caller downstream was told the first one. Returning the distinction here means there is exactly
+ * one list of signals; a predicate that re-tested them would be a second list, free to drift.
+ */
+function classify(p: string): { type: TaskType; matched: boolean } {
   // Order matters: most-specific / highest-complexity wins when multiple match.
-  if (RE.architecture.test(p)) return 'architecture';
+  if (RE.architecture.test(p)) return { type: 'architecture', matched: true };
   // SHARED complex-app verdict (single source of truth with the pipeline-DEPTH/ETA estimator, so the
   // two can never route the same prompt two different ways). Page-deliverable-aware: a category THEME
   // word on a one-page ask ("SaaS landing page") no longer forces complex_app — the 29-min bug.
-  if (isComplexAppPrompt(p)) return 'complex_app';
-  if (RE.debugging.test(p)) return 'debugging';
-  if (RE.simpleApp.test(p)) return 'simple_app';
-  if (RE.summary.test(p)) return 'summary';
-  if (RE.translate.test(p)) return 'translate';
-  if (RE.coding.test(p)) return 'coding';
-  if (RE.greeting.test(p)) return 'chat';
-  return 'chat';
+  if (isComplexAppPrompt(p)) return { type: 'complex_app', matched: true };
+  if (RE.debugging.test(p)) return { type: 'debugging', matched: true };
+  if (RE.simpleApp.test(p)) return { type: 'simple_app', matched: true };
+  if (RE.summary.test(p)) return { type: 'summary', matched: true };
+  if (RE.translate.test(p)) return { type: 'translate', matched: true };
+  if (RE.coding.test(p)) return { type: 'coding', matched: true };
+  if (RE.greeting.test(p)) return { type: 'chat', matched: true };
+  return { type: 'chat', matched: false };
+}
+
+function detectTaskType(p: string): TaskType {
+  return classify(p).type;
+}
+
+/**
+ * PURE. Not one signal in `RE` — nor the shared `isComplexAppPrompt` — matched this request.
+ *
+ * 🔴 THE SIBLING THAT WAS NOT HUNTED (rule 3). `signalsCouldNotRead` fixed the case where the
+ * signals cannot read the SCRIPT. This is the case where they can read every letter and still
+ * recognise nothing, and it is the commoner one by far. Measured on `main` the day this shipped,
+ * every one of these scored **5 — the same 5 as the word "hi"** — and each is a real NavBharatAI
+ * request:
+ *
+ *   'restaurant billing app with menu, KOT, GST invoice, table management and daily sales report'
+ *   'kirana store billing software with stock, customers, udhaar khata and daily report'
+ *   'medical store app — batch wise stock, expiry alert, GST bill, supplier ledger'
+ *   'gym management app: members, plans, fee reminders, attendance, trainer schedule'
+ *   'society management app: flats, maintenance bills, complaints, notices, visitors'
+ *
+ * `COMPLEX_APP_SIGNAL` is a keyword list, so a real app whose words are not on it falls through —
+ * `'ecommerce website'` scores 58 and `'E commerce website'` scores 5, on one space.
+ *
+ * ⚠️ IT IS NOT A NEW KEYWORD LIST, DELIBERATELY. Adding "billing", "kirana", "salon" … would fix
+ * today's five and leave tomorrow's five, which is the instance rather than the class. What this
+ * says is only *"I recognised nothing"* — an honest unknown, which `scriptNeutralFloor` then prices
+ * on evidence that needs no vocabulary at all.
+ *
+ * 🔒 A GREETING IS NOT THIS. `RE.greeting` matches, so "hi", "thanks bhai" and "namaste" return
+ * FALSE here and nothing about them changes.
+ */
+export function signalsFoundNothing(prompt: string): boolean {
+  return !classify(String(prompt ?? '').toLowerCase()).matched;
 }
 
 /** Base complexity by task type (before feature adjustments). */
@@ -442,13 +484,26 @@ export function analyzeRequest(input: AnalyserInput): AnalysisResult {
    * cost, no new branch, nothing to regress.
    */
   const unreadable = signalsCouldNotRead(prompt);
-  if (unreadable) {
+  /**
+   * 🔴 AND THE SAME IS TRUE WHEN THE SIGNALS READ EVERY LETTER AND RECOGNISE NOTHING — the sibling
+   * the 2026-09-17 fix did not hunt. `signalsFoundNothing` is that state; its docblock carries the
+   * five real requests that scored 5 because of it. The floor is applied on EXACTLY the evidence it
+   * already uses, because that evidence never needed a vocabulary in the first place: how many
+   * things the request enumerates, and how long it is.
+   *
+   * 🔒 NO NEW NUMBER IS INTRODUCED. Same `scriptNeutralFloor`, same `BASE_SCORE` bands, same
+   * raise-only rule. A one-line request has no enumerated parts, so the floor is 0 and a greeting,
+   * a question or a three-word ask is byte-identical to before — measured, not assumed.
+   */
+  const unread = unreadable || signalsFoundNothing(prompt);
+  if (unread) {
+    const why = unreadable ? 'cannot read this script' : 'recognised nothing in this request';
     const floor = scriptNeutralFloor(prompt);
     if (floor > score) {
       score = floor;
-      reasons.push(`floor ${floor} — the signals cannot read this script; ${enumeratedParts(prompt)} enumerated part(s), ${prompt.length} chars`);
+      reasons.push(`floor ${floor} — the signals ${why}; ${enumeratedParts(prompt)} enumerated part(s), ${prompt.length} chars`);
     } else {
-      reasons.push('the signals cannot read this script; no script-neutral size evidence either');
+      reasons.push(`the signals ${why}; no script-neutral size evidence either`);
     }
   }
 
@@ -461,7 +516,7 @@ export function analyzeRequest(input: AnalyserInput): AnalysisResult {
    * this module had understood nothing of. The floor above is the honest DETERMINISTIC answer; this
    * flag is what lets a caller do better than deterministic when a cheap classifier is available.
    */
-  const ambiguous = isNearBoundary(score) || unreadable;
+  const ambiguous = isNearBoundary(score) || unread;
 
   // Intelligent Scoping (Phase B): rank features by priority for checkpoint loop.
   // Only rank for app builds (not chat/coding) to avoid noise.

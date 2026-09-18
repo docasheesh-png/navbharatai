@@ -11,8 +11,13 @@
 // Pure, dependency-free, unit-tested. It is a SUPERSET of the historical RE.complexApp alternatives
 // (every prior match is preserved) plus a few unambiguous app-category signals (crm, erp, marketplace,
 // food delivery, ride-hailing) that both detectors previously missed.
+// ⚠️ `e[\s-]?commerce` TOLERATES A SPACE, and that one character class is a real defect fixed
+// (2026-09-18). `e-?commerce` matched "ecommerce" and "e-commerce" and NOT "e commerce" — so
+// `'ecommerce website'` scored 58 and `'E commerce website'` scored **5, the same as "hi"**, on one
+// space. It is the same keyword and the same concept, not a widening: nothing newly matches that a
+// reader would call a different word.
 export const COMPLEX_APP_SIGNAL =
-  /\b(full[- ]?stack|full app|complete app|saas|crm|erp|dashboard|admin panel|authentication|auth|login system|signup|payment|stripe|razorpay|checkout|e-?commerce|marketplace|database|backend|rest api|graphql|multi[- ]?page|multi[- ]?file|crud|real[- ]?time|websocket|chat app|social|booking|inventory|food[- ]?delivery|ride[- ]?hailing)\b/i;
+  /\b(full[- ]?stack|full app|complete app|saas|crm|erp|dashboard|admin panel|authentication|auth|login system|signup|payment|stripe|razorpay|checkout|e[\s-]?commerce|marketplace|database|backend|rest api|graphql|multi[- ]?page|multi[- ]?file|crud|real[- ]?time|websocket|chat app|social|booking|inventory|food[- ]?delivery|ride[- ]?hailing)\b/i;
 
 /**
  * Page-scoped deliverables — the request is for ONE static/marketing page, however it's themed.
@@ -26,7 +31,7 @@ export const PAGE_DELIVERABLE_SIGNAL =
  * discount a theme word on a page-scoped deliverable; scope words (auth, database, backend, payment,
  * checkout, real-time, …) are never discounted. /g is safe here — used only in String.replace.
  */
-const CATEGORY_THEME_WORDS = /\b(saas|crm|erp|e-?commerce|marketplace|social|food[- ]?delivery|ride[- ]?hailing)\b/gi;
+const CATEGORY_THEME_WORDS = /\b(saas|crm|erp|e[\s-]?commerce|marketplace|social|food[- ]?delivery|ride[- ]?hailing)\b/gi;
 
 /**
  * True when the prompt names a genuinely complex, multi-module app to BUILD. Pure.

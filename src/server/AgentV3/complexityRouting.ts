@@ -24,7 +24,7 @@
 // only worth taking where it is likely to pay, which is why `simple` is the default on every doubt.
 
 import { isCheapFlashRung, withoutCheapFlashLead, type LadderRung } from './tierLadder';
-import { signalsCouldNotRead } from './RequestAnalyser';
+import { signalsCouldNotRead, signalsFoundNothing, scriptNeutralFloor } from './RequestAnalyser';
 
 /**
  * 🔒 ONE IMPLEMENTATION, OWNED BY THE MODULE THE FACT IS ABOUT (2026-09-17, later the same day).
@@ -113,6 +113,21 @@ export function complexityFromScore(score: number): ComplexityVerdict {
  */
 export function needsSecondOpinion(score: number, prompt?: string): boolean {
   if (prompt !== undefined && signalsCouldNotRead(prompt)) return true;
+  /**
+   * 🔴 THE SCRIPT WAS NEVER THE ONLY WAY TO BE UNREAD. A request whose every letter is Latin and
+   * whose every signal missed is in exactly the state the line above buys a second opinion for —
+   * and it is the commoner state by far. Measured on `main` the day this shipped, seven real
+   * NavBharatAI requests (kirana billing, medical store, gym, coaching, salon, society, restaurant
+   * KOT/GST) each scored **5**, thirty-five clear of the line, so the ±3 test below answered "not
+   * borderline" with total confidence and opened every one of them on the cheapest rung.
+   *
+   * 💸 THE FLOOR IS WHAT KEEPS THIS CHEAP, and it is why the test is not `signalsFoundNothing`
+   * alone. `scriptNeutralFloor` is 0 for anything that enumerates nothing, so "hi", "thanks bhai",
+   * "what can you generate?" and a three-word ask buy no call at all — "kharcha kam se kam" applies
+   * to the classifier, and this asks only where there is real evidence of a multi-part request that
+   * nothing could read.
+   */
+  if (prompt !== undefined && signalsFoundNothing(prompt) && scriptNeutralFloor(prompt) > 0) return true;
   return Number.isFinite(score) && Math.abs(score - COMPLEX_SCORE_LINE) <= BORDERLINE_MARGIN;
 }
 

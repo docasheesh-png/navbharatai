@@ -42,13 +42,13 @@ export function isDeviceCheckPlatform(platform: string | null | undefined): bool
 }
 
 /** The plugin handle, or null on web, iOS and older shells. Never throws. */
-async function plugin(): Promise<DeviceIntegrityPlugin | null> {
-  if (cached) return cached;
+async function plugin(): Promise<{ api: DeviceIntegrityPlugin } | null> {
+  if (cached) return { api: cached };
   try {
     const { Capacitor, registerPlugin } = await import('@capacitor/core');
     if (!isDeviceCheckPlatform(Capacitor.getPlatform())) return null;
     cached = registerPlugin<DeviceIntegrityPlugin>('DeviceIntegrity');
-    return cached;
+    return { api: cached };
   } catch {
     return null;
   }
@@ -67,9 +67,9 @@ async function plugin(): Promise<DeviceIntegrityPlugin | null> {
  */
 export async function collectDeviceCheck(): Promise<NativeDeviceCheck> {
   try {
-    const p = await plugin();
-    if (!p) return { outcome: 'unavailable' };
-    const res = await p.getDeviceCheck();
+    const held = await plugin();
+    if (!held) return { outcome: 'unavailable' };
+    const res = await held.api.getDeviceCheck();
     if (!res || res.outcome !== 'ok') {
       return { outcome: res?.outcome ?? 'failed', message: res?.message };
     }

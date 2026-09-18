@@ -198,18 +198,36 @@ export const HomeView = ({
         colors.bg, colors.text
       )}
     >
-      {/* Ambient background */}
+      {/*
+        Ambient background.
+
+        🔴 THESE TWO BLOBS USED TO ANIMATE FOR EVER, AND THAT IS WHAT A USER REPORTED AS
+        "Aapki home screen bahut leg maarta hai" (report 2026-09-15, app build 117, a 360x524
+        Android phone on 4g, in the Capacitor WebView).
+
+        Each is `w-3/4 h-3/4` carrying `blur-[100px]`, and each was a `motion.div` animating
+        `scale` + `rotate` + `opacity` on `repeat: Infinity`. A blurred layer that never moves is
+        rasterised ONCE and then composited for free; a blurred layer that SCALES AND ROTATES must
+        be re-rasterised through a 100px Gaussian on essentially every frame, and a 100px radius
+        needs a buffer far larger than the element itself. Two of them, for ever, on the app's
+        most-visited screen, on a mid-range phone — with two perpetual requestAnimationFrame loops
+        on top. Nothing else on this screen animates perpetually (these were the only two
+        `repeat: Infinity` in the file).
+
+        The blobs are KEPT, with their exact colours, sizes, positions and blur — at rest the
+        screen is pixel-identical. What is gone is the perpetual motion, which at a 22s/28s period
+        and 0.08→0.16 opacity was close to imperceptible and was costing every frame of every
+        visit. If the ambient movement is ever wanted back, it must be an OPACITY-only CSS
+        keyframe — opacity composites without re-running the filter, while scale and rotate cannot.
+
+        ⚠️ The reporter's diagnostics also flagged this second blob as "147px past the right edge".
+        That one is NOT a bug: `overflow-hidden` on this wrapper clips it, so no user ever sees it
+        and it adds no page scroll. The scanner was reporting a clipped element, which is fixed in
+        `reportDiagnostics.ts` in the same change — chasing a ghost costs as much as missing a bug.
+      */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        <motion.div
-          animate={{ scale: [1, 1.15, 1], rotate: [0, 60, 0], opacity: [0.08, 0.16, 0.08] }}
-          transition={{ duration: 22, repeat: Infinity, ease: 'linear' }}
-          className="absolute -top-1/3 -left-1/4 w-3/4 h-3/4 bg-indigo-600/20 rounded-full blur-[100px]"
-        />
-        <motion.div
-          animate={{ scale: [1, 1.2, 1], rotate: [0, -60, 0], opacity: [0.06, 0.12, 0.06] }}
-          transition={{ duration: 28, repeat: Infinity, ease: 'linear' }}
-          className="absolute -bottom-1/3 -right-1/4 w-3/4 h-3/4 bg-orange-500/15 rounded-full blur-[100px]"
-        />
+        <div className="absolute -top-1/3 -left-1/4 w-3/4 h-3/4 bg-indigo-600/20 rounded-full blur-[100px] opacity-[0.12]" />
+        <div className="absolute -bottom-1/3 -right-1/4 w-3/4 h-3/4 bg-orange-500/15 rounded-full blur-[100px] opacity-[0.09]" />
       </div>
 
       {/* Admin badge */}

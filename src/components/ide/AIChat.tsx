@@ -843,7 +843,7 @@ export const AIChat: React.FC<AIChatProps> = ({
               </button>
               <button
                 onClick={() => window.open('https://pages.github.com', '_blank')}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-raised hover:bg-raised border border-line text-muted text-[10px] font-bold rounded-xl transition-all active:scale-95"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-raised hover:bg-raised-hover border border-line text-muted text-[10px] font-bold rounded-xl transition-all active:scale-95"
               >
                 🐙 GitHub Pages
               </button>
@@ -936,7 +936,7 @@ export const AIChat: React.FC<AIChatProps> = ({
             <p className="text-[10px] text-muted font-mono truncate max-w-full">{lightbox.name}</p>
             <button
               onClick={() => setLightbox(null)}
-              className="absolute -top-3 -right-3 w-8 h-8 bg-raised hover:bg-raised rounded-full flex items-center justify-center text-ink transition-colors border border-line"
+              className="absolute -top-3 -right-3 w-8 h-8 bg-raised hover:bg-raised-hover rounded-full flex items-center justify-center text-ink transition-colors border border-line"
             >
               <X className="w-4 h-4" />
             </button>
@@ -949,7 +949,7 @@ export const AIChat: React.FC<AIChatProps> = ({
             <span className="text-[12px] font-black uppercase tracking-widest text-ink">Full Screen Composer</span>
             <button
               onClick={() => setIsExpanded(false)}
-              className="px-4 py-1.5 bg-raised hover:bg-raised rounded-lg text-ink text-[10px] font-black uppercase tracking-widest"
+              className="px-4 py-1.5 bg-raised hover:bg-raised-hover rounded-lg text-ink text-[10px] font-black uppercase tracking-widest"
             >
               <div className="flex items-center gap-1.5">
                 <Minimize2 className="w-3.5 h-3.5" />
@@ -1225,7 +1225,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                               alt={att.name}
                               className="w-16 h-16 rounded-lg object-cover border border-line group-hover:brightness-110 transition-all cursor-zoom-in"
                             />
-                            <div className="absolute inset-0 rounded-lg bg-well group-hover:bg-well transition-colors flex items-center justify-center">
+                            <div className="absolute inset-0 rounded-lg bg-well group-hover:bg-well-hover transition-colors flex items-center justify-center">
                               <Maximize2 className="w-4 h-4 text-ink opacity-0 group-hover:opacity-100 transition-opacity drop-shadow" />
                             </div>
                           </button>
@@ -1341,7 +1341,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                   <button
                     onClick={() => { if (messages.length > 0) onSendSuggestion(messages.filter(m => m.sender === 'user').at(-1)?.text || '__REGENERATE__'); }}
                     title="Regenerate response"
-                    className="flex items-center gap-1 px-2 py-0.5 text-[8px] font-black uppercase tracking-widest rounded-lg bg-raised hover:bg-raised text-faint hover:text-ink border border-line transition-all"
+                    className="flex items-center gap-1 px-2 py-0.5 text-[8px] font-black uppercase tracking-widest rounded-lg bg-raised hover:bg-raised-hover text-faint hover:text-ink border border-line transition-all"
                   >
                     ↺ Retry
                   </button>
@@ -1443,7 +1443,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                 <button
                   onClick={() => { const t = guiderInput.trim(); if (t) { setGuiderInput(''); onGuiderSend?.(t); } }}
                   disabled={!!guiderReplanning || !guiderInput.trim()}
-                  className="px-3 py-2 rounded-lg bg-raised border border-line text-body text-[11px] font-black uppercase tracking-wider hover:bg-raised transition disabled:opacity-40"
+                  className="px-3 py-2 rounded-lg bg-raised border border-line text-body text-[11px] font-black uppercase tracking-wider hover:bg-raised-hover transition disabled:opacity-40"
                   title="Edit the plan or answer the questions"
                 >
                   {guiderReplanning ? '⏳ Thinking…' : '✏️ Send'}
@@ -1519,7 +1519,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                 <span className="text-[8px] text-faint font-mono">{buildProgress.percent}%</span>
                 <button
                   onClick={() => setProgressCollapsed(p => !p)}
-                  className="flex items-center gap-1 px-2 py-0.5 rounded bg-raised hover:bg-raised border border-line text-[8px] font-black uppercase tracking-widest text-muted hover:text-ink transition-all"
+                  className="flex items-center gap-1 px-2 py-0.5 rounded bg-raised hover:bg-raised-hover border border-line text-[8px] font-black uppercase tracking-widest text-muted hover:text-ink transition-all"
                   title={progressCollapsed ? 'Show details' : 'Hide details'}
                 >
                   {progressCollapsed ? '▼ Show' : '▲ Hide'}

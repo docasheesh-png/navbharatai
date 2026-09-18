@@ -66837,6 +66837,154 @@ The guard is what makes that discoverable instead of silent.
 session's theme work (PRs C and G) after #3071 merged. That file was deliberately NOT touched here —
 this change is server-side only.
 
+## 2026-09-18 — THE DONE SIGNAL: the engine computed "this app is finished" and threw the answer away
+
+Admin asked for this by name. What shipped is **the measurement first and the steer second**, and the
+reason for that order is recorded here because it contradicts what I told the admin the night before.
+
+**THE GAP IS REAL AND NARROW.** `assessBuildReadiness` is free, deterministic, and already runs inside
+the build loop (`shouldRunWeakCheckpoint`, every 20 steps on a weak build). It returns score, blockers,
+warnings and `ready`. `weakCheckpointSteer` reads **only the blockers**. When the answer is "this app is
+finished and healthy", nothing is said, nothing is recorded, and the loop runs on until the model itself
+stops or the step cap ends it.
+
+**🔴 THE EVIDENCE FOR THE CURE IS THINNER THAN THE EVIDENCE FOR THE GAP, AND I OVERSTATED IT.** I told
+the admin this was the second-biggest lever, citing autopsy `681bd91b` — an app finished, rendering and
+preview-published at 4:45, then 26 minutes ending in failure. Re-read against the code: **those 26
+minutes were the TYPECHECK GATE grinding a Vite scaffold the user had explicitly forbidden, not the
+model choosing to polish** — and PR #3059 already fixed that at its own root. In the other reports to
+hand (`baa0b3c7`, `e706e068`, `dd1f5f60`) the builds were genuinely BROKEN and grinding; a readiness
+scan would have said "not ready" and this signal would correctly have stayed silent.
+
+So the honest position is: **nobody knows whether builds overrun after they are done.** Building a
+loop-ending mechanism on that belief would be the E2B-rate mistake again — a derivation that sounds
+rigorous and contains a step that cannot fail.
+
+**WHAT SHIPPED.** `src/server/AgentV3/doneSignal.ts` (pure), wired in two places:
+- **The measurement (the deliverable).** `readyAt` records step, elapsed ms and score the first time a
+  build is judged finished; the route reports `READY_BEFORE_END` on EVERY build — including the ones
+  that never got there, because "never judged finished" and "finished and stopped immediately" are
+  opposite facts and a missing line would read as the second. Within days this turns the belief into a
+  number.
+- **The steer (free, and cannot break anything).** One message, once per build, riding the same user
+  message `truncationSteer` / `loopSteer` / `budgetSteer` already use. No model call, no file read.
+
+**🔒 THE BAR IS HIGHER THAN `ready`, DELIBERATELY.** `ready` answers "is anything blocking?" and its
+floor is `MIN_READY_SCORE` = 50 — chosen so a working app is never condemned. "You may stop now" is a
+much stronger claim, and saying it at 50/100 would tell a model to walk away from an app with half its
+defect budget spent. `DONE_SCORE` = 85.
+
+**🔒 IT IS A STEER, NOT A STOP — and that is a decision, not timidity.** Ending the loop ourselves would
+ship whatever exists the moment a deterministic CODE scan says 'ready'. Nothing in the loop has seen the
+app render, and the scan cannot know whether the user's request was met. Cutting a build on that trades
+a slow app for a missing one — the wrong direction under the one absolute rule. The steer therefore
+states its evidence and explicitly tells the model to **ignore it** if something requested is still
+missing.
+
+**OPEN (rule 6): should the loop END itself at the ready point?** That is the decision this measurement
+exists to answer. It must not be taken until `READY_BEFORE_END` has produced real numbers across real
+builds — and if the overruns turn out to be small, the right answer is to do nothing more.
+
+Flag `AGENTV3_DONE_SIGNAL=off` reverts to the pre-change behaviour exactly; tunables
+`AGENTV3_DONE_SIGNAL_EVERY` (10) and `_MIN_STEP` (8) fall back to their defaults on a blank or
+malformed value, never to zero. Tests: `tests/theDoneSignal.test.ts` (25 cases), both wiring halves
+proven by reversion.
+---
+
+## 2026-09-18 — 🔴 THE EVIDENCE LEDGER IS READ BACK (autopsy 697b38ee, SIXTH appearance — the write half already existed)
+
+**Admin:** *"navbharatai ab production me hai, worldclass apps se competition me hai … app ko us level
+ko match karne ke liye ya usse accha banane ke liye kuch aur behtar karo."*
+
+### Choosing the lever from evidence, not from ambition
+
+Three of my own recorded open items were re-checked against `main` first, and **two of them were wrong
+or already done** — recorded here because acting on either would have wasted a cycle:
+
+1. **Cold-resume blindness (`GRAPH_RESTORED_STUBS`, 30/30 placeholder facts)** — **ALREADY FIXED** the
+   same day by another session (report `2ec15a71`, `warmIndexFiles`). Found by reading the code, not by
+   trusting my own note.
+2. **"Overwriting `index.html` destroys the preview bridge, which caused the `useState of null`"** —
+   🔴 **THIS CLAIM OF MINE DOES NOT SURVIVE CHECKING, and I reported it to the admin as a root cause.**
+   The LIVE bridge is re-injected at dev-server start (`E2BActuator`, every boot), and the failing
+   preview was the **in-browser** renderer, which builds its own document with its own importmap
+   (`ReactPreview.ts`) and never reads the app's `index.html` for React. The real cause of that
+   `useState of null` is **not established**, and saying so is the honest position — it was a
+   plausible-sounding inference, which is exactly the "not invented is weaker than checked" lesson
+   this file already records about the E2B rate.
+3. **The graph-vs-disk area is TAKEN** — PR #3077 is open there (another session). Not touched.
+
+### The lever actually chosen — and it is the constitution's own named gap
+
+CLAUDE.md names the missing subsystem, verbatim, and has since 2026-09-14:
+
+> *"there is no shared EVIDENCE LEDGER. The agent's shell commands and the platform's gates keep
+> private notions of what has been proven, and the gates trust only their own … Until one ledger exists
+> that any actor writes a proven fact into and every verdict reads from, this class returns."*
+
+`PROGRESS.md` records it **six separate times**. It is the class behind every recent autopsy where a
+**working app was graded as unproven** — which, against Lovable/Bolt/v0, is the single most expensive
+thing this engine does: a competitor that watches your app run and then tells you it cannot say whether
+it works has lost the user, whatever else it did well.
+
+🔑 **THE FINDING THAT MADE IT SMALL: the WRITE half already exists.** `agentRunEvidence.ts` closed the
+shell-command half on 2026-09-17 and its own docblock names what it left — *"That proof does not live
+in the shell-command log at all — it is held by the page checks — so it needs the ledger's WRITE half."*
+But every actor that proves something **already records it**: `RUNTIME_VERIFIED` when the app was loaded
+in a real browser with no errors, `PREVIEW_PUBLISHED` / `PLATFORM_PREVIEW_UP` when an address really went
+up. **The build's own issue timeline IS the ledger. Nothing read it back.** The route already proves the
+pattern — `stoppedByUser` is read off that same timeline so the gate and `rootCause` *"can never tell the
+reader different stories about one build"*.
+
+So this is not a new store threaded through twelve call sites; it is the missing READ, wired at the one
+place a gate already asks what was proven.
+
+### The fix — `provenFromTimeline.ts`, wired beside `agentRunEvidence`
+
+- **`RUNTIME_VERIFIED` ⇒ `pages: 'passed'`.** ⚠️ **Mapped to `pages`, NOT `preview`, deliberately.** It
+  has exactly two producers and they disagree about the preview: `runtimeRecordFromPageChecks` fires
+  precisely when the live preview session is NOT up and says so in its own message. *"Did the app's own
+  page routes render in a real browser?"* is established by **both**, so it is the strongest claim that
+  is true either way. Telling the producers apart by parsing our own prose would be a parser over a
+  sentence we are free to reword.
+- **`PREVIEW_PUBLISHED` / `PLATFORM_PREVIEW_UP` ⇒ `previewUrlPublished`** — wording only, by that
+  field's own documented contract. It fixes the Fight-3D sentence the interface already records.
+- **A sibling module, not a branch inside `agentRunEvidence`**: that one answers *"what does the COMMAND
+  LOG settle?"* and parses shell output; this one answers *"what did an ACTOR record as proven?"* and
+  reads issue codes. One name over two sources of truth would leave a caller unable to tell which kind
+  of evidence it was trusting.
+
+🔒 **IT CANNOT CHANGE A BILL, CHECKED RATHER THAN ASSUMED.** A gate goes RED only on `!buildOk`, a check
+recorded `'failed'`, or blockers — and RED is what flips a build to `ok: false` and therefore FREE. This
+reader only promotes `'not-run'` → `'passed'`, which removes no failure and adds none. A RED build stays
+RED and free; an UNKNOWN build becomes YELLOW. **It moves the sentence, never the money** — and all four
+cases are in the suite.
+
+⚠️ **It also cannot reach GREEN on its own**, and that limit is kept on purpose: GREEN needs a journey to
+have held up, because an app that paints beautifully and saves nothing renders exactly as well as one
+that works.
+
+### Tests
+
+`tests/theLedgerIsReadBack.test.ts` — **16 cases**, built from the engine's REAL records
+(`runtimeVerifiedRecord()`, `runtimeRecordFromPageChecks()`) rather than hand-written fixtures, so a
+change to what the actors emit fails this suite instead of silently unhooking it.
+**Reversion-proven on four independent reverts**: the route's read, the severity guard, the
+`pages`-vs-`preview` mapping, and fill-vs-overwrite.
+
+### 🔴 Still open (rule 6)
+
+- **The ledger is still a READ over records that were designed as prose, not as proof.** Two readers now
+  exist (`agentRunEvidence` for the command log, `provenFromTimeline` for the timeline) and they share no
+  vocabulary. The complete subsystem is an explicit `proved(fact, source)` call an actor makes — this
+  change earns the right to it by showing the read works, and does not pretend to be it.
+- **`RUNTIME_UNCHECKED` still reaches the report through a threaded `previewRendered` boolean**
+  (`AutoFix.runtimeUncheckedRecord`) rather than through this reader. Same fact, second path; unifying
+  them touches the autofix call site and belongs with the write half.
+- **The `useState of null` from autopsy 95598899 is UNEXPLAINED** — see above. It needs the failing
+  file contents, which the report does not carry.
+- **The cancelled-build bill** (₹23.81 charged for a build that left the app broken) is unchanged and
+  still open.
 ### …and the same class one script over — Devanagari (same day, same PR)
 
 Hunting the sibling of the fix above found the India-first half, and the framing is the finding:
@@ -66966,3 +67114,279 @@ minutes.
 **Not fixed here on purpose:** `analyzeRequest`'s score also drives `startTier` and `escalationPath` for
 every build, so changing it trades one problem for a possible other (the 2026-09-13 rule) and needs its
 own change with its own evidence. Recorded, not guessed at.
+
+---
+
+## 2026-09-18 — 🔴 AN UNVERIFIED EDIT IS NOT A DELIVERY: the ₹23.81 charged for damage (autopsy 95598899)
+
+**Admin:** *"jo bacha hai woh kaam complete karo."* This is the largest item left from that autopsy, and
+the only one with real money on it.
+
+### What the bill did
+
+The user had a working 35-file marketplace. The turn overwrote four of its entry files, left the release
+gate **RED** and the app throwing `Cannot read properties of null (reading 'useState')` on load. They
+typed *"No parrot or no app, don't work on any project"* to stop it — and `decideCancelledBuildBill`
+returned the `files-saved` rate: **half of the work done, ₹23.81, for damage.**
+
+### Root cause — `files-saved` reads "files were written" as "value was delivered"
+
+Every branch of that module asks the right question — *what is the user holding?* — and the answers
+were right for every case it had: a rendering app is charged in full; nothing written is free; only our
+own template is free. **The case it could not see is the one where the user holds LESS than they
+started with.**
+
+On a FRESH build the half-charge is fair: the user now has something they did not have before and can
+resume from it. On an EDIT it can be exactly backwards, and with no verified render **nobody, including
+us, can say which.** Charging for an unverified mutation of an app that was working is precisely what
+*"working app or free"* exists to forbid — and the party that cannot show the app is fine should not be
+the one paid.
+
+### The fix — one fact, one branch, placed with care
+
+`editingExistingApp` (the route's own `isEditMode`, already in scope) is now a fact the rule reads, and
+an unverified edit returns **₹0** with a new honest delivery value, `unverified-edit`.
+
+🔒 **The ORDERING is the whole design.** It sits BELOW `appRendered`, so a **verified** edit is still
+charged in **full** — the admin's own 2026-09-15 rule (*"app bani = preview chala"*) is untouched. It
+sits below `files === 0` so a fresh build holding only our template keeps its own, more specific reason.
+And rule 3 is unbroken: every branch starts from the already-decided number, so a cancel can still only
+ever cost LESS than finishing.
+
+⚠️ **The exploit was considered and does not pay.** "Edit, stop before verification, get it free" costs
+the user a broken or unverified app to save a half-charge — and a verified edit is still billed in full,
+so the only way to reach ₹0 is to genuinely receive nothing provable.
+
+### ⚠️ A hole in my own test, found by the reversion proof and worth recording
+
+My wiring case asserted `route.toContain('editingExistingApp: isEditMode,')` — and it **PASSED with the
+billing call site deleted**, because `AgentRunner`'s options carry a field of the same name three
+thousand lines away (I added it myself in PR #3078). A wiring test any call site can satisfy tests
+nothing. It is now scoped to the `decideCancelledBuildBill({…})` argument object, and the reversion
+bites.
+
+### Tests
+
+`tests/anUnverifiedEditIsNotADelivery.test.ts` — **13 cases**, using that report's exact numbers
+(`filesWritten: 4`, `decidedBilledUsd: 0.248124`). **Reversion-proven on three independent reverts**:
+removing the branch, unwiring the route, and moving the branch above `appRendered` (which would silently
+make every verified edit free — no behavioural case above would have caught it alone, which is why the
+ORDER is pinned in the source as well).
+
+The module's existing 20 cases pass unchanged.
+
+### 🔴 Still open
+
+- **`RUNTIME_UNCHECKED` still reaches the report through a threaded `previewRendered` boolean**
+  (`AutoFix.runtimeUncheckedRecord`) rather than through `provenFromTimeline` — same fact, two paths.
+  Unifying them belongs with the evidence ledger's write half, not with a billing change.
+- **The evidence ledger's WRITE half** — an explicit `proved(fact, source)` an actor calls — remains the
+  real subsystem; today there are two readers sharing no vocabulary.
+- **The `useState of null` from this same autopsy is still unexplained.** It needs the failing file
+  contents, which the report does not carry, and no plausible-sounding guess is recorded in its place.
+
+## 2026-09-18 — Option F: a suggestion costs a suggestion's price (`AGENTV3_GREEN_REVIEW_LEAN`)
+
+Second of the series (admin: *"ek ek kar ke sabhi build karo"*). Measured on b6f88a72 from the raw
+token counts, not report fields: the reviewer made **40 calls**, read `src/App.tsx` **six times** and
+`src/index.css` five (each time told by the tool "you already have it"), spent **523,374 input tokens
+= 34.4% of the build's LLM spend ≈ ₹12.6**, and returned **`responseChars: 0` on every call**. And on
+that green app Green Stop had already made it suggest-only — no repair could run, nothing it said
+could fail the build.
+
+**The rule, reused — never a second "is the app green?" question.** `greenReviewPlan` is
+`!reviewerShouldWrite(...)`: exactly when the review can only suggest, it is also lean.
+- **Hard step cap** `GREEN_REVIEW_MAX_STEPS = 12` — a second `makeSubAgentSpawn({ ...subAgentDeps,
+  maxSteps })`. The deps object was hoisted so one wiring serves both spawns (the arity test
+  `subAgentGetsTheWholeWiring` re-anchored on the object, reason recorded in place).
+- **Budget** `reviewerBudgetMs(…, { previewGreen })` capped at `GREEN_REVIEW_BUDGET_MS = 45_000` — the
+  floor the function already refuses to go under, so a green review is never given LESS than a
+  not-green one at the wall-clock margin, only never more.
+- **The reviewer is TOLD** (`reviewBuild({ mode: 'suggest' })`): proven to render, suggest-only, read
+  each file once, do not survey, do not call `second_opinion`. The instruction became the pure,
+  exported `reviewerInstruction` so this can be asserted rather than trusted; full mode is
+  byte-identical to a review with no mode at all (test-locked).
+- Report code `REVIEW_LEAN`. Kill switch `AGENTV3_GREEN_REVIEW_LEAN=off`.
+
+**Untouched, on purpose:** where the reviewer can WRITE — not green AND (build failed OR proven
+broken) — full budget, full steps, full powers. The cut is in tokens, never strictness.
+
+⚠️ **A wrong expectation in my own first test, caught by the derived case.** I wrote that "not green,
+not proven broken, build ok" keeps the full review. `reviewerShouldWrite` says otherwise — that is the
+*could not look* state, and since 2026-08-23 ignorance is not a licence to edit, so it was already
+suggest-only. The plan correctly makes it lean; the hand-written table was wrong and the derived
+test (plan.mode === 'suggest' ⇔ !canWrite, all eight states) is what caught it. Recorded rather
+than quietly corrected.
+
+`second_opinion` needed no change: the child dispatcher is built with it withheld (SubAgent.ts,
+"positions 7-10"), which is why the Gita reviewer's call to it took 0 s.
+
+**Tests:** `tests/aSuggestionCostsASuggestionsPrice.test.ts` — 16 cases + source-anchored wiring
+guard. **Proven by reversion four ways:** the plan not asked · the budget not told · the green cap
+removed · the plan ignoring the write rule (bites two cases).
+## 2026-09-18 — Option A: a working app is never lost to later edits in the SAME build (`AGENTV3_IN_BUILD_GREEN`)
+
+Admin, verbatim: *"navbharatai dwara app banne ke baad tutni nahi chahiye!!!!!"* — the same sentence
+they wrote on 2026-08-09, which GreenGuard answered for TURNS. Read from the route's end-of-build
+call: `before: { green: hasSnapshot }` where `hasSnapshot` is a **previous** build's green snapshot.
+So on a first build — app rendering at minute 2, broken by a later step at minute 6 — there was
+nothing to restore from. Verified in the Gita build (b6f88a72): `GREEN_GUARD_SAVE` fired at t+365 s,
+after everything; no snapshot existed at t+128 s when the app first rendered.
+
+**The principle, extended one level down: a build's OWN first proven render is a last known good too.**
+
+- `inBuildGreen.ts` (pure): the evidence bar is the late check's own three refusals — never curl,
+  never inconclusive, never server-down (`isProvenGreenRender`); `shouldAttemptInBuildProof` bounds
+  attempts (one in flight, 15 s gap, stop once proven, never after abort); `attemptOutcome` names the
+  write race apart from "not yet" and "could not tell".
+- The route runs the proof BESIDE the loop (fire-and-forget on `preview` / successful `tool_result`),
+  collects the tree, and saves it to **`greenWorkspaceKey(workspaceId)` — the same key the
+  end-of-build GreenGuard reads.** No second store, no second decision. One browser open per attempt,
+  zero model calls.
+- 🔒 The snapshot must be of the tree that RENDERED: `inBuildWriteTick` is bumped on every captured
+  write and compared before the browser opens and after the files are collected. A change discards
+  the attempt (`IN_BUILD_GREEN_RACED`). A snapshot that was never proven would be restored as "the
+  working version" — worse than none.
+- Honesty: `decideGreenGuard` takes `turnStartedAt`; with `before.at` from this build the restore
+  reason says *"rendered earlier in this build"*. `greenGuardSummaryCorrection` gains `fromThisBuild`
+  — *"your change was not kept"* is FALSE for a first build whose own earlier version came back; the
+  user is told a later step broke it and the rendering version is what they see, later work saved
+  separately. Both markers are idempotent on the settle/watchdog double path.
+
+**What it does NOT do, stated plainly (and why):** it does not freeze writes and does not stop the
+build — a rendering app is not a finished app (a manifest may plan 20 files with 8 written). Only
+the worst case changes. It does not save the 10–20 minutes; that is Option E's measurement and then
+B/C on evidence. ⚠️ Semantics: the last known good is now the LATEST PROVEN RENDER, which on an edit
+turn may be a mid-edit state that renders — GreenGuard's own rule applied inside the turn.
+
+**Tests:** `tests/aWorkingAppIsNeverLostToItsOwnBuild.test.ts` — 25 cases, including a source-anchored
+wiring guard (the proof is armed BEFORE `await runner.run(buildPrompt)`, saves to GreenGuard's key,
+checks the write race, tells the guard when the build began). **Proven by reversion, four ways**, each
+restored and re-verified: the save key · the write-tick bump · `turnStartedAt` · the curl refusal.
+⚠️ One reversion's restore silently failed on the first pass (a probe string collided with existing
+text); caught by grepping the file, redone with hard-stop restores. Recorded because "the tests pass"
+after a botched restore is exactly the false green this repo warns about.
+`tests/greenGuardHonesty.test.ts` re-anchored on the multi-line facts (reason recorded in place).
+
+**Next in this series (admin: "ek ek kar ke sabhi build karo"):** F (reviewer cheap on green), then
+E (time-to-first-render + who wrote after green), then B/C on E's numbers. D never.
+---
+
+## 2026-09-18 — 🔴 FOUR VARIABLES HELD ONE FACT, AND THE TWO PRODUCERS DID NOT AGREE (evidence ledger, 7th appearance)
+
+**Admin:** *"ab next kya kya kaam bacha hai??"* — this is the first of the three items left from the
+`95598899` autopsy, and the one that turned out to have a real defect behind it rather than only a
+tidy-up.
+
+### What was left, and what hunting the sibling found
+
+The recorded item was narrow: *"`RUNTIME_UNCHECKED` still reaches the report through a threaded
+`previewRendered` boolean rather than through `provenFromTimeline` — same fact, two paths."* Reading
+the route for that threading found the paths were not two but **four**, and that they disagreed:
+
+| | `previewVerifiedRendered` | `browserRenderProven` | `buildObs.previewRendered` | the ledger |
+|---|---|---|---|---|
+| the preview verify loop | set | set | set | — |
+| **the render rescue** | set | set | **never set** | — |
+
+The two adjacent branches of ONE `if` read two different copies — `verifiedNoChangeSummary` is passed
+`previewVerifiedRendered`, and ten lines below `emptyBuildFailureSummary` is passed
+`buildObs.previewRendered`.
+
+### What the missing assignment actually cost — checked one reader at a time
+
+- 🔴 **The failure card the admin asked for could never fire for a rescued build.** The `result`
+  event's `appRendered` is that third copy, and `appRanDespiteFailedVerdict` requires it `true`. A
+  rescued app whose verdict a LATER flip returned to `ok: false` — a **stopped** build is exactly such
+  a case, since `runProvenApp` does not hold a flip for one — therefore showed the plain failure card
+  and its *"finish/fix the build so the app works end-to-end"* button. That is the admin's own
+  2026-09-14 mechanism verbatim: *"ham aise builds ko fix with ai press hote hi SACH ME TOD DETE
+  HAI"*. The half built to be durable was disarmed by a missing line.
+- 🔴 **The admin Monitor under-counted it** — both exits report `previewAllowed` from the same copy.
+- ⚠️ **The cancelled-build bill reads it too** (`appRendered: buildObs.previewRendered === true`), so a
+  Stop arriving after the rescue under-charges for an app the browser had just watched rendering —
+  against the standing 2026-09-15 rule. **Reachable by ordering; not observed in a report**, and
+  recorded as the weaker claim it is.
+- ✅ **`emptyBuildFailureSummary` was NOT affected, and saying so closes the obvious wrong
+  conclusion** — my own first reading of this. `renderRescueEligible` requires `filesWritten > 0`, and
+  that summary returns `null` on `fileCount > 0` **before** it ever reads the render. The argument is
+  dead on the rescue path.
+
+### The fix — the ledger's WRITE half, for the one fact that had none
+
+`renderProof.ts` records `APP_RENDERED` — *"a real browser opened this app and it rendered"* — and
+`provenFromTimeline` reads it back as `preview: 'passed'`. The route now has **one writer**,
+`markAppRendered(source, where)`, which sets every local copy and files the ledger fact; both
+producers call it and no producer assigns by hand any more.
+
+🔒 **Why a recorded fact and not a fourth boolean.** A boolean must be assigned at every producer, so
+a new producer is one forgotten line from this bug — which is what happened. **The 50/50 half is that
+hand-assigning is now gone**, not that the missing line was added.
+
+🔒 **Only a real browser counts, and that rule lives in the module, not at the call sites** — the same
+line `browserRenderProven` and the green-freeze latch already drew (a curl fallback's empty-shell
+render is not proof, adversarial review 2026-08-12). A non-browser source records **nothing**, rather
+than a weaker fact a later reader could mistake for proof.
+
+🔒 **It cannot move a verdict it should not.** The gate fill is fill-only (`=== 'not-run'`), so a
+preview recorded as `failed` keeps its failure; the record is `info` + `autoResolved`, so
+`shippingIssueCount` (severity-filtered) can never count it and `buildFindingSuggestions` skips it —
+registered in `NEVER_SUGGEST` as well, matching `RUNTIME_VERIFIED`.
+
+### Tests
+
+`tests/fourVariablesForOneFact.test.ts` — **22 cases**: the write half's browser-only rule, a
+writer→reader ROUND TRIP with no literal in between (the anti-drift case), the read half promoting
+only, the two producers' wiring, the consumers, and the reader this did NOT affect. **Proven by four
+independent reversions**: dropping the copy from the writer, deleting the reader's mapping, letting
+curl count as proof, and making the gate fill unconditional — each turns the suite red.
+
+### 🔴 Still open (rule 6)
+
+- **The ledger's write half is now real for ONE fact.** `typecheck`, `tests` and this render proof are
+  read back; an explicit `proved(fact, source)` every actor calls is still the subsystem.
+- **The `useState of null` from autopsy `95598899` remains unexplained** — it needs the failing file's
+  contents, which the report does not carry, and no plausible-sounding guess is recorded in its place.
+
+## 2026-09-18 — A hover that repeats the resting background is not a hover (follow-up to #3070)
+
+**Found while auditing #3070 for the admin's standing instruction that no PR may compromise another
+feature.** The theme migration was clean on every axis it measured — literals down 11,487 → 2,825, AA
+green on all three themes, embedded snippets untouched — and it still shipped a real interaction
+regression that none of its gates could see.
+
+**The defect, in one line: the app's old idiom was `bg-white/10 hover:bg-white/15`, and BOTH alphas map
+to the single `bg-raised` token.** So the codemod emitted `bg-raised hover:bg-raised` **105 times**, and
+on **76 of those controls there was no other hover feedback of any kind** — a button simply stopped
+answering the pointer. Nothing failed anywhere: the classes are valid, `tsc` and the suite are silent on
+behaviour, the ratchet counts *literals* rather than *outcomes*, and every contrast check passed because
+the hover colour was, by construction, the colour that had already passed.
+
+🔒 **Fixed as one collapsed mapping, not as 105 sites.** Two real surfaces per theme — `--surface-raised-hover`
+and `--surface-well-hover` — exposed through `@theme inline` as `bg-raised-hover` / `bg-well-hover`, and
+the 107 class attributes rewritten to use them (29 files). A site whose hover was already a *different*
+surface was left alone, and a template literal carrying markup was skipped, because that is somebody
+else's app — the same exclusion `maskEmbeddedSources` makes.
+
+**The rule the values follow, so a fourth theme does not have to re-derive it: a hover moves the surface
+toward the theme's INSET end (the `well` direction), never toward its text.** On dark that is darker, on
+light darker, and on High contrast the only direction black can move. Contrast therefore *improves* on
+hover on every theme, which is what let this ship without re-tuning the palette.
+
+⚠️ **One palette value did have to move, and it is worth recording why.** Light's `--text-faint` was set
+to `#5b6b82` by the 2026-09-18 audit precisely because `#64748b` measured 4.23 on `--surface-raised` — and
+`#5b6b82` measures **4.40 on the new hover surface**, i.e. the hover state would have re-created the exact
+defect that audit removed, one step later. It is now `#57677e` (4.73), still lighter than `--text-muted`,
+so the body > muted > faint hierarchy is unchanged. `surface-raised-hover` was added to the AA lock's
+`SURFACES` list, so all ten text tokens are checked against it for every theme from now on.
+
+**Tests:** `tests/hoverIsNotANoOp.test.ts` (7 cases). It asserts no client file pairs a resting surface
+with the same surface on hover, that each theme declares both hover surfaces, and that the lift is large
+enough to SEE (> 7%) — a token differing in its last hex digit would otherwise pass and be invisible,
+which is the same "nothing failed" outcome in a new costume. **Reversion-proven in both halves:**
+restoring one `hover:bg-raised` fails the scanner by name, and setting `--surface-raised-hover` back to
+`--surface-raised` fails both the repeat check and the lift check.
+
+**Open, deliberately not done here:** `bg-card` and `bg-surface` have no hover partner, because nothing
+in the app currently hovers them onto themselves — the scanner covers all four surfaces, so the day one
+appears it fails rather than shipping silently.

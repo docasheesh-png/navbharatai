@@ -1469,11 +1469,23 @@ the code (it is actually read somewhere) on 2026-07-11.
   "kimi-k2.7-code always reasons" purely because the id failed a `startsWith('glm-')` check, handing an
   unbounded budget to a vendor nobody has measured. So the new predicate is FALSE for every non-GLM
   vendor, which keeps today's clamp for them exactly.
-  🔴 **STILL OPEN (rule 6): the Kimi sibling.** Report 58fe8254 shows the same `outputTokens: 4833`
-  starvation three times on Kimi, so the class is not GLM-only — but this repo holds no capability fact
-  for Moonshot's models, and inventing one would be a guess. The honest generic fix (remember a rung
-  that starved and unclamp its NEXT call) needs cross-turn state the per-rung runner construction does
-  not currently carry. Recorded, not guessed at.
+  ✅ **THE KIMI SIBLING IS CLOSED — corrected 2026-09-18, because this paragraph still said it was
+  open and sent a session to rebuild what already exists.** It read: *"STILL OPEN (rule 6): the Kimi
+  sibling … this repo holds no capability fact for Moonshot's models, and inventing one would be a
+  guess. The honest generic fix (remember a rung that starved and unclamp its NEXT call) needs
+  cross-turn state the per-rung runner construction does not currently carry."* **Both halves now
+  exist**, verified against `main` rather than taken from this file:
+  • **The capability fact is MEASURED, not guessed** — `MEASURED_ALWAYS_REASONS = ['kimi-k2.7-code']`
+    in `providers/glmThinking.ts`, derived from two independent admin reports (`58fe8254`, four
+    starvations; `d98dae01`, two more) and matching `-highspeed` by prefix because it is the same model
+    served faster. `kimi-k3` is deliberately NOT in it — nobody has measured it.
+  • **The cross-turn state exists** — `rememberStarvedWhileClamped` / `modelStarvedWhileClamped`
+    (`providers/OpenAiToolRunner.ts`), a per-process memory fed from the starvation throw and read at
+    `reconcileFloorBudget`'s `alwaysReasons`, so a model that starves ONCE while clamped is never
+    clamped again in that process.
+  ⚠️ **The lesson is safeguard #6 applied to this file itself: a "STILL OPEN" note is a claim with a
+  date on it, and the code moves under it.** Re-grep before acting on one — an open item that is
+  actually closed costs a session the same investigation twice, and this one nearly did.
   🔒 **Honesty half:** a rung that starves with the clamp ALREADY LIFTED must not be reported as "our
   own ceiling" — that sentence would send the next autopsy to fix arithmetic that is already correct.
   `isUnclampedStarvation` splits the two wordings in `BuildDiagnostics`. Test-locked and proven by
@@ -2244,6 +2256,47 @@ the flag entries above promise.
   page's self-retry is CAPPED (~2 min) because a door hit RESUMES a paused sandbox — uncapped, an
   abandoned open tab would fight the idle reaper forever at real E2B cost; (2) `off` stops both minting
   and answering, and the client falls back to the old stored-URL behaviour byte-identically.
+- **`AGENTV3_IN_BUILD_GREEN`** (default ON, set `off` to disable — added 2026-09-18, admin: *"navbharatai
+  dwara app banne ke baad tutni nahi chahiye!!!!!"*) — **a working app is never lost to later edits in the
+  SAME build.** GreenGuard (2026-08-09, the admin's identical sentence then) restores a PREVIOUS build's
+  green snapshot when a turn ends proven-broken — so on a first build, where the app rendered at minute 2
+  and a later step broke it, there was nothing to restore from. Now the build's OWN first proven render
+  (real browser, same judge and same three refusals as the late check: never curl, never inconclusive,
+  never server-down) is saved as the last known good **to the same key GreenGuard reads**, so the
+  end-of-build restore path covers the case the admin described with no second store and no second rule.
+  Logic in `inBuildGreen.ts` (pure); the I/O half runs BESIDE the loop in `routes/agentv3.ts`
+  (`attemptInBuildGreen`), fire-and-forget on a `preview`/`tool_result` event, one browser open per
+  attempt bounded by `MIN_ATTEMPT_GAP_MS` (15 s), zero model calls, every failure swallowed.
+  ⚠️ **It does NOT freeze writes and does NOT stop the build** — a rendering app is not a finished app;
+  only the worst case changes (the version that rendered comes back, with an honest note). 🔒 **The
+  snapshot must be of the tree that RENDERED:** a write counter is compared before the browser opens and
+  after the files are collected; a change discards the attempt (`IN_BUILD_GREEN_RACED`) and a later
+  trigger retries. ⚠️ **Semantics, stated plainly:** the last known good is now the LATEST PROVEN
+  RENDER, which on an edit turn may be a mid-edit state that renders — GreenGuard's own rule ("green now
+  → save it"), applied inside the turn. Report codes `IN_BUILD_GREEN` / `_RACED` / `_NOT_YET` /
+  `_UNCHECKED`; the restore's reason and the user's summary correction say "earlier in this build"
+  instead of "your change was not kept" when the snapshot is this build's own (`turnStartedAt`,
+  `fromThisBuild`). Test-locked and reversion-proven four ways in
+  `tests/aWorkingAppIsNeverLostToItsOwnBuild.test.ts`. **What to watch:** `IN_BUILD_GREEN` appearing
+  a minute or two into builds, and `GREEN_GUARD_RESTORED` on FIRST builds — which was impossible before.
+- **`AGENTV3_GREEN_REVIEW_LEAN`** (default ON, set `off` to disable — added 2026-09-18, autopsy b6f88a72) —
+  **a suggestion costs a suggestion's price.** `reviewerShouldWrite` (Green Stop) already makes the
+  post-build reviewer suggest-only on a proven-green app — no repair, nothing it says can fail the
+  build — yet it ran at full budget and the full 40-step sub-agent cap: on the Gita build **40 calls,
+  `src/App.tsx` read six times, 523,374 input tokens = 34% of the build's LLM spend, zero characters
+  back.** Now `greenReviewPlan` (`greenReviewPolicy.ts`) is that SAME write rule reused — never a
+  second "is it green?" question — and exactly when the review can only suggest it is also lean: a
+  hard step cap (`GREEN_REVIEW_MAX_STEPS` = 12, a second `makeSubAgentSpawn` from the hoisted
+  `subAgentDeps`), a 45 s budget (`GREEN_REVIEW_BUDGET_MS`, the existing floor, via
+  `reviewerBudgetMs(…, { previewGreen })`), and an instruction that says so (`reviewBuild({ mode:
+  'suggest' })`, built by the now-pure `reviewerInstruction`). ⚠️ **Where the reviewer can WRITE —
+  not green AND (build failed OR proven broken) — nothing changes: full budget, full steps.** The cut
+  is in TOKENS, never in strictness. ⚠️ "Could not look" (not green, not proven broken, build ok) is
+  ALSO lean, on purpose: Green Stop already made it suggest-only (*ignorance is not a licence to
+  edit*, 2026-08-23), so an offer costs an offer's price there too. Report code `REVIEW_LEAN`.
+  Test-locked and reversion-proven four ways in `tests/aSuggestionCostsASuggestionsPrice.test.ts`.
+  **What to watch:** reviewer token share on green builds (34% → single digits expected), and that
+  the reviewer's findings on NOT-green builds are as complete as before.
 - **`AGENTV3_JOURNEY_CHECK`** (default ON, set `off` to disable) — after a successful build with a live
   preview, derives a real user journey from the app's OWN markup and runs it in the sandbox's pre-baked
   browser: fill the form, submit, **reload, and check the item is still there**. That last step is the

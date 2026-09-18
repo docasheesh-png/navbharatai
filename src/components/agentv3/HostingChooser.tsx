@@ -31,6 +31,7 @@ import { backendDeployOffer, DEPLOY_BACKEND_LABEL, type BackendKeySource, should
 import { managedDeployRequest, managedDeployOutcome, renderConnectSteps } from '../../lib/backendDeployWiring';
 import { LONG_REQUEST_TIMEOUT_MS, fetchFailureLine, isFetchTimeout } from '../../lib/longRequest';
 import { advancedPublishStartsOpen, ADVANCED_PUBLISH_LABEL, ADVANCED_PUBLISH_HINT } from '../../lib/advancedPublish';
+import { FREE_PUBLISHED_APPS } from '../../lib/hostingTiers';
 import {
   DEPLOY_BACKEND_FAILURE, PROVISION_DB_FAILURE, PUSH_APP_FAILURE, PUSH_APP_UNCONFIRMED_LINE,
   pushSavedLine, repoFactOf, type PushAppResult,
@@ -986,7 +987,12 @@ export function HostingChooser({
             <ul className="text-[11px] text-muted flex flex-col gap-1 mt-0.5">
               <li>• Instant publish — nothing to set up</li>
               <li>• Frontend now · full app (backend + DB) coming soon</li>
-              <li>• 5 apps free · updating one you published is always free</li>
+              {/* The NUMBER comes from the same constant the server enforces and the plan screen quotes
+                  — never a literal. It read "5 apps free" while `publishedAppCap()` refused the FOURTH
+                  publish, so this card and the error printed directly above it (admin's own capture,
+                  2026-09-18: "free limit of 3") contradicted each other on one screen. The drifted-copy
+                  class, in a string: nothing type-checks a number written in prose. */}
+              <li>• {FREE_PUBLISHED_APPS} apps free · updating one you published is always free</li>
               <li>• Fair-use limits apply (per-publish size + safety scan)</li>
             </ul>
             <button
@@ -1172,7 +1178,7 @@ export function HostingChooser({
                         {cfgErrors.length > 0 && <ul className="text-[10.5px] text-danger list-disc pl-4">{cfgErrors.map((e, i) => <li key={i}>{e}</li>)}</ul>}
                         {cfgNote && <p className="text-[10.5px] text-success">{cfgNote}</p>}
                         <button onClick={() => void saveSettings()} disabled={cfgBusy}
-                          className="self-start px-3 py-1.5 rounded-lg bg-raised hover:bg-raised text-ink text-[11px] font-semibold disabled:opacity-50">
+                          className="self-start px-3 py-1.5 rounded-lg bg-raised hover:bg-raised-hover text-ink text-[11px] font-semibold disabled:opacity-50">
                           {cfgBusy ? 'Saving…' : 'Save settings'}
                         </button>
                       </>
@@ -1417,6 +1423,51 @@ export function HostingChooser({
             </button>
             <p className="text-[11px] text-faint leading-relaxed">
               Needs GitHub connected · paid step — the builder shows the price before you build.
+            </p>
+          </div>
+
+          {/*
+            Path 4 — PUT IT ON APP MART (admin 2026-09-18: "publish on app mart button wapas lao").
+
+            🔴 THIS BUTTON IS A DOOR, NOT A SECOND PUBLISH FORM, AND THE DIFFERENCE IS THE WHOLE
+            POINT. An embedded App Mart publish CARD used to live in this sheet and was removed
+            deliberately (#2986, admin's own instruction: hosting and App Mart are two separate
+            decisions on their own screens). Re-creating that card would also re-create a SECOND
+            caller of `/api/navstore/publish` — and `NavAppStore.tsx`'s own comment records that it
+            is "now the ONLY caller of the endpoint that bug was fixed for" (the 2026-08-27
+            infinity-loading report). One publish implementation, reachable from here.
+
+            So it navigates, carrying BOTH the tab and THIS app, so the user lands on the publish
+            form with their app already chosen rather than on Browse hunting for it.
+          */}
+          <div className="rounded-xl border border-violet-800/50 bg-violet-500/10 p-4 flex flex-col gap-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[13px] font-bold text-ink">Put it on App Mart</span>
+              <span className="text-[9px] font-black uppercase tracking-widest text-accent-text bg-violet-500/10 px-2 py-0.5 rounded-full">STORE</span>
+            </div>
+            <p className="text-[11.5px] text-muted leading-relaxed">
+              List this app on NavBharatAI&apos;s own store, where anyone can open it instantly — no
+              install, no Play Store.
+            </p>
+            <ul className="text-[11px] text-muted flex flex-col gap-1 mt-0.5">
+              <li>• Free to list · opens in one tap</li>
+              <li>• Your name, icon &amp; description</li>
+              <li>• Reviewed before it goes live</li>
+            </ul>
+            <button
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('navbharat:navigate', {
+                  detail: { view: 'appstore', storeTab: 'publish', storeWorkspaceId: workspaceId },
+                }));
+                onClose();
+              }}
+              className="mt-auto w-full py-2.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-on-accent text-xs font-bold flex items-center justify-center gap-2 transition-colors"
+            >
+              <Rocket className="w-3.5 h-3.5" />
+              Publish on App Mart
+            </button>
+            <p className="text-[11px] text-faint leading-relaxed">
+              Opens App Mart with this app selected — publishing there is a separate step from hosting.
             </p>
           </div>
 

@@ -15,7 +15,7 @@
 // cheap start costs ~₹0 and the evaluate-gate catches failures and escalates, so leaning
 // cheap is safe AND is the whole point (a new user's calculator must not cost a fortune).
 
-import { isComplexAppPrompt } from '../lib/appComplexitySignals';
+import { isComplexAppPrompt, namesBusinessDomain, SIMPLE_APP_SIGNAL } from '../lib/appComplexitySignals';
 
 export type StartTier = 'gemini' | 'haiku' | 'sonnet' | 'opus';
 
@@ -119,8 +119,10 @@ const RE = {
   greeting: /\b(hi|hello|hey|namaste|namaskar|kaise ho|how are you|thanks|thank you|dhanyaiwad|shukriya|good morning|good evening)\b/i,
   translate: /\b(translate|translation|anuvad|in hindi|in english|convert to)\b/i,
   summary: /\b(summar(y|ize|ise)|tl;?dr|in short|key points|gist)\b/i,
-  // Simple, self-contained apps cheap models build reliably.
-  simpleApp: /\b(calculator|calc|clock|stopwatch|stop-watch|timer|todo|to-do|to do list|counter|dice|ludo|tic[\s-]?tac[\s-]?toe|snake game|memory game|quiz|flashcard|stopwatch|weather widget|color picker|qr code|bouncing ball|3d ball|landing page|portfolio page|single page|simple website|note app|notes app)\b/i,
+  // Simple, self-contained apps cheap models build reliably. The LIST now lives in
+  // `appComplexitySignals` beside the complex one, so "is this big?" and "is this one of the small
+  // ones?" cannot be answered from two drifting copies — `namesBusinessDomain` guards on it too.
+  simpleApp: SIMPLE_APP_SIGNAL,
   coding: /\b(function|component|html|css|javascript|typescript|react|vue|svelte|sql query|regex|snippet|small (fix|bug|utility)|api example|documentation|readme)\b/i,
   debugging: /\b(debug|error|not working|doesn'?t work|broken|crash|exception|stack trace|fix the bug|failing test|why is)\b/i,
   architecture: /\b(architecture|architect|system design|scalable|microservice|micro-service|refactor (the|entire|whole)|design pattern|high[- ]availability|distributed|infrastructure|migrate the|production[- ]grade|enterprise)\b/i,
@@ -140,6 +142,17 @@ function detectTaskType(p: string): TaskType {
   if (RE.translate.test(p)) return 'translate';
   if (RE.coding.test(p)) return 'coding';
   if (RE.greeting.test(p)) return 'chat';
+  /**
+   * 🔴 LAST RESORT, AND THE ONLY PLACE THIS MODULE KNOWS NOTHING — so a prompt that names a real
+   * business domain stops scoring 5, the same as "hi" (admin's failure table, 2026-09-18).
+   *
+   * Every check above has already declined, so nothing correct is being overruled: this fires only
+   * where the previous line was an unconditional `return 'chat'`. Exactly the placement, and the
+   * reasoning, of the unreadable-script floor documented below — raise the floor where there is no
+   * evidence, never move a verdict that has some. See `namesBusinessDomain` for the two guards and
+   * for why the platform's OWN domain classifier answers this instead of a third keyword list.
+   */
+  if (namesBusinessDomain(p)) return 'complex_app';
   return 'chat';
 }
 

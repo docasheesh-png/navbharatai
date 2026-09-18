@@ -35,6 +35,7 @@
 // PURE: no clock, no environment, no I/O. Every rule here is unit-testable and cannot lie.
 
 import { realProviderCostUsd, type ProviderCostEntry } from './providerRates';
+import { NO_BARREN_PHASES, type BarrenPhases } from './billingPhase';
 
 /** The token counts of one turn, in the shape the ledger and the rate card both already use. */
 export interface UnbilledTokens {
@@ -55,6 +56,8 @@ export interface UnbilledTokens {
 export interface UnbilledAwareEntry extends ProviderCostEntry {
   usage: ProviderCostEntry['usage'] & { cacheReadInputTokens?: number };
   unbilled?: UnbilledTokens;
+  /** Which part of the build spent this slice — see `billingPhase.ts`. */
+  phase?: string;
 }
 
 /** Non-finite and negative counts are dropped rather than trusted. */
@@ -77,10 +80,22 @@ export function addUnbilled(into: UnbilledTokens, add: UnbilledTokens): void {
  * Clamped at zero per field, so a malformed `unbilled` larger than its own slice can only ever bill
  * the user LESS — the only direction the billing law permits being wrong in. Returns NEW objects;
  * the input is never mutated, because the caller still needs the full figures for OUR cost.
+ *
+ * A slice belonging to a BARREN PHASE is unbilled in its ENTIRETY, whatever its own `unbilled` says.
+ * 🔒 That is a UNION, never a sum: a starved turn inside a barren pass is already counted in
+ * `unbilled`, and adding the two would subtract the same tokens twice and hand back money we never
+ * spent. Taking the whole slice is idempotent — the two rules may overlap freely and the answer does
+ * not move.
  */
-export function billableEntries(entries: readonly UnbilledAwareEntry[]): ProviderCostEntry[] {
+export function billableEntries(
+  entries: readonly UnbilledAwareEntry[],
+  barrenPhases: BarrenPhases = NO_BARREN_PHASES,
+): ProviderCostEntry[] {
   if (!Array.isArray(entries)) return [];
   return entries.map((e) => {
+    if (e.phase && barrenPhases.has(e.phase)) {
+      return { provider: e.provider, ...(e.model ? { model: e.model } : {}), usage: { inputTokens: 0, outputTokens: 0 } };
+    }
     const u = e.unbilled;
     if (!u) return { provider: e.provider, ...(e.model ? { model: e.model } : {}), usage: { ...e.usage } };
     const inputTokens = Math.max(0, clean(e.usage.inputTokens) - clean(u.inputTokens));
@@ -103,14 +118,16 @@ export function billableEntries(entries: readonly UnbilledAwareEntry[]): Provide
  * DERIVED as the difference rather than priced separately — so the two can never disagree, and an
  * explanation shown to the admin can never diverge from the amount actually charged. The
  * `remainder` (the unattributed aux calls) is billable by definition: we have no per-turn record of
- * it at all, so we cannot claim any of it produced nothing.
+ * it at all, so we cannot claim any of it produced nothing — and it carries no phase either, so a
+ * barren phase can never reach it.
  */
 export function splitUnbilledCost(
   entries: readonly UnbilledAwareEntry[],
   remainder: { inputTokens: number; outputTokens: number } = { inputTokens: 0, outputTokens: 0 },
+  barrenPhases: BarrenPhases = NO_BARREN_PHASES,
 ): { realCostUsd: number; billableCostUsd: number; absorbedCostUsd: number } {
   const realCostUsd = realProviderCostUsd(entries as ProviderCostEntry[], remainder);
-  const billableCostUsd = realProviderCostUsd(billableEntries(entries), remainder);
+  const billableCostUsd = realProviderCostUsd(billableEntries(entries, barrenPhases), remainder);
   // Clamped, and never allowed to exceed the real cost: absorbing more than we spent would be an
   // invented number, which is the one thing the billing law forbids in either direction.
   const absorbedCostUsd = Math.min(realCostUsd, Math.max(0, realCostUsd - billableCostUsd));

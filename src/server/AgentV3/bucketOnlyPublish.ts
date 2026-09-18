@@ -61,6 +61,61 @@ export function isBucketOnlySubdomain(sub: string): boolean {
   return new RegExp(`^${BUCKET_ONLY_PREFIX}[0-9a-f]{${HASH_LEN}}$`).test(String(sub ?? ''));
 }
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// 🔴 THE CEILING WAS NEVER THE PUBLISHES (admin Monitor capture, 2026-09-18).
+//
+// Bucket-only publishing had been live and verified for a day, and the channel count still climbed:
+// 43 → 46 with the flag on. Every id in the admin's "wasted channels" list began `sn-`, which is
+// `snapshotChannelId`, not `makeChannelId`. **Preview SNAPSHOTS were eating the pool.**
+//
+// A snapshot is the saved `dist/` of a green build, kept so a finished app survives its sandbox
+// pausing. It is created on every green build, it is pure static files, and NOTHING in the entire
+// server ever deletes one — `snapshotChannelId` appears at exactly two places: the line that builds
+// the id and the line that deploys to it. So the pool grew by one channel per workspace that ever
+// built successfully, for ever, and no amount of bucket-only publishing could touch it: the bucket
+// branch in `deployStatic` was gated on the channel being the PUBLISH channel, and a snapshot passes
+// its own id by design.
+//
+// A snapshot is static files served over a URL. That is precisely what the bucket already does for
+// publishes, and the Cloudflare Worker resolves ANY `<sub>.<domain>` against `apps/<sub>/`, so this
+// needs no edge change. Its own prefix keeps the three namespaces disjoint by construction:
+//   `v3-…`  Firebase publish channel     `a-…`  bucket-only PUBLISH     `s-…`  bucket SNAPSHOT
+// A snapshot must never be able to overwrite what somebody deliberately published — the same rule
+// that gave it a separate Firebase channel in the first place, carried into the bucket.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The prefix marking a bucket object set as a build SNAPSHOT. Never `a-` (publish) or `v3-`. */
+export const SNAPSHOT_BUCKET_PREFIX = 's-';
+
+/**
+ * The public subdomain a workspace's build snapshot is served from. Same hash discipline as
+ * `bucketOnlySubdomain`, different namespace, so a snapshot can never collide with a published app.
+ * Deterministic, so a rebuild overwrites the same objects instead of accumulating new ones. Pure.
+ */
+export function snapshotSubdomain(workspaceId: string): string {
+  const digest = crypto.createHash('sha256').update(String(workspaceId ?? '')).digest('hex').slice(0, HASH_LEN);
+  return `${SNAPSHOT_BUCKET_PREFIX}${digest}`;
+}
+
+/** Whether a subdomain is a build snapshot's. */
+export function isSnapshotSubdomain(sub: string): boolean {
+  return new RegExp(`^${SNAPSHOT_BUCKET_PREFIX}[0-9a-f]{${HASH_LEN}}$`).test(String(sub ?? ''));
+}
+
+/**
+ * May a build snapshot be served from the bucket instead of a Firebase channel?
+ *
+ * Requires everything bucket-only publishing requires (the bucket, the branded domain, the master
+ * switch), because it is the same infrastructure and a half-configured one hands out dead links.
+ * `AGENTV3_SNAPSHOT_BUCKET=off` reverts snapshots alone to Firebase channels without touching
+ * publishing — two behaviours that ride one switch is how a revert becomes a bigger decision than it
+ * should be.
+ */
+export function snapshotBucketEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (String(env.AGENTV3_SNAPSHOT_BUCKET ?? '').trim().toLowerCase() === 'off') return false;
+  return bucketOnlyPublishEnabled(env);
+}
+
 /** The branded domain published apps are served on, '' when unset. */
 export function publishedAppDomain(env: NodeJS.ProcessEnv = process.env): string {
   return String(env.PUBLISHED_APP_DOMAIN || '').trim().replace(/^\.+|\.+$/g, '');

@@ -200,6 +200,7 @@ export class AIRouter {
       try {
         const winner = await Promise.any(attempts);
         console.log(`[RACE] won by ${winner.name}`);
+        recordRouterOutcome(true);
         return {
           response: winner.response,
           telemetry: { provider: winner.name, retries: errors.length, latency: winner.response.latencyMs, success: true },
@@ -218,6 +219,7 @@ export class AIRouter {
         console.log(`[RACE] last-resort: ${p.name}`);
         const response = assertNonEmpty(await p.execute(prompt, undefined, undefined, systemPrompt, images), p.name);
         recordProviderLatency(p.name, Date.now() - t, false);
+        recordRouterOutcome(true);
         return {
           response,
           telemetry: { provider: p.name, retries: errors.length, latency: response.latencyMs, success: true, fallbackReason: errors.length ? `Race failed: ${errors.slice(0, 3).join('; ')}` : undefined },
@@ -232,6 +234,7 @@ export class AIRouter {
     }
 
     console.error('[RACE] race + last-resort all failed:', errors);
+    recordRouterOutcome(false);
     return {
       response: { content: 'The AI service is temporarily busy. Please try again in 1-2 minutes. 🙏', latencyMs: 0, provider: 'GEMINI', model: 'fallback' },
       telemetry: { provider: 'NONE', retries: errors.length, latency: 0, success: false },
@@ -458,6 +461,7 @@ export class AIRouter {
           const latency = Date.now() - startTime;
           console.log(`[ROUTER] ${provider.name} SUCCESS in ${latency}ms`);
           recordProviderLatency(provider.name, latency, false);
+          recordRouterOutcome(true);
 
           return {
             response,
@@ -484,6 +488,7 @@ export class AIRouter {
 
     // All 4 providers failed both passes — last-resort graceful message
     console.error('[ROUTER] ALL PROVIDERS FAILED:', errors);
+    recordRouterOutcome(false);
     return {
       response: {
         content: 'The AI service is temporarily busy. Please try again in 1-2 minutes. 🙏',
@@ -494,6 +499,46 @@ export class AIRouter {
       telemetry: { provider: 'NONE', retries: errors.length, latency: 0, success: false },
     };
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// 🔴 A LADDER RUNG THAT FAILED IS NOT A USER WHO WAS REFUSED (admin Monitor capture, 2026-09-18).
+//
+// The admin's board showed **AI load: 50% refused**, in red, under the words *"Engines are refusing
+// requests."* Nobody had been refused. `recordProviderLatency` is called once per ATTEMPT, and this
+// router's whole design is to walk down a ladder: the free leader is rate-limited, the next rung
+// answers, the user gets their reply. That is one success and one error, which is exactly 50%.
+//
+// So the number rose when the fallback was doing its job, and it reset to nothing on every deploy,
+// which is how a two-attempt sample came to be painted as a platform-wide refusal rate.
+//
+// The honest question is per REQUEST: did this person get an answer? That is what these two counters
+// hold, and the per-provider accumulator below is left exactly as it is — it answers a different,
+// still-useful question (which vendor is flaky), and the admin board simply stopped asking it the
+// wrong one.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+const routerOutcomes = { requests: 0, failed: 0 };
+
+/** Record ONE user-facing routing request and whether the user ended up with an answer. */
+export function recordRouterOutcome(success: boolean): void {
+  routerOutcomes.requests += 1;
+  if (!success) routerOutcomes.failed += 1;
+}
+
+/**
+ * Requests served by this process since boot, and how many ended with NO answer from any provider.
+ *
+ * ⚠️ Per PROCESS and since BOOT, like every counter in this module — it resets on each deploy. A
+ * caller that grades it must say so, or a small sample reads as a platform verdict.
+ */
+export function getRouterOutcomeStats(): { requests: number; failed: number } {
+  return { ...routerOutcomes };
+}
+
+/** Test-only reset. */
+export function _resetRouterOutcomes(): void {
+  routerOutcomes.requests = 0;
+  routerOutcomes.failed = 0;
 }
 
 // Per-provider latency accumulator for stats

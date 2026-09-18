@@ -777,8 +777,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
    * nobody clicks is not a warning, and the cost is one channel list, not 500 build documents.
    */
   const [channels, setChannels] = useState<{
-    verdict: { used: number; cap: number; remaining: number; reclaimable: number; level: 'ok' | 'warn' | 'critical'; message: string };
-    channels: Array<{ channelId: string; url: string; updateTime: string | null; state: 'live' | 'stale' | 'unknown' | 'indeterminate' | 'default'; workspaceId: string | null; reclaimable: boolean }>;
+    verdict: { used: number; cap: number; remaining: number; reclaimable: number; snapshots?: number; level: 'ok' | 'warn' | 'critical'; message: string };
+    // `snapshot` is a saved copy of a build rather than a published app (channelInventory.ts). It has
+    // no deployment record BY DESIGN, which is why it used to classify as an orphaned app here.
+    channels: Array<{ channelId: string; url: string; updateTime: string | null; state: 'live' | 'stale' | 'unknown' | 'indeterminate' | 'default' | 'snapshot'; workspaceId: string | null; reclaimable: boolean }>;
   } | null>(null);
   const [channelsError, setChannelsError] = useState('');
   const [reclaiming, setReclaiming] = useState('');
@@ -891,6 +893,48 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     finally { setReclaiming(''); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken, fetchChannels]);
+
+  /**
+   * RECLAIM EVERY WASTED CHANNEL, ONE PRESS (admin 2026-09-18).
+   *
+   * The capture that prompted this carried THIRTY-SEVEN reclaimable channels, each with its own
+   * button. Clearing the backlog was the action the panel kept recommending and the one thing it made
+   * impractical.
+   *
+   * 🔒 SEQUENTIAL, AND IT STOPS AT THE FIRST REFUSAL. Each reclaim is a DELETE, and the route refuses
+   * one it cannot prove is waste (an incomplete registry, a live channel). Firing them in parallel
+   * would turn one refusal into a race nobody can read, and carrying on past it would mean deleting
+   * while the server has just said it cannot tell what these are. The list is re-read once at the end
+   * rather than after each, so the panel does not flicker through 37 states.
+   */
+  const [reclaimingAll, setReclaimingAll] = useState<{ done: number; total: number } | null>(null);
+  const reclaimAllChannels = useCallback(async () => {
+    const targets = (channels?.channels ?? []).filter((c) => c.reclaimable).map((c) => c.channelId);
+    if (targets.length === 0) return;
+    if (!window.confirm(
+      `Reclaim ${targets.length} channel(s)?\n\nThis deletes each one from Firebase Hosting. Saved copies of `
+      + 'builds come back on the next build. Anything the server cannot prove is waste is refused and stops this.',
+    )) return;
+    setReclaimingAll({ done: 0, total: targets.length });
+    let done = 0;
+    try {
+      for (const channelId of targets) {
+        const r = await fetch(`/api/admin/hosting/channels/${encodeURIComponent(channelId)}/reclaim`, { method: 'POST', headers });
+        const d = await r.json().catch(() => ({}));
+        if (!d?.ok) { toast(d?.error || `Stopped at ${channelId} — it was NOT removed.`); break; }
+        done += 1;
+        setReclaimingAll({ done, total: targets.length });
+      }
+      toast(done === targets.length ? `Reclaimed ${done} channel(s).` : `Reclaimed ${done} of ${targets.length}, then stopped.`);
+    } catch (e) {
+      console.error(e);
+      toast(`Reclaimed ${done} channel(s), then the request failed.`);
+    } finally {
+      setReclaimingAll(null);
+      await fetchChannels();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken, channels, fetchChannels]);
 
   /**
    * SANDBOX HANDOVER (Phase 0 of IN_BROWSER_PREVIEW_PLAN.md) — where a sandbox's billed life goes.
@@ -1855,15 +1899,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
                       {channels.channels.some((c) => c.reclaimable) && (
                         <div className="mt-4 space-y-2">
-                          <p className="text-[10px] font-black uppercase tracking-wider text-[#8b949e]">
-                            Wasted channels — no live app is using these
-                          </p>
+                          <div className="flex items-center justify-between gap-3 flex-wrap">
+                            <p className="text-[10px] font-black uppercase tracking-wider text-[#8b949e]">
+                              Reclaimable channels — no live app is using these
+                            </p>
+                            <button
+                              onClick={() => void reclaimAllChannels()}
+                              disabled={!!reclaimingAll || !!reclaiming}
+                              className="shrink-0 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-red-600/20 border border-white/10 text-[10px] font-black uppercase tracking-wider text-white/70 hover:text-red-300 disabled:opacity-40"
+                            >
+                              {reclaimingAll ? `Reclaiming ${reclaimingAll.done}/${reclaimingAll.total}…` : 'Reclaim all'}
+                            </button>
+                          </div>
                           {channels.channels.filter((c) => c.reclaimable).map((c) => (
                             <div key={c.channelId} className="flex items-center justify-between gap-3 rounded-xl bg-black/20 border border-white/5 px-3 py-2">
                               <div className="min-w-0">
                                 <p className="text-[11px] font-mono text-white/80 truncate">{c.channelId}</p>
                                 <p className="text-[10px] text-[#8b949e] truncate">
-                                  {c.state === 'unknown'
+                                  {c.state === 'snapshot'
+                                    /* A build copy, not an app. It never had a record, by design — and
+                                       the next green build writes it again, so clearing it is safe. */
+                                    ? 'A saved copy of a build, not a published app. It returns on the next build.'
+                                    : c.state === 'unknown'
                                     /* No record anywhere — a purge deleted it and left the app serving. */
                                     ? 'Its chat and record are gone, but the app is still live'
                                     /* Both unpublish and takedown delete the channel BEFORE the registry,

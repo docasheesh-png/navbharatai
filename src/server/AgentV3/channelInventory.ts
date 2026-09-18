@@ -21,6 +21,8 @@ import type { MetricAlert } from '../lib/metricsAlerts';
 // file's domain — and defining them here would make the two modules import each other.
 export { channelIdFromResourceName, isChannelQuotaError, HOSTING_FULL_MESSAGE };
 
+import { isSnapshotChannelId } from './previewSnapshot';
+
 /** A channel's id as it exists on the Hosting site. */
 export interface HostingChannel { channelId: string; url?: string; updateTime?: string | null }
 
@@ -45,6 +47,19 @@ export type ChannelState =
    * was not, that is what this says — and it is never reclaimable.
    */
   | 'indeterminate'
+  /**
+   * A BUILD SNAPSHOT, not a published app (admin Monitor capture, 2026-09-18).
+   *
+   * `previewSnapshot.ts` saves a green build's `dist/` so a finished app outlives its sandbox. It gets
+   * its own channel by design, so it can never overwrite what somebody deliberately published — and
+   * therefore it never has a deployment record either. Before this state existed, that missing record
+   * made every snapshot classify as `unknown`, and the card told the admin their chat and record were
+   * gone and the app was still live. Thirty-seven times, about files that are a build cache.
+   *
+   * It DOES spend a slot, so it is counted against the ceiling. It IS reclaimable, and more safely
+   * than anything else on the list: the next green build simply writes it again.
+   */
+  | 'snapshot'
   /**
    * THE SITE'S OWN DEFAULT CHANNEL — Firebase Hosting's built-in `live`, which every site has and
    * which is NOT a preview channel at all (admin Monitor capture, 2026-09-14).
@@ -120,6 +135,11 @@ export function classifyChannels(
       // The site's own channel is checked FIRST: it never has a record, and "no record" must not be
       // allowed to mean "orphaned waste" for the one channel that is supposed to have none.
       ? 'default'
+      // A snapshot is checked SECOND, and for the same reason: it is a build copy that never has a
+      // record, so the record lookup below would call it orphaned. Its id is decided by us, so this
+      // is a fact about the channel rather than an inference from an absence.
+      : isSnapshotChannelId(channelId)
+        ? 'snapshot'
       : rec
         ? (isLiveDeployment(rec as DeploymentRecord) ? 'live' : 'stale')
         // No record — but that only MEANS something when the registry was genuinely read in full.
@@ -134,11 +154,12 @@ export function classifyChannels(
       // working app — taking it down belongs to the owner (Unpublish) or to a deliberate admin
       // takedown, which also updates the registry. 'indeterminate' is excluded for the stronger
       // reason: we do not know what it is, and a delete is not reversible.
-      reclaimable: state === 'stale' || state === 'unknown',
+      // A snapshot is the SAFEST thing on this list to reclaim: the next green build writes it again.
+      reclaimable: state === 'stale' || state === 'unknown' || state === 'snapshot',
     });
   }
   // Waste first — it is what the screen exists to act on.
-  const rank: Record<ChannelState, number> = { unknown: 0, stale: 1, indeterminate: 2, live: 3, default: 4 };
+  const rank: Record<ChannelState, number> = { unknown: 0, stale: 1, snapshot: 2, indeterminate: 3, live: 4, default: 5 };
   return out.sort((a, b) => rank[a.state] - rank[b.state] || a.channelId.localeCompare(b.channelId));
 }
 
@@ -164,6 +185,12 @@ export interface CeilingVerdict {
   remaining: number;
   /** How many slots reclaiming every wasted channel would give back. */
   reclaimable: number;
+  /**
+   * How many of those are BUILD SNAPSHOTS rather than orphaned apps. Reported separately because the
+   * two need different words and different actions: an orphan is a mystery to investigate, a snapshot
+   * is a cache entry that returns on the next build.
+   */
+  snapshots: number;
   level: 'ok' | 'warn' | 'critical';
   /** Plain English, for an admin who should not have to interpret a ratio. */
   message: string;
@@ -184,18 +211,23 @@ export function channelCeilingVerdict(
   const previewChannels = classified.filter((c) => c.state !== 'default');
   const used = previewChannels.length;
   const reclaimable = previewChannels.filter((c) => c.reclaimable).length;
+  const snapshots = previewChannels.filter((c) => c.state === 'snapshot').length;
   const remaining = Math.max(0, cap - used);
   const ratio = cap > 0 ? used / cap : 0;
   const level: CeilingVerdict['level'] = ratio >= 0.9 ? 'critical' : ratio >= 0.7 ? 'warn' : 'ok';
+  // Say what they ARE. "Belong to no live app" is true of a build snapshot and tells the admin nothing
+  // they can act on; naming it explains both the number and why clearing it is safe.
   const reclaimNote = reclaimable > 0
-    ? ` ${reclaimable} of them belong to no live app and can be reclaimed.`
+    ? (snapshots > 0
+      ? ` ${reclaimable} can be reclaimed, of which ${snapshots} are saved copies of builds that return on the next build.`
+      : ` ${reclaimable} of them belong to no live app and can be reclaimed.`)
     : '';
   const message = level === 'critical'
     ? `Publishing is close to stopping for everyone: ${used} of about ${cap} hosting channels are in use.${reclaimNote}`
     : level === 'warn'
       ? `Hosting channels are filling up: ${used} of about ${cap} in use.${reclaimNote}`
       : `${used} of about ${cap} hosting channels in use.${reclaimNote}`;
-  return { used, cap, remaining, reclaimable, level, message };
+  return { used, cap, remaining, reclaimable, snapshots, level, message };
 }
 
 /**

@@ -65578,3 +65578,67 @@ domain at all.** On a Hindi-first product that is a real gap. It is NOT touched 
 same regexes drive the LIVE builder (`AGENTV3_REQUIREMENT_AWARE=on`), so changing them changes what
 real builds produce — a separate change with its own blast radius and its own corpus test. The India
 half already fires correctly on GST/₹, which is the more valuable of the two.
+
+### 2026-09-18 (admin Monitor capture) — the publish ceiling was never the publishes, and "50% refused" refused nobody
+
+The admin sent the load board with two red tiles and asked how to fix them, then asked for all four
+fixes. Both tiles were reporting something other than what their label claimed.
+
+**1. 🔴 PUBLISH LOAD: the channels are BUILD SNAPSHOTS, not published apps.** Bucket-only publishing
+had been live and verified for a day and the count still climbed, **43 → 46 with the flag on**. Every
+id in the reclaim list began `sn-`, which is `snapshotChannelId`, not `makeChannelId`. A snapshot is a
+green build's saved `dist/`, kept so a finished app outlives its sandbox. Three facts together:
+one is created on **every green build**; **nothing anywhere deletes one** (`snapshotChannelId` appeared
+at exactly two places in the server, the id and the deploy); and the bucket branch in `deployStatic`
+was gated on the channel being the PUBLISH channel, so bucket-only publishing could never reach them.
+Publishes stopped taking channels and builds carried on taking them, one per workspace, for ever.
+**Fixed** by routing the snapshot through the same bucket on its own `s-…` subdomain — the third
+namespace, disjoint from `v3-…` (Firebase publish) and `a-…` (bucket publish), so a snapshot can never
+overwrite what somebody published. ONE branch serves both ids, because that method's docblock already
+says a parameter beats a second copy. No Worker change: the edge already resolves any `<sub>` against
+`apps/<sub>/`. Kill switch `AGENTV3_SNAPSHOT_BUCKET=off` reverts snapshots without touching publishing.
+
+**2. 🔴 AND THE CARD CALLED THEM ORPHANED APPS.** A snapshot never has a deployment record, by design,
+so `classifyChannels` read the missing record as orphanhood and printed *"Its chat and record are gone,
+but the app is still live"* — thirty-seven times, about a build cache. New `snapshot` state, decided
+from the id (a fact) rather than from an absence (an inference). It still counts against the ceiling,
+because it really does spend a slot, and it is still reclaimable — more safely than anything else on
+that screen, since the next green build writes it again. `CeilingVerdict.snapshots` reports the split
+so the message can say what the backlog actually is.
+
+**3. Reclaim all.** The panel kept recommending the one action it made impractical: 37 rows, one button
+each. Sequential, stops at the first refusal (the route refuses anything it cannot prove is waste, and
+carrying on past that would mean deleting while the server says it cannot tell), confirms with the
+count, and reports what really went rather than what it attempted.
+
+**4. 🔴 AI LOAD: a fallback is not a refusal.** *"50% refused"* in red, under *"Engines are refusing
+requests."* `recordProviderLatency` fires once per ATTEMPT, and the router walks a ladder: the free
+leader is rate-limited, the next rung answers, the user gets their reply. One success, one error,
+exactly 50%. **The number rose when the fallback worked.** New `recordRouterOutcome` counts per
+REQUEST — did this person get an answer — at all five of the router's own endings, and the board reads
+that instead. The per-provider accumulator is untouched and still answers its own question on the
+observability route. Second half: `AI_MIN_SAMPLE` (10, borrowed from `ALERT_MIN_SAMPLE` rather than
+invented) keeps the tile UNKNOWN below a real sample, because these counters reset on every deploy and
+minutes after a release the whole figure can rest on two requests. The word is now "unanswered", which
+is the user's side of it, not "refused", which was the provider's.
+
+⚠️ **AND THIS CORRECTS MY OWN LINE FROM THE DAY BEFORE.** PR #3062 shipped a note reading *"Near the
+channel ceiling, but it can no longer grow: bucket-only publishing is on."* The admin's screenshot
+disproved it within the hour. It could not grow from publishes and was growing from snapshots the whole
+time. The lesson is the one this file keeps paying for: I verified that bucket-only was ON, and did not
+verify that it covered everything creating channels.
+
+**Tests:** `theCeilingWasNeverThePublishes` (13), `aFallbackIsNotARefusal` (11),
+`reclaimEveryWastedChannel` (12). Reversion-proven in all six parts: reverting the deploy branch, the
+inventory state, the min sample, the route counter, the Reclaim-all wiring and one of the router's five
+recorders fails 8 cases between them.
+
+⚠️ **A drifted copy found on the way:** `AdminDashboard.tsx` keeps its own inline copy of the
+`ChannelState` union, so the server's new state had to be added there too or `tsc` rejected the compare.
+Recorded rather than refactored — it is a second PR's worth of change and not this autopsy's subject.
+
+**Still open (rule 6):** the snapshot objects in the bucket are never swept either. They overwrite in
+place, so they cannot grow per workspace the way channels did, but a workspace that is deleted leaves
+its copy behind. The publish path has `removePublishFromBucket` and the takedown route calls it; the
+snapshot path has no owner-deletion hook to call it from yet.
+

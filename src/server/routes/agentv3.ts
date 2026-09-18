@@ -56,6 +56,7 @@ import {
   catalogForTools,
   roleConfig,
   makeSubAgentSpawn,
+  type SubAgentDeps,
   makeSecondOpinion,
   makeConsensus,
   makeWebSearch,
@@ -153,7 +154,7 @@ import {
 } from '../AgentV3/journeyDerivation';
 import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals } from '../AgentV3/releaseGate';
 import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../AgentV3/claimAudit';
-import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard } from '../AgentV3/greenReviewPolicy';
+import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan } from '../AgentV3/greenReviewPolicy';
 import { scaffoldFilesInTscErrors, canonicalScaffold, protectBoilerplateInRepair } from '../AgentV3/scaffoldBoilerplate';
 import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver } from '../AgentV3/greenFreeze';
 import { inBuildGreenEnabled, shouldAttemptInBuildProof, isProvenGreenRender, attemptOutcome, inBuildGreenNote, inBuildGreenNarration, snapshotIsFromThisBuild } from '../AgentV3/inBuildGreen';
@@ -13432,7 +13433,9 @@ async function noteBuildOutcome(
       // isn't defined until a few hundred lines down, so this holder is reassigned once it is, and
       // the thunk below is safe because no sub-agent can actually run before that reassignment does.
       let onFileWriteForSubAgents: ((path: string, content: string) => void) | undefined;
-      const spawnSubAgent = makeSubAgentSpawn({
+      // Hoisted (2026-09-18) so the post-build reviewer can be spawned from the SAME deps with a
+      // smaller step cap on a proven-green app — see greenReviewPlan. One wiring, two spawns.
+      const subAgentDeps: SubAgentDeps = {
         ignoreRules: () => ignoreRulesForBuild,
         onFileWrite: (path, content) => onFileWriteForSubAgents?.(path, content),
         client, actuator, workspaceId, state, events, model, onlyOpus,
@@ -13468,7 +13471,8 @@ async function noteBuildOutcome(
           : 0),
         // A thunk: `expectsArtifacts` is decided further down, and `intent` can still change before it.
         expectsArtifacts: () => expectsArtifacts,
-      });
+      };
+      const spawnSubAgent = makeSubAgentSpawn(subAgentDeps);
       // Layer 84 (Multi-Model Ensemble): the Architect can call second_opinion to
       // get an independent cross-model review from the NON-Claude free router
       // (Vertex → Gemini → Grok). Adapt the real AIRouter to the OpinionRouter
@@ -19244,7 +19248,20 @@ async function noteBuildOutcome(
           // reviewer mid-review on a 40-file app and silently lost its completeness verdict. Bigger apps
           // get more time, never past the wall-clock safety margin. Honest note on timeout, not silence.
           const reviewHeadroomMs = effectiveBuildSeconds === 0 ? Infinity : (effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt));
-          const reviewBudget = reviewerBudgetMs(rFiles.length, reviewHeadroomMs, projectFileCount);
+          // 💸 A SUGGESTION COSTS A SUGGESTION'S PRICE (autopsy b6f88a72). On a proven-green app Green
+          // Stop already makes this review suggest-only; it ran anyway at full budget and the full
+          // 40-step cap — 523,374 input tokens, zero characters back. The plan is the SAME rule
+          // `reviewerShouldWrite` uses, so it can never disagree with the write decision below: when
+          // the review can only suggest, it is also lean (a hard step cap, a 45 s budget, and an
+          // instruction that says so). Not-green / proven-broken / failed build: byte-identical.
+          const reviewPlan = greenReviewPlan({ previewGreen, previewProvenBroken, buildOk: result.ok });
+          const reviewSpawn = reviewPlan.maxSteps !== undefined
+            ? makeSubAgentSpawn({ ...subAgentDeps, maxSteps: reviewPlan.maxSteps })
+            : spawnSubAgent;
+          const reviewBudget = reviewerBudgetMs(rFiles.length, reviewHeadroomMs, projectFileCount, { previewGreen: reviewPlan.mode === 'suggest' });
+          if (reviewPlan.mode === 'suggest') {
+            try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_LEAN', message: `The app is proven green, so the post-build review is suggest-only and ran lean: at most ${reviewPlan.maxSteps} steps, ${Math.round(reviewBudget / 1000)}s budget. Its findings are an offer, never a repair.`, autoResolved: true }); } catch { /* best-effort */ }
+          }
           let review;
           /** A verdict rebuilt from an unfinished review's own narration — see partialReview.ts. */
           let salvaged: ReturnType<typeof salvageReview> = null;
@@ -19278,7 +19295,8 @@ async function noteBuildOutcome(
               userRequest: prompt,
               fileTree: rFiles,
               fileSample: rSample,
-              spawn: spawnSubAgent,
+              spawn: reviewSpawn,
+              mode: reviewPlan.mode,
               // What THIS turn changed. Without it the reviewer surveys the whole project: the Shiv
               // Medical Store report shows ~25 read_file calls for a 3-file edit — the user's money
               // spent re-reading code they did not touch.

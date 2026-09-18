@@ -268,7 +268,7 @@ export function TopNav({
             {/* Avatar button */}
             <button
               onClick={() => setDropdownOpen(v => !v)}
-              className="flex items-center gap-2 h-9 pl-1 pr-2 bg-raised hover:bg-raised border border-line hover:border-line rounded-xl transition-all active:scale-95"
+              className="flex items-center gap-2 h-9 pl-1 pr-2 bg-raised hover:bg-raised-hover border border-line hover:border-line rounded-xl transition-all active:scale-95"
               title="My Account"
             >
               {user.photoURL ? (

@@ -65877,6 +65877,91 @@ heaviest first), or delete `theme-compat.css` (at zero). Stacked on PR A (#3070)
 merges, so #3070 stays exactly what its CI ran.
 ---
 
+## 2026-09-18 — 🔴 THE BUILD-COST WINDOW WAS WORKSPACES, NOT BUILDS (admin report)
+
+**Admin, verbatim:** *"yeh report fix hai, har build ke bad update nahi ho rahi. hame pata hi nahi lag
+raha ki ham progress kar rahe ya nahi!!"* — the admin panel's **Build costs — real cost vs bill, by
+tier and app size** card, permanently reading *"30 builds read; real cost measured on 29"*.
+
+### Root cause — a window that meant something other than its own label
+
+`/api/admin/build-costs` called `listRecentFullReports`, which reads the **PARENT** documents of
+`workspace_diagnostics_v3`. There is exactly **one per WORKSPACE**, holding that workspace's LATEST
+report, and `saveDiagnostics` **overwrites it on every build**.
+
+So "last 30 builds" was really **"the latest build of each of the 30 most recently active
+workspaces"** — and the gap between those two is precisely the thing the admin was trying to see:
+
+- **Iterating inside one workspace — which is what testing the engine IS — produces ONE row, not
+  twenty.** Twenty builds later the document COUNT has not moved, so `reportsRead` is still 30 and
+  the table is still the same shape.
+- The card was therefore **structurally incapable of showing progress**, because progress is exactly
+  a sequence of builds in the same workspace getting cheaper, faster and needing fewer heals — the
+  one signal this query throws away.
+
+🔑 **The per-build record already existed and nothing read it.** `saveDiagnosticsHistory` has been
+writing every settled build to `<workspace>/history/<startedAt>` (wired in `routes/agentv3.ts`), and
+`upsertDiagnosticsHistoryProgress` writes each turn as it runs. The data was never missing; only the
+reader was pointed at the wrong collection.
+
+### The fix
+
+1. **`listRecentBuildReports` (`DiagnosticsStore.ts`)** — the last N **builds** across workspaces,
+   read from the history subcollections.
+   - 🔒 **Scanning the top N workspaces is EXACT, not a heuristic:** parents are ordered by latest
+     save, so for a workspace at position N+1 to hold one of the newest N builds, every workspace
+     above it would have to hold only older builds — impossible, since each holds at least one build
+     saved more recently.
+   - ⚠️ **Orders by `documentId()`, exactly as `listDiagnosticsHistory` already does, so it needs NO
+     Firestore index.** The obvious alternative — an ordered `collectionGroup('history')` query —
+     needs a collection-group index, this repo ships no `firestore.indexes.json`, and its absence is
+     a RUNTIME error, not a compile one.
+   - Both sweeps are `.select()` projections (document refs only, the cheapest read Firestore has);
+     only the winning builds are fetched whole, in one batched `getAll`.
+   - A build still **running** is excluded (`endedAt === undefined`) — it has no settled billing, so
+     counting it would drag every average toward "not measured". It reappears at settle, same doc id.
+   - One unreadable workspace cannot empty the card; a totally unreadable history falls back to the
+     old per-workspace view and **says so** (`source: 'latest-per-workspace'`), because a window that
+     quietly means something else is the bug being fixed.
+
+2. **`costTrend` (`buildCostLedger.ts`)** — the admin's actual question. The tier × size table gives
+   one average over the whole window and therefore cannot answer "is it getting better": a run of
+   cheap builds and a run of dear ones produce the same mean. The trend splits the window in half by
+   time and compares real cost, bill, minutes, heals and success rate.
+   - 🔒 **`MIN_TREND_SAMPLE = 3` per half**, or the delta is `null` and the card says "not enough
+     builds yet" — with two builds a side, "cost halved" is noise wearing a decimal point.
+   - ⚠️ **`successRate` is the ONE metric where higher is better**; every other delta is an
+     improvement when NEGATIVE, and `deltaLabel` must not treat them alike.
+
+3. **Honesty (rule 5).** The card now shows **when it was read** — a card that never says so looks
+   identical whether it is live or an hour stale, which is how a frozen window went unnoticed — and
+   names the per-workspace fallback explicitly when it is what was returned.
+
+### What did NOT change
+
+The tier × size table, every label rule (`avgWithSample`, `realCostLabel`, `billLabel`), the
+admin-token gate, and the White-Label boundary: real cost and margin remain admin-only.
+
+### Tests
+
+`tests/theWindowWasWorkspacesNotBuilds.test.ts` — **20 cases**, reversion-proven on four independent
+reverts (the route's reader, the sample floor, the fallback naming, the in-progress filter); between
+them they fail 5 cases.
+
+⚠️ **One EXISTING assertion was updated rather than left red**, and this is recorded because changing
+a test to match new behaviour is normally forbidden: `BuildCostCard.test.tsx` pinned the route to
+`listRecentFullReports`. Its stated intent — "reads the FULL stored reports, not the metadata
+projection (which has no call log)" — is **unchanged and still enforced**; only the function name
+moved, because the new reader is also whole-report, just per build. The comment in that test says so.
+
+### 🔴 Still open (rule 6)
+
+- **The card still refreshes only on mount or on the Refresh button.** A timer poll would cost a
+  projection sweep per tick for a screen nobody is watching most of the time, so the read stamp makes
+  staleness visible instead. If the admin wants it live, that is a deliberate next change.
+- **History is never pruned.** `MAX_HISTORY_ITEMS = 20` is a listing default, not a retention cap —
+  no code deletes old history documents. Harmless today (it is what makes this fix possible) and
+  worth a retention decision before the collection is large.
 ## 2026-09-18 — AI Image Gen: a flex-overflow, a resolution mistake that made images blurrier, and the paid tier (PR pending)
 
 Admin, four items in one message: the STYLE column overlapping its neighbour, free images coming out

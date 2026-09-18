@@ -67,7 +67,13 @@ describe('🔒 the wiring — an API with no screen is not a feature', () => {
   it('🔒 the route is admin-gated and reads the FULL stored reports (the metadata projection has no call log)', () => {
     expect(admin).toContain("app.get('/api/admin/build-costs', verifyAdminToken,");
     const at = admin.indexOf("app.get('/api/admin/build-costs'");
-    expect(admin.slice(at, at + 1500)).toContain('listRecentFullReports(limit)');
+    // ⚠️ CHANGED 2026-09-18, and the INTENT is unchanged: this case exists so the route reads whole
+    // reports rather than the metadata projection (which carries no call log or billing block). It
+    // used to name `listRecentFullReports`, which reads one FULL report per WORKSPACE — still whole,
+    // but one row per workspace rather than per build, so repeated builds in one workspace were
+    // invisible. `listRecentBuildReports` reads whole reports per BUILD. See
+    // tests/theWindowWasWorkspacesNotBuilds.test.ts for the window itself.
+    expect(admin.slice(at, at + 1500)).toContain('listRecentBuildReports(limit)');
   });
   it('renders its first paint without a number — dashes and "Reading", never a zero', () => {
     const html = renderToStaticMarkup(<BuildCostCard adminToken="t" />);

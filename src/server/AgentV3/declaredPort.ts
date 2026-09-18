@@ -64,6 +64,8 @@
 //
 // PURE — files in, answer out. No I/O, no clock, never throws.
 
+import { portsInCommand, usablePort, walkScript } from './npmScripts';
+
 export interface DeclaredPort {
   port: number;
   /** Where it came from, in the user's terms — surfaced in diagnostics so the choice is checkable. */
@@ -73,55 +75,10 @@ export interface DeclaredPort {
 }
 
 /** Ports that are never an app's own dev server, so a stray match cannot send the door somewhere silly. */
-function usable(port: unknown): port is number {
-  return typeof port === 'number' && Number.isInteger(port) && port > 1023 && port < 65536;
-}
+const usable = usablePort;
 
 /** The scripts an app is actually started by. Everything else is reached only by delegation. */
 const ENTRY_SCRIPTS = ['dev', 'start', 'serve'] as const;
-
-/**
- * How deep a `npm run` chain is followed. Three covers every real shape seen
- * (`dev` → `dev:client` → a tool) and bounds a pathological package.json by construction.
- */
-const MAX_SCRIPT_DEPTH = 3;
-
-/** Every `--port N` / `-p N` / `PORT=N` in ONE command string, in the order they appear. */
-function portsInCommand(command: string): number[] {
-  const out: number[] = [];
-  const flag = /(?:--port[= ]|(?:^|\s)-p\s+)(\d{2,5})\b/g;
-  const env = /\bPORT=(\d{2,5})\b/g;
-  for (const re of [flag, env]) {
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(command)) !== null) {
-      const n = Number(m[1]);
-      if (usable(n)) out.push(n);
-    }
-  }
-  return out;
-}
-
-/**
- * Script names this command delegates to.
- *
- * Deliberately only the `run`-prefixed forms plus `npm-run-all`: a bare `yarn <word>` would read
- * `yarn add express` as a script called "add", and inventing a delegation is how a port reader starts
- * answering about something that is not the app.
- */
-function delegatesTo(command: string): string[] {
-  const names: string[] = [];
-  const run = /\b(?:npm|pnpm|yarn|bun)\s+run\s+([\w:.@/-]+)/g;
-  let m: RegExpExecArray | null;
-  while ((m = run.exec(command)) !== null) names.push(m[1]);
-  // `npm-run-all -p dev:client dev:server` / `run-p a b` — the names are bare positional arguments.
-  const all = /\b(?:npm-run-all|run-p|run-s)\b([^&|;"']*)/g;
-  while ((m = all.exec(command)) !== null) {
-    for (const word of String(m[1] ?? '').split(/\s+/)) {
-      if (word && !word.startsWith('-')) names.push(word);
-    }
-  }
-  return names;
-}
 
 /**
  * Ports declared by the package's own scripts — following `npm run` delegation.
@@ -129,24 +86,21 @@ function delegatesTo(command: string): string[] {
  * Returns EVERY port found, because a full-stack dev script starts more than one process and both
  * ports belong to the app. `rank` stays 1: an explicit flag is an explicit flag however many hops away
  * it was written, and the hop is the author's own indirection, not our inference.
+ *
+ * ⚠️ The walk and the flag parsing live in `npmScripts.ts`, shared with `serviceGraph`. Four modules
+ * used to keep private copies of this and all four were blind the same way — see that file's header.
  */
 function fromScripts(pkg: Record<string, unknown>): DeclaredPort[] {
   const scripts = (pkg?.scripts ?? {}) as Record<string, string>;
   const found: DeclaredPort[] = [];
   const seen = new Set<string>();
-
-  const walk = (name: string, depth: number): void => {
-    if (depth > MAX_SCRIPT_DEPTH || seen.has(name)) return;
-    seen.add(name);
-    const command = typeof scripts[name] === 'string' ? scripts[name] : '';
-    if (!command) return;
-    for (const port of portsInCommand(command)) {
-      found.push({ port, source: `the "${name}" script's port flag`, rank: 1 });
-    }
-    for (const next of delegatesTo(command)) walk(next, depth + 1);
-  };
-
-  for (const entry of ENTRY_SCRIPTS) walk(entry, 0);
+  for (const entry of ENTRY_SCRIPTS) {
+    walkScript(scripts, entry, (name, command) => {
+      for (const port of portsInCommand(command)) {
+        found.push({ port, source: `the "${name}" script's port flag`, rank: 1 });
+      }
+    }, seen);
+  }
   return found;
 }
 

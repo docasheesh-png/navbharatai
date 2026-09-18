@@ -14,11 +14,92 @@
 // 🔴 THE PRICE IS A DECISION, NOT A MEASUREMENT. ₹2/image is the admin's set price, so the user is
 // told ₹2 and charged ₹2 — that is honest by construction and needs no estimate. It is deliberately
 // NOT the real-cost + markup model a build uses, because an image provider returns no token usage to
-// price from, and THE ONE-WALLET LAW forbids inventing one. What this does mean is that the MARGIN is
-// unverified from inside the code: whether ₹2 clears what the host charges is a question only the
-// admin's provider invoice can answer. See PROGRESS.md.
+// price from, and THE ONE-WALLET LAW forbids inventing one.
+//
+// ✅ CORRECTED 2026-09-18, THE SAME DAY: this block used to end "the MARGIN is unverified from inside
+// the code … only the admin's provider invoice can answer". The admin then gave the number —
+// **$0.014 per image** — so it is verified, and the old sentence had to go rather than stand as a
+// stale caveat a later session would repeat. THAT is the drift this repo has paid for twice already
+// (an idle-minutes default that read "NOT taken" eight days after it was taken; an E2B rate whose
+// derivation "could not fail"). A caveat that has been answered is not humility, it is rot.
+//
+// 💰 THE MARGIN, and why ₹2 is comfortable rather than lucky: at ₹85–95/$ the real cost is
+// ₹1.19–₹1.33, so ₹2 recovers it **~1.5–1.7×**. The number that matters for safety is the
+// BREAK-EVEN EXCHANGE RATE — ₹2 ÷ $0.014 = **₹142.9 per dollar** — i.e. the rupee would have to fall
+// by two-thirds before a Pro image stopped covering its own cost. That is the headroom, stated as a
+// thing that could be falsified rather than as a reassuring adjective.
+//
+// 🔒 AND IT CANNOT INVERT SILENTLY. `imageProMarginWarning` compares the two and says so loudly if
+// the price ever stops covering the cost. This is exactly the `E2B_USD_PER_HOUR` shape — an env value
+// always beats the code, so warning is the only thing the code can do — and it is why the cost lives
+// here as a named, invoice-anchored constant instead of nowhere at all.
 
 export const IMAGE_PRO_PRICE_INR = 2;
+
+/**
+ * What ONE Pro image really costs us, in USD. Admin-supplied 2026-09-18: **$0.014 per image**.
+ *
+ * Env-tunable (`IMAGE_PRO_COST_USD`) for the same reason every other rate in this repo is: a
+ * provider reprices without asking us, and re-deploying to record that is how a rate card goes stale.
+ *
+ * ⚠️ A MALFORMED VALUE FALLS BACK TO THE KNOWN PRICE, NEVER TO ZERO. `Number('')` is 0, and a cost of
+ * zero would report infinite margin on the exact panel used to judge whether ₹2 is working — the
+ * failure mode being guarded against, wearing a green tick. Only a real, positive, finite number is
+ * accepted.
+ */
+export const IMAGE_PRO_COST_USD_DEFAULT = 0.014;
+
+export function imageProCostUsd(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = (env.IMAGE_PRO_COST_USD || '').trim();
+  if (!raw) return IMAGE_PRO_COST_USD_DEFAULT;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : IMAGE_PRO_COST_USD_DEFAULT;
+}
+
+export interface ImageProMargin {
+  /** What the user pays, in ₹. */
+  priceInr: number;
+  /** What it costs us, in ₹, at the live exchange rate. */
+  costInr: number;
+  /** priceInr − costInr. Negative means every Pro image loses money. */
+  marginInr: number;
+  /** priceInr ÷ costInr. 1.0 is break-even. */
+  ratio: number;
+  /** The USD→INR rate at which this price stops covering its cost. */
+  breakEvenUsdInr: number;
+  healthy: boolean;
+}
+
+/** PURE, so the money comparison is testable without a clock, a wallet or a provider. */
+export function imageProMargin(usdInr: number, env: NodeJS.ProcessEnv = process.env): ImageProMargin {
+  const costUsd = imageProCostUsd(env);
+  // A non-finite or non-positive exchange rate would make every number below meaningless, so it
+  // falls back to this repo's own documented default rather than producing NaN margins.
+  const rate = Number.isFinite(usdInr) && usdInr > 0 ? usdInr : 85;
+  const costInr = costUsd * rate;
+  return {
+    priceInr: IMAGE_PRO_PRICE_INR,
+    costInr,
+    marginInr: IMAGE_PRO_PRICE_INR - costInr,
+    ratio: IMAGE_PRO_PRICE_INR / costInr,
+    breakEvenUsdInr: IMAGE_PRO_PRICE_INR / costUsd,
+    healthy: costInr < IMAGE_PRO_PRICE_INR,
+  };
+}
+
+/**
+ * One admin-facing line when the price has stopped covering the cost, or `null` when it still does.
+ *
+ * ⚠️ ADMIN-ONLY BY CONSTRUCTION: this names our own cost, which is exactly what the White-Label Law
+ * keeps off a user's screen. It belongs in a server log and the admin panel, never in a response.
+ */
+export function imageProMarginWarning(usdInr: number, env: NodeJS.ProcessEnv = process.env): string | null {
+  const m = imageProMargin(usdInr, env);
+  if (m.healthy) return null;
+  return `[IMAGE PRO] PRICE NO LONGER COVERS COST — charging ₹${m.priceInr.toFixed(2)} per image while one costs `
+    + `₹${m.costInr.toFixed(2)} (loss ₹${(-m.marginInr).toFixed(2)}/image). `
+    + `Raise IMAGE_PRO_PRICE_INR, or check IMAGE_PRO_COST_USD against the provider invoice.`;
+}
 
 /** The most images one request may ask for — a bound on both spend and wall-clock. */
 export const IMAGE_PRO_MAX_BATCH = 4;

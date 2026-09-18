@@ -66649,3 +66649,48 @@ the sharpest example yet: the engine created the mess by refusing to accept an a
 not a better nudge — it is that *every place the engine overrides a model's judgement must first ask
 what the model actually said.* The nudge was the only such override found; if another is added, it
 inherits this rule or it inherits this autopsy.
+## 2026-09-18 — Pro image cost: the open margin question, CLOSED by the admin's number
+
+The 2026-09-18 entry above recorded an OPEN item: *"the ₹2 margin is unverified from inside the code …
+only the provider's invoice can answer"*. The admin answered it the same day — **$0.014 per image** —
+so this closes it, and the stale caveat in `imageProGen.ts` was DELETED rather than left standing.
+
+🔴 **Deleting it was the point, not tidiness.** This repo has paid twice for a doc that kept asserting
+something already settled: an idle-minutes default that read *"NOT taken, admin's call"* eight days
+after it was taken, and an E2B rate whose derivation *"could not fail"*. A caveat that has been
+answered is not humility — a later session reads it as current and either re-asks a settled question
+or reasons from a premise that is no longer true.
+
+**The margin, at the live rate:**
+
+| USD/INR | cost/image | margin | ratio |
+|---|---|---|---|
+| 85 | ₹1.190 | ₹0.810 | 1.68× |
+| 87 | ₹1.218 | ₹0.782 | 1.64× |
+| 95 | ₹1.330 | ₹0.670 | 1.50× |
+
+**The number that matters is the BREAK-EVEN EXCHANGE RATE: ₹2 ÷ $0.014 = ₹142.9 per dollar** — the
+rupee would have to fall by two-thirds before a Pro image stopped covering its own cost. That is stated
+as a thing which could be falsified, rather than as a reassuring ratio. (The E2B lesson applied to our
+own reasoning: a derivation is only verified once it predicts something it could have got wrong.)
+
+**What shipped:** `IMAGE_PRO_COST_USD_DEFAULT = 0.014` with an env override, `imageProMargin()` (pure)
+and `imageProMarginWarning()`, which the route logs ONCE per process — loudly via `console.error` when
+the price has stopped covering cost, quietly as a confirmation line when it has not.
+
+🔒 **Two failure modes closed deliberately.** A MALFORMED `IMAGE_PRO_COST_USD` falls back to the known
+$0.014 and never to zero — `Number('')` is 0, and a zero cost reports INFINITE margin on the very panel
+that exists to catch a bad one, i.e. the failure being guarded against wearing a green tick. And a junk
+exchange rate cannot produce NaN money. Both reversion-proven.
+
+⚠️ **The warning is ADMIN-ONLY text** — it names our own cost, which is exactly what the White-Label
+Law keeps off a user's screen. It belongs in a server log and the admin panel, never in a response.
+
+🔴 **STILL OPEN, and unchanged by this:** no HOST is chosen, so `IMAGE_PRO_ENDPOINT` and
+`IMAGE_PRO_KEY` remain unset and the paid tier is honestly unavailable. $0.014 is the MODEL's price;
+which host serves it is a separate decision, and a host that marks it up would move every number above.
+The guard is what makes that discoverable instead of silent.
+
+📌 Note for whoever reads this next: `ImageStudioPro.tsx` was migrated to design tokens by another
+session's theme work (PRs C and G) after #3071 merged. That file was deliberately NOT touched here —
+this change is server-side only.

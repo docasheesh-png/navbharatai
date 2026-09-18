@@ -892,7 +892,7 @@ Content-Type: application/json
           <div className="nb-sheet rounded-xl border border-line flex flex-col w-full max-w-[380px]" style={{ background: 'var(--surface-card)' }}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-line">
               <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse text-on-accent" />
                 <span className="text-sm font-semibold">Bot Simulator</span>
                 <span className="text-xs text-faint capitalize">({platform})</span>
               </div>

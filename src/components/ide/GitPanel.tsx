@@ -865,7 +865,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
         {activeTab === 'deploy' ? (
           <div className="p-4 space-y-4 flex flex-col flex-1">
             {/* Header / Intro */}
-            <div className="relative p-4 rounded-2xl bg-gradient-to-br from-indigo-950/40 to-black/30 border border-indigo-500/10 space-y-2 overflow-hidden shadow-xl shrink-0">
+            <div className="relative p-4 rounded-2xl bg-gradient-to-br from-indigo-950/40 to-black/30 border border-indigo-500/10 space-y-2 overflow-hidden shadow-xl shrink-0 text-on-accent">
               <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/10 rounded-full blur-2xl"></div>
               <div className="flex items-center gap-2 text-[9px] font-black uppercase text-accent-text tracking-wider">
                 <Sparkles className="w-3.5 h-3.5 animate-pulse" />
@@ -1008,7 +1008,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                       {token && (
                         <button
                           onClick={onDisconnect}
-                          className="px-2.5 py-1 bg-red-950/20 border border-red-500/20 rounded-lg text-[8px] font-black uppercase tracking-widest text-danger hover:text-ink transition-all cursor-pointer hover:bg-red-950/40"
+                          className="px-2.5 py-1 bg-red-500/10 border border-red-500/20 rounded-lg text-[8px] font-black uppercase tracking-widest text-danger hover:text-ink transition-all cursor-pointer hover:bg-red-500/10"
                         >
                           Sign Out
                         </button>
@@ -1090,7 +1090,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                                 onClick={generateCommitMessage}
                                 title="Suggest a commit message from your changed files"
                                 aria-label="Suggest a commit message from your changed files"
-                                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-black text-accent-text hover:text-accent-text hover:bg-indigo-900/20 transition-all uppercase tracking-widest"
+                                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-black text-accent-text hover:text-accent-text hover:bg-indigo-500/10 transition-all uppercase tracking-widest"
                               >
                                 <Sparkles className="w-2.5 h-2.5" />
                                 Suggest
@@ -1130,7 +1130,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                           <p className="text-[8.5px] text-muted font-sans uppercase tracking-widest font-black">Firebase DevOps link</p>
                           {firebaseToken ? (
                             <span className="text-warn font-extrabold text-[10px] flex items-center gap-1 mt-0.5 truncate">
-                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0" />
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0 text-on-accent" />
                               {firebaseUser?.projectId || configs.firebase.projectId || 'Connected'}
                             </span>
                           ) : (
@@ -1143,7 +1143,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                       {firebaseToken && (
                         <button
                           onClick={onFirebaseDisconnect}
-                          className="px-2.5 py-1 bg-red-950/20 border border-red-500/20 rounded-lg text-[8px] font-black uppercase tracking-widest text-danger hover:text-ink transition-all cursor-pointer hover:bg-red-950/40"
+                          className="px-2.5 py-1 bg-red-500/10 border border-red-500/20 rounded-lg text-[8px] font-black uppercase tracking-widest text-danger hover:text-ink transition-all cursor-pointer hover:bg-red-500/10"
                         >
                           Sign Out
                         </button>
@@ -1327,7 +1327,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                       />
                     </div>
                     {/* CREDENTIALS BOX */}
-                    <div className="p-3 bg-teal-950/10 border border-teal-500/15 rounded-xl space-y-2 mt-2">
+                    <div className="p-3 bg-teal-500/10 border border-teal-500/15 rounded-xl space-y-2 mt-2">
                       <span className="text-[8.5px] font-extrabold uppercase tracking-widest text-success block">Netlify Authorization Setup</span>
                       <div className="space-y-1">
                         <label className="text-[9px] font-mono font-bold text-body">Netlify Personal Access Token</label>
@@ -1399,7 +1399,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                       </div>
                     </div>
                     {/* CREDENTIALS BOX */}
-                    <div className="p-3 bg-blue-950/15 border border-blue-500/15 rounded-xl space-y-2 mt-2">
+                    <div className="p-3 bg-blue-500/10 border border-blue-500/15 rounded-xl space-y-2 mt-2">
                       <span className="text-[8.5px] font-extrabold uppercase tracking-widest text-info block">Google Cloud Platform Auth</span>
                       <div className="space-y-1">
                         <label className="text-[9px] font-mono font-bold text-body">Service Account Credential JSON Key</label>
@@ -1446,7 +1446,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                       <span className="text-[10px] font-bold text-body">Auto-generate secure multi-stage Dockerfile</span>
                     </label>
                     {/* CREDENTIALS BOX */}
-                    <div className="p-3 bg-blue-950/15 border border-[#2496ed]/20 rounded-xl space-y-2 mt-2">
+                    <div className="p-3 bg-blue-500/10 border border-[#2496ed]/20 rounded-xl space-y-2 mt-2">
                       <span className="text-[8.5px] font-extrabold uppercase tracking-widest text-info block">Docker Hub Account handshakes</span>
                       <div className="grid grid-cols-2 gap-2">
                         <div className="space-y-1">
@@ -1523,7 +1523,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
 
             {/* Validation warning block if any */}
             {validationErrors.length > 0 && (
-              <div className="p-3 rounded-2xl bg-red-950/25 border border-red-500/20 text-[9.5px] text-danger font-medium leading-relaxed space-y-1 animate-in shake duration-200 shrink-0">
+              <div className="p-3 rounded-2xl bg-red-500/10 border border-red-500/20 text-[9.5px] text-danger font-medium leading-relaxed space-y-1 animate-in shake duration-200 shrink-0">
                 <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider mb-1">
                   <AlertTriangle className="w-3.5 h-3.5" />
                   Pre-deployment validation halt
@@ -1638,7 +1638,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                   })}
                   {deployStatus === 'building' && (
                     <div className="flex items-center gap-1.5 text-warn animate-pulse font-bold text-[8.5px] pt-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"></span>
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping text-on-accent"></span>
                       PIPELINE ACTIVE... EXECUTING DOCKER BUILD ENGINE
                     </div>
                   )}
@@ -1651,7 +1651,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                 config has actually been added. Never rendered for Cloud Run / Railway: they have config
                 generators and no engine, so a button there could not be honoured. */}
             {canManagedDeploy && deployStatus === 'unavailable' && (
-              <div className="bg-indigo-950/20 border border-indigo-500/25 rounded-2xl p-4 space-y-2 shrink-0">
+              <div className="bg-indigo-500/10 border border-indigo-500/25 rounded-2xl p-4 space-y-2 shrink-0">
                 <div className="flex items-center gap-2 text-accent-text text-[10px] font-black uppercase tracking-wider">
                   <Rocket className="w-4 h-4" />
                   NavBharatAI can deploy this for you
@@ -1683,7 +1683,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
               <motion.div 
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="bg-emerald-950/20 border border-emerald-500/25 rounded-2xl p-4 space-y-3 shrink-0 shadow-lg"
+                className="bg-emerald-500/10 border border-emerald-500/25 rounded-2xl p-4 space-y-3 shrink-0 shadow-lg"
               >
                 <div className="flex items-center gap-2 text-success text-[10px] font-black uppercase tracking-wider">
                   <CheckCircle2 className="w-4 h-4 text-success" />
@@ -1732,7 +1732,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     href={`${deployedUrl}/compare/main...${encodeURIComponent(configs.github.branch)}?expand=1`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-2 w-full py-2 rounded-xl bg-indigo-900/30 border border-indigo-500/30 text-accent-text text-[9px] font-black uppercase tracking-widest hover:bg-indigo-900/50 transition-all"
+                    className="flex items-center justify-center gap-2 w-full py-2 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-accent-text text-[9px] font-black uppercase tracking-widest hover:bg-indigo-500/10 transition-all"
                   >
                     <Github className="w-3 h-3" />
                     Create Pull Request on GitHub
@@ -1791,7 +1791,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
           /* Premium Cloud Sync Panel */
           <div className="p-3 space-y-3 flex flex-col flex-1 min-h-0 select-none">
             {/* Header Description */}
-            <div className="relative p-2.5 px-3 rounded-xl bg-gradient-to-br from-raised to-black/40 border border-line overflow-hidden shadow-xl shrink-0">
+            <div className="relative p-2.5 px-3 rounded-xl bg-gradient-to-br from-raised to-black/40 border border-line overflow-hidden shadow-xl shrink-0 text-on-accent">
               <div className="absolute top-0 right-0 w-16 h-16 bg-indigo-500/5 rounded-full blur-xl"></div>
               <div className="flex items-center gap-1.5 text-[9px] font-black uppercase text-accent-text tracking-wider">
                 <Cloud className="w-3.5 h-3.5 animate-pulse" />
@@ -1875,7 +1875,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                       <div className="leading-none">
                         <p className="text-[10px] font-black text-ink">@{user?.login || 'Authorized Account'}</p>
                         <span className="text-[8px] font-sans text-success uppercase tracking-widest font-black inline-flex items-center gap-1 mt-0.5">
-                          <span className="w-1 h-1 bg-emerald-500 rounded-full animate-pulse" />
+                          <span className="w-1 h-1 bg-emerald-500 rounded-full animate-pulse text-on-accent" />
                           ACTIVE HOST ACCESS
                         </span>
                       </div>
@@ -1917,7 +1917,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                       <div className="leading-none">
                         <p className="text-[10px] font-black text-ink truncate max-w-[120px]">{firebaseUser?.projectId || 'Connected Project'}</p>
                         <span className="text-[8px] font-sans text-success uppercase tracking-widest font-black inline-flex items-center gap-1 mt-0.5">
-                          <span className="w-1 h-1 bg-emerald-500 rounded-full animate-pulse" />
+                          <span className="w-1 h-1 bg-emerald-500 rounded-full animate-pulse text-on-accent" />
                           DATABASE LINKED
                         </span>
                       </div>
@@ -2229,7 +2229,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
               </div>
 
               {/* Error Reason Banner */}
-              <div className="p-3 bg-red-950/20 border border-red-500/15 rounded-xl space-y-1">
+              <div className="p-3 bg-red-500/10 border border-red-500/15 rounded-xl space-y-1">
                 <span className="text-[8px] font-extrabold text-danger uppercase tracking-wider block">Raw Return Manifest Message:</span>
                 <p className="text-[10px] text-danger font-mono leading-relaxed break-words font-medium">
                   {errorDetails.rawDetails}
@@ -2283,7 +2283,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                   </span>
                   <button
                     onClick={handleCancelAutoRetry}
-                    className="px-2.5 py-1 bg-red-950/40 hover:bg-red-900/40 text-danger hover:text-ink rounded-lg text-[8.5px] font-black uppercase tracking-wider border border-red-500/20 transition-all cursor-pointer shadow-none"
+                    className="px-2.5 py-1 bg-red-500/10 hover:bg-red-500/10 text-danger hover:text-ink rounded-lg text-[8.5px] font-black uppercase tracking-wider border border-red-500/20 transition-all cursor-pointer shadow-none"
                   >
                     Pause
                   </button>

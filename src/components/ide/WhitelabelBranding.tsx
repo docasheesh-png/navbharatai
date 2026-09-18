@@ -160,33 +160,33 @@ module.exports = {
   ] as const;
 
   return (
-    <div className="h-full flex flex-col bg-[#0d1117] text-white overflow-hidden">
+    <div className="h-full flex flex-col bg-surface text-ink overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5 bg-[#161b22]">
+      <div className="flex items-center gap-3 px-6 py-4 border-b border-line bg-card">
         <div className="w-10 h-10 bg-pink-600/20 rounded-xl flex items-center justify-center">
-          <Paintbrush className="w-5 h-5 text-pink-400" />
+          <Paintbrush className="w-5 h-5 text-accent-text" />
         </div>
         <div>
           {/* Honest name (admin autopsy 2026-07-21): this generates a brand kit (CSS variables, meta
               tags, Tailwind config) to EXPORT and paste into your app — it does not auto-apply to the
               built app. Renamed so it no longer implies one-click white-labeling. */}
-          <h2 className="font-semibold text-white text-base">Brand Kit Generator</h2>
-          <p className="text-xs text-white/40">Define name, logo, colors &amp; fonts → export a brand kit (CSS, meta tags, Tailwind config) to drop into your app</p>
+          <h2 className="font-semibold text-ink text-base">Brand Kit Generator</h2>
+          <p className="text-xs text-faint">Define name, logo, colors &amp; fonts → export a brand kit (CSS, meta tags, Tailwind config) to drop into your app</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <button onClick={resetToDefault} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-[#0d1117] border border-white/10 rounded-lg text-white/40 hover:text-white transition-all">
+          <button onClick={resetToDefault} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-surface border border-line rounded-lg text-faint hover:text-ink transition-all">
             <RefreshCw className="w-3.5 h-3.5" /> Reset
           </button>
-          <button onClick={downloadAll} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-pink-600 hover:bg-pink-500 rounded-lg text-white font-medium transition-all">
+          <button onClick={downloadAll} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-pink-600 hover:bg-pink-500 rounded-lg text-on-accent font-medium transition-all">
             <Download className="w-3.5 h-3.5" /> Export Brand Kit
           </button>
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-white/5 bg-[#161b22] overflow-x-auto">
+      <div className="flex border-b border-line bg-card overflow-x-auto">
         {tabs.map(tab => (
-          <button key={tab.key} onClick={() => setActiveTab(tab.key)} className={`flex items-center gap-1.5 px-4 py-3 text-xs font-medium border-b-2 whitespace-nowrap transition-all ${activeTab === tab.key ? 'border-pink-500 text-pink-400' : 'border-transparent text-white/30 hover:text-white/60'}`}>
+          <button key={tab.key} onClick={() => setActiveTab(tab.key)} className={`flex items-center gap-1.5 px-4 py-3 text-xs font-medium border-b-2 whitespace-nowrap transition-all ${activeTab === tab.key ? 'border-pink-500 text-accent-text' : 'border-transparent text-faint hover:text-muted'}`}>
             {tab.label}
           </button>
         ))}
@@ -201,29 +201,29 @@ module.exports = {
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs text-white/50 mb-1.5 block">App Name</label>
-                  <input className="w-full bg-[#161b22] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50" value={config.appName} onChange={e => update({ appName: e.target.value })} />
+                  <label className="text-xs text-muted mb-1.5 block">App Name</label>
+                  <input className="w-full bg-card border border-line rounded-xl px-3 py-2.5 text-sm text-ink focus:outline-none focus:border-pink-500/50" value={config.appName} onChange={e => update({ appName: e.target.value })} />
                 </div>
                 <div>
-                  <label className="text-xs text-white/50 mb-1.5 block">Tagline</label>
-                  <input className="w-full bg-[#161b22] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50" value={config.tagline} onChange={e => update({ tagline: e.target.value })} />
+                  <label className="text-xs text-muted mb-1.5 block">Tagline</label>
+                  <input className="w-full bg-card border border-line rounded-xl px-3 py-2.5 text-sm text-ink focus:outline-none focus:border-pink-500/50" value={config.tagline} onChange={e => update({ tagline: e.target.value })} />
                 </div>
               </div>
               <div>
-                <label className="text-xs text-white/50 mb-1.5 block">Logo URL</label>
-                <input className="w-full bg-[#161b22] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50" placeholder="https://yourapp.com/logo.png (SVG/PNG)" value={config.logoUrl} onChange={e => update({ logoUrl: e.target.value })} />
+                <label className="text-xs text-muted mb-1.5 block">Logo URL</label>
+                <input className="w-full bg-card border border-line rounded-xl px-3 py-2.5 text-sm text-ink focus:outline-none focus:border-pink-500/50" placeholder="https://yourapp.com/logo.png (SVG/PNG)" value={config.logoUrl} onChange={e => update({ logoUrl: e.target.value })} />
               </div>
               <div>
-                <label className="text-xs text-white/50 mb-1.5 block">Favicon URL</label>
-                <input className="w-full bg-[#161b22] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50" placeholder="https://yourapp.com/favicon.ico" value={config.faviconUrl} onChange={e => update({ faviconUrl: e.target.value })} />
+                <label className="text-xs text-muted mb-1.5 block">Favicon URL</label>
+                <input className="w-full bg-card border border-line rounded-xl px-3 py-2.5 text-sm text-ink focus:outline-none focus:border-pink-500/50" placeholder="https://yourapp.com/favicon.ico" value={config.faviconUrl} onChange={e => update({ faviconUrl: e.target.value })} />
               </div>
               <div>
-                <label className="text-xs text-white/50 mb-1.5 block">Custom Domain</label>
-                <input className="w-full bg-[#161b22] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50" placeholder="yourapp.com" value={config.customDomain} onChange={e => update({ customDomain: e.target.value })} />
+                <label className="text-xs text-muted mb-1.5 block">Custom Domain</label>
+                <input className="w-full bg-card border border-line rounded-xl px-3 py-2.5 text-sm text-ink focus:outline-none focus:border-pink-500/50" placeholder="yourapp.com" value={config.customDomain} onChange={e => update({ customDomain: e.target.value })} />
               </div>
               <div>
-                <label className="text-xs text-white/50 mb-1.5 block">Footer Text</label>
-                <input className="w-full bg-[#161b22] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50" value={config.footerText} onChange={e => update({ footerText: e.target.value })} />
+                <label className="text-xs text-muted mb-1.5 block">Footer Text</label>
+                <input className="w-full bg-card border border-line rounded-xl px-3 py-2.5 text-sm text-ink focus:outline-none focus:border-pink-500/50" value={config.footerText} onChange={e => update({ footerText: e.target.value })} />
               </div>
             </div>
           )}
@@ -233,14 +233,14 @@ module.exports = {
             <div className="space-y-5">
               {/* Presets */}
               <div>
-                <p className="text-xs text-white/50 mb-3">Color Presets</p>
+                <p className="text-xs text-muted mb-3">Color Presets</p>
                 <div className="grid grid-cols-3 gap-2">
                   {COLOR_PRESETS.map(preset => (
-                    <button key={preset.name} onClick={() => applyPreset(preset)} className="flex items-center gap-2 p-2.5 rounded-xl border border-white/5 bg-[#161b22] hover:border-white/20 transition-all group">
+                    <button key={preset.name} onClick={() => applyPreset(preset)} className="flex items-center gap-2 p-2.5 rounded-xl border border-line bg-card hover:border-line transition-all group">
                       <div className="flex gap-0.5">
                         {[preset.primary, preset.secondary, preset.accent].map((c, i) => <div key={i} className="w-4 h-4 rounded-full" style={{ backgroundColor: c }} />)}
                       </div>
-                      <span className="text-[10px] text-white/50 group-hover:text-white/80 truncate">{preset.name}</span>
+                      <span className="text-[10px] text-muted group-hover:text-body truncate">{preset.name}</span>
                     </button>
                   ))}
                 </div>
@@ -254,22 +254,22 @@ module.exports = {
                   { key: 'bgColor', label: 'Background Color', val: config.bgColor },
                   { key: 'textColor', label: 'Text Color', val: config.textColor },
                 ].map(item => (
-                  <div key={item.key} className="flex items-center gap-3 bg-[#161b22] p-3 rounded-xl border border-white/5">
+                  <div key={item.key} className="flex items-center gap-3 bg-card p-3 rounded-xl border border-line">
                     <input type="color" value={item.val} onChange={e => update({ [item.key]: e.target.value } as any)} className="w-10 h-10 rounded-xl border-0 cursor-pointer bg-transparent" />
                     <div className="flex-1">
-                      <p className="text-xs text-white/70">{item.label}</p>
-                      <p className="text-[10px] text-white/30 font-mono">{item.val}</p>
+                      <p className="text-xs text-body">{item.label}</p>
+                      <p className="text-[10px] text-faint font-mono">{item.val}</p>
                     </div>
-                    <input className="bg-[#0d1117] border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white font-mono w-24 focus:outline-none" value={item.val} onChange={e => update({ [item.key]: e.target.value } as any)} />
+                    <input className="bg-surface border border-line rounded-lg px-2 py-1.5 text-xs text-ink font-mono w-24 focus:outline-none" value={item.val} onChange={e => update({ [item.key]: e.target.value } as any)} />
                   </div>
                 ))}
               </div>
               {/* Border radius */}
               <div>
-                <p className="text-xs text-white/50 mb-2">Border Radius</p>
+                <p className="text-xs text-muted mb-2">Border Radius</p>
                 <div className="flex gap-2">
                   {BORDER_RADIUS_OPTIONS.map(opt => (
-                    <button key={opt.value} onClick={() => update({ borderRadius: opt.value })} className={`flex-1 py-2 text-[10px] rounded-xl border transition-all ${config.borderRadius === opt.value ? 'border-pink-500/50 bg-pink-500/10 text-pink-300' : 'border-white/10 text-white/40 hover:border-white/20'}`} style={{ borderRadius: opt.value === '999' ? '999px' : `${opt.value}px` }}>
+                    <button key={opt.value} onClick={() => update({ borderRadius: opt.value })} className={`flex-1 py-2 text-[10px] rounded-xl border transition-all ${config.borderRadius === opt.value ? 'border-pink-500/50 bg-pink-500/10 text-accent-text' : 'border-line text-faint hover:border-line'}`} style={{ borderRadius: opt.value === '999' ? '999px' : `${opt.value}px` }}>
                       {opt.label}
                     </button>
                   ))}
@@ -282,30 +282,30 @@ module.exports = {
           {activeTab === 'typography' && (
             <div className="space-y-4">
               <div>
-                <p className="text-xs text-white/50 mb-3">Font Family</p>
+                <p className="text-xs text-muted mb-3">Font Family</p>
                 <div className="grid grid-cols-3 gap-2">
                   {FONT_OPTIONS.map(font => (
-                    <button key={font} onClick={() => update({ fontFamily: font })} className={`py-3 px-3 rounded-xl border text-xs transition-all text-center ${config.fontFamily === font ? 'border-pink-500/50 bg-pink-500/10 text-pink-300' : 'border-white/5 bg-[#161b22] text-white/50 hover:border-white/10'}`} style={{ fontFamily: font }}>
+                    <button key={font} onClick={() => update({ fontFamily: font })} className={`py-3 px-3 rounded-xl border text-xs transition-all text-center ${config.fontFamily === font ? 'border-pink-500/50 bg-pink-500/10 text-accent-text' : 'border-line bg-card text-muted hover:border-line'}`} style={{ fontFamily: font }}>
                       {font}
                     </button>
                   ))}
                 </div>
               </div>
-              <div className="bg-[#161b22] border border-white/5 rounded-xl p-4">
-                <p className="text-[10px] text-white/30 uppercase tracking-wider mb-3">Preview</p>
+              <div className="bg-card border border-line rounded-xl p-4">
+                <p className="text-[10px] text-faint uppercase tracking-wider mb-3">Preview</p>
                 <div style={{ fontFamily: config.fontFamily }}>
                   <h1 className="text-2xl font-bold mb-1" style={{ color: config.primaryColor }}>{config.appName}</h1>
-                  <h2 className="text-base font-semibold mb-2 text-white/70">{config.tagline}</h2>
-                  <p className="text-sm text-white/50">This is your app description. See how the font looks — professional and clean design.</p>
+                  <h2 className="text-base font-semibold mb-2 text-body">{config.tagline}</h2>
+                  <p className="text-sm text-muted">This is your app description. See how the font looks — professional and clean design.</p>
                   <div className="flex gap-2 mt-3">
-                    <button className="px-4 py-2 text-xs text-white font-medium" style={{ backgroundColor: config.primaryColor, borderRadius: `${config.borderRadius}px` }}>Primary Button</button>
-                    <button className="px-4 py-2 text-xs text-white font-medium" style={{ backgroundColor: config.secondaryColor, borderRadius: `${config.borderRadius}px` }}>Secondary</button>
+                    <button className="px-4 py-2 text-xs text-ink font-medium" style={{ backgroundColor: config.primaryColor, borderRadius: `${config.borderRadius}px` }}>Primary Button</button>
+                    <button className="px-4 py-2 text-xs text-ink font-medium" style={{ backgroundColor: config.secondaryColor, borderRadius: `${config.borderRadius}px` }}>Secondary</button>
                   </div>
                 </div>
               </div>
-              <div className="bg-[#161b22] p-3 rounded-xl border border-white/5">
-                <p className="text-[10px] text-white/30 mb-2">Google Fonts CDN Link</p>
-                <code className="text-[9px] text-emerald-300 font-mono">{`<link href="https://fonts.googleapis.com/css2?family=${config.fontFamily.replace(' ', '+')}:wght@400;500;600;700&display=swap" rel="stylesheet">`}</code>
+              <div className="bg-card p-3 rounded-xl border border-line">
+                <p className="text-[10px] text-faint mb-2">Google Fonts CDN Link</p>
+                <code className="text-[9px] text-success font-mono">{`<link href="https://fonts.googleapis.com/css2?family=${config.fontFamily.replace(' ', '+')}:wght@400;500;600;700&display=swap" rel="stylesheet">`}</code>
               </div>
             </div>
           )}
@@ -314,35 +314,35 @@ module.exports = {
           {activeTab === 'meta' && (
             <div className="space-y-4">
               <div>
-                <label className="text-xs text-white/50 mb-1.5 block">OG Title</label>
-                <input className="w-full bg-[#161b22] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50" value={config.ogTitle} onChange={e => update({ ogTitle: e.target.value })} />
+                <label className="text-xs text-muted mb-1.5 block">OG Title</label>
+                <input className="w-full bg-card border border-line rounded-xl px-3 py-2.5 text-sm text-ink focus:outline-none focus:border-pink-500/50" value={config.ogTitle} onChange={e => update({ ogTitle: e.target.value })} />
               </div>
               <div>
-                <label className="text-xs text-white/50 mb-1.5 block">OG Description</label>
-                <textarea className="w-full bg-[#161b22] border border-white/10 rounded-xl px-3 py-2 text-sm text-white resize-none focus:outline-none focus:border-pink-500/50" rows={2} value={config.ogDescription} onChange={e => update({ ogDescription: e.target.value })} />
+                <label className="text-xs text-muted mb-1.5 block">OG Description</label>
+                <textarea className="w-full bg-card border border-line rounded-xl px-3 py-2 text-sm text-ink resize-none focus:outline-none focus:border-pink-500/50" rows={2} value={config.ogDescription} onChange={e => update({ ogDescription: e.target.value })} />
               </div>
               <div>
-                <label className="text-xs text-white/50 mb-1.5 block">OG Image URL (1200×630)</label>
-                <input className="w-full bg-[#161b22] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50" placeholder="https://yourapp.com/og-image.png" value={config.ogImageUrl} onChange={e => update({ ogImageUrl: e.target.value })} />
+                <label className="text-xs text-muted mb-1.5 block">OG Image URL (1200×630)</label>
+                <input className="w-full bg-card border border-line rounded-xl px-3 py-2.5 text-sm text-ink focus:outline-none focus:border-pink-500/50" placeholder="https://yourapp.com/og-image.png" value={config.ogImageUrl} onChange={e => update({ ogImageUrl: e.target.value })} />
               </div>
               <div>
-                <label className="text-xs text-white/50 mb-1.5 block">Twitter Handle</label>
-                <input className="w-full bg-[#161b22] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50" placeholder="@yourhandle" value={config.twitterHandle} onChange={e => update({ twitterHandle: e.target.value })} />
+                <label className="text-xs text-muted mb-1.5 block">Twitter Handle</label>
+                <input className="w-full bg-card border border-line rounded-xl px-3 py-2.5 text-sm text-ink focus:outline-none focus:border-pink-500/50" placeholder="@yourhandle" value={config.twitterHandle} onChange={e => update({ twitterHandle: e.target.value })} />
               </div>
 
               {/* Preview meta card */}
-              <div className="bg-[#161b22] border border-white/10 rounded-xl overflow-hidden">
-                <div className="p-3 border-b border-white/5">
-                  <p className="text-[10px] text-white/30">Social Share Preview</p>
+              <div className="bg-card border border-line rounded-xl overflow-hidden">
+                <div className="p-3 border-b border-line">
+                  <p className="text-[10px] text-faint">Social Share Preview</p>
                 </div>
                 <div className="p-3 flex gap-3">
-                  <div className="w-20 h-14 bg-white/5 rounded-lg flex items-center justify-center shrink-0">
-                    {config.ogImageUrl ? <img src={config.ogImageUrl} alt="OG" className="w-full h-full object-cover rounded-lg" /> : <ImageIcon className="w-6 h-6 text-white/20" />}
+                  <div className="w-20 h-14 bg-raised rounded-lg flex items-center justify-center shrink-0">
+                    {config.ogImageUrl ? <img src={config.ogImageUrl} alt="OG" className="w-full h-full object-cover rounded-lg" /> : <ImageIcon className="w-6 h-6 text-faint" />}
                   </div>
                   <div>
-                    <p className="text-[9px] text-white/30 uppercase">{config.customDomain}</p>
-                    <p className="text-xs font-semibold text-white mt-0.5">{config.ogTitle}</p>
-                    <p className="text-[10px] text-white/40 line-clamp-2 mt-0.5">{config.ogDescription}</p>
+                    <p className="text-[9px] text-faint uppercase">{config.customDomain}</p>
+                    <p className="text-xs font-semibold text-ink mt-0.5">{config.ogTitle}</p>
+                    <p className="text-[10px] text-faint line-clamp-2 mt-0.5">{config.ogDescription}</p>
                   </div>
                 </div>
               </div>
@@ -357,22 +357,22 @@ module.exports = {
                 { title: 'HTML Meta Tags', lang: 'html', content: metaTags, filename: 'meta-tags.html', key: 'meta' },
                 { title: 'Tailwind Config', lang: 'js', content: tailwindCfg, filename: 'tailwind.config.js', key: 'tw' },
               ].map(item => (
-                <div key={item.key} className="bg-[#161b22] border border-white/5 rounded-xl overflow-hidden">
-                  <div className="flex items-center justify-between px-3 py-2 border-b border-white/5">
-                    <span className="text-[10px] text-white/50">{item.title}</span>
+                <div key={item.key} className="bg-card border border-line rounded-xl overflow-hidden">
+                  <div className="flex items-center justify-between px-3 py-2 border-b border-line">
+                    <span className="text-[10px] text-muted">{item.title}</span>
                     <div className="flex gap-1.5">
-                      <button onClick={() => copyText(item.content, item.key)} className={`text-[9px] flex items-center gap-1 px-2 py-0.5 rounded-lg transition-all ${copied === item.key ? 'text-emerald-400 bg-emerald-500/10' : 'text-white/30 bg-white/5'}`}>
+                      <button onClick={() => copyText(item.content, item.key)} className={`text-[9px] flex items-center gap-1 px-2 py-0.5 rounded-lg transition-all ${copied === item.key ? 'text-success bg-emerald-500/10' : 'text-faint bg-raised'}`}>
                         {copied === item.key ? <><Check className="w-2.5 h-2.5" /> Copied</> : <><Copy className="w-2.5 h-2.5" /> Copy</>}
                       </button>
-                      <button onClick={() => { const b = new Blob([item.content], { type: 'text/plain' }); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = item.filename; a.click(); URL.revokeObjectURL(u); }} className="text-[9px] flex items-center gap-1 px-2 py-0.5 rounded-lg text-white/30 bg-white/5">
+                      <button onClick={() => { const b = new Blob([item.content], { type: 'text/plain' }); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = item.filename; a.click(); URL.revokeObjectURL(u); }} className="text-[9px] flex items-center gap-1 px-2 py-0.5 rounded-lg text-faint bg-raised">
                         <Download className="w-2.5 h-2.5" /> Save
                       </button>
                     </div>
                   </div>
-                  <pre className="p-3 text-[9px] font-mono text-emerald-300 overflow-x-auto max-h-48 whitespace-pre">{item.content}</pre>
+                  <pre className="p-3 text-[9px] font-mono text-success overflow-x-auto max-h-48 whitespace-pre">{item.content}</pre>
                 </div>
               ))}
-              <button onClick={downloadAll} className="w-full py-3 bg-pink-600 hover:bg-pink-500 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all">
+              <button onClick={downloadAll} className="w-full py-3 bg-pink-600 hover:bg-pink-500 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all text-on-accent">
                 <Download className="w-4 h-4" /> Download Complete Brand Kit
               </button>
             </div>
@@ -380,28 +380,29 @@ module.exports = {
         </div>
 
         {/* Right: Live Preview */}
-        <div className="w-72 border-l border-white/5 flex flex-col bg-[#161b22]">
-          <div className="flex items-center justify-between px-3 py-2.5 border-b border-white/5">
-            <p className="text-[10px] text-white/30 uppercase tracking-wider">Live Preview</p>
+        <div className="w-72 border-l border-line flex flex-col bg-card">
+          <div className="flex items-center justify-between px-3 py-2.5 border-b border-line">
+            <p className="text-[10px] text-faint uppercase tracking-wider">Live Preview</p>
             <div className="flex gap-1">
-              <button onClick={() => setPreviewMode('desktop')} className={`p-1.5 rounded-lg transition-all ${previewMode === 'desktop' ? 'bg-pink-500/20 text-pink-400' : 'text-white/20 hover:text-white/50'}`}><Monitor className="w-3.5 h-3.5" /></button>
-              <button onClick={() => setPreviewMode('mobile')} className={`p-1.5 rounded-lg transition-all ${previewMode === 'mobile' ? 'bg-pink-500/20 text-pink-400' : 'text-white/20 hover:text-white/50'}`}><Smartphone className="w-3.5 h-3.5" /></button>
-              <button onClick={() => setDarkPreview(!darkPreview)} className="p-1.5 rounded-lg text-white/20 hover:text-white/50 transition-all">
+              <button onClick={() => setPreviewMode('desktop')} className={`p-1.5 rounded-lg transition-all ${previewMode === 'desktop' ? 'bg-pink-500/20 text-accent-text' : 'text-faint hover:text-muted'}`}><Monitor className="w-3.5 h-3.5" /></button>
+              <button onClick={() => setPreviewMode('mobile')} className={`p-1.5 rounded-lg transition-all ${previewMode === 'mobile' ? 'bg-pink-500/20 text-accent-text' : 'text-faint hover:text-muted'}`}><Smartphone className="w-3.5 h-3.5" /></button>
+              <button onClick={() => setDarkPreview(!darkPreview)} className="p-1.5 rounded-lg text-faint hover:text-muted transition-all">
                 {darkPreview ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
               </button>
             </div>
           </div>
           <div className="flex-1 p-3 overflow-auto flex items-start justify-center">
             <div
-              className={`rounded-2xl overflow-hidden border border-white/10 shadow-2xl transition-all ${previewMode === 'mobile' ? 'w-44' : 'w-full'}`}
+              className={`rounded-2xl overflow-hidden border border-line shadow-2xl transition-all ${previewMode === 'mobile' ? 'w-44' : 'w-full'}`}
               style={{ backgroundColor: darkPreview ? config.bgColor : '#ffffff', fontFamily: config.fontFamily }}
             >
               {/* Mock Browser Bar */}
-              <div className="flex items-center gap-1.5 px-3 py-2 bg-black/20">
-                <div className="w-2 h-2 rounded-full bg-red-500" />
-                <div className="w-2 h-2 rounded-full bg-amber-500" />
-                <div className="w-2 h-2 rounded-full bg-emerald-500" />
-                <div className="flex-1 mx-2 bg-black/20 rounded px-2 py-0.5 text-[7px] text-white/30">{config.customDomain}</div>
+              <div className="flex items-center gap-1.5 px-3 py-2 bg-well">
+                <div className="w-2 h-2 rounded-full bg-red-500 text-on-accent" />
+                <div className="w-2 h-2 rounded-full bg-amber-500 text-on-accent" />
+                <div className="w-2 h-2 rounded-full bg-emerald-500 text-on-accent" />
+                {/* The mock browser sits on the USER's chosen background, so its address text follows THEIR text colour, not our theme. */}
+                <div className="flex-1 mx-2 bg-well rounded px-2 py-0.5 text-[7px]" style={{ color: darkPreview ? config.textColor : '#000', opacity: 0.6 }}>{config.customDomain}</div>
               </div>
               {/* Mock App */}
               <div className="p-4">
@@ -411,13 +412,13 @@ module.exports = {
                     {config.logoUrl ? <img src={config.logoUrl} alt="Logo" className="w-5 h-5 rounded" /> : <div className="w-5 h-5 rounded" style={{ backgroundColor: config.primaryColor }} />}
                     <span className="text-[10px] font-bold" style={{ color: darkPreview ? config.textColor : '#000' }}>{config.appName}</span>
                   </div>
-                  <button className="text-[8px] px-2 py-0.5 text-white font-medium" style={{ backgroundColor: config.primaryColor, borderRadius: `${Math.min(Number(config.borderRadius), 8)}px` }}>Login</button>
+                  <button className="text-[8px] px-2 py-0.5 text-ink font-medium" style={{ backgroundColor: config.primaryColor, borderRadius: `${Math.min(Number(config.borderRadius), 8)}px` }}>Login</button>
                 </div>
                 {/* Hero */}
                 <div className="mb-3">
                   <h1 className="text-sm font-bold mb-1" style={{ color: darkPreview ? config.textColor : '#000' }}>{config.tagline}</h1>
                   <p className="text-[9px] mb-2" style={{ color: darkPreview ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)' }}>Some more description text will go here</p>
-                  <button className="text-[9px] px-3 py-1.5 text-white font-medium" style={{ backgroundColor: config.primaryColor, borderRadius: `${config.borderRadius}px` }}>Get Started</button>
+                  <button className="text-[9px] px-3 py-1.5 text-ink font-medium" style={{ backgroundColor: config.primaryColor, borderRadius: `${config.borderRadius}px` }}>Get Started</button>
                 </div>
                 {/* Cards */}
                 <div className="grid grid-cols-2 gap-1.5">

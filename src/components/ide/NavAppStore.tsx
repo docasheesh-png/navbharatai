@@ -472,7 +472,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
       <div className="max-w-3xl mx-auto px-4 py-5 sm:px-6">
         {/* Header */}
         <div className="flex items-center gap-3 mb-5">
-          <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center flex-shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center flex-shrink-0 text-on-accent">
             <Store size={20} />
           </div>
           <div className="min-w-0">
@@ -952,7 +952,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                       <button
                         onClick={() => { if (window.confirm('Unpublish this app? Its link stops working and its published files are deleted. Your workspace is untouched.')) void webAppAction(a.id, { action: 'unpublish' }); }}
                         disabled={webBusy === a.id}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-950/40 hover:bg-rose-900/40 disabled:opacity-40 text-[11px] text-danger transition-colors"
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/10 disabled:opacity-40 text-[11px] text-danger transition-colors"
                       ><Trash2 size={11} /> Unpublish</button>
                     </div>
                   )}
@@ -1147,7 +1147,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                         <button
                           onClick={() => void decide(a.id, 'approved')}
                           disabled={reviewing === a.id}
-                          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold disabled:opacity-40"
+                          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold disabled:opacity-40 text-on-accent"
                         >
                           {reviewing === a.id ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />} Publish
                         </button>
@@ -1248,7 +1248,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
               type="button"
               disabled={dlBusy}
               onClick={() => void startDownload(openApp.id)}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-base font-bold transition-colors"
+              className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-base font-bold transition-colors text-on-accent"
             >
               <Download size={17} /> {dlBusy ? 'Preparing…' : 'Download .apk'}
             </button>

@@ -742,7 +742,7 @@ export const AIChat: React.FC<AIChatProps> = ({
         {hasUrgentBuild && onModeChange && (
           <div className="mt-3 pt-3 border-t border-line">
             <div className="rounded-2xl overflow-hidden border border-orange-500/40 shadow-lg shadow-orange-900/20">
-              <div className="bg-gradient-to-r from-orange-950/80 to-amber-950/80 px-4 py-3 flex items-start gap-3">
+              <div className="bg-gradient-to-r from-orange-950/80 to-amber-950/80 px-4 py-3 flex items-start gap-3 text-on-accent">
                 <span className="text-2xl shrink-0 mt-0.5">🔨</span>
                 <div>
                   <p className="text-[12px] font-black text-warn uppercase tracking-wider">Switch to Build Mode?</p>
@@ -772,7 +772,7 @@ export const AIChat: React.FC<AIChatProps> = ({
         {hasAutoPlan && onSendSuggestion && (
           <div className="mt-3 pt-3 border-t border-indigo-500/20">
             <div className="rounded-2xl overflow-hidden border border-indigo-500/30 shadow-lg shadow-indigo-900/20">
-              <div className="bg-gradient-to-r from-indigo-950/80 to-violet-950/80 px-4 py-2.5 flex items-center gap-2">
+              <div className="bg-gradient-to-r from-indigo-950/80 to-violet-950/80 px-4 py-2.5 flex items-center gap-2 text-on-accent">
                 <span className="text-lg shrink-0">✨</span>
                 <p className="text-[11px] font-black text-accent-text uppercase tracking-wider">Plan ready — build kar du?</p>
               </div>
@@ -1016,7 +1016,7 @@ export const AIChat: React.FC<AIChatProps> = ({
         })()}
         {/* AgentProgress removed here to only be rendered dynamically in messages if needed */}
         {restoredMessages && restoredMessages.length > 0 && (
-          <div className="mb-6 bg-indigo-950/10 border border-indigo-500/10 rounded-2xl overflow-hidden shadow-2xl transition-all">
+          <div className="mb-6 bg-indigo-500/10 border border-indigo-500/10 rounded-2xl overflow-hidden shadow-2xl transition-all">
             <button 
               onClick={() => setIsHistoryExpanded(!isHistoryExpanded)}
               className="w-full flex items-center justify-between p-4 bg-indigo-500/5 hover:bg-indigo-500/10 transition-all border-b border-indigo-500/5 text-left group"
@@ -1079,7 +1079,7 @@ export const AIChat: React.FC<AIChatProps> = ({
             <div className="flex justify-center my-4">
                 <button 
                   onClick={() => setShowContinueModal(!showContinueModal)}
-                  className="px-4 py-2 bg-indigo-950/40 hover:bg-indigo-950/60 border border-indigo-500/20 text-accent-text rounded-xl text-[9px] font-black uppercase tracking-widest transition-all shadow-lg active:scale-95 flex items-center gap-2"
+                  className="px-4 py-2 bg-indigo-500/10 hover:bg-indigo-500/10 border border-indigo-500/20 text-accent-text rounded-xl text-[9px] font-black uppercase tracking-widest transition-all shadow-lg active:scale-95 flex items-center gap-2"
                 >
                   <Clock className="w-3 h-3" />
                   {showContinueModal ? 'Hide Restore Options' : 'Resume Previous Session'}
@@ -1088,7 +1088,7 @@ export const AIChat: React.FC<AIChatProps> = ({
         )}
         
         {showContinueModal && messages.length <= 1 && (
-          <div className="p-4 bg-indigo-950/20 border border-indigo-500/10 rounded-2xl space-y-3 shadow-xl backdrop-blur-md max-w-xl mx-auto select-none animate-in fade-in zoom-in-95">
+          <div className="p-4 bg-indigo-500/10 border border-indigo-500/10 rounded-2xl space-y-3 shadow-xl backdrop-blur-md max-w-xl mx-auto select-none animate-in fade-in zoom-in-95">
             <p className="text-[9px] text-muted font-medium">{continuePromptPhrase}</p>
             <div className="flex gap-2">
               <input 
@@ -1273,7 +1273,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                   {isAIError && <span className="text-[7px] font-black uppercase tracking-widest text-warn bg-amber-500/10 border border-amber-500/20 rounded px-1 py-px">AI Service</span>}
                   {/* B7: Model badge on AI messages */}
                   {msg.sender === 'ai' && msg.modelUsed && (
-                    <span className="text-[7px] font-mono text-accent-text bg-indigo-900/20 border border-indigo-800/30 rounded px-1 py-px">
+                    <span className="text-[7px] font-mono text-accent-text bg-indigo-500/10 border border-indigo-800/30 rounded px-1 py-px">
                       {msg.modelUsed}
                     </span>
                   )}
@@ -1598,7 +1598,7 @@ export const AIChat: React.FC<AIChatProps> = ({
       {/* Mobile-only: "Preview ready" sticky banner above the input.
           The desktop floating button is hidden on sm- screens — this replaces it. */}
       {isAppBuilt && onPreviewClick && (
-        <div className="sm:hidden flex items-center justify-between gap-3 px-4 py-2.5 bg-emerald-950/40 border-t border-emerald-500/20 select-none">
+        <div className="sm:hidden flex items-center justify-between gap-3 px-4 py-2.5 bg-emerald-500/10 border-t border-emerald-500/20 select-none">
           <div className="flex items-center gap-2 min-w-0">
             <Zap className="w-3.5 h-3.5 text-success shrink-0 animate-pulse" />
             <span className="text-success text-[9px] font-black uppercase tracking-widest truncate">App ready!</span>

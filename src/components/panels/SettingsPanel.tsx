@@ -228,7 +228,7 @@ function TouchFeedbackControl() {
                 is decoration — hence aria-hidden, not a second announcement of the same fact. */}
             <span
               aria-hidden="true"
-              className={`w-10 h-6 rounded-full shrink-0 p-0.5 transition-colors ${prefs[r.key] ? 'bg-indigo-600' : 'bg-raised'}`}
+              className={`w-10 h-6 rounded-full shrink-0 p-0.5 transition-colors ${prefs[r.key] ? 'bg-indigo-600 text-on-accent' : 'bg-raised'}`}
             >
               <span className={`block w-5 h-5 rounded-full bg-white transition-transform ${prefs[r.key] ? 'translate-x-4' : ''}`} />
             </span>
@@ -359,7 +359,7 @@ function AppSignatureToggle() {
         onClick={toggle}
         disabled={locked}
         title={locked ? 'Removing the badge is a paid feature.' : undefined}
-        className={`w-12 h-6 rounded-full p-1 flex items-center transition-all shrink-0 ${locked ? 'bg-indigo-600/40 justify-end cursor-not-allowed' : enabled ? 'bg-indigo-600 justify-end' : 'bg-well justify-start border border-line'}`}
+        className={`w-12 h-6 rounded-full p-1 flex items-center transition-all shrink-0 ${locked ? 'bg-indigo-600/40 justify-end cursor-not-allowed' : enabled ? 'bg-indigo-600 justify-end text-on-accent' : 'bg-well justify-start border border-line'}`}
       >
         <div className={`w-4 h-4 rounded-full shadow-lg ${locked ? 'bg-card' : 'bg-white'}`}></div>
       </button>
@@ -433,7 +433,7 @@ export function SettingsPanel({
           </button>
         )}
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-indigo-600 rounded-lg">
+          <div className="p-2 bg-indigo-600 rounded-lg text-on-accent">
             <Settings className="w-4 h-4 text-on-accent" />
           </div>
           <h3 className="font-bold text-ink text-sm">
@@ -492,7 +492,7 @@ export function SettingsPanel({
                 {/* G2: User profile card */}
                 {user && (
                   <div className="bg-card border border-line rounded-2xl p-4 flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-full overflow-hidden shrink-0 bg-indigo-600 flex items-center justify-center border border-line">
+                    <div className="w-11 h-11 rounded-full overflow-hidden shrink-0 bg-indigo-600 flex items-center justify-center border border-line text-on-accent">
                       {user.photoURL ? (
                         <img src={user.photoURL} alt={user.displayName || 'User'} className="w-full h-full object-cover" referrerPolicy="no-referrer" loading="lazy" />
                       ) : (
@@ -710,7 +710,7 @@ export function SettingsPanel({
                 <DangerZone signedIn={!!user} onLog={addLog} />
 
                 <div className="pt-4 border-t border-line flex flex-col items-center">
-                  <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-600/30 mb-3">
+                  <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-600/30 mb-3 text-on-accent">
                     <span className="text-on-accent font-black text-xs">NB</span>
                   </div>
                   {/* The version number is gone (admin 2026-09-13: "Settings footer ka Navbharat AI
@@ -746,7 +746,7 @@ export function SettingsPanel({
 
                 <div className="bg-card border border-line rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 shadow-2xl space-y-6 sm:space-y-8">
                   <div className="flex flex-col items-center text-center space-y-4">
-                     <div className="w-20 h-20 bg-indigo-600 rounded-[2rem] flex items-center justify-center shadow-2xl relative group cursor-pointer overflow-hidden">
+                     <div className="w-20 h-20 bg-indigo-600 rounded-[2rem] flex items-center justify-center shadow-2xl relative group cursor-pointer overflow-hidden text-on-accent">
                         <Bot className="w-10 h-10 text-on-accent group-hover:scale-110 transition-transform" />
                         <div className="absolute inset-0 bg-well opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                            <Plus className="w-6 h-6 text-on-accent" />
@@ -1128,7 +1128,7 @@ export function SettingsPanel({
                     <div className="w-20 h-20 bg-raised rounded-[2rem] flex items-center justify-center border border-line shadow-3xl relative overflow-hidden group z-10">
                        <Github className="w-10 h-10 text-ink group-hover:scale-110 transition-transform" />
                        {githubToken && (
-                         <div className="absolute top-2 right-2 w-4 h-4 bg-emerald-500 rounded-full border-2 border-line"></div>
+                         <div className="absolute top-2 right-2 w-4 h-4 bg-emerald-500 rounded-full border-2 border-line text-on-accent"></div>
                        )}
                     </div>
                     <div className="space-y-2 z-10">
@@ -1348,7 +1348,7 @@ export function SettingsPanel({
                              className={`p-6 flex items-center justify-between cursor-pointer transition-all group ${selectedRepo?.id === repo.id ? 'bg-indigo-600/10' : 'hover:bg-raised'}`}
                            >
                               <div className="flex items-center gap-5">
-                                 <div className={`w-12 h-12 rounded-xl flex items-center justify-center border transition-all ${selectedRepo?.id === repo.id ? 'bg-indigo-600 border-indigo-600' : 'bg-raised border-line'}`}>
+                                 <div className={`w-12 h-12 rounded-xl flex items-center justify-center border transition-all ${selectedRepo?.id === repo.id ? 'bg-indigo-600 border-indigo-600 text-on-accent' : 'bg-raised border-line'}`}>
                                     <Folder className={`w-5 h-5 ${selectedRepo?.id === repo.id ? 'text-on-accent' : 'text-faint group-hover:text-on-accent'}`} />
                                  </div>
                                  <div>
@@ -1357,7 +1357,7 @@ export function SettingsPanel({
                                  </div>
                               </div>
                               {selectedRepo?.id === repo.id && (
-                                 <div className="w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center border-4 border-line">
+                                 <div className="w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center border-4 border-line text-on-accent">
                                     <Check className="w-3 h-3 text-on-accent stroke-[4]" />
                                  </div>
                               )}
@@ -1371,7 +1371,7 @@ export function SettingsPanel({
                    <motion.div
                      initial={{ opacity: 0, y: 20 }}
                      animate={{ opacity: 1, y: 0 }}
-                     className="bg-indigo-600 border border-line rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 space-y-6 shadow-3xl relative overflow-hidden"
+                     className="bg-indigo-600 border border-line rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 space-y-6 shadow-3xl relative overflow-hidden text-on-accent"
                    >
                       <div className="absolute top-0 right-0 p-8 opacity-10">
                         <GitBranchIcon className="w-24 h-24 text-ink" />
@@ -1414,7 +1414,7 @@ export function SettingsPanel({
                               setActiveView('git');
                               setSettingsScreen('root');
                            }}
-                           className="w-full py-5 bg-white text-indigo-600 rounded-[1.5rem] font-black uppercase tracking-widest transition-all hover:scale-[1.02] shadow-2xl active:scale-[0.98] flex items-center justify-center gap-3"
+                           className="w-full py-5 bg-white text-accent-text rounded-[1.5rem] font-black uppercase tracking-widest transition-all hover:scale-[1.02] shadow-2xl active:scale-[0.98] flex items-center justify-center gap-3"
                          >
                             <Zap className="w-4 h-4 fill-indigo-600" />
                             Open Git Panel
@@ -1502,7 +1502,7 @@ export function SettingsPanel({
                         {adminLiveMetrics.alerts.map((al: any) => (
                           <div
                             key={al.id}
-                            className={`rounded-2xl px-5 py-4 border flex items-start gap-3 ${al.severity === 'critical' ? 'bg-red-950/30 border-red-600/40' : 'bg-amber-950/30 border-amber-600/40'}`}
+                            className={`rounded-2xl px-5 py-4 border flex items-start gap-3 ${al.severity === 'critical' ? 'bg-red-500/10 border-red-600/40' : 'bg-amber-500/10 border-amber-600/40'}`}
                           >
                             <span className={`text-lg leading-none ${al.severity === 'critical' ? 'text-danger' : 'text-warn'}`}>{al.severity === 'critical' ? '⛔' : '⚠️'}</span>
                             <div>

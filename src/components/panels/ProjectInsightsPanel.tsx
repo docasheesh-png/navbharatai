@@ -305,7 +305,7 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
 
       {/* Build Health — one-click aggregate of every robustness check */}
       <Card icon={<Brain className="w-4 h-4 text-accent-text" />} title="Build Health — Will this app work?"
-        action={<Button size="sm" onClick={runHealth} disabled={healthBusy} className="uppercase tracking-widest bg-violet-600 hover:bg-violet-700">{healthBusy ? 'Running…' : 'Run All Checks'}</Button>}>
+        action={<Button size="sm" onClick={runHealth} disabled={healthBusy} className="uppercase tracking-widest bg-violet-600 hover:bg-violet-700 text-on-accent">{healthBusy ? 'Running…' : 'Run All Checks'}</Button>}>
         {!health ? (
           <p className="text-[11px] text-muted">Run every build-robustness check at once — code confidence, React Rules of Hooks, import/export consistency, and JSX component resolution — for a single verdict on whether the generated app will build and run.</p>
         ) : (
@@ -359,7 +359,7 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
 
       {/* Code Confidence (P-AI.1 hallucination check) */}
       <Card icon={<Brain className="w-4 h-4 text-accent-text" />} title="Code Confidence (AI hallucination check)"
-        action={<Button size="sm" onClick={runConf} disabled={confBusy} className="uppercase tracking-widest bg-fuchsia-600 hover:bg-fuchsia-700">{confBusy ? 'Checking…' : 'Check Code'}</Button>}>
+        action={<Button size="sm" onClick={runConf} disabled={confBusy} className="uppercase tracking-widest bg-fuchsia-600 hover:bg-fuchsia-700 text-on-accent">{confBusy ? 'Checking…' : 'Check Code'}</Button>}>
         {!conf ? (
           <p className="text-[11px] text-muted">Scan the generated code for hallucination signals — undeclared (hallucinated) dependencies, imports to files that don't exist, and placeholder/"not implemented" stubs — and get a confidence score.</p>
         ) : (
@@ -384,7 +384,7 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
 
       {/* React Rules-of-Hooks safety */}
       <Card icon={<Brain className="w-4 h-4 text-info" />} title="React Hooks Safety (Rules of Hooks)"
-        action={<Button size="sm" onClick={runHooksRules} disabled={hooksRulesBusy} className="uppercase tracking-widest bg-sky-600 hover:bg-sky-700">{hooksRulesBusy ? 'Checking…' : 'Check Hooks'}</Button>}>
+        action={<Button size="sm" onClick={runHooksRules} disabled={hooksRulesBusy} className="uppercase tracking-widest bg-sky-600 hover:bg-sky-700 text-on-accent">{hooksRulesBusy ? 'Checking…' : 'Check Hooks'}</Button>}>
         {!hooksRules ? (
           <p className="text-[11px] text-muted">Scan the generated React code for Rules-of-Hooks violations — hooks called conditionally, after an early return, inside a loop, or from a nested callback. These crash the app at runtime (white screen), so catching them here prevents a broken preview.</p>
         ) : hooksRules.ok ? (
@@ -407,7 +407,7 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
 
       {/* Import/Export consistency */}
       <Card icon={<Brain className="w-4 h-4 text-success" />} title="Import / Export Consistency"
-        action={<Button size="sm" onClick={runImportChk} disabled={importChkBusy} className="uppercase tracking-widest bg-teal-600 hover:bg-teal-700">{importChkBusy ? 'Checking…' : 'Check Imports'}</Button>}>
+        action={<Button size="sm" onClick={runImportChk} disabled={importChkBusy} className="uppercase tracking-widest bg-teal-600 hover:bg-teal-700 text-on-accent">{importChkBusy ? 'Checking…' : 'Check Imports'}</Button>}>
         {!importChk ? (
           <p className="text-[11px] text-muted">Scan the generated code for imports of names a local module doesn't actually export (e.g. <span className="font-mono">import &#123; Foo &#125; from './bar'</span> when bar has no <span className="font-mono">Foo</span>). These fail the build with "'Foo' is not exported" — exact symbol-level check.</p>
         ) : importChk.ok ? (
@@ -428,7 +428,7 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
 
       {/* JSX undefined-component */}
       <Card icon={<Brain className="w-4 h-4 text-danger" />} title="JSX Component Resolution"
-        action={<Button size="sm" onClick={runJsxChk} disabled={jsxChkBusy} className="uppercase tracking-widest bg-rose-600 hover:bg-rose-700">{jsxChkBusy ? 'Checking…' : 'Check JSX'}</Button>}>
+        action={<Button size="sm" onClick={runJsxChk} disabled={jsxChkBusy} className="uppercase tracking-widest bg-rose-600 hover:bg-rose-700 text-on-accent">{jsxChkBusy ? 'Checking…' : 'Check JSX'}</Button>}>
         {!jsxChk ? (
           <p className="text-[11px] text-muted">Scan the generated JSX for components used but never imported or defined (e.g. <span className="font-mono">&lt;Widget /&gt;</span> with no <span className="font-mono">Widget</span> in scope). These throw "Widget is not defined" and white-screen the app — exact AST check that never flags host elements, local components, or props.</p>
         ) : jsxChk.ok ? (
@@ -447,7 +447,7 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
           ScaleAnalysis.ts for why an invented "handles N users" number would be the one claim a user
           would plan a launch around. */}
       <Card icon={<TrendingUp className="w-4 h-4 text-info" />} title="Will this app handle real traffic?"
-        action={<Button size="sm" onClick={runScale} disabled={scaleBusy} className="uppercase tracking-widest bg-cyan-600 hover:bg-cyan-700">{scaleBusy ? 'Checking…' : 'Check Scaling'}</Button>}>
+        action={<Button size="sm" onClick={runScale} disabled={scaleBusy} className="uppercase tracking-widest bg-cyan-600 hover:bg-cyan-700 text-on-accent">{scaleBusy ? 'Checking…' : 'Check Scaling'}</Button>}>
         {!scale ? (
           <p className="text-[11px] text-muted">Find the three things that actually slow an app down as it grows: queries that read <span className="font-mono">every</span> row, database calls running inside a loop, and filters on columns your migrations never indexed. Each finding says how the cost grows with your data and the exact change that fixes it.</p>
         ) : (
@@ -474,7 +474,7 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
 
       {/* Undefined hook calls */}
       <Card icon={<Brain className="w-4 h-4 text-warn" />} title="Hook Resolution"
-        action={<Button size="sm" onClick={runHookRes} disabled={hookResBusy} className="uppercase tracking-widest bg-orange-600 hover:bg-orange-700">{hookResBusy ? 'Checking…' : 'Check Hooks'}</Button>}>
+        action={<Button size="sm" onClick={runHookRes} disabled={hookResBusy} className="uppercase tracking-widest bg-orange-600 hover:bg-orange-700 text-on-accent">{hookResBusy ? 'Checking…' : 'Check Hooks'}</Button>}>
         {!hookRes ? (
           <p className="text-[11px] text-muted">Scan for React hooks called but never imported or defined (e.g. <span className="font-mono">useState(0)</span> with no <span className="font-mono">import &#123; useState &#125;</span>). These throw "useState is not defined" and white-screen the app — exact AST check that never flags imported, local, or member-expression hooks.</p>
         ) : hookRes.ok ? (
@@ -508,7 +508,7 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
 
       {/* Code Explanation (P-DEV.10) */}
       <Card icon={<Activity className="w-4 h-4 text-info" />} title="Explain Code"
-        action={<Button size="sm" onClick={runExplain} disabled={explainBusy || !explainInput.trim()} className="uppercase tracking-widest bg-cyan-600 hover:bg-cyan-700">{explainBusy ? 'Reading…' : 'Explain'}</Button>}>
+        action={<Button size="sm" onClick={runExplain} disabled={explainBusy || !explainInput.trim()} className="uppercase tracking-widest bg-cyan-600 hover:bg-cyan-700 text-on-accent">{explainBusy ? 'Reading…' : 'Explain'}</Button>}>
         <p className="text-[11px] text-muted mb-2">Paste a function, component, or file — get an instant, free (no AI credits) plain-language explanation: what it is, its complexity, the patterns it uses, and concrete refactoring tips.</p>
         <textarea
           value={explainInput}
@@ -527,7 +527,7 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
             </div>
             {explainResult.patterns.length > 0 && (
               <div className="flex flex-wrap gap-1">{explainResult.patterns.map((p: string, i: number) => (
-                <span key={i} className="bg-cyan-950/60 text-info rounded px-2 py-0.5 text-[10px]">{p}</span>
+                <span key={i} className="bg-cyan-500/10 text-info rounded px-2 py-0.5 text-[10px]">{p}</span>
               ))}</div>
             )}
             {explainResult.refactors.length > 0 && (
@@ -549,7 +549,7 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
             <input value={rvLine} onChange={(e) => setRvLine(e.target.value)} placeholder="line" inputMode="numeric" className="w-16 bg-well border border-line rounded px-2 py-1 text-[10px] font-mono text-body focus:outline-none focus:border-violet-500" />
           </div>
           <textarea value={rvBody} onChange={(e) => setRvBody(e.target.value)} placeholder="Comment…" className="w-full h-14 bg-well border border-line rounded px-2 py-1 text-[10px] text-body resize-y focus:outline-none focus:border-violet-500" />
-          <Button size="sm" onClick={addComment} disabled={rvBusy || !rvFile.trim() || !rvBody.trim()} className="uppercase tracking-widest bg-violet-600 hover:bg-violet-700">{rvBusy ? 'Adding…' : 'Add comment'}</Button>
+          <Button size="sm" onClick={addComment} disabled={rvBusy || !rvFile.trim() || !rvBody.trim()} className="uppercase tracking-widest bg-violet-600 hover:bg-violet-700 text-on-accent">{rvBusy ? 'Adding…' : 'Add comment'}</Button>
           {comments.length > 0 && (
             <div className="space-y-1 max-h-52 overflow-auto">{pagedComments.visible.map((c) => (
               <div key={c.id} className={cn('bg-well rounded px-3 py-2 text-[10px] space-y-1', c.resolved && 'opacity-50')}>
@@ -578,7 +578,7 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
             </div>
             {sbom.hasCopyleftRisk && (
               <div className="space-y-1">{sbom.copyleft.strong.map((c: any, i: number) => (
-                <div key={i} className="bg-red-950/20 border border-red-500/20 rounded px-3 py-1 font-mono text-[10px] text-danger">{c.name}@{c.version} — {c.license}</div>
+                <div key={i} className="bg-red-500/10 border border-red-500/20 rounded px-3 py-1 font-mono text-[10px] text-danger">{c.name}@{c.version} — {c.license}</div>
               ))}</div>
             )}
           </div>
@@ -606,7 +606,7 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
             <p className="text-[11px] text-muted">Get a POST on BUILD_COMPLETE / FAILED / DEPLOY_COMPLETE / FAILED — wire builds into Slack/Discord/your CI.</p>
             <div className="flex gap-2">
               <Input value={newUrl} onChange={e => setNewUrl(e.target.value)} placeholder="https://hooks.slack.com/…" className="flex-1 bg-well focus:border-cyan-500" />
-              <Button onClick={addHook} disabled={whBusy || !newUrl.trim()} className="bg-cyan-600 hover:bg-cyan-700"><Plus className="w-3.5 h-3.5" />Add</Button>
+              <Button onClick={addHook} disabled={whBusy || !newUrl.trim()} className="bg-cyan-600 hover:bg-cyan-700 text-on-accent"><Plus className="w-3.5 h-3.5" />Add</Button>
             </div>
             {whMsg && <p className="text-[11px] text-warn">{whMsg}</p>}
             <div className="space-y-1.5">

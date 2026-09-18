@@ -1605,7 +1605,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     else toast('Error: ' + r.error);
   };
 
-  const providerColors: Record<string, string> = { gemini: 'bg-blue-500', anthropic: 'bg-orange-500', grok: 'bg-purple-500', vertex: 'bg-green-500', openai: 'bg-emerald-500' };
+  const providerColors: Record<string, string> = { gemini: 'bg-blue-500 text-on-accent', anthropic: 'bg-orange-500 text-on-accent', grok: 'bg-purple-500 text-on-accent', vertex: 'bg-green-500 text-on-accent', openai: 'bg-emerald-500 text-on-accent' };
 
   return (
     <div className="w-full max-w-7xl mx-auto space-y-6 py-4 text-left">
@@ -1683,7 +1683,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   disabled={moderateBusy || reasonMissing}
                   title={reasonMissing ? 'A ban needs a reason' : undefined}
                   className={`flex-1 px-4 py-2.5 rounded-xl text-ink text-sm font-bold disabled:opacity-40 ${
-                    isBan ? 'bg-red-600 hover:bg-red-500' : 'bg-raised hover:bg-raised'}`}
+                    isBan ? 'bg-red-600 hover:bg-red-500 text-on-accent' : 'bg-raised hover:bg-raised'}`}
                 >
                   {moderateBusy ? 'Working…' : copy.cta}
                 </button>
@@ -1789,15 +1789,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
               {/* Row 1: 4 key metrics */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {statCard('Total Revenue', `₹${(analytics?.totalRevenue || 0).toLocaleString('en-IN')}`, 'Verified payments', 'bg-emerald-500', IndianRupee)}
-                {statCard('Registered Users', analytics?.totalUsers || 0, `+${analytics?.newUsersToday || 0} today`, 'bg-indigo-500', Users)}
-                {statCard('Website Hits Today', (analytics?.websiteHitsToday || 0).toLocaleString(), analytics?.hitsSinceBoot ? `${(analytics?.websiteHitsTotal || 0).toLocaleString()} since this server started` : `${(analytics?.websiteHitsTotal || 0).toLocaleString()} total`, 'bg-sky-500', Globe)}
-                {statCard('Active (24h)', analytics?.activeUsers24h || 0, 'Unique users with AI requests', 'bg-violet-500', Activity)}
+                {statCard('Total Revenue', `₹${(analytics?.totalRevenue || 0).toLocaleString('en-IN')}`, 'Verified payments', 'bg-emerald-500 text-on-accent', IndianRupee)}
+                {statCard('Registered Users', analytics?.totalUsers || 0, `+${analytics?.newUsersToday || 0} today`, 'bg-indigo-500 text-on-accent', Users)}
+                {statCard('Website Hits Today', (analytics?.websiteHitsToday || 0).toLocaleString(), analytics?.hitsSinceBoot ? `${(analytics?.websiteHitsTotal || 0).toLocaleString()} since this server started` : `${(analytics?.websiteHitsTotal || 0).toLocaleString()} total`, 'bg-sky-500 text-on-accent', Globe)}
+                {statCard('Active (24h)', analytics?.activeUsers24h || 0, 'Unique users with AI requests', 'bg-violet-500 text-on-accent', Activity)}
               </div>
 
               {/* Row 2: 4 more metrics */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {statCard('Output Tokens', (analytics?.totalTokensUsed || 0).toLocaleString(), analytics?.scope === 'chat' ? 'Chat assistants only — builds are on the Monitor' : 'All providers combined', 'bg-amber-500', Zap)}
+                {statCard('Output Tokens', (analytics?.totalTokensUsed || 0).toLocaleString(), analytics?.scope === 'chat' ? 'Chat assistants only — builds are on the Monitor' : 'All providers combined', 'bg-amber-500 text-on-accent', Zap)}
                 {/* 🔒 "AT MOST" WHEN THE COST IS A FLOOR. Some calls cannot be priced (a provider that
                     reported no tokens, or a row written before usage was recorded), so the real cost is
                     at least what we summed and the margin is at most what we show. This card used to
@@ -1809,9 +1809,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   `₹${(analytics?.estimatedProfit || 0).toFixed(2)}`,
                   /* CHAT cost only — build cost is on the Monitor's own tiles (scope from the server) */
                   `Revenue minus ${analytics?.scope === 'chat' ? 'CHAT AI' : 'AI'} cost${analytics?.scope === 'chat' ? ' · build cost is on the Monitor' : ''}${analytics?.providerCostComplete === false ? ` · ${analytics?.unpricedCalls || 0} call(s) could not be priced` : ''}`,
-                  (analytics?.estimatedProfit || 0) >= 0 ? 'bg-emerald-500' : 'bg-red-500', TrendingUp)}
-                {statCard('Token Purchases', analytics?.tokenPurchaseCount || 0, 'Paid transactions', 'bg-pink-500', Tag)}
-                {statCard('Cost / Request', `₹${(analytics?.burnRate || 0).toFixed(5)}`, analytics?.scope === 'chat' ? 'Direct provider cost · chat only' : 'Direct provider cost', 'bg-orange-500', Cpu)}
+                  (analytics?.estimatedProfit || 0) >= 0 ? 'bg-emerald-500 text-on-accent' : 'bg-red-500 text-on-accent', TrendingUp)}
+                {statCard('Token Purchases', analytics?.tokenPurchaseCount || 0, 'Paid transactions', 'bg-pink-500 text-on-accent', Tag)}
+                {statCard('Cost / Request', `₹${(analytics?.burnRate || 0).toFixed(5)}`, analytics?.scope === 'chat' ? 'Direct provider cost · chat only' : 'Direct provider cost', 'bg-orange-500 text-on-accent', Cpu)}
               </div>
 
               {/* PUBLISHED APPS, as a NUMBER among the numbers.
@@ -1832,9 +1832,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     ? 'Could not read the list — not a count of zero'
                     : `${channels.verdict.remaining} more can be published${channels.verdict.reclaimable > 0 ? ` · ${channels.verdict.reclaimable} reclaimable` : ''}`,
                   channelsError || !channels ? 'bg-raised'
-                    : channels.verdict.level === 'critical' ? 'bg-red-500'
-                    : channels.verdict.level === 'warn' ? 'bg-amber-500'
-                    : 'bg-emerald-500',
+                    : channels.verdict.level === 'critical' ? 'bg-red-500 text-on-accent'
+                    : channels.verdict.level === 'warn' ? 'bg-amber-500 text-on-accent'
+                    : 'bg-emerald-500 text-on-accent',
                   Globe,
                 )}
               </div>
@@ -2046,7 +2046,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     {(analytics?.providerRanking || []).map((p: any, i: number) => {
                       const total = (analytics?.providerRanking || []).reduce((s: number, x: any) => s + x.requests, 0);
                       const pct = total > 0 ? Math.round((p.requests / total) * 100) : 0;
-                      const col = providerColors[p.name?.toLowerCase()] || 'bg-indigo-500';
+                      const col = providerColors[p.name?.toLowerCase()] || 'bg-indigo-500 text-on-accent';
                       return (
                         <div key={p.name}>
                           <div className="flex justify-between text-xs font-bold text-ink mb-1">
@@ -2072,7 +2072,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   <div className="space-y-3">
                     {Object.entries(analytics?.providerWise || {}).map(([name, tokens]: any) => {
                       const pct = analytics?.totalTokensUsed > 0 ? Math.round((tokens / analytics.totalTokensUsed) * 100) : 0;
-                      const col = providerColors[name?.toLowerCase()] || 'bg-indigo-500';
+                      const col = providerColors[name?.toLowerCase()] || 'bg-indigo-500 text-on-accent';
                       return (
                         <div key={name}>
                           <div className="flex justify-between text-xs font-bold text-ink mb-1">
@@ -2158,7 +2158,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         <div key={r.feature} className="flex items-center gap-2 text-[11px]">
                           <span className="text-body w-40 shrink-0 truncate">{r.label}</span>
                           <span className="flex-1 h-1.5 rounded-full bg-raised overflow-hidden min-w-0">
-                            <span className="block h-full rounded-full bg-emerald-500/70" style={{ width: `${pct}%` }} />
+                            <span className="block h-full rounded-full bg-emerald-500/70 text-on-accent" style={{ width: `${pct}%` }} />
                           </span>
                           {/* USERS first — the admin is deciding what to invest in, and one heavy
                               user is not the same signal as many people choosing a feature. */}
@@ -2230,7 +2230,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         <tr><td colSpan={11} className="py-10 text-center text-muted text-[10px] font-bold uppercase">No users found. Click Load to fetch.</td></tr>
                       )}
                       {users.map((u: any) => (
-                        <tr key={u.userId} className={`hover:bg-raised transition-colors ${u.banned ? 'bg-red-950/20' : ''}`}>
+                        <tr key={u.userId} className={`hover:bg-raised transition-colors ${u.banned ? 'bg-red-500/10' : ''}`}>
                           <td className="py-3 px-4">
                             {/* The same account sheet a report opens — one place where a person's whole
                                 picture lives, reachable from both surfaces rather than rebuilt in each. */}
@@ -2427,7 +2427,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     <div key={name} className={`bg-card border rounded-[1.5rem] p-5 space-y-3 ${isOnCooldown ? 'border-red-500/30' : 'border-line'}`}>
                       <div className="flex justify-between items-center">
                         <div className="flex items-center gap-3">
-                          <div className={`w-3 h-3 rounded-full ${isOnCooldown ? 'bg-red-500 animate-pulse' : !everRan ? 'bg-faint' : stat.inFlight > 0 ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`} />
+                          <div className={`w-3 h-3 rounded-full ${isOnCooldown ? 'bg-red-500 animate-pulse text-on-accent' : !everRan ? 'bg-faint' : stat.inFlight > 0 ? 'bg-amber-500 animate-pulse text-on-accent' : 'bg-emerald-500 text-on-accent'}`} />
                           <span className="font-black text-ink uppercase font-mono">{name}</span>
                         </div>
                         <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-full border ${isOnCooldown ? 'bg-red-500/10 border-red-500/30 text-danger' : !everRan ? 'bg-raised border-line text-muted' : 'bg-emerald-500/10 border-emerald-500/30 text-success'}`}>
@@ -2532,10 +2532,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 ) : (
                   <>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      {statCard('Samples', latencyAnomaly.count, 'recent traces', 'bg-sky-500', Activity)}
-                      {statCard('Anomalies', (latencyAnomaly.zAnomalies?.length || 0) + (latencyAnomaly.ewmaAnomalies?.length || 0), 'z-score + EWMA', (latencyAnomaly.zAnomalies?.length || 0) + (latencyAnomaly.ewmaAnomalies?.length || 0) > 0 ? 'bg-amber-500' : 'bg-emerald-500', AlertTriangle)}
-                      {statCard('Trend', latencyAnomaly.trend?.direction || 'n/a', latencyAnomaly.trend ? `slope ${Number(latencyAnomaly.trend.slope).toFixed(3)}` : 'unknown', latencyAnomaly.trend?.direction === 'rising' ? 'bg-red-500' : latencyAnomaly.trend?.direction === 'falling' ? 'bg-emerald-500' : 'bg-raised', TrendingUp)}
-                      {statCard('Avg Latency', `${latencyAnomaly.stats?.mean ?? '—'}ms`, `max ${latencyAnomaly.stats?.max ?? '—'}ms`, 'bg-indigo-500', Cpu)}
+                      {statCard('Samples', latencyAnomaly.count, 'recent traces', 'bg-sky-500 text-on-accent', Activity)}
+                      {statCard('Anomalies', (latencyAnomaly.zAnomalies?.length || 0) + (latencyAnomaly.ewmaAnomalies?.length || 0), 'z-score + EWMA', (latencyAnomaly.zAnomalies?.length || 0) + (latencyAnomaly.ewmaAnomalies?.length || 0) > 0 ? 'bg-amber-500 text-on-accent' : 'bg-emerald-500 text-on-accent', AlertTriangle)}
+                      {statCard('Trend', latencyAnomaly.trend?.direction || 'n/a', latencyAnomaly.trend ? `slope ${Number(latencyAnomaly.trend.slope).toFixed(3)}` : 'unknown', latencyAnomaly.trend?.direction === 'rising' ? 'bg-red-500 text-on-accent' : latencyAnomaly.trend?.direction === 'falling' ? 'bg-emerald-500 text-on-accent' : 'bg-raised', TrendingUp)}
+                      {statCard('Avg Latency', `${latencyAnomaly.stats?.mean ?? '—'}ms`, `max ${latencyAnomaly.stats?.max ?? '—'}ms`, 'bg-indigo-500 text-on-accent', Cpu)}
                     </div>
                     {(latencyAnomaly.zAnomalies?.length || 0) > 0 && (
                       <div className="text-[10px] text-warn font-mono">
@@ -2555,22 +2555,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           {activeTab === 'revenue' && (
             <div className="space-y-6">
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                {statCard('Total Revenue', `₹${(analytics?.totalRevenue || 0).toLocaleString('en-IN')}`, 'All time', 'bg-emerald-500', IndianRupee)}
+                {statCard('Total Revenue', `₹${(analytics?.totalRevenue || 0).toLocaleString('en-IN')}`, 'All time', 'bg-emerald-500 text-on-accent', IndianRupee)}
                 {statCard(
                   analytics?.providerCostComplete === false ? 'Provider Cost (at least)' : 'Provider Cost',
                   `₹${(analytics?.totalProviderCost || 0).toFixed(4)}`,
                   analytics?.providerCostComplete === false
                     ? `AI API cost · ${analytics?.pricedCalls || 0} priced, ${analytics?.unpricedCalls || 0} not`
                     : 'AI API cost',
-                  'bg-red-500', Database)}
+                  'bg-red-500 text-on-accent', Database)}
                 {statCard(
                   analytics?.providerCostComplete === false ? 'Net Margin (at most)' : 'Net Margin',
                   `₹${(analytics?.estimatedProfit || 0).toFixed(2)}`,
                   analytics?.providerCostComplete === false ? 'Revenue - cost (cost is a floor)' : 'Revenue - cost',
-                  (analytics?.estimatedProfit || 0) >= 0 ? 'bg-emerald-500' : 'bg-red-500', TrendingUp)}
-                {statCard('Token Purchases', analytics?.tokenPurchaseCount || 0, 'Successful payments', 'bg-pink-500', Tag)}
-                {statCard('Cost / Request', `₹${(analytics?.burnRate || 0).toFixed(5)}`, 'Avg AI provider cost', 'bg-orange-500', Cpu)}
-                {statCard('Active Users', analytics?.activeUsers24h || 0, 'Using AI in 24h', 'bg-violet-500', UserCheck)}
+                  (analytics?.estimatedProfit || 0) >= 0 ? 'bg-emerald-500 text-on-accent' : 'bg-red-500 text-on-accent', TrendingUp)}
+                {statCard('Token Purchases', analytics?.tokenPurchaseCount || 0, 'Successful payments', 'bg-pink-500 text-on-accent', Tag)}
+                {statCard('Cost / Request', `₹${(analytics?.burnRate || 0).toFixed(5)}`, 'Avg AI provider cost', 'bg-orange-500 text-on-accent', Cpu)}
+                {statCard('Active Users', analytics?.activeUsers24h || 0, 'Using AI in 24h', 'bg-violet-500 text-on-accent', UserCheck)}
               </div>
 
               {/* PURCHASES — "this revenue came from which users?" (admin 2026-09-17). Every row is a
@@ -2587,10 +2587,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 </div>
                 {purchases?.overall && (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    {statCard('Revenue (all time)', `₹${Number(purchases.overall.revenueInr || 0).toLocaleString('en-IN')}`, `${purchases.overall.revenueRows} paid purchase${purchases.overall.revenueRows === 1 ? '' : 's'}`, 'bg-emerald-500', IndianRupee)}
-                    {statCard('In this view', `₹${Number(purchases.summary?.revenueInr || 0).toLocaleString('en-IN')}`, `${purchases.summary?.revenueRows || 0} paid of ${purchases.total} row${purchases.total === 1 ? '' : 's'}`, 'bg-sky-500', Tag)}
-                    {statCard('Credits given free', (purchases.overall.freeCreditRows || 0).toLocaleString('en-IN'), 'coupons, gifts, referral steps — never revenue', 'bg-violet-500', UserCheck)}
-                    {statCard('Unfinished', `${purchases.overall.pendingRows || 0} pending · ${purchases.overall.failedRows || 0} failed`, 'never counted as revenue', 'bg-amber-500', Activity)}
+                    {statCard('Revenue (all time)', `₹${Number(purchases.overall.revenueInr || 0).toLocaleString('en-IN')}`, `${purchases.overall.revenueRows} paid purchase${purchases.overall.revenueRows === 1 ? '' : 's'}`, 'bg-emerald-500 text-on-accent', IndianRupee)}
+                    {statCard('In this view', `₹${Number(purchases.summary?.revenueInr || 0).toLocaleString('en-IN')}`, `${purchases.summary?.revenueRows || 0} paid of ${purchases.total} row${purchases.total === 1 ? '' : 's'}`, 'bg-sky-500 text-on-accent', Tag)}
+                    {statCard('Credits given free', (purchases.overall.freeCreditRows || 0).toLocaleString('en-IN'), 'coupons, gifts, referral steps — never revenue', 'bg-violet-500 text-on-accent', UserCheck)}
+                    {statCard('Unfinished', `${purchases.overall.pendingRows || 0} pending · ${purchases.overall.failedRows || 0} failed`, 'never counted as revenue', 'bg-amber-500 text-on-accent', Activity)}
                   </div>
                 )}
                 <div className="flex flex-wrap gap-2 items-end">
@@ -2730,10 +2730,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 ) : (
                   <>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      {statCard('Builds', costSummary.totalBuilds.toLocaleString(), `${costSummary.days} day(s)`, 'bg-indigo-500', Server)}
-                      {statCard('Success Rate', `${costSummary.overallSuccessPct}%`, `${costSummary.okBuilds} ok`, costSummary.overallSuccessPct >= 80 ? 'bg-emerald-500' : 'bg-amber-500', CheckCircle2)}
-                      {statCard('Cheap-Tier Share', `${costSummary.cheapTierSharePct}%`, 'ran on Gemini (cheapest)', 'bg-sky-500', TrendingUp)}
-                      {statCard('Billed', `$${costSummary.totalBilledUsd.toFixed(4)}`, `${costSummary.powerBuilds} power builds`, 'bg-pink-500', IndianRupee)}
+                      {statCard('Builds', costSummary.totalBuilds.toLocaleString(), `${costSummary.days} day(s)`, 'bg-indigo-500 text-on-accent', Server)}
+                      {statCard('Success Rate', `${costSummary.overallSuccessPct}%`, `${costSummary.okBuilds} ok`, costSummary.overallSuccessPct >= 80 ? 'bg-emerald-500 text-on-accent' : 'bg-amber-500 text-on-accent', CheckCircle2)}
+                      {statCard('Cheap-Tier Share', `${costSummary.cheapTierSharePct}%`, 'ran on Gemini (cheapest)', 'bg-sky-500 text-on-accent', TrendingUp)}
+                      {statCard('Billed', `$${costSummary.totalBilledUsd.toFixed(4)}`, `${costSummary.powerBuilds} power builds`, 'bg-pink-500 text-on-accent', IndianRupee)}
                     </div>
 
                     {/* T1-admin-dashboard — build-failure analytics: overall failure rate + spike-day alert. */}
@@ -2865,7 +2865,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         : rec.severity === 'warning'
                           ? 'border-amber-500/20 bg-amber-500/5'
                           : 'border-sky-500/20 bg-sky-500/5';
-                      const dot = rec.severity === 'critical' ? 'bg-red-500' : rec.severity === 'warning' ? 'bg-amber-500' : 'bg-sky-500';
+                      const dot = rec.severity === 'critical' ? 'bg-red-500 text-on-accent' : rec.severity === 'warning' ? 'bg-amber-500 text-on-accent' : 'bg-sky-500 text-on-accent';
                       return (
                         <div key={rec.id} className={`border ${box} rounded-xl p-4`}>
                           <div className="flex items-start gap-2.5">
@@ -3125,7 +3125,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                               {/* The bar is the point: the admin asked which feature is used MOST,
                                   and a column of numbers does not answer that at a glance. */}
                               <span className="flex-1 h-1.5 rounded-full bg-raised overflow-hidden min-w-0">
-                                <span className="block h-full rounded-full bg-indigo-500/70" style={{ width: `${pct}%` }} />
+                                <span className="block h-full rounded-full bg-indigo-500/70 text-on-accent" style={{ width: `${pct}%` }} />
                               </span>
                               <span className="text-body tabular-nums w-16 text-right shrink-0">₹{r.inr.toFixed(2)}</span>
                               <span className="text-faint tabular-nums w-9 text-right shrink-0">{pct}%</span>
@@ -3237,7 +3237,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 <div className="flex flex-wrap gap-2 mt-5 pt-4 border-t border-line">
                   <button
                     onClick={() => { void handleBan(account.uid, !account.wallet?.banned); setAccount(null); }}
-                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-on-accent ${account.wallet?.banned ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-rose-600 hover:bg-rose-500'}`}
+                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-on-accent ${account.wallet?.banned ? 'bg-emerald-600 hover:bg-emerald-500 text-on-accent' : 'bg-rose-600 hover:bg-rose-500 text-on-accent'}`}
                   >
                     <Shield size={13} /> {account.wallet?.banned ? 'Lift the suspension' : 'Suspend this account'}
                   </button>
@@ -4267,7 +4267,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         <div key={p.label} className="flex items-center gap-3">
                           <span className="w-40 shrink-0 text-[12px] font-bold text-ink truncate" title={p.sample}>{p.label}</span>
                           <span className="flex-1 h-2 rounded-full bg-raised overflow-hidden">
-                            <span className="block h-full bg-amber-500/70 rounded-full" style={{ width: `${pct}%` }} />
+                            <span className="block h-full bg-amber-500/70 rounded-full text-on-accent" style={{ width: `${pct}%` }} />
                           </span>
                           <span className="w-16 shrink-0 text-right text-[11px] text-muted tabular-nums">{p.count} · {pct}%</span>
                         </div>
@@ -4900,9 +4900,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                {statCard('Failed Logins', analytics?.failedRequests || 0, 'Admin login failures', 'bg-red-500', Shield)}
-                {statCard('Website Hits', (analytics?.websiteHitsTotal || 0).toLocaleString(), analytics?.hitsSinceBoot ? 'Since this server started — resets on deploy' : 'All time requests', 'bg-sky-500', Globe)}
-                {statCard('Today Hits', (analytics?.websiteHitsToday || 0).toLocaleString(), `vs ${analytics?.websiteHitsYesterday || 0} yesterday`, 'bg-indigo-500', Eye)}
+                {statCard('Failed Logins', analytics?.failedRequests || 0, 'Admin login failures', 'bg-red-500 text-on-accent', Shield)}
+                {statCard('Website Hits', (analytics?.websiteHitsTotal || 0).toLocaleString(), analytics?.hitsSinceBoot ? 'Since this server started — resets on deploy' : 'All time requests', 'bg-sky-500 text-on-accent', Globe)}
+                {statCard('Today Hits', (analytics?.websiteHitsToday || 0).toLocaleString(), `vs ${analytics?.websiteHitsYesterday || 0} yesterday`, 'bg-indigo-500 text-on-accent', Eye)}
               </div>
 
               <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
@@ -4931,7 +4931,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   {Object.entries(analytics?.liveProviderStats || {})
                     .filter(([, s]: any) => s.cooldownUntil > Date.now())
                     .map(([name, s]: any) => (
-                      <div key={name} className="flex justify-between items-center bg-red-950/20 border border-red-500/20 rounded-xl px-4 py-2.5">
+                      <div key={name} className="flex justify-between items-center bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2.5">
                         <span className="text-danger font-black uppercase font-mono text-[11px]">{name}</span>
                         <span className="text-[10px] text-danger">Cooldown: {Math.ceil((s.cooldownUntil - Date.now()) / 1000)}s remaining</span>
                       </div>

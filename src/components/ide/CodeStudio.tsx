@@ -1277,14 +1277,14 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
            <button
              onClick={() => { const v = !editorWordWrap; setEditorWordWrap(v); localStorage.setItem('ide_wordWrap', v ? 'on' : 'off'); }}
              title={`Word wrap: ${editorWordWrap ? 'on' : 'off'}`}
-             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorWordWrap ? 'text-accent-text bg-indigo-900/30' : 'text-faint hover:text-ink'}`}
+             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorWordWrap ? 'text-accent-text bg-indigo-500/10' : 'text-faint hover:text-ink'}`}
            >
              <AlignJustify className="w-3 h-3" />
            </button>
            <button
              onClick={() => { const v = !editorMinimap; setEditorMinimap(v); localStorage.setItem('ide_minimap', v ? 'on' : 'off'); }}
              title={`Minimap: ${editorMinimap ? 'on' : 'off'}`}
-             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorMinimap ? 'text-accent-text bg-indigo-900/30' : 'text-faint hover:text-ink'}`}
+             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorMinimap ? 'text-accent-text bg-indigo-500/10' : 'text-faint hover:text-ink'}`}
            >
              <Map className="w-3 h-3" />
            </button>
@@ -1328,25 +1328,25 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
            <button
              onClick={() => { const v = editorTheme === 'vs-dark' ? 'vs' : 'vs-dark'; setEditorTheme(v); localStorage.setItem('ide_theme', v); }}
              title={`Editor theme: ${editorTheme === 'vs-dark' ? 'Dark' : 'Light'} (click to toggle)`}
-             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorTheme === 'vs' ? 'text-warn bg-amber-900/20' : 'text-faint hover:text-ink'}`}
+             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorTheme === 'vs' ? 'text-warn bg-amber-500/10' : 'text-faint hover:text-ink'}`}
            >{editorTheme === 'vs-dark' ? '🌙' : '☀️'}</button>
            {/* A12: Format on Save toggle */}
            <button
              onClick={() => { const v = !editorFormatOnSave; setEditorFormatOnSave(v); localStorage.setItem('ide_formatOnSave', v ? 'on' : 'off'); }}
              title={`Format on Save: ${editorFormatOnSave ? 'on' : 'off'} (Ctrl+S)`}
-             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorFormatOnSave ? 'text-accent-text bg-indigo-900/30' : 'text-faint hover:text-ink'}`}
+             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorFormatOnSave ? 'text-accent-text bg-indigo-500/10' : 'text-faint hover:text-ink'}`}
            >Fmt</button>
            {/* A13: Trim whitespace toggle */}
            <button
              onClick={() => { const v = !editorTrimWhitespace; setEditorTrimWhitespace(v); localStorage.setItem('ide_trimWhitespace', v ? 'on' : 'off'); }}
              title={`Trim trailing whitespace on Save: ${editorTrimWhitespace ? 'on' : 'off'}`}
-             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorTrimWhitespace ? 'text-accent-text bg-indigo-900/30' : 'text-faint hover:text-ink'}`}
+             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorTrimWhitespace ? 'text-accent-text bg-indigo-500/10' : 'text-faint hover:text-ink'}`}
            >Trim</button>
            {/* A14: Final newline toggle */}
            <button
              onClick={() => { const v = !editorFinalNewline; setEditorFinalNewline(v); localStorage.setItem('ide_finalNewline', v ? 'on' : 'off'); }}
              title={`Insert final newline on Save: ${editorFinalNewline ? 'on' : 'off'}`}
-             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorFinalNewline ? 'text-accent-text bg-indigo-900/30' : 'text-faint hover:text-ink'}`}
+             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorFinalNewline ? 'text-accent-text bg-indigo-500/10' : 'text-faint hover:text-ink'}`}
            >↵</button>
            {/* A9: Code folding */}
            <button
@@ -1391,7 +1391,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                key={label}
                onClick={() => sendProjectAction(prompt)}
                title={`AI: Generate ${label}`}
-               className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black text-faint hover:text-success hover:bg-emerald-900/20 transition-all uppercase tracking-widest"
+               className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black text-faint hover:text-success hover:bg-emerald-500/10 transition-all uppercase tracking-widest"
              >
                <Icon className="w-3 h-3" />
                {label}
@@ -1444,7 +1444,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
               onClick={() => { if (onPreviewClick) onPreviewClick(); else handleScreenChange('preview'); }}
               className={cn(
                 "w-20 h-7 rounded-r-lg flex items-center justify-center text-ink shadow-lg shadow-indigo-500/20 active:scale-90 transition-all border-y border-r border-l border-indigo-400/20",
-                activeScreen === 'preview' ? "bg-indigo-700" : "bg-indigo-600 hover:bg-indigo-700"
+                activeScreen === 'preview' ? "bg-indigo-700 text-on-accent" : "bg-indigo-600 hover:bg-indigo-700 text-on-accent"
               )}
               title="Open Preview"
             >
@@ -1754,7 +1754,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
 
           {/* A24: Status bar — cursor position, language, file info */}
           {activeScreen !== 'preview' && activeScreen !== 'security' && Object.keys(files).length > 0 && (
-            <div className="h-5 shrink-0 bg-[#007acc] flex items-center px-3 gap-4 select-none overflow-hidden">
+            <div className="h-5 shrink-0 bg-[#007acc] flex items-center px-3 gap-4 select-none overflow-hidden text-on-accent">
               <span className="text-[10px] text-on-accent font-mono">Ln {cursorPos.line}, Col {cursorPos.col}</span>
               <span className="text-[10px] text-on-accent font-mono">{activeFile?.split('.').pop()?.toUpperCase() || 'TXT'}</span>
               <span className="text-[10px] text-on-accent font-mono ml-auto">UTF-8</span>
@@ -1925,7 +1925,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                >
                  <Icon className="w-5 h-5" />
                  <span className="text-[9px] font-black uppercase tracking-tight">{label}</span>
-                 {active && <div className="absolute top-0 left-1/4 right-1/4 h-0.5 bg-indigo-500 rounded-full" />}
+                 {active && <div className="absolute top-0 left-1/4 right-1/4 h-0.5 bg-indigo-500 rounded-full text-on-accent" />}
                </button>
              ))}
            </div>

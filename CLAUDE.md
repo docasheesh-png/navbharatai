@@ -2747,6 +2747,18 @@ is now enforced at the source, by CI.**
   by indentation across lines (`fillScopes`), so "UTF-8" three lines under Code Studio's `#007acc` status
   bar no longer lands on `text-muted` (1.47:1). When migrating by hand, the same rule: on `bg-indigo-600`
   or a hex fill, text is `text-on-accent`, never `text-ink`/`text-muted`.
+- **A filled element names its own label colour (PR G, 2026-09-18).** A button on `bg-violet-600` with
+  no `text-` class was white only because the old dark root was `text-white`; on tokens the root is
+  `text-body` and the label went near-black on violet. The codemod now adds `text-on-accent` to any
+  RESTING solid fill without a text colour (never to a `hover:`-only fill, never to `bg-clip-text`), and
+  an inline `style={{ backgroundColor: … }}` that is not a `var(--…)` counts as a fixed fill. By hand:
+  never rely on inheritance for text on a fill.
+- **A dark tint is a Light defect; a dark shade as text is a Dark defect.** `bg-emerald-900/30` →
+  `bg-emerald-500/10` (≤ 60% only — above that it is an opaque panel, by hand) and `text-emerald-600` →
+  `text-success`. Both are counted by the census since PR G, so the ratchet sees them.
+- **A panel must not carry a PRIVATE theme.** SecurityScan had its own `useState<'dark' | 'light'>`
+  and a "Light Mode" button with 23 ternaries; removed in PR G. One theme, the app's — a local toggle is
+  a second theme system and is deleted, not migrated.
 - **Two more tokens exist since PR C:** `bg-well` (an inset panel inside a card — the old
   `bg-black/20–40` on dark; a 6% ink wash on light) and `bg-scrim` (the modal backdrop, deliberately
   the same dark on every theme because it dims what is behind it).

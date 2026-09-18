@@ -111,9 +111,19 @@ export function hasHexBrandFill(span) {
   return false;
 }
 
+/**
+ * An inline `style={{ backgroundColor: brand }}` on the same line — a fill the theme never changes (a
+ * white-label preview's buttons, a collaborator's avatar in their own colour). A `var(--…)` background
+ * follows the theme and is NOT a fixed fill.
+ */
+export function hasInlineFill(line) {
+  // The lookahead carries its own `\s*` so backtracking through the one before it cannot slip past `var(`.
+  return /style=\{\{[^}]*\bbackground(?:Color)?\s*:(?!\s*['"`]?var\()/.test(line);
+}
+
 export function fillContext(line, idx, insideFill = false) {
   const span = enclosingSpan(line, idx);
-  if (SOLID_FILL.test(span) || hasHexBrandFill(span)) return 'yes';
+  if (SOLID_FILL.test(span) || hasHexBrandFill(span) || hasInlineFill(line)) return 'yes';
   // A label INSIDE a filled box — an element with no background of its own, nested (by indentation)
   // under an opener whose className carries a solid fill. The same-element rule cannot see a parent,
   // and this shape (an avatar badge, a status bar's labels) is where the audit found labels going dark.
@@ -164,11 +174,18 @@ export function mapToken(base, { onSolidFill = false } = {}) {
     if (inSet(TEXT_MUTED_FIX, value)) return { token: `${prop}-muted`, kind: 'fix' };
     if (inSet(TEXT_FAINT_FIX, value)) return { token: `${prop}-faint`, kind: 'fix' };
     if (HEX_BRAND[value]) return { token: `${prop}-${HEX_BRAND[value]}`, kind: 'fix' };
-    const hue = value.match(/^([a-z]+)-(50|100|200|300|400|500)$/);
+    // 50–500: a LIGHT shade as text (unreadable on light). 600–700: a DARK shade as text (3.3:1 on dark).
+    // The role token is the readable shade on every theme.
+    const hue = value.match(/^([a-z]+)-(50|100|200|300|400|500|600|700)$/);
     if (hue && HUE_TOKEN[hue[1]]) return { token: `${prop}-${HUE_TOKEN[hue[1]]}`, kind: 'fix' }; // opacity dropped: it only lowers contrast
     return null;
   }
   if (prop === 'bg') {
+    // A dark tint (`bg-emerald-900/30`) is a wash on dark and a mid-dark smear on light; the 500 shade at
+    // 10% is a tint on both. Only brand hues — a grey 900 is chrome and handled above.
+    // Past 60% a dark tint is an opaque PANEL (an error overlay with white text), not a wash — by hand.
+    const dark = value.match(/^([a-z]+)-(800|900|950)$/);
+    if (dark && HUE_TOKEN[dark[1]] && opacity !== null && opacity <= 60) return { token: `bg-${dark[1]}-500/10`, kind: 'fix' };
     if (opacity === null) {
       if (inSet(BG_SURFACE, value)) return { token: 'bg-surface', kind: 'exact' };
       if (inSet(BG_CARD, value)) return { token: 'bg-card', kind: 'exact' };
@@ -256,13 +273,14 @@ export function migrate(src) {
   const lines = normalised.split('\n');
   const masked = maskEmbeddedSources(normalised).split('\n');
   const insideFill = fillScopes(masked);
-  const out = lines.map((line, i) => line.replace(LITERAL, (m, v1, v2, offset) => {
+  // LITERAL has one variant-prefix capture per alternative (grey/hex, hue text, dark tint): the callback
+  // receives all of them before `offset`, so the arity here must follow the regex.
+  const out = lines.map((line, i) => line.replace(LITERAL, (m, v1, v2, v3, offset) => {
     // Inside an embedded-source span the masked line holds spaces where the match is: leave it alone.
     if (masked[i].slice(offset, offset + m.length) !== m) return m;
-    return rewrite(line, i, m, v1, v2, offset);
+    return rewrite(line, i, m, v1 ?? v2 ?? v3 ?? '', offset);
   }));
-  function rewrite(line, i, m, v1, v2, offset) {
-    const variant = v1 ?? v2 ?? '';
+  function rewrite(line, i, m, variant, offset) {
     const base = m.slice(variant.length);
     const ctx = /^(?:text|placeholder)-/.test(base) ? fillContext(line, offset, insideFill[i]) : 'no';
     if (ctx === 'mixed') { left[`${m} (mixed fills in one template — split by hand)`] = (left[`${m} (mixed fills in one template — split by hand)`] || 0) + 1; return m; }
@@ -273,6 +291,25 @@ export function migrate(src) {
     changed[label] = (changed[label] || 0) + 1;
     if (r.kind === 'exact') exact++; else fix++;
     return to;
+  }
+  // A solid fill with NO text colour of its own inherits the page's `text-body` — which was white on the
+  // old dark UI and is near-black on Light: "Download YAML" on `bg-violet-600` read at 3.0:1. The label
+  // on a fixed fill is `text-on-accent`, stated on the element so nothing depends on what it inherits.
+  // Only a RESTING, unprefixed fill counts (a `hover:bg-indigo-600` on a flat button must not pin white
+  // text for the resting state), and gradient TEXT (`bg-clip-text`) is not a fill at all.
+  const RESTING_FILL = /(?<![\w:-])bg-(?:indigo|blue|emerald|green|red|rose|purple|violet|fuchsia|amber|orange|teal|cyan|pink|sky)-(?:500|600|700)(?:\/(?:[6-9]\d|100))?(?![\w/-])|(?<![\w:-])bg-gradient-|(?<![\w:-])bg-\[#(?!(?:0d1117|161b22|21262d|30363d|0d1520|1c2128|1c2732|1e1e1e|252526|111827|0f172a)\])[0-9a-fA-F]{6}\](?![\w/-])/;
+  const HAS_TEXT_COLOUR = /(?<![\w-])(?:[a-z-]+:)*text-(?:on-accent|ink|body|muted|faint|accent-text|success|warn|danger|info|white|black|transparent|current|inherit|[a-z]+-\d{2,3}|\[#)/;
+  const INHERITED_LABEL = '(label inherits its colour on a solid fill) + text-on-accent';
+  for (let i = 0; i < out.length; i++) {
+    const m2 = maskEmbeddedSources(out[i]); // same length as out[i]: offsets line up
+    out[i] = out[i].replace(/'[^'\n]*'|"[^"\n]*"/g, (q, offset) => {
+      if (m2.slice(offset, offset + q.length) !== q) return q; // embedded source — never touched
+      const body = q.slice(1, -1);
+      if (!RESTING_FILL.test(body) || HAS_TEXT_COLOUR.test(body) || /bg-clip-text/.test(body)) return q;
+      if (!/(?:^|\s)(?:[a-z-]+:)*(?:bg|text|rounded|px|py|p|flex|w|h|border|font|shadow|inline|block)[\w-]*(?:\s|$)/.test(body)) return q; // not a class list
+      changed[INHERITED_LABEL] = (changed[INHERITED_LABEL] || 0) + 1; fix++;
+      return `${q[0]}${body} text-on-accent${q[0]}`;
+    });
   }
   return { out: out.join('\n'), changed, left, exact, fix };
 }

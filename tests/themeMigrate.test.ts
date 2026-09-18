@@ -67,7 +67,8 @@ describe('the readability FIX rows — pixels change on purpose, toward AA', () 
     expect(mapToken('text-rose-300')?.token).toBe('text-danger');
     expect(mapToken('text-sky-300')?.token).toBe('text-info');
     expect(mapToken('text-indigo-400')?.token).toBe('text-accent-text');
-    expect(mapToken('text-indigo-600')).toBeNull(); // a dark shade is not in the audit's failing set — by hand
+    expect(mapToken('text-indigo-600')).toEqual({ token: 'text-accent-text', kind: 'fix' }); // PR G: a dark shade as text is 3.3:1 on Dark — the role token
+    expect(mapToken('text-indigo-800')).toBeNull(); // 800+ as text is a design choice — by hand
   });
   it('border-white/N is a FIX row — compat\'s last rule for it is a mix of --text-primary, not --border-soft', () => {
     // On dark the two are the same rgba(255,255,255,.1); on light --border-soft (#e2e8f0) replaces a
@@ -237,6 +238,47 @@ describe('migrate — mechanics', () => {
   });
 });
 
+describe('🔒 a fixed fill decides its label — PR G rows, each from a real crawl miss', () => {
+  it('an inline style background is a fixed fill: text-white → text-on-accent (the white-label preview buttons)', () => {
+    const src = `<button className="px-4 py-2 text-xs text-white font-medium" style={{ backgroundColor: config.primaryColor }}>Login</button>`;
+    expect(migrate(src).out).toContain('text-on-accent font-medium');
+  });
+  it('a var(--…) inline background follows the theme and is NOT a fixed fill', () => {
+    const src = `<div className="text-white" style={{ background: 'var(--surface-card)' }}>x</div>`;
+    expect(migrate(src).out).toContain('className="text-ink"');
+  });
+  it('a solid fill with no text colour of its own gets text-on-accent ("Download YAML" on bg-violet-600 inherited ink)', () => {
+    const src = `<button className="px-4 py-2.5 bg-violet-600 hover:bg-violet-500 rounded-xl text-sm font-medium">Download</button>`;
+    const r = migrate(src);
+    expect(r.out).toContain('rounded-xl text-sm font-medium text-on-accent"');
+    expect(migrate(r.out).out).toBe(r.out); // idempotent
+  });
+  it('a HOVER-only fill on a flat button does not pin white text for the resting state', () => {
+    const src = `<button className="px-3 py-1 hover:bg-indigo-600 rounded">x</button>`;
+    expect(migrate(src).out).toBe(src);
+  });
+  it('gradient TEXT (bg-clip-text) and a fill that already names its text colour are left alone', () => {
+    const src = `<span className="bg-gradient-to-r from-indigo-400 to-amber-300 bg-clip-text text-transparent">FULL TEAM</span>\n<button className="bg-indigo-600 text-on-accent px-3">ok</button>`;
+    expect(migrate(src).out).toBe(src);
+  });
+  it('a ternary branch that is only a fill gets the label colour in that branch alone', () => {
+    const src = "<div className={`px-2 ${on ? 'bg-emerald-600' : 'bg-raised'}`}>x</div>";
+    expect(migrate(src).out).toBe("<div className={`px-2 ${on ? 'bg-emerald-600 text-on-accent' : 'bg-raised'}`}>x</div>");
+  });
+  it('a DARK tint becomes the 500 shade at 10% (bg-emerald-900/30 was a mid-dark smear on Light)', () => {
+    expect(mapToken('bg-emerald-900/30')).toEqual({ token: 'bg-emerald-500/10', kind: 'fix' });
+    expect(mapToken('bg-amber-950/40')).toEqual({ token: 'bg-amber-500/10', kind: 'fix' });
+    expect(mapToken('bg-emerald-900')).toBeNull(); // a SOLID dark fill is a design choice — by hand
+    expect(mapToken('bg-red-950/95')).toBeNull(); // past 60% it is an opaque panel, not a wash — by hand
+    expect(literalsIn('<div className="bg-red-900/20 text-red-200">x</div>').map((h) => h.token)).toEqual(['bg-red-900/20', 'text-red-200']);
+  });
+  it('a DARK brand shade as text becomes the role token (text-emerald-600 is 3.3:1 on Dark)', () => {
+    expect(mapToken('text-emerald-600')).toEqual({ token: 'text-success', kind: 'fix' });
+    expect(mapToken('text-red-700')).toEqual({ token: 'text-danger', kind: 'fix' });
+    expect(literalsIn('<p className="text-emerald-600">x</p>').map((h) => h.token)).toEqual(['text-emerald-600']);
+  });
+});
+
 describe('🔒 embedded source is SOMEBODY ELSE\'S app — never counted, never rewritten', () => {
   // ComponentLibrary\'s copyable snippets and SyncedTemplates\' starter projects are markup inside
   // template literals. Those apps run on plain Tailwind, where `bg-card` means nothing — the first
@@ -251,6 +293,16 @@ describe('🔒 embedded source is SOMEBODY ELSE\'S app — never counted, never 
     const { out } = migrate(src);
     expect(out.split('\n')[0]).toBe(snippet);
     expect(out.split('\n')[1]).toBe("const ui = <div className=\"bg-card text-ink\">{c.html}</div>;");
+  });
+  it('a QUOTED string that opens an HTML tag is embedded markup too (a print report, a highlighter span)', () => {
+    const src = `const h = md.replace(/^# (.+)$/gm, '<h1 style="color:#064e3b">$1</h1>');\nconst k = "<span style=\\"color:#79c0ff\\">";\nconst cls = "text-white bg-[#0d1117]";`;
+    expect(literalsIn(src).map((h) => h.token)).toEqual(['text-white', 'bg-[#0d1117]']);
+    expect(migrate(src).out).toContain(`'<h1 style="color:#064e3b">$1</h1>'`);
+  });
+  it('a NESTED template (rows mapped inside a report) is ONE embedded literal, not alternating segments', () => {
+    const src = 'const html = `<table>${rows.map((r) => `<tr><td style="color:#6b7280">${r.k}</td></tr>`).join(\'\')}</table>`;\nconst ui = "text-white";';
+    expect(literalsIn(src).map((h) => h.token)).toEqual(['text-white']);
+    expect(migrate(src).out).toContain('color:#6b7280');
   });
   it('a class-list template (`px-2 ${x} text-white`) is NOT embedded source — it has no markup', () => {
     const src = "className={`px-2 ${on ? 'a' : 'b'} text-white`}";

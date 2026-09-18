@@ -347,7 +347,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
   const selectedSize = SIZES.find(s => s.id === size) || SIZES[0];
 
   return (
-    <div className={`h-full flex flex-col text-ink overflow-hidden ${tier === 'pro' ? 'bg-[#08090c]' : 'bg-surface'}`}>
+    <div className={`h-full flex flex-col text-ink overflow-hidden ${tier === 'pro' ? 'bg-surface' : 'bg-surface'}`}>
       {/* Header. In Pro it collapses to a single slim bar carrying only the toggle — the studio below
           introduces itself, and a dense title block would undo the restraint the whole surface is for.
           The toggle itself is never hidden: a user must always be one press from the free tier, which
@@ -522,7 +522,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
           <button
             onClick={handleGenerate}
             disabled={isLoading}
-            className="w-full py-3.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-colors mt-2"
+            className="w-full py-3.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-colors mt-2 text-on-accent"
           >
             {isLoading ? (
               <><TirangaLoader className="w-4 h-4" /> Generating...</>

@@ -102,7 +102,7 @@ function NavItem({
         <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white animate-pulse"></div>
       )}
       {isPreview && hasGeneratedCode && !isActive && (
-        <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.6)]"></div>
+        <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.6)] text-on-accent"></div>
       )}
     </button>
   );
@@ -180,7 +180,7 @@ export function SidebarNav({
           <div className="flex-1 overflow-y-auto p-4 space-y-8 custom-scrollbar">
             <div className="space-y-1.5">
               <div className="text-[10px] font-black text-accent-text uppercase tracking-widest px-3 mb-4 flex items-center gap-2">
-                <div className="w-1 h-3 bg-indigo-500 rounded-full"></div>
+                <div className="w-1 h-3 bg-indigo-500 rounded-full text-on-accent"></div>
                 Core Navigation
               </div>
               {visibleItems.map(item => (
@@ -249,7 +249,7 @@ export function SidebarNav({
               <div className="flex-1 overflow-y-auto p-4 space-y-8 custom-scrollbar">
                 <div className="space-y-1.5">
                   <div className="text-[10px] font-black text-accent-text uppercase tracking-widest px-3 mb-4 flex items-center gap-2">
-                    <div className="w-1 h-3 bg-indigo-500 rounded-full"></div>
+                    <div className="w-1 h-3 bg-indigo-500 rounded-full text-on-accent"></div>
                     Core Navigation
                   </div>
                   {visibleItems.map(item => (
@@ -317,21 +317,21 @@ export function SidebarNav({
 
                 <div className="space-y-4 pt-4 border-t border-line">
                   <div className="text-[10px] font-black text-success uppercase tracking-widest px-3 flex items-center gap-2">
-                    <div className="w-1 h-3 bg-emerald-500 rounded-full"></div>
+                    <div className="w-1 h-3 bg-emerald-500 rounded-full text-on-accent"></div>
                     System Matrix
                   </div>
                   <div className="px-1 space-y-3">
                     <div className="grid grid-cols-2 gap-3">
                       <button
                         onClick={() => { toggleTab('settings'); setIsMenuOpen(false); setErrorContext(null); }}
-                        className={`flex flex-col items-center justify-center gap-2 border py-5 rounded-2xl transition-all group shadow-lg ${activeView === 'settings' ? 'bg-indigo-600 border-indigo-500' : 'bg-card border-line hover:border-indigo-500/50'}`}
+                        className={`flex flex-col items-center justify-center gap-2 border py-5 rounded-2xl transition-all group shadow-lg ${activeView === 'settings' ? 'bg-indigo-600 border-indigo-500 text-on-accent' : 'bg-card border-line hover:border-indigo-500/50'}`}
                       >
                         <Settings className="w-6 h-6 text-accent-text group-hover:rotate-90 transition-transform duration-500" />
                         <span className={`text-[10px] font-black uppercase tracking-widest ${activeView === 'settings' ? 'text-ink' : 'text-muted'}`}>Settings</span>
                       </button>
                       <button
                         onClick={() => { toggleTab('donation'); setIsMenuOpen(false); }}
-                        className="flex flex-col items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 py-5 rounded-2xl transition-all shadow-xl shadow-indigo-600/30 group"
+                        className="flex flex-col items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 py-5 rounded-2xl transition-all shadow-xl shadow-indigo-600/30 group text-on-accent"
                       >
                         <Heart className="w-6 h-6 text-ink group-hover:scale-110 transition-transform" />
                         <span className="text-[10px] font-black text-ink uppercase tracking-widest">Donate</span>

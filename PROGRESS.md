@@ -66218,3 +66218,54 @@ later PR: white on `bg-emerald-600` / `bg-green-600` is 3.65:1 / 3.22:1 on EVERY
 "Browse", BotBuilder's "Go Live" and "Whatsapp"). That is the brand fill, not the theme system — a
 `bg-success` fill token at emerald-700 (≥ 4.5 with white) would fix the class in one place; recorded
 here rather than hand-patched three buttons.
+
+## 2026-09-18 — THE THEME SYSTEM IS REPLACED, PR G of N: ten more files, and three rules the crawl demanded
+
+**Ten files, one run each, then the crawl:** SecurityScan 86 → 0 · WhitelabelBranding 129 → 0 · SDAChat 128 → 0
+· PWANotifications 128 → 0 · FilesPanel 127 → 0 · FigmaImporter 124 → 6 (Figma's own brand purple — a
+logo mark, deliberate) · NbaiDomainConnect 122 → 0 · CICDPipeline 116 → 1 (a toggle knob, not text) ·
+StoreBuildPanel 112 → 0 · LiveCollaboration 112 → 0. Every migrated file (A–G, 33 of them) was then re-run
+under the widened rules below. Baseline **5,738 → 4,581** (157 files). ⚠️ The census itself got STRICTER in
+this PR (two new literal classes, below), so the number is not comparable one-for-one with F's — the
+unmigrated files gained counts while the migrated ones lost them; the direction of every migrated file
+is down and the ratchet holds each file at its new number.
+
+**🔴 SecurityScan carried a PRIVATE theme system.** A local `useState<'dark' | 'light'>` with its own
+"Light Mode" button and 23 `theme === 'dark' ? … : …` ternaries — a second, panel-local theme fighting
+the app's. Under "pura theme system badlo" that is exactly the thing to remove: the button and the state
+are gone, every ternary collapsed to its dark branch, and the codemod mapped those literals to tokens,
+so the panel now follows the ONE app theme like every other screen.
+
+**Three rules the crawl demanded, each from a real miss, each test-locked (`themeMigrate.test.ts`):**
+1. **A label that INHERITS its colour on a solid fill.** "Download YAML" on `bg-violet-600` and "New
+   Room" on `bg-blue-600` carried no text class at all — the old dark UI's `text-white` root was doing the
+   work, and the migrated root is `text-body`, so on Light the label went near-black on violet (3.0:1).
+   A RESTING, unprefixed fill with no text colour of its own now gets `text-on-accent` stated on the
+   element; a `hover:` fill on a flat button does not (it would pin white text for the resting state),
+   and gradient TEXT (`bg-clip-text`) is not a fill. Re-running the rule over A–F added it in 100+
+   places — the same latent defect everywhere a filled button relied on inheritance.
+2. **An inline `style={{ backgroundColor: brand }}` is a fixed fill.** The white-label preview's buttons
+   sit on the USER's chosen colour; the codemod had turned their `text-white` into `text-ink`. A `var(--…)`
+   background follows the theme and is deliberately NOT a fill.
+3. **Dark tints and dark shades.** `bg-emerald-900/30` is a wash on Dark and a mid-dark smear on Light
+   (the theme cannot lighten a 900 shade); `text-emerald-600` is 3.3:1 on Dark. Both are now LITERALS the
+   census counts, and the codemod maps a brand tint ≤ 60% to the 500 shade at 10% and a 600/700 text shade
+   to its role token. Past 60% a dark tint is an opaque PANEL (AgentV3Panel's `bg-red-950/95` error
+   overlay) and is left for a hand — the first cut turned three of those into 10% washes and was reverted
+   before it was committed.
+
+**Two smaller findings, fixed at the class:** (a) a QUOTED string that opens an HTML tag is embedded
+markup too — SDAChat's printable clinical report is assembled with `.replace()` into single-quoted
+`<h1 style=…>` strings, and a NESTED template (`<table>${rows.map(() => `<tr>…`)}`) is ONE literal, which
+the first mask read as alternating segments; `templateLiteralSpans` is nesting-aware and the quoted-string
+rule joined `maskEmbeddedSources`. (b) PWANotifications' service-worker sample used fixed GitHub-dark
+syntax colours (`#79c0ff`) inside a `<pre>` that had just become `bg-surface` — light blue on white; the
+three spans now use the palette's own info/success/faint variables.
+
+**Crawled 23 views × three themes against each view's last known state: no view worse on any theme.**
+SDA chat, CI/CD and Live Collaboration to zero on all three (CI/CD was 14 severe on Light); Whitelabel
+9 → 1 severe, and what remains is the mock browser rendered in the USER's own palette. Home, Settings,
+Billing, Admin, Profile, Preview, Database, Deploy, Files, Components, Security, PWA, Figma stay at zero.
+Still open and NOT in G's files: the `apk` view (APKBuilder, later PR), ConnectMyWebsitePanel's
+`text-red-200/90` on a red tint (1.18:1 on Light, later PR), Studio's `Editor.tsx` tabs and Monaco, and
+the systemic white-on-`emerald-600` fill recorded under F.

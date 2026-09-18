@@ -182,7 +182,7 @@ export function ImageStudioPro({ onImageGenerated }: { onImageGenerated?: (url: 
 
   return (
     <div
-      className="h-full flex flex-col bg-[#08090c] text-ink overflow-hidden"
+      className="h-full flex flex-col bg-surface text-ink overflow-hidden"
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();
@@ -195,7 +195,7 @@ export function ImageStudioPro({ onImageGenerated }: { onImageGenerated?: (url: 
         {empty ? (
           // The Google-homepage moment: one wordmark, one line, four suggestions, nothing else.
           <div className="h-full flex flex-col items-center justify-center px-6 text-center select-none">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-400/20 to-fuchsia-500/20 border border-line flex items-center justify-center mb-6">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-400/20 to-fuchsia-500/20 border border-line flex items-center justify-center mb-6 text-on-accent">
               <Sparkles className="w-7 h-7 text-warn" />
             </div>
             <h1 className="text-[30px] sm:text-[38px] font-semibold tracking-tight bg-gradient-to-r from-white via-white to-white/60 bg-clip-text text-transparent">
@@ -268,7 +268,7 @@ export function ImageStudioPro({ onImageGenerated }: { onImageGenerated?: (url: 
       </div>
 
       {/* ── The footer input ───────────────────────────────────────────────────────────────── */}
-      <div className="shrink-0 border-t border-line bg-[#08090c]/95 backdrop-blur px-4 sm:px-6 py-4">
+      <div className="shrink-0 border-t border-line bg-surface backdrop-blur px-4 sm:px-6 py-4">
         <div className="max-w-3xl mx-auto space-y-2.5">
           {error && (
             <div className="flex items-start gap-2 text-[11px] text-danger bg-rose-500/10 border border-rose-500/20 rounded-xl px-3 py-2">

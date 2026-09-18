@@ -579,7 +579,7 @@ export function DatabaseStudio() {
                 Columns your table does not have are skipped, and NavBharatAI will name them afterwards.
               </p>
               <div className="flex gap-2">
-                <button onClick={() => void runImport()} disabled={importing} className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 rounded-lg text-xs flex items-center gap-1 transition-all">
+                <button onClick={() => void runImport()} disabled={importing} className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 rounded-lg text-xs flex items-center gap-1 transition-all text-on-accent">
                   {importing ? <TirangaLoader className="w-3 h-3" /> : <Upload className="w-3 h-3" />} Import
                 </button>
                 <button onClick={() => { setImportPreview(null); setImportNote(''); }} className="px-3 py-1.5 bg-raised rounded-lg text-xs text-faint">Cancel</button>
@@ -606,7 +606,7 @@ export function DatabaseStudio() {
                 spellCheck={false}
               />
               <div className="flex gap-2">
-                <button onClick={() => void addRow()} disabled={saving} className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 rounded-lg text-xs flex items-center gap-1 transition-all">
+                <button onClick={() => void addRow()} disabled={saving} className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 rounded-lg text-xs flex items-center gap-1 transition-all text-on-accent">
                   {saving ? <TirangaLoader className="w-3 h-3" /> : <Check className="w-3 h-3" />} Add
                 </button>
                 <button onClick={() => { setAdding(null); setWriteError(''); }} className="px-3 py-1.5 bg-raised rounded-lg text-xs text-faint">Cancel</button>
@@ -794,7 +794,7 @@ export function DatabaseStudio() {
                     <button
                       onClick={() => void runSql(false)}
                       disabled={sqlRunning}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 rounded-lg text-xs font-medium transition-all"
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 rounded-lg text-xs font-medium transition-all text-on-accent"
                     >
                       {sqlRunning ? <TirangaLoader className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />} Run
                     </button>
@@ -891,7 +891,7 @@ export function DatabaseStudio() {
               </p>
             </div>
             <div className="p-3 border-t border-line flex gap-2">
-              <button onClick={() => void saveEdit()} disabled={saving} className="flex-1 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 rounded-xl text-xs font-medium flex items-center justify-center gap-1.5 transition-all">
+              <button onClick={() => void saveEdit()} disabled={saving} className="flex-1 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 rounded-xl text-xs font-medium flex items-center justify-center gap-1.5 transition-all text-on-accent">
                 {saving ? <TirangaLoader className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />} Save
               </button>
               <button onClick={() => { setEditing(null); setWriteError(''); }} className="px-4 py-2 bg-raised hover:bg-raised rounded-xl text-xs text-faint transition-all">Cancel</button>

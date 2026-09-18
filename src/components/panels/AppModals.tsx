@@ -104,7 +104,7 @@ export function AppModals({
 
               <div className="space-y-3.5">
                 <div className="flex items-center gap-2.5 bg-indigo-500/5 border border-indigo-500/10 p-3 rounded-2xl">
-                  <div className="w-2 h-2 rounded-full bg-indigo-500 animate-ping" />
+                  <div className="w-2 h-2 rounded-full bg-indigo-500 animate-ping text-on-accent" />
                   <p className="text-[11px] font-bold text-accent-text leading-snug">{githubRedirectingMessage}</p>
                 </div>
 
@@ -263,7 +263,7 @@ export function AppModals({
                 </div>
               </div>
 
-              <div className="p-3.5 bg-red-950/20 border border-red-500/15 rounded-xl space-y-1">
+              <div className="p-3.5 bg-red-500/10 border border-red-500/15 rounded-xl space-y-1">
                 <span className="text-[8px] font-extrabold text-danger uppercase tracking-wider block">OAuth Failure Context:</span>
                 <p className="text-[11px] text-danger font-mono leading-relaxed break-words font-medium">
                   {firebaseOauthError.message}
@@ -389,12 +389,12 @@ export function AppModals({
               exit={{ opacity: 0, scale: 0.9, y: 30 }}
               className="bg-card border border-line rounded-[2.5rem] shadow-3xl w-full max-w-md relative z-[1001] overflow-hidden p-6 sm:p-8"
             >
-              <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-emerald-500 via-indigo-500 to-indigo-600"></div>
+              <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-emerald-500 via-indigo-500 to-indigo-600 text-on-accent"></div>
 
               <div className="flex justify-between items-start mb-6">
                 <div>
                   <div className="flex items-center gap-2 text-accent-text font-mono text-[10px] font-bold uppercase tracking-wider mb-1">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse text-on-accent"></span>
                     {paymentSession.isSimulator ? "Development Simulation Gateway" : "Cashfree Secure Gateway"}
                   </div>
                   <h3 className="text-xl font-black text-ink uppercase tracking-tight">
@@ -452,9 +452,9 @@ export function AppModals({
                   </p>
 
                   <div className="py-2.5 flex items-center justify-center space-x-2.5">
-                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce text-on-accent" style={{ animationDelay: '0ms' }} />
+                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce text-on-accent" style={{ animationDelay: '150ms' }} />
+                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce text-on-accent" style={{ animationDelay: '300ms' }} />
                   </div>
 
                   <button
@@ -480,7 +480,7 @@ export function AppModals({
               exit={{ scale: 0.95, opacity: 0 }}
               className="w-full max-w-sm bg-card border border-indigo-500/40 rounded-3xl p-6 space-y-6 text-center shadow-3xl relative overflow-hidden"
             >
-              <div className="absolute top-0 left-0 w-full h-[3px] bg-indigo-500 animate-pulse shadow-[0_0_15px_rgba(99,102,241,0.5)]"></div>
+              <div className="absolute top-0 left-0 w-full h-[3px] bg-indigo-500 animate-pulse shadow-[0_0_15px_rgba(99,102,241,0.5)] text-on-accent"></div>
 
               <div className="flex flex-col items-center justify-center space-y-4 pt-4">
                 <div className="relative">
@@ -525,7 +525,7 @@ export function AppModals({
               exit={{ scale: 0.95, opacity: 0, y: 10 }}
               className="w-full max-w-sm bg-card border border-red-500/30 rounded-3xl p-6 space-y-4 shadow-3xl text-center relative"
             >
-              <div className="absolute top-0 left-0 w-full h-[3px] bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)]"></div>
+              <div className="absolute top-0 left-0 w-full h-[3px] bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)] text-on-accent"></div>
 
               <div className="flex flex-col items-center justify-center space-y-3">
                 <div className="w-12 h-12 rounded-2xl bg-red-500/10 border border-red-500/35 flex items-center justify-center text-danger font-bold text-xl font-mono">
@@ -567,7 +567,7 @@ export function AppModals({
               className="w-full max-w-md bg-card border border-indigo-500/35 rounded-3xl p-6 space-y-5 shadow-3xl relative"
             >
               <div
-                className="absolute top-0 left-0 h-[3px] bg-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.5)] transition-all duration-500"
+                className="absolute top-0 left-0 h-[3px] bg-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.5)] transition-all duration-500 text-on-accent"
                 style={{
                   width: previewBuildStage === 'preparing' ? '20%' :
                          previewBuildStage === 'installing' ? '45%' :
@@ -619,7 +619,7 @@ export function AppModals({
                             ✓
                           </div>
                         ) : isActive ? (
-                          <div className="w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center text-[9px] font-black animate-spin">
+                          <div className="w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center text-[9px] font-black animate-spin text-on-accent">
                             ⏳
                           </div>
                         ) : (
@@ -652,7 +652,7 @@ export function AppModals({
               exit={{ scale: 0.95, opacity: 0, y: 10 }}
               className="w-full max-w-sm bg-card border border-red-500/30 rounded-3xl p-6 space-y-4 shadow-3xl text-center relative"
             >
-              <div className="absolute top-0 left-0 w-full h-[3px] bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)]"></div>
+              <div className="absolute top-0 left-0 w-full h-[3px] bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)] text-on-accent"></div>
 
               <div className="flex flex-col items-center justify-center space-y-3">
                 <div className="w-12 h-12 rounded-2xl bg-red-500/10 border border-red-500/35 flex items-center justify-center text-danger font-mono text-xl font-bold">

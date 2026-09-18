@@ -537,8 +537,8 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
               <p className={PANEL_SUB}>Succeeded vs failed, per {Math.round((data?.timeline?.bucketMs ?? 300_000) / 60_000)} min</p>
             </div>
             <div className="flex items-center gap-2.5 text-[8px] font-black uppercase tracking-wider">
-              <span className="flex items-center gap-1 text-success"><span className="w-2 h-2 rounded-sm bg-emerald-500" />OK</span>
-              <span className="flex items-center gap-1 text-danger"><span className="w-2 h-2 rounded-sm bg-red-500" />Failed</span>
+              <span className="flex items-center gap-1 text-success"><span className="w-2 h-2 rounded-sm bg-emerald-500 text-on-accent" />OK</span>
+              <span className="flex items-center gap-1 text-danger"><span className="w-2 h-2 rounded-sm bg-red-500 text-on-accent" />Failed</span>
             </div>
           </div>
           {chartsLive ? (

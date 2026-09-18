@@ -3667,7 +3667,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             <span className="flex items-center gap-1.5 text-[10px] text-faint">
               {isActive && <span className="text-accent-text font-semibold">Current session ·</span>}
               {c.deadTranscript
-                ? <span className="text-amber-600/80">Transcript lost (old bug) — files safe</span>
+                ? <span className="text-warn">Transcript lost (old bug) — files safe</span>
                 : meta.label && <span className={meta.live ? 'text-success font-semibold' : ''}>{meta.label}</span>}
               {c.updatedAt ? <span>· {relTime(c.updatedAt)}</span> : null}
             </span>
@@ -4063,7 +4063,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           >
             <Rocket className="w-3.5 h-3.5" />
             Publish
-            {showPublishDot && <span className="w-1.5 h-1.5 rounded-full bg-red-500" aria-label="You have unpublished changes" />}
+            {showPublishDot && <span className="w-1.5 h-1.5 rounded-full bg-red-500 text-on-accent" aria-label="You have unpublished changes" />}
           </button>
           {liveUrl && (
             <a
@@ -4071,7 +4071,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               target="_blank"
               rel="noreferrer"
               title={`Your live site: ${liveUrl}`}
-              className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-emerald-700/60 bg-emerald-950/40 text-success hover:text-ink hover:border-emerald-500 transition-colors"
+              className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-emerald-700/60 bg-emerald-500/10 text-success hover:text-ink hover:border-emerald-500 transition-colors"
             >
               <Globe className="w-3.5 h-3.5" />
               Live site
@@ -4425,7 +4425,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               // Paid-public (billing PR 5): credits ran out → the build was refused BEFORE it started, so
               // "Fix with AI" (the code-error treatment) would be wrong. This is its own actionable card:
               // add credits, or dismiss. Any build already running is unaffected (nothing was started).
-              <div className="px-3 py-2.5 bg-amber-950/50 text-warn text-xs rounded border border-amber-500/30">
+              <div className="px-3 py-2.5 bg-amber-500/10 text-warn text-xs rounded border border-amber-500/30">
                 <div className="flex items-start gap-2">
                   <Wallet className="w-4 h-4 shrink-0 mt-0.5" />
                   <div className="min-w-0">
@@ -4466,7 +4466,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               </div>
             )}
             {(error || state.error) && (
-              <div className="px-3 py-2 bg-red-950/60 text-danger text-xs rounded">
+              <div className="px-3 py-2 bg-red-500/10 text-danger text-xs rounded">
                 <div className="flex items-start gap-2">
                   <AlertCircle className="w-4 h-4 shrink-0" /> <span className="whitespace-pre-wrap break-words">{error || state.error}</span>
                 </div>
@@ -4528,7 +4528,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             {/* T1-budget-ux: a budget-cap stop is an honest PAUSE, not a failure — calm state + a Continue that
                 the user chooses (never a silent auto-continue that would keep spending). Work is already saved. */}
             {state.done && state.budgetReached && (
-              <div className="px-3 py-2 bg-sky-950/50 text-info text-xs rounded border border-sky-900/60">
+              <div className="px-3 py-2 bg-sky-500/10 text-info text-xs rounded border border-sky-900/60">
                 <div className="flex items-start gap-2">
                   <Wallet className="w-4 h-4 shrink-0" />
                   <span className="whitespace-pre-wrap break-words">This build reached its budget for now — your files are saved. Continue to keep building (uses more of your balance), or stop here.</span>
@@ -4556,7 +4556,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 ok: state.ok, appRendered: state.appRendered, running,
                 hasError: !!state.error, budgetReached: state.budgetReached, summary: state.summary,
               }) ? (
-                <div className="px-3 py-2 bg-emerald-950/40 text-success text-xs rounded border border-emerald-900/60">
+                <div className="px-3 py-2 bg-emerald-500/10 text-success text-xs rounded border border-emerald-900/60">
                   <div className="flex items-start gap-2">
                     <CheckCircle2 className="w-4 h-4 shrink-0 text-success" />
                     <span className="whitespace-pre-wrap break-words">{appRunningNoticeText()}</span>
@@ -4573,7 +4573,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   )}
                 </div>
               ) : (
-                <div className="px-3 py-2 bg-amber-950/50 text-warn text-xs rounded">
+                <div className="px-3 py-2 bg-amber-500/10 text-warn text-xs rounded">
                   <div className="flex items-start gap-2">
                     <AlertCircle className="w-4 h-4 shrink-0" /> <span className="whitespace-pre-wrap break-words">{state.summary}</span>
                   </div>
@@ -4624,7 +4624,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               />
             )}
             {state.pendingPermission && (
-              <div className="px-3 py-2.5 bg-amber-950/50 border border-amber-900 rounded">
+              <div className="px-3 py-2.5 bg-amber-500/10 border border-amber-900 rounded">
                 <div className="flex items-center gap-2 text-xs text-warn mb-2">
                   <AlertCircle className="w-4 h-4" /> {state.pendingPermission.action}
                 </div>
@@ -4638,7 +4638,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               </div>
             )}
             {fwConflict && (
-              <div className="px-3 py-2.5 bg-indigo-950/50 border border-indigo-800 rounded">
+              <div className="px-3 py-2.5 bg-indigo-500/10 border border-indigo-800 rounded">
                 <div className="flex items-center gap-2 text-xs text-accent-text mb-1">
                   <AlertCircle className="w-4 h-4" /> Which framework should I use?
                 </div>
@@ -4752,7 +4752,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       type="button"
                       onClick={() => setRoadmapOpen((v) => !v)}
                       title={`${roadmap.role === 'planner' ? 'Proposed plan' : 'Proposed fixes'} — tap to review & queue`}
-                      className={`flex items-center gap-1 px-2 h-6 rounded-full text-[10px] font-semibold border ${roadmapOpen ? 'bg-indigo-600 border-indigo-500 text-on-accent' : 'bg-indigo-950/60 border-indigo-800 text-accent-text hover:text-ink'}`}
+                      className={`flex items-center gap-1 px-2 h-6 rounded-full text-[10px] font-semibold border ${roadmapOpen ? 'bg-indigo-600 border-indigo-500 text-on-accent' : 'bg-indigo-500/10 border-indigo-800 text-accent-text hover:text-ink'}`}
                     >
                       🗺 {roadmap.role === 'planner' ? 'Plan' : 'Fixes'} · {roadmap.steps.length}
                     </button>
@@ -4775,7 +4775,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 behind stays fully visible the rest of the time). Queue-all / per-step add / dismiss. */}
             {roadmapOpen && activeProposedSteps && activeProposedSteps.steps.length > 0
               && roadmapDismissedKey !== activeProposedSteps.steps.join('\n') && (
-              <div className="mx-3 mt-1.5 p-2.5 bg-indigo-950/40 border border-indigo-900/60 rounded space-y-1.5 max-h-44 overflow-y-auto">
+              <div className="mx-3 mt-1.5 p-2.5 bg-indigo-500/10 border border-indigo-900/60 rounded space-y-1.5 max-h-44 overflow-y-auto">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-accent-text">
                     {activeProposedSteps.role === 'planner' ? 'Proposed plan' : 'Proposed fixes'} · {activeProposedSteps.steps.length} step{activeProposedSteps.steps.length > 1 ? 's' : ''}
@@ -5202,7 +5202,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   screen showed one static "Importing…" line for minutes, which is indistinguishable from
                   a crash ("sab ruk gaya"). A real percentage is the difference between working and frozen. */}
               {zipImporting && (
-                <div className="order-1 w-full mb-1 flex items-center gap-2 px-3 py-1.5 rounded-lg border border-indigo-800/60 bg-indigo-950/40 text-[11px] text-accent-text">
+                <div className="order-1 w-full mb-1 flex items-center gap-2 px-3 py-1.5 rounded-lg border border-indigo-800/60 bg-indigo-500/10 text-[11px] text-accent-text">
                   <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
                   <span className="flex-1 truncate">{zipProgress || 'Preparing your project…'}</span>
                   <span className="shrink-0 text-accent-text">Large projects take a few minutes</span>
@@ -5246,7 +5246,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 <div
                   className={`order-0 w-full mb-1 flex items-center gap-2 rounded px-2 py-1 text-[11px] border ${
                     state.contextUsage.level === 'critical'
-                      ? 'border-amber-600/50 bg-amber-950/30 text-warn'
+                      ? 'border-amber-600/50 bg-amber-500/10 text-warn'
                       : 'border-line bg-raised text-muted'
                   }`}
                 >
@@ -5640,7 +5640,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     </div>
                   )}
                   {runtimeLogs.notice && (
-                    <div className="text-[11px] text-warn border border-amber-700/40 bg-amber-950/30 rounded px-2 py-1">
+                    <div className="text-[11px] text-warn border border-amber-700/40 bg-amber-500/10 rounded px-2 py-1">
                       {runtimeLogs.notice}
                     </div>
                   )}
@@ -5687,7 +5687,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   {/* B5 — a name that did NOT persist must say so. Silently reverting the row would look
                       like the app ate the user's input. */}
                   {labelError && (
-                    <div className="mb-2 text-[11px] text-warn bg-amber-950/30 border border-amber-700/40 rounded px-2 py-1">{labelError}</div>
+                    <div className="mb-2 text-[11px] text-warn bg-amber-500/10 border border-amber-700/40 rounded px-2 py-1">{labelError}</div>
                   )}
                   {/* B6 — compare two versions. The toggle is offered only when there is anything
                       to compare; results render above the list so picking stays one screen. */}
@@ -5956,7 +5956,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 >
                   <Rocket className="w-4 h-4 shrink-0" />
                   <span className="flex-1 text-left">Publish — host on NavBharatAI or your own provider</span>
-                  {showPublishDot && <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" aria-label="You have unpublished changes" />}
+                  {showPublishDot && <span className="w-2 h-2 rounded-full bg-red-500 shrink-0 text-on-accent" aria-label="You have unpublished changes" />}
                 </button>
                 {liveUrl && (
                   <a
@@ -6030,7 +6030,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               className="w-full bg-raised border border-indigo-500/30 rounded-xl px-3 py-2.5 text-sm text-ink placeholder-faint outline-none focus:border-indigo-500"
             />
             {nameError && (
-              <p className="text-[11px] text-danger bg-red-900/20 border border-red-500/20 rounded-lg px-2.5 py-2">{nameError}</p>
+              <p className="text-[11px] text-danger bg-red-500/10 border border-red-500/20 rounded-lg px-2.5 py-2">{nameError}</p>
             )}
             {running && (
               // Said out loud because the opposite is what users expect from a builder, and a person
@@ -6522,7 +6522,7 @@ function BuildHealthCard({ health }: { health: BuildHealth }) {
   const warnings = simplifyHealthLines(health.warnings, 2);
   const more = blockers.more + warnings.more;
   return (
-    <div className={`mt-1 rounded-lg border px-2.5 py-1.5 text-[11px] ${ready ? 'border-emerald-800/60 bg-emerald-950/30' : 'border-amber-800/60 bg-amber-950/30'}`}>
+    <div className={`mt-1 rounded-lg border px-2.5 py-1.5 text-[11px] ${ready ? 'border-emerald-800/60 bg-emerald-500/10' : 'border-amber-800/60 bg-amber-500/10'}`}>
       <div className="flex items-center gap-1.5 font-semibold">
         {ready
           ? <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0" />
@@ -6599,7 +6599,7 @@ function TeamHqCard({ agents, todos, elapsedMs }: { agents: Record<string, Agent
   const m = teamHqModel(agents, todos);
   const squares = m.progress.total > 0 ? todos.slice(0, 24) : [];
   return (
-    <div className="mx-2 mt-2 rounded-xl p-[1px] bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-amber-400 shadow-[0_0_18px_rgba(129,80,255,0.25)]">
+    <div className="mx-2 mt-2 rounded-xl p-[1px] bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-amber-400 shadow-[0_0_18px_rgba(129,80,255,0.25)] text-on-accent">
       <div className="rounded-[11px] bg-surface px-3 py-2">
         <div className="flex items-center justify-between gap-2">
           <span className="flex items-center gap-1.5 text-[11px] font-bold tracking-wide">
@@ -6617,7 +6617,7 @@ function TeamHqCard({ agents, todos, elapsedMs }: { agents: Record<string, Agent
               <span
                 key={t.id}
                 className={`h-2 w-2 rounded-[2px] ${
-                  t.status === 'done' ? 'bg-emerald-500'
+                  t.status === 'done' ? 'bg-emerald-500 text-on-accent'
                   : t.status === 'in_progress' ? 'bg-indigo-400 animate-pulse'
                   : 'bg-raised'
                 }`}
@@ -6630,7 +6630,7 @@ function TeamHqCard({ agents, todos, elapsedMs }: { agents: Record<string, Agent
           <div className="mt-1.5 flex gap-1.5 overflow-x-auto no-scrollbar" style={{ WebkitOverflowScrolling: 'touch' }}>
             {m.roster.map((a) => (
               <span key={a.agent} title={a.lastAction} className={`flex items-center gap-1 shrink-0 text-[10px] rounded-full px-2 py-0.5 border ${a.active ? 'border-indigo-500/60 bg-indigo-500/10 text-accent-text' : 'border-line bg-card text-muted'}`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${a.active ? 'bg-indigo-400 animate-pulse' : 'bg-emerald-500'}`} />
+                <span className={`w-1.5 h-1.5 rounded-full ${a.active ? 'bg-indigo-400 animate-pulse' : 'bg-emerald-500 text-on-accent'}`} />
                 <span className="capitalize font-medium">{a.agent}</span>
                 <span className="max-w-[120px] truncate text-faint">{a.lastAction}</span>
               </span>
@@ -6700,9 +6700,9 @@ function Empty({ children }: { children: React.ReactNode }) {
 
 function fileDot(kind: string): string {
   const base = 'inline-block w-2 h-2 rounded-full ';
-  if (kind === 'create') return base + 'bg-emerald-500';
-  if (kind === 'delete') return base + 'bg-red-500';
-  return base + 'bg-amber-500';
+  if (kind === 'create') return base + 'bg-emerald-500 text-on-accent';
+  if (kind === 'delete') return base + 'bg-red-500 text-on-accent';
+  return base + 'bg-amber-500 text-on-accent';
 }
 
 function colorizeDiff(patch: string): React.ReactNode {

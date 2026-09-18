@@ -828,7 +828,7 @@ export function HostingChooser({
         <>
         {/* The publish did not start — say WHY, right where the user is looking. Never a silent no-op. */}
         {blocked && (
-          <div className="mx-4 mt-4 flex items-start gap-2 rounded-lg border border-rose-900/50 bg-rose-950/30 px-3 py-2 text-[11.5px] text-danger">
+          <div className="mx-4 mt-4 flex items-start gap-2 rounded-lg border border-rose-900/50 bg-rose-500/10 px-3 py-2 text-[11.5px] text-danger">
             <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
             <span>{blocked}</span>
           </div>
@@ -838,7 +838,7 @@ export function HostingChooser({
             point of moving publishing off the chat stream is that the user can watch it here. A build
             failure arrives with the compiler's real output, so `whitespace-pre-wrap` is deliberate. */}
         {publishStatus && (
-          <div className="mx-4 mt-4 rounded-lg border border-sky-900/50 bg-sky-950/30 px-3 py-2 text-[11.5px] text-info">
+          <div className="mx-4 mt-4 rounded-lg border border-sky-900/50 bg-sky-500/10 px-3 py-2 text-[11.5px] text-info">
             <div className="flex items-start gap-2">
               {busy ? <TirangaLoader className="w-3.5 h-3.5 mt-0.5 shrink-0" /> : <Rocket className="w-3.5 h-3.5 mt-0.5 shrink-0" />}
               <span className="whitespace-pre-wrap break-words max-h-48 overflow-auto">{publishStatus}</span>
@@ -849,7 +849,7 @@ export function HostingChooser({
         {/* The backend-deploy offer. Appears ONLY after a publish was refused for needing a server —
             which is the one moment the words "Deploy backend" are on the screen. */}
         {backendOffer.show && (
-          <div className="mx-4 mt-4 rounded-xl border border-indigo-800/50 bg-indigo-950/20 p-3.5 flex flex-col gap-2.5">
+          <div className="mx-4 mt-4 rounded-xl border border-indigo-800/50 bg-indigo-500/10 p-3.5 flex flex-col gap-2.5">
             <div className="flex items-center gap-2">
               <Server className="w-4 h-4 text-accent-text" />
               <span className="text-[13px] font-bold text-ink">{backendOffer.title}</span>
@@ -919,7 +919,7 @@ export function HostingChooser({
 
         {/* The data gate. Shown only when the app REALLY stores data and REALLY has nowhere to put it. */}
         {dataGate?.needsDatabase && !dataGate.connected && (
-          <div className="mx-4 mt-4 rounded-xl border border-amber-800/50 bg-amber-950/20 p-3.5 flex flex-col gap-2.5">
+          <div className="mx-4 mt-4 rounded-xl border border-amber-800/50 bg-amber-500/10 p-3.5 flex flex-col gap-2.5">
             <div className="flex items-center gap-2">
               <Database className="w-4 h-4 text-warn" />
               <span className="text-[13px] font-bold text-ink">Your app needs a database</span>
@@ -972,7 +972,7 @@ export function HostingChooser({
         )}
         <div className="p-4 grid gap-3 sm:grid-cols-2">
           {/* Path 1 — Host on NavBharatAI */}
-          <div className="rounded-xl border border-emerald-800/50 bg-emerald-950/20 p-4 flex flex-col gap-2.5">
+          <div className="rounded-xl border border-emerald-800/50 bg-emerald-500/10 p-4 flex flex-col gap-2.5">
             {/* The "Free" badge was REMOVED (admin 2026-08-21). Hosting itself costs the user nothing,
                 but the badge sat at the top of a card that also offers a PAID custom domain, so it read
                 as a promise about the whole card. The one line that is genuinely free-or-not — the
@@ -1014,7 +1014,7 @@ export function HostingChooser({
                 {/* THE MIDDLE STEP OF THE DOT TRAIL (admin 2026-08-21). The dot on the v5 Publish
                     button brought the user here; this one tells them the trail continues inward
                     rather than ending on this screen. Same source of truth as both its neighbours. */}
-                {showPublishDot && <span className="w-1.5 h-1.5 rounded-full bg-red-500" aria-label="You have unpublished changes" />}
+                {showPublishDot && <span className="w-1.5 h-1.5 rounded-full bg-red-500 text-on-accent" aria-label="You have unpublished changes" />}
               </button>
             )}
 
@@ -1038,7 +1038,7 @@ export function HostingChooser({
                     Undo last publish — put the previous version back
                   </button>
                 ) : (
-                  <div className="rounded-lg border border-amber-900/60 bg-amber-950/20 p-2.5 flex flex-col gap-2">
+                  <div className="rounded-lg border border-amber-900/60 bg-amber-500/10 p-2.5 flex flex-col gap-2">
                     <p className="text-[11px] text-warn leading-relaxed">
                       Your live app goes back to the version you published before this one. Visitors see the
                       change straight away. Your files and chat are untouched, and you can undo this too.
@@ -1096,7 +1096,7 @@ export function HostingChooser({
                           const when = c.releaseTime ? new Date(c.releaseTime) : null;
                           const label = when && !Number.isNaN(when.getTime()) ? when.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : 'time unknown';
                           return (
-                            <li key={c.versionName} className={`flex items-center justify-between gap-2 px-2 py-1 rounded ${c.live ? 'bg-emerald-950/40' : 'bg-raised'}`}>
+                            <li key={c.versionName} className={`flex items-center justify-between gap-2 px-2 py-1 rounded ${c.live ? 'bg-emerald-500/10' : 'bg-raised'}`}>
                               <span className="text-[10.5px] text-muted truncate">{label}{c.live ? ' — live now' : ''}</span>
                               {!c.live && pickedVersion !== c.versionName && (
                                 <button onClick={() => setPickedVersion(c.versionName)} disabled={rollbackBusy} className="text-[10px] font-semibold text-warn hover:text-warn shrink-0">Go back to this</button>
@@ -1219,7 +1219,7 @@ export function HostingChooser({
                     <div className="flex items-end gap-[2px] h-7" aria-hidden="true">
                       {(siteAnalytics.days ?? []).map((p) => {
                         const max = Math.max(1, ...(siteAnalytics.days ?? []).map((q) => q.views));
-                        return <div key={p.day} title={`${p.day}: ${p.views} views`} className="flex-1 rounded-sm bg-emerald-500/70" style={{ height: `${Math.max(2, Math.round((p.views / max) * 100))}%` }} />;
+                        return <div key={p.day} title={`${p.day}: ${p.views} views`} className="flex-1 rounded-sm bg-emerald-500/70 text-on-accent" style={{ height: `${Math.max(2, Math.round((p.views / max) * 100))}%` }} />;
                       })}
                     </div>
                     {((siteAnalytics.topPaths?.length ?? 0) > 0 || (siteAnalytics.topReferrers?.length ?? 0) > 0) && (
@@ -1263,7 +1263,7 @@ export function HostingChooser({
                     Remove this app from NavBharatAI hosting
                   </button>
                 ) : (
-                  <div className="rounded-lg border border-red-900/60 bg-red-950/20 p-2.5 flex flex-col gap-2">
+                  <div className="rounded-lg border border-red-900/60 bg-red-500/10 p-2.5 flex flex-col gap-2">
                     <p className="text-[11px] text-danger leading-relaxed">
                       Take it offline? Anyone with the link will stop being able to open it. Your code and
                       chat are untouched, and you can publish it again whenever you like.
@@ -1394,10 +1394,10 @@ export function HostingChooser({
           </div>
 
           {/* Path 3 — Make an Android app (APK) via the APK Builder, pre-targeted to THIS app (admin 2026-08-13). */}
-          <div className="rounded-xl border border-sky-800/50 bg-sky-950/20 p-4 flex flex-col gap-2.5">
+          <div className="rounded-xl border border-sky-800/50 bg-sky-500/10 p-4 flex flex-col gap-2.5">
             <div className="flex items-center justify-between">
               <span className="text-[13px] font-bold text-ink">Make an Android app</span>
-              <span className="text-[9px] font-black uppercase tracking-widest text-info bg-sky-900/50 px-2 py-0.5 rounded-full">APK</span>
+              <span className="text-[9px] font-black uppercase tracking-widest text-info bg-sky-500/10 px-2 py-0.5 rounded-full">APK</span>
             </div>
             <p className="text-[11.5px] text-muted leading-relaxed">
               Turn this app into a real installable Android app (.apk) — share it or upload it to the Play Store.
@@ -1424,7 +1424,7 @@ export function HostingChooser({
 
         {/* Full-stack note + sync law */}
         <div className="px-4 pb-4 flex flex-col gap-2">
-          <div className="flex items-start gap-2 text-[11px] text-warn bg-amber-950/20 border border-amber-900/40 rounded-lg px-3 py-2">
+          <div className="flex items-start gap-2 text-[11px] text-warn bg-amber-500/10 border border-amber-900/40 rounded-lg px-3 py-2">
             <Server className="w-3.5 h-3.5 mt-0.5 shrink-0" />
             <span><b className="font-semibold">Full-stack hosting (running backend + database) on NavBharatAI is coming soon.</b> For now, apps with a backend keep it on your own database (Settings → Database) or your own provider.</span>
           </div>

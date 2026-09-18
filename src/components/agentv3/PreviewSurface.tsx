@@ -1412,7 +1412,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   // Honest (real cloud compute uses credits; in-browser is free), vendor-free (White-Label), and
   // dismissible so it informs without nagging. Rendered in both Live-server branches below.
   const paidNote = mode === 'live' && !paidNoteDismissed ? (
-    <div className="flex items-start gap-2 px-3 py-2 border-b border-amber-900/60 bg-amber-950/40 text-[11px] text-warn">
+    <div className="flex items-start gap-2 px-3 py-2 border-b border-amber-900/60 bg-amber-500/10 text-[11px] text-warn">
       <span aria-hidden>⚡</span>
       <span className="flex-1">{LIVE_SERVER_PAID_NOTE}</span>
       <button
@@ -1632,14 +1632,14 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   if (versionUrl) {
     return (
       <div className="h-full flex flex-col">
-        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-amber-800 bg-amber-950/40 text-[11px] text-warn">
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-amber-800 bg-amber-500/10 text-[11px] text-warn">
           <span className="shrink-0" aria-hidden="true">🕘</span>
           <span className="flex-1 min-w-0 truncate">
             You are looking at an <strong>older version</strong> of your app{versionSha ? ` (${versionSha.slice(0, 7)})` : ''}. Your current app is untouched.
           </span>
           <button
             onClick={() => onExitVersion?.()}
-            className="shrink-0 px-2 py-0.5 rounded border border-amber-600/60 hover:bg-amber-900/40"
+            className="shrink-0 px-2 py-0.5 rounded border border-amber-600/60 hover:bg-amber-500/10"
           >
             Back to my app
           </button>
@@ -1745,7 +1745,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
           if (line.kind === 'none') return null;
           if (line.kind === 'progress') {
             return (
-              <div className="flex items-center gap-2 px-3 py-1.5 border-b border-indigo-900/60 bg-indigo-950/30 text-[11px] text-accent-text">
+              <div className="flex items-center gap-2 px-3 py-1.5 border-b border-indigo-900/60 bg-indigo-500/10 text-[11px] text-accent-text">
                 <TirangaLoader className="w-3 h-3 shrink-0" />
                 <span className="flex-1 truncate">{line.text}</span>
                 <span className="shrink-0 tabular-nums text-accent-text">{line.seconds}s</span>
@@ -1754,15 +1754,15 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
           }
           return (
             <div className={`flex items-start gap-2 px-3 py-1.5 border-b text-[11px] ${
-              line.kind === 'ok' ? 'border-emerald-900/60 bg-emerald-950/30 text-success'
-                : 'border-amber-900/60 bg-amber-950/30 text-warn'}`}>
+              line.kind === 'ok' ? 'border-emerald-900/60 bg-emerald-500/10 text-success'
+                : 'border-amber-900/60 bg-amber-500/10 text-warn'}`}>
               <span className="flex-1">{line.text}</span>
               <button onClick={() => setDiagResult(null)} className="shrink-0 opacity-70 hover:opacity-100" title="Dismiss">✕</button>
             </div>
           );
         })()}
         {failoverNote && (
-          <div className="flex items-start gap-2 px-3 py-1.5 border-b border-sky-900/60 bg-sky-950/40 text-[11px] text-info">
+          <div className="flex items-start gap-2 px-3 py-1.5 border-b border-sky-900/60 bg-sky-500/10 text-[11px] text-info">
             <span className="flex-1">{failoverNote}</span>
             <button onClick={() => setFailoverNote('')} className="shrink-0 text-info hover:text-info" title="Dismiss">✕</button>
           </div>
@@ -1772,7 +1772,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             page labelled as their live app. A page that does not render is not the app, and saying so is
             the whole point; the iframe still shows below so nothing is hidden from the user. */}
         {notServing && (
-          <div className="flex items-start gap-2 px-3 py-2 border-b border-amber-900/60 bg-amber-950/40 text-[11px] text-warn">
+          <div className="flex items-start gap-2 px-3 py-2 border-b border-amber-900/60 bg-amber-500/10 text-[11px] text-warn">
             <span className="flex-1">
               <span className="font-semibold">This is not your app yet.</span>{' '}
               The server is answering, but it is not serving your pages
@@ -1791,7 +1791,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             running by the time this shows; this line exists so the wait is understood rather than
             guessed at, and the button is here for anyone who does not want to wait for the watchdog. */}
         {(health === 'sleeping' || health === 'crashed') && !diagnosing && (
-          <div className="flex items-start gap-2 px-3 py-2 border-b border-sky-900/60 bg-sky-950/40 text-[11px] text-info">
+          <div className="flex items-start gap-2 px-3 py-2 border-b border-sky-900/60 bg-sky-500/10 text-[11px] text-info">
             <span className="flex-1">
               <span className="font-semibold">
                 {health === 'sleeping' ? 'Preview is in sleep mode.' : 'Your preview stopped.'}
@@ -1822,7 +1822,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
           </div>
         )}
         {snapshotNote && (
-          <div className="flex items-start gap-2 px-3 py-2 border-b border-amber-900/60 bg-amber-950/30 text-[11px] text-warn">
+          <div className="flex items-start gap-2 px-3 py-2 border-b border-amber-900/60 bg-amber-500/10 text-[11px] text-warn">
             <span className="flex-1">{snapshotNote}</span>
           </div>
         )}
@@ -1847,7 +1847,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
         )}
         {liveLoading && (
           <div className="h-0.5 bg-raised overflow-hidden">
-            <div className="h-full w-1/3 bg-indigo-500 animate-pulse" />
+            <div className="h-full w-1/3 bg-indigo-500 animate-pulse text-on-accent" />
           </div>
         )}
         {/* `portDown` joins `unreachable` here: both mean "whatever that host returns is not your app".
@@ -1944,7 +1944,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
                       <span className="shrink-0 pl-2 font-mono">{diagStage.pct}%{diagStage.seconds > 0 ? ` · ${diagStage.seconds}s` : ''}</span>
                     </div>
                     <div className="h-1.5 rounded bg-raised overflow-hidden">
-                      <div className="h-full bg-indigo-500 transition-all duration-500" style={{ width: `${diagStage.pct}%` }} />
+                      <div className="h-full bg-indigo-500 transition-all duration-500 text-on-accent" style={{ width: `${diagStage.pct}%` }} />
                     </div>
                     {diagStage.seconds >= 30 && (
                       <p className="text-[10px] text-faint">A cold sandbox install can take up to ~90s — this is a real install, not a stuck screen.</p>
@@ -1952,7 +1952,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
                   </div>
                 )}
                 {diagResult && (
-                  <div className={`mt-2 text-left rounded-lg border p-3 text-xs ${diagResult.ok ? 'border-emerald-800 bg-emerald-950/40 text-success' : 'border-amber-800 bg-amber-950/30 text-warn'}`}>
+                  <div className={`mt-2 text-left rounded-lg border p-3 text-xs ${diagResult.ok ? 'border-emerald-800 bg-emerald-500/10 text-success' : 'border-amber-800 bg-amber-500/10 text-warn'}`}>
                     <p className="font-medium">{diagResult.reason}</p>
                     {diagResult.detail && (
                       <pre className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-[11px] text-muted font-mono">{diagResult.detail}</pre>
@@ -2044,12 +2044,12 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
         </div>
       )}
       {editError && (
-        <div className="px-3 py-1.5 text-[11px] text-warn bg-amber-950/40 border-b border-amber-900">{editError}</div>
+        <div className="px-3 py-1.5 text-[11px] text-warn bg-amber-500/10 border-b border-amber-900">{editError}</div>
       )}
       {recovered && (
         // The deep refresh made a previously-broken preview render again — tell the user honestly
         // that no AI fix was needed (and no credit was spent).
-        <div className="px-3 py-1.5 text-[11px] text-success bg-emerald-950/40 border-b border-emerald-900 flex items-center justify-between gap-2">
+        <div className="px-3 py-1.5 text-[11px] text-success bg-emerald-500/10 border-b border-emerald-900 flex items-center justify-between gap-2">
           <span>✓ Preview recovered after a deep refresh — no AI fix was needed.</span>
           <button onClick={() => setRecovered(false)} className="shrink-0 text-success hover:text-success">Dismiss</button>
         </div>
@@ -2060,7 +2060,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
           rendered as a vaguely wrong app with no explanation, which is the state the second absolute
           rule calls "built but not really working". */}
       {source === 'inbrowser' && !refusal.refuse && browserRunnable === false && !hasBackend && browserBlockedReason && (
-        <div className="px-3 py-1.5 text-[11px] text-warn bg-amber-950/40 border-b border-amber-900 flex items-center justify-between gap-2">
+        <div className="px-3 py-1.5 text-[11px] text-warn bg-amber-500/10 border-b border-amber-900 flex items-center justify-between gap-2">
           <span>ℹ️ Heads up — {browserBlockedReason}. What you see here may be incomplete.</span>
           <button onClick={() => setChoice('live')} className="shrink-0 px-2 py-0.5 rounded bg-amber-800 hover:bg-amber-700 text-warn font-semibold">Live server</button>
         </div>
@@ -2082,7 +2082,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
           the paid live server for nothing. Deliberately ONE line: a wall of caveats above a working
           app reads as "this is broken", which is the opposite of what is being said. */}
       {source === 'inbrowser' && !!html && !err && !refusal.refuse && !!fidelityNotice && (
-        <div className="px-3 py-1.5 text-[11px] text-warn bg-amber-950/30 border-b border-amber-900/60 flex items-start gap-2">
+        <div className="px-3 py-1.5 text-[11px] text-warn bg-amber-500/10 border-b border-amber-900/60 flex items-start gap-2">
           <span className="flex-1">{fidelityNotice}</span>
           {!!effectiveUrl && (
             <button onClick={() => setChoice('live')} className="shrink-0 underline hover:text-warn">See it on the live server</button>
@@ -2094,7 +2094,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
         // Task #64 — honest full-stack state. The in-browser preview compiles only the frontend, so an
         // app with a backend renders here with its data/API features non-functional. Say so plainly and
         // point to the Live server (which actually boots the backend) instead of a silently-broken app.
-        <div className="px-3 py-1.5 text-[11px] text-info bg-sky-950/40 border-b border-sky-900 flex items-center justify-between gap-2">
+        <div className="px-3 py-1.5 text-[11px] text-info bg-sky-500/10 border-b border-sky-900 flex items-center justify-between gap-2">
           <span>
             ℹ️ This app has {backendReason || 'a backend'} — the in-browser preview shows the frontend
             only, so its data/API features won't work here. Switch to the Live server to run it fully.

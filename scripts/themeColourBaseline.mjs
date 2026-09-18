@@ -41,7 +41,10 @@ const GITHUB_HEX = '(?:0d1117|161b22|21262d|30363d|0d1520|1c2128|1c2732|1e1e1e|2
  */
 export const LITERAL = new RegExp(
   `(?<![\\w-])((?:[a-z-]+:)*)${PROPS}-(?:white|black|${GREY}-\\d{2,3}|\\[#[0-9a-fA-F]{3,8}\\]|\\[rgba?\\([^\\]]*\\)\\])(?:\\/\\d{1,3})?(?![\\w-])`
-  + `|(?<![\\w-])((?:[a-z-]+:)*)text-${HUE}-(?:50|100|200|300|400|500)(?:\\/\\d{1,3})?(?![\\w-])`,
+  + `|(?<![\\w-])((?:[a-z-]+:)*)text-${HUE}-(?:50|100|200|300|400|500|600|700)(?:\\/\\d{1,3})?(?![\\w-])`
+  // A DARK tint (`bg-emerald-900/30`): a subtle wash on dark, a mid-dark smear on light — the theme cannot
+  // lighten a 900 shade. The readable idiom is the 500 shade at low opacity, which is a tint on both.
+  + `|(?<![\\w-])((?:[a-z-]+:)*)bg-${HUE}-(?:800|900|950)\\/\\d{1,3}(?![\\w-])`,
   'g',
 );
 /** `style={{ color: '#fff' }}` and friends — CSS cannot override these, so they count double as a smell. */
@@ -61,9 +64,55 @@ export function codeOnly(src) {
  * component the user copies. The body is replaced with spaces (newlines kept) so line numbers and
  * offsets still line up for the census and the codemod alike.
  */
+/**
+ * The outermost template literals of a source, as [start, end) offsets — nesting-aware, because a
+ * report assembled as `<table>${rows.map((r) => `<tr>…</tr>`)}</table>` is ONE literal, and a scan
+ * that ends at the first inner backtick would leave every other segment of it visible to the census.
+ */
+export function templateLiteralSpans(src) {
+  const spans = [];
+  const stack = []; // 'tpl' | { braces: n } for a ${ … } expression
+  let start = -1;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    const top = stack[stack.length - 1];
+    if (top === 'tpl') {
+      if (ch === '\\') { i++; continue; }
+      if (ch === '`') { stack.pop(); if (stack.length === 0) spans.push([start, i + 1]); continue; }
+      if (ch === '$' && src[i + 1] === '{') { stack.push({ braces: 0 }); i++; }
+      continue;
+    }
+    if (top && typeof top === 'object') {
+      if (ch === '`') { stack.push('tpl'); continue; }
+      if (ch === "'" || ch === '"') { // a plain string inside the expression: skip it whole
+        for (i++; i < src.length && src[i] !== ch && src[i] !== '\n'; i++) if (src[i] === '\\') i++;
+        continue;
+      }
+      if (ch === '{') top.braces++;
+      else if (ch === '}') { if (top.braces === 0) stack.pop(); else top.braces--; }
+      continue;
+    }
+    if (ch === '`') { stack.push('tpl'); start = i; }
+  }
+  return spans;
+}
+
 export function maskEmbeddedSources(src) {
-  return src.replace(/`(?:[^`\\]|\\.)*`/g, (lit) =>
-    (/className=|\bclass=|<[a-z][\w-]*[\s>]/.test(lit) ? lit.replace(/[^\n]/g, ' ') : lit));
+  const blank = (lit) => lit.replace(/[^\n]/g, ' ');
+  const isMarkup = (lit) => /className=|\bclass=|<[a-z][\w-]*[\s>]/.test(lit);
+  let out = '';
+  let cursor = 0;
+  for (const [a, b] of templateLiteralSpans(src)) {
+    const lit = src.slice(a, b);
+    out += src.slice(cursor, a) + (isMarkup(lit) ? blank(lit) : lit);
+    cursor = b;
+  }
+  out += src.slice(cursor);
+  // A single- or double-quoted string that OPENS an HTML tag is markup too: a printable report
+  // assembled with .replace(), a syntax highlighter's `<span style=…>`. JSX itself is never
+  // inside quotes, and a className string never contains `<tag`, so this cannot touch the UI.
+  return out.replace(/'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"/g, (lit) =>
+    (/<[a-z][\w-]*[\s>]/.test(lit) ? blank(lit) : lit));
 }
 
 /** Every client source file — the surfaces a user reads. Server code renders no UI. */

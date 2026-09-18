@@ -207,7 +207,7 @@ export function BillingPanel(props: BillingPanelProps) {
           {wallet && wallet.remaining_balance <= reminderLimit && !dismissedReminderWarning && (
             <div className="fixed inset-0 bg-scrim flex items-center justify-center p-4 z-50 animate-fade-in backdrop-blur-sm">
               <div className="w-full max-w-md bg-card border border-red-500/30 rounded-[2.5rem] p-8 space-y-6 shadow-[0_0_50px_rgba(239,68,68,0.25)] text-left relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-red-500 to-rose-600"></div>
+                <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-red-500 to-rose-600 text-on-accent"></div>
 
                 <div className="flex items-center gap-4">
                   <div className="p-4 bg-red-500/10 rounded-2xl border border-red-500/20 text-danger">
@@ -286,7 +286,7 @@ export function BillingPanel(props: BillingPanelProps) {
               className={cn(
                 "relative rounded-[2.2rem] p-6 h-44 flex flex-col justify-between transition-all duration-300 cursor-pointer overflow-hidden border group select-none",
                 activeBillingDetailTab === 'remaining'
-                  ? "bg-gradient-to-br from-indigo-950/80 to-card border-indigo-505 shadow-[0_0_25px_rgba(99,102,241,0.15)] ring-2 ring-indigo-500"
+                  ? "bg-gradient-to-br from-indigo-950/80 to-card border-indigo-505 shadow-[0_0_25px_rgba(99,102,241,0.15)] ring-2 ring-indigo-500 text-on-accent"
                   : "bg-card border-line hover:border-indigo-500/40 hover:bg-raised"
               )}
             >
@@ -322,7 +322,7 @@ export function BillingPanel(props: BillingPanelProps) {
               className={cn(
                 "relative rounded-[2.2rem] p-6 h-44 flex flex-col justify-between transition-all duration-300 cursor-pointer overflow-hidden border group select-none",
                 activeBillingDetailTab === 'gift'
-                  ? "bg-gradient-to-br from-amber-950/40 to-card border-amber-500 shadow-[0_0_25px_rgba(245,158,11,0.15)] ring-2 ring-amber-500"
+                  ? "bg-gradient-to-br from-amber-950/40 to-card border-amber-500 shadow-[0_0_25px_rgba(245,158,11,0.15)] ring-2 ring-amber-500 text-on-accent"
                   : "bg-card border-line hover:border-amber-500/40 hover:bg-raised"
               )}
             >
@@ -355,8 +355,8 @@ export function BillingPanel(props: BillingPanelProps) {
               className={cn(
                 "order-first relative rounded-[2.2rem] p-6 h-44 flex flex-col justify-between transition-all duration-300 cursor-pointer overflow-hidden border-2 group select-none shadow-[0_0_30px_rgba(16,185,129,0.28)]",
                 activeBillingDetailTab === 'purchase'
-                  ? "bg-gradient-to-br from-emerald-900/60 to-card border-emerald-400 ring-2 ring-emerald-500"
-                  : "bg-gradient-to-br from-emerald-950/50 to-card border-emerald-500/70 hover:border-emerald-400 hover:shadow-[0_0_42px_rgba(16,185,129,0.42)]"
+                  ? "bg-gradient-to-br from-emerald-900/60 to-card border-emerald-400 ring-2 ring-emerald-500 text-on-accent"
+                  : "bg-gradient-to-br from-emerald-950/50 to-card border-emerald-500/70 hover:border-emerald-400 hover:shadow-[0_0_42px_rgba(16,185,129,0.42)] text-on-accent"
               )}
             >
               <div className="absolute -top-12 -right-12 w-28 h-28 bg-emerald-500/5 rounded-full blur-2xl group-hover:bg-emerald-500/10 transition-all duration-300"></div>
@@ -382,7 +382,7 @@ export function BillingPanel(props: BillingPanelProps) {
               className={cn(
                 "relative rounded-[2.2rem] p-6 h-44 flex flex-col justify-between transition-all duration-300 cursor-pointer overflow-hidden border group select-none",
                 activeBillingDetailTab === 'budget'
-                  ? "bg-gradient-to-br from-violet-950/40 to-card border-violet-500 shadow-[0_0_25px_rgba(139,92,246,0.15)] ring-2 ring-violet-500"
+                  ? "bg-gradient-to-br from-violet-950/40 to-card border-violet-500 shadow-[0_0_25px_rgba(139,92,246,0.15)] ring-2 ring-violet-500 text-on-accent"
                   : "bg-card border-line hover:border-violet-500/40 hover:bg-raised"
               )}
             >

@@ -303,7 +303,7 @@ export const HomeView = ({
               type="button"
               onClick={() => openExternalUrl(HOW_TO_BUILD_VIDEO_URL)}
               aria-label="Watch the video: how to build your first app with NavBharatAI Pro"
-              className="group flex-1 flex items-center gap-3 rounded-2xl border border-emerald-500/30 bg-gradient-to-r from-emerald-600/15 via-emerald-500/10 to-transparent px-4 py-3 text-left transition-colors hover:border-emerald-400/60 hover:from-emerald-600/25"
+              className="group flex-1 flex items-center gap-3 rounded-2xl border border-emerald-500/30 bg-gradient-to-r from-emerald-600/15 via-emerald-500/10 to-transparent px-4 py-3 text-left transition-colors hover:border-emerald-400/60 hover:from-emerald-600/25 text-on-accent"
             >
               <span className="shrink-0 rounded-xl bg-emerald-500/20 p-2">
                 <PlayCircle className="w-5 h-5 text-success" />
@@ -377,7 +377,7 @@ export const HomeView = ({
                 )}
               >
                 {/* Card gradient overlay */}
-                <div className={cn('absolute inset-0 bg-gradient-to-br pointer-events-none', card.gradient)} />
+                <div className={cn('absolute inset-0 bg-gradient-to-br pointer-events-none text-on-accent', card.gradient)} />
 
                 <div className="relative z-10 flex flex-col h-full p-3.5 sm:p-6 gap-2 sm:gap-4">
                   {/* Header row */}

@@ -118,3 +118,90 @@ export function confirmCopy(action: 'unpublish' | 'ban'): { title: string; body:
       cta: 'Unpublish',
     };
 }
+
+// ── EVERY BUILT APP, WITH A PREVIEW (admin 2026-09-18) ────────────────────────────────────────────
+//
+// "sabhi users ki build app dikhni chahiye … chahe live hai ya offline, sabhi ka preview chalna
+// chahiye … 12-12 ke set me." The rows below come from the DURABLE FILE STORE (every built app),
+// joined to the publish registry; `appStatusView` above still describes a registry status, but a
+// built app has two more states the registry cannot name — never published, and a status-only record
+// that was never a publish — so the row is judged by its `publish` state, computed server-side by
+// ONE definition (`publishStateOf`, adminBuiltApps.ts) and read here.
+
+/** The server's judgement of a built app's publish state (adminBuiltApps.ts → publishStateOf). */
+export type PublishState = 'live' | 'offline' | 'banned' | 'held' | 'paused' | 'never' | 'unknown';
+
+/** One row of the admin's built-apps list — mirrors the server's BuiltAppRow. */
+export interface BuiltAppRow {
+  workspaceId: string;
+  ownerUid: string | null;
+  userId: string | null;
+  fileCount: number;
+  savedAt: number;
+  publish: PublishState;
+  status: string | null;
+  url: string | null;
+  publishedAt: number;
+  snapshotUrl: string | null;
+  snapshotAt: number;
+  orphaned: boolean;
+}
+
+/** What the admin reads on a built app's row — every state yields real words, never blank. */
+export function publishStateView(state: PublishState | string | undefined): AppStatusView {
+  switch (state) {
+    case 'live': return appStatusView('active');
+    case 'offline': return appStatusView('unpublished');
+    case 'banned': return appStatusView('taken_down');
+    case 'held': return appStatusView('held');
+    case 'paused': return appStatusView('plan_paused');
+    case 'never':
+      return { label: 'Not published', live: false, tone: 'off', meaning: 'Built, and never put on the internet. Only the owner can open it.' };
+    default:
+      return { label: 'Unknown', live: false, tone: 'unknown', meaning: 'An unrecognised publish state — treat it as not live.' };
+  }
+}
+
+/**
+ * The server answers direct lookups (an app id, an owner uid, a link); a FRAGMENT is filtered here,
+ * over the rows already loaded, because answering it server-side would mean scanning everything —
+ * the load the admin asked to stop. Matches the id, the owner and the link, case-insensitively.
+ */
+export function matchesBuiltApp(row: Pick<BuiltAppRow, 'workspaceId' | 'ownerUid' | 'userId' | 'url'>, query: string): boolean {
+  const q = (query || '').trim().toLowerCase();
+  if (!q) return true;
+  return [row?.workspaceId, row?.ownerUid, row?.userId, row?.url]
+    .some((f) => typeof f === 'string' && f.toLowerCase().includes(q));
+}
+
+/**
+ * WHICH PREVIEW TO SHOW, and what to call it — the admin's "sabhi ka preview chalna chahiye".
+ *
+ * Two sources, both free of any sandbox: the SAVED COPY of the last green build (a real `dist/`
+ * on its own subdomain, the most faithful thing we hold) wins whenever the row carries one; else the
+ * IN-BROWSER RENDER of the durable files, which is the frontend compiled in the admin's own browser
+ * (so a full-stack app's API calls do not run — the label says so). An app with no saved files has
+ * nothing to show, and that is stated rather than spun. Pure, so the label can never disagree with
+ * the frame.
+ */
+export type PreviewPlan =
+  | { source: 'copy'; url: string; label: string }
+  | { source: 'render'; label: string }
+  | { source: 'none'; label: string };
+
+export function previewPlan(row: Pick<BuiltAppRow, 'snapshotUrl' | 'snapshotAt' | 'fileCount'>): PreviewPlan {
+  if (row.snapshotUrl) {
+    const when = row.snapshotAt > 0 ? ` (${new Date(row.snapshotAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })})` : '';
+    return { source: 'copy', url: row.snapshotUrl, label: `Saved copy of the last successful build${when} — the real built app, served without waking the owner's machine.` };
+  }
+  if (row.fileCount > 0) {
+    return { source: 'render', label: 'Rendered in your browser from the saved files — the frontend only; a backend or database this app uses does not run here.' };
+  }
+  return { source: 'none', label: 'No saved files for this app, so there is nothing to preview.' };
+}
+
+/** Replace one row in place after a moderation — the page and the scroll position are kept. */
+export function replaceRow(rows: BuiltAppRow[], fresh: BuiltAppRow | null, workspaceId: string): BuiltAppRow[] {
+  if (!fresh) return rows;
+  return rows.map((r) => (r.workspaceId === workspaceId ? fresh : r));
+}

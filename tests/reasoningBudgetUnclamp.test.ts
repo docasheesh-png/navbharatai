@@ -188,12 +188,19 @@ describe('🔒 reversion guards — the wiring, not just the helpers', () => {
     // remaining clock, when the LANE bounded the call rather than this engine's own cap. The flag this
     // case exists for is untouched and is still asserted; both are pinned together so neither can be
     // dropped while the other stands.
-    expect(runner).toContain(`starvedBudgetError(
-        budget.maxTokens,
-        budget.requested,
-        budget.reasoningUnclamped,
-        bound.source === 'deadline' ? timeoutMs : undefined,
-      )`);
+    // ⚠️ Updated a FOURTH time on 2026-09-18: the call is now WRAPPED in `markAbandonedTurn`, which
+    // attaches this doomed turn's measured usage to the error so the chain can record it as OUR cost
+    // and keep it off the user's bill (unbilledTurns.ts). Before that, a starved call's tokens reached
+    // no ledger and no sink at all. The behaviour this case guards is STILL unchanged — throw, never
+    // return an unusable turn — and the wrapper is pinned WITH the call, so neither can be dropped
+    // while the other stands. Re-indented only because it is now nested.
+    expect(runner).toContain(`        starvedBudgetError(
+          budget.maxTokens,
+          budget.requested,
+          budget.reasoningUnclamped,
+          bound.source === 'deadline' ? timeoutMs : undefined,
+        )`);
+    expect(runner).toContain('throw markAbandonedTurn(');
   });
 
   // 🔴 THE RATE CONSTANT WAS MEASURED AND DELIBERATELY LEFT ALONE. Across 73 real calls in the reports

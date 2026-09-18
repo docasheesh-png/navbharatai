@@ -219,6 +219,25 @@ class SandboxStore {
   }
 
   /**
+   * The records of a SET of workspaces in ONE `getAll` (mirrors DeploymentStore.getMany). The admin's
+   * built-apps page joins twelve rows against their saved copies (`snapshotUrl`) and must not spend
+   * twelve round trips doing it. Missing docs are absent from the map. Never throws.
+   */
+  async getMany(workspaceIds: Array<string | null | undefined>): Promise<Map<string, SandboxRecord>> {
+    const out = new Map<string, SandboxRecord>();
+    const db = this.getDb();
+    const ids = [...new Set(workspaceIds.filter((id): id is string => typeof id === 'string' && id.length > 0 && !id.includes('/')))].slice(0, 100);
+    if (!db || ids.length === 0) return out;
+    try {
+      const snaps = await db.getAll(...ids.map((id) => db.collection('agentv3_sandboxes').doc(id)));
+      for (const s of snaps) {
+        if (s.exists) out.set(s.id, s.data() as SandboxRecord);
+      }
+    } catch { /* best-effort — a short map, never a thrown page */ }
+    return out;
+  }
+
+  /**
    * Store the revival recipe proven by a successful boot, and CONFIRM it by reading it back.
    *
    * The read-back is the whole point. "We wrote it" and "it is there" are different facts, and a

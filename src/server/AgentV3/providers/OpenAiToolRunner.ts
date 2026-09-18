@@ -15,6 +15,7 @@ import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 import { turnDeadline, BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE, SLOW_STREAM_MESSAGE } from '../turnDeadline';
 import { glmThinkingParam, isThinkingParamRejection, modelAlwaysReasons, type GlmThinkingLevel } from './glmThinking';
 import { reconcileFloorBudget, turnStarvedItsBudget, starvedBudgetError } from '../floorBudget';
+import { markAbandonedTurn } from '../unbilledTurns';
 import {
   toolDefsToOpenAI,
   transcriptToOpenAI,
@@ -497,11 +498,21 @@ export class OpenAiToolRunner implements TurnRunner {
       // only place that fact exists, and without it the report blames this engine's own cap for a
       // ceiling the CALLING LANE's remaining budget decided — sending the next autopsy to fix
       // arithmetic that was already right. See STARVED_BY_LANE_MARK in floorBudget.ts.
-      throw starvedBudgetError(
-        budget.maxTokens,
-        budget.requested,
-        budget.reasoningUnclamped,
-        bound.source === 'deadline' ? timeoutMs : undefined,
+      // 🔴 THROWING IT AWAY DOES NOT MAKE IT FREE (admin 2026-09-18). This turn is discarded, and
+      // the provider still charged us for every token of the reasoning that filled its ceiling.
+      // Before this, that spend reached no ledger and no sink at all — the one direction the billing
+      // law does not forgive, because it under-states OUR OWN cost on the panel used to judge it and
+      // hides the spend from the mid-build cost ceiling. The usage rides the error to the chain,
+      // which reports it as a turn that produced nothing: our cost in full, never the user's bill.
+      throw markAbandonedTurn(
+        starvedBudgetError(
+          budget.maxTokens,
+          budget.requested,
+          budget.reasoningUnclamped,
+          bound.source === 'deadline' ? timeoutMs : undefined,
+        ),
+        result.usage,
+        thinkingModel,
       );
     }
 

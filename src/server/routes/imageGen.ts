@@ -309,7 +309,7 @@ export function registerImageGenRoutes(app: Express): void {
     }
     if (!imageProConfigured()) {
       // Honest not-available (rule 2). Never a silent fall back to the FREE provider: that would
-      // charge ₹2 for the picture the user could have had for nothing, on the tier they switched to
+      // charge the Pro price for a picture the user could have had for nothing, on the tier they chose
       // precisely because they wanted something better.
       res.status(503).json({ error: imageProFailureMessage('unconfigured'), code: 'pro_unconfigured' });
       return;
@@ -429,7 +429,7 @@ export function registerImageGenRoutes(app: Express): void {
     });
 
     if (chargedInr > 0) {
-      // ADMIN-ONLY cost visibility. The user was told ₹2 and charged ₹2; this line is the other half
+      // ADMIN-ONLY cost visibility. The user was quoted the Pro price and charged it; this is the other half
       // of that honesty — what it actually cost US — so the admin's own picture of this feature is
       // never an assumption. Throttled to once per process because a per-image line would bury it.
       if (!marginWarned) {

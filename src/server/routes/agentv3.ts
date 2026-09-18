@@ -20060,6 +20060,10 @@ async function noteBuildOutcome(
           // render rescue both read its size and mean something different by it.
           preseededUnchanged: [...preseededGolden].filter(([p, c]) => writtenFiles.get(p) === c).length,
           appRendered: buildObs.previewRendered === true,
+          // An unverified EDIT may have left the user's working app worse than it started — see
+          // `editingExistingApp` (autopsy 95598899). Read after appRendered, so a verified edit is
+          // still charged in full.
+          editingExistingApp: isEditMode,
           decidedBilledUsd: effectiveBilledUsd,
         })
         : null;

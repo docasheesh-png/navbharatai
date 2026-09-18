@@ -66938,3 +66938,73 @@ minutes.
 **Not fixed here on purpose:** `analyzeRequest`'s score also drives `startTier` and `escalationPath` for
 every build, so changing it trades one problem for a possible other (the 2026-09-13 rule) and needs its
 own change with its own evidence. Recorded, not guessed at.
+
+---
+
+## 2026-09-18 — 🔴 AN UNVERIFIED EDIT IS NOT A DELIVERY: the ₹23.81 charged for damage (autopsy 95598899)
+
+**Admin:** *"jo bacha hai woh kaam complete karo."* This is the largest item left from that autopsy, and
+the only one with real money on it.
+
+### What the bill did
+
+The user had a working 35-file marketplace. The turn overwrote four of its entry files, left the release
+gate **RED** and the app throwing `Cannot read properties of null (reading 'useState')` on load. They
+typed *"No parrot or no app, don't work on any project"* to stop it — and `decideCancelledBuildBill`
+returned the `files-saved` rate: **half of the work done, ₹23.81, for damage.**
+
+### Root cause — `files-saved` reads "files were written" as "value was delivered"
+
+Every branch of that module asks the right question — *what is the user holding?* — and the answers
+were right for every case it had: a rendering app is charged in full; nothing written is free; only our
+own template is free. **The case it could not see is the one where the user holds LESS than they
+started with.**
+
+On a FRESH build the half-charge is fair: the user now has something they did not have before and can
+resume from it. On an EDIT it can be exactly backwards, and with no verified render **nobody, including
+us, can say which.** Charging for an unverified mutation of an app that was working is precisely what
+*"working app or free"* exists to forbid — and the party that cannot show the app is fine should not be
+the one paid.
+
+### The fix — one fact, one branch, placed with care
+
+`editingExistingApp` (the route's own `isEditMode`, already in scope) is now a fact the rule reads, and
+an unverified edit returns **₹0** with a new honest delivery value, `unverified-edit`.
+
+🔒 **The ORDERING is the whole design.** It sits BELOW `appRendered`, so a **verified** edit is still
+charged in **full** — the admin's own 2026-09-15 rule (*"app bani = preview chala"*) is untouched. It
+sits below `files === 0` so a fresh build holding only our template keeps its own, more specific reason.
+And rule 3 is unbroken: every branch starts from the already-decided number, so a cancel can still only
+ever cost LESS than finishing.
+
+⚠️ **The exploit was considered and does not pay.** "Edit, stop before verification, get it free" costs
+the user a broken or unverified app to save a half-charge — and a verified edit is still billed in full,
+so the only way to reach ₹0 is to genuinely receive nothing provable.
+
+### ⚠️ A hole in my own test, found by the reversion proof and worth recording
+
+My wiring case asserted `route.toContain('editingExistingApp: isEditMode,')` — and it **PASSED with the
+billing call site deleted**, because `AgentRunner`'s options carry a field of the same name three
+thousand lines away (I added it myself in PR #3078). A wiring test any call site can satisfy tests
+nothing. It is now scoped to the `decideCancelledBuildBill({…})` argument object, and the reversion
+bites.
+
+### Tests
+
+`tests/anUnverifiedEditIsNotADelivery.test.ts` — **13 cases**, using that report's exact numbers
+(`filesWritten: 4`, `decidedBilledUsd: 0.248124`). **Reversion-proven on three independent reverts**:
+removing the branch, unwiring the route, and moving the branch above `appRendered` (which would silently
+make every verified edit free — no behavioural case above would have caught it alone, which is why the
+ORDER is pinned in the source as well).
+
+The module's existing 20 cases pass unchanged.
+
+### 🔴 Still open
+
+- **`RUNTIME_UNCHECKED` still reaches the report through a threaded `previewRendered` boolean**
+  (`AutoFix.runtimeUncheckedRecord`) rather than through `provenFromTimeline` — same fact, two paths.
+  Unifying them belongs with the evidence ledger's write half, not with a billing change.
+- **The evidence ledger's WRITE half** — an explicit `proved(fact, source)` an actor calls — remains the
+  real subsystem; today there are two readers sharing no vocabulary.
+- **The `useState of null` from this same autopsy is still unexplained.** It needs the failing file
+  contents, which the report does not carry, and no plausible-sounding guess is recorded in its place.

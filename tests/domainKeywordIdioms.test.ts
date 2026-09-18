@@ -183,7 +183,15 @@ describe('the route asks the app question, not the routing question', () => {
   const routes = fs.readFileSync(path.join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
 
   it('passes userAskedForAnAppToBeBuilt into the guidance builder', () => {
-    expect(routes).toContain('userAskedForAnApp: userAskedForAnAppToBeBuilt(prompt),');
+    // 2026-09-18: the call site binds it to a name first, because the GENERATED long-tail path added
+    // beside it must answer the same question from the same source rather than asking its own. The
+    // invariant is unchanged — this value comes from the prompt, never from `intent`.
+    expect(routes).toContain('const askedForAnApp = userAskedForAnAppToBeBuilt(prompt);');
+    expect(routes).toContain('userAskedForAnApp: askedForAnApp,');
+  });
+
+  it('the generated long-tail guidance is gated on that SAME answer', () => {
+    expect(routes).toContain('if (!reqGuidance && askedForAnApp)');
   });
 
   it('does not reuse the intent verdict for it', () => {

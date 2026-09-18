@@ -70,34 +70,34 @@ export const AppLockRow: React.FC<{ userId: string | undefined; onOpen: () => vo
   useEffect(() => { load(); }, [load]);
 
   return (
-    <div className="space-y-3 pt-6 border-t border-white/10">
-      <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2 block pl-1">App Lock</label>
+    <div className="space-y-3 pt-6 border-t border-line">
+      <label className="text-[10px] font-black text-accent-text uppercase tracking-widest mb-2 block pl-1">App Lock</label>
       <button
         type="button"
         onClick={() => { if (loadFailed) load(); onOpen(); }}
         disabled={!userId}
         aria-label="Open App Lock"
-        className="w-full flex items-center gap-3 rounded-xl border border-white/10 bg-black/20 p-3 text-left hover:bg-white/5 active:bg-white/10 transition-colors disabled:opacity-60"
+        className="w-full flex items-center gap-3 rounded-xl border border-line bg-well p-3 text-left hover:bg-raised active:bg-raised transition-colors disabled:opacity-60"
       >
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-500/10">
-          <Lock className="h-5 w-5 text-indigo-300" />
+          <Lock className="h-5 w-5 text-accent-text" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-sm font-bold text-white">App Lock</span>
-          <span className="block text-[11px] text-gray-400 leading-snug">
+          <span className="block text-sm font-bold text-ink">App Lock</span>
+          <span className="block text-[11px] text-muted leading-snug">
             {userId ? appLockRowSubtitle(status, loadFailed) : 'Sign in to set a PIN on parts of the app.'}
           </span>
         </span>
-        <ChevronRight className="h-4 w-4 shrink-0 text-gray-500" />
+        <ChevronRight className="h-4 w-4 shrink-0 text-faint" />
       </button>
-      <p className="text-[10px] leading-snug text-gray-500 pl-1">
+      <p className="text-[10px] leading-snug text-faint pl-1">
         One 4-digit PIN, and you choose what it guards. Opening this screen needs the PIN too.
       </p>
     </div>
   );
 };
 
-const PIN_BOX = 'w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2.5 text-center text-sm font-bold tracking-[0.4em] text-white placeholder-gray-600 outline-none focus:border-indigo-500/50';
+const PIN_BOX = 'w-full rounded-lg border border-line bg-well px-3 py-2.5 text-center text-sm font-bold tracking-[0.4em] text-ink placeholder-faint outline-none focus:border-indigo-500/50';
 const digits = (v: string) => v.replace(/\D/g, '').slice(0, 4);
 
 /**
@@ -154,17 +154,17 @@ const ChangePinCard: React.FC<{ userId: string }> = ({ userId }) => {
   };
 
   return (
-    <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-3">
+    <div className="rounded-xl border border-line bg-well p-3 space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <p className="flex items-start gap-2 text-[11px] leading-relaxed text-gray-400">
-          <KeyRound size={14} className="mt-px shrink-0 text-indigo-300" />
-          <span><span className="font-bold text-gray-200">Change PIN.</span> You will need your current PIN.</span>
+        <p className="flex items-start gap-2 text-[11px] leading-relaxed text-muted">
+          <KeyRound size={14} className="mt-px shrink-0 text-accent-text" />
+          <span><span className="font-bold text-body">Change PIN.</span> You will need your current PIN.</span>
         </p>
         {!open && (
           <button
             type="button"
             onClick={() => { setOpen(true); setDone(''); setError(''); }}
-            className="shrink-0 rounded-lg border border-white/10 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-gray-200 hover:bg-white/5"
+            className="shrink-0 rounded-lg border border-line px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-body hover:bg-raised"
           >
             Change PIN
           </button>
@@ -172,7 +172,7 @@ const ChangePinCard: React.FC<{ userId: string }> = ({ userId }) => {
       </div>
 
       {done && !open && (
-        <p className="flex items-start gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2.5 text-[11px] leading-snug text-emerald-300">
+        <p className="flex items-start gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2.5 text-[11px] leading-snug text-success">
           <ShieldCheck size={14} className="mt-px shrink-0" /> {done}
         </p>
       )}
@@ -187,7 +187,7 @@ const ChangePinCard: React.FC<{ userId: string }> = ({ userId }) => {
             onChange={(e) => setConfirmPin(digits(e.target.value))} onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
             placeholder="Confirm new PIN" aria-label="Confirm new PIN" className={PIN_BOX} />
           {error && (
-            <p className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/5 p-2.5 text-[11px] leading-snug text-red-300">
+            <p className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/5 p-2.5 text-[11px] leading-snug text-danger">
               <AlertTriangle size={14} className="mt-px shrink-0" /> {error}
             </p>
           )}
@@ -196,7 +196,7 @@ const ChangePinCard: React.FC<{ userId: string }> = ({ userId }) => {
               type="button"
               onClick={() => void submit()}
               disabled={busy || !looksLikePin(currentPin) || !looksLikePin(newPin) || !confirmPin}
-              className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-white hover:bg-indigo-500 disabled:opacity-40"
+              className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-on-accent hover:bg-indigo-500 disabled:opacity-40"
             >
               {busy ? <Loader2 size={13} className="animate-spin" /> : <KeyRound size={13} />}
               {busy ? 'Changing…' : 'Save new PIN'}
@@ -204,14 +204,14 @@ const ChangePinCard: React.FC<{ userId: string }> = ({ userId }) => {
             <button
               type="button"
               onClick={() => { setOpen(false); reset(); setError(''); }}
-              className="rounded-lg border border-white/10 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-gray-400 hover:text-white"
+              className="rounded-lg border border-line px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-muted hover:text-ink"
             >
               Cancel
             </button>
           </div>
-          <p className="text-[10px] leading-snug text-gray-500">
-            Avoid 0000 or 1234. Forgot your current PIN? Press <strong className="text-gray-400">Lock now</strong> above,
-            then <strong className="text-gray-400">Forgot PIN?</strong> — a code is emailed and you set a new one.
+          <p className="text-[10px] leading-snug text-faint">
+            Avoid 0000 or 1234. Forgot your current PIN? Press <strong className="text-muted">Lock now</strong> above,
+            then <strong className="text-muted">Forgot PIN?</strong> — a code is emailed and you set a new one.
           </p>
         </div>
       )}
@@ -284,22 +284,22 @@ export const AppLockSettings: React.FC<{ userId: string }> = ({ userId }) => {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-3">
-        <p className="flex items-start gap-2 text-[11px] leading-relaxed text-gray-400">
-          <Lock size={14} className="mt-px shrink-0 text-indigo-300" />
-          <span><span className="font-bold text-gray-200">What your PIN guards.</span> Tick a part of the app and it opens only
+      <div className="rounded-xl border border-line bg-well p-3 space-y-3">
+        <p className="flex items-start gap-2 text-[11px] leading-relaxed text-muted">
+          <Lock size={14} className="mt-px shrink-0 text-accent-text" />
+          <span><span className="font-bold text-body">What your PIN guards.</span> Tick a part of the app and it opens only
           with your PIN. One unlock opens every locked screen for five minutes.</span>
         </p>
 
         {loadError && (
-          <p className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/5 p-2.5 text-[11px] leading-snug text-red-300">
+          <p className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/5 p-2.5 text-[11px] leading-snug text-danger">
             <AlertTriangle size={14} className="mt-px shrink-0" /> {loadError}
             <button onClick={() => void load()} className="ml-auto shrink-0 underline underline-offset-2">Retry</button>
           </p>
         )}
 
         {status === null && !loadError && (
-          <p className="flex items-center gap-2 text-[11px] text-gray-500"><Loader2 size={12} className="animate-spin" /> Reading your settings…</p>
+          <p className="flex items-center gap-2 text-[11px] text-faint"><Loader2 size={12} className="animate-spin" /> Reading your settings…</p>
         )}
 
         {status !== null && (
@@ -314,7 +314,7 @@ export const AppLockSettings: React.FC<{ userId: string }> = ({ userId }) => {
                   <label
                     key={spec.id}
                     className={`flex items-start gap-2.5 rounded-lg border p-2.5 ${
-                      spec.mandatory ? 'border-indigo-500/20 bg-indigo-500/5' : 'border-white/5 cursor-pointer hover:bg-white/5'
+                      spec.mandatory ? 'border-indigo-500/20 bg-indigo-500/5' : 'border-line cursor-pointer hover:bg-raised'
                     }`}
                   >
                     <input
@@ -325,12 +325,12 @@ export const AppLockSettings: React.FC<{ userId: string }> = ({ userId }) => {
                       className="mt-0.5 accent-indigo-500 disabled:opacity-70"
                       aria-label={`Lock ${spec.label}`}
                     />
-                    <span className="min-w-0 text-xs text-gray-200 leading-snug">
+                    <span className="min-w-0 text-xs text-body leading-snug">
                       {spec.label}
-                      {spec.mandatory && <span className="ml-2 text-[10px] font-bold uppercase tracking-wider text-indigo-300">Always on</span>}
-                      <span className="block text-[11px] text-gray-500">{spec.hint}</span>
+                      {spec.mandatory && <span className="ml-2 text-[10px] font-bold uppercase tracking-wider text-accent-text">Always on</span>}
+                      <span className="block text-[11px] text-faint">{spec.hint}</span>
                       {impliedByBilling && (
-                        <span className="block text-[11px] text-amber-300/80">Already covered — Wallet &amp; Billing is locked.</span>
+                        <span className="block text-[11px] text-warn">Already covered — Wallet &amp; Billing is locked.</span>
                       )}
                     </span>
                   </label>
@@ -339,12 +339,12 @@ export const AppLockSettings: React.FC<{ userId: string }> = ({ userId }) => {
             </div>
 
             {error && (
-              <p className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/5 p-2.5 text-[11px] leading-snug text-red-300">
+              <p className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/5 p-2.5 text-[11px] leading-snug text-danger">
                 <AlertTriangle size={14} className="mt-px shrink-0" /> {error}
               </p>
             )}
             {saved && !error && (
-              <p className="flex items-start gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2.5 text-[11px] leading-snug text-emerald-300">
+              <p className="flex items-start gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2.5 text-[11px] leading-snug text-success">
                 <ShieldCheck size={14} className="mt-px shrink-0" /> {saved}
               </p>
             )}
@@ -353,7 +353,7 @@ export const AppLockSettings: React.FC<{ userId: string }> = ({ userId }) => {
               <button
                 onClick={() => void save()}
                 disabled={!dirty || busy}
-                className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-white hover:bg-indigo-500 disabled:opacity-40"
+                className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-on-accent hover:bg-indigo-500 disabled:opacity-40"
               >
                 {busy ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />}
                 {busy ? 'Saving…' : 'Save'}
@@ -361,12 +361,12 @@ export const AppLockSettings: React.FC<{ userId: string }> = ({ userId }) => {
               {dirty && (
                 <button
                   onClick={() => { setDraft(stored); setError(''); setSaved(''); }}
-                  className="flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-gray-400 hover:text-white"
+                  className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-muted hover:text-ink"
                 >
                   <RotateCcw size={12} /> Undo
                 </button>
               )}
-              {!dirty && !saved && <span className="text-[10px] text-gray-500">No changes.</span>}
+              {!dirty && !saved && <span className="text-[10px] text-faint">No changes.</span>}
             </div>
           </>
         )}
@@ -376,9 +376,9 @@ export const AppLockSettings: React.FC<{ userId: string }> = ({ userId }) => {
 
       {/* Said once, plainly, rather than implied. The admin is the person who decides whether this
           trade is acceptable, and they cannot decide it if the screen overstates what it does. */}
-      <p className="text-[10px] leading-snug text-gray-500 px-1">
+      <p className="text-[10px] leading-snug text-faint px-1">
         Two things are protected on our server, not just on your screen: your API key values stay
-        encrypted until the PIN is accepted, and anything that <strong className="text-gray-400">spends
+        encrypted until the PIN is accepted, and anything that <strong className="text-muted">spends
         money</strong> — a recharge, buying or renewing a plan, auto-renew — is refused without it, with
         nothing charged. On the other screens the PIN keeps the screen closed on this device, which is
         what stops someone who picks up your phone. Money you have already paid is always credited

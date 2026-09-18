@@ -134,6 +134,9 @@ describe('the grey slab behind each plan — fixed at the component, not with a 
   // now says what it means, and the compat layer already knew how to theme that.
   it('uses a surface class the theme layer maps, not a black overlay', () => {
     expect(card).not.toContain('bg-black/20');
-    expect(card).toContain('bg-[#21262d]');
+    // The theme replacement (PR J, 2026-09-18) took this the last step: the slab no longer relies on
+    // `theme-compat.css` remapping a GitHub-dark literal, it names the raised surface token directly.
+    // The claim is unchanged and now stronger — it is a real surface, not an overlay.
+    expect(card).toContain('bg-raised');
   });
 });

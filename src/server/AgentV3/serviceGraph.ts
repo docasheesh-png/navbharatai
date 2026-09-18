@@ -32,6 +32,8 @@
 //
 // PURE + dependency-free → fully unit-testable without a sandbox.
 
+import { delegatesTo, portsInCommand, walkScript } from './npmScripts';
+
 export type ServiceKind = 'frontend' | 'backend' | 'worker' | 'cron';
 
 export interface Service {
@@ -76,7 +78,21 @@ const readJson = (raw: string | undefined): Record<string, any> | null => {
  * Ordered deliberately: worker/cron are checked FIRST, because a worker's script often also mentions
  * "start", and mistaking it for a web service is the expensive error (waiting for a port forever).
  */
-export function classifyScript(scriptName: string, command: string, pkg: Record<string, any> | null): ServiceKind | null {
+export function classifyScript(
+  scriptName: string,
+  command: string,
+  pkg: Record<string, any> | null,
+  /**
+   * Skip the "is this an entry script?" NAME gate.
+   *
+   * That gate exists to FIND the runnable script among all of a package's scripts, where `build` and
+   * `lint` must not be mistaken for processes. Inside a fan-out the question is already answered — the
+   * author wrote `run-p api web`, so `api` and `web` ARE the processes — and applying the gate there
+   * rejects every real-world name (`api`, `web`, `client`, `server`). Worker/cron detection is
+   * deliberately still ahead of this, so `run-p web worker` still classifies the worker as one.
+   */
+  assumeRunnable = false,
+): ServiceKind | null {
   const n = String(scriptName || '').toLowerCase();
   const c = String(command || '').toLowerCase();
   const deps = { ...(pkg?.dependencies || {}), ...(pkg?.devDependencies || {}) } as Record<string, string>;
@@ -87,7 +103,7 @@ export function classifyScript(scriptName: string, command: string, pkg: Record<
   // A queue library in the command is a strong signal even when the script is named oddly.
   if (/\b(bullmq|bull|agenda|bee-queue|celery)\b/.test(c)) return 'worker';
 
-  if (/\b(dev|start|serve|preview)\b/.test(n)) {
+  if (assumeRunnable || /\b(dev|start|serve|preview)\b/.test(n)) {
     // Bundler/dev-server tooling ⇒ frontend. A bare node/tsx entry ⇒ backend.
     if (/\b(vite|next|nuxt|astro|remix|ng serve|react-scripts|svelte-kit|webpack|parcel)\b/.test(c)) return 'frontend';
     if (/\b(nodemon|ts-node|tsx|node|bun run|deno run|fastify|nest)\b/.test(c)) return 'backend';
@@ -102,12 +118,50 @@ export function classifyScript(scriptName: string, command: string, pkg: Record<
 /** The port a service should use: what it explicitly asks for, else the default for its kind. */
 export function portForService(kind: ServiceKind, command: string, taken: ReadonlySet<number>): number | null {
   if (kind === 'worker' || kind === 'cron') return null; // no listener — never wait for one
-  const m = String(command || '').match(/--port[= ](\d{2,5})|PORT=(\d{2,5})/i);
-  const explicit = m ? Number(m[1] ?? m[2]) : NaN;
-  let port = Number.isFinite(explicit) && explicit > 0 ? explicit : DEFAULT_PORTS[kind];
+  // Via the shared parser, so this and `declaredPort` can never disagree about what a flag says.
+  const explicit = portsInCommand(String(command || ''))[0];
+  let port = typeof explicit === 'number' ? explicit : DEFAULT_PORTS[kind];
   // Two services asking for the same port is the collision this exists to prevent; step off it.
   while (taken.has(port)) port += 1;
   return port;
+}
+
+/**
+ * A delegating entry script is a FAN-OUT, not one process.
+ *
+ * 🔴 WHY (autopsy `1a7f4a58`, 2026-09-18). "Qiikr" is a Vite web app plus an Express API in one
+ * package, started by `"dev": "concurrently \"npm run dev:server\" \"npm run dev:client\""`. The graph
+ * read only `dev`, found no port in it, and reported **`Single service: qiikr (frontend on port
+ * 5173)`** — where 5173 came from `DEFAULT_PORTS`, not from the app. It was right by coincidence
+ * (Vite's default happens to equal the app's pin) and wrong about everything else: one service instead
+ * of two, and a guessed port presented as a fact.
+ *
+ * In the same report the supersede logic concluded the app was on 3001 and killed 5173. Two
+ * subsystems, one report, opposite conclusions — so the graph now READS the fan-out instead of
+ * defaulting past it.
+ *
+ * 🔒 CONSERVATIVE, because this file's own header says the mistake worse than the gap is INVENTING a
+ * service. Expansion needs the author to have written the fan-out themselves: at least two delegated
+ * scripts that exist, classify, and come out as at least two DISTINCT kinds. Two backends behind one
+ * script stay one service — a miss, and the safe direction.
+ */
+function expandDelegated(
+  scripts: Record<string, string>,
+  best: { script: string; kind: ServiceKind; command: string },
+  pkg: Record<string, any> | null,
+): Array<{ script: string; kind: ServiceKind; command: string }> | null {
+  if (delegatesTo(best.command).length < 2) return null;
+  const parts: Array<{ script: string; kind: ServiceKind; command: string }> = [];
+  const seen = new Set<string>([best.script]);
+  for (const name of delegatesTo(best.command)) {
+    walkScript(scripts, name, (script, command) => {
+      const kind = classifyScript(script, command, pkg, true);
+      if (kind && !parts.some((p) => p.script === script)) parts.push({ script, kind, command });
+    }, seen);
+  }
+  if (parts.length < 2) return null;
+  if (new Set(parts.map((p) => p.kind)).size < 2) return null;
+  return parts;
 }
 
 /**
@@ -145,10 +199,24 @@ export function buildServiceGraph(opts: {
     }
     if (!best) continue;
 
-    const port = portForService(best.kind, best.command, taken);
-    if (port != null) taken.add(port);
     const name = String(pkg.name || dir || 'app');
-    found.push({ id: dir || 'root', name, kind: best.kind, dir, script: best.script, port, dependsOn: [] });
+    const parts = expandDelegated(scripts, best, pkg) ?? [best];
+    // Claim EXPLICIT ports before defaulted ones, so a default can never squat on a port the app
+    // actually asked for and push it off by one.
+    const ordered = [...parts].sort((a, b) => portsInCommand(b.command).length - portsInCommand(a.command).length);
+    for (const part of ordered) {
+      const port = portForService(part.kind, part.command, taken);
+      if (port != null) taken.add(port);
+      found.push({
+        id: parts.length > 1 ? `${dir || 'root'}:${part.script}` : (dir || 'root'),
+        name: parts.length > 1 ? `${name} (${part.script})` : name,
+        kind: part.kind,
+        dir,
+        script: part.script,
+        port,
+        dependsOn: [],
+      });
+    }
   }
 
   // A frontend depends on every backend in the project: bring the API up first, or the web app's

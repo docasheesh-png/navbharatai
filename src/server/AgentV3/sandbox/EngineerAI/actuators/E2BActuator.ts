@@ -9,6 +9,7 @@ import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
 import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand, isTransientNpmFsFailure } from './devServerHost';
 import { buildPortSweepCommand, parsePortSweep, portCandidates, shouldSweep, sweepFoundSummary } from './portSweep';
+import { appPortsFrom } from '../../../appPorts';
 import type { DevFramework } from './devServerHost';
 import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, devServerRunnerMissing, type DevServerDiagnosis } from './DevServerRecovery';
 import { recordDevServerLaunch } from '../../../devServerLaunchLog';
@@ -2087,7 +2088,17 @@ export class E2BActuator implements IEngineerActuator {
           // cannot promote itself here either.
           portUp = true;
           livePort = found;
-          stdout += `\n${sweepFoundSummary(boundPort, found)}`;
+          /**
+           * Ask the app which of its OWN ports this is before announcing that it "moved" — the sweep's
+           * summary used to assert a move on every full-stack app (autopsy `1a7f4a58`). One bounded
+           * read of package.json, and only on the sweep path, which already only runs when the expected
+           * port missed; a healthy build still pays nothing. Unreadable ⇒ null ⇒ today's wording.
+           */
+          const appPorts = await sandbox.files
+            .read(`${WORKSPACE_ROOT}/package.json`)
+            .then((raw) => appPortsFrom({ 'package.json': raw }))
+            .catch(() => null);
+          stdout += `\n${sweepFoundSummary(boundPort, found, appPorts)}`;
         }
       }
       // Honest health line: the verified port when UP, the REAL root cause when DOWN.

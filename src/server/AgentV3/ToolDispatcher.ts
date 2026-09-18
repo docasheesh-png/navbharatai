@@ -6,7 +6,8 @@ import { shouldRunAuditFix, auditFixOutcome, AUDIT_FIX_COMMAND } from './npmAudi
 import { narrationText, type NarrationId, type NarrationParams } from './narrationCatalogue';
 import { noteHeal } from './HealLedger';
 import { decideSupersede } from './previewSupersede';
-import { declaredPortsFrom, DECLARED_PORT_FILES } from './declaredPort';
+import { DECLARED_PORT_FILES } from './declaredPort';
+import { appPortsFrom, isSecondaryAppPort, type AppPortMap } from './appPorts';
 import { sandboxStore } from './SandboxStore';
 import { buildPreKillPortCommand } from './sandbox/EngineerAI/actuators/devServerHost';
 import { pipedGateExitCodeWarning } from './pipedGateExitCode';
@@ -8332,6 +8333,9 @@ export class ToolDispatcher {
          * database ports never (see previewSupersede.ts). Best-effort: a failure here degrades the
          * preview, it must never touch a build that already succeeded.
          */
+        // Hoisted above the supersede block because the REPLY below reads it too — one derivation of
+        // the app's ports, used by the veto and by what the agent is told.
+        let appPortMap: AppPortMap | null = null;
         try {
           const [recipe, record] = await Promise.all([
             sandboxStore.getRecipe(this.workspaceId),
@@ -8358,7 +8362,12 @@ export class ToolDispatcher {
             // EVERY port the app declares, not the strongest one. A full-stack app's frontend and API
             // are both its own, and the singular answer protected one while leaving the other killable
             // — report `1a7f4a58` killed a Vite frontend to bless the app's own Express API.
-            sourceDeclaredPorts = declaredPortsFrom(portFiles).map((d) => d.port);
+            //
+            // 🔒 ONE DERIVATION. `appPortsFrom` is the same function the service graph's answer comes
+            // from, so this decision and the graph's report line cannot contradict each other the way
+            // they did in that report ("Single service … on port 5173" beside "verified on port 3001").
+            appPortMap = appPortsFrom(portFiles);
+            sourceDeclaredPorts = appPortMap.all;
           } catch { /* a port hint must never be able to affect a build */ }
           const decision = decideSupersede({ newPort: port, recipe, declaredPort: record?.declaredPort, sourceDeclaredPorts });
           if (decision.staleports.length > 0) {
@@ -8391,7 +8400,21 @@ export class ToolDispatcher {
         // the running app in their own Preview panel, and a copied sandbox address is a free, unmetered
         // ticket onto NavBharatAI's bill for anyone it's forwarded to (see redactPreviewUrls, which
         // strips it from your visible text as a backstop — but do not rely on that; do not print it).
-        return `Live preview published (port ${port} verified UP). Internal url for your own tool calls only, NEVER to be quoted in your reply to the user: ${url}`;
+        /**
+         * 🔒 "A SECOND PROCESS OF THIS APP CAME UP" IS NOT "THE APP MOVED" (autopsy `1a7f4a58`).
+         *
+         * The agent is not corrected or overridden — it asked for this port and it gets it. But when
+         * the port it published is this app's API while the app also has a web page, the reply says so,
+         * because that is the one fact the whole failed build turned on: the platform told the agent
+         * "your app is running on port 3001", it believed it, and the user's preview served
+         * `Cannot GET /` for the rest of the build.
+         */
+        const secondary = appPortMap && isSecondaryAppPort(appPortMap, port)
+          ? ` NOTE: port ${port} is this project's ${appPortMap.frontend === port ? 'web app' : 'API/secondary service'};`
+            + ` its web page is served on port ${appPortMap.preview}. A person opening the preview should see the web page,`
+            + ` so once that server is up, call update_preview with port=${appPortMap.preview}.`
+          : '';
+        return `Live preview published (port ${port} verified UP).${secondary} Internal url for your own tool calls only, NEVER to be quoted in your reply to the user: ${url}`;
       }
 
       case 'task': {

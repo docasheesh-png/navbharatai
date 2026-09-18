@@ -67410,3 +67410,71 @@ was designed to answer a different question.
 - **Billing:** ₹613.08 charged on a free wallet for a build whose `RELEASE_GATE` is `UNKNOWN` and
   whose preview never rendered. `ok: true`, so "working app or free" never fired. Whether an UNKNOWN
   gate should bill in full is an admin decision, not a code one — raised, not changed.
+
+---
+
+## 2026-09-18 — Admin order: "ab yeh nahi ana chahiye" — ONE answer about which port is the app
+
+Admin, on autopsy `1a7f4a58`, pointing at the two lines that contradicted each other in one report:
+
+```
+SERVICE_GRAPH_SINGLE  "Single service: qiikr (frontend on port 5173)."
+(supersede)           "superseded now that the current app is verified on port 3001"
+```
+
+**Two subsystems, one report, opposite conclusions — and the wrong one held the kill switch.**
+
+### The graph was not merely ignored; it was also guessing
+
+Worth recording because it changes what "listen to the graph" means: the graph's `5173` came from
+`DEFAULT_PORTS.frontend`, **not from the app**. It was right by coincidence (Vite's default equals this
+app's pin) and wrong about everything else — it called a two-process project "Single service", because
+`buildServiceGraph` read only the text of `dev` and `"dev": "concurrently \"npm run dev:server\"
+\"npm run dev:client\""` contains no port and no clue.
+
+### What shipped
+
+- **`npmScripts.ts` — the ONE script parser.** Four modules kept private copies of "find a port in a
+  command" and all four stopped at the `npm run` boundary (`declaredPort`, `serviceGraph`,
+  `DevServerRecovery`, `E2BActuator`). `portsInCommand`, `delegatesTo` and a cycle-safe, depth-bounded
+  `walkScript` now live in one file that the readers import — the drifted-copy class this repo has
+  already paid for with four `safeRelPath`s and two complex-app detectors.
+- **The graph READS the fan-out.** `expandDelegated` turns a delegating entry script into the services
+  the author actually wrote. Qiikr now reports `2 services: qiikr (dev:client) — frontend :5173;
+  qiikr (dev:server) — backend :3001`, start order backend-first, with **5173 read from `--port 5173`**
+  — proven by moving the app's pin and watching the answer follow.
+  🔒 Conservative, per that file's own warning that inventing a service is worse than the gap: it needs
+  ≥2 delegated scripts that exist, classify, and yield ≥2 DISTINCT kinds. Two frontends behind one
+  script stay one service.
+  ⚠️ `classifyScript` gained `assumeRunnable`: its name gate (`dev|start|serve|preview`) exists to FIND
+  the entry script among all scripts, and inside a known fan-out it rejected every real name (`api`,
+  `web`, `client`). My own test caught that — `run-p api web` classified as nothing. Worker/cron
+  detection still runs ahead of it.
+- **`appPorts.ts` — the single derivation.** `appPortsFrom(files)` → `{ preview, frontend, backends,
+  all, multiService }`, built on the graph and unioned with `declaredPortsFrom` (the graph reads
+  scripts; an app also states ports in `.env.example`, `listen()` and `vite.config.ts`, and the veto
+  must not answer "not yours" because of which file it was written in). `previewPortFor` answers the
+  question nobody was asking: **a frontend always wins** — the API is the web app's dependency, and a
+  person opening a "preview" means the thing with a user interface.
+- **Every actor reads it.** `update_preview` feeds the supersede veto from `appPortMap.all`, and when
+  the port it just published is the app's API while the app also has a web page, it says so to the
+  agent instead of letting it believe the app moved. The port sweep's summary stops asserting a move:
+  *"Port 3001 is this project's API/secondary service … Nothing has moved. Point the preview at 5173."*
+- **`tests/oneAnswerAboutWhichPortIsTheApp.test.ts` (15 cases)** includes the contradiction guard
+  itself: the graph's preview port must be a port the supersede refuses to free, asserted through the
+  same function. Proven by reversion twice — un-expanding the fan-out turns 4 red, taking the port map
+  away from the sweep turns 1 red.
+
+### 🔴 Still open (rule 6)
+
+- **The health check's own line is not yet port-map-aware.** `devServerHealthLine` still says
+  *"dev server is UP on port N. Call update_preview with port=N"*, and on a backend-only restart that N
+  is the API. The sweep line beside it now contradicts it honestly, and `update_preview` corrects it
+  after the fact — but the cleanest fix is one more reader of `appPortsFrom`, in `DevServerRecovery`.
+  Deliberately not done in the same change: that file was PR #3086's subject hours earlier, and the
+  right moment to touch it is after this lands.
+- **Nothing STARTS the second service yet.** The graph now describes both processes and their order;
+  the runner still launches one. That was always the graph's stated purpose — *"Before building a
+  multi-process runner we need to know how often a real project even has a second service"* — and this
+  change is what finally makes that measurement real. A full-stack app whose API is not running still
+  renders a web page with failing fetches.

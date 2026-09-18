@@ -67347,3 +67347,46 @@ curl count as proof, and making the gate fill unconditional — each turns the s
   read back; an explicit `proved(fact, source)` every actor calls is still the subsystem.
 - **The `useState of null` from autopsy `95598899` remains unexplained** — it needs the failing file's
   contents, which the report does not carry, and no plausible-sounding guess is recorded in its place.
+
+## 2026-09-18 — A hover that repeats the resting background is not a hover (follow-up to #3070)
+
+**Found while auditing #3070 for the admin's standing instruction that no PR may compromise another
+feature.** The theme migration was clean on every axis it measured — literals down 11,487 → 2,825, AA
+green on all three themes, embedded snippets untouched — and it still shipped a real interaction
+regression that none of its gates could see.
+
+**The defect, in one line: the app's old idiom was `bg-white/10 hover:bg-white/15`, and BOTH alphas map
+to the single `bg-raised` token.** So the codemod emitted `bg-raised hover:bg-raised` **105 times**, and
+on **76 of those controls there was no other hover feedback of any kind** — a button simply stopped
+answering the pointer. Nothing failed anywhere: the classes are valid, `tsc` and the suite are silent on
+behaviour, the ratchet counts *literals* rather than *outcomes*, and every contrast check passed because
+the hover colour was, by construction, the colour that had already passed.
+
+🔒 **Fixed as one collapsed mapping, not as 105 sites.** Two real surfaces per theme — `--surface-raised-hover`
+and `--surface-well-hover` — exposed through `@theme inline` as `bg-raised-hover` / `bg-well-hover`, and
+the 107 class attributes rewritten to use them (29 files). A site whose hover was already a *different*
+surface was left alone, and a template literal carrying markup was skipped, because that is somebody
+else's app — the same exclusion `maskEmbeddedSources` makes.
+
+**The rule the values follow, so a fourth theme does not have to re-derive it: a hover moves the surface
+toward the theme's INSET end (the `well` direction), never toward its text.** On dark that is darker, on
+light darker, and on High contrast the only direction black can move. Contrast therefore *improves* on
+hover on every theme, which is what let this ship without re-tuning the palette.
+
+⚠️ **One palette value did have to move, and it is worth recording why.** Light's `--text-faint` was set
+to `#5b6b82` by the 2026-09-18 audit precisely because `#64748b` measured 4.23 on `--surface-raised` — and
+`#5b6b82` measures **4.40 on the new hover surface**, i.e. the hover state would have re-created the exact
+defect that audit removed, one step later. It is now `#57677e` (4.73), still lighter than `--text-muted`,
+so the body > muted > faint hierarchy is unchanged. `surface-raised-hover` was added to the AA lock's
+`SURFACES` list, so all ten text tokens are checked against it for every theme from now on.
+
+**Tests:** `tests/hoverIsNotANoOp.test.ts` (7 cases). It asserts no client file pairs a resting surface
+with the same surface on hover, that each theme declares both hover surfaces, and that the lift is large
+enough to SEE (> 7%) — a token differing in its last hex digit would otherwise pass and be invisible,
+which is the same "nothing failed" outcome in a new costume. **Reversion-proven in both halves:**
+restoring one `hover:bg-raised` fails the scanner by name, and setting `--surface-raised-hover` back to
+`--surface-raised` fails both the repeat check and the lift check.
+
+**Open, deliberately not done here:** `bg-card` and `bg-surface` have no hover partner, because nothing
+in the app currently hovers them onto themselves — the scanner covers all four surfaces, so the day one
+appears it fails rather than shipping silently.

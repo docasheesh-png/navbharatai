@@ -150,7 +150,7 @@ export function AppModals({
                   </button>
                   <button
                     onClick={() => setGithubRedirectingMessage(null)}
-                    className="px-4 py-3 bg-raised hover:bg-raised active:scale-95 border border-line text-ink rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer text-center"
+                    className="px-4 py-3 bg-raised hover:bg-raised-hover active:scale-95 border border-line text-ink rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer text-center"
                   >
                     Dismiss
                   </button>
@@ -353,7 +353,7 @@ export function AppModals({
                     </button>
                     <button
                       onClick={() => window.open(PROVIDER_CONFIG[pendingProvider]?.link, '_blank')}
-                      className="w-full py-3 bg-raised border border-line hover:bg-raised text-ink rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-2"
+                      className="w-full py-3 bg-raised border border-line hover:bg-raised-hover text-ink rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-2"
                     >
                       <Globe className="w-4 h-4" />
                       Get API Key
@@ -546,7 +546,7 @@ export function AppModals({
                 <button
                   type="button"
                   onClick={() => setWorkspacePrepError(null)}
-                  className="w-full py-2.5 bg-raised hover:bg-raised active:scale-95 border border-line text-ink rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer"
+                  className="w-full py-2.5 bg-raised hover:bg-raised-hover active:scale-95 border border-line text-ink rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer"
                 >
                   Dismiss / Rectify Error
                 </button>
@@ -673,7 +673,7 @@ export function AppModals({
                 <button
                   type="button"
                   onClick={() => setPreviewBuildError(null)}
-                  className="w-full py-2.5 bg-raised hover:bg-raised active:scale-95 border border-line text-ink rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer"
+                  className="w-full py-2.5 bg-raised hover:bg-raised-hover active:scale-95 border border-line text-ink rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer"
                 >
                   Dismiss Error / Repair Code
                 </button>

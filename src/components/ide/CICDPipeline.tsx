@@ -403,7 +403,7 @@ export function CICDPipeline({ githubToken, onConnectGitHub }: CICDPipelineProps
                       Connect GitHub and NavBharatAI can commit this file into your repository for you.
                     </p>
                     {onConnectGitHub && (
-                      <button onClick={onConnectGitHub} className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-raised hover:bg-raised text-[11px] font-medium text-ink whitespace-nowrap">
+                      <button onClick={onConnectGitHub} className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-raised hover:bg-raised-hover text-[11px] font-medium text-ink whitespace-nowrap">
                         <Github className="w-3.5 h-3.5" /> Connect GitHub
                       </button>
                     )}

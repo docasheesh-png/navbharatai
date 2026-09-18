@@ -95,11 +95,21 @@ describe('the route wiring — the CODE of each late flip, comments stripped', (
   const raw = readFileSync('src/server/routes/agentv3.ts', 'utf8');
   const code = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
+  // ⚠️ UPDATED 2026-09-18, INTENT UNCHANGED AND STRENGTHENED. This case required TWO guarded
+  // assignments — one per producer — because the fact was hand-assigned at each site. That is the
+  // shape that produced the bug renderProof.ts documents (the rescue set two of three copies), so
+  // there is now exactly ONE assignment, inside the single writer both producers call, still guarded
+  // on a real browser. One writer is a stronger guarantee than two matching ones, not a weaker one.
   it('a real-browser render is the ONLY thing that sets browserRenderProven — never a curl fallback', () => {
     const sets = code.match(/browserRenderProven = true/g) ?? [];
-    expect(sets.length).toBeGreaterThanOrEqual(2); // the rescue and the verify loop
-    const guarded = code.match(/if \(shot\.source === 'browser'\) browserRenderProven = true/g) ?? [];
+    expect(sets.length).toBe(1);
+    const guarded = code.match(/if \(source === 'browser'\) browserRenderProven = true/g) ?? [];
     expect(guarded.length).toBe(sets.length);
+    // …and that one assignment lives in the writer every producer goes through.
+    const writer = code.slice(code.indexOf('const markAppRendered = ('));
+    expect(writer.slice(0, 600)).toContain('browserRenderProven = true');
+    expect(code).toContain("markAppRendered(shot.source, 'render rescue')");
+    expect(code).toContain("markAppRendered(shot.source, 'preview verify loop')");
   });
 
   it('prodBuildOutcome is set from judgeProdBuild\'s own verdict, right where it is judged', () => {

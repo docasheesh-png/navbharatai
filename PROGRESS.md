@@ -67390,3 +67390,65 @@ restoring one `hover:bg-raised` fails the scanner by name, and setting `--surfac
 **Open, deliberately not done here:** `bg-card` and `bg-surface` have no hover partner, because nothing
 in the app currently hovers them onto themselves — the scanner covers all four surfaces, so the day one
 appears it fails rather than shipping silently.
+
+---
+
+## 2026-09-18 — Admin order: "paise tabhi charge hone chahiye, jab preview chale"
+
+Admin, choosing option (c) after autopsy `1a7f4a58` billed a free-tier user **₹613.08** for a build
+whose `RELEASE_GATE` said `UNKNOWN` and whose preview served `Cannot GET /`.
+
+### Nothing in the money path was broken — and that is the finding
+
+Every existing guard did exactly what it says on the tin:
+
+| guard | needs |
+|---|---|
+| `zeroBillForUnrenderedPreview` | `previewVerifiedFailed` — **we looked and it failed** |
+| `zeroBillForFailedBuild` | `!result.ok` — **the build reported failure** |
+
+That build was **neither**. We never managed to look at all, and the build reported success. So the
+full tiered markup applied to a build nobody could show had produced a working app.
+
+🔑 **The distinction is one this codebase already makes everywhere else and had never applied to
+money.** `previewProvenBroken` exists precisely because *"we looked and it was broken"* and *"we could
+not look"* are different facts, and only the first is evidence. The two billing guards cover the
+first. This covers the second — and the second is the commonest of the three.
+
+### What ships — `previewEarnsMarkup.ts`
+
+`decideMarkupOnProof` waives the SERVICE MARGIN, not the cost, when no real check saw the app render:
+the user pays `realCostUsd + sandboxUsd` — the same two numbers the bill already used, before the
+markup — and nothing on top. On the report's own figures that is **₹613.08 → ₹172.37**.
+
+- The proof read is `buildObs.previewRendered`, whose only producer is `markAppRendered` (one fact,
+  one write). Never *"the build said ok"*.
+- Applied at **both** billing paths — the settle and the Fix-67 deadline finalizer — because those two
+  priced one build differently once already, which is why Fix 67 exists. `expectsArtifacts` rides to
+  the finalizer on `billingCtx`, defaulting to `false` so an absent fact stands the rule down.
+- It can only ever REDUCE (`min(decided, real)`), runs BEFORE every zeroing rule so those still take
+  precedence, and leaves `decideCancelledBuildBill` safe (that one starts from this number and may
+  never exceed it).
+- A turn with no app expected is untouched — the same carve-out `zeroBillForUnrenderedPreview` makes.
+- Report code `MARKUP_WAIVED_NO_PREVIEW`; the user is told in branded words with no vendor name.
+- Kill switch `AGENTV3_MARKUP_NEEDS_PREVIEW=off`.
+
+⚠️ **It is not ₹0, and that was the admin's explicit choice** — they were offered ₹0 and refused it,
+for the reason autopsy `4efab9d7` already records: free-when-unproven hands away every build whose app
+works but whose proof WE failed to collect.
+
+### ⚠️ A number I gave the admin was wrong, corrected here
+
+I told them in chat that our real cost on that build was *"~₹145"*. It is **₹172.37**: I priced the
+tokens and forgot the sandbox, which the bill's own formula includes BEFORE the markup. The formula
+reproduces exactly — `tieredMarkup(1.698349 + 0.098019) = 4 + 0.796368 × 3 = 6.389104` against the
+report's `billedUsd: 6.389103` — which is what makes these the real figures rather than an estimate.
+`tests/paisaTabhiJabPreviewChale.test.ts` pins ₹172.37 so the number cannot drift again.
+
+### 🔴 Still open (rule 6)
+
+- **This does not refund the build that prompted it.** The rule applies from the next build onward;
+  whether that ₹613 should be credited back is the admin's call, not a code change.
+- **A high `MARKUP_WAIVED_NO_PREVIEW` rate is not a billing problem — it is the engine failing to
+  prove its own work.** That is the number to watch, and the honest reading of it is that we are
+  giving away margin because our own verification could not look, not because users' apps are broken.

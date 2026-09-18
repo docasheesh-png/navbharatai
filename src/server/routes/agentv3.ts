@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from 'express';
 import { copyName, copyStatus } from '../AgentV3/duplicateApp';
+import { decideMarkupOnProof, markupNeedsPreview } from '../AgentV3/previewEarnsMarkup';
 import { isPlatformFixRequest } from '../../lib/platformFixRequest';
 import { buildRateLimiter, rateLimiter, workspaceRateLimiter, workspacePollRateLimiter, deployOpsRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
 import express from 'express';
@@ -11337,7 +11338,10 @@ async function noteBuildOutcome(
     // populated by the inner scope so the finalizer can bill via the SAME real-cost path (Fix 65) and
     // debit with the SAME idempotent buildRef the normal settle uses. Empty until the build starts → the
     // finalizer safely skips billing if the cap somehow fires before then.
-    const billingCtx: { providerLedger?: BillingLedgerView; buildStartedAt?: number; cacheReadInputTokens?: number } = {};
+    // `expectsArtifacts` rides here for the same reason the ledger does: it is computed deep inside
+    // the build block, and the deadline finalizer — defined above it, called after it — needs the
+    // same fact the settle path uses, or the two would price one build by different rules.
+    const billingCtx: { providerLedger?: BillingLedgerView; buildStartedAt?: number; cacheReadInputTokens?: number; expectsArtifacts?: boolean } = {};
     // PLATFORM TELEMETRY (2026-08-23) — what the admin Monitor needs from a build, readable by BOTH
     // exits. It lives here, above the deadline finalizer, on purpose: `previewVerifiedRendered` is a
     // `let` declared much further down, so a finalizer that fires before that line runs would hit its
@@ -11429,7 +11433,27 @@ async function noteBuildOutcome(
         try {
           watchdogLivePreview = billableSandboxDetail(actuator, workspaceId, billingCtx.buildStartedAt);
           const decided = decideBuildBilledUsd(billingCtx.providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, watchdogLivePreview.usd);
-          watchdogBilledUsd = decided.effectiveBilledUsd;
+          /**
+           * THE MARKUP IS EARNED BY A PREVIEW THAT RAN (admin 2026-09-18). Applied HERE as well as at
+           * the settle for the reason Fix 67 exists at all: these two paths decide the same build's
+           * bill, and a rule on only one of them is a rule a long build escapes.
+           */
+          const wdMarkup = decideMarkupOnProof({
+            decidedBilledUsd: decided.effectiveBilledUsd,
+            realCostUsd: decided.realCostUsd,
+            sandboxUsd: decided.sandboxUsd,
+            previewProven: buildObs.previewRendered === true,
+            // Absent ⇒ false ⇒ the rule stands down, which is the direction that cannot over-charge.
+            expectsArtifacts: billingCtx.expectsArtifacts === true,
+            enabled: markupNeedsPreview(),
+          });
+          watchdogBilledUsd = wdMarkup.billedUsd;
+          if (!wdMarkup.markupApplied) {
+            buildDiagRef?.record({
+              phase: 'build', severity: 'info', code: 'MARKUP_WAIVED_NO_PREVIEW',
+              message: wdMarkup.reason, autoResolved: true,
+            });
+          }
           recordBuildTelemetryOnce({
             ok,
             previewAllowed: buildObs.previewRendered,
@@ -14261,6 +14285,8 @@ async function noteBuildOutcome(
       // outcome — NOT a failed build to retry/escalate. (Real evidence: importing Mitrify escalated
       // 3-4× over 5 min and ran the readiness gate on the user's OWN imported code → "NOT READY 0/100".)
       const expectsArtifacts = (intent === 'new_build' || intent === 'edit_existing') && !isImportTurn;
+      // The deadline finalizer prices the same build and must use the same fact — see billingCtx.
+      billingCtx.expectsArtifacts = expectsArtifacts;
       // The mandatory readiness gate audits code v5.0 BUILT — it must NOT judge a freshly-imported
       // existing app (its pre-existing hardcoded keys / SQL patterns are the user's, not this build's,
       // and surfacing "NOT READY 0/100" on their working production app is wrong + alarming).
@@ -20041,6 +20067,35 @@ async function noteBuildOutcome(
         } catch { /* the ledger must never be why a failed build fails differently */ }
       }
       let effectiveBilledUsd: number = decidedBilledUsd;
+      /**
+       * 🔒 THE MARKUP IS EARNED BY A PREVIEW THAT RAN (admin-mandated 2026-09-18).
+       *
+       * Runs BEFORE every zeroing rule below, so those still take precedence and can still take this
+       * to ₹0; and it can only ever reduce, so `decideCancelledBuildBill` — which starts from this
+       * number and may never exceed it — is safe with a smaller starting point.
+       *
+       * The case it covers is the one the existing guards structurally cannot: not "we looked and it
+       * failed" (`zeroBillForUnrenderedPreview`) and not "the build failed" (`zeroBillForFailedBuild`),
+       * but "we never managed to look" — which is what billed ₹613 on a build whose gate said UNKNOWN.
+       */
+      const markupDecision = decideMarkupOnProof({
+        decidedBilledUsd: effectiveBilledUsd,
+        realCostUsd: decidedRealCostUsd,
+        sandboxUsd: decidedSandboxUsd,
+        previewProven: buildObs.previewRendered === true,
+        expectsArtifacts,
+        enabled: markupNeedsPreview(),
+      });
+      if (!markupDecision.markupApplied) {
+        effectiveBilledUsd = markupDecision.billedUsd;
+        buildDiag.record({
+          phase: 'build', severity: 'info', code: 'MARKUP_WAIVED_NO_PREVIEW',
+          message: markupDecision.reason, autoResolved: true,
+        });
+        if (markupDecision.userMessage) {
+          events.emit({ type: 'narration', agent: 'architect', text: `🧾 ${markupDecision.userMessage}`, ts: Date.now() });
+        }
+      }
       // WHY a build ended up free — recorded into the build report's billing section (admin
       // 2026-07-11) so a ₹0 build always explains itself.
       let zeroBillReason: string | undefined;

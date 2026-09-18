@@ -1368,6 +1368,33 @@ the code (it is actually read somewhere) on 2026-07-11.
   override yet**, because nothing in the product can set one and a field with no screen behind it is a
   promise. Reverting is one key: unset it and new publishes stamp nothing, while apps already carrying
   a token get an honest "not available" from the endpoint.
+- **🧾 THE MARKUP IS EARNED BY A PREVIEW THAT RAN (admin-mandated 2026-09-18).** `AGENTV3_MARKUP_NEEDS_PREVIEW`
+  — ⚠️ **NOT set, and the code default is ON**; `off` is the instant, no-deploy revert to the
+  pre-2026-09-18 behaviour exactly. Read by `src/server/AgentV3/previewEarnsMarkup.ts`; applied at BOTH
+  billing paths in `routes/agentv3.ts` (the settle and the Fix-67 deadline finalizer).
+  **Admin, verbatim:** *"app बनी = preview चला — aur paise tabhi charge hone chahiye, jab preview chale"*,
+  and choosing between three options for the case where it did not: *"(c) सिर्फ़ असली लागत लें, बिना markup"*.
+  🔴 **WHY: autopsy `1a7f4a58` billed a FREE-tier user ₹613.08 for a build whose `RELEASE_GATE` was
+  `UNKNOWN`, whose preview served `Cannot GET /`, and which ended in a rollback.** Nothing in the money
+  path was broken — every guard did what it says: `zeroBillForUnrenderedPreview` needs
+  `previewVerifiedFailed` (*we looked and it failed*), `zeroBillForFailedBuild` needs `!result.ok`. That
+  build was **neither**. We never managed to look, and the build reported success.
+  🔑 **The distinction is one this codebase already makes everywhere else and had never applied to
+  money.** `previewProvenBroken` exists precisely because *"we looked and it was broken"* and *"we could
+  not look"* are different facts. The guards covered the first; this covers the second — the commonest
+  of the three. The proof read is `buildObs.previewRendered`, whose only producer is `markAppRendered`
+  (one fact, one write), never *"the build said ok"*.
+  ⚠️ **IT IS NOT ₹0, AND THAT WAS THE ADMIN'S CHOICE.** They were offered ₹0 and refused it, for the
+  reason autopsy `4efab9d7` already records — free-when-unproven hands away every build whose app works
+  but whose proof WE failed to collect. So the user pays what the build genuinely cost us (tokens + the
+  VM, the same two numbers the bill already used) and not one paisa of margin.
+  🔒 **It can only ever REDUCE** (`min(decided, real)`), it runs BEFORE every zeroing rule so those still
+  take precedence, and a turn with no app expected (chat/survey/import) is untouched — the same carve-out
+  `zeroBillForUnrenderedPreview` already makes. Report code `MARKUP_WAIVED_NO_PREVIEW`; the user is told
+  in branded words. Test-locked and reversion-proven in `tests/paisaTabhiJabPreviewChale.test.ts`.
+  **What to watch:** how often `MARKUP_WAIVED_NO_PREVIEW` appears. A high rate is not a billing problem —
+  it is the engine failing to prove its own work, and the number that says so.
+
 - **The MID-BUILD cost stop (shipped 2026-09-13):** `AGENTV3_BUILD_COST_CEILING_USD` — ⚠️ **NOT set,
   and the code default is what governs today.** The ceiling on ONE build's REAL provider cost, in USD.
   **Default $5**, capped at $50, read by `src/server/AgentV3/buildCostCeiling.ts` and evaluated inside

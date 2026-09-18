@@ -51,6 +51,22 @@ export function snapshotChannelId(workspaceId: string): string {
   return `sn-${safe}-${hash}`; // ≤ 3 + 17 + 1 + 12 = 33 chars, same budget as the publish channel
 }
 
+/** The prefix every snapshot channel id carries. Named once so no caller re-types the literal. */
+export const SNAPSHOT_CHANNEL_PREFIX = 'sn-';
+
+/**
+ * Is this channel id a build snapshot's rather than a published app's? Pure.
+ *
+ * 🔴 WHY THE INVENTORY NEEDS THIS (admin Monitor capture, 2026-09-18). A snapshot channel never has a
+ * deployment record — it is not a publish — so `classifyChannels` read "no record" as "orphaned", and
+ * the Publish Capacity card described 37 build copies as *"Its chat and record are gone, but the app
+ * is still live"*. That sends the admin hunting a deleted app. It is a cache entry, and reclaiming one
+ * is harmless because the next green build writes it again.
+ */
+export function isSnapshotChannelId(channelId: string | null | undefined): boolean {
+  return String(channelId ?? '').trim().toLowerCase().startsWith(SNAPSHOT_CHANNEL_PREFIX);
+}
+
 /**
  * Is this app one a static snapshot can honestly represent?
  *

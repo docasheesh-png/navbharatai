@@ -15,6 +15,12 @@
 //
 // PURE — readings in, tiles out. No I/O, no clock. The route gathers; this decides.
 
+/**
+ * How many routing requests before the refusal rate is worth grading. Borrowed from `ALERT_MIN_SAMPLE`
+ * rather than invented: this repo already decided that number for exactly this question.
+ */
+export const AI_MIN_SAMPLE = 10;
+
 export type LoadLevel = 'ok' | 'warn' | 'critical' | 'full' | 'unknown';
 
 export interface LoadTile {
@@ -131,8 +137,21 @@ export interface LoadReadings {
    * know, which reads exactly as today. See the publish tile for why the NOTE depends on it.
    */
   publishBucketOnly?: boolean;
-  /** Provider 429 rate over the window, 0–1 (§12 #8). */
+  /**
+   * Share of ROUTING REQUESTS that ended with no answer from any provider, 0–1 (§12 #8).
+   *
+   * 🔴 IT IS PER REQUEST, NOT PER ATTEMPT (admin Monitor capture, 2026-09-18). This tile read the
+   * per-PROVIDER accumulator, which counts every rung of the fallback ladder separately — so a user
+   * whose free rung was rate-limited and whose next rung answered contributed one success and one
+   * error, and the board printed **50% refused** in red under the words "Engines are refusing
+   * requests". Nobody had been refused; the fallback had worked. See `recordRouterOutcome`.
+   */
   providerErrorRate?: number | null;
+  /**
+   * How many requests that rate was measured over. Required for it to mean anything: the counters
+   * reset on every deploy, so a rate can be a verdict on two attempts.
+   */
+  providerRequests?: number | null;
   /** Spend not recovered from users, in INR, over the window. */
   unrecoveredInr?: number | null;
 }
@@ -307,7 +326,17 @@ export function loadBoard(r: LoadReadings | null | undefined): LoadTile[] {
   });
 
   // 8 · AI PROVIDERS — already handled in code; this is the tile that says whether it is still true.
-  const aiPct = pct(x.providerErrorRate);
+  //
+  // 🔒 A RATE WITHOUT A SAMPLE IS NOT A MEASUREMENT. The counters behind this reset on every deploy,
+  // so minutes after a release the whole figure can rest on two requests — and this board's own rule
+  // is that an unreadable number is unknown rather than a verdict. `ALERT_MIN_SAMPLE` is this repo's
+  // existing answer to "how many points before a mean is worth acting on" (monitorAlerts.ts raised it
+  // from 3 to 10 after one slow build set off an alert), so the same number is used rather than a new
+  // one invented here.
+  const aiSample = x.providerRequests;
+  const tooFewRequests = aiSample !== null && aiSample !== undefined && Number.isFinite(Number(aiSample))
+    && Number(aiSample) < AI_MIN_SAMPLE;
+  const aiPct = tooFewRequests ? null : pct(x.providerErrorRate);
   const aiLevel: LoadLevel = aiPct === null ? 'unknown' : aiPct >= 20 ? 'critical' : aiPct >= 5 ? 'warn' : 'ok';
   tiles.push({
     id: 'ai',
@@ -315,12 +344,17 @@ export function loadBoard(r: LoadReadings | null | undefined): LoadTile[] {
     level: aiLevel,
     value: aiPct,
     cap: 100,
-    display: aiPct === null ? 'unknown' : `${aiPct}% refused`,
+    display: aiPct === null ? 'unknown' : `${aiPct}% unanswered`,
     note: aiLevel === 'unknown'
-      ? 'Could not read the provider refusal rate.'
+      ? (tooFewRequests
+        ? `Too few requests since this server started (${aiSample}) to mean anything. The count resets on every `
+          + 'deploy, so this fills in as normal traffic arrives.'
+        : 'Could not read how often requests went unanswered.')
       : aiLevel === 'ok'
-        ? 'The AI engines are answering normally.'
-        : 'Engines are refusing requests. At scale the answer is more API keys in rotation, not more code.',
+        ? 'The AI engines are answering. A request that fell back to a second engine still counts as answered, '
+          + 'because the user got their reply.'
+        : 'Requests are ending with no answer from ANY engine, which is what a user actually feels. At scale the '
+          + 'answer is more API keys in rotation, not more code.',
   });
 
   // 9 · MONEY — the load that decides whether the rest is worth carrying.

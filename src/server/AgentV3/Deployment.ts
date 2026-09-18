@@ -21,7 +21,10 @@ import {
   bucketOnlyPublishUsable,
   bucketOnlyPublishedUrl,
   bucketOnlySubdomain,
+  snapshotBucketEnabled,
+  snapshotSubdomain,
 } from './bucketOnlyPublish';
+import { snapshotChannelId } from './previewSnapshot';
 import * as crypto from 'crypto';
 import * as zlib from 'zlib';
 import { promisify } from 'util';
@@ -130,8 +133,22 @@ export class FirebaseHostingDeployer {
     // to the Firebase path below, which still works and still costs a slot: the ceiling matters, and
     // handing the user a broken app matters more. The partial objects are swept on the way out so a
     // failed attempt cannot leave paid-for garbage behind.
-    if (channelId === makeChannelId(workspaceId) && bucketOnlyPublishEnabled()) {
-      const sub = bucketOnlySubdomain(workspaceId);
+    // 🔴 AND THE SNAPSHOT CHANNEL TAKES THE SAME ROAD (admin Monitor capture, 2026-09-18). Bucket-only
+    // publishing had been live for a day and the channel count still climbed, 43 → 46, because this
+    // branch asked only whether the id was the PUBLISH channel. Every id filling the pool began `sn-`:
+    // build snapshots, one per workspace, created on every green build and deleted by nothing. They
+    // are static files with a URL, which is exactly what the bucket serves. See `snapshotSubdomain`.
+    //
+    // ONE branch for both, deliberately: a second copy of this block is how the two would drift, and
+    // the method's own docblock already says that is why `channelId` is a parameter rather than a
+    // second method. `sub` is the only thing that differs, and the namespaces cannot overlap.
+    const bucketSub = channelId === makeChannelId(workspaceId) && bucketOnlyPublishEnabled()
+      ? bucketOnlySubdomain(workspaceId)
+      : channelId === snapshotChannelId(workspaceId) && snapshotBucketEnabled()
+        ? snapshotSubdomain(workspaceId)
+        : '';
+    if (bucketSub) {
+      const sub = bucketSub;
       const mirror = await mirrorPublishToBucket(sub, files).catch((err) => ({
         attempted: true, bucket: '', uploaded: 0, failed: files.size, error: String((err as Error)?.message ?? err),
       }));

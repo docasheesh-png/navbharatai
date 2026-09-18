@@ -22,7 +22,7 @@ import { audit } from '../lib/audit';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
 import { mergeWallets } from '../lib/accountMerge';
 import { serverStats } from '../lib/serverStats';
-import { getProviderStats } from '../AI/Router/AIRouter';
+import { getProviderStats, getRouterOutcomeStats } from '../AI/Router/AIRouter';
 import { getMetrics } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
 import { metricsTimeline } from '../lib/metricsTimeline';
@@ -2640,17 +2640,23 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     // ceiling is not a calm one; it may already be full. Each of these degrades to null on failure,
     // which the board renders as unknown, so nothing here can invent a healthy number.
 
-    // AI load — the provider 429/error rate. The same counters the health score already grades on.
+    // AI load — how often a user's request ended with NO answer from any engine.
+    //
+    // 🔴 THIS USED TO SUM THE PER-PROVIDER COUNTERS, AND THAT IS A DIFFERENT QUESTION (admin Monitor
+    // capture, 2026-09-18). Those count every rung of the fallback ladder: the free leader is
+    // rate-limited, the next rung answers, and one satisfied user leaves behind one success and one
+    // error. The board printed 50% refused, in red, while the ladder was doing exactly its job.
+    // `getRouterOutcomeStats` counts REQUESTS and how many of them nobody answered, which is the thing
+    // the tile claims to be about. The per-provider stats are untouched and still answer their own
+    // question (which vendor is flaky) on the observability route.
     try {
-      const stats = getProviderStats();
-      let req = 0; let err = 0;
-      for (const st of Object.values(stats || {})) {
-        req += Number(st?.requestCount) || 0;
-        err += Number(st?.errorCount) || 0;
-      }
+      const outcomes = getRouterOutcomeStats();
+      const req = Number(outcomes?.requests) || 0;
       // 🔒 No requests ⇒ no RATE. Zero over zero is not "healthy", it is "nothing happened", and
-      // reporting 0% there would turn an idle window into a clean bill of health.
-      if (req > 0) readings.providerErrorRate = err / req;
+      // reporting 0% there would turn an idle window into a clean bill of health. The SAMPLE travels
+      // with the rate so the board can refuse to grade two requests as a platform verdict.
+      if (req > 0) readings.providerErrorRate = (Number(outcomes?.failed) || 0) / req;
+      readings.providerRequests = req;
     } catch { /* unknown */ }
 
     // Sandbox load — live E2B machines. The SAME reading the Monitor's "Live sandboxes" tile uses, so

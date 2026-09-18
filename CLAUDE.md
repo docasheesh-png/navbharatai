@@ -2293,6 +2293,35 @@ the flag entries above promise.
   fast-lane builds — with the symbols homed, the errors that remain should be the mechanical ones the
   deterministic pass already fixes for free.
 
+- **`AGENTV3_SNAPSHOT_BUCKET`** (default ON wherever bucket-only publishing is on; `off` reverts
+  snapshots alone — added 2026-09-18, admin Monitor capture) — a build SNAPSHOT is now served from the
+  same Cloud Storage bucket as a published app, on its own `s-<hash>` subdomain, instead of taking a
+  Firebase Hosting channel.
+  🔴 **WHY, AND IT CORRECTS A CLAIM THIS FILE MADE THE DAY BEFORE.** The 2026-09-17 entry above says
+  the publish ceiling is GONE because bucket-only publishing is live. The ceiling kept climbing anyway,
+  **43 → 46 channels with the flag on**, and every id in the admin's reclaim list began `sn-`. Those are
+  `snapshotChannelId`, not `makeChannelId`: preview snapshots, one per workspace, created on every green
+  build, and **deleted by nothing** — `snapshotChannelId` appeared at exactly two places in the whole
+  server, the line that builds the id and the line that deploys to it. Bucket-only publishing could
+  never touch them, because the bucket branch in `deployStatic` was gated on the channel being the
+  PUBLISH channel and a snapshot passes its own id by design. So publishes stopped taking channels and
+  builds carried on taking them.
+  🔒 **THE NAMESPACES CANNOT OVERLAP**, which is what lets one branch serve both: `v3-…` is a Firebase
+  publish channel, `a-…` a bucket-only publish, `s-…` a bucket snapshot. A snapshot must never be able
+  to overwrite what somebody deliberately published — the same rule that gave it a separate Firebase
+  channel, carried into the bucket. ⚠️ **ONE branch in `deployStatic` handles both**, deliberately: that
+  method's own docblock says `channelId` is a parameter rather than a second method precisely so the
+  two paths cannot drift, and this is that rule applied again.
+  ⚠️ **No Cloudflare Worker change is needed** — the Worker already resolves ANY `<sub>.<domain>`
+  against `apps/<sub>/`, so the new prefix is served by the code already at the edge. That matters
+  because the Worker is deployed by pasting and is the one piece CI cannot prove.
+  **What it does NOT do:** the channels already taken stay taken. Clearing them is the admin panel's
+  *Reclaim all* button (same change), and reclaiming a snapshot is the safest delete on that screen
+  because the next green build writes it again. Logic in `bucketOnlyPublish.ts`
+  (`snapshotSubdomain`, `snapshotBucketEnabled`); test-locked in
+  `tests/theCeilingWasNeverThePublishes.test.ts`. **What to watch:** the Publish load tile should stop
+  rising as builds complete.
+
 **New report codes you will now see (2026-08-12) — what they mean:**
 - `RELEASE_GATE` — GREEN / YELLOW / RED / **UNKNOWN**. UNKNOWN is the important one: nothing failed and
   nothing was PROVEN, because every runtime check needs a live preview and they all skip together. GREEN

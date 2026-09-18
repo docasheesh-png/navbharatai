@@ -171,7 +171,13 @@ describe('the wiring — both surfaces, and no upsell after a refusal', () => {
     // ⚠️ Anchored on the reason STRING alone, not on the assignment. Autopsy 697b38ee turned that
     // assignment into a ternary (a verified-no-change turn is a success and must not be logged as an
     // empty build), which broke this anchor while the guard it protects was untouched.
-    const start = route.indexOf("'empty build (0 files produced) — never charged'");
+    // ⚠️ FIFTH OVER-SPECIFICATION, SAME ASSERTION, AND THIS ONE IS A REFACTOR RATHER THAN A WIDENING
+    // (autopsy e9b25b08). The reason strings moved OUT of the route into `zeroBillReason.ts`, because
+    // a build the USER STOPPED was being recorded as an "empty build" — a third state the two-branch
+    // ternary here could not hold. The guard this test protects was untouched and the anchor broke
+    // anyway. It is pinned on the CALL now, which is the thing that stays in the route however the
+    // sentences are worded or wherever they come to live.
+    const start = route.indexOf('zeroBillReasonFor({');
     expect(start).toBeGreaterThan(0);
     // ⚠️ THE *WINDOW* IS THE THIRD OVER-SPECIFICATION IN THIS ONE ASSERTION, and it was found the
     // only way it could be: by merging every open PR together before merging any of them. A fixed

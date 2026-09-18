@@ -8,33 +8,70 @@
 //
 // The fix does NOT touch the score (startTier, escalationPath, the one-shot lane and the simple lane
 // all read it). It makes the scorer ADMIT it has no opinion, which is the one thing that was missing.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// 🔴 REPAIRED 2026-09-18, THE SAME DAY, BECAUSE BOTH OF THIS FILE'S EXAMPLES WERE FIXED UNDER IT.
+//
+// This suite went red on `main` — 7 cases — within hours of merging, and nothing in it or in the code
+// it guards was wrong. Two sibling PRs landed the same day and each recognised one of its fixtures:
+//
+//     'E commerce website'          5 → 58   (`e-?commerce` widened to `e[\s-]?commerce`)
+//     'hospital management system'  5 → 58   (`namesBusinessDomain`)
+//
+// So the assertions failed with `expected 58 to be 5` — the scorer giving the RIGHT answer to a test
+// that needed it to still be giving the wrong one. This is the concurrent-merge semantic conflict
+// `CLAUDE.md` warns about: each PR was green alone, and neither CI could see the other.
+//
+// ⚠️ THE BEHAVIOUR UNDER TEST IS UNCHANGED AND STILL LIVE — a keyword list can always be one word
+// short, and `signalsMatchedNothing` is what stops the scorer being confidently wrong about the next
+// word it does not know. Only the EXAMPLE was retired. `UNRECOGNISED` below is a prompt the signals
+// still cannot read, and the guard directly under it says what to do when a sibling fixes that one
+// too: pick another, never delete the test.
 import { describe, it, expect } from 'vitest';
 import { analyzeRequest, signalsMatchedNothing, signalsCouldNotRead } from '../src/server/AgentV3/RequestAnalyser';
 import { needsSecondOpinion, decideComplexity, COMPLEX_SCORE_LINE } from '../src/server/AgentV3/complexityRouting';
 
+/**
+ * A real request the signals still cannot read — a housing-society management app, exactly the kind of
+ * Indian SMB prompt this scorer exists to stop mis-sizing.
+ *
+ * 🔒 IF THE GUARD BELOW EVER FAILS, A SIBLING HAS TAUGHT THE SCORER THIS PHRASE TOO. That is a WIN,
+ * not a regression: swap in another prompt the signals cannot read and keep the suite. Do not delete
+ * these cases — the property they pin (a scorer that admits it has no opinion) is permanent; only its
+ * example is perishable.
+ */
+const UNRECOGNISED = 'society management system';
+
 describe('the prompt that failed, and the space that caused it', () => {
-  it('one space away from a pattern that scores 58', () => {
-    // Measured, not assumed: COMPLEX_APP_SIGNAL carries `e-?commerce` — an optional HYPHEN, no space.
+  it('🔒 the fixture is still genuinely unrecognised — read the note above if this fails', () => {
+    expect(signalsMatchedNothing(UNRECOGNISED)).toBe(true);
+    expect(analyzeRequest({ prompt: UNRECOGNISED }).complexityScore).toBe(5);
+  });
+
+  it('the original example is now RECOGNISED — a sibling closed it, and that is the win', () => {
+    // All three spellings score 58 since `e-?commerce` was widened to `e[\s-]?commerce`. The space
+    // that cost a 26.7-minute build is gone, which is the outcome this autopsy wanted.
     expect(analyzeRequest({ prompt: 'ecommerce website' }).complexityScore).toBe(58);
     expect(analyzeRequest({ prompt: 'e-commerce website' }).complexityScore).toBe(58);
-    expect(analyzeRequest({ prompt: 'E commerce website' }).complexityScore).toBe(5);
+    expect(analyzeRequest({ prompt: 'E commerce website' }).complexityScore).toBe(58);
+    // …and so is the other one, via `namesBusinessDomain`.
+    expect(analyzeRequest({ prompt: 'hospital management system' }).complexityScore).toBe(58);
   });
 
   it('the scorer now admits it recognised nothing', () => {
-    expect(signalsMatchedNothing('E commerce website')).toBe(true);
-    expect(signalsMatchedNothing('hospital management system')).toBe(true);
+    expect(signalsMatchedNothing(UNRECOGNISED)).toBe(true);
+    expect(signalsMatchedNothing(UNRECOGNISED)).toBe(true);
   });
 
   it('and that admission is what buys the second opinion', () => {
     // 5 is nowhere near the 40 line, so the score-based ask cannot catch it on its own.
     expect(Math.abs(5 - COMPLEX_SCORE_LINE)).toBeGreaterThan(3);
-    expect(needsSecondOpinion(5, 'E commerce website')).toBe(true);
-    expect(needsSecondOpinion(5, 'hospital management system')).toBe(true);
+    expect(needsSecondOpinion(5, UNRECOGNISED)).toBe(true);
+    expect(needsSecondOpinion(5, UNRECOGNISED)).toBe(true);
   });
 
   it('a model that reads it as complex flips the verdict', async () => {
     const d = await decideComplexity(
-      { prompt: 'E commerce website', score: 5 },
+      { prompt: UNRECOGNISED, score: 5 },
       async () => 'complex',
       { env: {} as NodeJS.ProcessEnv },
     );
@@ -59,8 +96,8 @@ describe('a greeting is not "unrecognised" — it matched, and it must not buy a
     expect(signalsMatchedNothing('app')).toBe(false);
     expect(signalsMatchedNothing('🎨🎨🎨🎨🎨🎨🎨🎨')).toBe(false);
     // ...while the real requests clear the bar.
-    expect(signalsMatchedNothing('E commerce website')).toBe(true);
-    expect(signalsMatchedNothing('hospital management system')).toBe(true);
+    expect(signalsMatchedNothing(UNRECOGNISED)).toBe(true);
+    expect(signalsMatchedNothing(UNRECOGNISED)).toBe(true);
   });
 
   it('empty and whitespace ask nothing', () => {
@@ -90,7 +127,7 @@ describe('a request the patterns DO recognise is unchanged — no new call is bo
 
 describe('the SCORE is deliberately untouched — this fix changes the ASK, nothing else', () => {
   it('an unrecognised prompt keeps its score, task type and tier', () => {
-    const a = analyzeRequest({ prompt: 'E commerce website' });
+    const a = analyzeRequest({ prompt: UNRECOGNISED });
     expect(a.complexityScore).toBe(5);
     expect(a.taskType).toBe('chat');
     expect(a.startTier).toBe('gemini');
@@ -116,22 +153,22 @@ describe('the two existing reasons still work, and are reported apart', () => {
 
 describe('it cannot break, hang or over-spend', () => {
   it('no llmCall ⇒ the deterministic verdict stands, and says why', async () => {
-    const d = await decideComplexity({ prompt: 'E commerce website', score: 5 }, undefined, { env: {} as NodeJS.ProcessEnv });
+    const d = await decideComplexity({ prompt: UNRECOGNISED, score: 5 }, undefined, { env: {} as NodeJS.ProcessEnv });
     expect(d.verdict).toBe('simple');
     expect(d.source).toBe('deterministic');
     expect(d.reason).toContain('recognised nothing');
   });
 
   it('a throw, an empty answer and a paragraph all fall back to simple', async () => {
-    const thrown = await decideComplexity({ prompt: 'E commerce website', score: 5 }, async () => { throw new Error('x'); }, { env: {} as NodeJS.ProcessEnv });
-    const empty = await decideComplexity({ prompt: 'E commerce website', score: 5 }, async () => '', { env: {} as NodeJS.ProcessEnv });
-    const essay = await decideComplexity({ prompt: 'E commerce website', score: 5 }, async () => 'Well, that depends on...', { env: {} as NodeJS.ProcessEnv });
+    const thrown = await decideComplexity({ prompt: UNRECOGNISED, score: 5 }, async () => { throw new Error('x'); }, { env: {} as NodeJS.ProcessEnv });
+    const empty = await decideComplexity({ prompt: UNRECOGNISED, score: 5 }, async () => '', { env: {} as NodeJS.ProcessEnv });
+    const essay = await decideComplexity({ prompt: UNRECOGNISED, score: 5 }, async () => 'Well, that depends on...', { env: {} as NodeJS.ProcessEnv });
     for (const d of [thrown, empty, essay]) expect(d.verdict).toBe('simple');
   });
 
   it('the kill switch still disables the whole thing', async () => {
     const d = await decideComplexity(
-      { prompt: 'E commerce website', score: 5 },
+      { prompt: UNRECOGNISED, score: 5 },
       async () => 'complex',
       { env: { AGENTV3_COMPLEX_TO_KIMI: 'off' } as unknown as NodeJS.ProcessEnv },
     );

@@ -67231,3 +67231,31 @@ after a botched restore is exactly the false green this repo warns about.
 
 **Next in this series (admin: "ek ek kar ke sabhi build karo"):** F (reviewer cheap on green), then
 E (time-to-first-render + who wrote after green), then B/C on E's numbers. D never.
+
+## 2026-09-18 — Option E: who wrote after the app was green (`TIME_TO_FIRST_RENDER`, `POST_GREEN_WRITES`)
+
+Third of the series, stacked on Option A (it needs A's first-render moment). Before either stronger
+protection is built — verify-and-revert on every post-green write, or arming the freeze before the
+~36-pass gate stretch — this answers the question both depend on, because **as of today no report
+shows a pass breaking a green app** (and #3084 found the same for the loop and shipped
+`READY_BEFORE_END` first).
+
+- `TIME_TO_FIRST_RENDER` — recorded once on A's proof (`BuildDiagnostics.recordTimeToFirstRender`),
+  the render-side sibling of `TIME_TO_FIRST_CALL`. "4 minutes" is now a number.
+- `greenFreeze.setWriteObserver` — a second observer at the SAME chokepoint as the refusal observer,
+  fired on every ALLOWED `assertWriteAllowed` with `currentPass()` (null = the build loop). One
+  place, so nothing is threaded through the twenty sites that persist a file; infra paths excluded.
+- `postGreenWrites.ts` (pure) — the ledger, grouped by writer, read against the END verdict
+  (`endVerdictFrom(previewGreen, previewProvenBroken)`, green wins as in Green Stop). Severity is the
+  finding: nothing wrote / wrote-and-rendered / unchecked → info; **wrote and PROVEN BROKEN → warning
+  naming the writers.** Bounded at 2,000 entries and `MAX_NAMED_PASSES` = 6 in the line.
+- Both codes registered as `PROCESS_ONLY_CODES` and `NEVER_SUGGEST` — measurements of the engine,
+  never findings about the user's app.
+
+**What decides B/C:** a run of real builds. If `POST_GREEN_WRITES` warnings appear and name the same
+writers, that writer class is the target (a gate pass → C with evidence; the build loop → B). If they
+do not appear, the 10–20 minutes are not breakage and "make the first draft right" is the lever.
+
+**Tests:** `tests/whoWroteAfterTheAppWasGreen.test.ts` — the grouping, all four verdict lines, the
+observer at the chokepoint (allowed vs refused are disjoint; infra excluded; a throwing observer
+never breaks a write; dispose), idempotent timing, and source-anchored wiring guards.

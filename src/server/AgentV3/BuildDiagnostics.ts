@@ -40,6 +40,7 @@ export type IssueSeverity = 'info' | 'warning' | 'error';
  * a human notices them; never a reason to hesitate before shipping the app.
  */
 const PROCESS_ONLY_CODES = new Set([
+  'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', // measurements of the ENGINE (postGreenWrites.ts), never app findings
   'GROUNDING_COST', 'POST_ANSWER_TIMING', 'SERVICE_GRAPH_MULTI', 'SERVICE_GRAPH_SINGLE',
   'JOURNEY_NOT_DERIVED', 'RELEASE_GATE',
   // Our own journey runner produced nothing — a statement about OUR check, never about their app.
@@ -1128,6 +1129,22 @@ export class BuildDiagnostics {
       code: 'TIME_TO_FIRST_CALL',
       message: withGap,
       autoResolved: seconds < 60,
+    });
+  }
+
+  private firstRenderRecorded = false;
+  /**
+   * TIME_TO_FIRST_RENDER — when the app first rendered in a real browser during the build (inBuildGreen.ts).
+   * The render-side sibling of TIME_TO_FIRST_CALL and of #3084's READY_BEFORE_END: "4 minutes" was a
+   * feeling until this line; now it is a number. Recorded once, on the first proof only.
+   */
+  recordTimeToFirstRender(elapsedMs: number): void {
+    if (this.firstRenderRecorded) return;
+    this.firstRenderRecorded = true;
+    const seconds = Math.max(0, Math.round(elapsedMs / 1000));
+    this.record({
+      phase: 'preview', severity: 'info', code: 'TIME_TO_FIRST_RENDER', autoResolved: true,
+      message: `${seconds}s from build start to the first real-browser render of the app.`,
     });
   }
 

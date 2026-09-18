@@ -1050,7 +1050,7 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
-        <button onClick={onBack} className="w-7 h-7 rounded-lg bg-raised hover:bg-raised flex items-center justify-center text-muted hover:text-ink transition-colors" title="Back">
+        <button onClick={onBack} className="w-7 h-7 rounded-lg bg-raised hover:bg-raised-hover flex items-center justify-center text-muted hover:text-ink transition-colors" title="Back">
           <ChevronLeft className="w-4 h-4" />
         </button>
         <div>

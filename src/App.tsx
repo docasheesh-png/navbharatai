@@ -444,6 +444,11 @@ export default function App() {
   // Phase 3.1 — unified Chat+IDE: when an app exists, the live workspace (code +
   // preview) docks to the right of the Pro Chat on desktop. User can collapse it.
   const [settingsScreen, setSettingsScreen] = useState<SettingsScreen>('root');
+  /**
+   * Where App Mart should open when something navigated there ON PURPOSE. Null until a caller says
+   * so, so the store's own default (Browse) is untouched for every other way in.
+   */
+  const [storeTarget, setStoreTarget] = useState<{ tab?: 'browse' | 'publish' | 'mine' | 'review'; workspaceId: string | null } | null>(null);
   const [githubRedirectingMessage, setGithubRedirectingMessage] = useState<string | null>(null);
   /**
    * A mirror of the message above, for the native listeners.
@@ -1402,7 +1407,7 @@ export default function App() {
   // `navbharat:navigate` with { detail: { view } } instead of threading a prop through every layer.
   useEffect(() => {
     const onNavigate = (e: Event) => {
-      const detail = (e as CustomEvent<{ view?: ViewType; settingsScreen?: string; fixPrompt?: string; autoSend?: boolean; signIn?: 'phone' }>).detail;
+      const detail = (e as CustomEvent<{ view?: ViewType; settingsScreen?: string; fixPrompt?: string; autoSend?: boolean; signIn?: 'phone'; storeTab?: 'browse' | 'publish' | 'mine' | 'review'; storeWorkspaceId?: string }>).detail;
       // OPEN THE SIGN-IN SCREEN (admin 2026-08-22). The verify sheet refuses a number that belongs to
       // another account and offers the one thing that helps — signing in with it, which opens that
       // account. It rides this existing event rather than a new prop chain: the sheet lives four
@@ -1418,6 +1423,12 @@ export default function App() {
       // sent away mid-task and has to find their way back. Carrying the screen makes "connect my own
       // database" land on the database form itself.
       if (detail?.settingsScreen) setSettingsScreen(detail.settingsScreen as SettingsScreen);
+      // Same reasoning as `settingsScreen`, for App Mart: the publish sheet's "Publish on App Mart"
+      // button knows which tab AND which app it means, so landing the user on Browse would make them
+      // find their own way to the form they just asked for.
+      if (detail?.storeTab || detail?.storeWorkspaceId) {
+        setStoreTarget({ tab: detail.storeTab, workspaceId: detail.storeWorkspaceId ?? null });
+      }
     };
     window.addEventListener('navbharat:navigate', onNavigate as EventListener);
     return () => window.removeEventListener('navbharat:navigate', onNavigate as EventListener);
@@ -4009,6 +4020,8 @@ export default function App() {
 
           <ViewPanels
             effectiveDeviceMode={effectiveDeviceMode}
+            storeInitialTab={storeTarget?.tab}
+            storePublishWorkspaceId={storeTarget?.workspaceId ?? null}
             v3Preview={v3Preview}
             previousFiles={previousFiles}
             onV3FixError={(errText) => setV3PendingFix({ text: platformFixRequestPrompt(errText), nonce: Date.now() })}

@@ -285,7 +285,7 @@ export function SidebarNav({
                   {onReportProblem && (
                     <button
                       onClick={() => { onReportProblem(); setIsMenuOpen(false); }}
-                      className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all group border border-line bg-raised text-muted hover:text-ink hover:bg-raised"
+                      className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all group border border-line bg-raised text-muted hover:text-ink hover:bg-raised-hover"
                     >
                       <span className="relative shrink-0">
                         <Flag className="w-4.5 h-4.5 group-hover:scale-110 transition-transform" />

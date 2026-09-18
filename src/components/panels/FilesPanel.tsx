@@ -218,14 +218,14 @@ export function FilesPanel({
               <button
                 onClick={() => setShowNewFile(v => !v)}
                 title="New file"
-                className="flex items-center gap-1 px-2.5 py-1 bg-raised hover:bg-raised border border-line rounded-lg text-[9px] font-black uppercase tracking-wider text-muted hover:text-ink transition-all active:scale-95"
+                className="flex items-center gap-1 px-2.5 py-1 bg-raised hover:bg-raised-hover border border-line rounded-lg text-[9px] font-black uppercase tracking-wider text-muted hover:text-ink transition-all active:scale-95"
               >
                 <Plus className="w-3 h-3" />
               </button>
             )}
             <button
               onClick={() => uploadRef.current?.click()}
-              className="flex items-center gap-1 px-2.5 py-1 bg-raised hover:bg-raised border border-line rounded-lg text-[9px] font-black uppercase tracking-wider text-muted hover:text-ink transition-all active:scale-95"
+              className="flex items-center gap-1 px-2.5 py-1 bg-raised hover:bg-raised-hover border border-line rounded-lg text-[9px] font-black uppercase tracking-wider text-muted hover:text-ink transition-all active:scale-95"
               // This button already imports a whole .zip PROJECT (App.handleFilesUpload routes a zip
               // through the 5 GB chunked importer), but it said only "Upload any file" -- so a user
               // arriving with an existing project had no reason to think this was the way in.

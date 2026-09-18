@@ -95,10 +95,25 @@ interface WebApp {
 export interface NavAppStoreProps {
   /** Deep link (`/store/app/<id>`): open this web app's player immediately. */
   initialWebAppId?: string | null;
+  /**
+   * Which tab to open on. Used by the "Publish on App Mart" button in the publish sheet
+   * (admin 2026-09-18) so pressing it LANDS on the publish form rather than on Browse.
+   *
+   * The same reasoning `settingsScreen` carries in `App.tsx`: sending someone to a screen's root
+   * when the caller knew which screen they wanted is a dead end — they are moved mid-task and have
+   * to find their own way back. Absent ⇒ 'browse', which is what every other caller gets.
+   */
+  initialTab?: Tab;
+  /**
+   * Pre-select this workspace in the publish picker, so the app the user was already looking at is
+   * the one the form is about. Applied ONCE, after the picker's app list arrives — it cannot be set
+   * before then because choosing an app also pre-fills its name from that list.
+   */
+  initialPublishWorkspaceId?: string | null;
 }
 
-export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => {
-  const [tab, setTab] = useState<Tab>('browse');
+export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initialTab, initialPublishWorkspaceId }) => {
+  const [tab, setTab] = useState<Tab>(initialTab ?? 'browse');
   const [status, setStatus] = useState<StoreStatus | null>(null);
 
   // ── PUBLISH FROM THIS PAGE (admin 2026-08-26) ────────────────────────────────────────────────
@@ -279,6 +294,22 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
     const hit = (myApps ?? []).find((a) => a.workspaceId === workspaceId);
     setPickName(hit ? hit.suggestedName : '');
   }, [myApps]);
+
+  /**
+   * Pre-select the app the caller arrived with, ONCE, as soon as the picker's list exists.
+   *
+   * It waits for `myApps` because `choosePublishApp` reads that list to pre-fill the name — calling
+   * it earlier would select the app and leave the name blank, which looks like the form failed. The
+   * ref makes it fire once: a user who then picks a DIFFERENT app must not have ours put back.
+   */
+  const preselectedRef = useRef(false);
+  useEffect(() => {
+    if (preselectedRef.current || !initialPublishWorkspaceId || myApps === null) return;
+    preselectedRef.current = true;
+    // Only if it is genuinely one of their publishable apps — otherwise leave the picker untouched
+    // rather than selecting an id the list does not contain.
+    if (myApps.some((a) => a.workspaceId === initialPublishWorkspaceId)) choosePublishApp(initialPublishWorkspaceId);
+  }, [initialPublishWorkspaceId, myApps, choosePublishApp]);
 
   const acceptPickIcon = useCallback(async (run: () => Promise<IconCheck>) => {
     setPickIconBusy(true);
@@ -919,17 +950,17 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                     <div className="flex gap-2 mt-2 flex-wrap">
                       <button
                         onClick={() => { void navigator.clipboard?.writeText(`${window.location.origin}/store/app/${a.id}`); }}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised hover:bg-raised text-[11px] text-body transition-colors"
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised hover:bg-raised-hover text-[11px] text-body transition-colors"
                       ><Link2 size={11} /> Copy link</button>
                       <button
                         onClick={() => setPlayingId(a.id)}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised hover:bg-raised text-[11px] text-body transition-colors"
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised hover:bg-raised-hover text-[11px] text-body transition-colors"
                       ><Play size={11} /> Open</button>
                       {a.requiresPassword ? (
                         <button
                           onClick={() => void webAppAction(a.id, { visibility: 'public' })}
                           disabled={webBusy === a.id}
-                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised hover:bg-raised disabled:opacity-40 text-[11px] text-body transition-colors"
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised hover:bg-raised-hover disabled:opacity-40 text-[11px] text-body transition-colors"
                         >Make public</button>
                       ) : (
                         <button
@@ -938,7 +969,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                             if (pw && pw.length >= 4) void webAppAction(a.id, { visibility: 'private', password: pw });
                           }}
                           disabled={webBusy === a.id}
-                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised hover:bg-raised disabled:opacity-40 text-[11px] text-body transition-colors"
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised hover:bg-raised-hover disabled:opacity-40 text-[11px] text-body transition-colors"
                         ><Lock size={11} /> Make private</button>
                       )}
                       {/* SELLING IS PARKED (admin 2026-08-15) — every app is free to remix for now.
@@ -1019,7 +1050,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                     <div className="flex gap-2 mt-2.5">
                       <button
                         onClick={() => setPlayingId(r.appId)}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-raised hover:bg-raised text-[11px] text-body transition-colors"
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-raised hover:bg-raised-hover text-[11px] text-body transition-colors"
                       ><Play size={11} /> See it</button>
                       <button
                         onClick={() => void decideWeb(r.appId, 'removed')}
@@ -1067,7 +1098,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                   <div className="flex gap-2 mt-2.5">
                     <button
                       onClick={() => setPlayingId(a.id)}
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-raised hover:bg-raised text-[11px] text-body transition-colors"
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-raised hover:bg-raised-hover text-[11px] text-body transition-colors"
                     ><Play size={11} /> Try it</button>
                     <button
                       onClick={() => void decideWeb(a.id, 'listed')}
@@ -1154,7 +1185,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                         <button
                           onClick={() => void decide(a.id, 'rejected')}
                           disabled={reviewing === a.id}
-                          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-raised hover:bg-raised text-xs font-semibold text-body disabled:opacity-40"
+                          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-raised hover:bg-raised-hover text-xs font-semibold text-body disabled:opacity-40"
                         >
                           <X size={12} /> Reject
                         </button>

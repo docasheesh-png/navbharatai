@@ -24,7 +24,7 @@
 // only worth taking where it is likely to pay, which is why `simple` is the default on every doubt.
 
 import { isCheapFlashRung, withoutCheapFlashLead, type LadderRung } from './tierLadder';
-import { signalsCouldNotRead, signalsFoundNothing, scriptNeutralFloor } from './RequestAnalyser';
+import { signalsCouldNotRead, signalsMatchedNothing } from './RequestAnalyser';
 
 /**
  * 🔒 ONE IMPLEMENTATION, OWNED BY THE MODULE THE FACT IS ABOUT (2026-09-17, later the same day).
@@ -39,6 +39,12 @@ import { signalsCouldNotRead, signalsFoundNothing, scriptNeutralFloor } from './
  * caller and test keeps working.
  */
 export { signalsCouldNotRead as scorerCouldNotRead, UNREADABLE_LETTER_SHARE, MIN_LETTERS_TO_JUDGE_SCRIPT } from './RequestAnalyser';
+
+/**
+ * THE THIRD WAY THE CODE CANNOT TELL, re-exported from the module that owns it for the same reason as
+ * the test above: `RequestAnalyser` knows what its own signals matched, and a copy here would drift.
+ */
+export { signalsMatchedNothing } from './RequestAnalyser';
 
 export type ComplexityVerdict = 'simple' | 'complex';
 /** Where a verdict came from — recorded in the build report so a routing choice is never a mystery. */
@@ -113,21 +119,14 @@ export function complexityFromScore(score: number): ComplexityVerdict {
  */
 export function needsSecondOpinion(score: number, prompt?: string): boolean {
   if (prompt !== undefined && signalsCouldNotRead(prompt)) return true;
-  /**
-   * 🔴 THE SCRIPT WAS NEVER THE ONLY WAY TO BE UNREAD. A request whose every letter is Latin and
-   * whose every signal missed is in exactly the state the line above buys a second opinion for —
-   * and it is the commoner state by far. Measured on `main` the day this shipped, seven real
-   * NavBharatAI requests (kirana billing, medical store, gym, coaching, salon, society, restaurant
-   * KOT/GST) each scored **5**, thirty-five clear of the line, so the ±3 test below answered "not
-   * borderline" with total confidence and opened every one of them on the cheapest rung.
-   *
-   * 💸 THE FLOOR IS WHAT KEEPS THIS CHEAP, and it is why the test is not `signalsFoundNothing`
-   * alone. `scriptNeutralFloor` is 0 for anything that enumerates nothing, so "hi", "thanks bhai",
-   * "what can you generate?" and a three-word ask buy no call at all — "kharcha kam se kam" applies
-   * to the classifier, and this asks only where there is real evidence of a multi-part request that
-   * nothing could read.
-   */
-  if (prompt !== undefined && signalsFoundNothing(prompt) && scriptNeutralFloor(prompt) > 0) return true;
+  // 🔴 THE SIBLING OF THE LINE ABOVE, AND IT WAS NEVER HUNTED (autopsy c6e4c6ff, 2026-09-18).
+  // "I could not read the script" and "I read it and recognised nothing" are the SAME fact about this
+  // scorer — it has no opinion — and the argument three paragraphs up applies word for word to both:
+  // such a request scores 5, nowhere near the 40 line, so the score-based ask answers "not borderline"
+  // with total confidence and sends the biggest app on the cheapest rung. A confident wrong answer is
+  // worse than an admitted unknown. `'E commerce website'` is exactly that request: one space away
+  // from a pattern that would have scored it 58, and it opened a 26.7-minute build on the flash rung.
+  if (prompt !== undefined && signalsMatchedNothing(prompt)) return true;
   return Number.isFinite(score) && Math.abs(score - COMPLEX_SCORE_LINE) <= BORDERLINE_MARGIN;
 }
 
@@ -183,19 +182,22 @@ export async function decideComplexity(
     return { ...base, verdict: 'simple', source: 'disabled', reason: 'complexity routing is switched off' };
   }
   const unread = signalsCouldNotRead(input?.prompt ?? '');
+  const unmatched = !unread && signalsMatchedNothing(input?.prompt ?? '');
+  /** Why the call is being bought — three different facts, and the admin report should say which. */
+  const why = unread
+    ? 'the request is not in a script the scorer reads'
+    : unmatched
+      ? 'the scorer recognised nothing in this request'
+      : `score ${score} is borderline`;
   if (!needsSecondOpinion(score, input?.prompt) || !llmCall) {
     return {
       ...base,
       source: 'deterministic',
-      reason: unread
-        ? `the request is not in a script the scorer reads, and no second opinion was available, so the ${score} score stands`
+      reason: unread || unmatched
+        ? `${why}, and no second opinion was available, so the ${score} score stands`
         : `score ${score} is ${deterministic === 'complex' ? 'above' : 'at or below'} the ${COMPLEX_SCORE_LINE} line`,
     };
   }
-  /** Why the call is being bought — the two are different facts and the admin report should say which. */
-  const why = unread
-    ? 'the request is not in a script the scorer reads'
-    : `score ${score} is borderline`;
 
   const timeoutMs = Math.max(500, opts.timeoutMs ?? 6_000);
   try {

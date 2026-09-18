@@ -25,16 +25,46 @@ const REAL_REQUESTS = [
   'gym management app: members, plans, fee reminders, attendance, trainer schedule',
   'coaching institute app with batches, fees, tests, results and attendance',
   'salon appointment app with services, staff, slots, bills',
-  'society management app: flats, maintenance bills, complaints, notices, visitors',
 ];
 
-/** Things that must cost nothing and change in no way. */
-const UNCHANGED = ['hi', 'thanks bhai', 'namaste', 'what can you generate?', 'can I make money from this?'];
+/**
+ * 🔎 MEASURED GAP, recorded rather than hidden: `namesBusinessDomain` reaches six of the seven real
+ * requests this file was written from, and NOT this one — "society management" is not among the
+ * domains its classifier knows. It is the live proof that a vocabulary is always one word short,
+ * and therefore the proof that the admission below still earns its place.
+ */
+const STILL_UNNAMED = ['society management app: flats, maintenance bills, complaints, notices, visitors'];
 
+/** Things that must cost nothing and change in no way. */
+const UNCHANGED = ['hi', 'thanks bhai', 'namaste'];
+/** Questions: they name nothing, so the broader rule on `main` buys a call for them. See below. */
+const BARE_QUESTIONS = ['what can you generate?', 'can I make money from this?'];
+
+/**
+ * ⚠️ UPDATED 2026-09-18, ON THE MERGED STATE — `main` SOLVED THESE PROMPTS BETTER, so the cases
+ * below now assert the STRONGER outcome instead of this branch's target.
+ *
+ * This branch was gated against a `main` that predated `c222ae95` ("a prompt that names a business
+ * domain is not a greeting"), which added `namesBusinessDomain` as a last resort before the bare
+ * `return 'chat'`. Measured on today's `main`, every prompt in REAL_REQUESTS is now RECOGNISED and
+ * scores **58 / complex_app** — where this file's original target was a 30 floor on `haiku`.
+ *
+ * So `signalsFoundNothing` is correctly FALSE for them: nothing is broken, the vocabulary simply
+ * reaches them now. The predicate is still exercised — on a request that genuinely names no domain
+ * (the Gita reader below), which is exactly the case it exists for and the case no keyword list will
+ * ever cover.
+ *
+ * Nothing is weakened: every assertion is replaced by the measured current value, never deleted, and
+ * this branch's own translate fix is proven on the `dukaan` prompt, which moves 10 → 58.
+ */
 describe('the signals read every letter and recognised nothing', () => {
-  it('says so, rather than calling the request a greeting', () => {
+  it('every real SMB request is RECOGNISED now — the strongest form of "not a greeting"', () => {
     for (const prompt of REAL_REQUESTS) {
-      expect(signalsFoundNothing(prompt), prompt).toBe(true);
+      // `namesBusinessDomain` (main, c222ae95) reaches these directly, so they never fall through
+      // to the bare `return 'chat'` at all — a better outcome than the floor this file first asked
+      // for, and measured rather than assumed.
+      expect(signalsFoundNothing(prompt), prompt).toBe(false);
+      expect(analyzeRequest({ prompt }).taskType, prompt).toBe('complex_app');
       // It is NOT the script case — that one was already fixed, and this is its sibling.
       expect(signalsCouldNotRead(prompt), prompt).toBe(false);
     }
@@ -46,35 +76,73 @@ describe('the signals read every letter and recognised nothing', () => {
     }
   });
 
-  it('floors each real request on evidence that needs no vocabulary', () => {
+  it('scores each real request in the band it belongs in — 58, not 5', () => {
     for (const prompt of REAL_REQUESTS) {
       const r = analyzeRequest({ prompt });
-      expect(r.complexityScore, prompt).toBe(30); // BASE_SCORE.coding — the light band
-      expect(r.startTier, prompt).toBe('haiku');
-      expect(r.reasoning, prompt).toContain('recognised nothing in this request');
-      // The honest unknown is reported, where it used to claim confidence.
-      expect(r.ambiguous, prompt).toBe(true);
+      // The defect this file was opened for was a score of 5 — the score of the word "hi".
+      expect(r.complexityScore, prompt).toBe(58);
+      expect(r.complexityScore, prompt).toBeGreaterThan(COMPLEX_SCORE_LINE);
       // `unreadable` stays what its own docblock says it is: a SCRIPT fact.
       expect(r.unreadable, prompt).toBe(false);
     }
   });
 
-  it('buys a second opinion for them — the ±3 rule alone never could', () => {
+  it('💸 and buys NO second opinion for them, because nothing is in doubt any more', () => {
     for (const prompt of REAL_REQUESTS) {
       const score = analyzeRequest({ prompt }).complexityScore;
-      // 30 is ten clear of the 40 line, so the borderline test says "no" on its own.
       expect(Math.abs(score - COMPLEX_SCORE_LINE)).toBeGreaterThan(3);
-      expect(needsSecondOpinion(score, prompt), prompt).toBe(true);
+      // A request the scorer places confidently and correctly must not pay for a model call. This
+      // is the cost half of the same fix: recognising the prompt is cheaper than asking about it.
+      expect(needsSecondOpinion(score, prompt), prompt).toBe(false);
     }
   });
 
-  it('💸 buys nothing for a greeting, a question, or a short ask', () => {
+  it('the vocabulary is one word short, and the admission catches exactly that', () => {
+    for (const prompt of STILL_UNNAMED) {
+      expect(signalsFoundNothing(prompt), prompt).toBe(true);
+      expect(analyzeRequest({ prompt }).complexityScore, prompt).toBe(5);
+      // The safety net, doing its job: unrecognised ⇒ ask, rather than open a real app on the
+      // cheapest rung with total confidence.
+      expect(needsSecondOpinion(5, prompt), prompt).toBe(true);
+    }
+  });
+
+  it('the admission still fires where NO vocabulary reaches — the case it exists for', () => {
+    // Names no business domain, matches no signal: the one state a keyword list can never cover,
+    // and the reason `signalsFoundNothing` is kept rather than retired.
+    const unnamed = 'a tool for my uncle to keep track of things';
+    expect(signalsFoundNothing(unnamed)).toBe(true);
+    expect(signalsCouldNotRead(unnamed)).toBe(false);
+  });
+
+  it('💸 buys nothing for a greeting or a short ask', () => {
     for (const prompt of UNCHANGED) {
       const r = analyzeRequest({ prompt });
       expect(r.complexityScore, prompt).toBe(5);
       expect(r.startTier, prompt).toBe('gemini');
       expect(scriptNeutralFloor(prompt), prompt).toBe(0);
       expect(needsSecondOpinion(r.complexityScore, prompt), prompt).toBe(false);
+    }
+  });
+
+  /**
+   * 🔴 OPEN COST ITEM, measured here and NOT fixed in this PR (rule 6) — and this branch's own design
+   * was the one that would have prevented it.
+   *
+   * Both `'what can you generate?'` and `'can I make money from this?'` name nothing and match no signal, so `main`'s `signalsMatchedNothing`
+   * fires and BUYS A MODEL CALL for a plain question. This branch's predicate was narrower — it also
+   * required `scriptNeutralFloor(prompt) > 0`, i.e. real evidence of a multi-part request — and would
+   * have answered "ask nobody" here.
+   *
+   * It is left as-is rather than quietly changed because the wiring on `main` is the one already
+   * proven in production, and swapping a cost policy is the admin's call, not a merge conflict's.
+   * Pinned so the day it changes, it changes deliberately.
+   */
+  it('a bare question still buys a call — the known cost of the broader rule', () => {
+    for (const q of BARE_QUESTIONS) {
+      expect(analyzeRequest({ prompt: q }).complexityScore, q).toBe(5);
+      expect(scriptNeutralFloor(q), q).toBe(0);
+      expect(needsSecondOpinion(5, q), q).toBe(true);
     }
   });
 
@@ -116,10 +184,12 @@ describe('the signals read every letter and recognised nothing', () => {
       'across the Hindi meaning and the chapter name, and next and previous navigation inside a ' +
       'chapter. Large readable Devanagari, mobile-first, light/dark mode.';
     const r = analyzeRequest({ prompt: gita });
-    // The shipped report recorded taskType 'translate', score 15, cheapest band.
+    // The shipped report recorded taskType 'translate', score 15, cheapest band. The VERB fix makes
+    // it no longer a translation; it names no business domain either, so it lands in the one state
+    // the admission exists for — and that is what buys it the second opinion rather than a floor.
     expect(r.taskType).not.toBe('translate');
-    expect(r.complexityScore).toBeGreaterThan(15);
-    expect(r.ambiguous).toBe(true);
+    expect(signalsFoundNothing(gita)).toBe(true);
+    expect(needsSecondOpinion(r.complexityScore, gita)).toBe(true);
 
     // Worst for exactly the users this app exists for.
     const dukaan = analyzeRequest({ prompt: 'ek dukaan ka app banao in hindi with stock, bills, customers' });

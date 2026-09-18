@@ -8,7 +8,7 @@
 // HONESTY: with no history it falls back to the heuristic and says so (`basis: 'heuristic'`,
 // lower confidence). It never reads the clock — `predictDeadline` takes the start time as input.
 
-import { isComplexAppPrompt } from './appComplexitySignals';
+import { isComplexAppPrompt, namesBusinessDomain } from './appComplexitySignals';
 
 export interface Complexity {
   /** Number of modules / pages / screens in the blueprint. */
@@ -262,7 +262,11 @@ export function complexityFromPrompt(prompt: string): Complexity {
   // magnitude (moduleCount + featureCount) reaches the DEEP threshold (≥ 12), giving these builds the
   // deep pipeline + realistic ETA. Simple apps (todo/calculator) don't match → unchanged fast lane.
   // Safe: this only ever RAISES the estimate/headroom (a build stops the moment it is done).
-  if (isComplexAppPrompt(text)) {
+  // …and a NAMED BUSINESS DOMAIN is the same case in the user's own words rather than a developer's
+  // (2026-09-18): "hospital management system" counted 1 module and 1 feature here — magnitude 2, the
+  // fast lane, and an ETA sized for a calculator. `namesBusinessDomain` carries the page-scoped and
+  // simple-deliverable guards, so "a todo app for my restaurant" is untouched.
+  if (isComplexAppPrompt(text) || namesBusinessDomain(text)) {
     moduleCount = clamp(Math.max(moduleCount, 6), 1, 20);
     featureCount = clamp(Math.max(featureCount, 6), 1, 30);
   }

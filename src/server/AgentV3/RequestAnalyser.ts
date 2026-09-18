@@ -117,7 +117,16 @@ const NORMAL_LADDER: StartTier[] = ['gemini', 'haiku', 'sonnet'];
 // ── Keyword signals (lowercased, word-ish boundaries kept loose for Hinglish) ──────
 const RE = {
   greeting: /\b(hi|hello|hey|namaste|namaskar|kaise ho|how are you|thanks|thank you|dhanyaiwad|shukriya|good morning|good evening)\b/i,
-  translate: /\b(translate|translation|anuvad|in hindi|in english|convert to)\b/i,
+  /**
+   * 🔴 "in hindi" IS NOT AN ORDER TO TRANSLATE (autopsy b6f88a72, 2026-09-18). The prompt
+   * *"Build a Bhagavad Gita reader in Hindi"* was recorded as `taskType: 'translate'`, score 15,
+   * cheapest band — and it is worst for exactly the users this app exists for:
+   *   `ek dukaan ka app banao in hindi with stock, bills, customers` → translate, 10.
+   * The translation VERB stays; the bare language phrases go. `'translate this paragraph in hindi'`
+   * still classifies as translation, and `'make a notes app, translate to english later'` is still
+   * the app.
+   */
+  translate: /\b(translate|translation|anuvad|convert to)\b/i,
   summary: /\b(summar(y|ize|ise)|tl;?dr|in short|key points|gist)\b/i,
   // Simple, self-contained apps cheap models build reliably. The LIST now lives in
   // `appComplexitySignals` beside the complex one, so "is this big?" and "is this one of the small
@@ -129,19 +138,19 @@ const RE = {
   hardSignal: /\b(production|secure|security|scalable|optimi[sz]e|performance|concurrency|multi[- ]tenant)\b/i,
 };
 
-function detectTaskType(p: string): TaskType {
+function classify(p: string): { type: TaskType; matched: boolean } {
   // Order matters: most-specific / highest-complexity wins when multiple match.
-  if (RE.architecture.test(p)) return 'architecture';
+  if (RE.architecture.test(p)) return { type: 'architecture', matched: true };
   // SHARED complex-app verdict (single source of truth with the pipeline-DEPTH/ETA estimator, so the
   // two can never route the same prompt two different ways). Page-deliverable-aware: a category THEME
   // word on a one-page ask ("SaaS landing page") no longer forces complex_app — the 29-min bug.
-  if (isComplexAppPrompt(p)) return 'complex_app';
-  if (RE.debugging.test(p)) return 'debugging';
-  if (RE.simpleApp.test(p)) return 'simple_app';
-  if (RE.summary.test(p)) return 'summary';
-  if (RE.translate.test(p)) return 'translate';
-  if (RE.coding.test(p)) return 'coding';
-  if (RE.greeting.test(p)) return 'chat';
+  if (isComplexAppPrompt(p)) return { type: 'complex_app', matched: true };
+  if (RE.debugging.test(p)) return { type: 'debugging', matched: true };
+  if (RE.simpleApp.test(p)) return { type: 'simple_app', matched: true };
+  if (RE.summary.test(p)) return { type: 'summary', matched: true };
+  if (RE.translate.test(p)) return { type: 'translate', matched: true };
+  if (RE.coding.test(p)) return { type: 'coding', matched: true };
+  if (RE.greeting.test(p)) return { type: 'chat', matched: true };
   /**
    * 🔴 LAST RESORT, AND THE ONLY PLACE THIS MODULE KNOWS NOTHING — so a prompt that names a real
    * business domain stops scoring 5, the same as "hi" (admin's failure table, 2026-09-18).
@@ -152,8 +161,73 @@ function detectTaskType(p: string): TaskType {
    * evidence, never move a verdict that has some. See `namesBusinessDomain` for the two guards and
    * for why the platform's OWN domain classifier answers this instead of a third keyword list.
    */
-  if (namesBusinessDomain(p)) return 'complex_app';
-  return 'chat';
+  if (namesBusinessDomain(p)) return { type: 'complex_app', matched: true };
+  return { type: 'chat', matched: false };
+}
+
+function detectTaskType(p: string): TaskType {
+  return classify(p).type;
+}
+
+/**
+ * PURE. Not one signal in `RE` — nor `isComplexAppPrompt`, nor `namesBusinessDomain` — matched.
+ *
+ * ⚠️ KEPT ALONGSIDE `signalsMatchedNothing` (2026-09-18, on the merged state). Two sessions fixed
+ * the same class from different angles and BOTH landed: `signalsMatchedNothing` is what
+ * `needsSecondOpinion` actually consults, and it is the one already proven in production. This
+ * predicate is the same question asked from `classify`'s own `matched` flag, which is what makes it
+ * derived rather than a second copy of the patterns — the drift this repo has paid for twice. It is
+ * exported for the tests that pin the behaviour; the WIRING deliberately stays single, so no request
+ * can buy two model calls.
+ */
+export function signalsFoundNothing(prompt: string): boolean {
+  return !classify(String(prompt ?? '').toLowerCase()).matched;
+}
+
+/**
+ * PURE. TRUE when NONE of this module's signals matched — the request was read, and nothing in it was
+ * recognised.
+ *
+ * 🔴 WHY THIS IS A SEPARATE FACT FROM `signalsCouldNotRead`, and why the difference cost a real build
+ * (autopsy c6e4c6ff, 2026-09-18). `detectTaskType` ends in `return 'chat'`, so it answers `chat` to two
+ * completely different questions: "this IS a chat message" (the greeting pattern matched) and "I did not
+ * recognise ANY of this". Both then score **5** — the score of the word "hi" — with `ambiguous` false,
+ * so the second opinion never opens and the biggest app on the list starts on the cheapest rung.
+ *
+ * Measured on the real patterns, and the gap is a space:
+ *
+ *     'ecommerce website'           → complex_app, 58   (COMPLEX_APP_SIGNAL has `e-?commerce`)
+ *     'e-commerce website'          → complex_app, 58
+ *     'E commerce website'          → chat, 5           ← the build that failed
+ *     'hospital management system'  → chat, 5           ← no pattern names it at all
+ *
+ * ⚠️ The answer is NOT to keep widening the keyword list. That list is a fixed vocabulary against an
+ * open-ended set of things people build — the same shape as the allowlist the theme system had to
+ * abandon, and as the sixteen hand-written domains the knowledge layer stopped being. A list can always
+ * be one word short; what it can do honestly is SAY when it recognised nothing.
+ *
+ * 🔒 DERIVED FROM `detectTaskType` ITSELF, never a second copy of the patterns. A re-listed set of
+ * regexes would agree on the day it was written and not afterwards — this repo has paid for that twice
+ * (four drifted `safeRelPath`s, two complex-app detectors). Adding or changing a signal automatically
+ * changes this answer, because it asks the real function.
+ *
+ * A GREETING IS NOT "unrecognised" — it matched, and "hi" must not buy a model call.
+ */
+export function signalsMatchedNothing(prompt: string): boolean {
+  const p = String(prompt ?? '').toLowerCase();
+  if (!p.trim()) return false;
+  // 💸 A SCRAP IS NOT AN UNRECOGNISED REQUEST — it is a scrap, and it must not buy a model call.
+  // Caught by `complexityRouting.test.ts`'s own cost guard, which failed on `'ऐप'` when this
+  // predicate first shipped without the bar. `MIN_LETTERS_TO_JUDGE_SCRIPT` is BORROWED rather than
+  // re-chosen because it is the same question measured the same way — "is there enough text here to
+  // conclude anything at all?" — and the sibling test `signalsCouldNotRead` already answers it with
+  // this exact constant. ⚠️ The cost is real and conservative on purpose: a genuinely short app name
+  // ("zomato clone", 11 letters) stays unasked and keeps today's behaviour, which is the direction
+  // that spends nothing.
+  const letters = p.match(/\p{L}/gu) ?? [];
+  if (letters.length < MIN_LETTERS_TO_JUDGE_SCRIPT) return false;
+  if (RE.greeting.test(p)) return false;
+  return detectTaskType(p) === 'chat';
 }
 
 /** Base complexity by task type (before feature adjustments). */

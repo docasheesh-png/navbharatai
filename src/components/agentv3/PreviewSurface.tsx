@@ -1839,7 +1839,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             <span className="flex-1 truncate">{deferredReloadNote(heldReloads)}</span>
             <button
               onClick={applyReload}
-              className="shrink-0 rounded-md bg-raised px-2.5 py-1 font-semibold text-body hover:bg-raised"
+              className="shrink-0 rounded-md bg-raised px-2.5 py-1 font-semibold text-body hover:bg-raised-hover"
             >
               Refresh now
             </button>
@@ -1873,7 +1873,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
                 moment your server starts — it usually takes under a minute.
               </p>
               <div className="flex items-center justify-center gap-2 pt-1">
-                <button onClick={() => { setLiveReloadKey((k) => k + 1); void probeAndMaybeHeal(); }} className="px-3 py-1.5 rounded-lg bg-raised hover:bg-raised text-body text-xs font-semibold">Check again</button>
+                <button onClick={() => { setLiveReloadKey((k) => k + 1); void probeAndMaybeHeal(); }} className="px-3 py-1.5 rounded-lg bg-raised hover:bg-raised-hover text-body text-xs font-semibold">Check again</button>
                 <button onClick={() => setChoice('auto')} className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-on-accent text-xs font-semibold">Back to the preview</button>
               </div>
               <p className="text-faint text-xs">The preview shows your current files right now, without waiting for the server.</p>

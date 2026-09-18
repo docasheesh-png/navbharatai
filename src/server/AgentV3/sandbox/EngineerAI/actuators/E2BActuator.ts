@@ -331,7 +331,7 @@ const BROWSER_DAEMON_SCRIPT = `
 const {chromium}=require('playwright');
 const fs=require('fs');
 const LOG=${JSON.stringify(CONSOLE_LOG)};
-function rec(kind,text){ try{ fs.appendFileSync(LOG, JSON.stringify({t:Date.now(),kind,text:String(text).slice(0,500)})+'\\n'); }catch(e){} }
+function rec(kind,text,stack){ try{ fs.appendFileSync(LOG, JSON.stringify({t:Date.now(),kind,text:String(text).slice(0,500),stack:stack?String(stack).slice(0,1200):undefined})+'\\n'); }catch(e){} }
 (async()=>{
   const browser=await chromium.launch({headless:true,args:['--no-sandbox','--disable-setuid-sandbox','--remote-debugging-port=${CDP_PORT}']});
   // A CLEAN APP AND A BROWSER THAT NEVER RAN MUST NOT LOOK THE SAME (autopsy 9cca1fd5, 2026-09-17).
@@ -345,7 +345,7 @@ function rec(kind,text){ try{ fs.appendFileSync(LOG, JSON.stringify({t:Date.now(
   function attach(page){
     if(seen.has(page))return; seen.add(page);
     page.on('console',m=>{ if(m.type()==='error') rec('console',m.text()); });
-    page.on('pageerror',e=>rec('pageerror',e&&e.message||e));
+    page.on('pageerror',e=>rec('pageerror',e&&e.message||e,e&&e.stack));
     page.on('requestfailed',r=>{ const f=r.failure(); rec('requestfailed',r.url()+' — '+(f&&f.errorText||'failed')); });
     page.on('response',res=>{ try{ const s=res.status(); if(s>=500) rec('httperror','HTTP '+s+' from '+res.url()); }catch(e){} });
   }
@@ -2543,7 +2543,7 @@ ${paintWaitJs('p')}
   async getConsoleErrors(
     workspaceId: string,
     sinceMs: number,
-  ): Promise<{ errors: { t: number; kind: string; text: string }[]; captured: boolean }> {
+  ): Promise<{ errors: { t: number; kind: string; text: string; stack?: string }[]; captured: boolean }> {
     const sandbox = await this.getSandbox(workspaceId);
     let raw = '';
     try {
@@ -2553,14 +2553,21 @@ ${paintWaitJs('p')}
       // capture the console. captured:false so the caller records "runtime unchecked", not a false clean.
       return { errors: [], captured: false };
     }
-    const errors: { t: number; kind: string; text: string }[] = [];
+    const errors: { t: number; kind: string; text: string; stack?: string }[] = [];
     for (const line of raw.split('\n')) {
       const trimmed = line.trim();
       if (!trimmed) continue;
       try {
         const e = JSON.parse(trimmed);
         if (typeof e.t === 'number' && e.t > sinceMs) {
-          errors.push({ t: e.t, kind: String(e.kind || 'console'), text: String(e.text || '') });
+          errors.push({
+            t: e.t,
+            kind: String(e.kind || 'console'),
+            text: String(e.text || ''),
+            // Absent on every line an OLDER daemon wrote, and on every kind that never had one — so
+            // it is read as optional rather than defaulted. "Not captured" must not become ''.
+            ...(typeof e.stack === 'string' && e.stack ? { stack: e.stack } : {}),
+          });
         }
       } catch { /* skip malformed line */ }
     }

@@ -91,7 +91,10 @@ function palette(theme: string): Record<string, string> {
   return out;
 }
 const THEMES = ['light', 'dark', 'contrast'];
-const SURFACES = ['surface-base', 'surface-card', 'surface-raised'];
+/* `surface-raised-hover` is in this list on purpose: a hovered row carries the same faint labels a
+   resting one does, so a hover surface the palette does not clear is the audit's own defect with an
+   extra step. It is what forced Light's --text-faint from #5b6b82 to #57677e (4.40 → 4.73). */
+const SURFACES = ['surface-base', 'surface-card', 'surface-raised', 'surface-raised-hover'];
 const TEXTS = ['text-primary', 'text-body', 'text-muted', 'text-faint', 'accent', 'brand-accent-text', 'brand-success-text', 'brand-warn-text', 'brand-danger-text', 'brand-info-text'];
 
 describe('🔒 every theme palette clears WCAG AA (4.5:1) for normal text — Comfort failed 11 of 30 pairs before', () => {
@@ -137,7 +140,7 @@ describe('🔒 the pipeline — tokens exist and the first migrated file is at z
   it('index.css exposes every semantic token through @theme inline', () => {
     const css = read('src/index.css');
     const block = css.match(/@theme inline \{([^}]*)\}/)?.[1] ?? '';
-    for (const tok of ['surface', 'card', 'raised', 'ink', 'body', 'muted', 'faint', 'line', 'accent', 'accent-text', 'success', 'warn', 'danger', 'info', 'on-accent', 'well', 'scrim']) {
+    for (const tok of ['surface', 'card', 'raised', 'raised-hover', 'ink', 'body', 'muted', 'faint', 'line', 'accent', 'accent-text', 'success', 'warn', 'danger', 'info', 'on-accent', 'well', 'well-hover', 'scrim']) {
       expect(block, `--color-${tok} missing from @theme inline`).toMatch(new RegExp(`--color-${tok}:`));
     }
     // `inline` is load-bearing: without it Tailwind would bake the var's initial value into the

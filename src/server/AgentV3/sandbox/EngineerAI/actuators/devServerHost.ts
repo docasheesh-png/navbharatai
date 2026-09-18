@@ -404,6 +404,86 @@ export function stripShellPlumbing(segment: string): string {
     .replace(/(?:^|\s)<?\s*\/dev\/[a-z0-9]+/gi, ' ');
 }
 
+/**
+ * The longest `timeout N` bound that still proves a segment is a SMOKE TEST rather than a server the
+ * build wants left running.
+ *
+ * ⚠️ THE CAP IS THE WHOLE SAFETY ARGUMENT, so it is chosen rather than borrowed, and the reasoning is
+ * the cost of being wrong. Below it, a segment is run plainly in the FOREGROUND, so the worst case is
+ * blocking for N seconds — and N is the agent's own number. Above it, an agent writing
+ * `timeout 600 npm run dev` may genuinely mean "start the server", and running THAT in the foreground
+ * would block until E2B's 5-minute command timeout and return `deadline_exceeded` — strictly worse
+ * than today. So a long bound keeps the managed path exactly as it is.
+ */
+export const MAX_TIMEBOX_SECONDS = 60;
+
+/**
+ * PURE. The seconds a `timeout` bound allows this segment, or null when it is not time-boxed at all.
+ *
+ * 🔴 ROOT CAUSE (autopsy c6e4c6ff, 2026-09-18 — "E commerce website"). The agent ran, to see its
+ * backend boot:
+ *
+ *     . .env && DATABASE_URL="$DATABASE_URL" timeout 5 npm run server 2>&1 | head -30
+ *
+ * `isLongRunningCommand` said TRUE, so the whole managed dev-server sequence ran on it: dependency
+ * staleness, port pinning, host binding, a backgrounded launch, a port wait, and two RESTART attempts.
+ * It took **103 seconds** of the user's build clock and ended with
+ *
+ *     [health-check] dev server did not come up on port 3000 after automatic recovery.
+ *
+ * printed four lines below the app's own
+ *
+ *     Server listening on port 3000
+ *
+ * Both sentences were in the same captured output. The server HAD come up; `timeout 5` then killed it,
+ * exactly as asked — and the recovery loop was fighting the agent's own instruction.
+ *
+ * 🔑 THE POINT, and it is why this belongs beside `ONE_SHOT_PREFIX` rather than in the health-check:
+ * `timeout N` is the agent SAYING the command exits. A command that is bounded to five seconds is not
+ * a long-running one, whatever it runs. This is the third member of a class this file already records
+ * twice — `2>/dev/null` (every redirect read as a dev server, 95 s on a `git checkout`) and
+ * `--save-dev` (76 s on an `npm install`, which then failed) — where a pattern matched the words of a
+ * command while its SHAPE said the opposite.
+ *
+ * ⚠️ A FLAG IS NOT THE COMMAND. `npm run dev -- --timeout 5000` sets an option; the `-` before the
+ * word is deliberately not in the leading character class, so it can never match.
+ */
+/** GNU `timeout` options that consume the NEXT token, so its number is not the duration. */
+const TIMEOUT_OPTS_WITH_ARG = new Set(['-k', '--kill-after', '-s', '--signal']);
+
+export function timeBoxedSeconds(segment: string): number | null {
+  const tokens = String(segment ?? '').split(/\s+/).filter(Boolean);
+  // Tokenised rather than matched in one regex, because `timeout -k 2 30 npm run dev` means "kill 2
+  // seconds after a 30-second run" — a regex that skips options greedily reads the 2. Harmless at
+  // these sizes and wrong exactly where it matters: `timeout -k 2 600` would read 2, call a
+  // ten-minute server a smoke test, and run it in the foreground until E2B's own timeout.
+  for (let i = 0; i < tokens.length; i += 1) {
+    const cmd = tokens[i] ?? '';
+    // The binary itself, by bare name or absolute path. A FLAG is never the command: `--timeout 5000`
+    // is an option to something else, and starts with `-`.
+    if (!/^(?:\/\S*\/)?timeout$/i.test(cmd)) continue;
+    let j = i + 1;
+    while (j < tokens.length && (tokens[j] ?? '').startsWith('-')) {
+      const opt = tokens[j] ?? '';
+      j += TIMEOUT_OPTS_WITH_ARG.has(opt) ? 2 : 1;
+    }
+    const duration = /^(\d+)([smhd])?$/i.exec(tokens[j] ?? '');
+    if (!duration) return null;
+    const n = Number(duration[1]);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    const unit = (duration[2] ?? 's').toLowerCase();
+    const mult = unit === 'm' ? 60 : unit === 'h' ? 3600 : unit === 'd' ? 86400 : 1;
+    return n * mult;
+  }
+  return null;
+}
+
+/** True when the agent bounded this segment tightly enough that it is a smoke test, not a server. */
+export function isSmokeTestSegment(segment: string): boolean {
+  const secs = timeBoxedSeconds(segment);
+  return secs !== null && secs <= MAX_TIMEBOX_SECONDS;
+}
+
 export function isLongRunningCommand(command: string): boolean {
   if (!command) return false;
   if (/^\s*(?:curl|wget)\b/.test(command)) return false;
@@ -421,7 +501,10 @@ export function isLongRunningCommand(command: string): boolean {
   // code path. So: a one-shot-prefixed segment's OWN text is never checked for a dev-server pattern,
   // but every OTHER segment still is — the whole command is long-running if ANY of those matches.
   const segments = command.split(/&&|\|\||;/);
-  return segments.some((seg) => !ONE_SHOT_PREFIX.test(seg) && isDevServerInvocation(stripShellPlumbing(seg)));
+  // A segment the agent BOUNDED with a short `timeout N` is a smoke test, not a server to manage —
+  // see timeBoxedSeconds for the 103 seconds this cost on a command whose own output said the server
+  // had started. Same shape as ONE_SHOT_PREFIX: a segment whose form proves it exits.
+  return segments.some((seg) => !ONE_SHOT_PREFIX.test(seg) && !isSmokeTestSegment(seg) && isDevServerInvocation(stripShellPlumbing(seg)));
 }
 
 /**

@@ -104,7 +104,7 @@ export const BotBuildHelp: React.FC<Props> = ({ mode, onModeChange }) => {
       <button
         onClick={() => onModeChange('open')}
         aria-label="Open NavBharatAI help"
-        className="fixed bottom-4 right-4 z-[200] w-14 h-14 rounded-full bg-indigo-600 hover:bg-indigo-500 shadow-2xl flex items-center justify-center text-white transition-all active:scale-90"
+        className="fixed bottom-4 right-4 z-[200] w-14 h-14 rounded-full bg-indigo-600 hover:bg-indigo-500 shadow-2xl flex items-center justify-center text-on-accent transition-all active:scale-90"
         style={{ boxShadow: '0 8px 30px rgba(79,70,229,0.5)' }}
       >
         <Bot size={26} />
@@ -114,20 +114,20 @@ export const BotBuildHelp: React.FC<Props> = ({ mode, onModeChange }) => {
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-[200] flex flex-col rounded-2xl border border-white/15 shadow-2xl overflow-hidden"
+    <div className="fixed bottom-4 right-4 z-[200] flex flex-col rounded-2xl border border-line shadow-2xl overflow-hidden"
       style={{ width: 'min(92vw, 384px)', height: 'min(72vh, 560px)', background: 'var(--surface-card)' }}>
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-white/10 flex-shrink-0" style={{ background: '#1c2230' }}>
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-line flex-shrink-0" style={{ background: '#1c2230' }}>
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-full bg-indigo-600 flex items-center justify-center"><Bot size={16} className="text-white" /></div>
+          <div className="w-7 h-7 rounded-full bg-indigo-600 flex items-center justify-center text-on-accent"><Bot size={16} className="text-on-accent" /></div>
           <div className="leading-tight">
-            <div className="text-xs font-semibold text-gray-100">NavBharatAI Help</div>
+            <div className="text-xs font-semibold text-on-accent">NavBharatAI Help</div>
             <div className="text-[10px] text-emerald-400 flex items-center gap-1"><span className="w-1.5 h-1.5 bg-emerald-400 rounded-full" /> here to help you go live</div>
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <button onClick={() => onModeChange('min')} title="Minimize" aria-label="Minimize" className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10"><ChevronDown size={16} /></button>
-          <button onClick={() => onModeChange('closed')} title="Close" aria-label="Close" className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10"><X size={15} /></button>
+          <button onClick={() => onModeChange('min')} title="Minimize" aria-label="Minimize" className="w-7 h-7 rounded-lg flex items-center justify-center text-on-accent hover:text-on-accent hover:bg-raised"><ChevronDown size={16} /></button>
+          <button onClick={() => onModeChange('closed')} title="Close" aria-label="Close" className="w-7 h-7 rounded-lg flex items-center justify-center text-on-accent hover:text-on-accent hover:bg-raised"><X size={15} /></button>
         </div>
       </div>
 
@@ -135,48 +135,48 @@ export const BotBuildHelp: React.FC<Props> = ({ mode, onModeChange }) => {
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 flex flex-col gap-2.5 min-h-0" style={{ background: 'var(--surface-base)' }}>
         {messages.map((m, i) => (
           <div key={i} className={`flex gap-2 ${m.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-            {m.sender === 'ai' && <div className="w-6 h-6 rounded-full bg-indigo-600/30 flex items-center justify-center flex-shrink-0 mt-0.5"><Bot size={12} className="text-indigo-300" /></div>}
-            <div className={`max-w-[78%] rounded-2xl px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap break-words ${m.sender === 'user' ? 'bg-indigo-600 text-white rounded-br-sm' : 'text-gray-200 rounded-bl-sm'}`} style={{ background: m.sender === 'user' ? undefined : '#1c2230' }}>
+            {m.sender === 'ai' && <div className="w-6 h-6 rounded-full bg-indigo-600/30 flex items-center justify-center flex-shrink-0 mt-0.5"><Bot size={12} className="text-accent-text" /></div>}
+            <div className={`max-w-[78%] rounded-2xl px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap break-words ${m.sender === 'user' ? 'bg-indigo-600 text-on-accent rounded-br-sm' : 'text-on-accent rounded-bl-sm'}`} style={{ background: m.sender === 'user' ? undefined : '#1c2230' }}>
               {m.image && <img src={m.image} alt="screenshot" className="rounded-lg mb-1.5 max-h-40 w-auto" />}
               {m.text}
             </div>
-            {m.sender === 'user' && <div className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center flex-shrink-0 mt-0.5"><User size={12} className="text-gray-300" /></div>}
+            {m.sender === 'user' && <div className="w-6 h-6 rounded-full bg-raised flex items-center justify-center flex-shrink-0 mt-0.5"><User size={12} className="text-muted" /></div>}
           </div>
         ))}
         {busy && (
           <div className="flex gap-2 justify-start">
-            <div className="w-6 h-6 rounded-full bg-indigo-600/30 flex items-center justify-center flex-shrink-0"><Bot size={12} className="text-indigo-300" /></div>
-            <div className="rounded-2xl px-3 py-2.5 text-xs text-gray-400 rounded-bl-sm flex gap-1" style={{ background: '#1c2230' }}>
-              <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-              <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-              <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+            <div className="w-6 h-6 rounded-full bg-indigo-600/30 flex items-center justify-center flex-shrink-0"><Bot size={12} className="text-accent-text" /></div>
+            <div className="rounded-2xl px-3 py-2.5 text-xs text-on-accent rounded-bl-sm flex gap-1" style={{ background: '#1c2230' }}>
+              <span className="w-1.5 h-1.5 bg-faint rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+              <span className="w-1.5 h-1.5 bg-faint rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+              <span className="w-1.5 h-1.5 bg-faint rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
             </div>
           </div>
         )}
       </div>
 
       {/* Composer */}
-      <div className="flex-shrink-0 border-t border-white/10 p-2.5" style={{ background: 'var(--surface-card)' }}>
+      <div className="flex-shrink-0 border-t border-line p-2.5" style={{ background: 'var(--surface-card)' }}>
         {pendingImg && (
-          <div className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded-lg bg-white/5 text-xs text-gray-300">
+          <div className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded-lg bg-raised text-xs text-muted">
             <img src={pendingImg.preview} alt="attached" className="w-8 h-8 rounded object-cover" />
             <span className="flex-1 truncate">{pendingImg.name}</span>
-            <button onClick={() => setPendingImg(null)} className="text-gray-500 hover:text-white"><X size={13} /></button>
+            <button onClick={() => setPendingImg(null)} className="text-faint hover:text-ink"><X size={13} /></button>
           </div>
         )}
         <div className="flex items-end gap-1.5">
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={pickImage} />
-          <button onClick={() => fileRef.current?.click()} title="Attach a screenshot" aria-label="Attach screenshot" className="w-9 h-9 rounded-lg flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 flex-shrink-0"><ImagePlus size={17} /></button>
+          <button onClick={() => fileRef.current?.click()} title="Attach a screenshot" aria-label="Attach screenshot" className="w-9 h-9 rounded-lg flex items-center justify-center text-muted hover:text-ink hover:bg-raised flex-shrink-0"><ImagePlus size={17} /></button>
           <textarea
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
             rows={1}
             placeholder="Ask anything, or send a screenshot…"
-            className="flex-1 rounded-xl px-3 py-2 text-xs text-gray-200 border border-white/10 resize-none focus:outline-none focus:border-indigo-500/50 max-h-24"
+            className="flex-1 rounded-xl px-3 py-2 text-xs text-body border border-line resize-none focus:outline-none focus:border-indigo-500/50 max-h-24"
             style={{ background: 'var(--surface-base)' }}
           />
-          <button onClick={send} disabled={busy || (!input.trim() && !pendingImg)} aria-label="Send" className="w-9 h-9 rounded-lg flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white flex-shrink-0"><Send size={15} /></button>
+          <button onClick={send} disabled={busy || (!input.trim() && !pendingImg)} aria-label="Send" className="w-9 h-9 rounded-lg flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-on-accent flex-shrink-0"><Send size={15} /></button>
         </div>
       </div>
     </div>

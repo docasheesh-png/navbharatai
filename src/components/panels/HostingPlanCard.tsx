@@ -149,22 +149,22 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
   const tiers: HostingTier[] = Array.isArray(status.tiers) && status.tiers.length ? status.tiers : [...HOSTING_TIERS];
 
   return (
-    <div className="bg-[#161b22] border border-white/5 rounded-2xl p-5 space-y-4">
+    <div className="bg-card border border-line rounded-2xl p-5 space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-xs font-black text-white uppercase tracking-widest">Plans — your whole account in one place</h3>
+        <h3 className="text-xs font-black text-ink uppercase tracking-widest">Plans — your whole account in one place</h3>
       </div>
 
       {/* Hosting — the active plan, or the tier picker */}
       <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 px-4 py-3 space-y-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex items-start gap-3 min-w-0">
-            <Globe className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+            <Globe className="w-4 h-4 text-accent-text shrink-0 mt-0.5" />
             <div className="min-w-0">
-              <p className="text-[12px] font-bold text-white">
+              <p className="text-[12px] font-bold text-ink">
                 Hosting{active && status.tier ? ` — ${status.tier.name}` : ''}
               </p>
               {active ? (
-                <p className="text-[11px] text-emerald-300/90 flex items-start gap-1 mt-0.5">
+                <p className="text-[11px] text-success flex items-start gap-1 mt-0.5">
                   <BadgeCheck className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                   <span>
                     Active until {new Date(status.plan!.expiresAt).toLocaleDateString()} — badge-free publishing,
@@ -174,7 +174,7 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
                   </span>
                 </p>
               ) : (
-                <p className="text-[11px] text-[#8b949e] mt-0.5">
+                <p className="text-[11px] text-muted mt-0.5">
                   Paid from your wallet — removes the "Made with NavBharatAI" badge and unlocks connecting your own domain. If a plan ever ends, your domain pauses (we remind you 5 days ahead) but your app stays live on its free NavBharatAI link — renewing reconnects the domain automatically.
                 </p>
               )}
@@ -184,7 +184,7 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
             <button
               onClick={toggleAutoRenew}
               disabled={busy}
-              className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider border border-white/10 text-[#c9d1d9] hover:bg-white/5 disabled:opacity-50 flex items-center gap-1.5 shrink-0"
+              className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider border border-line text-body hover:bg-raised disabled:opacity-50 flex items-center gap-1.5 shrink-0"
             >
               <RefreshCw className="w-3 h-3" />
               Auto-renew: {status.plan!.autoRenew !== false ? 'On' : 'Off'}
@@ -196,42 +196,42 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
           type="button"
           onClick={() => setHostingOpen((v) => !v)}
           aria-expanded={hostingOpen}
-          className="w-full flex items-center justify-between gap-2 rounded-lg border border-white/10 bg-[#21262d] px-3 py-2.5 text-left hover:border-indigo-500/40 transition-colors"
+          className="w-full flex items-center justify-between gap-2 rounded-lg border border-line bg-raised px-3 py-2.5 text-left hover:border-indigo-500/40 transition-colors"
         >
           <span className="flex items-center gap-2 min-w-0">
-            <Globe className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-            <span className="text-[11.5px] font-black text-white uppercase tracking-wider">Web Hosting</span>
-            <span className="text-[10px] text-[#8b949e] font-semibold truncate">
+            <Globe className="w-3.5 h-3.5 text-accent-text shrink-0" />
+            <span className="text-[11.5px] font-black text-ink uppercase tracking-wider">Web Hosting</span>
+            <span className="text-[10px] text-muted font-semibold truncate">
               {active && status.tier ? `On ${status.tier.name}` : 'Free · Starter · Growth'}
             </span>
           </span>
-          <ChevronDown className={`w-3.5 h-3.5 text-[#8b949e] shrink-0 transition-transform ${hostingOpen ? 'rotate-180' : ''}`} />
+          <ChevronDown className={`w-3.5 h-3.5 text-muted shrink-0 transition-transform ${hostingOpen ? 'rotate-180' : ''}`} />
         </button>
 
         {hostingOpen && (<>
         {/* FREE is listed beside the paid tiers because it is a real plan, not the absence of one —
             every account already has it, and a buyer comparing prices is owed the row they are
             leaving. Its numbers come from the same constant the server enforces. */}
-        <div className="rounded-xl border border-white/10 bg-[#21262d] px-3 py-3 space-y-2">
+        <div className="rounded-xl border border-line bg-raised px-3 py-3 space-y-2">
           <div className="flex items-baseline justify-between gap-2">
-            <p className="text-[12px] font-black text-white">Free</p>
-            <p className="text-[12px] font-black text-emerald-400 font-mono">₹0<span className="text-[9px] text-[#8b949e] font-bold">/always</span></p>
+            <p className="text-[12px] font-black text-ink">Free</p>
+            <p className="text-[12px] font-black text-success font-mono">₹0<span className="text-[9px] text-muted font-bold">/always</span></p>
           </div>
-          <p className="text-[10px] text-[#8b949e] font-semibold">Publish and share — no card, no expiry.</p>
-          <p className="text-[9px] font-black uppercase tracking-wider text-emerald-400">Included — no extra charge</p>
+          <p className="text-[10px] text-muted font-semibold">Publish and share — no card, no expiry.</p>
+          <p className="text-[9px] font-black uppercase tracking-wider text-success">Included — no extra charge</p>
           <ul className="space-y-1">
             {[
               `Keep up to ${FREE_PUBLISHED_APPS} apps published`,
               'A permanent NavBharatAI link for each one',
               'Visitor counts for every published app',
             ].map((line) => (
-              <li key={line} className="text-[10px] text-[#c9d1d9] flex items-start gap-1.5">
-                <Check className="w-3 h-3 text-emerald-400 shrink-0 mt-0.5" />
+              <li key={line} className="text-[10px] text-body flex items-start gap-1.5">
+                <Check className="w-3 h-3 text-success shrink-0 mt-0.5" />
                 <span>{line}</span>
               </li>
             ))}
           </ul>
-          <p className="text-[9.5px] text-[#8b949e] leading-relaxed border-t border-white/5 pt-2">
+          <p className="text-[9.5px] text-muted leading-relaxed border-t border-line pt-2">
             Your site shows a small “Made with NavBharatAI” badge, and apps that need a server need a plan.
           </p>
         </div>
@@ -245,23 +245,23 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
             return (
               <div
                 key={tier.id}
-                className={`rounded-xl border px-3 py-3 space-y-2 ${held ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-white/10 bg-[#21262d]'}`}
+                className={`rounded-xl border px-3 py-3 space-y-2 ${held ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-line bg-raised'}`}
               >
                 <div className="flex items-baseline justify-between gap-2">
-                  <p className="text-[12px] font-black text-white">{tier.name}</p>
-                  <p className="text-[12px] font-black text-indigo-300 font-mono">₹{tier.priceInr}<span className="text-[9px] text-[#8b949e] font-bold">/{tier.days}d</span></p>
+                  <p className="text-[12px] font-black text-ink">{tier.name}</p>
+                  <p className="text-[12px] font-black text-accent-text font-mono">₹{tier.priceInr}<span className="text-[9px] text-muted font-bold">/{tier.days}d</span></p>
                 </div>
-                <p className="text-[10px] text-[#8b949e] font-semibold">{tier.tagline}</p>
+                <p className="text-[10px] text-muted font-semibold">{tier.tagline}</p>
                 {/* THE HEADING IS THE FIX (admin 2026-09-13). The list was identical before and still
                     read as a price list; naming it as INCLUDED is what answers "₹149 bhi dega aur
                     wallet se bhi?" before the question is asked. */}
-                <p className="text-[9px] font-black uppercase tracking-wider text-emerald-400">
+                <p className="text-[9px] font-black uppercase tracking-wider text-success">
                   Included — no extra charge
                 </p>
                 <ul className="space-y-1">
                   {tier.includes.map((line) => (
-                    <li key={line} className="text-[10px] text-[#c9d1d9] flex items-start gap-1.5">
-                      <Check className="w-3 h-3 text-emerald-400 shrink-0 mt-0.5" />
+                    <li key={line} className="text-[10px] text-body flex items-start gap-1.5">
+                      <Check className="w-3 h-3 text-success shrink-0 mt-0.5" />
                       <span>{line}</span>
                     </li>
                   ))}
@@ -269,19 +269,19 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
                 {/* The one thing that can cost more, kept small and last — where an exception belongs.
                     Removing it would be dishonest; leading with it is what made the plan read as a
                     double charge. */}
-                <p className="text-[9.5px] text-[#8b949e] leading-relaxed border-t border-white/5 pt-2">
+                <p className="text-[9.5px] text-muted leading-relaxed border-t border-line pt-2">
                   Past {tier.includedFrontendGb} GB of visitor traffic — or {tier.includedBackendGb} GB on your
                   server apps — extra traffic is ₹{HOSTING_OVERAGE_INR_PER_GB}/GB. You see your usage before
                   anything extra is charged.
                 </p>
 
                 {held ? (
-                  <p className="text-[10px] font-black uppercase tracking-wider text-emerald-400">Your current plan</p>
+                  <p className="text-[10px] font-black uppercase tracking-wider text-success">Your current plan</p>
                 ) : (
                   <button
                     onClick={() => openTerms(tier)}
                     disabled={busy}
-                    className="w-full px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50"
+                    className="w-full px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider bg-indigo-600 hover:bg-indigo-700 text-on-accent disabled:opacity-50"
                   >
                     {open ? 'Close terms' : (active ? `Switch to ${tier.name} — ₹${tier.priceInr}` : `Choose ${tier.name} — ₹${tier.priceInr}`)}
                   </button>
@@ -292,10 +292,10 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
                     and on the server for real. */}
                 {open && (
                   <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-3 space-y-2">
-                    <p className="text-[10px] font-black uppercase tracking-wider text-amber-300">Before you buy — please read</p>
+                    <p className="text-[10px] font-black uppercase tracking-wider text-warn">Before you buy — please read</p>
                     <ul className="space-y-1.5">
                       {hostingAgreementTerms(tier).map((term) => (
-                        <li key={term} className="text-[10px] text-[#c9d1d9] leading-relaxed">• {term}</li>
+                        <li key={term} className="text-[10px] text-body leading-relaxed">• {term}</li>
                       ))}
                     </ul>
                     <label className="flex items-start gap-2 cursor-pointer select-none pt-1">
@@ -305,7 +305,7 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
                         onChange={(e) => setAgreed(e.target.checked)}
                         className="mt-0.5 accent-emerald-500 w-3.5 h-3.5"
                       />
-                      <span className="text-[10px] font-bold text-white">OK — I have read and accept these terms.</span>
+                      <span className="text-[10px] font-bold text-ink">OK — I have read and accept these terms.</span>
                     </label>
                     {/* The renewal choice belongs HERE, beside the price, not on the screen after
                         payment. It is ticked by default because the terms above already say the plan
@@ -317,7 +317,7 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
                         onChange={(e) => setAutoRenew(e.target.checked)}
                         className="mt-0.5 accent-emerald-500 w-3.5 h-3.5"
                       />
-                      <span className="text-[10px] text-[#c9d1d9] leading-relaxed">
+                      <span className="text-[10px] text-body leading-relaxed">
                         Renew automatically every {tier.days} days (₹{tier.priceInr} each time). Untick to pay once — the
                         plan then simply ends on its expiry date. You can change this any time.
                       </span>
@@ -325,7 +325,7 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
                     <button
                       onClick={() => purchase(tier)}
                       disabled={busy || !agreed}
-                      className="w-full px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="w-full px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-on-accent disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       {busy ? 'Processing…' : `Pay ₹${tier.priceInr} from my wallet`}
                     </button>
@@ -336,7 +336,7 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
           })}
         </div>
 
-        <p className="text-[10px] text-[#8b949e] leading-relaxed">
+        <p className="text-[10px] text-muted leading-relaxed">
           Need more than this — many sites, heavy traffic, or a dedicated setup? Write to us and we
           will build the plan around what you actually need, instead of selling you a bigger box.
         </p>
@@ -344,20 +344,20 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
       </div>
 
       {/* Database */}
-      <div className="flex items-start gap-3 rounded-xl border border-white/5 px-4 py-3">
-        <Database className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+      <div className="flex items-start gap-3 rounded-xl border border-line px-4 py-3">
+        <Database className="w-4 h-4 text-success shrink-0 mt-0.5" />
         <div>
-          <p className="text-[12px] font-bold text-white">Database — Free</p>
-          <p className="text-[11px] text-[#8b949e] mt-0.5">Your apps' databases run on your own account, so there is nothing to charge. Always ₹0.</p>
+          <p className="text-[12px] font-bold text-ink">Database — Free</p>
+          <p className="text-[11px] text-muted mt-0.5">Your apps' databases run on your own account, so there is nothing to charge. Always ₹0.</p>
         </div>
       </div>
 
       {/* Coding */}
-      <div className="flex items-start gap-3 rounded-xl border border-white/5 px-4 py-3">
-        <Cpu className="w-4 h-4 text-orange-400 shrink-0 mt-0.5" />
+      <div className="flex items-start gap-3 rounded-xl border border-line px-4 py-3">
+        <Cpu className="w-4 h-4 text-warn shrink-0 mt-0.5" />
         <div>
-          <p className="text-[12px] font-bold text-white">Coding — pay as you use</p>
-          <p className="text-[11px] text-[#8b949e] mt-0.5">Builds and AI assistants charge this same wallet by real usage — every charge shows in the ledger below. No subscription needed.</p>
+          <p className="text-[12px] font-bold text-ink">Coding — pay as you use</p>
+          <p className="text-[11px] text-muted mt-0.5">Builds and AI assistants charge this same wallet by real usage — every charge shows in the ledger below. No subscription needed.</p>
         </div>
       </div>
     </div>

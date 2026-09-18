@@ -157,7 +157,7 @@ export const ReferralPanel: React.FC<{
 
   if (!enabled) {
     return (
-      <div className="rounded-2xl border border-white/5 bg-black/20 p-6 text-xs font-semibold text-[#8b949e]">
+      <div className="rounded-2xl border border-line bg-well p-6 text-xs font-semibold text-muted">
         Referral rewards are not available right now.
       </div>
     );
@@ -179,10 +179,10 @@ export const ReferralPanel: React.FC<{
         onSignInInstead={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { signIn: 'phone' } }))}
       />
       {/* Your code — shareable EVERYWHERE, including the website. Only claiming is Android-only. */}
-      <div className="rounded-2xl border border-amber-500/20 bg-black/30 p-6">
-        <h4 className="text-[10px] font-black uppercase tracking-widest text-[#8b949e]">Your Referral Code</h4>
-        <div className="mt-3 flex items-center justify-between gap-4 rounded-xl border border-white/10 bg-[#0d1117] px-5 py-3.5">
-          <span className="font-mono text-base font-black tracking-widest text-amber-400">{code ?? '—'}</span>
+      <div className="rounded-2xl border border-amber-500/20 bg-well p-6">
+        <h4 className="text-[10px] font-black uppercase tracking-widest text-muted">Your Referral Code</h4>
+        <div className="mt-3 flex items-center justify-between gap-4 rounded-xl border border-line bg-surface px-5 py-3.5">
+          <span className="font-mono text-base font-black tracking-widest text-warn">{code ?? '—'}</span>
           <button
             disabled={!code}
             onClick={() => {
@@ -209,26 +209,26 @@ export const ReferralPanel: React.FC<{
         >
           <Share2 className="h-3.5 w-3.5" /> Share
         </button>
-        <p className="mt-4 text-xs font-semibold leading-relaxed text-amber-200/70">
+        <p className="mt-4 text-xs font-semibold leading-relaxed text-warn">
           You earn ₹25 for each of your friend&rsquo;s three verifications — ₹75 per friend,
           up to ₹{capRupees} in total. Your friend must apply it in the Android app.
         </p>
-        <p className="mt-2 text-[11px] font-bold text-[#8b949e]">
-          Earned so far: <span className="text-emerald-400">₹{earnedRupees}</span> of ₹{capRupees}
-          {capReached && <span className="ml-1 text-amber-400">— you have reached the maximum.</span>}
+        <p className="mt-2 text-[11px] font-bold text-muted">
+          Earned so far: <span className="text-success">₹{earnedRupees}</span> of ₹{capRupees}
+          {capReached && <span className="ml-1 text-warn">— you have reached the maximum.</span>}
         </p>
       </div>
 
       {/* The four steps. */}
-      <div className="rounded-2xl border border-white/5 bg-black/20 p-6">
-        <h4 className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-white">
-          <Gift className="h-4 w-4 text-emerald-400" /> Your free credit
+      <div className="rounded-2xl border border-line bg-well p-6">
+        <h4 className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-ink">
+          <Gift className="h-4 w-4 text-success" /> Your free credit
         </h4>
 
         {!isAndroid && (
           // Honest, and the reason is stated rather than hidden. The website has no device check, so
           // it cannot pay anything — showing a Claim button here would be a button that cannot work.
-          <p className="mt-3 rounded-xl border border-white/10 bg-black/30 p-3 text-[11px] font-semibold text-[#8b949e]">
+          <p className="mt-3 rounded-xl border border-line bg-well p-3 text-[11px] font-semibold text-muted">
             These bonuses are claimed in the NavBharatAI Android app, where each one is checked against
             your device. You can still copy and share your code from here.
           </p>
@@ -245,12 +245,12 @@ export const ReferralPanel: React.FC<{
               : row.step === 'github' ? { label: 'Connect', onClick: () => void connectGithub() }
               : null;
             return (
-              <li key={row.step} className="flex items-center justify-between gap-3 rounded-xl border border-white/5 bg-[#0d1117] px-4 py-3">
+              <li key={row.step} className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-3">
                 <span className="flex min-w-0 items-center gap-2">
                   {row.claimed
-                    ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+                    ? <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
                     : <Circle className="h-4 w-4 shrink-0 opacity-40" />}
-                  <span className={`truncate text-[11px] font-semibold ${row.claimed ? 'text-[#8b949e] line-through' : 'text-white'}`}>
+                  <span className={`truncate text-[11px] font-semibold ${row.claimed ? 'text-muted line-through' : 'text-ink'}`}>
                     {row.label}
                   </span>
                 </span>
@@ -258,12 +258,12 @@ export const ReferralPanel: React.FC<{
                   blocked
                     ? (
                       <span className="flex shrink-0 items-center gap-2">
-                        <span className="text-[10px] font-bold text-amber-400/80">{blocked}</span>
+                        <span className="text-[10px] font-bold text-warn">{blocked}</span>
                         {action && (
                           <button
                             onClick={action.onClick}
                             disabled={busy !== null}
-                            className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white transition-all hover:bg-indigo-500 disabled:opacity-40"
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-on-accent transition-all hover:bg-indigo-500 disabled:opacity-40"
                           >
                             {busy === row.step && <Loader2 className="h-3 w-3 animate-spin" />}
                             {action.label}
@@ -275,7 +275,7 @@ export const ReferralPanel: React.FC<{
                       <button
                         onClick={() => claim(row.step)}
                         disabled={busy !== null}
-                        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white transition-all hover:bg-emerald-500 disabled:opacity-40"
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-on-accent transition-all hover:bg-emerald-500 disabled:opacity-40"
                       >
                         {busy === row.step && <Loader2 className="h-3 w-3 animate-spin" />}
                         Claim ₹{row.rupees}
@@ -289,33 +289,33 @@ export const ReferralPanel: React.FC<{
 
         {/* Apply a friend's code — Android only, and only while the account has none. */}
         {isAndroid && !referred && (
-          <div className="mt-5 border-t border-white/5 pt-5">
-            <h5 className="text-[10px] font-black uppercase tracking-widest text-[#8b949e]">Have a friend&rsquo;s code?</h5>
+          <div className="mt-5 border-t border-line pt-5">
+            <h5 className="text-[10px] font-black uppercase tracking-widest text-muted">Have a friend&rsquo;s code?</h5>
             <div className="mt-2.5 flex gap-3">
               <input
                 type="text"
                 value={codeInput}
                 onChange={(e) => setCodeInput(e.target.value)}
                 placeholder="Enter referral code"
-                className="flex-1 rounded-xl border border-white/10 bg-[#0d1117] px-4 py-3 font-mono text-xs font-bold uppercase tracking-widest text-white transition-colors focus:border-amber-500 focus:outline-none"
+                className="flex-1 rounded-xl border border-line bg-surface px-4 py-3 font-mono text-xs font-bold uppercase tracking-widest text-ink transition-colors focus:border-amber-500 focus:outline-none"
               />
               <button
                 onClick={redeem}
                 disabled={busy !== null || !codeInput.trim()}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 px-6 py-3 text-[9px] font-black uppercase tracking-widest text-black transition-all hover:bg-amber-600 disabled:bg-amber-500/20 disabled:text-[#8b949e]/30"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 px-6 py-3 text-[9px] font-black uppercase tracking-widest text-black transition-all hover:bg-amber-600 disabled:bg-amber-500/20 disabled:text-on-accent"
               >
                 {busy === 'redeem' && <Loader2 className="h-3 w-3 animate-spin" />} Apply
               </button>
             </div>
-            <p className="mt-2 text-[10px] font-semibold text-[#8b949e]">A code can be applied once, to a new account.</p>
+            <p className="mt-2 text-[10px] font-semibold text-muted">A code can be applied once, to a new account.</p>
           </div>
         )}
 
         {notice && (
           <div className={`mt-4 flex items-center gap-2 rounded-xl p-3 text-xs font-semibold ${
             notice.kind === 'ok'
-              ? 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
-              : 'border border-red-500/20 bg-red-500/10 text-red-400'}`}>
+              ? 'border border-emerald-500/20 bg-emerald-500/10 text-success'
+              : 'border border-red-500/20 bg-red-500/10 text-danger'}`}>
             {notice.kind === 'ok' ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
             <span>{notice.text}</span>
           </div>

@@ -1550,7 +1550,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     setShowConfirmModal(true);
                   }}
                   disabled={deployStatus === 'validating' || deployStatus === 'building'}
-                  className="w-full h-8 bg-raised hover:bg-raised border border-line disabled:opacity-40 text-muted hover:text-ink rounded-xl text-[9px] font-black uppercase tracking-[0.15em] flex items-center justify-center gap-2 transition-all"
+                  className="w-full h-8 bg-raised hover:bg-raised-hover border border-line disabled:opacity-40 text-muted hover:text-ink rounded-xl text-[9px] font-black uppercase tracking-[0.15em] flex items-center justify-center gap-2 transition-all"
                   title="Push your local commits to the remote (a remote→local pull is not performed)"
                 >
                   <RefreshCcw className="w-3 h-3" />
@@ -1765,7 +1765,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     return (
                       <div 
                         key={item.id} 
-                        className="p-2.5 rounded-xl bg-raised hover:bg-raised border border-line flex items-center justify-between gap-3 text-xs font-bold shrink-0 transition-all cursor-pointer group"
+                        className="p-2.5 rounded-xl bg-raised hover:bg-raised-hover border border-line flex items-center justify-between gap-3 text-xs font-bold shrink-0 transition-all cursor-pointer group"
                         onClick={() => window.open(item.url, '_blank')}
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
@@ -1998,7 +1998,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                         }
                       }}
                       disabled={isSyncRunning}
-                      className="w-full p-2 rounded-lg bg-raised hover:bg-raised border border-line hover:border-indigo-600/40 transition-all text-left flex justify-between items-center focus:ring-1 focus:ring-indigo-600/30"
+                      className="w-full p-2 rounded-lg bg-raised hover:bg-raised-hover border border-line hover:border-indigo-600/40 transition-all text-left flex justify-between items-center focus:ring-1 focus:ring-indigo-600/30"
                     >
                       <div className="min-w-0 pr-2 leading-none">
                         <h4 className="text-[11px] font-extrabold text-body truncate">{project.displayName}</h4>
@@ -2184,7 +2184,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
               <div className="flex items-center gap-2.5 pt-2">
                 <button
                   onClick={() => setShowConfirmModal(false)}
-                  className="flex-1 py-3 bg-raised hover:bg-raised active:scale-95 border border-line text-ink rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer text-center"
+                  className="flex-1 py-3 bg-raised hover:bg-raised-hover active:scale-95 border border-line text-ink rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer text-center"
                 >
                   Cancel
                 </button>
@@ -2251,7 +2251,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
               <div className="border border-line bg-well rounded-xl overflow-hidden">
                 <button 
                   onClick={() => setIsLogsExpanded(!isLogsExpanded)}
-                  className="w-full flex items-center justify-between p-2.5 bg-raised hover:bg-raised transition-all font-mono text-[9px] font-bold text-body"
+                  className="w-full flex items-center justify-between p-2.5 bg-raised hover:bg-raised-hover transition-all font-mono text-[9px] font-bold text-body"
                 >
                   <span className="flex items-center gap-1.5 uppercase text-[8.5px] tracking-wider text-accent-text">
                     <Terminal className="w-3 h-3 text-accent-text" />
@@ -2308,7 +2308,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                 </button>
                 <button
                   onClick={handleCopyLogs}
-                  className="py-2 bg-raised hover:bg-raised text-ink rounded-xl text-[9px] font-extrabold uppercase tracking-widest transition-all cursor-pointer text-center flex items-center justify-center gap-1.5"
+                  className="py-2 bg-raised hover:bg-raised-hover text-ink rounded-xl text-[9px] font-extrabold uppercase tracking-widest transition-all cursor-pointer text-center flex items-center justify-center gap-1.5"
                 >
                   <Copy className="w-3 h-3 text-muted" />
                   Copy Logs
@@ -2320,7 +2320,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     setIsAutoRetryActive(false);
                     setRetryCountdown(null);
                   }}
-                  className="py-2 bg-raised hover:bg-raised text-muted hover:text-ink rounded-xl text-[9px] font-extrabold uppercase tracking-widest transition-all cursor-pointer text-center flex items-center justify-center gap-1.5"
+                  className="py-2 bg-raised hover:bg-raised-hover text-muted hover:text-ink rounded-xl text-[9px] font-extrabold uppercase tracking-widest transition-all cursor-pointer text-center flex items-center justify-center gap-1.5"
                 >
                   Dismiss
                 </button>

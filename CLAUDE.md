@@ -2256,6 +2256,18 @@ the flag entries above promise.
   page's self-retry is CAPPED (~2 min) because a door hit RESUMES a paused sandbox — uncapped, an
   abandoned open tab would fight the idle reaper forever at real E2B cost; (2) `off` stops both minting
   and answering, and the client falls back to the old stored-URL behaviour byte-identically.
+- **`TIME_TO_FIRST_RENDER` / `POST_GREEN_WRITES` — the measurement that decides the next protection
+  (added 2026-09-18; no flag, always on, zero cost).** After Option A, before anything stronger: when did
+  the app first render in a real browser, and WHO wrote to it afterwards, and did it survive?
+  `postGreenWrites.ts` (pure) + a second observer at the freeze's own chokepoint
+  (`greenFreeze.setWriteObserver`, fired on every ALLOWED `assertWriteAllowed`, so tool writes, heals,
+  restores and sub-agents are all seen once; infra paths never). The `POST_GREEN_WRITES` line's SEVERITY
+  is the finding: nothing wrote → info; wrote and still rendered → info; **wrote and ended PROVEN BROKEN
+  → warning naming the writers** — the evidence the two candidate protections (verify-and-revert per
+  post-green write; the freeze armed before the gate stretch) are waiting for. ⚠️ **Do not build either
+  of those until this line has produced warnings on real builds** — as of this date no report shows a
+  pass breaking a green app, and #3084 shipped `READY_BEFORE_END` first for the same reason. Both codes
+  are `PROCESS_ONLY_CODES` and `NEVER_SUGGEST`. Test-locked in `tests/whoWroteAfterTheAppWasGreen.test.ts`.
 - **`AGENTV3_IN_BUILD_GREEN`** (default ON, set `off` to disable — added 2026-09-18, admin: *"navbharatai
   dwara app banne ke baad tutni nahi chahiye!!!!!"*) — **a working app is never lost to later edits in the
   SAME build.** GreenGuard (2026-08-09, the admin's identical sentence then) restores a PREVIOUS build's
@@ -2279,6 +2291,24 @@ the flag entries above promise.
   `fromThisBuild`). Test-locked and reversion-proven four ways in
   `tests/aWorkingAppIsNeverLostToItsOwnBuild.test.ts`. **What to watch:** `IN_BUILD_GREEN` appearing
   a minute or two into builds, and `GREEN_GUARD_RESTORED` on FIRST builds — which was impossible before.
+- **`AGENTV3_GREEN_REVIEW_LEAN`** (default ON, set `off` to disable — added 2026-09-18, autopsy b6f88a72) —
+  **a suggestion costs a suggestion's price.** `reviewerShouldWrite` (Green Stop) already makes the
+  post-build reviewer suggest-only on a proven-green app — no repair, nothing it says can fail the
+  build — yet it ran at full budget and the full 40-step sub-agent cap: on the Gita build **40 calls,
+  `src/App.tsx` read six times, 523,374 input tokens = 34% of the build's LLM spend, zero characters
+  back.** Now `greenReviewPlan` (`greenReviewPolicy.ts`) is that SAME write rule reused — never a
+  second "is it green?" question — and exactly when the review can only suggest it is also lean: a
+  hard step cap (`GREEN_REVIEW_MAX_STEPS` = 12, a second `makeSubAgentSpawn` from the hoisted
+  `subAgentDeps`), a 45 s budget (`GREEN_REVIEW_BUDGET_MS`, the existing floor, via
+  `reviewerBudgetMs(…, { previewGreen })`), and an instruction that says so (`reviewBuild({ mode:
+  'suggest' })`, built by the now-pure `reviewerInstruction`). ⚠️ **Where the reviewer can WRITE —
+  not green AND (build failed OR proven broken) — nothing changes: full budget, full steps.** The cut
+  is in TOKENS, never in strictness. ⚠️ "Could not look" (not green, not proven broken, build ok) is
+  ALSO lean, on purpose: Green Stop already made it suggest-only (*ignorance is not a licence to
+  edit*, 2026-08-23), so an offer costs an offer's price there too. Report code `REVIEW_LEAN`.
+  Test-locked and reversion-proven four ways in `tests/aSuggestionCostsASuggestionsPrice.test.ts`.
+  **What to watch:** reviewer token share on green builds (34% → single digits expected), and that
+  the reviewer's findings on NOT-green builds are as complete as before.
 - **`AGENTV3_JOURNEY_CHECK`** (default ON, set `off` to disable) — after a successful build with a live
   preview, derives a real user journey from the app's OWN markup and runs it in the sandbox's pre-baked
   browser: fill the form, submit, **reload, and check the item is still there**. That last step is the
@@ -2805,6 +2835,8 @@ is now enforced at the source, by CI.**
   **brand-coloured label keeps its literal** — `text-amber-400` stays, because `text-warn` is dark
   amber on Light and the panel under it is near-black on every theme (2.59:1); same for a hex brand
   ink such as Figma's `#a259ff` on its own dark chip.
+  A **translucent tint** (`bg-amber-500/10`) is not a surface either — the fixed box shows through it,
+  so "does this element have its own background?" means a resting, OPAQUE one (`hasOwnOpaqueBackground`).
   ⚠️ **While `theme-compat.css` still exists, a GitHub-dark literal is NOT self-coherent** — compat
   repaints `bg-[#0d1117]` per theme, so a fixed ink left on it goes invisible on Light. A code block
   whose background compat owns must have its ink themed too (`bg-surface text-info`), not frozen.
@@ -3052,6 +3084,38 @@ the plan rather than by the window. It answers the five ceilings by name: contex
 saves the plan and projects the todos, ~18571 marks each module done/failed after its turn, ~19591
 auto-continues to the next buildable module). This is a live path behind a flag, not dead code —
 unlike `EmbeddingSearch`, whose only reader is called from nowhere.
+
+✅ **SET `on` IN CLOUD RUN BY THE ADMIN 2026-09-18** — the two-month-old pending decision above is
+taken, and Software Project Mode is live for every user. ⚠️ **It had never run for a single real
+build before that moment**, so the first real mega-prompts are its first evidence; treat it as new.
+
+🔴 **AND THE SWITCH WAS MEASURED THE SAME HOUR: THE DOOR IT OPENS WAS BOLTED.** `megaProjectSignals`
+counted `^- ` / `^1. ` LINES, so **not one of fourteen realistic prompts fired** — "school ERP with
+students, teachers, attendance, fees, exams, timetable, library, transport" scored **zero**, while
+`ProjectPlan.test.ts`'s own passing case is the same system written as a bulleted spec. **The gate was
+built to read a DEVELOPER's spec; real users write one line with commas.** Identical class to the
+scoring fix shipped hours earlier that day (`COMPLEX_APP_SIGNAL` listed the words a developer writes
+and scored "hospital management system" 5 — the score of "hi"): the instance was fixed in the SIZER,
+the two GATES were never hunted.
+- Both now ask one shared counter, `src/server/AgentV3/enumeratedFeatures.ts`
+  (`countEnumeratedFeatures`), which reads bullet lines AND inline `a, b, c` / `a aur b` runs.
+- ⚠️ **`MEGA_BULLETS_WITH_NOUN` moved 8 → 6**, and 6 is not invented: `complexityFromPrompt` already
+  floors a named complex app's `featureCount` at six. It is the weaker half of an AND (a big-software
+  noun must be present too). Measured margin: every ordinary app prompt counts **0–2**, every real
+  project prompt **5–8** — six sits in the gap, not on an edge.
+- 🔎 **SIBLING FIXED IN THE SAME CHANGE (rule 3): `featureCount` in `lib/appScopeAnalyzer.ts`**, the
+  gate behind `AGENTV3_MEGA_ROADMAP` (on by default), was blind the same way — it saw only bullet
+  lines plus loose verbs, so eight comma-listed modules read as the single word "with", halved away.
+  It takes the **MAX** of its old count and the shared one, never the sum: that gate spends a real
+  planner call on every user's build, so it may only become more right, never more eager. Measured:
+  **zero** ordinary prompts flipped to `analyze`.
+- Test-locked and reversion-proven in all three halves in
+  `tests/theGateReadsBulletsUsersWriteCommas.test.ts` (17 cases), whose ORDINARY corpus is the
+  precision lock — a later widening that drags a todo app in fails CI.
+
+⚠️ **What to watch on the first real builds:** the `PROJECT_MODE` report line, and whether a big
+request's module plan appears and advances. A build that takes an extra planner call and then
+decomposes is the feature working; a *small* app doing that is the precision lock having been broken.
 
 ⚠️ **UNSET ⇒ OFF, and every build is byte-identical to today.** The flag takes `on` (everyone),
 `off`/unset (the kill switch), or **anything else as an ALLOWLIST of uids/emails** — built

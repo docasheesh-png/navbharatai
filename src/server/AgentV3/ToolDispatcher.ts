@@ -3300,9 +3300,24 @@ export class ToolDispatcher {
       case 'grep': {
         const pattern = reqStr(input, 'pattern');
         const path = optStr(input, 'path') ?? '.';
+        /**
+         * 🔴 THE ONE SEARCH IN THIS FILE THAT EXCLUDED NOTHING (build b6f88a72, 2026-09-18).
+         *
+         * Eight other search paths here carry a `SKIP_DIR` / `EXCLUDE` pattern for exactly these
+         * directories; the agent-facing `grep` tool ran a bare `grep -rn`. A reviewer's
+         * `grep <pattern> .` therefore walked `node_modules/.vite/deps/*.js.map` and returned a
+         * result of **2,709,481 characters** — which was then truncated to ~12k tokens, so the
+         * machine paid for the walk and the model still did not get its answer.
+         *
+         * The set is copied from this file's own `SKIP_DIR`, so there is one vocabulary of
+         * "not the user's code", not two. An explicit path is still searched as given — only the
+         * unqualified walk is bounded, which is the case that produced this.
+         */
+        const EXCLUDED_DIRS = ['node_modules', '.git', 'dist', 'build', 'coverage', 'vendor', '.next', '__pycache__'];
+        const excludes = EXCLUDED_DIRS.map((d) => `--exclude-dir=${shellQuote(d)}`).join(' ');
         const { stdout } = await this.actuator.runCommand(
           this.workspaceId,
-          `grep -rn ${shellQuote(pattern)} ${shellQuote(path)} || true`,
+          `grep -rn ${excludes} ${shellQuote(pattern)} ${shellQuote(path)} || true`,
         );
         // T1-sec-redact: grep can surface a secret sitting in a matched line (e.g. `grep KEY .env`).
         return redactSecrets(stdout.trim()) || '(no matches)';

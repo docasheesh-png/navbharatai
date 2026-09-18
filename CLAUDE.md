@@ -2256,6 +2256,18 @@ the flag entries above promise.
   page's self-retry is CAPPED (~2 min) because a door hit RESUMES a paused sandbox — uncapped, an
   abandoned open tab would fight the idle reaper forever at real E2B cost; (2) `off` stops both minting
   and answering, and the client falls back to the old stored-URL behaviour byte-identically.
+- **`TIME_TO_FIRST_RENDER` / `POST_GREEN_WRITES` — the measurement that decides the next protection
+  (added 2026-09-18; no flag, always on, zero cost).** After Option A, before anything stronger: when did
+  the app first render in a real browser, and WHO wrote to it afterwards, and did it survive?
+  `postGreenWrites.ts` (pure) + a second observer at the freeze's own chokepoint
+  (`greenFreeze.setWriteObserver`, fired on every ALLOWED `assertWriteAllowed`, so tool writes, heals,
+  restores and sub-agents are all seen once; infra paths never). The `POST_GREEN_WRITES` line's SEVERITY
+  is the finding: nothing wrote → info; wrote and still rendered → info; **wrote and ended PROVEN BROKEN
+  → warning naming the writers** — the evidence the two candidate protections (verify-and-revert per
+  post-green write; the freeze armed before the gate stretch) are waiting for. ⚠️ **Do not build either
+  of those until this line has produced warnings on real builds** — as of this date no report shows a
+  pass breaking a green app, and #3084 shipped `READY_BEFORE_END` first for the same reason. Both codes
+  are `PROCESS_ONLY_CODES` and `NEVER_SUGGEST`. Test-locked in `tests/whoWroteAfterTheAppWasGreen.test.ts`.
 - **`AGENTV3_IN_BUILD_GREEN`** (default ON, set `off` to disable — added 2026-09-18, admin: *"navbharatai
   dwara app banne ke baad tutni nahi chahiye!!!!!"*) — **a working app is never lost to later edits in the
   SAME build.** GreenGuard (2026-08-09, the admin's identical sentence then) restores a PREVIOUS build's

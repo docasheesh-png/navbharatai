@@ -314,6 +314,7 @@ import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairProm
 import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, redTeamEnabled, type FuzzInput, type FuzzCase, type FuzzVerdict } from '../AgentV3/FuzzProbe';
 import { billedAmountUsd, sonnetEquivalentUsd, powerToTier, type BillingPowerLevel } from '../AgentV3/pricing';
 import { tieredMarkupUsd, realProviderCostUsd } from '../AgentV3/providerRates';
+import { splitUnbilledCost } from '../AgentV3/unbilledTurns';
 import { createUsageSink } from '../AgentV3/UsageSink';
 import {
   createProviderUsageLedger,
@@ -1731,6 +1732,12 @@ export function decideBuildBilledUsd(
    */
   realCostUsd: number;
   sandboxUsd: number;
+  /**
+   * The part of `realCostUsd` spent on turns that produced NOTHING a caller could use, and which was
+   * therefore left out of the base the markup is applied to. Always ≤ realCostUsd, and 0 on every
+   * build where no turn starved — i.e. on the normal path this whole change is a no-op.
+   */
+  absorbedUnbilledUsd: number;
 } {
   const reconciledProviderUsage = reconcileWithSink(providerLedger.byProvider(), sinkTotal);
   const flatBilledUsd = billedAmountUsd(sinkTotal, powerLevel);
@@ -1740,19 +1747,34 @@ export function decideBuildBilledUsd(
     outputTokens: Math.max(0, (sinkTotal.outputTokens || 0) - (ledgerAttributed.outputTokens || 0)),
   };
   const isOpusTier = powerToTier(powerLevel) === 'opus';
-  const tokenCost = realProviderCostUsd(providerLedger.entries(), realCostRemainder);
+  // OUR cost (`tokenCost`) is the FULL ledger and must stay so — it is what the admin cost card
+  // prints beside the bill, and what `ledgerCostUsd` hands the mid-build cost ceiling. What the USER
+  // is billed for is the same ledger MINUS the turns that produced nothing a caller could use: the
+  // 4× markup is not the problem, applying it to work that delivered nothing is (admin 2026-09-18,
+  // build b6f88a72 — a post-build reviewer that spent ~520,000 input tokens and returned not one
+  // character). `splitUnbilledCost` prices both halves through the SAME rate card and DERIVES the
+  // absorbed figure as the difference, so an explanation can never diverge from the amount charged.
+  const costSplit = splitUnbilledCost(providerLedger.entries(), realCostRemainder);
+  const tokenCost = costSplit.realCostUsd;
+  const billableTokenCost = costSplit.billableCostUsd;
   const vmCost = Math.max(0, sandboxUsd || 0);
   let effectiveBilledUsd: number;
   if (isOpusTier) {
     effectiveBilledUsd = flatBilledUsd; // real Opus × 2 — unchanged
   } else if (realCostBillingEnabled()) {
-    effectiveBilledUsd = tieredMarkupUsd(tokenCost + vmCost);
+    effectiveBilledUsd = tieredMarkupUsd(billableTokenCost + vmCost);
   } else {
     effectiveBilledUsd = (perTierBillingEnabled() || costRoutingActiveFor(userId, email))
       ? perTierBilledUsd(reconciledProviderUsage, powerLevel)
       : flatBilledUsd;
   }
-  return { effectiveBilledUsd, reconciledProviderUsage, realCostRemainder, isOpusTier, realCostUsd: tokenCost, sandboxUsd: vmCost };
+  return {
+    effectiveBilledUsd, reconciledProviderUsage, realCostRemainder, isOpusTier,
+    realCostUsd: tokenCost, sandboxUsd: vmCost,
+    // What we spent on turns that produced nothing and did NOT pass on. Surfaced so the gap
+    // between real cost and bill is explained rather than merely visible.
+    absorbedUnbilledUsd: costSplit.absorbedCostUsd,
+  };
 }
 
 /**
@@ -3157,7 +3179,7 @@ function unavailableTierRunner(level: PowerLevel, ladderText: string, missingKey
  * build when the floor was off, which is exactly what the rule forbids. A 429-storm on rung 1 now costs
  * one failed call per cooldown window (the shared bench still sidelines the rung), not a reorder.
  */
-export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; complex?: boolean; afterLeadRung?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void;
+export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; complex?: boolean; afterLeadRung?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean }, model?: string, cacheReadInputTokens?: number) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void;
   /** Retired-rung memory owned by the CALLER, so it can span several runner instances — the fast
    *  lane's per-file runners share ONE build's map. Omitted ⇒ each runner keeps its own, as before.
    *  See MultiProviderOptions.deadRungs for why this is caller-owned and never a singleton. */
@@ -11520,6 +11542,19 @@ async function noteBuildOutcome(
             powerLevel: powerLevelReqEffective,
             noClaude: noClaudeBuild,
           });
+          // Same explanation as the normal settle records — the watchdog path bills through the SAME
+          // `decideBuildBilledUsd`, so it must say the same thing about the same number. CLAUDE.md's
+          // Fix 67 is what this finalizer drifting from the settle once already cost.
+          if (decided.absorbedUnbilledUsd > 0) {
+            buildDiagRef?.record({
+              phase: 'build', severity: 'info', code: 'UNBILLED_BARREN_WORK',
+              autoResolved: true,
+              message: `₹${(decided.absorbedUnbilledUsd * usdInrRate()).toFixed(2)} of engine work produced nothing and was not billed`,
+              detail: 'One or more model turns spent their whole output budget without producing any text or '
+                + 'tool call. Counted in full in this report\'s real cost, left out of the base the markup is '
+                + `applied to. Absorbed: $${decided.absorbedUnbilledUsd.toFixed(6)}.`,
+            });
+          }
         } catch { /* billing enrichment is best-effort — never blocks finalization */ }
       }
       // STALE-SUCCESS SUMMARY ON THE TIMEOUT PATH (real report, 2026-09-14, an "EduTube" build):
@@ -12188,7 +12223,7 @@ async function noteBuildOutcome(
         shadowFastLaneLedger.add(used, usage, model);
       };
       billingCtx.providerLedger = providerLedger; // Fix 67 — expose to the wall-clock/advisory finalizer
-      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean }, model?: string, cacheReadInputTokens?: number): void => {
+      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean }, model?: string, cacheReadInputTokens?: number): void => {
         // 🔴 SAY IT WHEN WE DO NOT KNOW. A provider that returns no token counts contributes zeros to
         // the ledger, and zeros are indistinguishable from a turn that genuinely cost nothing — the
         // exact misreading autopsy f04421ef already paid for once, arriving here through a different
@@ -12220,7 +12255,10 @@ async function noteBuildOutcome(
         // provider's cheaper cache-read rate (usageCostUsd). Margin-safe: providers without a cache
         // line in the rate card price it at the full input rate (identical to before).
         const cacheRead = Number.isFinite(cacheReadInputTokens) && (cacheReadInputTokens ?? 0) > 0 ? (cacheReadInputTokens ?? 0) : 0;
-        providerLedger.add(used, cacheRead > 0 ? { ...usage, cacheReadInputTokens: cacheRead } : usage, model);
+        // `producedNothing` travels as the ledger's 4th argument, not inside `usage` — the tokens
+        // are added in FULL either way (we paid them); the flag only records the same counts a
+        // second time in the slice's `unbilled` subset, which is the only thing the bill subtracts.
+        providerLedger.add(used, cacheRead > 0 ? { ...usage, cacheReadInputTokens: cacheRead } : usage, model, usage.producedNothing === true);
         // …and accumulate the build total for the diagnostics report's cache-hit rate line.
         if (cacheRead > 0) {
           billingCtx.cacheReadInputTokens = (billingCtx.cacheReadInputTokens ?? 0) + cacheRead;
@@ -20075,6 +20113,10 @@ async function noteBuildOutcome(
         // The platform's OWN cost, recorded beside the bill on every settle (success or failure) —
         // the admin cost card's source of truth. Priced by the same call that priced the bill.
         realCostUsd: decidedRealCostUsd, sandboxUsd: decidedSandboxUsd,
+        // What we spent on turns that produced nothing and did NOT pass on to the user. Recorded
+        // so the gap between real cost and bill is EXPLAINED rather than merely visible — a number
+        // the admin cannot account for is the same problem as a number that is wrong.
+        absorbedUnbilledUsd: decidedAbsorbedUsd,
       } = decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, livePreviewCharge.usd);
       // PLATFORM TELEMETRY — feed the admin Monitor / Health Score / FinOps the REAL engine's numbers.
       // Until this line, those panels saw only the legacy Engineer-AI builder and were blind to every
@@ -20513,6 +20555,22 @@ async function noteBuildOutcome(
             // Claude provider actually delivered a turn. A real leak flips this to false (+ the violation above).
             noClaude: noClaudeBuild && !leakedClaudeProvider,
           });
+          // WHY THE BILL IS BELOW THE COST, in the admin report and nowhere else (White-Label Law:
+          // this names no vendor, and it is admin-only regardless). Recorded only when it actually
+          // happened, so a normal build's report is unchanged.
+          if (decidedAbsorbedUsd > 0) {
+            buildDiag.record({
+              phase: 'build', severity: 'info', code: 'UNBILLED_BARREN_WORK',
+              // Nothing about the app is wrong — this is an accounting fact, so it resolves itself.
+              autoResolved: true,
+              message: `₹${(decidedAbsorbedUsd * usdInrRate()).toFixed(2)} of engine work produced nothing and was not billed`,
+              detail: 'One or more model turns spent their whole output budget without producing any text or '
+                + 'tool call, so they delivered nothing a caller could use. Their tokens are counted IN FULL in '
+                + `this report's real cost (we paid for them) and were left OUT of the base the markup is applied `
+                + `to, which is why the bill is below cost × markup here. Absorbed: $${decidedAbsorbedUsd.toFixed(6)}. `
+                + 'The real saving is not spending them at all — see unbilledTurns.ts.',
+            });
+          }
         } catch { /* report enrichment is best-effort — never blocks the report itself */ }
         // U-1 — record the signed determinism-audit manifest (routing inputs + sha256 of every written
         // file, HMAC-signed by SECRET_ENCRYPTION_KEY when present). Best-effort; never blocks the report.

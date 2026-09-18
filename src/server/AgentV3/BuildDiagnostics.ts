@@ -43,6 +43,10 @@ const PROCESS_ONLY_CODES = new Set([
   'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', // measurements of the ENGINE (postGreenWrites.ts), never app findings
   'GROUNDING_COST', 'POST_ANSWER_TIMING', 'SERVICE_GRAPH_MULTI', 'SERVICE_GRAPH_SINGLE',
   'JOURNEY_NOT_DERIVED', 'RELEASE_GATE',
+  // What we chose not to charge for is an accounting fact about OUR engine (unbilledTurns.ts).
+  // Counting it as a finding about the user's app is the provider-error-as-app-blocker class
+  // (autopsy 4efab9d7) through yet another door.
+  'UNBILLED_BARREN_WORK',
   // Our own journey runner produced nothing — a statement about OUR check, never about their app.
   'JOURNEY_NOT_RUN',
   // How this turn was ROUTED is a fact about our engine, never a finding about the user's app.

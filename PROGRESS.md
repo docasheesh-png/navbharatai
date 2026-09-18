@@ -67695,6 +67695,84 @@ code dropped from `PROCESS_ONLY` → 1 · the stopped branch removed → 1).
    capability gate (the VPN-app build spent 18 minutes on the same class).
 ---
 
+## 2026-09-18 — A turn that produced NOTHING is our cost, never the user's bill
+
+**The admin's question, verbatim: *"kya ham ₹ kuch jyada hi charge to nahi kar rahe hai??"*** The
+honest answer was that the 4× markup is defensible — at ₹152.90 that build was still far below Bolt
+(~₹360 for the same token volume) and Lovable (₹720–₹1,440 per feature) — and that applying it to
+work which delivered nothing is not.
+
+**The evidence, from build `b6f88a72` (verified from raw token counts, not report fields):** real cost
+$0.398342 (LLM $0.381374 + E2B $0.016968) = ₹38.24, billed $1.593365 = ₹152.90 at ₹95.96/$. Of that,
+the post-build reviewer consumed **~520,000 input tokens — 34% of the build, ≈₹12 — and returned
+`responseChars: 0` on every single call.** The user paid ×4 on it.
+
+### The class: `turnStarvedItsBudget` already names the turn. Its tokens went two different wrong ways.
+
+`floorBudget.ts`'s predicate — no text, no tool call, and either truncated or reasoning-only — is the
+exact definition of "carried nothing a caller can use". What happened to those tokens depended on
+which runner produced them, and both outcomes were wrong in **opposite** directions:
+
+- **A runner that THROWS** (`OpenAiToolRunner`, i.e. every GLM/Kimi rung) rejects before
+  `onTurnComplete` is reached, so the tokens reached **neither the ledger nor the build sink** — real
+  money paid to a provider, recorded nowhere, invisible to the admin cost card *and* to
+  `buildCostCeiling`'s mid-build stop. This is the "abandoned provider call recorded as zero tokens"
+  open root cause from the `b6f88a72` autopsy, closed here.
+- **A runner that does NOT throw** (the Claude path — `AgentRunner` carries its own net at the loop
+  level) returns the starved turn as a plain success, so its tokens went into the sink, the ledger,
+  **and straight onto the user's bill at the full markup.**
+
+### The rule, in one sentence
+
+Those tokens are counted **in full** as OUR cost, and subtracted from the base the user's markup is
+applied to. `src/server/AgentV3/unbilledTurns.ts` owns the whole concept (pure: `billableEntries`,
+`splitUnbilledCost`, `markAbandonedTurn`, `abandonedTurnUsage`); `ProviderModelEntry.unbilled` is an
+optional SUBSET of `usage`, never a deduction from it, so `realProviderCostUsd`, `ledgerCostUsd`,
+`byProvider()` and `total()` all keep seeing every rupee.
+
+🔒 **A clamp that shrank OUR number too would hide our own bleeding on the exact panel used to judge
+it** — the `E2B_USD_PER_HOUR` shape. So the gap is not merely visible, it is *explained*: both the
+normal settle and the watchdog finalizer record `UNBILLED_BARREN_WORK` naming the absorbed rupees.
+The code is in `PROCESS_ONLY_CODES` and `NEVER_SUGGEST` — what we chose not to charge for is an
+accounting fact about our engine, never a finding about the user's app (the
+provider-error-as-app-blocker class, autopsy `4efab9d7`, through yet another door).
+
+🔑 **Reported through `onTurnComplete`, not a second channel.** The abandoned turn's usage rides the
+error (`markAbandonedTurn`, a non-enumerable Symbol so it can never leak into a serialised error
+body) and is handed to the one callback every build turn and every heal turn already passes through.
+A parallel channel is precisely how the heal gates' tokens went unattributed for months.
+
+⚠️ **The case that decides whether this is safe, and it is test-locked:** a reviewer sub-agent reading
+files returns **tool calls and no text**. `turnStarvedItsBudget` is FALSE the moment any tool call
+exists, so that work stays billable. Billing it as "produced nothing" would make the engine's real
+work free — the opposite error, and a far more expensive one.
+
+### What this does and does not deliver — stated plainly
+
+**On `b6f88a72` itself this change would have saved the user ₹0.** That build ran on Kimi, whose
+runner throws on starvation, so its reviewer's calls were not starved turns at all — they completed,
+made tool calls, and the *pass* ended barren when it timed out. That is a different thing, and this
+change does not touch it.
+
+🔴 **STILL OPEN, and it is where the ₹50 actually is:** there is no per-PASS attribution in the
+ledger. `ProviderUsageLedger` knows which VENDOR was paid, never what FOR, so "leave the reviewer's
+barren pass out of the bill" is not expressible today. The design is a thin billing-phase
+`AsyncLocalStorage` (the `aiSpendZone.ts` shape, deliberately NOT overloading `runInPass`, which
+answers a different question) read by `captureTurnUsage`, with the route marking a phase barren where
+it already records `REVIEW_INCOMPLETE`. `REVIEW_PARTIAL` and `REVIEW_LATE` must NOT count as barren —
+a salvaged verdict means something was produced.
+
+⚠️ **And none of this is the cost fix.** It is rule 5's honesty layer. The real saving is not spending
+those tokens at all — a reviewer that cannot write to a green app should not be reading the whole
+project at full budget either — which is a separate change, already specified to another session
+alongside the EARLY GREEN latch ordering.
+
+Test-locked in `tests/aTurnThatProducedNothingIsNotTheUsersBill.test.ts` (29 cases), each behavioural
+half proven by reversion: the success-path mark, the catch-path report, the ledger's subset, and the
+billing subtraction were each removed in turn and the matching cases observed to fail. Four existing
+pinned-literal guards were updated (not loosened) because the throw site gained a wrapper and the
+billing return gained a field — each with the reason recorded in place, per the trail those same
+comments already carry.
 ## 2026-09-18 — 🔎 THE STACK NAMED THE FILE, AND THREE CAPTURES THREW IT AWAY (closing the `95598899` blocker)
 
 **Admin:** *"woh crash report wala kaam bhi kar do"* — make a runtime crash bring its own file, so no
@@ -67977,6 +68055,61 @@ counter → 8 fail; threshold back to 8 → 2 fail; sibling un-fixed → 1 fail;
 3. **A bare category noun still does not fire, deliberately** — "CRM banao", "hospital management
    system" with nothing enumerated name nothing to decompose. Whether such a prompt should instead be
    ASKED what it needs is a product question, not a threshold one.
+
+---
+
+## 2026-09-18 — The Pro image tier moves to Z-Image, and the price falls to ₹1
+
+**Admin, after comparing Z-Image Turbo against GPT Image 1 Mini:** *"Z-Image Turbo + Z-Image-Edit … price bhi 1 inr / image karo"*.
+
+### Why this is a cut in price AND a rise in quality, not a trade
+
+| | cost/image | ₹ at 95.76/$ | margin at the price |
+|---|---|---|---|
+| **Z-Image Turbo** (new) | $0.005 | ₹0.48 | **₹1 → +₹0.52 (2.1×)** |
+| FLUX.2 Klein 4B (replaced) | $0.014 | ₹1.34 | ₹2 → +₹0.66 (1.5×) |
+| GPT Image 1 Mini — low | $0.005 | ₹0.48 | affordable, but not a premium tier |
+| GPT Image 1 Mini — high | $0.036 | ₹3.45 | 🔴 a LOSS at either price |
+
+Three reasons Z-Image won, and none of them is only price: it is **~a third of FLUX.2 Klein's cost**;
+it is **#1 open-source on the Artificial Analysis Image Arena**, above FLUX.2 [dev], HunyuanImage 3.0
+and Qwen-Image; and it is **open weights, so many vendors serve it** ($0.0047–$0.01 at WaveSpeed,
+Atlas, Replicate, SiliconFlow, getimg, …) — the GLM/Kimi key-pool situation, with competition and no
+lock-in. GPT Image 1 Mini is single-vendor and is only cheap at a quality tier that cannot deliver the
+thing the Pro tier exists for (*"paid walo ko inhance karna hai"*).
+
+**The break-even rupee went UP, not down: ₹1 ÷ $0.005 = ₹200/$**, against ₹2 ÷ $0.014 = ₹142.9/$. The
+rupee would have to halve again before a Pro image stopped covering its own cost.
+
+### 🔑 Z-Image is a FAMILY, so the mode picks the model
+
+`Z-Image-Turbo` generates from words; **`Z-Image-Edit`** is the variant fine-tuned to follow an editing
+instruction against a supplied picture. `imageProModel(env, mode)` is therefore mode-aware, with
+`IMAGE_PRO_TEXT_MODEL` / `IMAGE_PRO_EDIT_MODEL` pinnable separately and `IMAGE_PRO_MODEL` kept as the
+one-endpoint escape hatch. Sending the generation model a picture and an instruction would return a
+fresh image and quietly ignore one of them — a request that succeeds and answers the wrong question,
+which is precisely the half-working state the second absolute rule forbids. Test-locked.
+
+### 🔴 THE PRICE WAS IN THREE PLACES, AND THAT IS THE REAL DEFECT THIS FIXED
+
+`IMAGE_PRO_PRICE_INR` on the server, `PRICE_INR` in the Pro studio, and the bare string `'Pro ₹2'` on
+the free/pro toggle. Moving ₹2 → ₹1 meant three edits, and the third is exactly the one a later
+change forgets — the price a user is SHOWN and the price they are CHARGED are the same promise.
+The client cannot import the server module (it would pull server code into the browser bundle), so
+`tests/theProPriceIsOneNumber.test.ts` fails CI when they drift — the idiom
+`privacyPolicyTruth.test.ts` already uses. The toggle's literal is gone; it renders the constant.
+
+⚠️ **UNPROVEN, AND DELIBERATELY NOT ASSUMED: Devanagari.** Z-Image's bilingual text rendering is
+**Chinese and English**. No reliable claim was found for Hindi text inside an image, for Z-Image or
+for GPT Image 1 Mini. For an India-first app that is the differentiator, and it is the FIRST thing to
+test once `IMAGE_PRO_ENDPOINT` + `IMAGE_PRO_KEY` are set. Recorded as an open question rather than
+answered with a plausible guess.
+
+⚠️ **Still not live.** Both env keys remain unset, so the Pro tier still reports an honest "not
+available" and charges nothing; this change moves which engine it will call and what it will cost
+when the admin picks a host. Five of my own earlier cases in `imageProTier.test.ts` pinned ₹2/$0.014
+and were updated with the reason recorded in place — intent unchanged (the quote is price × count;
+the margin cannot invert silently; a malformed cost never falls back to zero).
 ---
 
 ## 2026-09-18 — Autopsy `1a7f4a58` (Qiikr): the platform killed the app's own frontend and previewed its API

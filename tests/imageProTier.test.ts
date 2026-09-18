@@ -27,10 +27,14 @@ describe('the mode is derived from the payload, not from a control', () => {
 });
 
 describe('what it costs, and the bound on what one request can spend', () => {
-  it('quotes ₹2 per image, exactly as the user is told', () => {
-    expect(IMAGE_PRO_PRICE_INR).toBe(2);
-    expect(imageProQuotedInr({ prompt: 'x' })).toBe(2);
-    expect(imageProQuotedInr({ prompt: 'x', count: 3 })).toBe(6);
+  it('quotes the price per image, exactly as the user is told', () => {
+    // 🔄 ₹2 → ₹1 on 2026-09-18, when the engine moved from FLUX.2 Klein 4B ($0.014) to Z-Image Turbo
+    // ($0.005) — a third of the cost at a higher arena ranking, so the cut is a real cut and not a
+    // squeezed margin. What this case guards is unchanged: the quote is the price times the count,
+    // with no rounding of its own. See tests/theProPriceIsOneNumber.test.ts for the three-file pin.
+    expect(IMAGE_PRO_PRICE_INR).toBe(1);
+    expect(imageProQuotedInr({ prompt: 'x' })).toBe(IMAGE_PRO_PRICE_INR);
+    expect(imageProQuotedInr({ prompt: 'x', count: 3 })).toBe(3 * IMAGE_PRO_PRICE_INR);
   });
 
   it('🔒 a batch is clamped, so one request can never spend without limit', () => {
@@ -194,13 +198,15 @@ describe('🔒 WHITE-LABEL LAW — no user-facing string may name the vendor or 
 });
 
 describe('💰 the real cost is ON THE CARD, and the margin cannot invert silently', () => {
-  it('the admin’s invoice number is the default', () => {
-    // $0.014/image, given by the admin 2026-09-18. A model may not be on a ladder without its price.
-    expect(imageProCostUsd({} as never)).toBe(0.014);
-    expect(IMAGE_PRO_COST_USD_DEFAULT).toBe(0.014);
+  it('the engine’s published price is the default', () => {
+    // $0.005/image — Z-Image Turbo at WaveSpeed/Atlas ($0.0047–$0.01 across vendors; the code takes
+    // the middle). Supersedes FLUX.2 Klein 4B's admin-supplied $0.014, kept in the module as the
+    // record. A model may not serve a paid tier without its price on the card.
+    expect(imageProCostUsd({} as never)).toBe(0.005);
+    expect(IMAGE_PRO_COST_USD_DEFAULT).toBe(0.005);
   });
 
-  it('₹2 comfortably covers it across every plausible exchange rate', () => {
+  it('the price comfortably covers it across every plausible exchange rate', () => {
     for (const rate of [85, 87, 90, 95, 100]) {
       const m = imageProMargin(rate, {} as never);
       expect(m.healthy, `unhealthy at ₹${rate}/$`).toBe(true);
@@ -209,16 +215,16 @@ describe('💰 the real cost is ON THE CARD, and the margin cannot invert silent
   });
 
   it('reports the BREAK-EVEN rate, which is the number that could actually falsify it', () => {
-    // ₹2 ÷ $0.014 = ₹142.9/$ — the rupee would have to fall by two-thirds. A ratio alone flatters;
-    // a break-even point can be checked against the real world.
-    expect(imageProMargin(87, {} as never).breakEvenUsdInr).toBeCloseTo(142.857, 2);
+    // ₹1 ÷ $0.005 = ₹200/$ — the rupee would have to HALVE again, wider headroom than ₹2 ÷ $0.014
+    // gave (₹142.9). A ratio alone flatters; a break-even point can be checked against the real world.
+    expect(imageProMargin(87, {} as never).breakEvenUsdInr).toBeCloseTo(200, 6);
   });
 
   it('the maths is right at a known rate, not just directionally right', () => {
     const m = imageProMargin(87, {} as never);
-    expect(m.costInr).toBeCloseTo(1.218, 3);
-    expect(m.marginInr).toBeCloseTo(0.782, 3);
-    expect(m.ratio).toBeCloseTo(1.642, 2);
+    expect(m.costInr).toBeCloseTo(0.435, 3);
+    expect(m.marginInr).toBeCloseTo(0.565, 3);
+    expect(m.ratio).toBeCloseTo(2.299, 2);
   });
 
   it('🔴 a cost that overtakes the price WARNS — it never quietly bleeds', () => {
@@ -239,9 +245,9 @@ describe('💰 the real cost is ON THE CARD, and the margin cannot invert silent
     // Number('') is 0, and a zero cost reports INFINITE margin on the very panel that exists to
     // catch a bad margin — the failure being guarded against, wearing a green tick.
     for (const bad of ['', '   ', 'abc', '0', '-1', 'NaN']) {
-      expect(imageProCostUsd({ IMAGE_PRO_COST_USD: bad } as never), `"${bad}"`).toBe(0.014);
+      expect(imageProCostUsd({ IMAGE_PRO_COST_USD: bad } as never), `"${bad}"`).toBe(IMAGE_PRO_COST_USD_DEFAULT);
     }
-    expect(imageProMargin(87, { IMAGE_PRO_COST_USD: '0' } as never).ratio).toBeCloseTo(1.642, 2);
+    expect(imageProMargin(87, { IMAGE_PRO_COST_USD: '0' } as never).ratio).toBeCloseTo(2.299, 2);
   });
 
   it('🔒 a junk exchange rate cannot produce NaN money', () => {

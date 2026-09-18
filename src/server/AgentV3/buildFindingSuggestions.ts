@@ -105,6 +105,9 @@ const NEVER_SUGGEST = new Set([
   'TEST_SUITE_UNVERIFIED', 'JOURNEY_NOT_DERIVED', 'JOURNEY_NOT_RUN', 'PAGE_RENDER_NOT_RUN',
   'BUILD_ORDER_READ_AS_EDIT', 'CLAIM_UNSUPPORTED', 'PREVIEW_UNVERIFIED',
   'PREVIEW_SERVER_RESTARTED',
+  // "₹X of engine work produced nothing and was not billed" is our own accounting, not something
+  // the user could ever act on.
+  'UNBILLED_BARREN_WORK',
 ]);
 
 /**

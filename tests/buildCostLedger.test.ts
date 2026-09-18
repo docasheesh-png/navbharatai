@@ -202,7 +202,15 @@ describe('reportPaths — the manifest carries EVERY file; generatedFiles is cap
 describe('🔒 THE SETTLE RECORDS THE REAL COST — both sites, so the card never has to re-derive it (rule 3: siblings)', () => {
   const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
   it('decideBuildBilledUsd returns realCostUsd + sandboxUsd on every path', () => {
-    expect(route).toMatch(/return \{ effectiveBilledUsd, reconciledProviderUsage, realCostRemainder, isOpusTier, realCostUsd: tokenCost, sandboxUsd: vmCost \}/);
+    // NOTE: the return became multi-line on 2026-09-18 when it gained `absorbedUnbilledUsd` — what we
+    // spent on turns that produced nothing and did NOT pass on (unbilledTurns.ts). What this case
+    // guards is unchanged and still asserted field by field: OUR OWN cost travels out of the single
+    // billing decision on EVERY path, so the admin cost card never has to re-derive it.
+    expect(route).toMatch(/return \{\n\s*effectiveBilledUsd, reconciledProviderUsage, realCostRemainder, isOpusTier,/);
+    expect(route).toContain('realCostUsd: tokenCost, sandboxUsd: vmCost,');
+    // …and that cost is the FULL ledger, never the reduced base the user is billed on. A clamp that
+    // shrank our own number too would hide our bleeding on the exact panel used to judge it.
+    expect(route).toContain('const tokenCost = costSplit.realCostUsd;');
   });
   it('the normal settle AND the watchdog finalizer both persist it on the billing record', () => {
     const sites = route.match(/realCostUsd: Math\.round\((decided\.realCostUsd|decidedRealCostUsd) \* 1_000_000\) \/ 1_000_000,/g) ?? [];

@@ -78,6 +78,16 @@ const STYLE_ENHANCERS: Record<string, string> = {
  * read that throws must never silently land somebody on the paid tier.
  */
 const TIER_KEY = 'nbai.imagegen.tier';
+
+/**
+ * What one Pro image costs, in ₹ — shown on the toggle so the switch names its own price.
+ *
+ * ⚠️ A COPY of the server's `IMAGE_PRO_PRICE_INR`, which is the authority; this file runs in the
+ * browser and must not import server code. `tests/theProPriceIsOneNumber.test.ts` fails CI if they
+ * ever disagree. It used to be the bare string 'Pro ₹2', which is how a price gets changed in two
+ * places out of three.
+ */
+const PRO_PRICE_INR = 1;
 function readTier(): 'free' | 'pro' {
   try {
     return localStorage.getItem(TIER_KEY) === 'pro' ? 'pro' : 'free';
@@ -385,7 +395,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
                     : 'text-muted hover:text-body'
                 }`}
               >
-                {t === 'pro' ? 'Pro ₹2' : 'Free'}
+                {t === 'pro' ? `Pro ₹${PRO_PRICE_INR}` : 'Free'}
               </button>
             ))}
           </div>

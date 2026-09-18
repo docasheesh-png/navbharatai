@@ -64,6 +64,14 @@ export const OUTCOME_TO_CATEGORY: Readonly<Record<string, { category: FailureCat
   OUTCOME_SANDBOX_UNAVAILABLE: { category: 'network', hint: 'The build sandbox could not be set up or reached — an infrastructure condition, not the app or the prompt. Retry; nothing in the code caused it.' },
   // Legacy fast-lane end-state (`OUTCOME_${sb.outcome}`) still present on old records; labelled on the panel, so known here too.
   OUTCOME_BUILD_FAILED: { category: 'build', hint: 'The build itself failed — check the compiler / bundler output the diagnostic names.' },
+  // Recorded since 2026-09-18 by the route's abort funnel (`abortOutcome.ts`) — seven abort causes that
+  // used to end a build with no outcome at all. None is a fact about the app's code.
+  OUTCOME_USER_STOPPED: { category: 'incomplete', hint: 'The user stopped this build. Nothing failed; send another message to continue from the saved files.' },
+  OUTCOME_COST_CEILING: { category: 'incomplete', hint: 'The build reached its cost ceiling and was paused between turns — the files so far are kept; a follow-up resumes it.' },
+  OUTCOME_FUTILE: { category: 'incomplete', hint: 'The futility breaker ended it: no file, command or step for the whole quiet window. Usually a prompt with too little to build from, or an engine that was not converging.' },
+  OUTCOME_DEPLOY_DRAIN: { category: 'network', hint: 'A NavBharatAI deploy drained this build; it resumes on its own. An infrastructure event, not the app or the prompt.' },
+  OUTCOME_SUPERSEDED: { category: 'incomplete', hint: 'A newer build on the same project took over this one\'s lock — the later build is the one to read.' },
+  OUTCOME_REAPED: { category: 'timeout', hint: 'The build stopped reporting and the zombie reaper cleaned it up — an engine condition; retry.' },
 };
 
 /**

@@ -11,7 +11,7 @@
 import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
 import { audit, truncateForAudit } from '../lib/audit';
-import { capProblems, outcomeCodeOf, severityOfOutcome, appWasSeenRunning, type BuildDiagnosticsReport } from './BuildDiagnostics';
+import { capProblems, outcomeCodeOf, severityOfOutcome, appWasSeenRunning, stoppedByUser, type BuildDiagnosticsReport } from './BuildDiagnostics';
 import { redactSecrets } from './SecretRedactor';
 import { summarizeModelPerformance, type ModelPerformanceSummary } from './modelPerformance';
 
@@ -672,6 +672,14 @@ export interface AllDiagnosticsEntry extends DiagnosticsHistoryEntry {
    * see `appWasSeenRunning`.
    */
   appSeenRunning?: boolean | null;
+  /**
+   * Did the USER stop this build? Read off the timeline with the same `stoppedByUser` the release
+   * gate and `deriveRootCause` use, so the failure panel can move a person's own Stop out of the
+   * failure tally without inventing a rule — and so a LEGACY record (written before the abort
+   * funnel recorded `OUTCOME_USER_STOPPED`, but carrying `USER_STOPPED_BUILD` or
+   * `CANCELLED_BUILD_CHARGED`) is recognised too. `null` when the report has no timeline to read.
+   */
+  userStopped?: boolean | null;
 }
 
 /**
@@ -712,6 +720,7 @@ export async function listAllDiagnostics(limit = 100, sinceMs?: number | null): 
         outcomeSeverity: severityOfOutcome(r.issues),
         // Was this app ever SEEN running? The only way to tell a real failure from a wrong verdict.
         appSeenRunning: appWasSeenRunning(r.issues),
+        userStopped: Array.isArray(r.issues) ? stoppedByUser(r.issues) : null,
         counts: r.counts,
         prompt: typeof r.prompt === 'string' ? r.prompt.slice(0, HISTORY_PROMPT_MAX) : undefined,
         // Read defensively: `billing` is absent on a legacy or unsettled report, and a number that is

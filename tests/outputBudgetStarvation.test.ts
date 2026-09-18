@@ -169,8 +169,16 @@ describe('🔒 the wiring — every half of this fix, pinned where it lives', ()
   });
 
   it('the loop does not nudge a model that never got to answer, and does not append an empty turn', () => {
+    // ⚠️ Updated 2026-09-18 (autopsy 95598899), and the PROPERTY this case guards is unchanged: a
+    // starved turn is never nudged. The nudge condition moved out of this one `if` into
+    // `decideBuildNudge` (nudgeToBuild.ts), because `no tool calls yet` could not tell a STALL from
+    // an ANSWER and so nudged a model's honest refusal into overwriting a user's app. `starvedTurn`
+    // now short-circuits that call, so starvation still cannot reach a nudge — by a wider path than
+    // before, since an eligible turn must ALSO not be a refusal or a question.
     expect(loop).toContain('const starvedTurn = turnStarvedItsBudget(turn);');
-    expect(loop).toContain('if (!starvedTurn && expectsArtifacts && totalToolUses === 0 && noBuildNudges < MAX_BUILD_NUDGES)');
+    expect(loop).toContain('const nudge = starvedTurn');
+    expect(loop).toContain('? { nudge: false as const, message: \'\', standDown: undefined }');
+    expect(loop).toContain(': decideBuildNudge({');
     expect(loop).toContain('if (!starvedTurn) {\n          messages.push({ role: \'assistant\', content: turn.rawContent });');
   });
 

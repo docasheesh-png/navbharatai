@@ -66079,6 +66079,64 @@ rule, `disabled:bg-white/10` and `disabled:text-white/25` with no light-theme re
 with no gradient stop). All four were added to the compat layers rather than designed around — a
 disabled SEND button rendering white-on-white would have told a light-theme user the button had
 vanished, not that it was disabled.
+
+## 2026-09-18 — THE "OTHER" BUCKET, ROOT-CAUSED: seven of nine abort causes ended a build with NO outcome (admin's failure table)
+
+The admin sent the Failure Category table — **381 built, 153 failed** — and asked for failures to be
+driven to zero at "deep DNA level". The top reason for the biggest row (General, 106 failures) was
+*"Other (not yet in the known pattern list)"*, **45 times**; Healthcare, Events and Logistics likewise.
+A failure nobody can name cannot be fixed at any level, so that bucket was the first DNA step.
+
+**Root cause, read out of the code and then measured.** Nine things abort a build (`AbortCause`).
+`AgentRunner` sees the signal and returns `ok:false` with an honest sentence — but never touches the
+timeline. The route recorded an `OUTCOME_*` for exactly TWO causes (watchdog, advisory-cap — both in
+`finalizeOnDeadline`). The other seven — the user's Stop, the cost ceiling, the futility breaker, a
+deploy drain, a reclaimed lock, the reaper, an unrecorded abort — reached `deriveRootCause` with no
+outcome, were headlined by their loudest UNRELATED warning (a provider fallback, a benched rung, a
+read of a file not yet written), and the classifier filed that sentence as "Other". Verified: every
+one of the 18 abort sentences and every `deriveRootCause` fallback sentence run through
+`classifyFailureReason` with no code came back `other`. This is the sibling of the 2026-09-17
+empty-build fix, which found "the ONLY verdict flip in the ROUTE that recorded none" — the abort branch
+lives in the runner, and it flips seven ways.
+
+**Fixed at the class, not the instance.** `src/server/AgentV3/abortOutcome.ts` maps EVERY cause to its
+outcome in one `switch` with a `never` check — a tenth cause cannot be added without deciding what it
+records. The route records it at the ONE abort funnel (beside the b89ba6f8 `USER_STOPPED_BUILD`
+back-fill), guarded on "no outcome on the timeline yet" so a deadline ending never carries two. New
+codes: `OUTCOME_USER_STOPPED` (info), `OUTCOME_COST_CEILING`, `OUTCOME_FUTILE`, `OUTCOME_DEPLOY_DRAIN`,
+`OUTCOME_SUPERSEDED`, `OUTCOME_REAPED`; `unknown` and a platform-composed stop reuse `OUTCOME_STOPPED`.
+Labelled in `OUTCOME_REASONS`, categorised in `OUTCOME_TO_CATEGORY` (the parity test enforces both).
+
+**Three consequences carried through, so the fix does not trade one problem for another:**
+- 🔒 How a build ENDED is not a finding about the APP. All eight stop codes (the six new ones plus
+  the two the finalizer writes) are in `PROCESS_ONLY_CODES`, so a cost ceiling is no longer printed
+  as "1 build-breaking blocker" on the user's health card — the provider-error-as-app-blocker class
+  (4efab9d7) through a new door. The release gate is RED on `buildOk:false` regardless; no verdict moves.
+- ✅ **The fourth population the failure panel said it could not separate is separated.** The card's
+  own text read *"Builds the USER stopped are not separated out yet — the engine knows the difference
+  but does not record it"*. It records it now, and the store also reads legacy records' own
+  `USER_STOPPED_BUILD` / `CANCELLED_BUILD_CHARGED` lines (`userStopped` on `AllDiagnosticsEntry`, via
+  the same `stoppedByUser` the gate uses — never a guess from duration or wording). A user's Stop is
+  neither a failure nor a success: it leaves the failure count, the rate, the domain rows and the
+  reason table, and has its own column ("Stopped by the user"). ⚠️ **This will LOWER the headline
+  failure count on the next panel read** — that is the removal of a mislabelling, not of failures.
+- Legacy records with no code get stable names for the engine's OWN fallback sentences:
+  `no-cause-recorded` ("no specific error was captured" / "ended without recording an outcome"),
+  `futile` (the breaker's warning), `user-stopped` (the deriveRootCause sentence).
+
+**Test:** `tests/everyAbortCauseRecordsAnOutcome.test.ts` (18): pins the BUG as measured (all 18
+sentences → `other`), derives the cause list from the union in the source, checks every outcome is
+known to both maps and never a blocker, the panel split reconciles with the new column, and the
+route wiring. **Reversion-proven twice**: removing the route funnel fails the wiring case; removing
+the process-only entries fails the blocker case.
+
+**Honest limits (rule 6).** (1) This names the 45; it does not yet fix what stopped them — the next
+panel read will say which of cost-ceiling / futile / reaper / deploy-drain dominates, and THAT is
+what to fix next. (2) Old records keep their old headline: a legacy aborted build whose loudest
+warning was a provider sentence stays "Other" until it is rebuilt — nothing here rewrites stored
+reports. (3) "Failure → 0" is not a truthful target and was said so to the admin: a user's Stop, a
+deploy drain and a wallet's cost ceiling will always end some builds; the honest target is that every
+ending is NAMED and every named engine failure is driven down.
 ## 2026-09-18 — AUTOPSY of report `2ec15a71` (a real user's hospital-app edit) — and the hollow graph is FILLED
 
 **The build:** a free-tier user's EDIT to a hospital price-list app. Prompt (verbatim): *"Or bhi medicine
@@ -66544,6 +66602,111 @@ theme, which still wants a `bg-success` fill token rather than per-button patche
 
 ---
 
+## 2026-09-18 — 🔴 THE ENGINE OVERRODE ITS OWN MODEL'S HONEST ANSWER AND REWROTE A USER'S APP (autopsy 95598899)
+
+**Workspace:** a 35-file Qiikr classifieds marketplace, free tier, weak ladder.
+**Prompt:** *"Make a video of parrot talking about the benefits of fruits in urdu"*.
+
+### Ledger (5 buckets)
+
+- ✅ **Self-healed (2):** the GLM family bench fired correctly after two consecutive 60 s timeouts
+  (`PROVIDER_BENCHED`), and the ladder reached KIMI. The throughput/timeout machinery worked.
+- 🔀 **Worked around (2):** both GLM fallbacks. **120 s of a 227 s build — 53% — was spent inside
+  two dead GLM calls.** The first GLM call had succeeded in 7.9 s, so this is not a keyless rung.
+- ⏭️ **Skipped (1):** the platform's injected preview bridge was destroyed when `index.html` was
+  overwritten; the model noticed and tried to re-add it by hand.
+- ❌ **Still broken (3):** `RELEASE_GATE` RED, `GREEN_GUARD_UNVERIFIED`, and `PREVIEW_ERROR —
+  Cannot read properties of null (reading 'useState')`. **The user's app is broken.**
+- 🥵 **Struggle:** the whole run. The user typed *"This app not working leave it"* and then *"No
+  parrot or no app, don't work on any project"* to make it stop, **and was charged ₹23.81.**
+
+### 🔴 Root cause — `toolUses.length === 0` is not evidence of a stall
+
+The first model answered **correctly, completely, in 8 seconds**: NavBharatAI builds web apps and
+cannot make videos — did the user want the Qiikr app continued, or something else? Zero tool calls,
+`finish_reason: end_turn`. **That should have ended the build.**
+
+`AgentRunner`'s NUDGE-TO-BUILD fired instead. It exists for a real bug (a model that narrates
+*"here's my plan… now I'll create index.html"* and never acts) and its only test for that bug was
+`no tool calls yet`. **An answer is indistinguishable from a stall through that test.** So the engine
+replied to its own model, verbatim:
+
+> *"Do NOT just describe or delegate in prose — ACT NOW … Start by writing the entry file (e.g.
+> index.html or src/main)."*
+
+And that is precisely what followed, against somebody's working app: `index.html`, `src/main.tsx`,
+`src/App.tsx`, `src/index.css` overwritten, an `rm` attempted on `src/`, the preview bridge lost, the
+app left throwing `useState` of null.
+
+🔑 **The engine had already said the right thing and then did the opposite.** The same build recorded
+*"✏️ Editing your existing app (35 source files) — I'll make targeted changes, not rebuild it."*
+Nothing enforced that sentence.
+
+⚠️ **THE NUDGE OUTLIVES THE MODEL IT WAS AIMED AT.** GLM produced the refusal, then timed out twice
+and was benched; **KIMI inherited the same transcript, read the nudge as an instruction, and
+complied.** A nudge written for a stalling model became an order to a model that had never stalled.
+
+🔎 **AND THE REPO'S OWN REFUSAL TEST WOULD HAVE CAUGHT IT.** `looksLikeRefusal` (`promptSafety.ts`)
+matches that turn's *"I cannot create videos"* — and it is consulted at three places in
+`routes/agentv3.ts`, all of them AFTER the build (retry, upsell, delivery). **The nudge never asked
+it.** Same class as the money audit's: a rule applied in one place and not its sibling.
+
+### The fix (`nudgeToBuild.ts`, both halves of the 50/50 law)
+
+1. **The trigger — an answer is never nudged.** `decideBuildNudge` asks what the turn WAS before
+   overriding it: `turnDeclined` (reusing `looksLikeRefusal`, never a second copy) or
+   `turnAskedTheUser` (the LAST non-empty line ends in `?` / `？` / `؟`). Either ends the turn with
+   the model's own words.
+2. **The condition — a nudge can no longer order a rewrite.** On an edit (`editingExistingApp`, the
+   route's `isEditMode`) the wording drops *"start by writing the entry file"* entirely and adds
+   *"this project ALREADY EXISTS … do NOT rewrite, replace or delete the existing app or its entry
+   files"*. It still says ACT NOW — it is not a softer nudge.
+3. **Honesty (rule 5):** `BUILD_NUDGE_STOOD_DOWN` on the admin report, via a new optional `onNote`
+   hook. Without it, a turn that was not nudged is indistinguishable from one where the nudge never
+   applied — and the decision would leave no trace at all.
+
+🔒 **The asymmetry, which must not be reversed:** standing down wrongly costs ONE turn — the build
+ends with the model's own words, `ok: false`, **no charge** by the billing law, and the user
+re-sends. Nudging wrongly costs a working app. Same shape as the READ-THE-MOOD rule.
+
+### ⚠️ A defect in my own first draft, recorded because its test caught it
+
+`turnAskedTheUser` originally tested `/[?]$/` on the last line — and the real turn ends
+`**Or clarify if you need something different?**`, a bold list item, so the clearest question in the
+whole transcript scored as "not a question". A model writing markdown is the normal case, not an edge
+one; trailing `* _ \` ) ] " '` are now stripped before the test.
+
+### Tests
+
+`tests/aRefusalIsNotAStall.test.ts` — **22 cases**, reversion-proven on five independent reverts
+(both stand-downs, the per-mode wording, the markdown strip, the route's edit signal, the runner's
+call site); between them they fail 7 cases.
+
+### 🔴 Still open (rule 6)
+
+- **The user was charged ₹23.81 for a build that broke their app.** `CANCELLED_BUILD_CHARGED` halved
+  it on delivery `files-saved` — which counts files WRITTEN, not value delivered, and here the files
+  written destroyed a working app while the release gate went RED. "Working app or free" is not
+  satisfied by "files were saved". Fixing this means teaching the cancelled-build biller the
+  difference between progress and damage, which is a separate change with its own billing risk.
+- **Overwriting `index.html` destroys the platform's injected preview bridge**, and the recovery is
+  the model re-adding it by hand from memory. That is what produced the `useState` of null. The
+  platform should re-inject on serve rather than rely on the model; not attempted here.
+- **`GRAPH_RESTORED_STUBS`: 30 of 30 files carried PLACEHOLDER facts on this cold resume** — "they
+  contribute nothing to recall, evaluate, the architecture analysis or the readiness score". The
+  engine was structurally blind to the app it was about to replace. Likely the reason nothing
+  downstream objected, and a real systemic gap.
+- **Two 60 s GLM timeouts = 53% of the build's wall clock.** The bench worked as designed (2 strikes,
+  family-keyed); the cost is the two strikes themselves. Lowering the first-strike cost is a
+  provider-timeout question, not this autopsy's.
+
+### Proactive layer (step 6) — the one lever above all others
+
+**Most "continue / fix the error" builds are the engine cleaning up its own mess, and this report is
+the sharpest example yet: the engine created the mess by refusing to accept an answer.** The lever is
+not a better nudge — it is that *every place the engine overrides a model's judgement must first ask
+what the model actually said.* The nudge was the only such override found; if another is added, it
+inherits this rule or it inherits this autopsy.
 ## 2026-09-18 — Pro image cost: the open margin question, CLOSED by the admin's number
 
 The 2026-09-18 entry above recorded an OPEN item: *"the ₹2 margin is unverified from inside the code …

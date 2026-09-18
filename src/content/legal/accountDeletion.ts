@@ -60,6 +60,10 @@ When your deletion request is completed, we remove:
 - your **build history and diagnostics** tied to your account;
 - your **wallet, token balance and usage records**;
 - any **API keys and credentials** you stored in the secrets vault;
+- your **App Lock PIN** — the 4-digit PIN that locks parts of NavBharatAI, including that vault;
+- your **saved connected services** — the MCP services you saved on your account to reuse across apps
+  (this removes NavBharatAI's saved copy of the address and key; it does **not** touch anything in the
+  service's own account, which stays yours);
 - your **saved sessions and preferences**;
 - your **connection to GitHub**, if you had connected one. (This removes NavBharatAI's access. It does **not** delete anything in your own GitHub account — that stays yours.)
 

@@ -65475,6 +65475,70 @@ knowledge base describe the engine's internals to people who cannot see them.
   2026-07-20) — it reverted itself honestly and that worked. Why the pass made it eight times worse is
   still unexplained on this evidence. Starting that pass with the real cause is the most that could be
   done from this report.
+---
+
+## 2026-09-17 (later) — three PUBLISHED promises the registries did not keep, one root cause
+
+**Found by asking a question the merge of #3055 made unavoidable:** that PR fixed the retention purge's
+gate so `DATA_RETENTION_PURGE_ENABLED=on` would actually work — so the next question is *what would
+happen if the admin switched it on?* Reading the answer found that the purge is the smaller half.
+
+| Promise in the published Privacy Policy | What the code did |
+|---|---|
+| *"These counts … **are kept for 30 days**"* (published-app visitor counts) | **nothing deleted them.** `site_analytics` was in neither `RETENTION_POLICIES` nor `RETAINED_INDEFINITELY`, and no purge, TTL or sweep in the repo touched it |
+| §9: personal data *"deleted or irreversibly anonymised within **30 days**"* of account deletion | **`user_vault_pin`** (the App Lock PIN record) and **`agentv3_mcp_library`** (the user's saved MCP servers) are keyed by the uid and appeared in **no erase path anywhere** |
+
+🔴 **ONE ROOT CAUSE, and it is the shape this file keeps paying for: a hand-maintained registry that a
+new store has to be added to by a human, where the omission is invisible from every direction.**
+`site_analytics` was also absent from `GROWING_COLLECTIONS` — the inventory the Load board's storage
+warning is computed from — so the warning that exists precisely to catch this could not see it. That
+inventory's own comment reads *"verified by reading each store on 2026-09-07"*; **the beacon shipped on
+2026-09-10, three days later.**
+
+🔒 **VERIFIED BEFORE FIXING, because a 30-day delete could have broken a number somebody is shown** (the
+"a fix must never trade one problem for another" rule): every `site_analytics` document is ONE
+app-day-shard (`hitDocId`) carrying `updatedAt: Date.now()`; the owner's dashboard reads a DAY WINDOW by
+id and the widest window any caller asks for is exactly `days = 30`; and the all-time total is a
+**separate** running counter in its own collection (`ownAudience.lifetimeViews`). So the delete cannot
+change anything anybody sees — and had `lifetimeViews` summed the day-docs, the same one-line fix would
+have silently zeroed every app's all-time views.
+
+🔴 **THE HONESTY HALF, and it is the sharpest finding of the three.**
+`tests/privacyPolicyTruth.test.ts` asserted `toMatch(/kept for 30 days/)` — **that the policy CONTAINS
+the sentence.** It never checked that anything deletes at 30 days. **The guard that exists to keep the
+policy truthful was, on this claim, verifying only that the promise is PRESENT — so it could not fail
+when the promise stopped being true.** The file already carried a sibling case named *"the beacon keeps
+those promises in code, not only in prose"*; the retention promise was the one in that group with no
+mechanism behind it. It has one now, with the NUMBER tied to the sentence so changing either alone fails.
+**This is the same vacuity class as the four earlier instances in this session, one level up: the subject
+was a promise rather than a line of code.**
+
+🔒 **THE CLASS FIX — `tests/everyCollectionIsClassified.test.ts` (6).** Every exported `*_COLLECTION`
+constant in `src/server` is read OUT OF THE SOURCE and must appear in a classification table stating
+what it is and why: `user` (must be erased on account deletion), `workspace`, `platform`, or `retained`
+(must have a retention policy). **A collection is guilty until listed**, so a NEW store fails CI until
+somebody decides — cheap while the store is being written, nearly impossible to notice later. The sweep
+asserts it found more than ten constants before trusting an empty result, and is reversion-proven in
+both halves (a planted unclassified collection fails it by FILE NAME; removing `user_vault_pin` from the
+erasure list fails the user-kind case by COLLECTION name).
+
+⚠️ **AND I DESTROYED MY OWN UNCOMMITTED WORK AGAIN, THE SAME WAY, IN THE SAME SESSION.** Cleaning up a
+reversion probe I ran `git checkout -- src/server/lib/DataRetentionManager.ts`, which restores the file
+to **HEAD** and therefore discarded every uncommitted edit in it — the retention policy and both erasure
+entries — not just the probe. Caught immediately only because the very next command was a `grep -c` that
+printed `0`. **That is the second time today**; the first was `chat.ts` during the stalled-stream work,
+and I wrote then that "that command is not an undo for the last edit". Knowing the rule did not stop me
+using it. The reliable habit is `git stash push -- <file>` for a temporary revert, which is what the
+other probes in this session used and which is why they cost nothing.
+
+🔴 **OPEN, recorded rather than decided (rule 6): eleven other declared collections, and one real
+question inside them.** `site_configs` and `agentv3_mcp_servers` are keyed by **workspaceId** and are NOT
+erased by `workspaceDataErase`, which covers the seven `workspace_*` collections plus `project_plans_v3`.
+Workspace deletion is not account deletion and no published promise covers it, so this is a product
+question, not a defect — but it is the same registry shape, and the classification table now holds both
+so the question cannot be lost again. The other nine are platform-owned (leases, day buckets, monthly
+counters, cross-fleet learning) and correct as they are; each carries its reason in the table rather than
+in somebody's memory.
 ### 2026-09-17 — 🇮🇳 "dukaan" is now a shop: the domain regexes learn Hindi, and `billing` stops selecting a domain
 
 Admin: *"dukaan wala bhi banao"* — the open item recorded an hour earlier while wiring Plan mode.

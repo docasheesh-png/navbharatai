@@ -14,6 +14,7 @@ import { recordPlatformBuild } from '../lib/platformBuildMetrics';
 import { isAdminEmail } from '../lib/adminEmails';
 import { honestResultEvent } from '../lib/responseEmoji';
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
+import { resolveDomainKnowledge, type DomainKnowledge } from '../lib/domainKnowledge';
 import { nextBuildSuggestions } from '../AgentV3/nextBuildSuggestions';
 import { memoryLinkedSuggestions, mergeSuggestions } from '../AgentV3/memoryLinkedSuggestions';
 import { buildFindingSuggestions } from '../AgentV3/buildFindingSuggestions';
@@ -9412,6 +9413,27 @@ async function noteBuildOutcome(
     // BEFORE the build lock: a role turn never writes, so it must run freely WHILE the executor builds
     // (that concurrency is the whole point of the model). Old clients never send `chatRole` → this
     // lane is invisible to them.
+    /**
+     * WHAT KIND OF APP IS THIS? — the sixteen enumerated domains first, a model only where they are
+     * silent (admin 2026-09-18: *"hame to app generator banana tha na?"*). See `domainKnowledge.ts`.
+     *
+     * The call is the FREE chat router — the same ₹0 door the intent doubt-reader uses — raced at 6 s,
+     * and EVERY failure mode (throw, timeout, empty, unparseable, "nothing special") resolves to a
+     * knowledge object with `source: 'none'`, which injects nothing. A known domain and a thin prompt
+     * never reach the model at all, so the common path pays nothing.
+     */
+    const learnDomain = async (text: string): Promise<DomainKnowledge | null> => {
+      try {
+        const free = AIRouterManager.getRouter('free');
+        return await raceTimeout(
+          resolveDomainKnowledge(text, (p) =>
+            free.route(p, 'You answer with JSON only.').then((r) => r.response.content)),
+          6_000,
+          'resolveDomainKnowledge',
+        );
+      } catch { return null; }
+    };
+
     const chatRole = parseChatRole(req.body?.chatRole);
     if (chatRole) {
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -9432,7 +9454,9 @@ async function noteBuildOutcome(
         // 🧭 THE PLAN THE USER CAN SEE, AND THE QUESTIONS WORTH ASKING (admin 2026-09-17). Deterministic,
         // no model call, and empty for everything but a FRESH app in PLAN mode with a real domain —
         // see `plannerDomainBrief`, which holds the reasoning and the three bounds.
-        const domainBrief = plannerDomainBrief(chatRole, prompt, { projectIsEmpty: Object.keys(roleFiles).length === 0 });
+        const projectIsEmpty = Object.keys(roleFiles).length === 0;
+        const knowledge = chatRole === 'planner' && projectIsEmpty ? await learnDomain(prompt) : null;
+        const domainBrief = plannerDomainBrief(chatRole, prompt, { projectIsEmpty, knowledge });
         const system = LANGUAGE_RULE + '\n\n' + CREDENTIAL_SILENCE_RULE + '\n\n' + CODE_LITERACY_RULE + '\n\n' + roleSystemPrompt(chatRole) + '\n\n' + recencyDirective() + roleRecall + formatRoleContext(fileTree, picked) + domainBrief;
         const roleRouter = AIRouterManager.getRouter('free');
         const { response } = await raceTimeout(roleRouter.route(prompt, system), 45_000, 'roleChat.route');
@@ -14335,10 +14359,31 @@ async function noteBuildOutcome(
           // (2026-09-14): a persona request ("your job is to tell me until it's bullet proof") routed
           // to new_build and was handed a recruitment-ATS feature list to INCLUDE. The domain half is
           // now withheld unless an app was genuinely asked for; the India half is unaffected.
+          const askedForAnApp = userAskedForAnAppToBeBuilt(prompt);
           const reqGuidance = buildRequirementGuidance(analyzeRequirementGaps(prompt), {
-            userAskedForAnApp: userAskedForAnAppToBeBuilt(prompt),
+            userAskedForAnApp: askedForAnApp,
           });
           if (reqGuidance) buildPrompt = `${reqGuidance}\n\n---\n\n${buildPrompt}`;
+          // 🇮🇳 THE LONG TAIL (2026-09-18). `buildRequirementGuidance` is silent outside its sixteen
+          // enumerated domains, so a mandir donation app or a machhli-palan tracker used to get NOTHING
+          // while a hospital got RBAC and an audit trail. This adds the same help for the domains
+          // nobody enumerated — and ONLY there: a listed domain returns `listed` and is skipped here,
+          // so every existing build prompt is byte-identical. It never asks a question (the 2026-07-20
+          // friction-free decision is untouched); it only names what such an app usually needs.
+          if (!reqGuidance && askedForAnApp) {
+            const learned = await learnDomain(prompt);
+            if (learned && learned.source === 'generated') {
+              buildPrompt = [
+                `[REQUIREMENT AWARENESS — this looks like a ${learned.domain} app]`,
+                `A production ${learned.domain} app almost always needs the following, which the request left implicit. INCLUDE them by default (real, wired — never stubbed) unless one is clearly out of scope for what the user asked; if it genuinely does not fit, skip it silently rather than asking:`,
+                ...learned.needs.map((f) => `- ${f}`),
+                '',
+                '---',
+                '',
+                buildPrompt,
+              ].join('\n');
+            }
+          }
         } catch { /* requirement guidance is best-effort — never affect the build */ }
       }
 

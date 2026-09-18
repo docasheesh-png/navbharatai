@@ -141,27 +141,27 @@ export function CodeVersioning({ files, sessionId, onRestoreFiles, onSwitchApp }
   const showDropdown = apps.length > 1 || (apps.length === 1 && !viewingCurrent);
 
   return (
-    <div className="h-full flex flex-col bg-[#0d1117] text-[#e6edf3] overflow-hidden">
+    <div className="h-full flex flex-col bg-surface text-body overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3.5 border-b border-white/5 bg-[#161b22] shrink-0">
+      <div className="flex items-center gap-3 px-4 py-3.5 border-b border-line bg-card shrink-0">
         <div className="w-9 h-9 rounded-xl bg-emerald-500/15 grid place-items-center shrink-0">
-          <History className="w-5 h-5 text-emerald-400" />
+          <History className="w-5 h-5 text-success" />
         </div>
         <div className="min-w-0">
           <h2 className="text-base font-semibold leading-tight">Time Machine</h2>
-          <p className="text-[11px] text-white/40 leading-tight mt-0.5">Go back to an earlier version of your app</p>
+          <p className="text-[11px] text-faint leading-tight mt-0.5">Go back to an earlier version of your app</p>
         </div>
       </div>
 
       {/* App picker — only shown when it matters (more than one app) */}
       {showDropdown && (
         <div className="px-4 pt-3 pb-1 shrink-0">
-          <label className="block text-[10px] uppercase tracking-wide text-white/35 mb-1.5">Which app?</label>
+          <label className="block text-[10px] uppercase tracking-wide text-faint mb-1.5">Which app?</label>
           <div className="relative">
             <select
               value={viewSession}
               onChange={(e) => changeApp(e.target.value)}
-              className="w-full appearance-none bg-[#161b22] border border-white/10 rounded-xl pl-3 pr-9 py-3 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+              className="w-full appearance-none bg-card border border-line rounded-xl pl-3 pr-9 py-3 text-sm text-ink focus:outline-none focus:border-emerald-500/50"
             >
               {sessionId && !apps.some((a) => a.sessionId === sessionId) && (
                 <option value={sessionId}>This app (current)</option>
@@ -172,7 +172,7 @@ export function CodeVersioning({ files, sessionId, onRestoreFiles, onSwitchApp }
                 </option>
               ))}
             </select>
-            <ChevronDown className="w-4 h-4 text-white/40 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <ChevronDown className="w-4 h-4 text-faint absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
         </div>
       )}
@@ -188,13 +188,13 @@ export function CodeVersioning({ files, sessionId, onRestoreFiles, onSwitchApp }
                 onChange={(e) => setSaveName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') void saveVersion(); if (e.key === 'Escape') setShowSaveName(false); }}
                 placeholder="Name this version (optional)"
-                className="flex-1 min-w-0 bg-[#161b22] border border-white/10 rounded-xl px-3 py-3 text-sm text-white placeholder-white/25 focus:outline-none focus:border-emerald-500/50"
+                className="flex-1 min-w-0 bg-card border border-line rounded-xl px-3 py-3 text-sm text-ink placeholder-faint focus:outline-none focus:border-emerald-500/50"
               />
               <button onClick={() => void saveVersion()} disabled={saving || !snapFiles}
                 className="shrink-0 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-[#04120c] font-semibold text-sm disabled:opacity-40 flex items-center gap-1.5">
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Save
               </button>
-              <button onClick={() => setShowSaveName(false)} className="shrink-0 px-3 rounded-xl border border-white/10 text-white/50">
+              <button onClick={() => setShowSaveName(false)} className="shrink-0 px-3 rounded-xl border border-line text-muted">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -204,12 +204,12 @@ export function CodeVersioning({ files, sessionId, onRestoreFiles, onSwitchApp }
               <Save className="w-4 h-4" /> Save this version
             </button>
           )}
-          <p className="text-[10px] text-white/25 mt-1.5 px-0.5">Every build is saved here automatically — tap Save to name a version before a big change.</p>
+          <p className="text-[10px] text-faint mt-1.5 px-0.5">Every build is saved here automatically — tap Save to name a version before a big change.</p>
         </div>
       )}
 
       {note && (
-        <div className="mx-4 mt-2 shrink-0 text-xs text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2">{note}</div>
+        <div className="mx-4 mt-2 shrink-0 text-xs text-success bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2">{note}</div>
       )}
 
       {/* Restore points list */}
@@ -217,10 +217,10 @@ export function CodeVersioning({ files, sessionId, onRestoreFiles, onSwitchApp }
         {/* Viewing another app → offer to open it */}
         {!viewingCurrent && (
           <div className="mb-3 rounded-xl border border-amber-500/25 bg-amber-500/10 p-3">
-            <p className="text-xs text-amber-300">You're viewing another app. Open it to restore any of its versions.</p>
+            <p className="text-xs text-warn">You're viewing another app. Open it to restore any of its versions.</p>
             {onSwitchApp && (
               <button onClick={() => onSwitchApp(viewSession)}
-                className="mt-2 w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-semibold text-sm">
+                className="mt-2 w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-warn font-semibold text-sm">
                 <FolderOpen className="w-4 h-4" /> Open this app
               </button>
             )}
@@ -228,60 +228,60 @@ export function CodeVersioning({ files, sessionId, onRestoreFiles, onSwitchApp }
         )}
 
         {loading ? (
-          <div className="flex items-center justify-center gap-2 py-12 text-white/40 text-sm">
+          <div className="flex items-center justify-center gap-2 py-12 text-faint text-sm">
             <Loader2 className="w-4 h-4 animate-spin" /> Loading versions…
           </div>
         ) : !sessionId ? (
           <div className="flex flex-col items-center justify-center gap-2 py-14 text-center px-6">
-            <History className="w-9 h-9 text-white/10" />
-            <p className="text-sm text-white/40">Build an app first</p>
-            <p className="text-xs text-white/25">Every build you make will appear here as a version you can go back to.</p>
+            <History className="w-9 h-9 text-faint" />
+            <p className="text-sm text-faint">Build an app first</p>
+            <p className="text-xs text-faint">Every build you make will appear here as a version you can go back to.</p>
           </div>
         ) : points.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-14 text-center px-6">
-            <History className="w-9 h-9 text-white/10" />
-            <p className="text-sm text-white/40">No saved versions yet</p>
-            <p className="text-xs text-white/25">Each build is saved here automatically — your first one will show up as a version to restore.</p>
+            <History className="w-9 h-9 text-faint" />
+            <p className="text-sm text-faint">No saved versions yet</p>
+            <p className="text-xs text-faint">Each build is saved here automatically — your first one will show up as a version to restore.</p>
           </div>
         ) : (
           <div className="relative">
-            <div className="absolute left-[13px] top-3 bottom-3 w-px bg-white/8" />
+            <div className="absolute left-[13px] top-3 bottom-3 w-px bg-raised" />
             <div className="flex flex-col gap-2">
               {points.map((v, i) => {
                 const isLatest = i === 0;
                 const confirming = confirmId === v.id;
                 return (
                   <div key={v.id} className="relative pl-8">
-                    <div className={`absolute left-2 top-4 w-3 h-3 rounded-full border-2 ${isLatest ? 'border-emerald-400 bg-emerald-400' : 'border-white/25 bg-[#0d1117]'}`} />
-                    <div className={`rounded-xl border p-3 ${isLatest ? 'border-emerald-500/30 bg-emerald-500/[0.06]' : 'border-white/8 bg-[#161b22]'}`}>
+                    <div className={`absolute left-2 top-4 w-3 h-3 rounded-full border-2 ${isLatest ? 'border-emerald-400 bg-emerald-400' : 'border-line bg-surface'}`} />
+                    <div className={`rounded-xl border p-3 ${isLatest ? 'border-emerald-500/30 bg-emerald-500/[0.06]' : 'border-line bg-card'}`}>
                       <div className="flex items-center gap-2">
                         <div className="min-w-0 flex-1">
                           <div className="text-sm font-medium truncate flex items-center gap-1.5">
                             <span className="truncate">{v.commitMessage || 'App version'}</span>
-                            {v.tier === 'manual' && <span className="shrink-0 text-[8px] font-bold text-emerald-300 bg-emerald-500/15 px-1.5 py-0.5 rounded">SAVED</span>}
+                            {v.tier === 'manual' && <span className="shrink-0 text-[8px] font-bold text-success bg-emerald-500/15 px-1.5 py-0.5 rounded">SAVED</span>}
                           </div>
-                          <div className="flex items-center gap-1.5 text-[11px] text-white/35 mt-1">
+                          <div className="flex items-center gap-1.5 text-[11px] text-faint mt-1">
                             <Clock className="w-3 h-3" /> {relativeTime(v.createdAt)}
-                            {isLatest && <span className="text-emerald-400/80">· latest</span>}
+                            {isLatest && <span className="text-success">· latest</span>}
                           </div>
                         </div>
                         {viewingCurrent && !confirming && (
                           <button onClick={() => { setConfirmId(v.id); setNote(''); }} disabled={busy}
-                            className="shrink-0 flex items-center gap-1 text-xs font-semibold text-emerald-300 bg-emerald-500/15 border border-emerald-500/30 rounded-lg px-3 py-2 hover:bg-emerald-500/25 disabled:opacity-40">
+                            className="shrink-0 flex items-center gap-1 text-xs font-semibold text-success bg-emerald-500/15 border border-emerald-500/30 rounded-lg px-3 py-2 hover:bg-emerald-500/25 disabled:opacity-40">
                             <RotateCcw className="w-3.5 h-3.5" /> Restore
                           </button>
                         )}
                       </div>
                       {confirming && (
-                        <div className="mt-2.5 pt-2.5 border-t border-white/8">
-                          <p className="text-xs text-white/60 mb-2">Go back to this version? Your current app will be replaced with it.</p>
+                        <div className="mt-2.5 pt-2.5 border-t border-line">
+                          <p className="text-xs text-muted mb-2">Go back to this version? Your current app will be replaced with it.</p>
                           <div className="flex gap-2">
                             <button onClick={() => void doRestore(v)} disabled={busy}
                               className="flex-1 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-[#04120c] font-semibold text-sm flex items-center justify-center gap-1.5 disabled:opacity-40">
                               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />} Yes, go back
                             </button>
                             <button onClick={() => setConfirmId(null)} disabled={busy}
-                              className="px-4 py-2.5 rounded-lg border border-white/10 text-white/60 text-sm">Cancel</button>
+                              className="px-4 py-2.5 rounded-lg border border-line text-muted text-sm">Cancel</button>
                           </div>
                         </div>
                       )}
@@ -295,7 +295,7 @@ export function CodeVersioning({ files, sessionId, onRestoreFiles, onSwitchApp }
       </div>
 
       {currentApp && viewingCurrent && (
-        <div className="shrink-0 px-4 py-2 border-t border-white/5 text-[10px] text-white/25 text-center">
+        <div className="shrink-0 px-4 py-2 border-t border-line text-[10px] text-faint text-center">
           Versions sync across your devices · last 50 kept
         </div>
       )}

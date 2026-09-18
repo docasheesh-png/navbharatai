@@ -212,29 +212,29 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
       className="fixed inset-0 z-[10000] flex items-center justify-center p-4"
       style={{ pointerEvents: 'none' }}
     >
-      <div className="w-full max-w-xl bg-[#0d1117]/98 border border-white/10 rounded-3xl shadow-3xl overflow-visible backdrop-blur-2xl flex flex-col pointer-events-auto cursor-default active:cursor-grabbing">
+      <div className="w-full max-w-xl bg-surface border border-line rounded-3xl shadow-3xl overflow-visible backdrop-blur-2xl flex flex-col pointer-events-auto cursor-default active:cursor-grabbing">
         
         {/* Row 1: Context Header - Acts as Drag Handle */}
-        <div className="flex items-center justify-between p-4 bg-white/5 border-b border-white/5 rounded-t-3xl">
+        <div className="flex items-center justify-between p-4 bg-raised border-b border-line rounded-t-3xl">
            <div className="flex items-center gap-3">
               <div className="p-2 bg-indigo-500/20 rounded-xl">
-                 <Keyboard className="w-5 h-5 text-indigo-400" />
+                 <Keyboard className="w-5 h-5 text-accent-text" />
               </div>
               <div>
-                 <h2 className="text-xs font-black text-white uppercase tracking-[0.2em]">NavBharat AI Code Studio</h2>
-                 <p className="text-[9px] font-bold text-[#484f58] uppercase">VS Code – Master Keyboard Shortcuts</p>
+                 <h2 className="text-xs font-black text-ink uppercase tracking-[0.2em]">NavBharat AI Code Studio</h2>
+                 <p className="text-[9px] font-bold text-faint uppercase">VS Code – Master Keyboard Shortcuts</p>
               </div>
            </div>
            
            <div className="flex items-center gap-3">
-              <div className="flex items-center bg-black/40 rounded-xl border border-white/5 p-1">
+              <div className="flex items-center bg-well rounded-xl border border-line p-1">
                 {[0.5, 1, 2].map(s => (
                   <button
                     key={s}
                     onClick={() => setScale(s)}
                     className={cn(
                       "px-3 py-1 text-[10px] font-black rounded-lg transition-all",
-                      scale === s ? "bg-white text-black" : "text-[#484f58] hover:text-[#8b949e]"
+                      scale === s ? "bg-white text-black" : "text-faint hover:text-muted"
                     )}
                   >
                     {s}x
@@ -243,7 +243,7 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
               </div>
               <button 
                 onClick={onClose}
-                className="p-2 hover:bg-red-500/20 rounded-xl text-red-500/60 transition-all"
+                className="p-2 hover:bg-red-500/20 rounded-xl text-danger transition-all"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -251,27 +251,27 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
         </div>
 
         {/* Row 2: The Selector (Dropdown + Enter) */}
-        <div className="p-6 bg-black/20 flex flex-col gap-6 relative">
+        <div className="p-6 bg-well flex flex-col gap-6 relative">
            <div className="flex gap-3 h-14">
               {/* Dropdown Selector Box */}
               <div className="relative flex-1" ref={dropdownRef}>
                  <button 
                    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
                    className={cn(
-                     "w-full h-full bg-white/5 border rounded-2xl px-5 flex items-center justify-between transition-all group",
-                     isDropdownOpen ? "border-indigo-500/50 bg-white/[0.08]" : "border-white/10 hover:border-white/20"
+                     "w-full h-full bg-raised border rounded-2xl px-5 flex items-center justify-between transition-all group",
+                     isDropdownOpen ? "border-indigo-500/50 bg-raised" : "border-line hover:border-line"
                    )}
                  >
                     <div className="flex items-center gap-3 overflow-hidden">
-                       <Search className="w-4 h-4 text-[#484f58]" />
+                       <Search className="w-4 h-4 text-faint" />
                        <span className={cn(
                          "text-sm font-bold truncate",
-                         selectedShortcut ? "text-indigo-400" : "text-[#484f58]"
+                         selectedShortcut ? "text-accent-text" : "text-faint"
                        )}>
                          {selectedShortcut ? `${selectedShortcut.label} (${selectedShortcut.key.toUpperCase()})` : "Select a shortcut function..."}
                        </span>
                     </div>
-                    <ChevronDown className={cn("w-4 h-4 text-[#484f58] transition-transform", isDropdownOpen && "rotate-180")} />
+                    <ChevronDown className={cn("w-4 h-4 text-faint transition-transform", isDropdownOpen && "rotate-180")} />
                  </button>
 
                  {/* Dropdown Options - Floating & Overflowing for better visibility */}
@@ -281,9 +281,9 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
                        animate={{ opacity: 1, y: 0, scale: 1 }}
                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                       className="absolute left-[-20px] right-[-20px] top-[calc(100%+10px)] bg-[#0d1117] border border-white/10 rounded-3xl shadow-[0_32px_64px_-16px_rgba(0,0,0,0.8)] overflow-hidden z-[10005] flex flex-col max-h-[450px]"
+                       className="absolute left-[-20px] right-[-20px] top-[calc(100%+10px)] bg-surface border border-line rounded-3xl shadow-[0_32px_64px_-16px_rgba(0,0,0,0.8)] overflow-hidden z-[10005] flex flex-col max-h-[450px]"
                      >
-                        <div className="p-4 border-b border-white/5 bg-white/5 backdrop-blur-3xl">
+                        <div className="p-4 border-b border-line bg-raised backdrop-blur-3xl">
                            <input 
                               autoFocus
                               type="text"
@@ -291,10 +291,10 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
                               value={search}
                               onChange={(e) => { setSearch(e.target.value); setSelectedIndex(0); }}
                               onKeyDown={handleKeyDown}
-                              className="w-full bg-white/5 border border-white/10 rounded-2xl py-3.5 px-5 text-sm font-bold text-white placeholder-[#21262d] outline-none focus:border-indigo-500/50 transition-all"
+                              className="w-full bg-raised border border-line rounded-2xl py-3.5 px-5 text-sm font-bold text-ink placeholder-[#21262d] outline-none focus:border-indigo-500/50 transition-all"
                            />
                         </div>
-                        <div className="flex-1 overflow-y-auto custom-scrollbar bg-black/40">
+                        <div className="flex-1 overflow-y-auto custom-scrollbar bg-well">
                            {filtered.map((s, idx) => {
                              const isSelected = selectedIndex === idx;
                              return (
@@ -303,8 +303,8 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
                                  onClick={() => handleSelect(s)}
                                  onMouseEnter={() => setSelectedIndex(idx)}
                                  className={cn(
-                                   "w-full px-6 py-4 text-left transition-all border-b border-white/5 last:border-0",
-                                   isSelected ? "bg-indigo-600/20 text-white" : "text-[#8b949e] hover:bg-white/5"
+                                   "w-full px-6 py-4 text-left transition-all border-b border-line last:border-0",
+                                   isSelected ? "bg-indigo-600/20 text-ink" : "text-muted hover:bg-raised"
                                  )}
                                >
                                   <div className="flex items-center justify-between">
@@ -315,8 +315,8 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
                                      <div className="flex gap-1.5">
                                         {s.keys.map((k, kIdx) => (
                                           <kbd key={kIdx} className={cn(
-                                            "px-2 py-1 bg-black/60 border rounded-lg text-[10px] font-black uppercase text-[#484f58]",
-                                            isSelected ? "border-indigo-500/30 text-indigo-400" : "border-white/5"
+                                            "px-2 py-1 bg-scrim border rounded-lg text-[10px] font-black uppercase text-faint",
+                                            isSelected ? "border-indigo-500/30 text-accent-text" : "border-line"
                                           )}>
                                             {k}
                                           </kbd>
@@ -339,8 +339,8 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
                 className={cn(
                   "px-8 h-full rounded-2xl font-black text-xs uppercase tracking-widest transition-all active:scale-95 shadow-xl",
                   selectedShortcut 
-                    ? "bg-indigo-500 hover:bg-indigo-400 text-white shadow-indigo-500/20" 
-                    : "bg-white/5 text-[#21262d] cursor-not-allowed border border-white/5"
+                    ? "bg-indigo-500 hover:bg-indigo-400 text-on-accent shadow-indigo-500/20" 
+                    : "bg-white/5 text-[#21262d] cursor-not-allowed border border-line"
                 )}
               >
                 ENTER
@@ -351,7 +351,7 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
            <div className="flex items-center justify-between px-2">
               <button 
                 onClick={onToggleCursor}
-                className="flex items-center gap-2 text-[#484f58] hover:text-indigo-400 transition-colors font-black text-[10px] uppercase tracking-widest"
+                className="flex items-center gap-2 text-faint hover:text-accent-text transition-colors font-black text-[10px] uppercase tracking-widest"
               >
                 <Move className="w-3 h-3" />
                 Switch to Cursor Tool
@@ -363,12 +363,12 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
         </div>
 
         {/* Footer Branding */}
-        <div className="bg-black/40 py-3 text-center border-t border-white/5 flex items-center justify-center gap-6">
+        <div className="bg-well py-3 text-center border-t border-line flex items-center justify-center gap-6">
            <span className="text-[8px] font-black uppercase tracking-[0.6em] text-[#21262d] italic">NavBharat AI Master Studio</span>
-           <div className="h-3 w-px bg-white/5" />
+           <div className="h-3 w-px bg-raised" />
            <div className="flex items-center gap-2">
-              <div className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)] animate-pulse" />
-              <span className="text-[8px] font-black text-[#8b949e] uppercase tracking-widest">Compiler Ready</span>
+              <div className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)] animate-pulse text-on-accent" />
+              <span className="text-[8px] font-black text-muted uppercase tracking-widest">Compiler Ready</span>
            </div>
         </div>
       </div>

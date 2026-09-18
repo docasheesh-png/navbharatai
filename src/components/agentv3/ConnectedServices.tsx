@@ -222,26 +222,26 @@ export const ConnectedServices: React.FC<Props> = ({ workspaceId, authedFetch })
 
   return (
     <div className="flex flex-col gap-3 p-4 text-sm">
-      <p className="text-xs text-zinc-400 leading-relaxed">
+      <p className="text-xs text-muted leading-relaxed">
         Connect your own tools — a Notion workspace, a Linear board, your company&apos;s own service —
         and NavBharatAI can use them while building this app. The service needs a public https address
         that speaks MCP.
       </p>
 
       {services === null ? (
-        <div className="flex items-center gap-2 text-zinc-400"><Loader2 className="w-4 h-4 animate-spin" /> Loading…</div>
+        <div className="flex items-center gap-2 text-muted"><Loader2 className="w-4 h-4 animate-spin" /> Loading…</div>
       ) : services.length === 0 ? (
-        <p className="text-xs text-zinc-500">Nothing connected yet.</p>
+        <p className="text-xs text-faint">Nothing connected yet.</p>
       ) : (
         <ul className="flex flex-col gap-1.5">
           {services.map((s) => (
-            <li key={s.id} className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2">
-              <Puzzle className="w-4 h-4 shrink-0 text-emerald-400" />
+            <li key={s.id} className="flex items-center gap-2 rounded-lg border border-line bg-raised px-3 py-2">
+              <Puzzle className="w-4 h-4 shrink-0 text-success" />
               <div className="min-w-0 flex-1">
-                <div className="text-zinc-200 font-medium truncate">{s.id}</div>
-                <div className="text-[11px] text-zinc-500 truncate">{s.url}{s.hasAuth ? ' · key saved' : ''}</div>
+                <div className="text-body font-medium truncate">{s.id}</div>
+                <div className="text-[11px] text-faint truncate">{s.url}{s.hasAuth ? ' · key saved' : ''}</div>
                 {health[s.id] && (
-                  <div className={`text-[11px] ${health[s.id].state === 'working' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  <div className={`text-[11px] ${health[s.id].state === 'working' ? 'text-success' : 'text-warn'}`}>
                     {health[s.id].message}
                   </div>
                 )}
@@ -250,7 +250,7 @@ export const ConnectedServices: React.FC<Props> = ({ workspaceId, authedFetch })
                 onClick={() => void remove(s.id)}
                 disabled={!!busy}
                 title={`Disconnect ${s.id}`}
-                className="p-1.5 rounded text-zinc-500 hover:text-red-400 hover:bg-zinc-800 disabled:opacity-40"
+                className="p-1.5 rounded text-faint hover:text-danger hover:bg-raised disabled:opacity-40"
               >
                 {busy === s.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
               </button>
@@ -266,13 +266,13 @@ export const ConnectedServices: React.FC<Props> = ({ workspaceId, authedFetch })
           <button
             onClick={() => void check()}
             disabled={!!busy}
-            className="flex items-center justify-center gap-1.5 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 text-xs font-semibold disabled:opacity-40"
+            className="flex items-center justify-center gap-1.5 py-1.5 rounded-lg border border-line text-muted hover:bg-raised text-xs font-semibold disabled:opacity-40"
           >
             {busy === 'check'
               ? <><Loader2 className="w-4 h-4 animate-spin" /> Asking your services…</>
               : <><Stethoscope className="w-4 h-4" /> Check they still work</>}
           </button>
-          {healthHeadline && <p className="text-[11px] text-zinc-400 leading-relaxed">{healthHeadline}</p>}
+          {healthHeadline && <p className="text-[11px] text-muted leading-relaxed">{healthHeadline}</p>}
         </div>
       )}
 
@@ -280,8 +280,8 @@ export const ConnectedServices: React.FC<Props> = ({ workspaceId, authedFetch })
         /* SAVED ONCE, CHOSEN PER APP. These are services this account has connected before. They are
            an OFFER — nothing here is attached until the user taps it, which is what keeps a key out of
            an app that has no business holding it. */
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 flex flex-col gap-2">
-          <span className="text-xs font-semibold text-zinc-300">Your saved services</span>
+        <div className="rounded-lg border border-line bg-raised p-3 flex flex-col gap-2">
+          <span className="text-xs font-semibold text-muted">Your saved services</span>
           <ul className="flex flex-col gap-1.5">
             {attachable.map((s) => (
               <li key={s.id} className="flex items-center gap-2">
@@ -289,21 +289,21 @@ export const ConnectedServices: React.FC<Props> = ({ workspaceId, authedFetch })
                   onClick={() => void attach(s.id)}
                   disabled={!!busy || atCap}
                   title={atCap ? `This app already has ${max} services` : `Use ${s.id} in this app`}
-                  className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-zinc-700 px-3 py-2 text-left hover:bg-zinc-800 disabled:opacity-40"
+                  className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-line px-3 py-2 text-left hover:bg-raised disabled:opacity-40"
                 >
                   {busy === `attach:${s.id}`
-                    ? <Loader2 className="w-4 h-4 shrink-0 animate-spin text-zinc-400" />
-                    : <Link2 className="w-4 h-4 shrink-0 text-zinc-400" />}
+                    ? <Loader2 className="w-4 h-4 shrink-0 animate-spin text-muted" />
+                    : <Link2 className="w-4 h-4 shrink-0 text-muted" />}
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-zinc-200 font-medium">{s.id}</span>
-                    <span className="block truncate text-[11px] text-zinc-500">{s.url}{s.hasAuth ? ' · key saved' : ''}</span>
+                    <span className="block truncate text-body font-medium">{s.id}</span>
+                    <span className="block truncate text-[11px] text-faint">{s.url}{s.hasAuth ? ' · key saved' : ''}</span>
                   </span>
                 </button>
                 <button
                   onClick={() => void forget(s.id)}
                   disabled={!!busy}
                   title={`Forget ${s.id}`}
-                  className="p-1.5 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800 disabled:opacity-40"
+                  className="p-1.5 rounded text-faint hover:text-danger hover:bg-raised disabled:opacity-40"
                 >
                   {busy === `forget:${s.id}` ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />}
                 </button>
@@ -312,7 +312,7 @@ export const ConnectedServices: React.FC<Props> = ({ workspaceId, authedFetch })
           </ul>
           {/* Said plainly rather than left to be discovered: forgetting stops it being offered to new
               apps, and does not reach into an app that is already using it. */}
-          <p className="text-[10px] text-zinc-500 leading-relaxed">
+          <p className="text-[10px] text-faint leading-relaxed">
             One tap adds it to this app — no address or key to type again. Forgetting one removes it
             from this list only; apps already using it keep working until you disconnect it there.
           </p>
@@ -323,43 +323,43 @@ export const ConnectedServices: React.FC<Props> = ({ workspaceId, authedFetch })
         /* LOCKED, HONESTLY — the form is not rendered at all rather than accepting a URL and then
            refusing it. Services ALREADY connected stay listed above and stay removable: a plan that
            lapsed must never trap a user's own key inside our database. */
-        <div className="rounded-lg border border-zinc-700 bg-zinc-900/60 p-3 text-[11px] text-zinc-400 leading-relaxed">
+        <div className="rounded-lg border border-line bg-raised p-3 text-[11px] text-muted leading-relaxed">
           {lockedMessage || 'Connecting your own tools is part of the paid plan.'}
         </div>
       ) : !adding ? (
         <button
           onClick={() => { setAdding(true); setError(''); setNote(''); }}
           disabled={atCap || services === null}
-          className="flex items-center justify-center gap-1.5 py-2 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 text-xs font-semibold disabled:opacity-40"
+          className="flex items-center justify-center gap-1.5 py-2 rounded-lg border border-line text-muted hover:bg-raised text-xs font-semibold disabled:opacity-40"
         >
           <Plus className="w-4 h-4" />
           {atCap ? `You can connect up to ${max} services` : 'Connect a service'}
         </button>
       ) : (
-        <div className="rounded-lg border border-zinc-700 bg-zinc-900/60 p-3 flex flex-col gap-2">
+        <div className="rounded-lg border border-line bg-raised p-3 flex flex-col gap-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-zinc-300">Connect a service (MCP)</span>
-            <button onClick={() => setAdding(false)} className="text-zinc-500 hover:text-zinc-300"><X className="w-4 h-4" /></button>
+            <span className="text-xs font-semibold text-muted">Connect a service (MCP)</span>
+            <button onClick={() => setAdding(false)} className="text-faint hover:text-muted"><X className="w-4 h-4" /></button>
           </div>
-          <label className="text-[11px] text-zinc-400">
+          <label className="text-[11px] text-muted">
             A short name for it
             <input
               value={id}
               onChange={(e) => setId(e.target.value)}
               placeholder="notion"
-              className="mt-1 w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 outline-none focus:border-zinc-500"
+              className="mt-1 w-full bg-surface border border-line rounded px-2 py-1.5 text-body outline-none focus:border-line"
             />
           </label>
-          <label className="text-[11px] text-zinc-400">
+          <label className="text-[11px] text-muted">
             Its address
             <input
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               placeholder="https://example.com/mcp"
-              className="mt-1 w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 outline-none focus:border-zinc-500"
+              className="mt-1 w-full bg-surface border border-line rounded px-2 py-1.5 text-body outline-none focus:border-line"
             />
           </label>
-          <label className="text-[11px] text-zinc-400">
+          <label className="text-[11px] text-muted">
             Key, if it needs one (optional)
             {/* type=password so it is not readable over a shoulder or in a screen share. It is never
                 sent back to this screen once saved. */}
@@ -368,25 +368,25 @@ export const ConnectedServices: React.FC<Props> = ({ workspaceId, authedFetch })
               value={authValue}
               onChange={(e) => setAuthValue(e.target.value)}
               placeholder="Bearer sk-…"
-              className="mt-1 w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 outline-none focus:border-zinc-500"
+              className="mt-1 w-full bg-surface border border-line rounded px-2 py-1.5 text-body outline-none focus:border-line"
             />
           </label>
           <button
             onClick={() => void connect()}
             disabled={!id.trim() || !url.trim() || busy === 'connect'}
-            className="py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold disabled:opacity-40"
+            className="py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-on-accent text-xs font-semibold disabled:opacity-40"
           >
             {busy === 'connect' ? 'Checking the service…' : 'Connect'}
           </button>
-          <p className="text-[10px] text-zinc-500 leading-relaxed">
+          <p className="text-[10px] text-faint leading-relaxed">
             NavBharatAI checks the address and asks the service what it can do before saving anything —
             so a service that cannot be reached is never listed as connected.
           </p>
         </div>
       )}
 
-      {error && <p className="text-xs text-red-400 leading-relaxed">{error}</p>}
-      {note && <p className="text-xs text-emerald-400 leading-relaxed">{note}</p>}
+      {error && <p className="text-xs text-danger leading-relaxed">{error}</p>}
+      {note && <p className="text-xs text-success leading-relaxed">{note}</p>}
     </div>
   );
 };

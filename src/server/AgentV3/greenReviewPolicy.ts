@@ -88,6 +88,52 @@ export function reviewerShouldWrite(input: {
  * Exists as its own named rule so the distinction is explicit and testable, and so a future pass cannot
  * be mis-filed on the wrong side of the line by accident.
  */
+/**
+ * 💸 A SUGGESTION COSTS A SUGGESTION'S PRICE (autopsy b6f88a72, 2026-09-18).
+ *
+ * `reviewerShouldWrite` above already decides that on a proven-green app the reviewer's ONLY possible
+ * output is a dismissible suggestion — no repair runs, nothing it says can fail the build. But the
+ * reviewer still ran at its full budget and its full step cap: on the Gita build it made 40 calls
+ * (`src/App.tsx` read SIX times, `src/index.css` five, each time told "you already have it"),
+ * 523,374 input tokens — 34% of the whole build's LLM spend — and returned **zero characters**.
+ *
+ * So the plan is one rule, reused, never a second "is the app green?" question: exactly when Green
+ * Stop makes the review suggest-only, the review is also LEAN — a hard step cap and a small budget.
+ * Where the reviewer can WRITE (not green, proven broken, or the build failed) nothing changes at all:
+ * full budget, full steps, full powers. That is where it earns its keep and it must not be weakened
+ * there. The cut is in TOKENS, never in strictness. PURE.
+ */
+export const GREEN_REVIEW_MAX_STEPS = 12;
+
+/** Kill switch: `off` makes a green review cost what it always did. Default ON. */
+export function greenReviewLeanEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.AGENTV3_GREEN_REVIEW_LEAN !== 'off';
+}
+
+export interface GreenReviewPlan {
+  /** `suggest` ⇔ the reviewer cannot write; `full` ⇔ today's review, unchanged. */
+  mode: 'full' | 'suggest';
+  /** The sub-agent step cap for this review; `undefined` keeps the build's ordinary cap. */
+  maxSteps: number | undefined;
+}
+
+export function greenReviewPlan(input: {
+  previewGreen: boolean;
+  previewProvenBroken?: boolean;
+  buildOk?: boolean;
+  env?: NodeJS.ProcessEnv;
+}): GreenReviewPlan {
+  const env = input.env ?? process.env;
+  const suggestOnly = !reviewerShouldWrite({
+    previewGreen: input.previewGreen,
+    previewProvenBroken: input.previewProvenBroken,
+    buildOk: input.buildOk,
+    env,
+  });
+  if (!suggestOnly || !greenReviewLeanEnabled(env)) return { mode: 'full', maxSteps: undefined };
+  return { mode: 'suggest', maxSteps: GREEN_REVIEW_MAX_STEPS };
+}
+
 export function userRequestHealAllowedWhenGreen(): boolean {
   return true;
 }

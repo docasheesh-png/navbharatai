@@ -389,7 +389,7 @@ export const HistoryView = ({
                       </button>
                       <button
                         onClick={() => setConfirmDeleteId(null)}
-                        className="px-4 py-2 bg-raised hover:bg-raised text-ink font-black text-xs uppercase tracking-wider rounded-xl transition-all active:scale-95 cursor-pointer border border-line"
+                        className="px-4 py-2 bg-raised hover:bg-raised-hover text-ink font-black text-xs uppercase tracking-wider rounded-xl transition-all active:scale-95 cursor-pointer border border-line"
                       >
                         Cancel
                       </button>

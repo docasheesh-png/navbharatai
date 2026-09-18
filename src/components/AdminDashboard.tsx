@@ -1638,7 +1638,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 <button
                   onClick={() => { setModerating(null); setModerateReason(''); }}
                   disabled={moderateBusy}
-                  className="flex-1 px-4 py-2.5 rounded-xl bg-raised hover:bg-raised text-ink text-sm font-bold disabled:opacity-40"
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-raised hover:bg-raised-hover text-ink text-sm font-bold disabled:opacity-40"
                 >
                   Cancel
                 </button>
@@ -2103,7 +2103,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     What people used today
                     {featureSpend?.date && <span className="ml-2 text-[10px] font-normal text-faint">{featureSpend.date}</span>}
                   </h4>
-                  <button onClick={() => void fetchFeatureSpend()} className="p-1.5 rounded-lg bg-raised hover:bg-raised text-muted" aria-label="Refresh">
+                  <button onClick={() => void fetchFeatureSpend()} className="p-1.5 rounded-lg bg-raised hover:bg-raised-hover text-muted" aria-label="Refresh">
                     <RefreshCw size={13} />
                   </button>
                 </div>
@@ -2267,7 +2267,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         type="button"
                         onClick={() => setUserLimit((l) => l + USER_PAGE)}
                         disabled={usersLoading}
-                        className="px-4 py-2 rounded-full border border-line bg-raised text-[11px] font-bold text-ink hover:bg-raised disabled:opacity-50"
+                        className="px-4 py-2 rounded-full border border-line bg-raised text-[11px] font-bold text-ink hover:bg-raised-hover disabled:opacity-50"
                       >
                         {usersLoading ? 'Loading…' : `Load ${Math.min(USER_PAGE, userTotal - users.length)} more`}
                       </button>
@@ -2638,8 +2638,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     {purchases?.overall?.refundTracked === false && <span className="ml-2 text-warn">· Refunds are not recorded by the payment webhook — check the gateway dashboard before treating a paid row as final.</span>}
                   </span>
                   <span className="flex gap-2">
-                    <button disabled={!purchases || purchases.offset === 0 || purchasesLoading} onClick={() => setPurchaseQuery((q) => ({ ...q, offset: Math.max(0, q.offset - PURCHASE_PAGE) }))} className="px-2 py-1 rounded-lg bg-raised hover:bg-raised disabled:opacity-40 text-ink">‹ Prev</button>
-                    <button disabled={!purchases || purchases.offset + purchases.rows.length >= purchases.total || purchasesLoading} onClick={() => setPurchaseQuery((q) => ({ ...q, offset: q.offset + PURCHASE_PAGE }))} className="px-2 py-1 rounded-lg bg-raised hover:bg-raised disabled:opacity-40 text-ink">Next ›</button>
+                    <button disabled={!purchases || purchases.offset === 0 || purchasesLoading} onClick={() => setPurchaseQuery((q) => ({ ...q, offset: Math.max(0, q.offset - PURCHASE_PAGE) }))} className="px-2 py-1 rounded-lg bg-raised hover:bg-raised-hover disabled:opacity-40 text-ink">‹ Prev</button>
+                    <button disabled={!purchases || purchases.offset + purchases.rows.length >= purchases.total || purchasesLoading} onClick={() => setPurchaseQuery((q) => ({ ...q, offset: q.offset + PURCHASE_PAGE }))} className="px-2 py-1 rounded-lg bg-raised hover:bg-raised-hover disabled:opacity-40 text-ink">Next ›</button>
                   </span>
                 </div>
               </div>
@@ -3205,7 +3205,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   >
                     <Shield size={13} /> {account.wallet?.banned ? 'Lift the suspension' : 'Suspend this account'}
                   </button>
-                  <button onClick={() => setAccount(null)} className="px-3 py-2 rounded-lg bg-raised hover:bg-raised text-xs text-muted">Close</button>
+                  <button onClick={() => setAccount(null)} className="px-3 py-2 rounded-lg bg-raised hover:bg-raised-hover text-xs text-muted">Close</button>
                 </div>
               </>
             )}
@@ -3232,7 +3232,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       className={`px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${reportFilter === f ? 'bg-rose-600 text-on-accent' : 'bg-raised text-muted hover:bg-raised'}`}
                     >{f === 'open' ? 'Needs a person' : 'All'}</button>
                   ))}
-                  <button onClick={() => void fetchUserReports()} className="p-2 rounded-lg bg-raised hover:bg-raised text-muted" aria-label="Refresh">
+                  <button onClick={() => void fetchUserReports()} className="p-2 rounded-lg bg-raised hover:bg-raised-hover text-muted" aria-label="Refresh">
                     <RefreshCw size={14} className={reportsLoading ? 'animate-spin' : ''} />
                   </button>
                 </div>
@@ -3250,7 +3250,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     <button
                       key={r.id}
                       onClick={() => void openUserReport(r.id)}
-                      className="w-full text-left rounded-xl border border-line bg-raised hover:bg-raised p-3 transition-colors"
+                      className="w-full text-left rounded-xl border border-line bg-raised hover:bg-raised-hover p-3 transition-colors"
                     >
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-line text-muted">
@@ -3449,7 +3449,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             <button
                               onClick={() => adminReplyFileRef.current?.click()}
                               disabled={reportReplyBusy}
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-line bg-raised text-[10px] font-semibold text-body hover:bg-raised disabled:opacity-40"
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-line bg-raised text-[10px] font-semibold text-body hover:bg-raised-hover disabled:opacity-40"
                             >
                               <PictureIcon size={12} /> {reportReplyShot ? 'Change screenshot' : 'Add screenshot'}
                             </button>
@@ -3467,8 +3467,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
                         <div className="flex flex-wrap gap-2 mt-5">
                           <button onClick={() => void markUserReport(openReport.report.id, 'actioned')} className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-on-accent">Acted on it</button>
-                          <button onClick={() => void markUserReport(openReport.report.id, 'reviewed')} className="px-3 py-2 rounded-lg bg-raised hover:bg-raised text-xs font-bold text-ink">Read it</button>
-                          <button onClick={() => void markUserReport(openReport.report.id, 'dismissed')} className="px-3 py-2 rounded-lg bg-raised hover:bg-raised text-xs text-muted">Dismiss</button>
+                          <button onClick={() => void markUserReport(openReport.report.id, 'reviewed')} className="px-3 py-2 rounded-lg bg-raised hover:bg-raised-hover text-xs font-bold text-ink">Read it</button>
+                          <button onClick={() => void markUserReport(openReport.report.id, 'dismissed')} className="px-3 py-2 rounded-lg bg-raised hover:bg-raised-hover text-xs text-muted">Dismiss</button>
                           {openReport.report?.target?.ownerUid && (
                             <button
                               onClick={() => { void handleBan(openReport.report.target.ownerUid, true); void markUserReport(openReport.report.id, 'actioned'); }}
@@ -3496,18 +3496,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   )}
                 </h3>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => void fetchApkReports()} className="p-2 rounded-lg bg-raised hover:bg-raised text-muted" aria-label="Refresh">
+                  <button onClick={() => void fetchApkReports()} className="p-2 rounded-lg bg-raised hover:bg-raised-hover text-muted" aria-label="Refresh">
                     <RefreshCw size={14} className={apkReportsLoading ? 'animate-spin' : ''} />
                   </button>
                   <button
                     onClick={downloadAllApkReports}
                     disabled={apkReports.length === 0}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-raised hover:bg-raised text-muted disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-raised hover:bg-raised-hover text-muted disabled:opacity-40 disabled:cursor-not-allowed"
                   ><Download size={12} /> Download all</button>
                   <button
                     onClick={() => void clearApkReports()}
                     disabled={apkReports.length === 0}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-raised hover:bg-raised text-muted disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-raised hover:bg-raised-hover text-muted disabled:opacity-40 disabled:cursor-not-allowed"
                   ><Trash2 size={12} /> Clear all</button>
                 </div>
               </div>
@@ -3528,7 +3528,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     <button
                       key={r.id}
                       onClick={() => void openApkReportById(r.id)}
-                      className="w-full text-left rounded-xl border border-line bg-raised hover:bg-raised p-3 transition-colors"
+                      className="w-full text-left rounded-xl border border-line bg-raised hover:bg-raised-hover p-3 transition-colors"
                     >
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-line text-muted">
@@ -3642,14 +3642,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
                         <div className="flex items-center gap-2 mt-5">
                           {openApkReport.fixed ? (
-                            <button onClick={() => void markApkReport(openApkReport.id, false)} className="px-3 py-2 rounded-lg bg-raised hover:bg-raised text-xs font-bold text-ink">Reopen</button>
+                            <button onClick={() => void markApkReport(openApkReport.id, false)} className="px-3 py-2 rounded-lg bg-raised hover:bg-raised-hover text-xs font-bold text-ink">Reopen</button>
                           ) : (
                             <button onClick={() => void markApkReport(openApkReport.id, true)} className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-on-accent">Mark fixed</button>
                           )}
                           {/* The whole stored report as a file — the log excerpt on screen scrolls,
                               so this is how the cause leaves this page intact. */}
-                          <button onClick={() => downloadApkReport(openApkReport)} className="px-3 py-2 rounded-lg bg-raised hover:bg-raised text-xs font-bold text-ink inline-flex items-center gap-1.5"><Download size={12} /> Download</button>
-                          <button onClick={() => copyApkReport(openApkReport)} className="px-3 py-2 rounded-lg bg-raised hover:bg-raised text-xs font-bold text-ink">Copy</button>
+                          <button onClick={() => downloadApkReport(openApkReport)} className="px-3 py-2 rounded-lg bg-raised hover:bg-raised-hover text-xs font-bold text-ink inline-flex items-center gap-1.5"><Download size={12} /> Download</button>
+                          <button onClick={() => copyApkReport(openApkReport)} className="px-3 py-2 rounded-lg bg-raised hover:bg-raised-hover text-xs font-bold text-ink">Copy</button>
                           <button onClick={() => void deleteApkReportRow(openApkReport.id)} className="ml-auto px-3 py-2 rounded-lg bg-rose-600/80 hover:bg-rose-500 text-xs font-bold text-on-accent inline-flex items-center gap-1.5"><Trash2 size={12} /> Delete</button>
                         </div>
                       </>
@@ -4807,7 +4807,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       <button
                         onClick={fetchUpdateCohort}
                         disabled={updateBusy}
-                        className="px-4 py-2 rounded-xl text-xs font-bold bg-raised text-body hover:bg-raised disabled:opacity-50"
+                        className="px-4 py-2 rounded-xl text-xs font-bold bg-raised text-body hover:bg-raised-hover disabled:opacity-50"
                       >
                         Refresh
                       </button>

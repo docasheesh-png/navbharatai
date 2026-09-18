@@ -168,9 +168,16 @@ describe('🔒 every thunk is called inside a try — a spawn can never be taken
 
 describe('the wiring at the route — proven by reversion', () => {
   const spawnBlock = (() => {
-    const at = ROUTE.indexOf('const spawnSubAgent = makeSubAgentSpawn({');
-    expect(at, 'the spawn call must be findable').toBeGreaterThan(-1);
-    return ROUTE.slice(at, ROUTE.indexOf('});', at));
+    // Re-anchored 2026-09-18: the deps object was hoisted into `subAgentDeps` so the post-build
+    // reviewer can be spawned from the SAME wiring with a smaller step cap on a proven-green app
+    // (greenReviewPlan). The claim is unchanged — every recorder the architect has reaches the
+    // child — and the block is the object literal rather than the call's argument.
+    const at = ROUTE.indexOf('const subAgentDeps: SubAgentDeps = {');
+    expect(at, 'the spawn deps must be findable').toBeGreaterThan(-1);
+    const block = ROUTE.slice(at, ROUTE.indexOf('\n      };\n', at));
+    // …and the ordinary spawn is built from exactly that object, nothing else.
+    expect(ROUTE).toContain('const spawnSubAgent = makeSubAgentSpawn(subAgentDeps);');
+    return block;
   })();
 
   it('the route hands over the same recorders the architect already uses', () => {

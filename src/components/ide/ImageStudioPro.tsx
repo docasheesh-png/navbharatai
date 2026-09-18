@@ -209,7 +209,7 @@ export function ImageStudioPro({ onImageGenerated }: { onImageGenerated?: (url: 
                 <button
                   key={sug}
                   onClick={() => { setPrompt(sug); taRef.current?.focus(); }}
-                  className="text-xs text-muted hover:text-ink bg-raised hover:bg-raised border border-line rounded-full px-3.5 py-2 transition-colors min-w-0 max-w-full truncate"
+                  className="text-xs text-muted hover:text-ink bg-raised hover:bg-raised-hover border border-line rounded-full px-3.5 py-2 transition-colors min-w-0 max-w-full truncate"
                 >
                   {sug}
                 </button>

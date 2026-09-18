@@ -604,7 +604,7 @@ Content-Type: application/json
         <button onClick={() => { setShowConnect(true); setConnResult(null); setConnErr(''); }} disabled={nodes.length === 0} title="Publish this flow as a REAL Telegram / WhatsApp bot" className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent transition-colors flex-shrink-0 whitespace-nowrap">
           <Rocket size={13} /> Go Live
         </button>
-        <button onClick={() => setHelpMode('open')} title="Get step-by-step help — NavBharatAI walks you through building & connecting your bot" className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-raised hover:bg-raised text-body transition-colors flex-shrink-0 whitespace-nowrap">
+        <button onClick={() => setHelpMode('open')} title="Get step-by-step help — NavBharatAI walks you through building & connecting your bot" className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-raised hover:bg-raised-hover text-body transition-colors flex-shrink-0 whitespace-nowrap">
           <HelpCircle size={13} /> Help
         </button>
         <button onClick={exportJson} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-green-700 hover:bg-green-600 text-on-accent transition-colors flex-shrink-0 whitespace-nowrap">

@@ -95,6 +95,18 @@ export function setGreenFreezeObserver(fn: (info: { workspaceId: string; path: s
 }
 
 /**
+ * The sibling observer: every write that was ALLOWED through `assertWriteAllowed`, with the pass that
+ * made it. Added 2026-09-18 for postGreenWrites.ts — the ledger of who edits an app after it first
+ * rendered. Same chokepoint as the refusal observer, so tool writes, heals, restores and sub-agents
+ * are all seen once, and nothing has to be threaded through the twenty places that persist a file.
+ */
+let onWrite: ((info: { workspaceId: string; path: string; pass: string | null }) => void) | null = null;
+export function setWriteObserver(fn: (info: { workspaceId: string; path: string; pass: string | null }) => void): () => void {
+  onWrite = fn;
+  return () => { if (onWrite === fn) onWrite = null; };
+}
+
+/**
  * Thrown by an actuator's writeFile when a write to a green-latched file is refused. A distinct class so
  * callers/tests identify the refusal precisely; a best-effort pass simply swallows it (its try/catch),
  * exactly as it would swallow any write error, and the working app is left untouched.
@@ -180,7 +192,10 @@ export function writeRefused(workspaceId: string, path: string, env: NodeJS.Proc
  * point; the invariant lives here, not at twelve call sites.
  */
 export function assertWriteAllowed(workspaceId: string, path: string, env: NodeJS.ProcessEnv = process.env): void {
-  if (!writeRefused(workspaceId, path, env)) return;
+  if (!writeRefused(workspaceId, path, env)) {
+    if (!isInfraPath(path)) { try { onWrite?.({ workspaceId, path: norm(path), pass: currentPass() }); } catch { /* observer is best-effort */ } }
+    return;
+  }
   const pass = currentPass();
   try { onDeferred?.({ workspaceId, path: norm(path), pass }); } catch { /* observer is best-effort */ }
   throw new GreenFreezeError(norm(path), pass);

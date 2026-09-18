@@ -145,7 +145,11 @@ describe('WIRING — the guard is told what was OBSERVED, not merely what was no
 
   it('the kept-but-unchecked branch tells the user and records an honest finding', () => {
     const at = route.indexOf('── GREEN GUARD, LAYER 2');
-    const seg = route.slice(at, at + 7000);
+    // Re-anchored 2026-09-18 on the block's next STRUCTURE, the way the LAYER 2 WIRING describe below
+    // already does — the fixed 7000 was the fifth character-count drift (the post-green ledger, one
+    // honest line inserted before the guard, pushed GREEN_GUARD_UNVERIFIED past it).
+    const end = route.indexOf('// P-BRE.2 — incremental signal', at);
+    const seg = route.slice(at, end > at ? end : at + 7000);
     expect(seg).toContain('greenGuardUnverifiedMessage()');
     expect(seg).toContain('GREEN_GUARD_UNVERIFIED');
   });

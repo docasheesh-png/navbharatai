@@ -17988,7 +17988,10 @@ async function noteBuildOutcome(
             buildDiag.record({
               phase: 'preview',
               severity: pageSummary.ok ? 'info' : 'warning',
-              code: pageSummary.ok ? 'PAGE_RENDER_PASSED' : 'PAGE_RENDER_FAILED',
+              // THREE outcomes, not two — the same correction `JOURNEY_NOT_RUN` made below. A browser
+              // that returned nothing did not pass and did not fail; `PAGE_RENDER_NOT_RUN` says so
+              // instead of borrowing either verdict, and both other codes now require `ran`.
+              code: !pageSummary.ran ? 'PAGE_RENDER_NOT_RUN' : pageSummary.ok ? 'PAGE_RENDER_PASSED' : 'PAGE_RENDER_FAILED',
               message: pageSummary.summary,
               autoResolved: pageSummary.ok,
               detail: pageResults.map((r) => `${r.verdict.toUpperCase()} ${r.note}`).join('\n'),

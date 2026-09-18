@@ -66127,3 +66127,35 @@ white cards with readable ones.
 **One guard re-anchored:** `themeSystem.test.ts` asserted AgentV3Panel's root LITERAL `bg-zinc-950`
 plus its compat remap; it now asserts the token `bg-surface` and the literal's ABSENCE — strictly
 stronger. Stacked on C; pushed after #3070 merges.
+
+## 2026-09-18 — THE THEME SYSTEM IS REPLACED, PR E of N: the navigation chrome — the two misses on EVERY page were one class
+
+**Four files, one run each:** SidebarNav 59 → 2 · TopNav 72 → 0 · HomeView 38 → 0 · MonitorPanels
+142 → 0. Baseline **8,023 → 7,714** (169 files — four more at zero drop out of the list entirely).
+
+**The finding:** every crawled page on Light carried the same two AA failures — "Enterprise AI
+Workspace" and "navBharat-AI" on a grey block, #b6b7b9. The block was `bg-[#0d1117]/30` on the
+sidebar header: a 30% GitHub-dark wash, which the compat layer never remapped (it covers the solid
+literal, not its opacity variants), so on Light it painted a 30% near-black smear over white and the
+labels sat in it. The codemod's chrome-with-opacity rule (`bg-[#0d1117]/N`, N < 80 → `bg-raised`)
+is exactly this case; nothing was hand-edited. The Live Monitor's range pills (`1H · 24H · 7D`,
+2.66:1 on Light) were the same class in MonitorPanels.
+
+**The proof in the browser** (audit crawler, five views × three themes, pre-E build vs migrated):
+dark and contrast zero misses before and after. Light, per view — **Home 2 inv / 1 sev / 4 fail →
+0 / 0 / 2 · Settings 0/0/2 → 0/0/0 · Billing 0/0/3 → 0/0/1 · Admin 0/3/2 → 0/0/0 · Git 1/0/2 →
+1/0/0.** Settings and Admin are now fully clean on Light. What is left is ONE shape: Home's two
+("Free Forever", "App Mart") and Billing's one ("⚡ RECHARGE") are all `text-success` badges on a 15%
+emerald tint — Light's `--brand-success-text` #047857 is 4.37:1 on that tint, a hair under AA. That is
+a PALETTE fact, not three call sites, and it is fixed at the palette (below). Git's "invisible" is the
+crawler misreading a gradient button's background as the page's white (the label is white on the
+gradient).
+
+**The palette fix (same PR):** Light's `--brand-success-text` / `-strong` move from emerald-700
+(#047857) to emerald-800 (#065f46): 4.37 → 6.13 on the 15% emerald tint a success badge sits on,
+7.68 on white, 6.83 on the raised surface. Warn, danger, info and accent were checked on their own
+tints the same way (6.28 / 5.28 / 4.98 / 6.24) and left alone — none is under the line. One guard
+re-anchored: `appMart.test.ts` asserted the description's `hidden sm:block` rule with the old colour
+class riding along in the same string; it now names the token, and the claim it makes is unchanged.
+**After the palette fix, re-crawled:** Home, Settings, Billing and Admin are at **zero misses on all
+three themes** — the first time any crawled page has been clean on Light.

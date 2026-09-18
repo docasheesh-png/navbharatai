@@ -72,20 +72,20 @@ const PRODUCT_CARDS = [
   {
     id: 'free',
     badge: 'Free Forever',
-    badgeColor: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30',
+    badgeColor: 'bg-emerald-500/20 text-success border border-emerald-500/30',
     gradient: 'from-orange-500/20 via-amber-500/10 to-transparent',
     border: 'border-orange-500/20 hover:border-orange-500/40',
     glow: 'shadow-orange-500/10',
     iconBg: 'bg-orange-500/15',
-    iconColor: 'text-orange-400',
+    iconColor: 'text-warn',
     Icon: MessageSquare,
     title: 'NavBharatAI',
     subtitle: 'Free AI Chat',
     description: 'Ask anything in Hindi, English, or Hinglish — instant answers, explanations, ideas, creative writing, and everyday help. Your free AI companion to learn and get things done. (For building apps, use NavBharatAI Pro.)',
     features: ['Chat in Hindi, English & Hinglish', 'Instant answers, research & learning', 'Creative writing, summaries & translation'],
     featureIcon: CheckCircle2,
-    featureColor: 'text-orange-400',
-    btnClass: 'bg-gradient-to-r from-orange-500 to-amber-400 hover:from-orange-400 hover:to-amber-300 text-white',
+    featureColor: 'text-warn',
+    btnClass: 'bg-gradient-to-r from-orange-500 to-amber-400 hover:from-orange-400 hover:to-amber-300 text-on-accent',
     btnLabel: 'Start Free Chat',
     btnLabelShort: 'Free Chat',
     btnIcon: MessageSquare,
@@ -93,20 +93,20 @@ const PRODUCT_CARDS = [
   {
     id: 'pro',
     badge: 'Pro',
-    badgeColor: 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30',
+    badgeColor: 'bg-indigo-500/20 text-accent-text border border-indigo-500/30',
     gradient: 'from-indigo-600/20 via-purple-500/10 to-transparent',
     border: 'border-indigo-500/20 hover:border-indigo-400/50',
     glow: 'shadow-indigo-500/10',
     iconBg: 'bg-indigo-500/15',
-    iconColor: 'text-indigo-400',
+    iconColor: 'text-accent-text',
     Icon: Bot,
     title: 'NavBharatAI Pro',
     subtitle: 'Agentic App Builder',
     description: 'Describe any app in plain language and NavBharatAI Pro plans, codes, previews and deploys it — automatically, end-to-end. This is the coding & app-building engine.',
     features: ['Full-stack app generation in minutes', 'Live preview + one-click deploy', "NavBharatAI's most powerful AI engine"],
     featureIcon: Zap,
-    featureColor: 'text-indigo-400',
-    btnClass: 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white',
+    featureColor: 'text-accent-text',
+    btnClass: 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-on-accent',
     btnLabel: 'Open Pro Builder',
     btnLabelShort: 'Pro Builder',
     btnIcon: Rocket,
@@ -114,20 +114,20 @@ const PRODUCT_CARDS = [
   {
     id: 'tools',
     badge: '20+ Tools',
-    badgeColor: 'bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30',
+    badgeColor: 'bg-fuchsia-500/20 text-accent-text border border-fuchsia-500/30',
     gradient: 'from-fuchsia-600/20 via-pink-500/10 to-transparent',
     border: 'border-fuchsia-500/20 hover:border-fuchsia-400/50',
     glow: 'shadow-fuchsia-500/10',
     iconBg: 'bg-fuchsia-500/15',
-    iconColor: 'text-fuchsia-400',
+    iconColor: 'text-accent-text',
     Icon: LayoutGrid,
     title: 'Other',
     subtitle: 'Builder Tools & Utilities',
     description: 'Every extra AI utility to design, develop, ship and monetize your app — bot builder, image gen, debugger, deploy, SEO, monetization and more.',
     features: ['Design, develop, test & minify', 'Publish, deploy & custom domain', 'Monetize, analytics & team'],
     featureIcon: CheckCircle2,
-    featureColor: 'text-fuchsia-400',
-    btnClass: 'bg-gradient-to-r from-fuchsia-600 to-pink-600 hover:from-fuchsia-500 hover:to-pink-500 text-white',
+    featureColor: 'text-accent-text',
+    btnClass: 'bg-gradient-to-r from-fuchsia-600 to-pink-600 hover:from-fuchsia-500 hover:to-pink-500 text-on-accent',
     btnLabel: 'Open Tools',
     btnLabelShort: 'Tools',
     btnIcon: LayoutGrid,
@@ -138,12 +138,12 @@ const PRODUCT_CARDS = [
     // whole reason it earns its own tile instead of a row inside Other's tool grid.
     id: 'appmart',
     badge: 'App Mart',
-    badgeColor: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30',
+    badgeColor: 'bg-emerald-500/20 text-success border border-emerald-500/30',
     gradient: 'from-emerald-600/20 via-teal-500/10 to-transparent',
     border: 'border-emerald-500/20 hover:border-emerald-400/50',
     glow: 'shadow-emerald-500/10',
     iconBg: 'bg-emerald-500/15',
-    iconColor: 'text-emerald-400',
+    iconColor: 'text-success',
     Icon: Store,
     title: 'App Mart',
     subtitle: 'Play & Install Apps',
@@ -154,8 +154,8 @@ const PRODUCT_CARDS = [
     description: 'Apps and games made by other NavBharatAI creators. Tap one and it runs straight away in your browser — no account, nothing to download, nothing to install. Like what you see? With a hosting plan you can make it yours and change it however you like.',
     features: ['Play instantly — no account needed', 'Install Android apps (.apk) — sign in to download', 'Remix any app into your own — with a plan'],
     featureIcon: CheckCircle2,
-    featureColor: 'text-emerald-400',
-    btnClass: 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white',
+    featureColor: 'text-success',
+    btnClass: 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-on-accent',
     phoneTagline: 'Games & apps by other creators — free to play',
     btnLabel: 'Open App Mart',
     btnLabelShort: 'Open App Mart',
@@ -228,7 +228,7 @@ export const HomeView = ({
 
       {/* Admin badge */}
       {isAdmin && (
-        <div className="absolute top-4 right-4 z-50 bg-indigo-600 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest text-white shadow-xl flex items-center gap-2">
+        <div className="absolute top-4 right-4 z-50 bg-indigo-600 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest text-on-accent shadow-xl flex items-center gap-2">
           <Shield className="w-3 h-3" />
           Admin
         </div>
@@ -252,21 +252,21 @@ export const HomeView = ({
             className="w-16 h-16 sm:w-20 sm:h-20 object-contain drop-shadow-[0_8px_20px_rgba(249,115,22,0.25)] select-none pointer-events-none"
           />
 
-          <div className="inline-flex items-center gap-2 bg-white/5 border border-white/10 rounded-full px-4 py-1.5">
-            <Sparkles className="w-3.5 h-3.5 text-orange-400 shrink-0" />
-            <span className="font-black uppercase tracking-[0.25em] text-indigo-400 text-[9px] sm:text-[10px]">
+          <div className="inline-flex items-center gap-2 bg-raised border border-line rounded-full px-4 py-1.5">
+            <Sparkles className="w-3.5 h-3.5 text-warn shrink-0" />
+            <span className="font-black uppercase tracking-[0.25em] text-accent-text text-[9px] sm:text-[10px]">
               {data?.welcomeText || 'Welcome to the Future'}
             </span>
           </div>
 
-          <h1 className="font-black text-white tracking-tight leading-none text-3xl sm:text-4xl md:text-5xl">
+          <h1 className="font-black text-ink tracking-tight leading-none text-3xl sm:text-4xl md:text-5xl">
             <span>NAVBHARAT&nbsp;</span>
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-400 to-orange-400">
               AI
             </span>
           </h1>
 
-          <p className="text-[#8b949e] font-medium leading-relaxed text-sm sm:text-base max-w-lg">
+          <p className="text-muted font-medium leading-relaxed text-sm sm:text-base max-w-lg">
             {data?.heroSubtitle || 'The most advanced AI workspace built for the next billion developers and creators from Bharat.'}
           </p>
         </motion.div>
@@ -306,24 +306,24 @@ export const HomeView = ({
               className="group flex-1 flex items-center gap-3 rounded-2xl border border-emerald-500/30 bg-gradient-to-r from-emerald-600/15 via-emerald-500/10 to-transparent px-4 py-3 text-left transition-colors hover:border-emerald-400/60 hover:from-emerald-600/25"
             >
               <span className="shrink-0 rounded-xl bg-emerald-500/20 p-2">
-                <PlayCircle className="w-5 h-5 text-emerald-400" />
+                <PlayCircle className="w-5 h-5 text-success" />
               </span>
               <span className="min-w-0">
-                <span className="block text-sm font-bold text-white leading-tight">
+                <span className="block text-sm font-bold text-ink leading-tight">
                   Stuck building your app?
                 </span>
-                <span className="block text-[11px] sm:text-xs text-emerald-300/80 leading-snug mt-0.5">
+                <span className="block text-[11px] sm:text-xs text-success leading-snug mt-0.5">
                   Watch a short video on how to build one
                 </span>
               </span>
-              <ArrowRight className="w-4 h-4 text-emerald-400/70 ml-auto shrink-0 transition-transform group-hover:translate-x-0.5" />
+              <ArrowRight className="w-4 h-4 text-success ml-auto shrink-0 transition-transform group-hover:translate-x-0.5" />
             </button>
             <button
               type="button"
               onClick={() => { writeTutorialDismissed(); setTutorialDismissed(true); }}
               aria-label="Hide this tip"
               title="Hide"
-              className="shrink-0 px-2 rounded-2xl border border-white/10 text-white/40 hover:text-white/80 hover:bg-white/5 transition-colors"
+              className="shrink-0 px-2 rounded-2xl border border-line text-faint hover:text-body hover:bg-raised transition-colors"
             >
               <X className="w-4 h-4" />
             </button>
@@ -334,7 +334,7 @@ export const HomeView = ({
               type="button"
               onClick={() => openExternalUrl(HOW_TO_BUILD_VIDEO_URL)}
               aria-label="Watch the video: how to build your first app with NavBharatAI Pro"
-              className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-semibold text-emerald-300 hover:border-emerald-400/50 hover:bg-emerald-500/20 transition-colors"
+              className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-semibold text-success hover:border-emerald-400/50 hover:bg-emerald-500/20 transition-colors"
             >
               <PlayCircle className="w-3.5 h-3.5" /> How to build an app
             </button>
@@ -364,7 +364,7 @@ export const HomeView = ({
                 className={cn(
                   'text-left w-full',
                   comingSoon ? 'cursor-not-allowed' : 'cursor-pointer active:scale-[0.98]',
-                  'relative flex flex-col rounded-2xl sm:rounded-3xl border bg-[#0d1117] overflow-hidden',
+                  'relative flex flex-col rounded-2xl sm:rounded-3xl border bg-surface overflow-hidden',
                   'shadow-xl transition-all duration-300',
                   // PHONE LAYOUT (admin 2026-08-16, given as a drawing): a 2-up grid of SQUARE tiles
                   // with App Mart lying across the bottom, 2x1. On a phone the old one-per-row cards
@@ -392,17 +392,17 @@ export const HomeView = ({
 
                   {/* Title + description */}
                   <div className="flex flex-col gap-1">
-                    <h2 className="font-black text-white text-sm sm:text-lg leading-tight">{card.title}</h2>
+                    <h2 className="font-black text-ink text-sm sm:text-lg leading-tight">{card.title}</h2>
                     <p className={cn('text-[9px] sm:text-[11px] font-bold uppercase tracking-wider sm:tracking-widest leading-tight', card.iconColor)}>{card.subtitle}</p>
                   </div>
 
                   {(card as { phoneTagline?: string }).phoneTagline && (
-                    <p className="sm:hidden text-[#8b949e] text-[10px] leading-snug shrink-0 truncate">
+                    <p className="sm:hidden text-muted text-[10px] leading-snug shrink-0 truncate">
                       {(card as { phoneTagline?: string }).phoneTagline}
                     </p>
                   )}
 
-                  <p className="hidden sm:block text-[#8b949e] text-xs sm:text-sm leading-relaxed flex-1">
+                  <p className="hidden sm:block text-muted text-xs sm:text-sm leading-relaxed flex-1">
                     {card.description}
                   </p>
 
@@ -411,7 +411,7 @@ export const HomeView = ({
                     {card.features.map((feat) => (
                       <li key={feat} className="flex items-start gap-2">
                         <FeatIcon className={cn('w-3.5 h-3.5 mt-0.5 shrink-0', card.featureColor)} />
-                        <span className="text-[11px] sm:text-xs text-[#8b949e] leading-snug">{feat}</span>
+                        <span className="text-[11px] sm:text-xs text-muted leading-snug">{feat}</span>
                       </li>
                     ))}
                   </ul>
@@ -446,7 +446,7 @@ export const HomeView = ({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.7 }}
-          className="text-[11px] text-[#484f58] font-medium tracking-wide text-center pb-2"
+          className="text-[11px] text-faint font-medium tracking-wide text-center pb-2"
         >
           Made with ❤️ for Bharat · Free to use · No credit card required
         </motion.p>

@@ -187,8 +187,11 @@ button, [role='button'], nav, header, footer {
        clears WCAG AA against both --surface-card (#ffffff) and --surface-raised (#eef2f7). */
     --brand-accent-text: #4338ca;
     --brand-accent-strong: #4338ca;
-    --brand-success-text: #047857;
-    --brand-success-strong: #047857;
+    /* success: emerald-800, not -700 (PR E, 2026-09-18). A success badge sits on a 15% emerald tint
+       (~#c6eee3 over white), and -700 is 4.37:1 there — the last three Light misses on Home and
+       Billing were all this one pair. -800 is 6.13 on the tint and 7.68 on white. */
+    --brand-success-text: #065f46;
+    --brand-success-strong: #065f46;
     --brand-warn-text: #92400e;
     --brand-warn-strong: #92400e;
     --brand-danger-text: #b91c1c;

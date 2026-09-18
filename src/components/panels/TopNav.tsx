@@ -150,7 +150,7 @@ export function TopNav({
         {effectiveDeviceMode === 'mobile' && (
           <button
             onClick={() => setIsMenuOpen(true)}
-            className="p-2 hover:bg-white/5 rounded-lg text-indigo-400 transition-all shrink-0 border border-white/5"
+            className="p-2 hover:bg-raised rounded-lg text-accent-text transition-all shrink-0 border border-line"
           >
             <Menu className="w-5 h-5" />
           </button>
@@ -159,7 +159,7 @@ export function TopNav({
         {effectiveDeviceMode !== 'mobile' && (
           <button
             onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            className="p-2 hover:bg-white/5 rounded-lg text-indigo-400 transition-all shrink-0 border border-white/5"
+            className="p-2 hover:bg-raised rounded-lg text-accent-text transition-all shrink-0 border border-line"
             title={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
           >
             <Menu className="w-5 h-5" />
@@ -176,7 +176,7 @@ export function TopNav({
             className="w-7 h-7 object-contain drop-shadow-md select-none pointer-events-none"
             referrerPolicy="no-referrer"
           />
-          <h1 className="text-sm font-bold tracking-tighter text-white hidden sm:block italic">navBharatAI</h1>
+          <h1 className="text-sm font-bold tracking-tighter text-ink hidden sm:block italic">navBharatAI</h1>
         </button>
 
         {/* Open tabs */}
@@ -195,19 +195,19 @@ export function TopNav({
                   key={tabId}
                   className={`flex items-center shrink-0 h-9 rounded-xl px-3 gap-2 border transition-all cursor-pointer group ${
                     activeView === tabId
-                      ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-600/20'
-                      : 'bg-[#0d1117] border-white/5 text-[#8b949e] hover:border-white/20'
+                      ? 'bg-indigo-600 border-indigo-500 text-on-accent shadow-lg shadow-indigo-600/20'
+                      : 'bg-surface border-line text-muted hover:border-line'
                   }`}
                   onClick={() => setActiveView(tabId as ViewType)}
                 >
-                  <Icon className={`w-3.5 h-3.5 ${activeView === tabId ? 'text-white' : 'text-indigo-400'}`} />
+                  <Icon className={`w-3.5 h-3.5 ${activeView === tabId ? 'text-ink' : 'text-accent-text'}`} />
                   <span className="text-[11px] font-bold whitespace-nowrap">{item.label}</span>
                   <button
                     onClick={(e) => closeTab(e, tabId)}
                     className={`p-0.5 rounded-md transition-all ${
                       activeView === tabId
-                        ? 'hover:bg-white/20 text-white/60 hover:text-white'
-                        : 'hover:bg-white/10 text-white/20 hover:text-white'
+                        ? 'hover:bg-raised text-muted hover:text-ink'
+                        : 'hover:bg-raised text-faint hover:text-ink'
                     }`}
                   >
                     <X className="w-3 h-3" />
@@ -222,21 +222,21 @@ export function TopNav({
       {/* Action Controls */}
       <div className="flex items-center gap-2 shrink-0">
         {hasGeneratedCode && (
-          <div className="hidden sm:flex items-center gap-1 border border-white/5 rounded-xl overflow-hidden">
+          <div className="hidden sm:flex items-center gap-1 border border-line rounded-xl overflow-hidden">
             <button
               onClick={undoCode}
               disabled={!canUndo}
               title="Undo (Ctrl+Z)"
-              className="p-2 hover:bg-white/5 text-[#484f58] hover:text-white transition-all disabled:opacity-25 disabled:cursor-not-allowed"
+              className="p-2 hover:bg-raised text-faint hover:text-ink transition-all disabled:opacity-25 disabled:cursor-not-allowed"
             >
               <RotateCcw className="w-3.5 h-3.5" />
             </button>
-            <div className="w-px h-5 bg-white/10" />
+            <div className="w-px h-5 bg-raised" />
             <button
               onClick={redoCode}
               disabled={!canRedo}
               title="Redo (Ctrl+Y)"
-              className="p-2 hover:bg-white/5 text-[#484f58] hover:text-white transition-all disabled:opacity-25 disabled:cursor-not-allowed"
+              className="p-2 hover:bg-raised text-faint hover:text-ink transition-all disabled:opacity-25 disabled:cursor-not-allowed"
             >
               <RotateCcw className="w-3.5 h-3.5 scale-x-[-1]" />
             </button>
@@ -249,7 +249,7 @@ export function TopNav({
             onClick={onEnterFocusMode}
             title="Focus Mode — hide the header (Esc to exit)"
             aria-label="Enter Focus Mode"
-            className="p-2 hover:bg-white/5 rounded-lg text-[#484f58] hover:text-white transition-all border border-white/5"
+            className="p-2 hover:bg-raised rounded-lg text-faint hover:text-ink transition-all border border-line"
           >
             <Maximize2 className="w-4 h-4" />
           </button>
@@ -259,7 +259,7 @@ export function TopNav({
         {!user ? (
           <button
             onClick={() => setShowAuth(true)}
-            className="py-2.5 px-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-600/20 active:scale-95"
+            className="py-2.5 px-5 bg-indigo-600 hover:bg-indigo-700 text-on-accent rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-600/20 active:scale-95"
           >
             Login
           </button>
@@ -268,22 +268,22 @@ export function TopNav({
             {/* Avatar button */}
             <button
               onClick={() => setDropdownOpen(v => !v)}
-              className="flex items-center gap-2 h-9 pl-1 pr-2 bg-white/5 hover:bg-white/8 border border-white/5 hover:border-white/15 rounded-xl transition-all active:scale-95"
+              className="flex items-center gap-2 h-9 pl-1 pr-2 bg-raised hover:bg-raised border border-line hover:border-line rounded-xl transition-all active:scale-95"
               title="My Account"
             >
               {user.photoURL ? (
                 <img src={user.photoURL} alt="" className="w-7 h-7 rounded-lg object-cover" referrerPolicy="no-referrer" />
               ) : (
                 <div className="w-7 h-7 rounded-lg bg-indigo-600/30 border border-indigo-500/30 flex items-center justify-center">
-                  <span className="text-xs font-black text-indigo-400">
+                  <span className="text-xs font-black text-accent-text">
                     {(user.displayName || user.email || 'U').charAt(0).toUpperCase()}
                   </span>
                 </div>
               )}
-              <span className="hidden sm:block text-[11px] font-bold text-white truncate max-w-[72px]">
+              <span className="hidden sm:block text-[11px] font-bold text-ink truncate max-w-[72px]">
                 {(user.displayName || user.email?.split('@')[0] || 'User')}
               </span>
-              <ChevronDown className={`w-3 h-3 text-[#484f58] transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
+              <ChevronDown className={`w-3 h-3 text-faint transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
             </button>
 
             {/* Dropdown */}
@@ -294,14 +294,14 @@ export function TopNav({
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95, y: -4 }}
                   transition={{ duration: 0.1 }}
-                  className="absolute right-0 top-full mt-1 w-48 bg-[#161b22] border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50"
+                  className="absolute right-0 top-full mt-1 w-48 bg-card border border-line rounded-2xl shadow-2xl overflow-hidden z-50"
                 >
                   {/* User info row */}
-                  <div className="px-4 py-3 border-b border-white/5">
-                    <p className="text-xs font-black text-white truncate">
+                  <div className="px-4 py-3 border-b border-line">
+                    <p className="text-xs font-black text-ink truncate">
                       {user.displayName || user.email?.split('@')[0]}
                     </p>
-                    <p className="text-[10px] text-[#484f58] truncate">{user.email}</p>
+                    <p className="text-[10px] text-faint truncate">{user.email}</p>
                   </div>
                   {/* SWITCH PROFILE (admin 2026-08-22). Other remembered accounts, one tap each.
                       Honest wording throughout: "Remove from this device" never says "sign out",
@@ -311,8 +311,8 @@ export function TopNav({
                       render only the OTHERS and hide itself when there were none — so a user with one
                       account saw no list at all and just an "Add another account" button, which is
                       exactly why this menu read as an add-only control (admin 2026-08-22). */}
-                  <div className="py-1 border-b border-white/5">
-                    <p className="px-4 pt-1 pb-1.5 text-[9px] font-black text-[#484f58] uppercase tracking-widest">{SWITCH_ACCOUNT_LABEL}</p>
+                  <div className="py-1 border-b border-line">
+                    <p className="px-4 pt-1 pb-1.5 text-[9px] font-black text-faint uppercase tracking-widest">{SWITCH_ACCOUNT_LABEL}</p>
                     {/* THE LINE THAT STOOD HERE IS NOW ON THE ROW ITSELF (admin 2026-09-12: "yeh
                         description bina bat ke jagah kha raha hai … unprofessional lagta hai").
 
@@ -330,7 +330,7 @@ export function TopNav({
                         the row you actually tap, which costs no space and reads on hover or long-press.
                         The promise still matches the mechanism; it just no longer sits in the open. */}
                     {accountRows(roster, user.uid, user).map((a) => (
-                        <div key={a.uid} className={cn('group flex items-center gap-2 px-2 transition-colors', a.isCurrent ? 'bg-white/[0.03]' : 'hover:bg-white/5')}>
+                        <div key={a.uid} className={cn('group flex items-center gap-2 px-2 transition-colors', a.isCurrent ? 'bg-raised' : 'hover:bg-raised')}>
                           <button
                             onClick={() => { if (!a.isCurrent) void switchTo(a); }}
                             disabled={a.isCurrent}
@@ -342,23 +342,23 @@ export function TopNav({
                             {a.photo ? (
                               <img src={a.photo} alt="" className="w-6 h-6 rounded-lg object-cover shrink-0" referrerPolicy="no-referrer" />
                             ) : (
-                              <div className="w-6 h-6 rounded-lg bg-white/10 flex items-center justify-center shrink-0">
-                                <span className="text-[10px] font-black text-[#8b949e]">{accountInitial(a)}</span>
+                              <div className="w-6 h-6 rounded-lg bg-raised flex items-center justify-center shrink-0">
+                                <span className="text-[10px] font-black text-muted">{accountInitial(a)}</span>
                               </div>
                             )}
                             <span className="min-w-0">
-                              <span className="block text-[11px] font-bold text-white truncate">{accountLabel(a)}</span>
-                              {a.email && a.name && <span className="block text-[9px] text-[#484f58] truncate">{a.email}</span>}
+                              <span className="block text-[11px] font-bold text-ink truncate">{accountLabel(a)}</span>
+                              {a.email && a.name && <span className="block text-[9px] text-faint truncate">{a.email}</span>}
                             </span>
                           </button>
                           {a.isCurrent ? (
-                            <span className="shrink-0 px-1 text-[9px] font-black uppercase tracking-widest text-emerald-400">Current</span>
+                            <span className="shrink-0 px-1 text-[9px] font-black uppercase tracking-widest text-success">Current</span>
                           ) : (
                             <button
                               onClick={(e) => { e.stopPropagation(); removeAccount(a.uid); }}
                               title="Remove from this device"
                               aria-label={`Remove ${accountLabel(a)} from this device`}
-                              className="shrink-0 p-1 rounded opacity-0 group-hover:opacity-100 text-[#484f58] hover:text-red-400 transition-all"
+                              className="shrink-0 p-1 rounded opacity-0 group-hover:opacity-100 text-faint hover:text-danger transition-all"
                             >
                               <X className="w-3.5 h-3.5" />
                             </button>
@@ -372,27 +372,27 @@ export function TopNav({
                         onClick={() => { if (!canAddAccount(roster)) return; void switchTo(); }}
                         disabled={!canAddAccount(roster)}
                         title={addAccountLabel(roster)}
-                        className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="w-full flex items-center gap-3 px-4 py-2 hover:bg-raised transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        <UserPlus className="w-4 h-4 text-emerald-400 shrink-0" />
-                        <span className="text-[11px] font-bold text-white truncate">{addAccountLabel(roster)}</span>
+                        <UserPlus className="w-4 h-4 text-success shrink-0" />
+                        <span className="text-[11px] font-bold text-ink truncate">{addAccountLabel(roster)}</span>
                       </button>
                     </div>
                   {/* Menu items */}
                   <div className="py-1">
                     <button
                       onClick={() => { setDropdownOpen(false); onOpenProfile?.(); }}
-                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
+                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-raised transition-colors text-left"
                     >
-                      <User className="w-4 h-4 text-indigo-400" />
-                      <span className="text-sm font-bold text-white">My Profile</span>
+                      <User className="w-4 h-4 text-accent-text" />
+                      <span className="text-sm font-bold text-ink">My Profile</span>
                     </button>
                     <button
                       onClick={() => { setDropdownOpen(false); onOpenSettings?.(); }}
-                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
+                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-raised transition-colors text-left"
                     >
-                      <Settings className="w-4 h-4 text-[#8b949e]" />
-                      <span className="text-sm font-bold text-[#8b949e]">Settings</span>
+                      <Settings className="w-4 h-4 text-muted" />
+                      <span className="text-sm font-bold text-muted">Settings</span>
                     </button>
                     {/* Admin Panel — visible ONLY when an admin session is active (isAdmin). Opens the
                         existing /admin dashboard view. Normal users never see this entry. */}
@@ -401,18 +401,18 @@ export function TopNav({
                         onClick={() => { setDropdownOpen(false); setActiveView('admin'); }}
                         className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-amber-500/10 transition-colors text-left group"
                       >
-                        <Shield className="w-4 h-4 text-amber-400" />
-                        <span className="text-sm font-bold text-amber-400">Admin Panel</span>
+                        <Shield className="w-4 h-4 text-warn" />
+                        <span className="text-sm font-bold text-warn">Admin Panel</span>
                       </button>
                     )}
                   </div>
-                  <div className="border-t border-white/5 py-1">
+                  <div className="border-t border-line py-1">
                     <button
                       onClick={handleLogout}
                       className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-red-500/10 transition-colors text-left group"
                     >
-                      <LogOut className="w-4 h-4 text-[#484f58] group-hover:text-red-400 transition-colors" />
-                      <span className="text-sm font-bold text-[#484f58] group-hover:text-red-400 transition-colors">Sign Out</span>
+                      <LogOut className="w-4 h-4 text-faint group-hover:text-danger transition-colors" />
+                      <span className="text-sm font-bold text-faint group-hover:text-danger transition-colors">Sign Out</span>
                     </button>
                   </div>
                 </motion.div>

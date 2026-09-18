@@ -173,7 +173,7 @@ describe('the phone layout the admin drew: 2-up squares, App Mart 2x1 across the
   it('squares only work because the content shrinks with them', () => {
     // A square tile with a description and three feature bullets in it would overflow. These are the
     // rules that make the shape possible — remove one and the tile spills.
-    expect(home).toContain('hidden sm:block text-[#8b949e]');   // description
+    expect(home).toContain('hidden sm:block text-muted');       // description (token since the theme replacement)
     expect(home).toContain('hidden sm:flex flex-col gap-1.5');  // feature list
     expect(home).toContain('hidden sm:inline-block');            // badge
   });

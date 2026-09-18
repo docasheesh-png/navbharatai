@@ -67809,6 +67809,93 @@ restoring one `hover:bg-raised` fails the scanner by name, and setting `--surfac
 **Open, deliberately not done here:** `bg-card` and `bg-surface` have no hover partner, because nothing
 in the app currently hovers them onto themselves — the scanner covers all four surfaces, so the day one
 appears it fails rather than shipping silently.
+## 2026-09-18 — A HOSPITAL SYSTEM ASKED FOR IN TAMIL SCORED 5 — THE SCORE OF "hi"
+
+Follow-on to the same day's domain-sizing work, on the admin's word ("han, wahi bhasha wala kaam
+uthao"). That entry closed the gap for English and Hindi and recorded this half as **open**, because
+this repo held no vocabulary at all for the other languages of the market and inventing one would be
+a guess. This is that vocabulary, measured rather than guessed.
+
+**THE DEFECT, root-caused.** `RequirementGapAnalyzer`'s thirteen domain regexes were English, with
+romanised Hindi and then Devanagari appended by hand, twice. A prompt in **Bengali, Tamil, Telugu,
+Urdu, Marathi, Gujarati, Kannada, Malayalam, Punjabi or Odia** therefore named NO domain:
+`analyzeRequirementGaps` returned `general`, `namesBusinessDomain` returned false, and
+`RequestAnalyser`'s last resort — which asks exactly that question — fell to `chat` at `BASE_SCORE`
+**5**. Everything downstream followed the score down: **80 steps instead of 150, no blueprint, a
+small-app ETA, and the cheap flash rung instead of Kimi.** The user typed their own language and got
+a toy.
+
+**THE SECOND DEFECT, same file, same cause.** `INDIA_CONTEXT_RE` names the languages in ENGLISH
+("hindi", "tamil"), so a prompt typed entirely IN one of those scripts was never recognised as an
+Indian-market prompt at all — `indiaFirstGuidance` (₹, UPI, DD/MM/YYYY) never reached the builder, and
+a user writing in Tamil got `$` / Stripe / MM-DD-YYYY defaults.
+
+**THE 50/50 HALF — why it could arise.** There was no PLACE for a language. The vocabulary lived
+inside one-line regex literals, so adding one meant editing thirteen lines and every editor had to
+re-derive the boundary rules below. `src/server/lib/indicDomainTerms.ts` is that place: one table, one
+boundary builder, one compiled cache, consulted at the **single** point where a domain is chosen —
+`selectDomain`, extracted because BOTH readers (the analyzer and the suggestion bulb) carried the same
+filter+reduce inline. So `analyzeRequirementGaps`, `missingDomainFeatures`, the admin's Failure
+Category panel, `namesBusinessDomain`, `BuildTimeEstimator`, `RoleChats` and `domainKnowledge` all
+gained every language at once, with no second copy to keep in sync.
+
+**🔒 THE BOUNDARY IS THE WHOLE DIFFICULTY, and it is why the terms are NOT pasted into the regexes.**
+JavaScript's `\b` is ASCII-only, so an unanchored Indic term matches inside longer, unrelated words —
+the way `माल` (goods) matches inside `मालिक` (owner). Two assertions, both needed:
+* LEFT `(?<![\p{L}\p{N}\p{M}])` — a term can never be found mid-word or at a word's end.
+* RIGHT `(?!\p{M}*[\p{L}\p{N}])` — trailing COMBINING MARKS may follow (so an inflected `दुकानों`
+  still matches `दुकान`), but not a mark-then-letter. **That second half is what a naive "marks are
+  allowed" rule gets wrong**: in Indic scripts a virama IS a mark, so `ಯೋಗ` (yoga) would otherwise
+  match inside `ಯೋಗ್ಯ` (suitable).
+A term marked `+` is a STEM (left assertion only), for the case suffixes Tamil/Telugu/Kannada/
+Malayalam/Bengali attach directly to a noun — `மருத்துவமனை` inside `மருத்துவமனையில்`. A term earns
+`+` only when every longer word starting with it is the same domain; otherwise it stays a whole word
+and an inflected form is simply missed. **A miss costs today's behaviour; a false positive costs a
+wrongly-sized, dearer build** — that asymmetry decided every borderline word.
+
+**Words dropped for precision, not forgotten:** `तेर्वु`/`தேர்வு` (exam, but also "selection"),
+`সংরক্ষণ` (means data storage as often as a reservation), `आरक्षण` (in India, quota far more often
+than a booking), `भूमि`/generic "home" words (`घर`, `ঘর`, `ಮನೆ`, `വീട്`), and every "hotel" word (in
+India it means both an eatery and lodging, and English `hotel` is in no domain regex either). `अप्पु`
+(Telugu loan) was demoted from stem to whole word because it is a prefix of `అప్పుడు` ("then").
+
+**Evidence.** `tests/theLanguagesOfTheMarketNameTheirDomain.test.ts` — 17 cases: **71 INFLECTED
+prompts** across ten languages each resolving to its own domain end-to-end and sizing as
+`complex_app`/58/`sonnet`; a **16-line collision corpus** of ordinary sentences that CONTAIN a domain
+term (`கடைசி`, `ಯೋಗ್ಯ`, `সুদানের`, `জিম্বাবুয়ের`, `अप्पुडु`, `कडलास`, `मालिक`, `उपयोग`) naming no
+domain; eleven ordinary app requests in eleven scripts staying `general` and ≤20; the English/Hindi
+corpus asserted unchanged. **Proven by reversion**: removing the matcher from `selectDomain` and the
+script test from `detectIndiaContext` turns 6 of the 17 red; narrowing the script range by one script
+turns 2 red.
+
+**A tie was INHERITED rather than re-decided.** `ഭക്ഷണത്തിന്റെ ഓർഡർ ആപ്പ്` ("a food order app")
+resolves to `ecommerce`, not `restaurant` — because `a food order app` does too in English, and has
+since the 2026-07-21 feature-score fix (with no English feature word in an Indic prompt, nothing
+breaks the tie and array order keeps the earlier domain). Giving the Indic path its own tie-break
+would make one sentence mean two things in two languages. Pinned as a test so it is a decision.
+
+**Drift policed, not merely noted.** `AgentV3/LanguageDetect.ts` already enumerates these nine script
+ranges for a DIFFERENT question (which language to write an app's labels in, gated on 15% dominance).
+Rather than refactor a module with its own tests, or leave two copies of one fact, a test DERIVES the
+invariant from that table and asserts the two agree — the `ladderClaimsMatchTheTable` pattern.
+
+### 🔴 STILL OPEN (rule 6) — four honest gaps, none of them guessed at
+
+1. **`namesBusinessDomain`'s guards are English-only.** `PAGE_DELIVERABLE_SIGNAL` and
+   `SIMPLE_APP_SIGNAL` (`appComplexitySignals.ts`) stop "a coming-soon **page** for my restaurant"
+   being sized as a whole app. An Indic-language page request passes both guards, so it sizes as
+   `complex_app`. **Not fixed here because that file is mid-flight in PR #3079** — CLAUDE.md's
+   concurrency rule 4 (do not edit another session's file while it is in flight).
+2. **Feature detection is still English-only.** For an Indic prompt every domain feature reads as
+   `likelyMissing`, so the requirement guidance tells the builder to INCLUDE things the user already
+   asked for (harmless — it would build them anyway) and, more importantly, the feature score cannot
+   break a tie between two domains (see the food-order case above). Closing it means Indic terms per
+   FEATURE, not per domain — a much larger table, and a separate change with its own evidence.
+3. **A SIMPLE app prompt in an Indic script still scores 5, not 15.** No consequence today (both are
+   ≤20, so the same tier and the same step cap), which is why it was not chased.
+4. **Assamese, Sindhi, Kashmiri, Konkani, Manipuri and Bodo are not covered.** Assamese is partly
+   carried by the Bengali terms (shared script); the rest would need vocabulary nobody here has
+   measured. Recorded rather than filled with guesses.
 ## 2026-09-18 — `AGENTV3_PROJECT_MODE=on`, and the door it opens was bolted (the gate read bullets; users write commas)
 
 The admin set `AGENTV3_PROJECT_MODE=on` in Cloud Run — the two-month-old pending decision recorded in

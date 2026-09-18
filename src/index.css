@@ -45,6 +45,16 @@
      which stays dark on every theme because it dims what is behind it. */
   --color-well: var(--surface-well);
   --color-scrim: var(--scrim);
+  /* HOVER surfaces (2026-09-18). `bg-raised hover:bg-raised` is a no-op, and the theme migration
+     produced 105 of them because the app's old idiom was `bg-white/10 hover:bg-white/15` — two
+     alphas that both map to ONE token, so the lift was silently lost on 76 controls that had no
+     other hover feedback at all. The rule these values follow: a hover moves the surface toward
+     the theme's INSET end (the `well` direction), never toward its text — on dark that is darker,
+     on light lighter-to-darker, and on High contrast the only direction black can move. Contrast
+     therefore IMPROVES on hover on every theme, which is why this could be added without
+     re-tuning the palette: tests/themeTokensOnly.test.ts checks all ten text tokens against it. */
+  --color-raised-hover: var(--surface-raised-hover);
+  --color-well-hover: var(--surface-well-hover);
 }
 
 /* Disable the browser's left/right swipe back/forward navigation — it was
@@ -152,7 +162,9 @@ button, [role='button'], nav, header, footer {
        staying visibly lighter than --text-muted, so the hierarchy survives. */
     --text-faint: #838d97;     /* placeholder / faint       */
     --border-soft: rgba(255, 255, 255, 0.1);
+    --surface-raised-hover: #191c22;      /* hover on a raised chip — a step toward the well */
     --surface-well: rgba(0, 0, 0, 0.3);   /* inset well inside a card */
+    --surface-well-hover: rgba(0, 0, 0, 0.45);
     --scrim: rgba(0, 0, 0, 0.7);          /* modal backdrop — the same on every theme */
     /* Native controls (select, date, scrollbar) follow the theme instead of the OS default. */
     color-scheme: dark;
@@ -178,9 +190,15 @@ button, [role='button'], nav, header, footer {
     --text-primary: #0f172a;
     --text-body: #1e293b;
     --text-muted: #475569;
-    --text-faint: #5b6b82;     /* audit 2026-09-18: #64748b was 4.23 on --surface-raised */
+    /* #64748b was 4.23 on --surface-raised (audit 2026-09-18); #5b6b82 fixed that but measured
+       4.40 on --surface-raised-hover, so the hover state would have re-created the very defect the
+       audit removed. #57677e clears 4.5 on all four surfaces and stays lighter than --text-muted,
+       so the body > muted > faint hierarchy is unchanged. */
+    --text-faint: #57677e;
     --border-soft: #e2e8f0;
+    --surface-raised-hover: #e5e9ef;
     --surface-well: rgba(15, 23, 42, 0.06);
+    --surface-well-hover: rgba(15, 23, 42, 0.1);
     color-scheme: light;
     --accent: #4f46e5;
     /* LIGHT — the theme the admin reported unreadable on 2026-09-13. Each is the 700 shade, which
@@ -212,7 +230,9 @@ button, [role='button'], nav, header, footer {
     --text-muted: #ffffff;
     --text-faint: #ffff00;
     --border-soft: #ffff00;
+    --surface-raised-hover: #1f1f1f;
     --surface-well: #111111;
+    --surface-well-hover: #1a1a1a;
     color-scheme: dark;
     --accent: #ffff00;
     --brand-accent-text: #ffff00;

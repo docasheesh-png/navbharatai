@@ -467,19 +467,19 @@ export function DatabaseStudio() {
             ))}
           </div>
           <div className="p-2 border-t border-line space-y-1.5">
-            <button onClick={() => void loadRows(selected, offset)} className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-raised hover:bg-raised rounded-lg text-[10px] text-faint transition-all">
+            <button onClick={() => void loadRows(selected, offset)} className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-raised hover:bg-raised-hover rounded-lg text-[10px] text-faint transition-all">
               <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} /> Refresh
             </button>
-            <button onClick={exportJson} className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-raised hover:bg-raised rounded-lg text-[10px] text-faint transition-all">
+            <button onClick={exportJson} className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-raised hover:bg-raised-hover rounded-lg text-[10px] text-faint transition-all">
               <Download className="w-3 h-3" /> Export page (JSON)
             </button>
             {live && (
               <>
-                <button onClick={() => void exportCsv()} className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-raised hover:bg-raised rounded-lg text-[10px] text-faint transition-all">
+                <button onClick={() => void exportCsv()} className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-raised hover:bg-raised-hover rounded-lg text-[10px] text-faint transition-all">
                   <Download className="w-3 h-3" /> Export table (CSV)
                 </button>
                 {editable && (
-                  <label className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-raised hover:bg-raised rounded-lg text-[10px] text-faint transition-all cursor-pointer">
+                  <label className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-raised hover:bg-raised-hover rounded-lg text-[10px] text-faint transition-all cursor-pointer">
                     <Upload className="w-3 h-3" /> Import CSV
                     <input
                       type="file"
@@ -519,7 +519,7 @@ export function DatabaseStudio() {
               <button
                 onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
                 disabled={offset === 0 || loading}
-                className="p-1.5 rounded-lg bg-raised hover:bg-raised disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                className="p-1.5 rounded-lg bg-raised hover:bg-raised-hover disabled:opacity-30 disabled:cursor-not-allowed transition-all"
                 title="Previous page"
               >
                 <ChevronLeft className="w-3.5 h-3.5 text-muted" />
@@ -527,7 +527,7 @@ export function DatabaseStudio() {
               <button
                 onClick={() => setOffset((o) => o + PAGE_SIZE)}
                 disabled={!hasMore || loading}
-                className="p-1.5 rounded-lg bg-raised hover:bg-raised disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                className="p-1.5 rounded-lg bg-raised hover:bg-raised-hover disabled:opacity-30 disabled:cursor-not-allowed transition-all"
                 title="Next page"
               >
                 <ChevronRight className="w-3.5 h-3.5 text-muted" />
@@ -894,7 +894,7 @@ export function DatabaseStudio() {
               <button onClick={() => void saveEdit()} disabled={saving} className="flex-1 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 rounded-xl text-xs font-medium flex items-center justify-center gap-1.5 transition-all text-on-accent">
                 {saving ? <TirangaLoader className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />} Save
               </button>
-              <button onClick={() => { setEditing(null); setWriteError(''); }} className="px-4 py-2 bg-raised hover:bg-raised rounded-xl text-xs text-faint transition-all">Cancel</button>
+              <button onClick={() => { setEditing(null); setWriteError(''); }} className="px-4 py-2 bg-raised hover:bg-raised-hover rounded-xl text-xs text-faint transition-all">Cancel</button>
             </div>
           </div>
         )}

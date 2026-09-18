@@ -435,7 +435,7 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
             {!editing && (
               <button
                 onClick={startEdit}
-                className="shrink-0 flex items-center gap-1.5 px-3 py-2 bg-raised hover:bg-raised border border-line rounded-xl text-[11px] font-bold text-ink transition-all"
+                className="shrink-0 flex items-center gap-1.5 px-3 py-2 bg-raised hover:bg-raised-hover border border-line rounded-xl text-[11px] font-bold text-ink transition-all"
               >
                 <Edit3 className="w-3.5 h-3.5" /> Edit
               </button>
@@ -497,7 +497,7 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
                   {saving ? <TirangaLoader className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
                   Save Changes
                 </button>
-                <button onClick={cancelEdit} className="flex items-center gap-1.5 px-4 py-2 bg-raised hover:bg-raised text-muted rounded-xl text-xs font-bold transition-all">
+                <button onClick={cancelEdit} className="flex items-center gap-1.5 px-4 py-2 bg-raised hover:bg-raised-hover text-muted rounded-xl text-xs font-bold transition-all">
                   <X className="w-3.5 h-3.5" /> Cancel
                 </button>
               </div>
@@ -551,7 +551,7 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
                   setCodeCopied(true);
                   setTimeout(() => setCodeCopied(false), 2000);
                 }}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-raised px-4 py-2 text-[10px] font-black uppercase tracking-widest text-ink transition-all hover:bg-raised disabled:opacity-40"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-raised px-4 py-2 text-[10px] font-black uppercase tracking-widest text-ink transition-all hover:bg-raised-hover disabled:opacity-40"
               >
                 <Copy className="h-3 w-3" /> {codeCopied ? 'Copied' : 'Copy'}
               </button>

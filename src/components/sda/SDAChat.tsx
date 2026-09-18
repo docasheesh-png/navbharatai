@@ -758,7 +758,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
           <div className="relative max-w-[95vw] max-h-[92vh] supports-[height:100dvh]:max-h-[92dvh] flex flex-col items-center gap-2" onClick={e => e.stopPropagation()}>
             <img src={lightbox.src} alt={lightbox.name} className="max-w-full max-h-[85vh] supports-[height:100dvh]:max-h-[85dvh] rounded-2xl shadow-2xl object-contain" />
             <p className="text-[10px] text-muted font-mono truncate max-w-full">{lightbox.name}</p>
-            <button onClick={() => setLightbox(null)} className="absolute -top-3 -right-3 w-8 h-8 bg-raised hover:bg-raised rounded-full flex items-center justify-center text-ink transition-colors border border-line">
+            <button onClick={() => setLightbox(null)} className="absolute -top-3 -right-3 w-8 h-8 bg-raised hover:bg-raised-hover rounded-full flex items-center justify-center text-ink transition-colors border border-line">
               <X className="w-4 h-4" />
             </button>
           </div>
@@ -845,7 +845,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
               <ClipboardList className="w-3.5 h-3.5" /> What Am I Missing?
             </button>
             <button onClick={generatePDF} disabled={messages.length < 2}
-              className="w-full flex items-center gap-2 px-3 py-2 bg-raised hover:bg-raised border border-line rounded-lg text-[10px] font-black text-muted hover:text-ink uppercase tracking-widest transition-all disabled:opacity-40">
+              className="w-full flex items-center gap-2 px-3 py-2 bg-raised hover:bg-raised-hover border border-line rounded-lg text-[10px] font-black text-muted hover:text-ink uppercase tracking-widest transition-all disabled:opacity-40">
               <Download className="w-3.5 h-3.5" /> Download PDF
             </button>
           </div>
@@ -887,7 +887,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
             </button>
             <button onClick={generatePDF} disabled={messages.length < 2}
               title="Download case as PDF"
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-raised border border-line text-faint hover:text-ink hover:bg-raised transition-all disabled:opacity-40">
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-raised border border-line text-faint hover:text-ink hover:bg-raised-hover transition-all disabled:opacity-40">
               <Download className="w-3 h-3" />
               <span className="hidden sm:inline">PDF</span>
             </button>
@@ -902,7 +902,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                 expecting a fresh case. A plus is the universal new-chat glyph. Same action, honest icon. */}
             <button onClick={startNewCase}
               title="New chat — start a fresh case"
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-raised border border-line text-faint hover:text-ink hover:bg-raised transition-all">
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-raised border border-line text-faint hover:text-ink hover:bg-raised-hover transition-all">
               <Plus className="w-3 h-3" />
               <span className="hidden sm:inline">New Chat</span>
             </button>
@@ -964,7 +964,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                           alt={msg.attachedFile.name}
                           className="w-16 h-16 rounded-lg object-cover border border-line group-hover:brightness-110 transition-all cursor-zoom-in"
                         />
-                        <div className="absolute inset-0 rounded-lg bg-well group-hover:bg-well transition-colors flex items-center justify-center">
+                        <div className="absolute inset-0 rounded-lg bg-well group-hover:bg-well-hover transition-colors flex items-center justify-center">
                           <Navigation className="w-4 h-4 text-ink opacity-0 group-hover:opacity-100 transition-opacity drop-shadow rotate-45" />
                         </div>
                       </button>
@@ -1050,7 +1050,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                     Yes, Generate
                   </button>
                   <button onClick={() => setSuggestPDF(false)}
-                    className="px-3 py-1.5 bg-raised hover:bg-raised rounded-lg text-[10px] font-black text-muted transition-all">
+                    className="px-3 py-1.5 bg-raised hover:bg-raised-hover rounded-lg text-[10px] font-black text-muted transition-all">
                     Later
                   </button>
                 </div>

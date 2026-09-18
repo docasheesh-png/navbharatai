@@ -69,7 +69,19 @@ export function scaleBuildSeconds(baseSeconds: number, depth: PipelineDepth): nu
  * NEVER eat into the wall-clock safety margin — a reviewer must never be the reason a finished app
  * times out. `headroomMs` = ms left before the wall-clock cap (Infinity when no cap is configured).
  */
-export function reviewerBudgetMs(fileCount: number, headroomMs: number, projectFileCount = 0): number {
+/**
+ * What a review that can ONLY produce a suggestion is allowed to cost in time. Equal to the floor
+ * the function below already refuses to go under, so a green review is never given less than a
+ * not-green review at the wall-clock margin — only never more. See greenReviewPolicy.ts.
+ */
+export const GREEN_REVIEW_BUDGET_MS = 45_000;
+
+export function reviewerBudgetMs(
+  fileCount: number,
+  headroomMs: number,
+  projectFileCount = 0,
+  opts: { previewGreen?: boolean } = {},
+): number {
   const BASE = 90_000, PER_FILE = 4_000, MIN = 45_000, MAX = 210_000, SAFETY = 60_000;
   // SECOND ROOT CAUSE (mitrify autopsy 2026-08-04): "Post-build review timed out after 90000ms on 9
   // files" — on an app with 608 files. The budget scaled with the number of files HANDED to the
@@ -82,8 +94,11 @@ export function reviewerBudgetMs(fileCount: number, headroomMs: number, projectF
   const project = Number.isFinite(projectFileCount) && projectFileCount > 0 ? Math.floor(projectFileCount) : 0;
   const contextMs = Math.max(0, Math.max(project, files) - 50) * PER_CONTEXT_FILE;
   const scaled = Math.min(BASE + Math.max(0, files - 20) * PER_FILE + contextMs, MAX);
-  if (!Number.isFinite(headroomMs)) return scaled;          // no wall-clock cap → the scaled budget
-  return Math.max(MIN, Math.min(scaled, headroomMs - SAFETY)); // else leave a 60s wall-clock safety margin
+  // 💸 A proven-green app's review is suggest-only, so it pays a suggestion's price — capped at the
+  // floor, never below it. Not-green keeps every number above exactly as it was.
+  const cap = opts.previewGreen ? Math.min(scaled, GREEN_REVIEW_BUDGET_MS) : scaled;
+  if (!Number.isFinite(headroomMs)) return cap;             // no wall-clock cap → the scaled budget
+  return Math.max(MIN, Math.min(cap, headroomMs - SAFETY)); // else leave a 60s wall-clock safety margin
 }
 
 /**

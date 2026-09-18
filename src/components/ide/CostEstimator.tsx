@@ -387,7 +387,7 @@ export const CostEstimator: React.FC = () => {
           {/* Export */}
           <button
             onClick={handleDownload}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-raised hover:bg-raised border border-line rounded-md text-xs text-body transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-raised hover:bg-raised-hover border border-line rounded-md text-xs text-body transition-colors"
           >
             <Download size={13} />
             Download Report

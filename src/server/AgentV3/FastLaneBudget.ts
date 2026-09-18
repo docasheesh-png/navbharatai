@@ -78,6 +78,42 @@ export function canFinishRemainingTiers(p: TierProgress): boolean {
   return p.elapsedMs + projectedMs <= p.overallMs;
 }
 
+/**
+ * TRUE when the lane can still finish its files AFTER paying for the shared-contract pass.
+ *
+ * 🔴 ROOT CAUSE (autopsy c6e4c6ff, 2026-09-18 — "E commerce website"). `preambleCapMs` bounds the
+ * contract by the PREAMBLE'S SHARE and never asks the only question that decides whether the lane
+ * survives: is there still room for the TIERS once it is paid for? On that build there was not, and
+ * the arithmetic is stark because every number in it was already known:
+ *
+ *     plan call            49s      (measured, a real call on this build's chain)
+ *     3 populated tiers  ~147s      (projected at the plan's latency, as canFinishAfterPreamble does)
+ *     after the plan      49 + 147 = 196s  of 240s   → the lane could finish
+ *     contract cap         47s      (what the preamble share still allowed)
+ *     after the contract  96 + 147 = 243s  of 240s   → DOOMED
+ *
+ * So `canFinishAfterPreamble` — which runs after the contract — correctly bailed, and the lane handed
+ * off having produced nothing. **The best-effort pass is what caused the bail that then discarded it.**
+ * The app was built by the full builder instead, and that build took 26.7 minutes.
+ *
+ * 🔑 THE CONTRACT IS ALREADY OPTIONAL AND THIS FILE ALREADY SAYS SO — `preambleCapMs` returns 0 to mean
+ * "skip this phase", with the reasoning that "an empty contract degrades per-file agreement, it does
+ * not break the build" while "a starved build phase produces no app at all". That is exactly the trade
+ * here; it was simply never applied to the tier projection. Skipping one optional pass is strictly
+ * better than bailing the whole lane.
+ *
+ * ⚠️ The contract's expected cost is the PLAN's measured duration, not its cap — same philosophy as
+ * both siblings above (project from a real measurement, so the decision improves automatically on a
+ * fast provider). Bounded by the cap, because the call cannot outlive it.
+ */
+export function canAffordSharedContract(p: PreambleProgress & { contractCapMs: number }): boolean {
+  if (p.contractCapMs <= 0) return false;        // already skipped by the share — nothing to decide
+  if (p.tiers <= 0) return true;
+  if (!(p.preambleCallMs > 0)) return true;      // no measurement — never bail on an absent signal
+  const expectedContractMs = Math.min(p.contractCapMs, p.preambleCallMs);
+  return canFinishAfterPreamble({ ...p, elapsedMs: p.elapsedMs + expectedContractMs });
+}
+
 export interface PreambleProgress {
   /** The MEASURED duration of the plan call — one real model call, on this build's real provider chain. */
   preambleCallMs: number;

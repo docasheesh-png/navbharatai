@@ -890,7 +890,7 @@ export function SettingsPanel({
                         <span className="flex-1 text-[10px] font-mono text-faint truncate">{user.uid}</span>
                         <button
                           onClick={() => { navigator.clipboard.writeText(user.uid).catch(() => {}); }}
-                          className="p-1.5 rounded-lg bg-raised hover:bg-raised text-faint hover:text-ink transition-colors"
+                          className="p-1.5 rounded-lg bg-raised hover:bg-raised-hover text-faint hover:text-ink transition-colors"
                           title="Copy user ID"
                         >
                           <Copy className="w-3 h-3" />
@@ -1161,7 +1161,7 @@ export function SettingsPanel({
                                 href="https://github.com/settings/tokens/new?scopes=repo,read:user,user:email&description=Navbharat%20AI%20Access"
                                 target="_blank"
                                 rel="noreferrer"
-                                className="flex items-center justify-center gap-2 w-full py-2.5 bg-raised border border-line hover:bg-raised text-muted hover:text-ink rounded-xl text-[9px] font-black uppercase tracking-widest transition-all"
+                                className="flex items-center justify-center gap-2 w-full py-2.5 bg-raised border border-line hover:bg-raised-hover text-muted hover:text-ink rounded-xl text-[9px] font-black uppercase tracking-widest transition-all"
                               >
                                  <Github className="w-3.5 h-3.5" />
                                  Generate PAT Token
@@ -1302,7 +1302,7 @@ export function SettingsPanel({
                  <div className="flex items-center gap-4 px-1 py-4">
                     <button
                       onClick={() => setSettingsScreen('connections')}
-                      className="w-10 h-10 rounded-xl bg-raised flex items-center justify-center border border-line hover:bg-raised transition-all"
+                      className="w-10 h-10 rounded-xl bg-raised flex items-center justify-center border border-line hover:bg-raised-hover transition-all"
                     >
                        <ChevronLeft className="w-5 h-5 text-ink" />
                     </button>
@@ -1324,7 +1324,7 @@ export function SettingsPanel({
                        />
                        <button
                          onClick={() => githubToken && fetchUserRepos(githubToken)}
-                         className="p-2 bg-raised hover:bg-raised rounded-lg transition-all"
+                         className="p-2 bg-raised hover:bg-raised-hover rounded-lg transition-all"
                          title="Refresh List"
                        >
                           <RefreshCw className="w-4 h-4 text-faint" />
@@ -1574,7 +1574,7 @@ export function SettingsPanel({
                           })
                           .finally(() => setLoadingAdminMetrics(false));
                       }}
-                      className="w-full py-4 bg-raised hover:bg-raised border border-line text-ink rounded-[1.5rem] font-black uppercase tracking-widest text-xs transition-all flex items-center justify-center gap-2"
+                      className="w-full py-4 bg-raised hover:bg-raised-hover border border-line text-ink rounded-[1.5rem] font-black uppercase tracking-widest text-xs transition-all flex items-center justify-center gap-2"
                     >
                       <BarChart2 className="w-4 h-4" />
                       Refresh Metrics
@@ -1600,7 +1600,7 @@ export function SettingsPanel({
                           })
                           .finally(() => setLoadingAdminMetrics(false));
                       }}
-                      className="px-4 py-2 bg-raised hover:bg-raised border border-line text-ink rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all"
+                      className="px-4 py-2 bg-raised hover:bg-raised-hover border border-line text-ink rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all"
                     >
                       Try again
                     </button>

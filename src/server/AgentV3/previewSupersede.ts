@@ -26,9 +26,17 @@
 // that pointed at it.
 //
 // 🔒 DELIBERATELY NARROW. Only ports this workspace's own records name (recipe port, declaredPort)
-// are ever freed — never a swept or guessed list, so a port the app legitimately uses for a second
+// are ever freed — never a swept or guessed list.
+//
+// 🔴 AND THAT PARENTHESIS USED TO BE FALSE. It read: "so a port the app legitimately uses for a second
 // process of ITS OWN (an API next to its frontend) is untouched unless our records called it the
-// previous app's. Infrastructure ports (databases) are never freed, same rule as DevServerRecovery.
+// previous app's." On a full-stack app our records call it exactly that — the recipe names the port of
+// whichever process was previewed LAST, so the app's other process is always "the previous app's port"
+// to this function. Report `1a7f4a58` (2026-09-18) is that sentence being wrong in production: a Vite
+// frontend on 5173 beside an Express API on 3001, `update_preview :3001`, and the frontend killed.
+// The veto below is now a SET for that reason — see `sourceDeclaredPorts`.
+//
+// Infrastructure ports (databases) are never freed, same rule as DevServerRecovery.
 
 import type { PreviewRecipe } from './previewRevival';
 
@@ -77,16 +85,32 @@ export function decideSupersede(input: {
    * legitimately hold a second port of its own, and refusing to kill is always the safe direction.
    */
   sourceDeclaredPort?: number | null;
+  /**
+   * EVERY port the app's own source declares — the veto as a SET (report `1a7f4a58`, 2026-09-18).
+   *
+   * 🔴 The singular field above expresses the right rule and can only ever half-apply it. A full-stack
+   * app declares two ports and BOTH are its own; naming the strongest one protects that one and leaves
+   * the other free to be killed. In the report it protected the API (3001, read from `.env.example`)
+   * and killed the frontend (5173) — so the preview served `Cannot GET /`, because that Express app
+   * only serves static files under `NODE_ENV=production`.
+   *
+   * Both fields are honoured and unioned, so a caller that passes only the singular one behaves exactly
+   * as it does today. Widening a veto can only ever REFUSE to kill, which is the direction this file
+   * already argues is always safe.
+   */
+  sourceDeclaredPorts?: readonly number[] | null;
 }): SupersedeDecision {
   const stale = new Set<number>();
-  const declared = typeof input.sourceDeclaredPort === 'number' && Number.isInteger(input.sourceDeclaredPort)
-    ? input.sourceDeclaredPort
-    : null;
+  const declaredSet = new Set<number>();
+  for (const p of [input.sourceDeclaredPort, ...(input.sourceDeclaredPorts ?? [])]) {
+    if (typeof p === 'number' && Number.isInteger(p)) declaredSet.add(p);
+  }
+  const declared = declaredSet.size > 0;
   const usable = (p: unknown): p is number =>
     typeof p === 'number' && Number.isInteger(p) && p > 0 && p < 65536
     && p !== input.newPort && !PROTECTED_PORTS.has(p)
-    // 🔒 THE VETO. Never free the port the app itself declares — see `sourceDeclaredPort`.
-    && p !== declared;
+    // 🔒 THE VETO. Never free ANY port the app itself declares — see `sourceDeclaredPorts`.
+    && !declaredSet.has(p);
   const recipePort = input.recipe?.port;
   if (usable(recipePort)) stale.add(recipePort);
   if (usable(input.declaredPort)) stale.add(input.declaredPort as number);
@@ -98,7 +122,15 @@ export function decideSupersede(input: {
    * build. When the app's own source and the stored recipe agree, a third port that merely answers
    * does not get to overrule both.
    */
-  const recipeMatchesApp = declared !== null && recipePort === declared && input.newPort !== declared;
+  /**
+   * ⚠️ The singular version read `recipePort === declared && input.newPort !== declared`. That second
+   * clause was how one port had to express "the app is on its OWN port, so the recipe's is the other
+   * app's" — and on a full-stack app it is false for the wrong reason: BOTH ports are the app's own, so
+   * it retired the frontend's recipe the moment the API was verified, re-pointing the preview door at
+   * the API for every later view. With a set the rule states itself: a recipe naming a port this app
+   * declares is not stale, whatever we happen to be verified on right now.
+   */
+  const recipeMatchesApp = declared && typeof recipePort === 'number' && declaredSet.has(recipePort);
   const retireRecipe = typeof recipePort === 'number' && recipePort !== input.newPort && !recipeMatchesApp;
   const staleports = [...stale];
   const note = staleports.length === 0 && !retireRecipe

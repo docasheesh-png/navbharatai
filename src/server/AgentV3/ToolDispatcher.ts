@@ -6,7 +6,7 @@ import { shouldRunAuditFix, auditFixOutcome, AUDIT_FIX_COMMAND } from './npmAudi
 import { narrationText, type NarrationId, type NarrationParams } from './narrationCatalogue';
 import { noteHeal } from './HealLedger';
 import { decideSupersede } from './previewSupersede';
-import { declaredPortFrom, DECLARED_PORT_FILES } from './declaredPort';
+import { declaredPortsFrom, DECLARED_PORT_FILES } from './declaredPort';
 import { sandboxStore } from './SandboxStore';
 import { buildPreKillPortCommand } from './sandbox/EngineerAI/actuators/devServerHost';
 import { pipedGateExitCodeWarning } from './pipedGateExitCode';
@@ -8347,7 +8347,7 @@ export class ToolDispatcher {
            * that declares nothing leaves `sourceDeclaredPort` null and the behaviour byte-identical to
            * before, because the veto simply has nothing to veto.
            */
-          let sourceDeclaredPort: number | null = null;
+          let sourceDeclaredPorts: number[] = [];
           try {
             const portFiles: Record<string, string | undefined> = {};
             for (const path of DECLARED_PORT_FILES) {
@@ -8355,9 +8355,12 @@ export class ToolDispatcher {
                 portFiles[path] = await withTimeout(this.actuator.readFile(this.workspaceId, path), 3_000, 'supersede-declared-port');
               } catch { /* absent is normal — most apps have only one or two of these */ }
             }
-            sourceDeclaredPort = declaredPortFrom(portFiles)?.port ?? null;
+            // EVERY port the app declares, not the strongest one. A full-stack app's frontend and API
+            // are both its own, and the singular answer protected one while leaving the other killable
+            // — report `1a7f4a58` killed a Vite frontend to bless the app's own Express API.
+            sourceDeclaredPorts = declaredPortsFrom(portFiles).map((d) => d.port);
           } catch { /* a port hint must never be able to affect a build */ }
-          const decision = decideSupersede({ newPort: port, recipe, declaredPort: record?.declaredPort, sourceDeclaredPort });
+          const decision = decideSupersede({ newPort: port, recipe, declaredPort: record?.declaredPort, sourceDeclaredPorts });
           if (decision.staleports.length > 0) {
             await withTimeout(
               this.actuator.runCommand(this.workspaceId, buildPreKillPortCommand(decision.staleports)),

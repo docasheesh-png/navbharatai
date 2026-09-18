@@ -67600,80 +67600,6 @@ curl count as proof, and making the gate fill unconditional — each turns the s
 - **The `useState of null` from autopsy `95598899` remains unexplained** — it needs the failing file's
   contents, which the report does not carry, and no plausible-sounding guess is recorded in its place.
 
-## 2026-09-18 — Admin Security → BUILT APPS: every user's built app, twelve at a time, each with a preview (branch `claude/every-built-app-has-a-preview`)
-
-Admin, verbatim, with a screenshot of the Security tab: *"1. admin panel ki security me jitni bhi apps dikh
-rahi hai, chahe woh live hai ya offline, sabhi ka preview chalna chahiye. 2. is security wale option me
-sabhi users ki build app dikhni chahiye. 3. ek dam se sara data load na ho, 12-12 ke set me load karwo."*
-
-### What the old panel read, and why it could answer none of the three
-
-`GET /api/admin/deployments` is the PUBLISH registry (`agentv3_deployments`): a record exists only once
-an app has been published, and the panel pulled 200 rows in one request. So a user's app that was built
-and never published was invisible, an offline app had no preview (its only "preview" was the live link it
-no longer had), and everything arrived at once.
-
-**And the screenshot showed a fourth defect nobody had asked about: rows reading LIVE or OFFLINE with
-NOTHING after the badge — no id, no link, no owner.** Root cause in `DeploymentStore`: `setStatus`,
-`markOrphaned` and `setOutboundVerdict` wrote with `set(…, { merge: true })`, which CREATES the document
-when it is absent. Unpublish and restore call `setStatus` for whatever workspace id they were handed, so
-a moderation on an app whose registry record had already been deleted minted a doc holding only
-`{ status, updatedAt }`. A status describes a publish; it cannot be the first thing written about one.
-
-### What ships
-
-- **The source of "built" is the durable FILE store, not the publish registry.** `listWorkspaceAppsPage`
-  (`WorkspaceFileStore.ts`) pages `workspace_files_v3` newest-save-first, resumed from a DOCUMENT
-  SNAPSHOT cursor (exact under this ordering with no composite index), skipping green-guard snapshot
-  keys and emptied indexes and refilling the page (bounded) so twelve means twelve. `ok: false` is a
-  failed read, never "no apps". `getWorkspaceAppsMany` is the batched join for the other direction.
-- **Each page is joined in ONE batched read per store** — `deploymentStore.getMany` (existing) and the
-  new `sandboxStore.getMany` — so a page costs three round trips, never thirty-six.
-- **`adminBuiltApps.ts` (pure):** `parseAppsQuery` (a workspace id → exact; a uid → owner prefix range;
-  a link → registry equality; a fragment → `text`, filtered client-side over loaded rows, said so on
-  screen — a fragment answered server-side is the full scan the admin asked to stop), `publishStateOf`
-  (`live` requires a URL via `isLiveDeployment`, the one definition; a status-only ghost reads **"Not
-  published"**, never Live), `builtAppRow` / `joinBuiltAppRows` (order kept), opaque cursor codec that
-  only ever decodes to a workspace id, `clampPageSize` (default 12, hard cap 48).
-- **`GET /api/admin/apps`** — one page of `BUILT_APPS_PAGE_SIZE`; a `status` filter pages the REGISTRY
-  instead (equality + `__name__` order, the one paging an equality filter can do without a composite
-  index; the response says `order: 'id'`). Orphaned live publishes (`orphaned: true`, files purged, so
-  the file-store list cannot reach them) ride the first page as their own strip — a live site nobody
-  can moderate is the hole `markOrphaned` exists to close. 502 on a failed read.
-- **`POST /api/admin/apps/:workspaceId/preview`** — renders the DURABLE files with the same
-  `renderPreview` the user's pane uses. 🔒 **Never touches a sandbox**: an admin looking at somebody's
-  app must not resume that user's E2B machine. Test-locked by grep against the route block.
-- **`previewPlan` (client):** the SAVED COPY of the last green build (`snapshotUrl`, a real `dist/` on
-  its own subdomain) wins when the row has one; else the in-browser render (labelled "frontend only");
-  else an honest "nothing to preview". Live or offline makes no difference to whether a preview exists.
-- **`admin/BuiltAppsPanel.tsx`** — the list, "Load 12 more", search (Enter), state filter, the preview
-  modal (sandboxed iframe: `src` for the copy, `srcDoc` for the render). Unpublish/Ban still open the
-  dashboard's confirmation dialog (the copy that guards a permanent act was not moved); after an action
-  the panel re-reads THAT row and swaps it in place, so the page and scroll position survive. Ban is
-  offered only where a registry record exists to hold it — on a never-published app it would "succeed"
-  and change nothing.
-- **Ghost writes fixed at the class:** the three methods use `update()` (refuses a missing doc →
-  `false`); `recordFromDoc` names every record by its DOCUMENT id so an old ghost at least shows its id.
-  `listPage`, `listOrphaned`, `findByUrl` added. `src/declarations.d.ts` gains lucide's `Ban` (the
-  dashboard's `XSquare` sits behind a `@ts-ignore`; the shim is the right place).
-- `AppKnowledgeBase`: `admin-built-apps`.
-
-### Tests
-
-`tests/everyBuiltAppHasAPreview.test.ts` — page-size clamp, every query mode, the ghost as "never",
-the three-source join, cursor opacity, owner offset paging, every state's words, the preview plan for
-live AND offline, and source-anchored guards: the three store methods `update` and never merge-set
-(comments stripped), the preview route reads durable files and no actuator/sandbox, the panel asks for
-12. `BuiltAppsPanel.render.test.tsx` — first paint promises nothing it has not read.
-`tests/adminAppModeration.test.ts` re-anchored on the panel (reason recorded in place).
-
-### Open (rule 6)
-
-- The state filter pages by app id, not by date (equality + `__name__` needs no index; equality +
-  `updatedAt` would). The screen says so. A composite index would give date order — an admin console
-  decision, not code.
-- A never-published app cannot be BANNED (nothing in the registry for the deploy gate to re-check). If
-  the admin wants "this workspace may never publish", that is a new pre-publish block, not this panel.
 ## 2026-09-18 — AUTOPSY `e9b25b08`: a build ORDER was built as an EDIT of our own scaffold, and it blocked the admin's first Project-Mode test
 
 **The build:** free/Weak, `"Build a search engines like google"`, 90 seconds, **stopped by the user**,
@@ -67767,8 +67693,160 @@ code dropped from `PROCESS_ONLY` → 1 · the stopped branch removed → 1).
 4. **"A search engine like Google" is something this platform cannot build** — it needs a crawler and an
    index, not a web app — and the engine said nothing. Second report supporting an honest
    capability gate (the VPN-app build spent 18 minutes on the same class).
+## 2026-09-18 — Admin Security → BUILT APPS: every user's built app, twelve at a time, each with a preview (branch `claude/every-built-app-has-a-preview`)
+
+Admin, verbatim, with a screenshot of the Security tab: *"1. admin panel ki security me jitni bhi apps dikh
+rahi hai, chahe woh live hai ya offline, sabhi ka preview chalna chahiye. 2. is security wale option me
+sabhi users ki build app dikhni chahiye. 3. ek dam se sara data load na ho, 12-12 ke set me load karwo."*
+
+### What the old panel read, and why it could answer none of the three
+
+`GET /api/admin/deployments` is the PUBLISH registry (`agentv3_deployments`): a record exists only once
+an app has been published, and the panel pulled 200 rows in one request. So a user's app that was built
+and never published was invisible, an offline app had no preview (its only "preview" was the live link it
+no longer had), and everything arrived at once.
+
+**And the screenshot showed a fourth defect nobody had asked about: rows reading LIVE or OFFLINE with
+NOTHING after the badge — no id, no link, no owner.** Root cause in `DeploymentStore`: `setStatus`,
+`markOrphaned` and `setOutboundVerdict` wrote with `set(…, { merge: true })`, which CREATES the document
+when it is absent. Unpublish and restore call `setStatus` for whatever workspace id they were handed, so
+a moderation on an app whose registry record had already been deleted minted a doc holding only
+`{ status, updatedAt }`. A status describes a publish; it cannot be the first thing written about one.
+
+### What ships
+
+- **The source of "built" is the durable FILE store, not the publish registry.** `listWorkspaceAppsPage`
+  (`WorkspaceFileStore.ts`) pages `workspace_files_v3` newest-save-first, resumed from a DOCUMENT
+  SNAPSHOT cursor (exact under this ordering with no composite index), skipping green-guard snapshot
+  keys and emptied indexes and refilling the page (bounded) so twelve means twelve. `ok: false` is a
+  failed read, never "no apps". `getWorkspaceAppsMany` is the batched join for the other direction.
+- **Each page is joined in ONE batched read per store** — `deploymentStore.getMany` (existing) and the
+  new `sandboxStore.getMany` — so a page costs three round trips, never thirty-six.
+- **`adminBuiltApps.ts` (pure):** `parseAppsQuery` (a workspace id → exact; a uid → owner prefix range;
+  a link → registry equality; a fragment → `text`, filtered client-side over loaded rows, said so on
+  screen — a fragment answered server-side is the full scan the admin asked to stop), `publishStateOf`
+  (`live` requires a URL via `isLiveDeployment`, the one definition; a status-only ghost reads **"Not
+  published"**, never Live), `builtAppRow` / `joinBuiltAppRows` (order kept), opaque cursor codec that
+  only ever decodes to a workspace id, `clampPageSize` (default 12, hard cap 48).
+- **`GET /api/admin/apps`** — one page of `BUILT_APPS_PAGE_SIZE`; a `status` filter pages the REGISTRY
+  instead (equality + `__name__` order, the one paging an equality filter can do without a composite
+  index; the response says `order: 'id'`). Orphaned live publishes (`orphaned: true`, files purged, so
+  the file-store list cannot reach them) ride the first page as their own strip — a live site nobody
+  can moderate is the hole `markOrphaned` exists to close. 502 on a failed read.
+- **`POST /api/admin/apps/:workspaceId/preview`** — renders the DURABLE files with the same
+  `renderPreview` the user's pane uses. 🔒 **Never touches a sandbox**: an admin looking at somebody's
+  app must not resume that user's E2B machine. Test-locked by grep against the route block.
+- **`previewPlan` (client):** the SAVED COPY of the last green build (`snapshotUrl`, a real `dist/` on
+  its own subdomain) wins when the row has one; else the in-browser render (labelled "frontend only");
+  else an honest "nothing to preview". Live or offline makes no difference to whether a preview exists.
+- **`admin/BuiltAppsPanel.tsx`** — the list, "Load 12 more", search (Enter), state filter, the preview
+  modal (sandboxed iframe: `src` for the copy, `srcDoc` for the render). Unpublish/Ban still open the
+  dashboard's confirmation dialog (the copy that guards a permanent act was not moved); after an action
+  the panel re-reads THAT row and swaps it in place, so the page and scroll position survive. Ban is
+  offered only where a registry record exists to hold it — on a never-published app it would "succeed"
+  and change nothing.
+- **Ghost writes fixed at the class:** the three methods use `update()` (refuses a missing doc →
+  `false`); `recordFromDoc` names every record by its DOCUMENT id so an old ghost at least shows its id.
+  `listPage`, `listOrphaned`, `findByUrl` added. `src/declarations.d.ts` gains lucide's `Ban` (the
+  dashboard's `XSquare` sits behind a `@ts-ignore`; the shim is the right place).
+- `AppKnowledgeBase`: `admin-built-apps`.
+
+### Tests
+
+`tests/everyBuiltAppHasAPreview.test.ts` — page-size clamp, every query mode, the ghost as "never",
+the three-source join, cursor opacity, owner offset paging, every state's words, the preview plan for
+live AND offline, and source-anchored guards: the three store methods `update` and never merge-set
+(comments stripped), the preview route reads durable files and no actuator/sandbox, the panel asks for
+12. `BuiltAppsPanel.render.test.tsx` — first paint promises nothing it has not read.
+`tests/adminAppModeration.test.ts` re-anchored on the panel (reason recorded in place).
+
+### Open (rule 6)
+
+- The state filter pages by app id, not by date (equality + `__name__` needs no index; equality +
+  `updatedAt` would). The screen says so. A composite index would give date order — an admin console
+  decision, not code.
+- A never-published app cannot be BANNED (nothing in the registry for the deploy gate to re-check). If
+  the admin wants "this workspace may never publish", that is a new pre-publish block, not this panel.
 ---
 
+## 2026-09-18 — A turn that produced NOTHING is our cost, never the user's bill
+
+**The admin's question, verbatim: *"kya ham ₹ kuch jyada hi charge to nahi kar rahe hai??"*** The
+honest answer was that the 4× markup is defensible — at ₹152.90 that build was still far below Bolt
+(~₹360 for the same token volume) and Lovable (₹720–₹1,440 per feature) — and that applying it to
+work which delivered nothing is not.
+
+**The evidence, from build `b6f88a72` (verified from raw token counts, not report fields):** real cost
+$0.398342 (LLM $0.381374 + E2B $0.016968) = ₹38.24, billed $1.593365 = ₹152.90 at ₹95.96/$. Of that,
+the post-build reviewer consumed **~520,000 input tokens — 34% of the build, ≈₹12 — and returned
+`responseChars: 0` on every single call.** The user paid ×4 on it.
+
+### The class: `turnStarvedItsBudget` already names the turn. Its tokens went two different wrong ways.
+
+`floorBudget.ts`'s predicate — no text, no tool call, and either truncated or reasoning-only — is the
+exact definition of "carried nothing a caller can use". What happened to those tokens depended on
+which runner produced them, and both outcomes were wrong in **opposite** directions:
+
+- **A runner that THROWS** (`OpenAiToolRunner`, i.e. every GLM/Kimi rung) rejects before
+  `onTurnComplete` is reached, so the tokens reached **neither the ledger nor the build sink** — real
+  money paid to a provider, recorded nowhere, invisible to the admin cost card *and* to
+  `buildCostCeiling`'s mid-build stop. This is the "abandoned provider call recorded as zero tokens"
+  open root cause from the `b6f88a72` autopsy, closed here.
+- **A runner that does NOT throw** (the Claude path — `AgentRunner` carries its own net at the loop
+  level) returns the starved turn as a plain success, so its tokens went into the sink, the ledger,
+  **and straight onto the user's bill at the full markup.**
+
+### The rule, in one sentence
+
+Those tokens are counted **in full** as OUR cost, and subtracted from the base the user's markup is
+applied to. `src/server/AgentV3/unbilledTurns.ts` owns the whole concept (pure: `billableEntries`,
+`splitUnbilledCost`, `markAbandonedTurn`, `abandonedTurnUsage`); `ProviderModelEntry.unbilled` is an
+optional SUBSET of `usage`, never a deduction from it, so `realProviderCostUsd`, `ledgerCostUsd`,
+`byProvider()` and `total()` all keep seeing every rupee.
+
+🔒 **A clamp that shrank OUR number too would hide our own bleeding on the exact panel used to judge
+it** — the `E2B_USD_PER_HOUR` shape. So the gap is not merely visible, it is *explained*: both the
+normal settle and the watchdog finalizer record `UNBILLED_BARREN_WORK` naming the absorbed rupees.
+The code is in `PROCESS_ONLY_CODES` and `NEVER_SUGGEST` — what we chose not to charge for is an
+accounting fact about our engine, never a finding about the user's app (the
+provider-error-as-app-blocker class, autopsy `4efab9d7`, through yet another door).
+
+🔑 **Reported through `onTurnComplete`, not a second channel.** The abandoned turn's usage rides the
+error (`markAbandonedTurn`, a non-enumerable Symbol so it can never leak into a serialised error
+body) and is handed to the one callback every build turn and every heal turn already passes through.
+A parallel channel is precisely how the heal gates' tokens went unattributed for months.
+
+⚠️ **The case that decides whether this is safe, and it is test-locked:** a reviewer sub-agent reading
+files returns **tool calls and no text**. `turnStarvedItsBudget` is FALSE the moment any tool call
+exists, so that work stays billable. Billing it as "produced nothing" would make the engine's real
+work free — the opposite error, and a far more expensive one.
+
+### What this does and does not deliver — stated plainly
+
+**On `b6f88a72` itself this change would have saved the user ₹0.** That build ran on Kimi, whose
+runner throws on starvation, so its reviewer's calls were not starved turns at all — they completed,
+made tool calls, and the *pass* ended barren when it timed out. That is a different thing, and this
+change does not touch it.
+
+🔴 **STILL OPEN, and it is where the ₹50 actually is:** there is no per-PASS attribution in the
+ledger. `ProviderUsageLedger` knows which VENDOR was paid, never what FOR, so "leave the reviewer's
+barren pass out of the bill" is not expressible today. The design is a thin billing-phase
+`AsyncLocalStorage` (the `aiSpendZone.ts` shape, deliberately NOT overloading `runInPass`, which
+answers a different question) read by `captureTurnUsage`, with the route marking a phase barren where
+it already records `REVIEW_INCOMPLETE`. `REVIEW_PARTIAL` and `REVIEW_LATE` must NOT count as barren —
+a salvaged verdict means something was produced.
+
+⚠️ **And none of this is the cost fix.** It is rule 5's honesty layer. The real saving is not spending
+those tokens at all — a reviewer that cannot write to a green app should not be reading the whole
+project at full budget either — which is a separate change, already specified to another session
+alongside the EARLY GREEN latch ordering.
+
+Test-locked in `tests/aTurnThatProducedNothingIsNotTheUsersBill.test.ts` (29 cases), each behavioural
+half proven by reversion: the success-path mark, the catch-path report, the ledger's subset, and the
+billing subtraction were each removed in turn and the matching cases observed to fail. Four existing
+pinned-literal guards were updated (not loosened) because the throw site gained a wrapper and the
+billing return gained a field — each with the reason recorded in place, per the trail those same
+comments already carry.
 ## 2026-09-18 — 🔎 THE STACK NAMED THE FILE, AND THREE CAPTURES THREW IT AWAY (closing the `95598899` blocker)
 
 **Admin:** *"woh crash report wala kaam bhi kar do"* — make a runtime crash bring its own file, so no
@@ -68105,6 +68183,60 @@ one-off cleanup would be an admin-console decision (Firestore query: docs in `ag
 `user_reports` / `admin_apk_reports` with no `updatedAt`/`at`/`reportedAt`).
 ---
 
+## 2026-09-18 — The Pro image tier moves to Z-Image, and the price falls to ₹1
+
+**Admin, after comparing Z-Image Turbo against GPT Image 1 Mini:** *"Z-Image Turbo + Z-Image-Edit … price bhi 1 inr / image karo"*.
+
+### Why this is a cut in price AND a rise in quality, not a trade
+
+| | cost/image | ₹ at 95.76/$ | margin at the price |
+|---|---|---|---|
+| **Z-Image Turbo** (new) | $0.005 | ₹0.48 | **₹1 → +₹0.52 (2.1×)** |
+| FLUX.2 Klein 4B (replaced) | $0.014 | ₹1.34 | ₹2 → +₹0.66 (1.5×) |
+| GPT Image 1 Mini — low | $0.005 | ₹0.48 | affordable, but not a premium tier |
+| GPT Image 1 Mini — high | $0.036 | ₹3.45 | 🔴 a LOSS at either price |
+
+Three reasons Z-Image won, and none of them is only price: it is **~a third of FLUX.2 Klein's cost**;
+it is **#1 open-source on the Artificial Analysis Image Arena**, above FLUX.2 [dev], HunyuanImage 3.0
+and Qwen-Image; and it is **open weights, so many vendors serve it** ($0.0047–$0.01 at WaveSpeed,
+Atlas, Replicate, SiliconFlow, getimg, …) — the GLM/Kimi key-pool situation, with competition and no
+lock-in. GPT Image 1 Mini is single-vendor and is only cheap at a quality tier that cannot deliver the
+thing the Pro tier exists for (*"paid walo ko inhance karna hai"*).
+
+**The break-even rupee went UP, not down: ₹1 ÷ $0.005 = ₹200/$**, against ₹2 ÷ $0.014 = ₹142.9/$. The
+rupee would have to halve again before a Pro image stopped covering its own cost.
+
+### 🔑 Z-Image is a FAMILY, so the mode picks the model
+
+`Z-Image-Turbo` generates from words; **`Z-Image-Edit`** is the variant fine-tuned to follow an editing
+instruction against a supplied picture. `imageProModel(env, mode)` is therefore mode-aware, with
+`IMAGE_PRO_TEXT_MODEL` / `IMAGE_PRO_EDIT_MODEL` pinnable separately and `IMAGE_PRO_MODEL` kept as the
+one-endpoint escape hatch. Sending the generation model a picture and an instruction would return a
+fresh image and quietly ignore one of them — a request that succeeds and answers the wrong question,
+which is precisely the half-working state the second absolute rule forbids. Test-locked.
+
+### 🔴 THE PRICE WAS IN THREE PLACES, AND THAT IS THE REAL DEFECT THIS FIXED
+
+`IMAGE_PRO_PRICE_INR` on the server, `PRICE_INR` in the Pro studio, and the bare string `'Pro ₹2'` on
+the free/pro toggle. Moving ₹2 → ₹1 meant three edits, and the third is exactly the one a later
+change forgets — the price a user is SHOWN and the price they are CHARGED are the same promise.
+The client cannot import the server module (it would pull server code into the browser bundle), so
+`tests/theProPriceIsOneNumber.test.ts` fails CI when they drift — the idiom
+`privacyPolicyTruth.test.ts` already uses. The toggle's literal is gone; it renders the constant.
+
+⚠️ **UNPROVEN, AND DELIBERATELY NOT ASSUMED: Devanagari.** Z-Image's bilingual text rendering is
+**Chinese and English**. No reliable claim was found for Hindi text inside an image, for Z-Image or
+for GPT Image 1 Mini. For an India-first app that is the differentiator, and it is the FIRST thing to
+test once `IMAGE_PRO_ENDPOINT` + `IMAGE_PRO_KEY` are set. Recorded as an open question rather than
+answered with a plausible guess.
+
+⚠️ **Still not live.** Both env keys remain unset, so the Pro tier still reports an honest "not
+available" and charges nothing; this change moves which engine it will call and what it will cost
+when the admin picks a host. Five of my own earlier cases in `imageProTier.test.ts` pinned ₹2/$0.014
+and were updated with the reason recorded in place — intent unchanged (the quote is price × count;
+the margin cannot invert silently; a malformed cost never falls back to zero).
+---
+
 ## 2026-09-18 — Autopsy `1a7f4a58` (Qiikr): the platform killed the app's own frontend and previewed its API
 
 **Free Weak build, KIMI `kimi-k2.7-code`, 36.6 min, `ok: true`, billed ₹613.08.** A full-stack
@@ -68295,3 +68427,62 @@ app's pin) and wrong about everything else — it called a two-process project "
   multi-process runner we need to know how often a real project even has a second service"* — and this
   change is what finally makes that measurement real. A full-stack app whose API is not running still
   renders a web page with failing fetches.
+## 2026-09-18 — Admin order: "paise tabhi charge hone chahiye, jab preview chale"
+
+Admin, choosing option (c) after autopsy `1a7f4a58` billed a free-tier user **₹613.08** for a build
+whose `RELEASE_GATE` said `UNKNOWN` and whose preview served `Cannot GET /`.
+
+### Nothing in the money path was broken — and that is the finding
+
+Every existing guard did exactly what it says on the tin:
+
+| guard | needs |
+|---|---|
+| `zeroBillForUnrenderedPreview` | `previewVerifiedFailed` — **we looked and it failed** |
+| `zeroBillForFailedBuild` | `!result.ok` — **the build reported failure** |
+
+That build was **neither**. We never managed to look at all, and the build reported success. So the
+full tiered markup applied to a build nobody could show had produced a working app.
+
+🔑 **The distinction is one this codebase already makes everywhere else and had never applied to
+money.** `previewProvenBroken` exists precisely because *"we looked and it was broken"* and *"we could
+not look"* are different facts, and only the first is evidence. The two billing guards cover the
+first. This covers the second — and the second is the commonest of the three.
+
+### What ships — `previewEarnsMarkup.ts`
+
+`decideMarkupOnProof` waives the SERVICE MARGIN, not the cost, when no real check saw the app render:
+the user pays `realCostUsd + sandboxUsd` — the same two numbers the bill already used, before the
+markup — and nothing on top. On the report's own figures that is **₹613.08 → ₹172.37**.
+
+- The proof read is `buildObs.previewRendered`, whose only producer is `markAppRendered` (one fact,
+  one write). Never *"the build said ok"*.
+- Applied at **both** billing paths — the settle and the Fix-67 deadline finalizer — because those two
+  priced one build differently once already, which is why Fix 67 exists. `expectsArtifacts` rides to
+  the finalizer on `billingCtx`, defaulting to `false` so an absent fact stands the rule down.
+- It can only ever REDUCE (`min(decided, real)`), runs BEFORE every zeroing rule so those still take
+  precedence, and leaves `decideCancelledBuildBill` safe (that one starts from this number and may
+  never exceed it).
+- A turn with no app expected is untouched — the same carve-out `zeroBillForUnrenderedPreview` makes.
+- Report code `MARKUP_WAIVED_NO_PREVIEW`; the user is told in branded words with no vendor name.
+- Kill switch `AGENTV3_MARKUP_NEEDS_PREVIEW=off`.
+
+⚠️ **It is not ₹0, and that was the admin's explicit choice** — they were offered ₹0 and refused it,
+for the reason autopsy `4efab9d7` already records: free-when-unproven hands away every build whose app
+works but whose proof WE failed to collect.
+
+### ⚠️ A number I gave the admin was wrong, corrected here
+
+I told them in chat that our real cost on that build was *"~₹145"*. It is **₹172.37**: I priced the
+tokens and forgot the sandbox, which the bill's own formula includes BEFORE the markup. The formula
+reproduces exactly — `tieredMarkup(1.698349 + 0.098019) = 4 + 0.796368 × 3 = 6.389104` against the
+report's `billedUsd: 6.389103` — which is what makes these the real figures rather than an estimate.
+`tests/paisaTabhiJabPreviewChale.test.ts` pins ₹172.37 so the number cannot drift again.
+
+### 🔴 Still open (rule 6)
+
+- **This does not refund the build that prompted it.** The rule applies from the next build onward;
+  whether that ₹613 should be credited back is the admin's call, not a code change.
+- **A high `MARKUP_WAIVED_NO_PREVIEW` rate is not a billing problem — it is the engine failing to
+  prove its own work.** That is the number to watch, and the honest reading of it is that we are
+  giving away margin because our own verification could not look, not because users' apps are broken.

@@ -149,11 +149,21 @@ describe('🔒 the wiring — every half of this fix, pinned where it lives', ()
     // correct. The behaviour this case guards is STILL unchanged: throw, never return an unusable
     // turn. Pinned whole, for the reason the note above gives.
     expect(runner).toContain('if (!budget.reasoningUnclamped) rememberStarvedWhileClamped(thinkingModel);');
-    expect(runner).toContain(`throw starvedBudgetError(
-        budget.maxTokens,
-        budget.requested,
-        budget.reasoningUnclamped,
-        bound.source === 'deadline' ? timeoutMs : undefined,
+    // ⚠️ Updated a FOURTH time on 2026-09-18: the call is now WRAPPED in `markAbandonedTurn`, which
+    // attaches this doomed turn's measured usage to the error so the chain can record it as OUR cost
+    // and keep it off the user's bill (unbilledTurns.ts). Before that, a starved call's tokens reached
+    // no ledger and no sink at all. The behaviour this case guards is STILL unchanged — throw, never
+    // return an unusable turn — and the wrapper is pinned WITH the call, so neither can be dropped
+    // while the other stands. Re-indented only because it is now nested.
+    expect(runner).toContain(`throw markAbandonedTurn(
+        starvedBudgetError(
+          budget.maxTokens,
+          budget.requested,
+          budget.reasoningUnclamped,
+          bound.source === 'deadline' ? timeoutMs : undefined,
+        ),
+        result.usage,
+        thinkingModel,
       );`);
     expect(runner).toContain('if (turnStarvedItsBudget(result)) {');
   });

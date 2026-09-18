@@ -18,7 +18,8 @@ import { pacerEnabled, getSharedPacer } from '../RateLimitPacer';
 import { parseEnvFlag } from '../../lib/envFlag';
 import { isModelUnavailableError } from '../providerErrorClass';
 import { isBudgetEndedError, isSlowStreamAbandon } from '../turnDeadline';
-import { isStarvedBudgetError } from '../floorBudget';
+import { isStarvedBudgetError, turnStarvedItsBudget } from '../floorBudget';
+import { abandonedTurnUsage } from '../unbilledTurns';
 import { reasoningAwareAsk } from '../reasoningAsk';
 import {
   EMPTY_SLOW_RUNG_STATE, canBenchAnother, describeSlowRung, isRungTooSlow, recordSlowSample,
@@ -69,7 +70,12 @@ export interface MultiProviderOptions {
    * per-provider/model ProviderUsageLedger. Purely observational: it never changes which provider
    * runs or how the turn is billed. `model` is optional so older callers keep compiling.
    */
-  onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean }, model?: string, cacheReadInputTokens?: number) => void;
+  onTurnComplete?: (
+    used: string,
+    usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean },
+    model?: string,
+    cacheReadInputTokens?: number,
+  ) => void;
   /**
    * Shared 429-cooldown registry (StudySync autopsy 2026-07-16) — the cross-instance memory of which
    * bench names are currently rate-limit-saturated. Defaults to the process-wide singleton so every
@@ -726,6 +732,12 @@ export function makeMultiProviderTurnRunner(
               // distinguishable from one that genuinely cost nothing (TurnUsage.measured). Reading
               // the zeros above cannot tell those apart, which is the whole point of the flag.
               ...(result.usage?.measured === false ? { measured: false as const } : {}),
+              // A SUCCESS THAT CARRIED NOTHING IS STILL A BILL (admin 2026-09-18, build b6f88a72).
+              // A runner that throws on starvation never reaches this line, but the Claude path does
+              // not throw — AgentRunner carries its own net at the loop level — so a turn with no text
+              // and no tool call arrives here as a plain success and used to be billed at the full
+              // markup. We still pay for it; the user does not. See unbilledTurns.ts.
+              ...(turnStarvedItsBudget(result) ? { producedNothing: true as const } : {}),
             }, result.model, result.usage?.cacheReadInputTokens ?? 0);
           } catch { /* telemetry attribution must never disturb the build */ }
           // 🔴 THE SUCCESS PATH IS WHERE THE SLOW-RUNG VERDICT HAS TO LIVE (autopsy dd1f5f60). This
@@ -763,6 +775,23 @@ export function makeMultiProviderTurnRunner(
           lastError = err;
           fellBackFrom.push(reportName);
           opts.onProviderError?.(reportName, err);
+          // 🔴 A CALL WE THREW AWAY WAS STILL PAID FOR (admin 2026-09-18). A rung that starves its
+          // own output budget throws, so `onTurnComplete` above is never reached and its tokens
+          // landed in NO ledger and NO sink — real money to a provider, recorded nowhere, and
+          // invisible to both the admin cost card and the mid-build cost ceiling. They are reported
+          // here through the SAME callback rather than a second channel, because a parallel channel
+          // is precisely how the heal gates' tokens went unattributed for months. Marked
+          // `producedNothing`, so they count as OUR cost and never as the user's bill.
+          try {
+            const abandoned = abandonedTurnUsage(err);
+            if (abandoned) {
+              opts.onTurnComplete?.(reportName, {
+                inputTokens: abandoned.usage.inputTokens,
+                outputTokens: abandoned.usage.outputTokens,
+                producedNothing: true,
+              }, abandoned.model ?? chain[i].modelId, abandoned.usage.cacheReadInputTokens ?? 0);
+            }
+          } catch { /* cost attribution must never replace the provider error below */ }
           // 🔴 OUR CLOCK ENDED, NOT THEIR SERVICE — abort the whole chain, do not walk it.
           //
           // The refusal is thrown at the TOP of each runner, before any network call, so without this

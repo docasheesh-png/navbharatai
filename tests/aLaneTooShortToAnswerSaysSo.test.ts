@@ -213,10 +213,16 @@ describe('🔒 the runner hands the clock source to the error', () => {
   };
 
   it('the starvation throw passes the lane clock, and only when the LANE bound the call', () => {
-    const stmt = statementAt('throw starvedBudgetError(');
+    // ⚠️ The anchor lost its `throw ` on 2026-09-18: the call is now WRAPPED in `markAbandonedTurn`,
+    // which carries the doomed turn's usage to the chain so it is recorded as OUR cost and kept off
+    // the user's bill (unbilledTurns.ts). What this case guards — that the LANE's clock reaches the
+    // error — is untouched, and that it is still THROWN is asserted on its own line below rather
+    // than left to the anchor.
+    const stmt = statementAt('starvedBudgetError(');
     expect(stmt).toContain("bound.source === 'deadline'");
     expect(stmt).toContain('timeoutMs');
     expect(stmt).toContain('undefined');
+    expect(code).toContain('throw markAbandonedTurn(');
   });
 
   it('and the unclamp still consults BOTH the known-in-advance rule and the learned one', () => {

@@ -23,31 +23,55 @@
 // (an idle-minutes default that read "NOT taken" eight days after it was taken; an E2B rate whose
 // derivation "could not fail"). A caveat that has been answered is not humility, it is rot.
 //
-// 💰 THE MARGIN, and why ₹2 is comfortable rather than lucky: at ₹85–95/$ the real cost is
-// ₹1.19–₹1.33, so ₹2 recovers it **~1.5–1.7×**. The number that matters for safety is the
-// BREAK-EVEN EXCHANGE RATE — ₹2 ÷ $0.014 = **₹142.9 per dollar** — i.e. the rupee would have to fall
-// by two-thirds before a Pro image stopped covering its own cost. That is the headroom, stated as a
-// thing that could be falsified rather than as a reassuring adjective.
+// 🔄 SUPERSEDED 2026-09-18, SAME DAY, and the reason is the whole point: the engine changed, so the
+// price could. FLUX.2 Klein 4B's $0.014 was correct and is kept below as the record. The admin then
+// compared **Z-Image Turbo** (Alibaba Tongyi, 6B, open weights) against GPT Image 1 Mini and chose
+// Z-Image — *"price bhi 1 inr / image karo"*.
+//
+// THREE REASONS IT IS BOTH CHEAPER AND BETTER, so this is not a quality trade:
+//   1. **$0.005/image at full quality**, against FLUX.2 Klein's $0.014 — roughly a THIRD.
+//   2. **#1 open-source model on the Artificial Analysis Image Arena**, above FLUX.2 [dev],
+//      HunyuanImage 3.0 and Qwen-Image. So the cheaper engine is also the higher-ranked one.
+//   3. **Open weights ⇒ many vendors** (WaveSpeed, Atlas, Replicate, SiliconFlow, getimg, …) priced
+//      $0.0047–$0.01. That is the GLM/Kimi key-pool situation: competition, no lock-in, and a price
+//      that falls. A single-vendor model has none of those.
+//
+// 💰 THE MARGIN AT ₹1: at ₹95.76/$ the real cost is **₹0.48**, so ₹1 recovers it **~2.1×** — a
+// WIDER margin than ₹2 gave on FLUX. The number that matters for safety is the BREAK-EVEN EXCHANGE
+// RATE — ₹1 ÷ $0.005 = **₹200 per dollar** — i.e. the rupee would have to halve again before a Pro
+// image stopped covering its own cost. That is the headroom, stated as a thing that could be
+// falsified rather than as a reassuring adjective.
+//
+// ⚠️ WHAT IS NOT PROVEN, AND MUST NOT BE ASSUMED: Z-Image's "bilingual" text rendering is CHINESE and
+// ENGLISH. **Devanagari is unverified for this model and for every alternative considered** — and for
+// an India-first app, Hindi text inside an image is the thing worth testing FIRST once a key exists.
+// Recorded as an open question rather than answered with a plausible-sounding guess.
 //
 // 🔒 AND IT CANNOT INVERT SILENTLY. `imageProMarginWarning` compares the two and says so loudly if
 // the price ever stops covering the cost. This is exactly the `E2B_USD_PER_HOUR` shape — an env value
 // always beats the code, so warning is the only thing the code can do — and it is why the cost lives
 // here as a named, invoice-anchored constant instead of nowhere at all.
 
-export const IMAGE_PRO_PRICE_INR = 2;
+export const IMAGE_PRO_PRICE_INR = 1;
 
 /**
- * What ONE Pro image really costs us, in USD. Admin-supplied 2026-09-18: **$0.014 per image**.
+ * What ONE Pro image really costs us, in USD. **$0.005 per image** — Z-Image Turbo's published rate
+ * at WaveSpeed and Atlas Cloud (the same model is $0.0047–$0.01 across vendors; the code takes the
+ * middle, and a vendor cheaper than this only widens the margin).
+ *
+ * 📌 The previous engine, FLUX.2 Klein 4B, was **$0.014** (admin-supplied 2026-09-18). Kept here as
+ * the record rather than deleted: a later session comparing engines needs the number it is beating,
+ * and a price with no predecessor reads as an assumption.
  *
  * Env-tunable (`IMAGE_PRO_COST_USD`) for the same reason every other rate in this repo is: a
  * provider reprices without asking us, and re-deploying to record that is how a rate card goes stale.
  *
  * ⚠️ A MALFORMED VALUE FALLS BACK TO THE KNOWN PRICE, NEVER TO ZERO. `Number('')` is 0, and a cost of
- * zero would report infinite margin on the exact panel used to judge whether ₹2 is working — the
+ * zero would report infinite margin on the exact panel used to judge whether the price is working — the
  * failure mode being guarded against, wearing a green tick. Only a real, positive, finite number is
  * accepted.
  */
-export const IMAGE_PRO_COST_USD_DEFAULT = 0.014;
+export const IMAGE_PRO_COST_USD_DEFAULT = 0.005;
 
 export function imageProCostUsd(env: NodeJS.ProcessEnv = process.env): number {
   const raw = (env.IMAGE_PRO_COST_USD || '').trim();
@@ -167,9 +191,25 @@ export function imageProEndpoint(env: NodeJS.ProcessEnv = process.env): string {
   return (env.IMAGE_PRO_ENDPOINT || '').trim();
 }
 
-/** The model id, for hosts that take it in the BODY rather than in the path. */
-export function imageProModel(env: NodeJS.ProcessEnv = process.env): string {
-  return (env.IMAGE_PRO_MODEL || '').trim() || 'flux.2-klein-4b';
+/**
+ * The model id, for hosts that take it in the BODY rather than in the path.
+ *
+ * 🔑 IT DEPENDS ON THE MODE, and that is not a convenience — Z-Image is a FAMILY, not one model.
+ * `Z-Image-Turbo` generates from words; `Z-Image-Edit` is the variant fine-tuned to follow an
+ * editing instruction against a supplied picture ("make the shirt red"). Sending a fresh-generation
+ * model an image and an instruction would quietly ignore one of them, which is the half-working
+ * state the second absolute rule forbids — the request would succeed and the answer would be wrong.
+ *
+ * Each has its OWN env override, because a host may name them differently and pinning one must not
+ * silently pin the other. `IMAGE_PRO_MODEL` still overrides BOTH, for a host that genuinely serves
+ * one endpoint for everything — it is the escape hatch, not the normal path.
+ */
+export function imageProModel(env: NodeJS.ProcessEnv = process.env, mode: ImageProMode = 'text-to-image'): string {
+  const both = (env.IMAGE_PRO_MODEL || '').trim();
+  if (both) return both;
+  const editing = mode === 'image-to-image' || mode === 'image-text-to-image';
+  const pinned = (editing ? env.IMAGE_PRO_EDIT_MODEL : env.IMAGE_PRO_TEXT_MODEL || '') || '';
+  return pinned.trim() || (editing ? 'z-image-edit' : 'z-image-turbo');
 }
 
 export function imageProKey(env: NodeJS.ProcessEnv = process.env): string {
@@ -200,7 +240,7 @@ export function imageProAuthHeaders(env: NodeJS.ProcessEnv = process.env): Recor
  * 🔒 BOTH a key AND an endpoint, and that is the second absolute rule applied: a half-configured paid
  * tier is the "built but not really working" state that must not exist. With either missing the
  * toggle still appears but says, honestly, that Pro is not available yet — never a silent fallback to
- * the free provider, which would charge ₹2 for the picture the user could have had for nothing.
+ * the free provider, which would charge the Pro price for a picture the user could have had free.
  */
 export function imageProConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
   if ((env.IMAGE_PRO_ENABLED || '').trim().toLowerCase() === 'off') return false;
@@ -246,9 +286,12 @@ export function buildImageProRequest(
 ): Record<string, unknown> {
   const prompt = String(req.prompt || '').slice(0, MAX_PROMPT_CHARS);
   const n = imageProCount(req);
+  // Resolved ONCE and reused below, so the model named in the body and the fields describing the
+  // request can never disagree about what kind of request this is.
+  const mode = imageProMode(req);
   const body: Record<string, unknown> = {
     prompt,
-    model: imageProModel(env),
+    model: imageProModel(env, mode ?? 'text-to-image'),
     width: px.w,
     height: px.h,
     image_size: { width: px.w, height: px.h },
@@ -259,7 +302,6 @@ export function buildImageProRequest(
     // same picture, and "try again" stops meaning anything.
     seed: Math.floor(Date.now() % 2_147_483_647),
   };
-  const mode = imageProMode(req);
   if (mode === 'image-to-image' || mode === 'image-text-to-image') {
     body.image_url = req.initImage;
     body.image = req.initImage;

@@ -117,7 +117,16 @@ const NORMAL_LADDER: StartTier[] = ['gemini', 'haiku', 'sonnet'];
 // ── Keyword signals (lowercased, word-ish boundaries kept loose for Hinglish) ──────
 const RE = {
   greeting: /\b(hi|hello|hey|namaste|namaskar|kaise ho|how are you|thanks|thank you|dhanyaiwad|shukriya|good morning|good evening)\b/i,
-  translate: /\b(translate|translation|anuvad|in hindi|in english|convert to)\b/i,
+  /**
+   * 🔴 "in hindi" IS NOT AN ORDER TO TRANSLATE (autopsy b6f88a72, 2026-09-18). The prompt
+   * *"Build a Bhagavad Gita reader in Hindi"* was recorded as `taskType: 'translate'`, score 15,
+   * cheapest band — and it is worst for exactly the users this app exists for:
+   *   `ek dukaan ka app banao in hindi with stock, bills, customers` → translate, 10.
+   * The translation VERB stays; the bare language phrases go. `'translate this paragraph in hindi'`
+   * still classifies as translation, and `'make a notes app, translate to english later'` is still
+   * the app.
+   */
+  translate: /\b(translate|translation|anuvad|convert to)\b/i,
   summary: /\b(summar(y|ize|ise)|tl;?dr|in short|key points|gist)\b/i,
   // Simple, self-contained apps cheap models build reliably. The LIST now lives in
   // `appComplexitySignals` beside the complex one, so "is this big?" and "is this one of the small
@@ -129,19 +138,19 @@ const RE = {
   hardSignal: /\b(production|secure|security|scalable|optimi[sz]e|performance|concurrency|multi[- ]tenant)\b/i,
 };
 
-function detectTaskType(p: string): TaskType {
+function classify(p: string): { type: TaskType; matched: boolean } {
   // Order matters: most-specific / highest-complexity wins when multiple match.
-  if (RE.architecture.test(p)) return 'architecture';
+  if (RE.architecture.test(p)) return { type: 'architecture', matched: true };
   // SHARED complex-app verdict (single source of truth with the pipeline-DEPTH/ETA estimator, so the
   // two can never route the same prompt two different ways). Page-deliverable-aware: a category THEME
   // word on a one-page ask ("SaaS landing page") no longer forces complex_app — the 29-min bug.
-  if (isComplexAppPrompt(p)) return 'complex_app';
-  if (RE.debugging.test(p)) return 'debugging';
-  if (RE.simpleApp.test(p)) return 'simple_app';
-  if (RE.summary.test(p)) return 'summary';
-  if (RE.translate.test(p)) return 'translate';
-  if (RE.coding.test(p)) return 'coding';
-  if (RE.greeting.test(p)) return 'chat';
+  if (isComplexAppPrompt(p)) return { type: 'complex_app', matched: true };
+  if (RE.debugging.test(p)) return { type: 'debugging', matched: true };
+  if (RE.simpleApp.test(p)) return { type: 'simple_app', matched: true };
+  if (RE.summary.test(p)) return { type: 'summary', matched: true };
+  if (RE.translate.test(p)) return { type: 'translate', matched: true };
+  if (RE.coding.test(p)) return { type: 'coding', matched: true };
+  if (RE.greeting.test(p)) return { type: 'chat', matched: true };
   /**
    * 🔴 LAST RESORT, AND THE ONLY PLACE THIS MODULE KNOWS NOTHING — so a prompt that names a real
    * business domain stops scoring 5, the same as "hi" (admin's failure table, 2026-09-18).
@@ -152,8 +161,27 @@ function detectTaskType(p: string): TaskType {
    * evidence, never move a verdict that has some. See `namesBusinessDomain` for the two guards and
    * for why the platform's OWN domain classifier answers this instead of a third keyword list.
    */
-  if (namesBusinessDomain(p)) return 'complex_app';
-  return 'chat';
+  if (namesBusinessDomain(p)) return { type: 'complex_app', matched: true };
+  return { type: 'chat', matched: false };
+}
+
+function detectTaskType(p: string): TaskType {
+  return classify(p).type;
+}
+
+/**
+ * PURE. Not one signal in `RE` — nor `isComplexAppPrompt`, nor `namesBusinessDomain` — matched.
+ *
+ * ⚠️ KEPT ALONGSIDE `signalsMatchedNothing` (2026-09-18, on the merged state). Two sessions fixed
+ * the same class from different angles and BOTH landed: `signalsMatchedNothing` is what
+ * `needsSecondOpinion` actually consults, and it is the one already proven in production. This
+ * predicate is the same question asked from `classify`'s own `matched` flag, which is what makes it
+ * derived rather than a second copy of the patterns — the drift this repo has paid for twice. It is
+ * exported for the tests that pin the behaviour; the WIRING deliberately stays single, so no request
+ * can buy two model calls.
+ */
+export function signalsFoundNothing(prompt: string): boolean {
+  return !classify(String(prompt ?? '').toLowerCase()).matched;
 }
 
 /**

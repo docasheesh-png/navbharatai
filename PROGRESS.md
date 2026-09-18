@@ -66600,6 +66600,46 @@ TeamCollaboration's two badge labels on Light (`text-muted` on `bg-well` over an
 lock covers surface, card and raised, not `well`); and white on `bg-emerald-600` at 3.65:1 on every
 theme, which still wants a `bg-success` fill token rather than per-button patches.
 
+## 2026-09-18 — #3070 MERGED, and PR J: twenty-five files on the new `main`
+
+**The admin merged #3070 at 10:06 UTC** — steps A through I, 55 files, literals 11,487 → 2,825, five
+themes down to three, the ratchet and the codemod live on `main` and deploying to Cloud Run. This
+branch was restarted from the merged `main` per the constitution's merged-PR rule rather than stacked
+on the old history.
+
+**Twenty-five files in one run, the largest batch yet because the remaining files are small:**
+ConnectedServices 60 → 0 · CodeMinifier 58 → 11 · VoiceToApp 56 → 0 · LoadBoard 55 → 0 · ReportSheet
+54 → 2 · HostingPlanCard 54 → 0 · AppLockSettings 54 → 0 · VirtualKeyboard 52 → 7 ·
+ActivityTimelineRow 51 → 0 · AuthSettings 51 → 0 · StorageSettings 49 → 0 · NextSuggestionsBulb 48 → 1
+· ProfessionalChat 48 → 2 · CodeVersioning 46 → 3 · RepoAnalystTool 46 → 0 · ReportsListView 45 → 0 ·
+**Editor 44 → 5** · PublishToNavStore 44 → 0 · DatabaseSettings 44 → 0 · AICodeReview 43 → 3 ·
+SecretRequestCard 42 → 1 · AppLockGate 41 → 0 · NotificationBell 39 → 0 · ReferralPanel 39 → 3 ·
+BotBuildHelp 36 → 4. Baseline **2,825 → 1,668** (132 files).
+
+**✅ A second open item closed: Code Studio's editor TABS.** PR F recorded them as a later-PR file at
+**1.82:1** on Light — `bg-[#2d2d2d] text-[#969696]`, a fixed dark tab whose grey label compat remapped
+to Light's muted grey. `Editor.tsx` was in this batch and the tab is now `bg-[#2d2d2d] text-on-accent`:
+white on the fixed dark tab, correct on every theme. (Monaco's own `vs-dark` syntax theme on Light is a
+separate product decision and stays open.)
+
+**🔴 One more refinement of the fixed-subtree rule, and the bug hiding underneath it.** AICodeReview's
+connect-error strip is `text-warn bg-amber-500/10` inside a fixed `bg-[#0f141b]` header. A 10% tint does
+not replace the box beneath it, so on Light a dark-amber label sat on near-black. The "does this element
+have its own background?" guard now requires a **resting, OPAQUE** background (`hasOwnOpaqueBackground`).
+- ⚠️ **And the first version of that helper was right by accident, which the reversion proof caught.**
+  Its value pattern `[\w[\]#.]+` has no hyphen, so on `bg-amber-500/10` it matched only `amber`, failed
+  the trailing lookahead on the `-`, and returned false — the right answer for the wrong reason, and the
+  WRONG answer for every opaque hyphenated fill (`bg-indigo-600` read as "no background at all"). The
+  reversion test did not fail when I deleted the opacity check, which is the only reason I looked. **A
+  test that passes when you delete the line it is meant to protect is not a test.** Both halves are now
+  proven by reversion separately, and the whole batch was restored and re-migrated under the fix.
+
+**Three source guards re-anchored, each with the reason recorded in place:** `themeBrandText.test.ts`
+asserted the hosting slab carried `bg-[#21262d]` — it now names `bg-raised` directly instead of relying
+on compat to remap a GitHub-dark literal, so the test's own claim ("a surface class the theme layer
+maps, not a black overlay") is satisfied more strongly than before; and `mobileNav.test.ts` x2 asserted
+`border-white/5` inside strings whose real claim is the compact header and composer PADDING, so only
+the border class moved to `border-line`.
 ## 2026-09-18 — "hospital management system" was scored 5, the same as the word "hi" (the admin's failure table, part 2)
 
 Part 1 (#3076) made every build ENDING nameable. This is the first fix aimed at the failure RATE
@@ -66837,6 +66877,190 @@ The guard is what makes that discoverable instead of silent.
 session's theme work (PRs C and G) after #3071 merged. That file was deliberately NOT touched here —
 this change is server-side only.
 
+## 2026-09-18 — A request the signals read every letter of and recognised NOTHING is not a greeting either
+
+**The sibling of the 2026-09-17 script fix, which was never hunted (rule 3).** `signalsCouldNotRead`
+covers a request whose SCRIPT the ASCII patterns cannot read. This is the case where they read every
+letter and recognise nothing — and it is the commoner one by far.
+
+Measured on `main` before the change, with `analyzeRequest({ prompt })`:
+
+```
+ 58 | complex_app  | ecommerce website
+  5 | chat         | E commerce website          ← one SPACE
+  5 | chat         | restaurant billing app with menu, KOT, GST invoice, table mgmt
+  5 | chat         | kirana store billing software with stock, customers, udhaar khata
+  5 | chat         | medical store app — batch wise stock, expiry alert, GST bill, ledger
+  5 | chat         | gym management app: members, plans, fee reminders, attendance
+  5 | chat         | coaching institute app with batches, fees, tests, results
+  5 | chat         | salon appointment app with services, staff, slots, bills
+  5 | chat         | society management app: flats, maintenance bills, complaints, visitors
+```
+
+**Five is the score of the word "hi".** The kirana app's full verdict was
+`startTier: 'gemini'`, `escalationPath: ['gemini','haiku','sonnet']`, **`ambiguous: false`** — a
+confident wrong answer about exactly the apps NavBharatAI exists to build. And `complexityRouting`
+reads that 5 against a line of 40 with a ±3 margin, so `AGENTV3_COMPLEX_TO_KIMI` — shipped ON by
+default on 2026-09-17 to open big apps on KIMI — could not fire for any of them.
+
+### The fix introduces no new number, and no new keyword
+
+1. **`classify()`** returns the task type AND whether any signal actually matched. `detectTaskType`
+   ended in a bare `return 'chat'`, so "this is a greeting" and "nothing fired" were the same answer.
+   One list of signals, not two — a predicate that re-tested them would be free to drift.
+2. **`signalsFoundNothing`** is that state, exported and pure. Deliberately NOT a new keyword list:
+   adding "billing", "kirana", "salon" would fix today's five and leave tomorrow's five.
+3. The floor is **`scriptNeutralFloor`, unchanged** — the same function, the same `BASE_SCORE` bands,
+   the same raise-only rule. Its evidence (enumerated parts, length) never needed a vocabulary, so it
+   was always equally valid for English; it had simply only been wired to the script case.
+4. **`needsSecondOpinion`** fires for the same state, gated on `scriptNeutralFloor > 0` so a greeting,
+   a question or a three-word ask buys no model call at all.
+5. **`e-?commerce` → `e[\s-]?commerce`.** Same keyword, one separator wider. This is PR #3077's
+   recorded open case, and it was a one-space defect rather than a routing question.
+
+After, measured:
+
+```
+  5 | gemini  | ask-model: no  | hi / thanks bhai / what can you generate?
+ 15 | gemini  | ask-model: no  | build a todo app
+ 58 | sonnet  | ask-model: no  | ecommerce website  AND  E commerce website
+ 30 | haiku   | ask-model: YES | kirana store billing software …
+ 30 | haiku   | ask-model: YES | society management app: flats, maintenance bills …
+ 58 | sonnet  | ask-model: no  | ek hospital management system banao …
+```
+
+### Why the score and not the tier (rule 6, said plainly)
+
+PR #3077 recorded this class and did not fix it, for a stated reason: *"that score also drives
+`startTier` and `escalationPath`, so changing it trades one problem for a possible other."* That is
+right, and it is why **no threshold moved**. The floor lands on `BASE_SCORE.coding` (30), a band this
+module's own docblock already reasons about — *"the light band keeps the one-shot and simple lanes
+and the same 80-step ceiling; only the score-58 band changes any of those."* And `ambiguous` was
+traced first: **nothing outside `RequestAnalyser` reads it.**
+
+🔴 **STILL OPEN:** a `complex` verdict from the refiner drives only the KIMI opener (`buildIsComplex`);
+it does not raise `startTier`. So a kirana app now starts in the light band and opens on KIMI, but a
+model saying "complex" still cannot move it to the standard band. That is a second change with its
+own evidence, not a line to slip in here.
+
+### Tests
+
+`tests/theSignalsReadEveryLetterAndRecognisedNothing.test.ts` — 9 cases: the seven real requests, the
+things that must cost nothing, the raise-only rule, the three e-commerce spellings, and a regression
+guard on the script case this is a sibling of.
+
+**Proven by reversion** — each of these turns the suite red, and each was restored:
+- `const unread = unreadable || signalsFoundNothing(prompt)` → `unreadable`
+- removing the new branch in `needsSecondOpinion`
+- `e[\s-]?commerce` → `e-?commerce`
+
+## 2026-09-18 — Autopsy b6f88a72 (Gita reader): the app was fine; four things we said about it were not
+
+Free Weak build, **6.1 min**, real cost $0.38, `ok: true`, release gate YELLOW. The app was genuinely
+built and genuinely rendering. Every defect below is in what the ENGINE said about it.
+
+**Ledger — 251 events, 0 errors, 7 warnings.**
+✅ self-healed 4 · 🔀 workaround 1 (GLM benched → KIMI) · ⏭️ skipped 2 (journey, test suite) ·
+❌ shipped imperfect 3 (the summary's self-contradiction, vulnerable vite, stale snapshot) ·
+🥵 struggle 5 (label-chase, 6× re-read, 2.7 MB grep, three "I can't size this yet", 25 s dead rung).
+
+### 🔴 1. The user's summary contradicted itself in one message
+
+It said **"Has Favorites / Wishlist — save shlokas from any verse card"** and, six lines later,
+**"⚠️ One thing you asked for isn't in the app yet: wishlist / favorites"**. Both about the same
+working feature.
+
+Root cause, read from `RequirementCoverage.ts`: `artifact` (broad, and it would have matched) is
+tested against `surface` — file and component NAMES — and a **one-file app contributes none**. The
+whole burden then falls on `evidence`, a list of four literal function names
+(`toggleFavourite|isFavourite|addToWishlist|toggleBookmark`); this app's handler is `toggleSave`. So
+it was recorded **confirmedMissing** — stated as fact, not advisory.
+
+It also cost real time: the agent read the evaluator, concluded "the evaluator is looking for the
+literal word", and spent **five `edit_file` calls (one of which failed) renaming a tab label**
+"सहेजे गए" → "पसंदीदा" — to satisfy a detector that reads function names, so the rename could never
+have worked.
+
+**Fixed:** when the surface has no name and `evidence` does not fire, the same broad `artifact`
+pattern is tested against the BODIES — the question this module already asks, asked where a one-file
+app answers it. The list's own comment says `artifact` is broad "so a feature built under a
+reasonable alternate name still counts"; that intent had simply never reached a one-file app. Error
+direction is the justification: broader coverage costs a nag we do not print, the reverse tells a
+user their working feature is missing and buys a heal pass.
+
+### 🔴 2. "in Hindi" was read as an order to TRANSLATE
+
+`requestAnalysis` recorded **`taskType: 'translate'`, score 15, cheapest band** — reproduced exactly:
+`RE.translate` carried `in hindi`, and the prompt opens *"Build a Bhagavad Gita reader **in Hindi**"*.
+
+⚠️ It is worst for precisely the users this app exists for:
+`'ek dukaan ka app banao in hindi with stock, bills, customers'` → **`translate`, score 10**.
+
+**Fixed:** the translation VERB stays (`translate|translation|anuvad|convert to`); the bare language
+phrases go. A real translation request still classifies as one; a request that merely names its
+output language falls through and is floored honestly. The Gita prompt: **15 → 58, cheapest band →
+standard band, `ambiguous: false` → `true`**.
+
+⚠️ **Stated plainly, because it is a behaviour change:** the score-58 band is the one that takes a
+build out of the one-shot and simple lanes. A many-part request that matches no signal now leaves
+the fast lane. That is intended — it is a multi-feature app — but it is not a no-op.
+
+🔎 **This is the THIRD sibling of one class**, and the shape is now unmistakable: the signals said
+`chat` for a script they could not read (fixed 09-17), `chat` when nothing fired (fixed today), and
+`translate` when the WRONG thing fired (this build). A keyword list standing in for understanding,
+reporting `ambiguous: false` each time.
+
+### 🔴 3. The agent's own `grep` tool excluded nothing
+
+One reviewer call carries **`promptChars: 2,709,481`** — a `grep <pattern> .` that walked
+`node_modules/.vite/deps/*.js.map`. It was truncated to ~12k tokens before the model, so the sandbox
+paid for the walk and the model still did not get its answer. **Eight other search paths in the same
+file carry a skip set; `case 'grep'` ran a bare `grep -rn`.** Fixed with that same vocabulary.
+
+### 📋 Recorded, NOT fixed here (rule 6) — each measured from this report
+
+1. **Our own scaffold ships a vulnerable vite.** `vite@5.4.21`, 3 advisories; `npm audit fix`
+   exited 1 because the fix is `vite@8` — a major upgrade. The user did not choose this version;
+   we did. Every build from this template carries it, and the report tells the USER to decide.
+2. **We wrote a Playwright suite and then reported we could not run it.** `E2E_SCAFFOLDED` →
+   `TEST_SUITE_UNVERIFIED` → `RELEASE_GATE: YELLOW` cites "this project HAS a test suite, but it
+   could not be run here". The suite is ours; the YELLOW is self-inflicted.
+3. **`JOURNEY_NOT_DERIVED`** — "no field this check could address honestly (no name, id, placeholder,
+   label or test id)". The app has a search box. It is OUR golden template's input that carries no
+   label, so our own journey check cannot test the app we seeded.
+4. **`PREVIEW_SNAPSHOT_STALE`** — the copy was taken, then the production-defaults and test-scaffold
+   passes changed files. Those passes run after the snapshot on every build, so this is ordering,
+   not chance.
+5. **The reviewer read `src/App.tsx` six times and `src/index.css` five times**, each time told by
+   the tool result that it already had the file, then returned no findings — 71 calls,
+   **1,520,722 input tokens** (1,427,968 cache-read).
+6. **Three times in six minutes the user was told "still working out how big it is."** The ETA was
+   inside its own band (368 s actual vs a 200–422 s band) and was never shown because it was
+   unevidenced.
+7. **A static Gita reader was given a Neon `DATABASE_URL` and a `RENDER_API_KEY` in `.env`** from
+   saved keys. `.gitignore` covers `.env`, so nothing leaked — but an app with no server should not
+   be handed a deploy credential.
+8. **`glm-4.7-flashx` was benched at 25 s** for answering below a usable rate — the first real
+   evidence on the rung that became the Weak/Normal lead on 2026-09-17.
+
+### 📌 The flag the admin actually set did not fire, and the report says so honestly
+
+`PROJECT_MODE`: *"Software Project Mode is ON for this account, but this prompt is not a mega-project
+— normal path. Signals: 0 enumerated feature lines."* `detectMegaProject` counts enumerated
+**lines**; this prompt is one paragraph of commas. So this build did not test the thing it was
+meant to test, and the honest way to test it is a prompt with ≥8 feature LINES and a big-software
+noun.
+
+### Tests
+
+`tests/aOneFileAppKeepsItsFeaturesInline.test.ts` (6) — the shipped app's own code, the genuine
+missing feature that must still be reported, the multi-file case, the no-bodies case, and a
+source-anchored guard on the grep command.
+`tests/theSignalsReadEveryLetterAndRecognisedNothing.test.ts` (+2 = 11) — the real prompt, the
+dukaan prompt, and the genuine translation requests that must not regress.
+
+**Proven by reversion** — each turns its suite red, and each was restored: `in hindi` back in the
+translate signal · the inline-artifact line removed · the excludes dropped from the grep command.
 ## 2026-09-18 — THE DONE SIGNAL: the engine computed "this app is finished" and threw the answer away
 
 Admin asked for this by name. What shipped is **the measurement first and the steer second**, and the

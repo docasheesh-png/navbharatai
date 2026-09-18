@@ -41,6 +41,11 @@
 .text-\[15px\]  { font-size: 0.9375rem; }
 .text-\[16px\]  { font-size: 1rem; }
 .text-\[18px\]  { font-size: 1.125rem; }
+/* The Pro image studio's wordmark (2026-09-18). Added here rather than avoided in the component,
+   because the point of this file is that a px utility is REMAPPED, not that px utilities are
+   forbidden — a display heading is exactly the case that wants an explicit size. */
+.text-\[30px\]  { font-size: 1.875rem; }
+.text-\[38px\]  { font-size: 2.375rem; }
 
 /* px line-height alongside scalable font-size would overlap lines at 200% — remap the ones in use. */
 .leading-\[14px\] { line-height: 0.875rem; }

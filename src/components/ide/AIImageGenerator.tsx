@@ -7,6 +7,7 @@ import { TirangaLoader } from '../ui/TirangaLoader';
 import { dataUrlToBlob, dataUrlToBase64, imageFilename } from '../../lib/imageExport';
 import { imageHistoryStore, pruneHistory, type ImageHistoryItem } from '../../lib/imageHistoryStore';
 import { auth } from '../../lib/firebase';
+import { ImageStudioPro } from './ImageStudioPro';
 
 type GeneratedImage = ImageHistoryItem;
 
@@ -33,9 +34,9 @@ const STYLES = [
 // while it generated 512. Every number a user read here was wrong, which is its own small dishonesty
 // and made the real fix — raising the resolution — impossible to even see.
 const SIZES = [
-  { id: 'square', label: 'Square', w: 1280, h: 1280, desc: '1280×1280' },
-  { id: 'wide', label: 'Wide / OG', w: 1536, h: 864, desc: '1536×864' },
-  { id: 'portrait', label: 'Portrait', w: 960, h: 1280, desc: '960×1280' },
+  { id: 'square', label: 'Square', w: 1024, h: 1024, desc: '1024×1024' },
+  { id: 'wide', label: 'Wide / OG', w: 1280, h: 720, desc: '1280×720' },
+  { id: 'portrait', label: 'Portrait', w: 864, h: 1152, desc: '864×1152' },
   { id: 'icon', label: 'App Icon', w: 1024, h: 1024, desc: '1024×1024' },
 ];
 
@@ -70,7 +71,23 @@ const STYLE_ENHANCERS: Record<string, string> = {
   '3d': '3D render, isometric, depth, shadows, realistic, ',
 };
 
+/**
+ * Which tier the user is on. Persisted, because the toggle is a PREFERENCE — the admin's words were
+ * "user uske kabhi bhi free aur paid me convert kar sake", and a preference that resets on every
+ * panel open is not one. Free is the default and the fallback for any unreadable value: a storage
+ * read that throws must never silently land somebody on the paid tier.
+ */
+const TIER_KEY = 'nbai.imagegen.tier';
+function readTier(): 'free' | 'pro' {
+  try {
+    return localStorage.getItem(TIER_KEY) === 'pro' ? 'pro' : 'free';
+  } catch {
+    return 'free';
+  }
+}
+
 export function AIImageGenerator({ onImageGenerated }: Props) {
+  const [tier, setTier] = useState<'free' | 'pro'>(readTier);
   const [prompt, setPrompt] = useState('');
   const [imageType, setImageType] = useState(IMAGE_TYPES[0]); // compulsory — always one selected
   const [style, setStyle] = useState('minimal');
@@ -321,25 +338,65 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
     return `${Math.floor(diff / 86400000)}d ago`;
   };
 
+  // Persisted best-effort: a storage that refuses (private window, blocked site data) must leave the
+  // toggle working for this session rather than break the panel.
+  useEffect(() => {
+    try { localStorage.setItem(TIER_KEY, tier); } catch { /* per-viewer convenience only */ }
+  }, [tier]);
+
   const selectedSize = SIZES.find(s => s.id === size) || SIZES[0];
 
   return (
-    <div className="h-full flex flex-col bg-[#0d1117] text-white overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5 bg-[#161b22]">
-        <div className="w-10 h-10 bg-violet-600/20 rounded-xl flex items-center justify-center">
-          <Wand2 className="w-5 h-5 text-violet-400" />
-        </div>
-        <div>
-          <h2 className="font-semibold text-white text-base">AI Image Generator</h2>
-          <p className="text-xs text-white/40">Write a prompt to generate images — logos, banners, icons</p>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          <span className="text-[10px] bg-violet-500/20 text-violet-300 px-2 py-1 rounded-full border border-violet-500/30">NavBharatAI</span>
-          <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-1 rounded-full border border-emerald-500/30">Free</span>
+    <div className={`h-full flex flex-col text-white overflow-hidden ${tier === 'pro' ? 'bg-[#08090c]' : 'bg-[#0d1117]'}`}>
+      {/* Header. In Pro it collapses to a single slim bar carrying only the toggle — the studio below
+          introduces itself, and a dense title block would undo the restraint the whole surface is for.
+          The toggle itself is never hidden: a user must always be one press from the free tier, which
+          is exactly what Pro's own error messages tell them to do. */}
+      <div className={`flex items-center gap-3 border-b border-white/5 ${
+        tier === 'pro' ? 'px-4 sm:px-6 py-2.5 bg-transparent' : 'px-6 py-4 bg-[#161b22]'
+      }`}>
+        {tier === 'free' && (
+          <>
+            <div className="w-10 h-10 bg-violet-600/20 rounded-xl flex items-center justify-center shrink-0">
+              <Wand2 className="w-5 h-5 text-violet-400" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="font-semibold text-white text-base truncate">AI Image Generator</h2>
+              <p className="text-xs text-white/40 truncate">Write a prompt to generate images — logos, banners, icons</p>
+            </div>
+          </>
+        )}
+        {/* The static "Free" badge was a LABEL; this is a CONTROL (admin 2026-09-18: "free ke jagah
+            free-paid ke toggle bana do … user uske kabhi bhi free aur paid me convert kar sake").
+            Both states are always reachable — switching back to Free is one press, and it is the
+            press the paid tier's own error messages point at when Pro cannot serve. */}
+        <div className="ml-auto flex items-center gap-2 shrink-0">
+          <span className="hidden sm:inline text-[10px] bg-violet-500/20 text-violet-300 px-2 py-1 rounded-full border border-violet-500/30">NavBharatAI</span>
+          <div role="tablist" aria-label="Image quality tier" className="flex items-center bg-black/40 border border-white/10 rounded-full p-0.5">
+            {(['free', 'pro'] as const).map((t) => (
+              <button
+                key={t}
+                role="tab"
+                aria-selected={tier === t}
+                onClick={() => setTier(t)}
+                className={`text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full transition-colors ${
+                  tier === t
+                    ? (t === 'pro' ? 'bg-amber-400 text-black' : 'bg-emerald-400 text-black')
+                    : 'text-white/45 hover:text-white/80'
+                }`}
+              >
+                {t === 'pro' ? 'Pro ₹2' : 'Free'}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
+      {tier === 'pro' ? (
+        <div className="flex-1 min-h-0">
+          <ImageStudioPro onImageGenerated={onImageGenerated} />
+        </div>
+      ) : (
       <div className="flex flex-1 overflow-hidden">
         {/* Left Panel */}
         <div className="w-[60%] flex flex-col gap-4 p-5 overflow-y-auto border-r border-white/5">
@@ -392,16 +449,24 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
                 <button
                   key={s.id}
                   onClick={() => setStyle(s.id)}
-                  className={`flex items-center gap-2 p-2.5 rounded-xl border text-left transition-all ${
+                  /* 🔴 `min-w-0` IS THE FIX, NOT DECORATION (admin 2026-09-18: "STYLE wale
+                     column ka text box se bahar nikal kar other box se overlap karta hai").
+                     A flex item defaults to `min-width: auto`, which refuses to shrink below its
+                     content — so "Three dimensional" and "Real photo look" held the button wider
+                     than its grid-cols-3 cell and spilled over the neighbour. The grid cell was
+                     never too small; the child simply would not fit into it. `min-w-0` on BOTH the
+                     button and the text column restores shrinking, and `truncate` decides what
+                     happens at the boundary instead of leaving it to overflow. */
+                  className={`flex items-center gap-2 p-2.5 rounded-xl border text-left transition-all min-w-0 ${
                     style === s.id
                       ? 'border-violet-500/60 bg-violet-500/10'
                       : 'border-white/5 bg-[#161b22] hover:border-white/10'
                   }`}
                 >
-                  <span className="text-lg">{s.emoji}</span>
-                  <div>
-                    <div className="text-xs font-medium text-white">{s.label}</div>
-                    <div className="text-[10px] text-white/30">{s.desc}</div>
+                  <span className="text-lg shrink-0">{s.emoji}</span>
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium text-white truncate">{s.label}</div>
+                    <div className="text-[10px] text-white/30 truncate" title={s.desc}>{s.desc}</div>
                   </div>
                 </button>
               ))}
@@ -416,7 +481,9 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
                 <button
                   key={s.id}
                   onClick={() => setSize(s.id)}
-                  className={`flex flex-col items-center p-2.5 rounded-xl border text-center transition-all ${
+                  /* Same class as the Style chips above: without `min-w-0` the widest label
+                     ("1536×864") sets the cell's floor and the four-column grid overflows. */
+                  className={`flex flex-col items-center p-2.5 rounded-xl border text-center transition-all min-w-0 ${
                     size === s.id
                       ? 'border-violet-500/60 bg-violet-500/10'
                       : 'border-white/5 bg-[#161b22] hover:border-white/10'
@@ -425,8 +492,8 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
                   <div className={`mb-1 border border-white/20 ${
                     s.id === 'wide' ? 'w-8 h-4' : s.id === 'portrait' ? 'w-4 h-7' : 'w-5 h-5'
                   } rounded-sm`} />
-                  <div className="text-[10px] font-medium text-white">{s.label}</div>
-                  <div className="text-[9px] text-white/30">{s.desc}</div>
+                  <div className="text-[10px] font-medium text-white truncate max-w-full">{s.label}</div>
+                  <div className="text-[9px] text-white/30 truncate max-w-full" title={s.desc}>{s.desc}</div>
                 </button>
               ))}
             </div>
@@ -581,6 +648,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }

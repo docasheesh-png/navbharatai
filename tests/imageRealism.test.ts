@@ -88,10 +88,42 @@ describe('🔒 resolution — the other half of “soft”', () => {
     expect(IMAGE_SIZE_PIXELS.icon).toEqual({ w: 1024, h: 1024 });
   });
 
-  it('every size is at least 864px on its short edge', () => {
+  // 🔴 CHANGED 2026-09-18, and the ORIGINAL PIN IS THE THING BEING CORRECTED — read this before
+  // restoring it. It asserted `min(w,h) >= 864`, which encodes the 2026-08-16 premise that a bigger
+  // free image is a sharper one. That premise is false past the model's trained resolution: a
+  // latent-diffusion model asked for materially more than ~1 MP smears and repeats texture instead
+  // of adding detail, so 1280×1280 (1.64 MP) was soft for the OPPOSITE reason 512 was. The admin
+  // reported the blur again on 2026-09-18 with the bigger numbers already live, which is the
+  // evidence that raising them had not worked.
+  //
+  // The replacement is STRONGER, not laxer: it pins the real property (a megapixel count inside the
+  // band the weights were fitted at) instead of a proxy for it, and adds two constraints the old
+  // pin did not have. The regression the old test actually guarded — a return to tiny 512 images —
+  // is still caught, by the lower bound of the band.
+  it('every size sits inside the model’s native ~1 MP band — not under it, and not over it', () => {
     for (const [id, px] of Object.entries(IMAGE_SIZE_PIXELS)) {
-      expect(Math.min(px.w, px.h), id).toBeGreaterThanOrEqual(864);
+      const mp = (px.w * px.h) / 1_000_000;
+      expect(mp, `${id} is under-sampled (the pre-08-16 512 bug)`).toBeGreaterThanOrEqual(0.7);
+      expect(mp, `${id} is over-sampled (the 08-16 bug: bigger, and blurrier)`).toBeLessThanOrEqual(1.3);
     }
+  });
+
+  it('🔒 every dimension is a multiple of 16, so no downsample lands off the latent grid', () => {
+    // The latent grid steps in 8s; 16 keeps every downsample integral. Off-grid dimensions are
+    // resampled at the edges, which is a second, independent source of the mush being fixed here.
+    for (const [id, px] of Object.entries(IMAGE_SIZE_PIXELS)) {
+      expect(px.w % 16, `${id} width`).toBe(0);
+      expect(px.h % 16, `${id} height`).toBe(0);
+    }
+  });
+
+  it('🔒 each size is the EXACT aspect ratio its hint promises the model', () => {
+    // The ratio hint and the pixel request are two statements of one intent; when they disagree the
+    // model is being told to compose for one frame and render into another.
+    expect(IMAGE_SIZE_PIXELS.square.w / IMAGE_SIZE_PIXELS.square.h).toBe(1);
+    expect(IMAGE_SIZE_PIXELS.icon.w / IMAGE_SIZE_PIXELS.icon.h).toBe(1);
+    expect(IMAGE_SIZE_PIXELS.wide.w / IMAGE_SIZE_PIXELS.wide.h).toBeCloseTo(16 / 9, 5);
+    expect(IMAGE_SIZE_PIXELS.portrait.w / IMAGE_SIZE_PIXELS.portrait.h).toBeCloseTo(3 / 4, 5);
   });
 
   it('🔒 but stays MODERATE — a timeout on the free provider would fall through to a PAID one', () => {

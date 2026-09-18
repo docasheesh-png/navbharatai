@@ -63983,6 +63983,60 @@ must-still-build boundary set, and **reversion guards proven to fail** when the 
    `Cannot read properties of undefined (reading 'title')`. A deterministic, model-free, two-file
    question that nothing asks.
 
+---
+
+## 2026-09-17 — THE INTENTION READER IS THE DEFAULT; the builder learns where its own buttons are
+
+**Admin, verbatim:** *"navbharatai pro, ko app self awareness nahi hai kya? preview kaise chalega, batana
+chahiye … navbharatai ko simple question ke simple anser dene sikhao. … user ka har woh messge jo ek
+limit se chota hai ya unclear hai, hamesa llm call karo?"* — and then *"aap batao kuch best option?"*
+
+### Two honest answers first
+
+**Self-awareness: NO, the builder did not have it.** `systemPrompt.ts` says so in its own words
+(2026-08-04): *"Every OTHER AI in NavBharatAI … is fed the AppKnowledgeBase … AgentV3 is not."* The one
+assistant that BUILDS the app was the only one that could not say where the Preview tab is — which is
+why report cc8c9075's answer was `npm run dev` and `localhost:5173`. The KB has had an `agentv3_preview`
+entry with the keyword `preview kaise` all along; the builder was never handed it (the full KB would
+break the cached prompt prefix).
+
+**The LLM-on-every-unclear-message proposal: right, and ~80 % already built.** `classifyIntentSmart`
+already consults the ₹0 free-chat reader — but only when confidence is LOW, and **five autopsies this
+week (5abad374, 2c61f648, the alarm app, f5351721, cc8c9075) were all HIGH-confidence hard-locks that
+skipped it.** Each added a regex; the class never closed. Regex reads words, the reader reads grammar.
+**Message LENGTH was declined as the trigger** — "build me a todo app" is five clear words, the
+cc8c9075 question was nine unclear ones — and object-less orders are already answered by #3039.
+
+### What shipped — A, B, C (each proven by reversion)
+
+- **A. Doubt → reader.** A HIGH verdict from a build/edit verb now survives only with NO question (the
+  strengthened `readsAsQuestion`) and NO negation in the sentence (`hasNegation`: `mat/nahi/don't/not/
+  no`…). Either one costs the lock, never the intent. A plain order keeps HIGH and pays nothing — a test
+  counts zero reader calls across four orders.
+- **B. Reader down on a QUESTION ⇒ chat, not build.** This REVERSES a deliberate 2026-09-13 pin
+  (*"the keyword answer still stands when the reader cannot run"*), on the admin's own asymmetry:
+  wrong-toward-chat is one message (the reply already offers to build), wrong-toward-build is a whole
+  build. A statement or order with the reader down keeps the keyword verdict exactly as before, so
+  "add a payment button" stays an edit when GLM is slow. `tests/capabilityQuestion.test.ts` records the
+  change in-file rather than silently.
+- **C. `help` is a fourth reader answer, and `NAVBHARATAI_UI_MAP` gives the builder its bearings.**
+  Fifteen static lines — Preview tab, Publish, Files/ZIP, History → Restore, Stop, Report, Download APK
+  — each tagged with its `AppKnowledgeBase` id, opening with *"Do NOT tell them to run npm, open a
+  terminal, or visit localhost: they are inside NavBharatAI on a phone."* 🔒 **ONE constant, TWO
+  readers**: the architect prompt (static side, so the cache prefix is untouched — a test asserts no
+  date/user/project interpolation) and the plain-chat lane's inline prompt in `routes/agentv3.ts`,
+  which has its OWN system prompt and would otherwise have kept answering like a generic bot.
+
+### What this does NOT do, stated so nobody re-derives it
+
+- It does not call the reader on every message — an unmistakable order still pays nothing.
+- It does not inject the whole KnowledgeBase into the build prompt (cache prefix).
+- It does not make the reader's verdict FINAL when it answers `build` on a question — that still goes
+  through `userAskedForAnAppToBeBuilt` (#3040), which now requires HIGH and so cannot re-run a build
+  on a guess.
+
+**Gate on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` · **25,001 tests
+passed** · `build` · `test:bundle` · `boot:check` · `deps:server-gate` — all green.
 ### 2026-09-17 (same day, follow-up) — "app banao" names no more than "banao" does
 
 The admin read the fix above and asked the one question that tested it: *"agar koi user send karega
@@ -64250,6 +64304,71 @@ with the abort case REVERTED, because `default`'s text also contains *"files so 
 **Full CI gate green on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` ·
 `vitest run` (**24,990 passed, 1 skipped, 0 failed**) · `build` · `test:bundle` · `boot:check` ·
 `deps:server-gate`.
+
+## 2026-09-17 — THE JOURNEY CHECK HAD NEVER LAUNCHED A BROWSER, and two things guaranteed nobody could tell
+
+Found while clearing the last un-owned items from autopsy `e706e068`'s ledger (🔀 "journey not derived",
+⏭️ "page-render check: no result for 6 routes"). Reading the two modules that produce that evidence
+turned up a bug bigger than the ledger item that led to it.
+
+**1. THE BUG.** `journeyScript` built its own run line:
+
+    node /tmp/nbai-journey.mjs 2>&1 | grep '^NBAI_JOURNEY ' || true
+
+with **no `PLAYWRIGHT_BROWSERS_PATH`**. Chromium exists in exactly one place in the sandbox —
+`/home/user/.e-tools/.browsers` — because the image build (`infra/e2b/e2b.Dockerfile:67`) and the
+runtime `_kickoffPlaywright` (`E2BActuator.ts:1483`) both install it with that variable set on the
+command, and it is **never** a persistent `ENV`. So `chromium.launch()` threw *"Executable doesn't
+exist"* before the first step of the first journey, on every build, since the check shipped. Its
+sibling `pageCheckScript` set the variable. **Fourteen other Playwright invocations in this repo set
+it.** This one did not.
+
+It is also a REPEAT: `browseUrl`'s own comment records the identical bug being root-caused once before
+("ran … with no PLAYWRIGHT_BROWSERS_PATH … so the require ALWAYS failed and browseUrl silently degraded
+to a curl of the static HTML shell"). The instance was fixed; the class was not — exactly the failure
+the constitution's bar entry describes for `a38c6fef`.
+
+**2. WHY IT COULD NOT BE SEEN.** The same line is the blindness. `2>&1` folds stderr into stdout, the
+marker `grep` then discards every line that is not a result, and `|| true` hides the exit status — so a
+script that died on line 1 and one that ran perfectly and found nothing return the **identical empty
+string**. `PageRouteCheck`'s header had already written this down about an earlier NODE_PATH bug ("the
+trailing || true and the grep swallow the error, so the run simply produces no result lines") and the
+pattern was copied into the sibling anyway, carrying the blindness with it.
+
+**3. THE FAKE GREEN.** `summarizeJourneys([])` returned `{ ok: true }`, and the route records
+`code: verdict.ok ? 'JOURNEY_PASSED' : 'JOURNEY_FAILED'` at `severity: 'info'` with
+`autoResolved: true`. So for the whole outage **every build recorded a PASSING journey code** whose own
+message read *"No user journey was run."* The message was honest and the code was not, and the code is
+what a reader scanning a report actually sees. (The release gate was never misled — the route only sets
+`gateEvidence.journeys` when results exist — so this was a reporting lie, not a shipping one.)
+
+**THE FIX, at the class rather than the instance.**
+- **`src/server/AgentV3/sandboxBrowserScript.ts` (new, pure).** ONE builder for the run line of every
+  in-sandbox browser script we own. It carries `PLAYWRIGHT_BROWSERS_PATH` by construction, keeps result
+  lines on stdout unchanged (so every parser is untouched), and — only when a run yields no result or
+  exits non-zero — prints a **bounded** tail (8 lines × 200 cols, capped at 400 chars in a report) of
+  what the script really said, under its own `NBAI_DIAG:` marker. Still exits 0: a probe that found
+  nothing must never look like a failed command. POSIX `sh` only, and the quiet grep is spelled
+  `grep -q '^M' file`, not `grep '^M' file -q`, which is GNU-only. **Verified by executing the generated
+  line in a real shell** across three cases (healthy, died-at-launch, ran-but-empty) rather than by eye.
+- Both modules use it; each result marker is now named once (`JOURNEY_RESULT_MARKER`,
+  `PAGE_RESULT_MARKER`) instead of hand-written in three places, which is how the first copy drifted.
+- `summarizeJourneys(results, attempted, stdout)` returns **`ran`** beside `ok`, and
+  `summarizePageCheck(results, attempted, stdout)` takes the raw output; both now say **why** when the
+  runner produced nothing. New report code **`JOURNEY_NOT_RUN`** (neither pass nor failure), registered
+  in `PROCESS_ONLY_CODES` and `NEVER_SUGGEST` so it can never count against the user's app.
+
+**THE GUARD THAT SHOULD HAVE EXISTED.** `sandboxBrowsersPath.test.ts` already pinned the CONSTANT and
+the hand-off to the USER's suite — and its own header names "journey runs" as a consumer — but nothing
+asserted that the scripts the PLATFORM runs carry the variable. Same shape as the complexity flag in
+#3043: the decision was tested, the chain was not. It now asserts the **real generated command** for
+both scripts, and that neither module builds its own run line. Proven by reversion, three ways: putting
+the old journey line back fails 2 cases; removing the path from the builder fails 3; restoring the
+route's two-way code fails 3 in `tests/journeyRunnerWiring.test.ts`.
+
+**What to watch on the first real builds:** `JOURNEY_PASSED` / `JOURNEY_FAILED` appearing **at all**.
+A crop of `JOURNEY_FAILED` is not a regression — it is the check working for the first time, and each
+one is a real app that looks like it saves data and does not.
 ### 2026-09-17 (autopsy d98dae01, half 1 of 2) — a request none of our signals can read is not a greeting
 
 The prompt was Telugu: a text-to-speech app with voice cloning. `RequestAnalyser` scored it **5** — the
@@ -64332,6 +64451,119 @@ timeout still consumes the lane's remaining clock, so the rungs BELOW it are aut
 tokens (2,314 instead of ~2,833 on this build) and Kimi was starved by a budget GLM had already spent.
 That is the second half of this autopsy and is next.
 
+### 2026-09-17 (autopsy d98dae01, half 2 of 2) — the rung was starved by a clock nobody named
+
+The timeline, from the report's own timestamps:
+
+```
+t+0.0s   "Planning the file list…"    the fast lane's manifest call, 90 s plan cap
+t+15.5s  GLM abandoned for crawling   glm-4.7-flashx, benched for the rest of the build
+t+49.5s  KIMI starved                 authorised 2,314 output tokens, cut down from 8,000
+```
+
+**2,314 × 30 ms + 5,000 = 74,420 ms**, which is the 90-second plan cap (`preambleCapMs`) minus the
+15.5 seconds the crawling rung had already spent. So the ceiling was decided by the CALLING LANE's
+remaining budget — and the finding printed *"the ceiling is FLOOR_TIMEOUT_CAP_MS /
+AGENTV3_FLOOR_MS_PER_TOKEN (see floorBudget.ts)"*, pointing an autopsy at a 150,000 ms cap that had
+nothing to do with it. **Raising either of the two knobs that sentence names would have changed
+nothing.**
+
+⚠️ **AND MY FIRST DIAGNOSIS, PUT TO THE ADMIN, WAS HALF WRONG — recorded because the correction is the
+useful part.** I described this as *"a failed rung eats the next rung's budget"*, and the crawl does
+cost the rungs below it: 15.5 s of a 90 s cap is the difference between 2,833 tokens and 2,314. But
+**both numbers are below what that model needs to finish thinking**, so removing the crawl entirely
+would not have saved the build. Reading the report's real timestamps rather than reasoning from the
+shape of the problem is what separated the two.
+
+**What shipped:**
+
+- **`kimi-k2.7-code` joins `MEASURED_ALWAYS_REASONS`** (`glmThinking.ts`), a new set
+  `modelAlwaysReasons` consults BEFORE its GLM family rule. Evidence, not a vendor claim: report
+  `58fe8254` shows `outputTokens: 4833` three times (the constant ceiling of a clamped floor rung) and
+  this report shows 2,314 twice — **four starvations of one model id across two nights.** The
+  `-highspeed` variant is the same model served faster, so a prefix match on the measured base id
+  covers it deliberately. `kimi-k3` is NOT listed: nobody has measured it.
+  🔒 That module's docblock objected to asserting *"kimi-k2.7-code always reasons"* **because the id
+  had failed a `startsWith('glm-')` check** — a negated prefix test, not evidence. The principle is
+  unchanged and is what now admits it, and the stale example in that docblock was corrected in place.
+  🔗 `modelStarvedWhileClamped` (built earlier the same day by another session) learns the same fact at
+  runtime and would have caught the SECOND starvation; this set is what stops paying for the FIRST on
+  every fresh process, on the rung that opens a complex Weak or Normal build. Both are needed and a
+  test asserts the runner still consults both.
+  🔒 It cannot make the worst case worse — unclamping changes the ASK, never the clock, so a slow rung
+  is cut at exactly the moment it is cut today. And `glm-5.3`, the rung directly BELOW this one on both
+  ladders, is already unclamped by the family rule: this only makes two adjacent rungs behave alike.
+- **A starvation now says WHICH clock cut the ceiling.** `STARVED_BY_LANE_MARK` +
+  `isLaneBoundStarvation` (`floorBudget.ts`), fed from `bound.source === 'deadline'` — the only place
+  in the stack that fact exists. The report gains a third sentence naming the lane's remaining budget
+  as the constraint and pointing at how much clock a lane reserves for an answer, instead of at this
+  module's cap and rate constant. The two markers are **mutually exclusive by construction** (an
+  unclamped rung keeps the full ask, so no clock reduced its ceiling) and a test asserts it, because
+  two markers on one error would make the report pick between contradictory explanations.
+  🔒 The new sentence is checked against all three failure classifiers it must not match
+  (`isTimeoutProviderError`, the context-length test, `isModelUnavailableError`) — the same constraint
+  `STARVED_BUDGET_MESSAGE` already carries, now test-locked for the addition too.
+
+**Tests:** `tests/aLaneTooShortToAnswerSaysSo.test.ts` (23), anchored on the report's real numbers
+rather than on a scenario — the first two cases prove that 74,420 ms buys exactly the 2,314 tokens the
+report recorded, so every later assertion is tied to evidence. **Reversion-proven in all three parts:**
+emptying the measured set fails 5, dropping the report branch fails 1, dropping the lane clock at the
+throw site fails the wiring guard. That last guard is anchored on the statement's own closing paren,
+not a byte window — the fourth time this repo has paid for that lesson.
+
+🔴 **OPEN ROOT CAUSE (rule 6), and it is the real ceiling behind this report.** The fast lane's plan
+cap is 90 s, and 90 s at the floor rate buys **2,833 output tokens, on any rung, on every build** —
+while the call asks for 8,000. So the manifest call is structurally incapable of being answered by a
+forced-reasoning rung that is still clamped, and the crawl only decides whether the number is 2,833 or
+2,314. **This is the 4efab9d7 defect one level up**: that autopsy compared the runner's own timeout
+against its ask and fixed the runner; nobody then checked the CALLERS' deadlines against the same
+arithmetic. The obvious fix — raise `preambleCapMs` — would re-open the 858f6d7b defect it exists to
+prevent (plan 89 s + contract 70 s = 159 s of a 240 s lane before file one), and reducing the ask does
+not help because the ceiling comes from the clock, not the ask. **What is missing is an instrument, not
+a number**: nothing records a clamp unless it starves, so the frequency and size of the cut are
+unmeasured across the fleet. The honest next step is to measure it the way the sandbox-minutes work was
+measured, then move a number — not to move a number now.
+### 2026-09-17 (same day) — the intention reader gets its fourth answer: `unclear`
+
+Admin, after the two fixes above: *"user ka har woh message jo ek limit se chota hai ya unclear hai,
+hamesha LLM call karo — woh bata dega."*
+
+**The honest finding, reported back before building anything: that call was ALREADY being made**, on
+every low-confidence message, on the free chain at ₹0, bounded at 6 s — report `d6d664e6` is the proof
+that it ran for `"Bnao"`. **What was missing was somewhere to put the answer.** The reader is handed
+three choices (`chat` / `build` / `edit`) and answered `build`, which is not even wrong: *"make it"* IS
+an order to build. *"They have not told me WHAT"* was not on the menu.
+
+- `classifyIntentSmartDetailed` returns `{ intent, unclear }` and the reader's menu now carries a
+  fourth answer. `classifyIntentSmart` is that function with the flag discarded — **delegating, not
+  duplicating**, the same pattern `classifyIntent` already uses.
+- 🔒 **`intent` deliberately stays at the KEYWORD result when `unclear` is true.** A caller that
+  ignores the flag is byte-identical to before. The flag adds an option; it removes none.
+- The route ORs it with the deterministic `'no-object'` half and sends **both through the same four
+  narrowing conditions** (empty workspace, no earlier request, no attachment/import, not an edit).
+  A second opinion that can only make the gate NARROWER cannot introduce a new way to refuse a real
+  prompt.
+
+⚠️ **What was deliberately NOT done, and why (rule 3, no sycophancy).** The instruction as written —
+*call the LLM on every short message* — would add a provider round trip to `"hi"`, `"ok"`, `"thanks"`,
+`"haan"`: HIGH-confidence messages with no doubt in them, answered instantly and free today. That
+slows the app's most common turn for no gain. The existing design already asks **only when it is
+genuinely unsure**, which is both better and cheaper; a test now pins that a HIGH-confidence message
+never reaches the reader at all. Also recorded: `glm-4.5-flash` is on none of this repo's ladders —
+free chat leads with `glm-4.7-flashx` (₹0), which is already the cheapest rung, and pinning a model id
+in code is the churn Decision A exists to avoid.
+
+🔎 **The bigger lever, named and not yet taken:** the recurring failure is the OPPOSITE shape — a
+**HIGH-confidence hard lock that skips the reader entirely**. Three autopsies now (`5abad374`,
+`cc8c9075`, and `d6d664e6`'s sibling). PR #3040 (another session) is working that seam; this change
+deliberately stays out of `clauseReadsAsQuestion` and `userAskedForAnAppToBeBuilt` so the two do not
+race in one file.
+
+**Tests:** `tests/intentReaderCanSayUnclear.test.ts` (9) + the reader block in
+`objectlessBuildAsks.test.ts`. Reversion-proven in **both** halves — deleting the `unclear` mapping
+fails the reader suite, deleting `|| readerSaysUnclear` fails the route suite. Two source-scanning
+tests had their needles updated (`classifyIntentSmartDetailed`, the widened route window): the symbol
+and the window moved, **the assertions did not**.
 ### 2026-09-17 (correction) — three of the four open items from autopsy `d6d664e6` are closed, and ONE OF THEM WAS MY MISTAKE
 
 Recorded here rather than by editing the original entry, per the append-only rule, because a session
@@ -64361,6 +64593,888 @@ against a *different* `main` and nothing had verified the combination: `277a6769
 no-unused-imports ✅, server typecheck ✅, **25105 passed | 1 skipped, 0 FAIL** ✅, build ✅, bundle ✅,
 boot ✅. The concurrent merges compose cleanly.
 
+---
+
+## 2026-09-17 — `Number('')` is 0: a CLEARED Cloud Run field was impersonating a deliberate zero (12 readers, 9 files)
+
+**Not from a report — from the fourth absolute rule's step 2 applied to something this file already
+shows:** the *"a malformed env value must not fall the dangerous way"* fix has been made here at least
+six separate times (`parseRolloutPercent`, `walletFloor`, `buildCostCeiling`, `referralRewards`,
+`webRiskBudget`, `slowRungBench`'s ratio), each time for one key. **Seven modules literally CITE
+`parseRolloutPercent` in a comment and then hand-implement the rule.** That is the drifted-duplicate
+shape `safeRelPath` → `workspacePath.ts` was centralised for, so the question was whether the copies
+had already diverged. They had.
+
+**The fact behind all of it: `Number('')` is `0`, not `NaN`.** So every reader shaped
+
+```ts
+const n = Number(process.env.X);
+return Number.isFinite(n) && n >= 0 ? n : DEFAULT;   // blank ⇒ 0, never DEFAULT
+```
+
+turns a key that EXISTS and is BLANK into a deliberate zero. An **UNSET** key was always safe
+(`Number(undefined)` is `NaN`) — which is exactly why this never surfaced: **every existing test in
+the repo `delete`s the key rather than emptying it**, so the whole class sat in a blind spot that the
+suites were structurally incapable of entering.
+
+**What a silent zero meant, per site (12 reads, 9 files):**
+
+| Key | A blank value meant |
+|---|---|
+| `WELCOME_BONUS_TOKENS` | the welcome gift is **₹0 for every new account** — and with `AGENTV3_PAID_PUBLIC` on, a ₹0 wallet is REFUSED new builds, so a new user could do **nothing at all** |
+| `WEEKLY_TOPUP_TOKENS` | the weekly gift ladder stops |
+| `AI_TOOL_FREE_DAILY_LIMIT` · `AI_IMAGE_FREE_DAILY_LIMIT` · `AI_IMAGE_PASS_DAILY_LIMIT` | the free daily allowance becomes none |
+| `PROFESSIONAL_FREE_DAILY_LIMIT` | no free professional messages |
+| `AGENTV3_DEPLOY_MAX_MB` | the per-deploy size ceiling is **DISABLED** (0 means off there, by its own comment) |
+| `STORE_FEE_PCT` | the fee split shown on a pack card stops adding up |
+| `MONITOR_SANDBOX_SPIKE_MIN_USD` | every trivial spend is alert-worthy — against the standing 2026-09-12 one-mail-per-episode mandate |
+| `SEMANTIC_MEMORY_MIN_SCORE` | the relevance floor is gone and noise is injected |
+
+🔴 **THE CONDITION IS NOT HYPOTHETICAL IN THIS DEPLOYMENT, and `CLAUDE.md` already records both
+routes to it.** One is the cleared field / dropped paste that `referralRewards.ts` documents. The
+other is worse and is live: **six keys are set TWICE in the running service**, the last row wins, and
+an **empty** last row wins *silently* while the good value sits visible a few rows above it — the
+audit's own sharpest example. So "present but blank" is a state this service can already be in.
+
+**THE FIX IS THE CLASS.** `src/server/lib/envNumber.ts` is the numeric sibling of `envFlag.ts` —
+which exists for the same reason, written the same way, for booleans ("six ways to read an ON flag").
+`parseEnvNumber` returns `number | null` for precisely the reason `parseEnvFlag` returns
+`boolean | null`: **only the caller knows which way its own default falls**, and what range and
+rounding its number has. So each site keeps its own bounds, and none of them keeps its own idea of
+what an empty string means. An explicit `0` is honoured everywhere it is in range — three existing
+suites assert that in words (`walletCredit.test.ts` calls switching the bonus off *"a valid choice"*),
+and those assertions are undisturbed. Nobody types a zero by accident; a cleared box is not a
+decision.
+
+⚠️ **THE EIGHT PUNCTUATION-STRIPPING PARSERS WERE DELIBERATELY LEFT ALONE, and are recorded as
+CHECKED AND SAFE so nobody re-audits them:** `buildCostCeiling`, `walletFloor`, `webRiskBudget`,
+`appAiGateway`, `referralRewards`, `escalationRollout`, `slowRungBench`, `streamWatchdog` all guard
+blank correctly already, and each takes punctuation (`₹`, `$`, `%`, `_`, thousands separators) that
+the shared primitive deliberately does not. Rewriting correct code to share a helper would risk
+weakening a guard for no defect — the same reason the 304-window sweep was declined.
+
+🔴 **ONE FINDING WAS MINE AND WRONG, AND THE CORRECTION IS THE USEFUL PART.** `CaptchaGenerator.ts`
+carried the same shape with the sharpest consequence — a blank floor made the gate `score >= 0`,
+which passes a **certain-bot 0**, inside a function whose own `catch` says *"fail CLOSED"*. I began
+fixing it as NavBharatAI's own bot gate. **It is not ours:** that code lives in a **template literal**
+and is written into the **user's generated app**, which is deliberately dependency-free — NavBharatAI
+has no first-party captcha path at all (verified, not assumed). Importing a server module into
+generated user code would have broken every app built from that recipe, and my backticks broke the
+template outright. Reverted and re-fixed **inline**. An out-of-range value like `5` is left refusing
+everything **on purpose**: that is the safe failure for a bot gate and relaxing it into the default
+would have traded a safe failure for a looser one — the *"a fix must never trade one problem for
+another"* rule, caught inside this very change.
+
+**Tests — `tests/aClearedEnvFieldIsNotAZero.test.ts` (54). Reversion-proven: with the nine files
+reverted, 23 fail.** The prevention half scans for the **SHAPE** rather than a list of files
+(a value read with `Number(env.X)` and accepted at `>= 0` is wrong *whatever it is called*, because
+the blank case is decided before any range test runs), anchored on a **whole-file regex and never on
+a byte window** — this repo has paid for fixed-offset source guards seven times and twice for guards
+that could not fail at all. It therefore carries a case asserting the detector still **FINDS** a
+known-bad sample, because a regex matching nothing would make the sweep pass vacuously. ⚠️ **Its own
+first run flagged its own fix** — `parseEnvNumber(` contains the substring `Number(`, and so does
+`rawNumber(` — which is what the negative lookbehind exists for, and what the "clears the safe shape"
+case caught.
+### 2026-09-17 (autopsy 57875eb3) — a starved model was retired one KEY at a time, and the contract had no home
+
+**Branch `claude/charming-bell-htxb9u`.** Weak tier, prompt *"Mujhe ek car racing game banakae do …"*,
+`vite-react`. The engine planned 11 files, designed a shared contract, and generated all 11 in **45
+seconds** on `glm-4.7-flashx`. They did not compile. The repair pass then ran for **27 minutes** without
+returning once, and the 29-minute wall clock ended the build with a non-compiling app and the message
+*"Time limit reached — 11 files saved so far."*
+
+**The ledger, all five buckets (rule 5, step 1):**
+
+| bucket | count | items |
+|---|---|---|
+| ✅ self-healed | 0 | — |
+| 🔀 worked around | 3 | `glm-4.7-flashx` abandoned for crawling at 29 s and benched; `kimi-k2.7-code` starved 8,000 tokens and was retired; `glm-5.3` starved 8,000 tokens and was "retired for the rest of this build" — **which held for ONE key of fifty-one** |
+| ⏭️ skipped | 3 | the ~104,000 output tokens the 13 starved `glm-5.3` calls burned (+8,000 on Kimi) entered NO ledger — `liveTokens` shows 6,647 GLM output tokens, the successful calls only; `requestAnalysis.taskType: "chat"` for a romanized-Hindi build order (the Latin-script sibling of d98dae01, scores like `"hi"`); no ETA figure was ever shown (honest, but 29 minutes against a 3-minute midpoint) |
+| ❌ still broken | 2 | the app: four invented homes for one contract (`../types/game`, `../types/note`, `./types/game`, `./App`), an inline re-declaration of the contract's interfaces, `import styles from "./index.css"`, a `tsconfig.json` referencing a `tsconfig.node.json` that does not exist, a named `Obstacle` export imported as default; and the outcome — stopped by the clock, not converged |
+| 🥵 struggle | 2 | **27 minutes inside "attempt 1/3"** — 15 provider calls, 0 answers, the repair strategy ladder never reached attempt 2; `glm-5.3` called **13 times, ~2 min apart, for the identical starvation** while `CLAUDE_HAIKU` (a rung that does not reason) sat one rung away the whole time |
+
+**Root cause 1 — the retirement key (the 26 minutes).** `deadKeyFor` in `MultiProviderTurnRunner`
+retired a starved rung under `${name}::${model}`, and every key of a pool has a distinct name (`GLM`,
+`GLM#2`, …). So the memory said "retired for the rest of this build" and meant one key. **This is the
+4efab9d7 defect (the timeout streak keyed per key, 2026-09-15) in its starvation sibling — and that
+autopsy's own text says the rule: *the instance was fixed; the class was not.*** A starvation is a fact
+about the MODEL at this ask, never about the key that carried it. Fixed: `starvedKeyFor` = provider
+FAMILY (`reportAs ?? name`) + model, the same shape the throughput bench already uses; the lookup consults
+it beside the two existing keys. Model-not-found deliberately stays per key (a pool may span accounts with
+different model access; a 404 costs one round-trip, not two minutes). On this ladder the repair now reaches
+Haiku after ONE starvation per model: ~5 minutes instead of 27.
+🔒 `tests/aStarvedModelIsRetiredAcrossThePool.test.ts` (12), reversion-proven — **and the first draft of
+the proof passed with the fix reverted**, because the route names a pool's first key bare (`GLM`), so a
+per-key entry written by key 1 coincides with the family key by accident. The case that catches it has
+key 1 time out and key 2 starve; the fix is the only thing that skips keys 3..N.
+
+**Root cause 2 — the contract had no home (why a repair was needed at all: the 50/50 law).** The shared
+contract was handed to every per-file call as PROSE (*"do NOT import a symbol that is not declared
+here"*) and never said where the symbols lived, because they lived nowhere — the manifest planned no
+file for them. Eleven isolated calls each guessed. Fixed upstream in `SimpleBuilder.ts`: `contractModule`
+turns the contract into a real TypeScript module (exported enums / interfaces / type aliases; `declare`
+stripped; `const enum` demoted because `isolatedModules` cannot import an ambient one; a type-only React
+import added when the contract uses the namespace; bodiless util signatures DROPPED — valid in a
+declaration, a compile error in a module — and left to the file the manifest names), written at
+`contractFilePath` as the first produced file so every tier's dependency context carries its export
+surface, listed in every prompt, with `contractImportSpecifier` giving each file its own exact relative
+path. A planned types file at that path is superseded, not generated twice. Kill switch
+`AGENTV3_CONTRACT_FILE=off`; no file for an unexportable contract or a non-bundler framework.
+🔒 `tests/theContractIsAFileNotAParagraph.test.ts` (21), anchored on the report's own contract text,
+reversion-proven (4 fail with the wiring removed). One existing assertion superseded and corrected in
+place with the reason (`SimpleBuilder.test.ts`: a planned `src/types.ts` now yields 2 generated files +
+the contract file, not 3 generated).
+
+**The missing subsystem (step 2), named honestly:** four retirement memories in one runner (timeout →
+family, 429 → key, slow → family+model, starved → was key, now family+model) were each fixed one class
+at a time as a report exposed them. What is missing is one registry where each failure class DECLARES
+its scope (KEY / MODEL@FAMILY / FAMILY) — so the next class cannot default to the wrong one. Recorded as
+a proactive item below, not built here: the four scopes are now all deliberate, and a fifth map is not
+what the runner needs.
+
+**Timeline fact that matters for reading this report:** the futility breaker (#3044) merged at 19:38 UTC;
+this build ran 18:51–19:20. It did not run. It would now stop this build at ~minute 11 (last write at
+minute 1 + 10 quiet). With this change the repair returns in ~5 minutes instead, so the breaker becomes
+the net, not the fix.
+
+🔴 **OPEN (rule 6) — and one closed mid-PR, kept in the list so the reasoning stays legible:**
+1. ✅ **CLOSED IN THIS SAME PR — the starvation line lied fifteen times.** *"Our own ceiling, not this
+   provider … the ceiling is FLOOR_TIMEOUT_CAP_MS / AGENTV3_FLOOR_MS_PER_TOKEN"* — but the ask was the
+   fast lane's own `maxTokens: 8000` (five literal sites in `routes/agentv3.ts`), never clamped: a 300 s
+   streamed clock affords 9,833, so neither knob was the ceiling. A THIRD case beyond the two #3052
+   splits (own cap / lane clock): *the caller's ask was the ceiling and nothing reduced it.* It was first
+   recorded here as OPEN because #3052 was mid-flight in exactly those hunks; #3052 merged while this PR
+   was being gated, so it was merged in and the branch added on top: `STARVED_BY_ASK_MARK` +
+   `isAskBoundStarvation` in `floorBudget.ts` — derivable from `granted === requested`, which is
+   precisely `reconcileFloorBudget`'s not-clamped case, so no new plumbing — and a fourth
+   `OUTPUT_BUDGET_STARVED` wording that names the CALLER'S OWN ASK and no knob of that module. Mutually
+   exclusive with both other markers by construction. `tests/aStarvationOnTheCallersOwnAskSaysSo.test.ts`
+   (9), including a source-order guard that the ask branch is consulted before the lane and own-cap ones.
+2. **A starved call's tokens are invisible.** The runner throws before `onTurnComplete`, so ~$0.5 of real
+   provider spend on this build entered no ledger — not `liveTokens`, not `AGENTV3_BUILD_COST_CEILING_USD`,
+   not the admin cost report. The money-audit class ("a paid call with no governance"). The usage exists on
+   the response the runner parsed; attaching it to the thrown error and attributing it in the catch is
+   the fix, at the `throw starvedBudgetError(` statement that #3052's tests pin whole. After #3052.
+3. **Is 8,000 the right ask for a repair on a forced-reasoning rung?** `glm-5.3` spent >8,000 tokens
+   thinking about a ~60k-char repair prompt 13 times, deterministically. `reconcileFloorBudget` lifts the
+   clamp only when the ask EXCEEDS the clock; when the ask is below what the clock carries, an
+   always-reasons rung still gets only the ask. Raising it to the clock's capacity (9,833) may or may not
+   have sufficed — unknown, and not guessed at. Measure how much thinking such a rung uses on a repair
+   before moving the number (the same instrument #3052 names for clamps).
+4. **Hinglish scores like `"hi"`.** `RequestAnalyser` read *"car racing game banakae do"* as `chat`, score
+   5; #3050's `signalsCouldNotRead` covers non-Latin scripts only. Harmless on this build (a simple app on
+   the fast lane is right), wrong as a label, and the same class as d98dae01.
+
+**Proactive layer (step 6) — what would make the FIRST build right:**
+- **The single biggest lever is already the one shipped here:** most Weak fast-lane repairs exist because
+  isolated per-file calls disagree on shared names. With the symbols homed, the errors that survive should
+  be the mechanical ones the deterministic pass fixes for free — watch `SIMPLE_BUILD_FALLBACK` and the
+  repair-attempt count on Weak.
+- **One retirement registry with declared scopes** (above) — a table, not a fifth map.
+- **`8000` at five sites in `routes/agentv3.ts`** is the "retired model ids in 5 files" precedent waiting
+  to happen; one `fastLaneMaxTokens()` is the source of truth the next autopsy will want to move.
+- **The user-facing message.** *"Time limit reached — 11 files saved so far. Continuing automatically…"*
+  was true and still the wrong sentence for a user whose app never compiled; the release gate should own
+  that line, and it should say what state the files are in.
+## 2026-09-17 — WRITE → TYPECHECK → NEXT: the compiler answers after every file (admin: "incremental typecheck wala PR bana do")
+
+From autopsy e706e068's biggest struggle: 20 files written before the first `tsc`, then 21 errors ground for
+seven minutes (six `tsc` runs, an endgame batch repair, a "repeated step" nudge, read → edit → tsc one at a
+time). Every error was visible the moment its file was written; nothing looked.
+
+**What ships (`src/server/AgentV3/writeTimeTypecheck.ts`, wired in `ToolDispatcher`):** after every
+TypeScript write on all four write paths, the dispatcher runs the shared incremental `tsc --noEmit`
+(same `/tmp/agentv3.tsbuildinfo` cache as the endgame and the `typecheck` tool — a warm run is sub-second)
+and appends the WRITTEN file's own errors to the tool result (quoted in full, capped at 10) plus a brief count
+of errors elsewhere (named, capped at 3). Clean tree ⇒ no note. Per-build `WriteTypecheckQueue` coalesces
+parallel writes (a burst costs at most two compiles). A JS project (no tsconfig), a timeout (30 s) or any
+failure ⇒ '' — never a fake pass; two consecutive timeouts stand it down for the build with a reason. Every
+run is reported through `onCommand`, so the release gate's typecheck evidence sees it (the e4ebcb5f bridge).
+Report line `WRITE_TIME_TYPECHECK` (runs, clean runs, errors quoted back, time, stand-down reason). Kill
+switch `AGENTV3_WRITE_TYPECHECK=off` restores today's behaviour exactly.
+
+**Honest cost:** ~0.5–3 s of sandbox time per TS write (the first run is cold). On a 30-file build that is
+roughly a minute, against the seven-minute grind it replaces. The fast lane (SimpleBuilder) keeps its own
+generate-all → verify → repair loop; this is the agentic builder's path.
+
+**What to watch on the first real builds:** `WRITE_TIME_TYPECHECK` runs vs. the endgame's error count at
+its first checkpoint — the endgame's "N compile errors left" should drop toward zero, and
+`REPEATED_READS`/edit loops with it. Tests: `tests/writeTimeTypecheck.test.ts` (note wording on the real
+ERP tsc output, path normalisation, caps, queue coalescing, summary, dispatcher + route wiring).
+
+### Same day, the BOOLEAN sibling — and the guard that could not see it (rule 3, applied to my own fix)
+
+Fixing the numeric class exposed a gap in **my own** prevention guard: it walked `src/server` only.
+Asking whether the 2026-08-09 boolean sweep's guard had the same scope answered itself —
+`tests/envFlag.test.ts` walks `find src/server`, and **there was a live instance sitting in the gap**.
+
+🔴 **Root `server.ts` gated the P-DATA.4 retention purge on
+`process.env.DATA_RETENTION_PURGE_ENABLED === 'true'`** — the strictest of the six dialects
+`envFlag.ts` was written to abolish. **The admin turns features on by writing `on`**; this file
+records several flags set exactly that way. So `on`, `1`, `yes` and `TRUE` would each have left an
+opt-in **deletion** job switched off, with nothing in any log to say so — and `purgeExpired` has
+exactly ONE caller in the whole repo, this one. Now `envFlag('DATA_RETENTION_PURGE_ENABLED')`.
+
+It is the *"I searched `src/` and the wiring was in `server.ts`"* mistake this file already records
+once, this time inside a test that exists to prevent a class. **A guard is only as wide as its walk**,
+and neither guard's narrowness could fail anything. Both are widened: mine to `src`/`scripts`/`infra`/
+`server.ts` plus the client's `import.meta.env` shape, the boolean one to `src/server`/`scripts`/
+`infra`/`server.ts`, each with a case asserting the walk really reached outside its old scope —
+because a walk that found nothing would pass vacuously. Reversion-proven: restoring `=== 'true'`
+fails the widened guard naming `server.ts:807`.
+
+⚠️ **Client code is deliberately still OUT of the boolean guard's scope, and that is a decision:**
+`envFlag` reads `process.env` and is a server module, so a browser file cannot call it, and a guard
+demanding a fix nobody can write is worse than none. Zero boolean-dialect env reads exist in client
+code today (swept the same day). If one appears it needs a client-side helper first.
+
+🔴 **OPEN, AND NOT MINE TO SETTLE (rule 6) — has the retention purge EVER run?**
+`DATA_RETENTION_PURGE_ENABLED` appears **nowhere in this file**, including in the 84-key audit read
+off the live Cloud Run console on 2026-08-20 — which listed every name on the service. If the key is
+unset, the purge has never run, while the published Privacy Policy states its windows as fact:
+technical logs **90 days**, safety-check and removal records **180 days**, post-deletion erasure
+**30 days**, published-app visitor counts **30 days**. That is the shape of the 2026-09-02 incident
+(the policy said *"we never share your data with advertisers"* while the pixel was being built), and
+`tests/privacyPolicyTruth.test.ts` exists because that drift produced no failure of any kind.
+**It cannot be verified from a Claude session** — Cloud Run is not readable here, and the audit is
+four weeks old, so the admin may have set it since. Recorded as an open question with the one-line
+check rather than asserted either way. The dialect fix above is what makes the key *settable the way
+the admin actually sets keys*, which is a precondition for answering it at all.
+
+### And a third, in the guard on an ABSOLUTE rule — plus the one I nearly shipped as decoration
+
+Two guards found narrow, so the method was turned on the rest: **30 tree-scanning guard tests, does
+each one's walk match its claim?** The three with the highest stakes were checked first, and the
+honest result is mixed — **worth recording as-is rather than as a clean sweep:**
+
+| Guard | Claim vs walk | Live instance outside? |
+|---|---|---|
+| `serverDbCentralization` | *"NO server source file"* vs `src/server` — root `server.ts` IS one | **none** (scanned root, `scripts/`, `infra/`, `functions/`) |
+| `ledgerWritersUseAppender` | server ledger writers vs `src/server` | **none**, and it already carries its own non-vacuity check |
+| `whiteLabelClientSurfaces` | *"no NEW user-facing surface"* vs `components`/`lib`/`hooks` | **none** — all 16 vendor mentions in the unwalked trees are comments, internal object keys, or the permitted BYOK surface |
+
+So the sweep produced **no further live defects**, and mechanically widening thirty guards would be
+diffuse work of the kind already declined for the 304-window sweep. **One was widened** — the
+white-label guard, because the rule is ABSOLUTE and the gap included `src/content`: the Privacy
+Policy, Terms and DPA, read by users and by Google's and Meta's reviewers.
+
+**Widening it exposed two real flaws in the detector itself, which matter more than the scope did:**
+
+1. 🔴 **`{2,200}` could not match an EMPTY literal, so the matcher paired the wrong quotes.** In
+   `{ gemini: '', groq: '' }` it skipped quote 1, paired quotes 2 and 3, and reported the *source
+   between them* (`, groq: `) as a user-facing string — three such false positives in `App.tsx`.
+   The worse half: every pairing after a mis-pair is shifted by one, so a genuine vendor literal
+   further down the same file could be read as the gap BETWEEN two literals and never tested.
+2. 🔴 **The 200-character ceiling silently skipped any longer literal** — i.e. every piece of
+   long-form user-facing text there is.
+
+🔴 **AND THEN THE PART THAT MATTERS MOST: MY FIRST VERSION OF THIS WIDENING WAS DECORATION, AND ONLY
+THE REVERSION PROBE CAUGHT IT.** With both bounds corrected and `src/content` in the walk, a probe
+reading *"built by Claude Sonnet"* was appended to `privacyPolicy.ts` — **and the guard passed.**
+The file was in the walk and the file was read. **A regex literal-matcher cannot read prose at
+all:** that policy carries **27 apostrophes** (*"the user's data"*, *"Google's own"*), each of which
+a regex reads as a quote, so the pairing shifts and the real text becomes the gap between
+mis-paired literals. Had I trusted the green, I would have reported new coverage of the legal text
+and delivered none. **This is the fourth time in two days that "a test that cannot fail is not a
+test" had to be paid for, and the first where the vacuity was in the SUBJECT rather than the
+assertion.**
+
+`src/content` is therefore swept **WHOLE** instead, which is sound exactly there and nowhere else:
+long-form text with no provider identifiers to false-positive on (verified to contain none today).
+Re-proven with the same probe — it now fails naming `privacyPolicy.ts: names "Claude"`.
+
+🔴 **OPEN ROOT CAUSE (rule 6) — the apostrophe flaw still affects the CODE trees.** A component
+holding `"the user's app"` shifts its own quote pairing the same way, so a vendor literal further
+down that file can be missed by the literal sweep. Min-0 keeps the pairing aligned where empty
+literals were the cause; an apostrophe inside text is a different cause and a wider regex cannot fix
+it. Reading it correctly needs a real tokenizer over the client sources — **a decision with a real
+cost, not a lint**, and it sits under an absolute rule, so it is recorded here rather than guessed
+at. What is true today: no vendor string is present in any swept tree, prose or code.
+### 2026-09-17 — ADMIN DECISION PENDING: `REFERRAL_REWARDS` — asked, answered "not yet", and why
+
+Admin: *"REFERRAL_REWARDS = on kar du? total kitna kharcha hoga mera fir? abhi vs bad me"*, then
+*"save kar lo bad me batana mujhe"*. **Recorded here because the answer is a sequence of steps only the
+admin can take, and the flag must not be flipped until every one of them is true.**
+
+🔴 **TURNING IT ON TODAY WOULD PAY EVERY NEW USER ₹0.** Read from the code, not assumed:
+
+1. `welcomeGiftExclusion.ts` → `flatWelcomeGiftSuppressed(env)` IS `referralRewardsEnabled(env)`. It is
+   pure env logic, so the moment the flag is on BOTH flat-gift surfaces return 0 — the legacy
+   `welcomeBonus.ts` (₹500) and the v2 `giftPlan.ts` (₹250 / ₹500). That half works instantly.
+2. The ladder pays only on a `verified` device verdict. `deviceCheckConfigured` requires
+   `GOOGLE_PLAY_SA_JSON` **and** `GOOGLE_PLAY_PACKAGE_NAME`; those are the Play-billing keys, and
+   `STORE_BILLING` is unset, so they are almost certainly not set either. Unset ⇒ every check is
+   `unavailable` ⇒ **₹0** (the gate FAILS CLOSED, deliberately).
+3. Even with both keys, a `.aab` carrying `DeviceIntegrityPlugin` must be LIVE on Play. That plugin
+   landed in PR #2953 (2026-09-15); the live release is **versionCode 91** (2026-08-25). **So it is
+   not in the app anybody has installed.**
+4. And `AGENTV3_PAID_PUBLIC=true`, so a ₹0-balance non-free-list user is REFUSED a new build. A new
+   user would sign up, receive nothing, and be unable to build at all.
+
+**The money, at `TOKENS_PER_RUPEE = 100`:**
+
+| | today (ladder off) | ladder on, everything live | ladder on TODAY |
+|---|---|---|---|
+| organic user (no code) | ₹500 | **₹300** | **₹0** |
+| referred user B | ₹500 | **₹400** | **₹0** |
+| referrer A | ₹0 | **₹75** | **₹0** |
+| one referred pair | ₹500 | **₹475** | **₹0** |
+
+Saving once live: **₹200 per organic user (40%)**, ₹25 per referred pair. At 1,000 new users,
+₹5,00,000 → ₹3,00,000. One referrer can ever earn at most **₹1,500** (~20 friends).
+⚠️ Stated plainly (rule 3): per-user cost falls, but the ladder exists to GROW users, so the TOTAL
+bill can still rise. That is the design working, not a defect — but "sasta" must not be read as
+"the bill goes down".
+
+🔴 **THE FOUR THINGS THAT MUST BE TRUE FIRST, IN THIS ORDER — admin-only work, saved at their request:**
+
+1. **Enable the Play Integrity API** in Google Cloud project `gen-lang-client-0866594388`.
+2. **Set `GOOGLE_PLAY_SA_JSON` + `GOOGLE_PLAY_PACKAGE_NAME` in Cloud Run**, and grant that same
+   service account the **`playintegrity`** scope. (A token minted for a scope the account lacks is
+   issued happily and then refused at the call — so this fails silently if skipped.)
+3. **Set `PLAY_INTEGRITY_CLOUD_PROJECT` as a GitHub REPO SECRET** — the project **NUMBER**, not the
+   id (`gen-lang-client-0866594388` is the id; the number sits beside it on the console home; a
+   non-numeric value parses to 0 and reads as "not configured"). Then build a fresh `.aab` and get it
+   **live on Play**.
+4. **Update Play Console → App content → Data safety.** Privacy Policy §3.2 already discloses the
+   device identifier and `tests/privacyPolicyTruth.test.ts` guards it, but a Play declaration that
+   contradicts the policy is a VIOLATION, not a mismatch — the same shape as the 2026-09-02 incident
+   where the policy said "we never share your data with advertisers" while the Meta pixel was built.
+
+Then claim all four steps on a real phone, confirm the money moves, and only then set
+`REFERRAL_REWARDS=on`.
+---
+
+## 2026-09-17 — AUTOPSY 681bd91b: done at 4:45, then 26 minutes "fixing" files the user had forbidden
+
+**The prompt:** a ~9,000-character spec for a single-file, bring-your-own-key AI chat app — *"ONE SINGLE
+self-contained index.html. Do NOT use React. Do NOT use Vite. Do NOT use npm."* — ending in §12/§16:
+*"No fake AI responses. No simulated model responses. Do NOT create buttons that don't work."*
+
+**What the user got at minute 4:45:** the one file, dev server up, preview live, screenshot, console
+clean, milestone summary — **and a "built-in mock assistant that streams canned responses" with
+hamburger / 3-dot / attach buttons "wired as placeholders (they log to the console)"**, plus *"How to run
+it: `npm run dev`"*. Then **26 minutes** of *"🔍 Type-checking the finished build — found type errors,
+fixing them…"*: `glm-5.3` starved at a hard-coded 8,000-token ceiling **fourteen times**, ~110 s apart,
+until the report was taken at minute 31 with the build still running.
+
+### The chain, proven by reading the code the report names (every link verified)
+
+```
+t+0    REQUIREMENT_GAPS domain=ecommerce     "Store:" + "Each profile stores:" matched \bstores?\b →
+                                            cart / checkout / refunds INJECTED into the build prompt
+t+0    APP_SCOPE "clone of Zoom / Meet"      "No page zoom problems" matched \bzoom\b
+t+40s  roadmap planner: maxTokens: 4000      KIMI starved → retired for the run (shared dead-Map)
+t+103s                                       GLM-5.3 starved at 4000 → planner answered at 154 s on rung 3
+       planner prompt = slice(0, 4000)        §12/§16 ("NO FAKE") were past char 4000 → never seen
+       HARD RULE 1: "core screen … on local/mock data"  → step 1 = mock assistant + placeholders
+       routes 14534: buildPrompt = step1.buildPrompt      → the user's own rules REPLACED, not restated
+t+4:45 app done, preview seen rendering
+t+5    tsc gate: writtenFiles = {index.html}  it type-checked the vite-react SCAFFOLD's src/*.tsx
+       repair: makeFastTextRunner, maxTokens: 8000, chain KIMI(retired) → GLM-5.3 ×51 keys → HAIKU
+       deadKeyFor = `${name}::${model}`      'GLM#2::glm-5.3', 'GLM#3::glm-5.3' … one key at a time
+t+5→31 14 × (starve at 8000, retire THIS key, rotate to the next key of the SAME model)
+```
+
+### Seven DNA-level fixes, each proven by reversion (`tests/autopsy681bd91b.test.ts`, 15 cases)
+
+| | Fix | Where |
+|---|---|---|
+| **A1** | A starvation (and a model-not-found) retires **`family::model`**, not `name::model` — one verdict per pool. `faa98da9` preserved: `KIMI::kimi-k2.5` dead leaves `kimi-k2.6` alive | `MultiProviderTurnRunner.ts` |
+| **A2** | A rung **measured** to always reason is never asked for less than `REASONING_MIN_ASK` (12,000 — clears every measured survivor: 8,651 / 9,199 / 9,746). Raised in the runner, where the rung is known; the clock still bounds; off with `AGENTV3_REASONING_UNCLAMP=off` | `reasoningAsk.ts` (new) |
+| **TS** | `typecheckGateShouldRun` = the shared predicate **plus** "we wrote TypeScript". A single-file HTML build records `TYPECHECK_SKIPPED_NO_TS_WRITTEN` instead of repairing the scaffold | `routes/agentv3.ts` |
+| **B1** | Planner HARD RULE 1 no longer says "on local/mock data": sample data only when not forbidden AND the core promise is not the live thing; **rule 7 forbids placeholders; rule 8 binds the user's constraints to every step** | `megaRoadmap.ts` |
+| **B2** | `boundedRequest`: head 3,000 + tail 1,500 with the elision marked; `hardConstraintLines` restates every "do not / never / must / only / no fake / single file" line as NON-NEGOTIABLE CONSTRAINTS | `megaRoadmap.ts` |
+| **B3** | The milestone swap appends those constraints to the step's build prompt, so no step is built in breach of them | `routes/agentv3.ts` |
+| **E1** | Zoom is a product only as a product reference (`zoom app/call/meeting/clone`, `like/clone of/similar to zoom`); "page zoom" is a setting | `appScopeAnalyzer.ts` |
+| **E2** | `Store:` / `stores:` before a list is an instruction to persist. **Proven on the full real prompt** (`tests/fixtures/prompt681bd91b.txt`): without the line the analyser answers `ecommerce`, exactly as the report did | `RequirementGapAnalyzer.ts` |
+
+⚠️ **A1's first reversion did NOT bite, and the reason is recorded because it is the lesson.** The fix
+has two halves — the WRITE key and the family LOOKUP — and with the pool's first key named `GLM` (equal
+to its family) the lookup half alone carried the test. The test now starves `GLM#2` first, which is the
+ordering the report actually had, and the write-key half is load-bearing.
+
+### Five-bucket ledger
+
+| | Count | Items |
+|---|---|---|
+| ✅ Self-healed | 4 | dev server started · preview published · screenshot + 3 browser actions + console read · todo bookkeeping |
+| 🔀 Worked around | 15 | **14** × "GLM failed — falling back" (each one the same starvation on the next key) · fast lane → full builder (`manifest_too_small`) |
+| ⏭️ Skipped | 3 | requirement coverage "settings / chat not found" on a single-file app (matcher looks for files) · release gate never reached · the ETA said "~7–16 min" then *"still working out how big it is"* for 27 minutes |
+| ❌ Still broken | 4 | **a mock assistant and console.log placeholders shipped against an explicit prohibition** · `npm run dev` in a summary for a no-npm app · `unsafe-html-sink @ index.html:506` (innerHTML) left unrepaired · vite@5 CVE advisory on a scaffold the user did not ask for |
+| 🥵 Struggle | 3 | **26 minutes of identical starvations after the app was done** · planner 154 s across three rungs · `providerChain` prints `×51` (the key-pool size) as if it were retries |
+
+### The missing subsystem (step 2)
+
+**There is no `static-html` framework.** `FrameworkRegistry` has `vanilla` = "TypeScript + Vite". So a
+prompt that says *no Vite, no npm, one index.html* is scaffolded with Vite + React + `src/main.tsx`
+anyway, served through `npm run dev`, and its report says `framework: vite-react`. The TS-gate fix stops
+the worst consequence (26 minutes repairing the scaffold); it does not make the scaffold honest. A
+build-tool-free target — write the file, serve it statically, run the same browser gates — is the real
+fix, and is recorded here as an **open root cause**.
+
+### Open, not guessed at
+
+- **`static-html` framework** (above).
+- **Requirement-aware injection on an explicit spec.** On the full prompt the domain is now `social`
+  (chat/messaging), and `AGENTV3_REQUIREMENT_AWARE=on` will still offer social "gaps" (feed / follow /
+  notifications) to a BYOK AI-chat app. A 163-feature spec with a "NO FAKE FEATURES" section has no
+  implicit gaps to fill; the analyser should stand down on a prompt this explicit. Not widened here.
+- **The ETA never showed a figure** — existing open item, seen again (27 minutes of "still working out").
+- **`×51` in `providerChain`** — the key-pool count rendered as rung repeats. Admin-facing, cosmetic, open.
+- **The retire memory is shared by the planner and the repair but not by the main build** — after A1
+  that sharing is safe (a family-level fact) and after A2 the planner's ask is no longer the thing that
+  kills a rung; the asymmetry itself is left as is, and named here.
+
+**Gate on the final state:** see the PR.
+## 2026-09-17 — AUTOPSY e706e068, FOURTH pass: the one finding in it nobody could act on
+
+The admin re-sent the School ERP report (*"app banne ke bad tut gayi?"*). **It has now been autopsied
+three times** — PRs #3009, #3020/#3023/#3025/#3031, and #3043 (its own title says "residue") — and
+`main` was re-read rather than trusted: its ledger is genuinely closed, and **two of the three open root
+causes that #3043 recorded have since been closed by other sessions**:
+
+| #3043's open item | State on `main` today |
+|---|---|
+| The first `tsc` ran after 20 files, then a 7-minute grind | **CLOSED** by #3048 — `writeTimeTypecheck.ts`, the compiler answers after every TypeScript write |
+| The abandoned planner call keeps running on the provider side | **CLOSED** by #3044's futility breaker for the *build*; the in-flight provider call itself is still the standing mid-build-cost-stop item |
+| The scaffolded E2E suite can never run here | **STILL OPEN** — infra: `@playwright/test` is not baked into the E2B images. Needs a template rebuild (`infra/e2b/build.mjs`), an admin action; not coded blind |
+
+### What was left, and it was hiding in plain sight
+
+Two of that report's unresolved warnings were **findings nobody could act on**:
+
+```
+ACCESSIBILITY      45/100 (D) … 14 form field(s) with no label … 7 button/link with no accessible name
+DESIGN_CONSISTENCY 50/100 (D) … 58 distinct colours … 14 spacing values off the 4px grid
+```
+
+Across a **31-file** app, naming **no file and no line**. A user cannot fix "14 form fields"; neither can
+a repair pass. Both shipped as permanent unresolved warnings, and the a11y one matters: `A11yLinter`'s own
+module comment says *"tsc, ESLint, the CSS consistency check and the reviewer are all blind to every one
+of those"* — so this is the ONLY thing in the stack that looks at accessibility, and its output was
+unusable.
+
+🔑 **The same report proves it was not inevitable.** `DESIGN_PAGE_INCONSISTENT` named its files
+(*"worst: src/pages/Attendance.tsx"*). **Two quality linters in one document, one actionable and one
+not** — because `lintBuiltApp` JOINS every file into one string before linting, so by the time a
+violation exists the file it came from has already been thrown away.
+
+### The fix
+
+`lintBuiltApp` now returns `offenders` — violation `type` → the files carrying the most of it, worst
+first (top 3). The summaries append `Worst: src/pages/Students.tsx (4), src/pages/Teachers.tsx (2).`
+
+🔒 **The score is unchanged.** Attribution is a second pass over the **same selected files**, in the same
+loop, so the headline number still comes from the joined text exactly as before and the two can never
+disagree about which files were judged — the existing 12 cases pass untouched. Cost is one more regex
+scan over the same characters, on a build that has already succeeded.
+
+⚠️ **A distinctness rule is attributed honestly.** For "58 distinct colours" or "3 font families" the
+per-file counts deliberately do **not** sum to the app-wide total (two files can share the same one-off
+colour). The word used is **"worst"**, which is true of every rule; nothing claims a share of the total,
+and a test asserts the sum differs for `color-count` precisely so nobody later "fixes" it into a lie.
+For a counting rule (`input-label`, `control-name`, `img-alt`) the per-file numbers DO add up, and a
+test asserts that too.
+
+Bounded (3 files per type, so a defect in fifty pages names three), deterministic, no model call, and
+`offenders` missing degrades to the old sentence instead of throwing.
+
+**Tests:** `tests/qualityFindingsNameTheirFiles.test.ts` (7), proven by reversion in both halves —
+dropping the summary call fails 2, returning an empty map fails 4.
+
+### Still open from this report, unchanged and not guessed at
+
+- **The E2E suite cannot run here** (infra, above).
+- **Accessibility is detected and never REPAIRED.** Naming the files is what makes a repair possible;
+  building one is a separate decision with its own cost. `input-label` on a field that already has a
+  `placeholder` is deterministically fixable (`aria-label` from the placeholder, zero guessing); an
+  icon-only button's name is not — a machine cannot invent what the button means. Recorded rather than
+  half-built.
+- **The abandoned in-flight provider call** — the standing mid-build cost-stop item.
+
+**Gate on the final state:** `typecheck` · `noUnusedImports` · `typecheck:server` · **25,254 tests
+passed** · `build` · `test:bundle` · `boot:check` · `deps:server-gate` — all green.
+### Same day — the sibling sweep the admin asked for: "screenshot script me bhi check karo"
+
+Admin, on the PR above: *"#3053 me PLAYWRIGHT_BROWSERS_PATH wala fix screenshot script me bhi check karo"*.
+Swept all 13 browser invocations across both actuators. **The answer on the PATH is that there was
+nothing to fix** — every screenshot, CDP, daemon, browser-action and browse command already carried
+`PLAYWRIGHT_BROWSERS_PATH`; the journey runner was the only one in the repo that never had it. Said
+plainly rather than dressed up as a find.
+
+**What the sweep DID turn up is the OTHER half of the same bug, in three places.** Two browser commands
+carried `2>/dev/null` **and** `.catch(() => null)`:
+
+| Where | Honest about not seeing? | Honest about why? |
+|---|---|---|
+| `browseUrl` | yes — falls back to curl with `source: 'curl'`, `painted: false` | **no** |
+| the element scan | yes — returns `scanned: false`, never "no elements" | **no** |
+| `screenshot` standalone | throws | **the crafted message was unreachable** |
+
+So none of them faked a pass — that part was already right — but when the browser genuinely could not
+launch, **the reason was destroyed twice over**: once by the shell redirect, once by a `.catch` that
+drops the `CommandExitError`. And the SDK **rejects on a non-zero exit carrying the command's real
+stdout/stderr on the error**, so both lines were throwing away a diagnosis that was free to keep. A
+browser outage would read as "this page has no elements" or "a slow SPA" for as long as it lasted.
+
+🔴 **AND THE FIX FOR THIS CLASS ALREADY EXISTED, IN THIS FILE'S OWN IMPORTS.**
+`src/server/lib/sandboxCommandError.ts` was written for precisely this ("the one moment we most need
+the tool's own words is the exact moment we discard them"), centralised under rule 4, and applied to
+the five **npm-install** call sites in this actuator. The **browser** call sites were never converted.
+Same shape as the PR it rides on: the class was fixed, the helper exists, the siblings were not hunted.
+All three now use `commandFailureResult` + `commandLogTail`, the redirects are gone, and the
+screenshot's crafted *"Screenshot failed: <what the browser said>"* is reachable for the first time.
+
+⚠️ **Deliberately NOT changed: the CDP attempt's `.catch(() => null)`** in `screenshot()`. Its failure
+is routine (the shared daemon is simply not up yet) and it falls through to the standalone run, which
+now reports properly — logging every occurrence would be noise, not evidence.
+
+**Guarded:** `sandboxBrowsersPath.test.ts` now sweeps BOTH actuators and fails on any browser
+invocation that lacks the path or carries `2>/dev/null`, and on a browse block that goes back to
+`.catch(() => null)`. Comments are stripped before the scan — the first version of that assertion was
+defeated by the fix's own comment, which names the lossy spelling it replaced. Proven by reversion
+both ways.
+
+## 2026-09-17 — "Top failure patterns": three of four "patterns" were one build's own sentence
+
+**The card the admin pasted** (`4 failed of 51 report(s)`, four rows at 25% each):
+
+```
+🔍 I analyzed your project — no files were changed. Overview:                          1 · 25%
+Sandbox / preview did not come up                                                      1 · 25%
+The GLM rung answered inside its clock and produced nothing, because our own output …  1 · 25%
+Tool call failed: edit_file: old_string not found in <file>. The string you supplied … 1 · 25%
+```
+
+Rows 1, 3 and 4 are not patterns — they are the model's own recap, a provider diagnostic and a tool
+error, each printed verbatim as a category. A panel whose rows are one-off sentences can never say
+"this class recurs": every novel sentence is its own 25%.
+
+### Three root causes, all read out of the code rather than guessed
+
+**1. 🔴 The card had its OWN classifier, and its fallback used the sentence AS THE LABEL.**
+`src/lib/buildReportAnalytics.ts` carried a nine-rule regex list (`CATEGORY_RULES`) and, for anything
+unmatched, `normalizeSignature()` — the first line of `rootCause` with numbers and file names stripped —
+became the bucket. It was the SECOND classifier of the same `rootCause` vocabulary:
+`buildFailureCategory.ts` had root-caused the "Other" flood that morning by reading the build's own
+`OUTCOME_*` code before its prose, and its header recorded, in writing, that the two lists were
+deliberately left apart *"as an open item"*. Row 2 is the same list's bare-word rule `/port/i` — which
+also matches "re**port**", "im**port**", "sup**port**" and "ex**port**" — so an unresolved-import failure could be
+filed as a sandbox one.
+
+**2. 🔴 The empty-build verdict flip recorded NO outcome — the only flip in the route that did not.**
+`OUTCOME_PREVIEW_COMPILE`, `OUTCOME_SYNTAX_ERROR` and `OUTCOME_REVIEW_CRITICAL` are each recorded beside
+their `ok:false`; `emptyBuildFailureSummary`'s flip (`routes/agentv3.ts`) recorded nothing. So
+`deriveRootCause` — which reads the last `OUTCOME_*` first — had no fact and fell to the loudest recorded
+warning. All three raw-sentence rows are empty builds: a recap note, an `OUTPUT_BUDGET_STARVED`
+diagnostic, a `TOOL_ERROR`. None of the three sentences was the reason the build failed.
+
+**3. 🔴 The platform's OWN recap sentence was keyword-matched into a "problem".** `BuildDiagnostics`
+flags a short narration as a WARNING when it contains a problem word; `no files` is on that list (it
+catches "no files were produced"). `ProjectSummary`'s analysis-only headline BEGINS with "no files were
+changed", so on a small project (recap ≤ 300 chars) the platform's own honest deliverable was recorded
+as a struggle — and, per (2), became the root cause.
+
+### The fix, at the class
+
+- **ONE classifier**, `src/lib/failureReason.ts` (isomorphic, so the client-side card can import it):
+  code-first with severity, grounded text patterns, and an unmatched reason is a STABLE `other` whose
+  raw sentence rides in the row's `sample`, never its label. `buildFailureCategory.ts` re-exports it
+  (every import path and `tests/failureNaming.test.ts` unchanged); `buildReportAnalytics.ts` reads it and
+  its regex list + signature fallback are DELETED. The advisory-cap predicates moved to
+  `src/lib/advisoryCapOutcome.ts` with a re-export shim at the old server path.
+- **New codes `OUTCOME_EMPTY_BUILD` / `OUTCOME_SANDBOX_UNAVAILABLE`**, recorded by
+  `emptyBuildOutcomeIssue()` at the flip. Two codes because the two causes are different work (infra vs
+  the engine — the same line `isInfra` already draws). Mapped in `failureReason.ts` and
+  `BuildRetrospectiveEngine.ts`; the drift guard now checks BOTH directions (which surfaced the legacy
+  `OUTCOME_BUILD_FAILED`, now in the retrospective map too).
+- **The filed report's meta carries `outcomeCode` / `outcomeSeverity`** (`AdminBuildReportStore`),
+  projected from the same issue list exactly as `listAllDiagnostics` does — so the card names a failure by
+  the build's own fact. Records written before this field classify by text, honestly, as before.
+- **`isProjectSummaryNarration`** (`ProjectSummary.ts`, matched on the exact headlines that module
+  emits, so a model's prose cannot claim the exemption) — the recap is an `AGENT_STEP`, never a note.
+
+**Tests:** `tests/emptyBuildRecordsItsOutcome.test.ts` (11 — the bug reproduced on `deriveRootCause`
+with the three real sentences, then named once the outcome is recorded; the route wiring; the recap
+predicate against the recap the engine really emits; the meta projection), `src/lib/buildReportAnalytics.test.ts`
+(the card's four rows → stable keys, code beats text, the `/port/` reversion guard), `tests/failureNaming.test.ts`
+(two-way drift guard). Proven by reversion: dropping the narration exemption fails 1, dropping the
+code-first read in the card fails 1.
+
+**Still open, said plainly (rule 6):** a `TOOL_ERROR` for an `edit_file` miss that the model then
+recovered from (a later successful write to the same path) stays `autoResolved: false` on a FAILED build,
+because nothing back-fills tool errors by path the way `recoveredCommands` does for commands. It can no
+longer become a root cause on an empty build (the outcome code wins), but it still inflates the
+unresolved count. Not coded here: it needs the tool-call path carried on the pending map, a separate
+change.
+### The same day, correcting the entry above: the "real tokenizer" was one import
+
+The entry immediately above recorded an OPEN root cause — the apostrophe flaw in the code trees —
+and justified leaving it open on the grounds that reading client sources correctly *"needs a real
+tokenizer, not a wider regex — a decision with a real cost, not a lint"*.
+
+🔴 **That cost claim was WRONG, and it is corrected here rather than quietly acted on.**
+`typescript` is already a dependency of this repo and is **already imported by four existing tests**
+(`tests/game3dObjects.test.ts`, `TsconfigGuard.test.ts`, `GameSystemsGenerator.test.ts`,
+`generatedGameCode.test.ts`). The parser costs one import. An estimate that sends a real defect to
+the "open, too expensive" pile is worse than no estimate, because nothing ever revisits it.
+
+**The AST tells text from code by KIND rather than by punctuation**, which retires all three regex
+flaws at once and one more nobody had noticed: string literals, template literals (head plus every
+span — an interpolation is code, and its own literals are visited separately) and **JSX TEXT, which
+a string-literal scan never saw at all**. Property names, module paths, identifiers and type names
+are excluded by kind, so `{ claude: '' }` can never again be read as something a screen shows.
+
+Six inline cases pin it, each one a case the regex got wrong — the apostrophe case, the
+empty-literal neighbourhood, a literal past the old 200-char ceiling, JSX text, the four things
+that cannot reach a screen, and the literal spans of an interpolated template. They run over a
+PURE extractor, so none of them can go vacuous the way the file-level probe did.
+
+`src/content` is folded back into the main sweep (it was excluded only because a regex cannot read
+prose). **The whole-text prose sweep STAYS**, for a reason that is not redundancy: the AST is
+correct only while a file PARSES, and a content file that failed to parse would yield no literals
+and pass in silence — the exact failure mode this file has now paid for twice in one day. Proven to
+overlap: with the probe planted, **BOTH** sweeps fail, not one.
+
+Result: **zero vendor strings across every client tree under correct parsing** — and that is now a
+statement about what the code contains, rather than about what a regex happened to look at.
+### 2026-09-17 (admin Monitor capture) — the publish ceiling was reported twice with two numbers, its advice named a switch already thrown, and a recurring error had its own fix truncated away
+
+**Branch `claude/charming-bell-htxb9u`.** The admin sent the Monitor page as text and asked for a
+fold/unfold control on Publish Capacity plus "isme kuch fix kar sakte ho?". Four things, three of them
+defects the capture proves on its own face.
+
+**1. 🔴 THE SAME CEILING, TWO NUMBERS, ONE SCREEN.** The capture carries `Publish load 44 / 50
+channels` and, one panel below, `Published Apps 43 / 50` — both read from the same channel list at the
+same instant. `loadBoard`'s reading was `chan.channels.length`, which includes the site's own `live`
+channel, and **the cap is on PREVIEW channels, which `live` is not.** `channelCeilingVerdict` had
+root-caused precisely this off-by-one on 2026-09-14 and says so in its own comment — *"with it counted,
+'N of about 50' was off by one on every site, always"* — and the load board kept the old arithmetic.
+The drifted-sibling class again: fixed in one reader, never hunted in the other. The route now filters
+with `isDefaultChannel`, the same predicate `state !== 'default'` reduces to, so no registry read is
+added to a route that must stay cheap.
+
+**2. 🔴 A NOTE THAT PRESCRIBED WORK ALREADY DONE.** The tile said, unconditionally, *"Bucket-only
+publishing takes no channel at all — that is the fix."* `PUBLISHED_APPS_BUCKET_ONLY=on` went live and
+was verified on a real published app **earlier the same day**. So the one panel the admin consults to
+decide what to do was sending them to switch on a thing that had been on for hours, while the action
+that would actually move the number — reclaiming the 34 channels no live app is using — went unnamed.
+`LoadReadings.publishBucketOnly` (undefined ⇒ today's wording exactly) fixes the sentence, and **only
+the sentence**: a frozen ceiling is still 43 of 50 channels really in use, so the LEVEL is untouched
+and a test asserts that. Grading a backlog as `ok` because it cannot grow would be the next mistake.
+
+**3. 🔴 THE FIX WAS IN THE PART WE CUT OFF.** `DIAGNOSTICS_READ_FAILED` appears ~15 times across two
+days in the capture, every row reading *"The query requires an index. You can create it here:
+https://console.firebase.google.com/…?create_composite=Clpwcm9qZWN0…"* and stopping mid-token.
+**Firestore answers a missing-index error with a link that CREATES the index — the entire remedy is one
+click, and the click was never recorded.** Two independent `slice(0, 300)` calls destroyed it: the
+store's, writing `meta.error`, and `persistedAuditEntry`'s, building the row. Either alone was enough.
+`truncateForAudit` keeps the budget for ordinary text (a long stack trace is still cut at 300) and
+carries a URL that straddles the cut to its end, bounded by a hard 2,000 so "keep the URL" can never
+mean "keep anything". Applied at all four diagnostics sites, not just the one the capture showed.
+⚠️ **This does not fix the missing index** — it makes the fix reachable. The error itself needs the
+full URL opened once from a live row (or the Cloud Run log, which was never truncated).
+
+**4. The fold control the admin asked for.** `Publish Capacity` grows one row per wasted channel; the
+capture carried 34, each with its own Reclaim button. It folds now, remembered per browser through
+`safeLS`, default OPEN so nothing moves for an admin who never presses it, and an unreadable
+`localStorage` opens rather than folds. 🔒 **Folding hides the LIST, never the ALARM:** the level badge
+stays outside the folded body and the collapsed header gains `used / cap · N reclaimable`, so a
+critical ceiling is still legible from a closed card. A control that could silently conceal a warning
+would be worse than a long card.
+
+**Tests:** `tests/thePublishCeilingPanelTellsTheTruth.test.ts` (10),
+`tests/theFixWasInThePartWeCutOff.test.ts` (10), `tests/publishCapacityFolds.test.ts` (8). All three
+reversion-proven (4 fail with the server halves reverted, 1 with the fold reverted).
+
+⚠️ **AND ONE OF MY OWN TESTS WAS SILENTLY NOT RUNNING.** The fold test was written as `.test.tsx`;
+`vitest.config`'s include is `tests/**/*.test.ts` plus `src/**/*.test.{ts,tsx}`, so a `.tsx` file under
+`tests/` is collected by nothing. It passed locally only because I named it explicitly on the command
+line — the reversion proof is what exposed it, by failing to fail. Renamed to `.test.ts` (it has no
+JSX). **Swept: no other `tests/**/*.test.tsx` exists**, so this was mine and not a standing hole.
+
+🔴 **REPORTED TO THE ADMIN, NOT FIXED IN CODE (rule 6): `GRIEVANCE_OFFICER_NAME` is genuinely not
+set.** The Monitor still shows the amber *"Grievance Officer not named"*. `grievanceOfficer()` reads
+the env directly and `grievanceOfficerFrom` trims, so there is no trailing-space trap here — the
+warning is the self-verifying signal this file's own 2026-09-12 queue table names, and it says the key
+is missing. That entry recorded the count as unreconciled for exactly this reason; this is the
+reconciliation for that row.
+
+**Not added to `AppKnowledgeBase.ts`, deliberately:** a collapse toggle on an admin-only card that has
+no knowledge-base entry is not a user-facing capability, and inventing one for it would make the KB
+describe the admin panel to end users who cannot open it.
+
+## 2026-09-17 — AUTOPSY `baa0b3c7` ("Make an VPN App") — a report from 25 DAYS AGO, and one bug in it is still live today
+
+Admin forwarded a build report. **First finding, because it reframes everything else: this build ran on
+2026-08-23, not today.** Three independent sources agree — `startedAt` 08:28:48Z, `reportedAt` 08:47:30Z,
+and an npm debug-log path from inside the sandbox (`2026-08-23T08_44_59_995Z-debug-0.log`). It was also
+submitted **while still running** (`inFlight: true`, 18m 42s in), so it carries no verdict, no cost and no
+duration; everything in it is a snapshot of work in progress, and the five-bucket tally below says so.
+
+**Ledger (the whole report):** ✅ self-healed 5 (missing import ×3, duplicate `main.tsx` import ×2) plus a
+batch repair that honestly reverted itself; 🔀 workarounds 4 (`cp tsconfig.json tsconfig.build.json`;
+installing `@types/react` by hand; fast lane → full builder; `rm Dashboard.tsx` to silence errors);
+⏭️ skipped 3 (2 dependency vulnerabilities left, 1 high; `ConnectionLog` importing a type that does not
+exist; an emptied `Dashboard/` directory); ❌ shipped-imperfect 2 at report time (`npm run build` still
+failing, the vulnerabilities); 🥵 struggles 7 (83 s on a `cd` into a directory that does not exist; 76 s on
+an install our own code corrupted; six `tsc` runs rewriting a CORRECT `ErrorBoundary.tsx`; a batch repair
+that took 4 errors to 41; four "repeated step is not making progress" nudges; 54 s of fast-lane planning
+then abandonment; 18m 42s elapsed on "Make an VPN App").
+
+**✅ ALREADY FIXED, AND THIS REPORT IS WHY — verified in the template on today's `main`, not assumed.**
+The dominant failure was `Property 'setState'/'props'/'state' does not exist on type 'ErrorBoundary'`,
+repeated six times. Without React's types `React.Component` has no members, so a perfectly correct class
+loses `this.props`. `ViteReactProviderContents.ts` now ships `@types/react` + `@types/react-dom` and its
+comment names **this build**: *"On 2026-08-23 a real user hit it, the model rewrote ErrorBoundary.tsx four
+times… the response was to add a banner to that file. That banner treated the SYMPTOM."* Fixed 2026-08-24.
+`tsconfig.build.json` likewise ships now, and its comment quotes this build's prompt verbatim.
+
+**🔴 STILL LIVE ON MAIN 25 DAYS LATER, FIXED HERE — our own code corrupted a dependency install.**
+
+`isDevServerInvocation` matches a bare `dev`, and `-` is a word boundary, so **`--save-dev` contains the
+word "dev"**. `npm install --save-dev @types/react @types/react-dom` was therefore classified as a
+dev-server start, routed through the managed boot, and `ensureHostBinding` appended its flag:
+
+    npm install --save-dev @types/react @types/react-dom -- --host 0.0.0.0
+
+npm reads `--host` as a package name. The real build got `404 Not Found - GET
+https://registry.npmjs.org/--host` and `'--host@*' is not in this registry`, after **76 seconds** inside
+the full boot sequence. The model retried as `-D`, which the pattern never matched, and that install
+finished in **0.9 s** — an accident that is the only reason the build ever got its React types.
+
+⚠️ **The split is the worst one available:** `--save-dev` is npm's own documented spelling, so this fires
+on the COMMON form and spares the short one, and the error names a package nobody asked for, pointing
+nowhere near us. **Reproduced on current `main` before changing a line**, and again after.
+
+- **Guard 1, the classifier:** `PM_ONE_SHOT_SUBCOMMAND` — a package-manager subcommand that installs,
+  inspects or modifies a dependency tree and exits is never a server, whatever flags follow. Checked
+  first, inside `isDevServerInvocation` so a future caller inherits it. `exec`/`dlx`/`run` are
+  deliberately absent: `npx vite` and `npm run dev` really do start servers.
+- **Guard 2, the mangler:** `ensureHostBinding` returns such a command untouched however it arrived.
+  One guard makes the misclassification rare; two make the damage impossible (50/50 law).
+
+**🔎 FOUND BY THE TEST WRITTEN FOR THAT BUG: `npm start` was never routed at all.** Every alternative
+demanded the literal word `run`, so the bare form took the FOREGROUND path and blocked to the command
+timeout — the exact failure this file's own note describes for `npm run server` (2026-08-12), one spelling
+away, never hunted. The repo already treats `start` as a first-class dev script: `resolveDevRunCommand`
+returns `npm start` for a project whose package.json names it, which is the CoreUI case in that note.
+
+**🔎 THE HONESTY HALF (rule 5): "no recognisable error" was said over a log that named the error.** The
+first failing command was `cd vpn-app && npm install && npm run dev …` in a workspace with no `vpn-app`
+directory. The log said `/bin/bash: line 1: cd: vpn-app: No such file or directory`;
+`classifyDevServerFailure` matched none of it, so the user was told the log had no recognisable error, the
+identical command was restarted **twice**, and 83 seconds later: *"Automatic recovery is exhausted."* Every
+word true, none of it the reason — the same shape as the CoreUI wrong-script case in that file's header.
+A failed `cd` is now a `code_error` (recovery `code_fix`, so it short-circuits the retry loop rather than
+burning it) that names the directory. A genuinely unreadable log still says so — test-locked.
+
+**Proven by reversion, three ways:** removing the classifier guard fails the install case; removing the
+`ensureHostBinding` guard fails the mangling case; both suites also assert that every REAL dev server
+(`npm run dev`, `npx vite`, `npm run preview`, `npm run server`, `tsx watch`, `ng serve`, `next dev`,
+chained `install && run dev`) is routed exactly as before — a fix that quietly stopped managing dev
+servers would have passed the new tests and broken every preview in the product.
+
+**OPEN ROOT CAUSES (rule 6), recorded rather than coded blind:**
+- **`rm src/components/Dashboard/Dashboard.tsx`** — the builder DELETED a component to make its compile
+  errors go away, leaving an empty directory and `ConnectionLog` still importing a type that does not
+  exist. Deleting the user's feature is not a repair. There is no guard against a destructive "fix", and
+  designing one (which deletions are legitimate?) is a decision, not a patch.
+- **The batch repair took 4 errors to 41** and was reverted. The revert is honest and worked; the pass
+  that made it eight times worse is unexplained on this evidence alone.
+- **The "repeated step is not making progress" nudge fired four times and changed nothing.** It detects
+  the loop and does not break it, because it cannot say WHAT to do differently — here the answer was one
+  install away and nothing in the engine knew that `Property 'props' does not exist on a React class`
+  means missing React types. That mapping is the missing subsystem this report names.
+
+## 2026-09-17 — THE MISSING SUBSYSTEM FROM AUTOPSY `baa0b3c7`: what a compiler error actually MEANS
+
+The `baa0b3c7` entry above closed with three open root causes. This is the first of them, and the one that
+report itself named as the missing subsystem: *"nothing in the engine knew that `Property 'props' does not
+exist on a React class` means missing React types. That mapping is the missing subsystem this report
+names."* It exists now — `src/server/AgentV3/tscErrorCause.ts`.
+
+**🔴 THE CORRECTION FIRST, because the entry above states it wrongly.** That entry recorded, as an open
+root cause, *"There is no guard against a destructive 'fix'"* for `rm src/components/Dashboard/Dashboard.tsx`.
+**That is false and was false on the day of the build.** `destructiveSourceDeletionTarget` has blocked the
+whole class — directory teardown, bulk deletion, blanking, moving source out, git wipes — since before
+that build, and a SECOND guard (2026-08-02) refuses to delete a file other modules still import. Neither
+fired because **neither was wrong to allow it**: the first deliberately permits *"deleting ONE stale source
+file by name"*, and the second asked the import graph, which had no importer of `Dashboard.tsx` to protect.
+A third guard shipped the same day this was written (`fileDeletion.ts`, autopsy 8b3dca5c) for the graph
+half. The real gap is narrower than "no guard" and is stated properly below.
+
+**WHAT ACTUALLY WENT WRONG, and it is one cause with two faces.** The build read
+
+    src/ErrorBoundary.tsx(29,39): error TS2339: Property 'setState' does not exist on type 'ErrorBoundary'.
+
+six times. The file was CORRECT. React's type declarations were absent, so `React.Component` had no members
+and a good class lost `this.props`. **A missing-declaration error is reported where the symbol is USED, so
+its remedy appears nowhere in the message and the code under the cursor looks broken.** The model therefore
+did the only thing the message suggests — it rewrote the file, four times — and then deleted a *different*
+component to make that one's errors go away. Both are rational responses to an error nobody translated.
+Four "repeated step is not making progress" nudges fired and changed nothing, because the loop detector can
+see a repeat without being able to say WHAT to do differently. **So the destructive delete is downstream of
+this, not a guard gap: the answer was one install away and the engine could not say so.**
+
+**THE MAPPING, and its boundary — this is not a hint bag.** Five signatures, every one a case where *the
+compiler is missing a DECLARATION and the code is fine*: React class members, untyped JSX, `import.meta.env`
+(Vite's client types), TS7016 "no declaration file for module", and TS2307 for a BARE package. A genuine
+code error needs no translation — the model reads `TS2345` and fixes it, and that ordinary path is
+deliberately untouched (test-locked on four such errors). **Do not add a signature whose remedy is "change
+the code".**
+
+**🔒 PRECISION, because advice is a steer and a wrong steer costs a round.** `Property 'props' does not
+exist on type 'X'` is genuinely AMBIGUOUS, and this repo holds both causes: the types are missing
+(`baa0b3c7`), or the class never extended `React.Component` (the dukaan stock app, 2026-08-12, which
+`looksLikeBrokenErrorBoundary` was written for). When the source is in hand the two are told apart and the
+advice is exact and opposite; when it is not, it names both, cheapest check first, rather than guessing.
+`extendsReactComponent` returns **null** for a class the file does not declare — "did not look" must not
+read as "does not extend".
+
+**FIVE SITES, because annotating only the tidy one would have missed this very report.** The build's own
+`rootCause` line is `$ ./node_modules/.bin/tsc --noEmit 2>&1 → exit 2` — a BASH command, not the
+`typecheck` tool. So: the write-time typecheck note (earliest possible moment, and the only site holding
+the file content, so the only one that gets the exact answer); the `typecheck` tool; a bare `tsc` through
+bash, keyed on output that really parses as compiler errors so an ordinary command is never annotated; and
+the endgame batch repair. That one rides the **error text** rather than a new parameter deliberately:
+every implementor of `llmRepair` passes that string to the model, and an optional argument an implementor
+forgot to read would be decoration.
+
+**AND A FIFTH, FOUND BY RULE 3 AFTER THE OTHER FOUR WERE WIRED — the one that REPEATS.** The fast lane's
+repair loop (`SimpleBuilder`) runs up to `maxRepairs` times climbing a strategy ladder, so a
+missing-declaration error aims EVERY rung of that ladder at a file that was never wrong — the
+four-rewrites-of-one-file shape itself. It reads `parseTscErrors` through a different import than the
+dispatcher, which is why a grep for the dispatcher's spelling alone did not find it. It holds `byPath`, so
+it gets the exact answer rather than the hedged one. The sweep that found it is kept as a test, so a sixth
+site cannot appear unnoticed: the only other consumer of parsed compiler errors, `AgentRunner`, parses to
+COUNT for the trend checkpoint and shows a model nothing.
+
+**Costs nothing.** Pure string analysis — no model call, no file read, no clock. `tscCauseNote` returns ''
+for every error outside the five, so a clean build and an ordinary type error are byte-identical to before.
+
+**Tests:** `tests/tscErrorCause.test.ts` (42 cases), **proven by reversion five ways** — removing the
+write-time note, the endgame block, the bash annotation, the typecheck-tool annotation or the fast-lane
+block each fails a named case. `tests/writeTimeTypecheck.test.ts` gained a guard that the call sites pass the CONTENT, not
+only the path, so a future edit that drops back to paths fails there instead of silently downgrading every
+piece of advice to the hedged form.
+
+⚠️ **Not added to `AppKnowledgeBase.ts`, deliberately:** this changes what the build engine tells itself. It
+adds no screen, route, button or capability a user can navigate to, and inventing an entry would make the
+knowledge base describe the engine's internals to people who cannot see them.
+
+**STILL OPEN from `baa0b3c7` (rule 6), and now stated correctly:**
+- **A single-file delete by name is allowed by design, and the ONLY thing that can refuse it is whether
+  another file imports it.** Nothing asks whether the file was a FEATURE the user asked for — a component
+  with no importer yet is indistinguishable from dead code, and `RequirementCoverage` / the feature heal
+  are downstream nets that report it rather than prevent it. Narrowing that allowance is a real design
+  decision (which deletions are legitimate?), not a patch, and it is now much less pressing: this change
+  removes the commonest REASON to reach for a delete.
+- **The batch repair that took 4 errors to 41** is bounded by the convergence guard (CrewHub autopsy
+  2026-07-20) — it reverted itself honestly and that worked. Why the pass made it eight times worse is
+  still unexplained on this evidence. Starting that pass with the real cause is the most that could be
+  done from this report.
 ### 2026-09-17 — PLAN MODE SHOWS THE PLAN AND ASKS: the domain knowledge finally reaches the planner
 
 Two admin asks on one day turned out to be **one change**: *"agar cheez clear nahi hai ki kya banana

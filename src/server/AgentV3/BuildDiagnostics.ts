@@ -13,6 +13,7 @@
 import { startBandLabel } from './RequestAnalyser';
 import { toolCallDetail } from './toolCallTarget';
 import { isPlatformFixRequest, looksLikeMachineError, PLATFORM_COMPOSED_PREFIXES } from '../../lib/platformFixRequest';
+import { isProjectSummaryNarration } from './ProjectSummary';
 import { isTransientStatusLine } from './workingHeartbeat';
 import type { AgentEvent } from './types';
 import { parseNpmAuditSummary, npmAuditNote, auditSeverity, looksLikeDependencyInstall } from './npmAuditSummary';
@@ -22,7 +23,7 @@ import { sandboxCost, describeSandboxCost } from './sandboxCost';
 import { redactProvidersText } from '../lib/providerRedaction';
 import { costAlertAdvisory, costAlertThresholdUsd } from './costAlert';
 import { isModelUnavailableError } from './providerErrorClass';
-import { isStarvedBudgetError, isUnclampedStarvation } from './floorBudget';
+import { isStarvedBudgetError, isUnclampedStarvation, isLaneBoundStarvation, isAskBoundStarvation } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
 import { isBudgetEndedError } from './turnDeadline';
 import { typecheckEvidenceFromCommands } from './TscGate';
@@ -41,6 +42,8 @@ export type IssueSeverity = 'info' | 'warning' | 'error';
 const PROCESS_ONLY_CODES = new Set([
   'GROUNDING_COST', 'POST_ANSWER_TIMING', 'SERVICE_GRAPH_MULTI', 'SERVICE_GRAPH_SINGLE',
   'JOURNEY_NOT_DERIVED', 'RELEASE_GATE',
+  // Our own journey runner produced nothing — a statement about OUR check, never about their app.
+  'JOURNEY_NOT_RUN',
   // Project mode could not steer the build — the build itself is unaffected (projectPlannerBudget.ts).
   'PROJECT_MODE_FAILED',
   // The gate said RED and a real run said otherwise — a statement about OUR verdict (runProvenApp.ts).
@@ -1428,7 +1431,12 @@ export class BuildDiagnostics {
         // severity=error AGENT_NOTE and even became the report's rootCause. Only a SHORT status-like
         // line (no markdown headings/tables, bounded length) can be classified as a problem — a
         // multi-paragraph analysis is a deliverable, not a struggle.
-        const statusLike = t.length <= 300 && !/(^|\n)#{1,4}\s|\n\s*\|/.test(t);
+        // THE PROJECT RECAP IS A DELIVERABLE, NEVER A PROBLEM (the "Top failure patterns" autopsy,
+        // 2026-09-17). "🔍 I analyzed your project — no files were changed" is the platform's own
+        // honest sentence about a turn with nothing to change; "no files" is a problem word (it catches
+        // "no files were produced"), so a short recap was filed as a WARNING and, on an empty build,
+        // became the report's root cause. Exempted by exact headline, so a model's prose cannot claim it.
+        const statusLike = t.length <= 300 && !/(^|\n)#{1,4}\s|\n\s*\|/.test(t) && !isProjectSummaryNarration(t);
         // BENIGN COMPOUNDS ARE NOT PROBLEMS (ShopKhata autopsy 2026-07-17): "Now let me create the App
         // component with routing and error boundary:" was recorded severity=error because \berror\b
         // matched inside "error boundary". Building error-UX (boundaries, handling, messages, toasts)
@@ -1643,10 +1651,32 @@ export class BuildDiagnostics {
           // is a model that cannot finish thinking inside any budget a turn can carry; saying "our
           // ceiling" there would send the next autopsy to floorBudget.ts to fix arithmetic that is
           // already correct.
+          // 🔴 AND A THIRD, BECAUSE THE SECOND ONE NAMED THE WRONG MODULE (autopsy d98dae01,
+          // 2026-09-17). The clamped sentence ends by pointing at FLOOR_TIMEOUT_CAP_MS and
+          // AGENTV3_FLOOR_MS_PER_TOKEN — true when the rung's OWN cap bounded the call, and false
+          // whenever `turnDeadline` picked the calling lane's remaining budget instead. That report's
+          // 2,314-token ceiling is 74,420 ms at the floor rate: the fast lane's 90 s plan cap minus a
+          // crawl, nothing like the 150 s cap the sentence blamed. Raising either of the two named
+          // knobs would have changed NOTHING, and an autopsy reading that line would have spent its
+          // time on arithmetic that was already correct.
           message: isUnclampedStarvation(reason)
             ? `The ${name} rung answered inside its clock and produced nothing — "${detail}". `
               + 'Its ceiling was NOT reduced by us: this rung always reasons, so it keeps the build loop\'s full per-turn ask, and it still spent every token thinking before any text or tool call appeared. '
               + 'That is the model, not our arithmetic; the rung was retired for the rest of this build so the ladder could reach a vendor that fits.'
+            // 🔴 AND A FOURTH (autopsy 57875eb3, 2026-09-17): the ask was never reduced at all. A
+            // fast-lane repair asked for 8,000 tokens, the clock could carry ~9,800, and glm-5.3
+            // spent all 8,000 thinking — thirteen times. The "own cap" sentence below blamed
+            // FLOOR_TIMEOUT_CAP_MS for a ceiling that was the caller's own `maxTokens`.
+            : isAskBoundStarvation(reason)
+            ? `The ${name} rung answered inside its clock and produced nothing — "${detail}". `
+              + 'Its ceiling was the CALLER\'S OWN ASK: the call requested exactly this many output tokens, the clock would have carried more, and nothing in floorBudget.ts reduced it — so the number to look at is that caller\'s per-call ask, not this engine\'s own cap or rate constant in floorBudget.ts. '
+              + 'A reasoning model bills its thinking to the same ceiling, so an ask below its thinking returns a reply with no text and no tool call. '
+              + 'The rung was retired for the rest of this build so the ladder could reach a vendor that fits.'
+            : isLaneBoundStarvation(reason)
+            ? `The ${name} rung answered inside its clock and produced nothing, because the ceiling it was given was spent before the answer began — "${detail}". `
+              + 'This is NOT a provider outage and NOT the user\'s prompt: a reasoning model bills its thinking to the same ceiling, so a ceiling below its thinking returns a truncated reply with no text and no tool call. '
+              + 'The ceiling here came from the REMAINING BUDGET OF THE LANE that made the call, not from this engine\'s own cap — so the fix is how much clock that lane reserves for an answer, not the cap or the rate constant in floorBudget.ts. '
+              + 'The rung was retired for the rest of this build so the ladder could reach a vendor that fits.'
             : `The ${name} rung answered inside its clock and produced nothing, because our own output ceiling was spent before the answer began — "${detail}". `
               + 'This is NOT a provider outage and NOT the user\'s prompt: a reasoning model bills its thinking to the same ceiling, so a ceiling below its thinking returns a truncated reply with no text and no tool call. '
               + 'The ceiling is FLOOR_TIMEOUT_CAP_MS / AGENTV3_FLOOR_MS_PER_TOKEN (see floorBudget.ts); the rung was retired for the rest of this build so the ladder could reach a vendor that fits.',

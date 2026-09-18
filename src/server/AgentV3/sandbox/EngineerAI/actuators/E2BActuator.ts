@@ -1,7 +1,7 @@
 import { Sandbox } from 'e2b';
 import { parseNpmAuditSummary } from '../../../npmAuditSummary';
 import { shouldRunAuditFix, AUDIT_FIX_COMMAND, AUDIT_FIX_TIMEOUT_MS } from '../../../npmAuditFix';
-import { commandFailureResult } from '../../../../lib/sandboxCommandError';
+import { commandFailureResult, commandLogTail } from '../../../../lib/sandboxCommandError';
 import type { CommandHandle } from 'e2b';
 import { TemplateRegistry } from '../../AppMakerLab/generator/templates/TemplateRegistry';
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
@@ -2220,13 +2220,24 @@ ${paintWaitJs('p')}
 })().catch(e=>{process.stderr.write(e.message);process.exit(1)});
 `;
       await sandbox.files.write(browsePath, playwrightBody);
-      const playwrightScript = `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node ${browsePath} 2>/dev/null`;
+      // 🔴 NO `2>/dev/null`, AND NO `.catch(() => null)` — both discarded the only explanation there
+      // would ever be. The SDK REJECTS on a non-zero exit and carries the command's real stdout /
+      // stderr / exitCode ON THE ERROR, which is exactly what `commandFailureResult` exists to keep
+      // (see sandboxCommandError.ts — centralised for the npm-install path and never applied to the
+      // browser ones). Stderr was never on stdout to begin with, so keeping it cannot corrupt the
+      // HTML this parses. The fallback below is honest about NOT having seen the app; it was silent
+      // about WHY, so a browser that could not launch at all looked identical to a slow SPA.
+      const playwrightScript = `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node ${browsePath}`;
       const pw = await sandbox.commands.run(playwrightScript, {
         cwd: TOOLS_DIR, timeoutMs: BROWSE_PAINT_DEADLINE_MS + 20_000,
-      }).catch(() => null);
-      if (pw && pw.exitCode === 0 && pw.stdout.trim()) {
+      }).catch((err: unknown) => commandFailureResult(err));
+      if (pw.exitCode === 0 && pw.stdout.trim()) {
         const { painted, html } = splitPaintMarker(pw.stdout);
         return { html, painted, source: 'browser' };
+      }
+      const browseWhy = commandLogTail(pw, 4);
+      if (browseWhy) {
+        console.error(`[E2BActuator] browseUrl fell back to curl for ${workspaceId} — the browser did not answer: ${browseWhy.slice(0, 300)}`);
       }
     }
 
@@ -2325,9 +2336,17 @@ ${paintWaitJs('p')}
 })().catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(1)});
 `;
     await sandbox.files.write(shotPath, shotBody);
-    const script = `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node ${shotPath} 2>/dev/null`;
-    const run = await sandbox.commands.run(script, { cwd: TOOLS_DIR, timeoutMs: 30_000 }).catch(() => null);
-    if (!run || run.exitCode !== 0) return { elements: [], scanned: false };
+    // Same correction as browseUrl above: keep the reason. `scanned: false` was already the honest
+    // answer, but on its own it cannot tell "this page has no elements" from "the browser never
+    // started" — and the second one is a platform outage that would otherwise look like a simple app.
+    const script = `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node ${shotPath}`;
+    const run = await sandbox.commands.run(script, { cwd: TOOLS_DIR, timeoutMs: 30_000 })
+      .catch((err: unknown) => commandFailureResult(err));
+    if (run.exitCode !== 0) {
+      const why = commandLogTail(run, 4);
+      console.error(`[E2BActuator] element scan did not run for ${workspaceId}${why ? ` — ${why.slice(0, 300)}` : ''}`);
+      return { elements: [], scanned: false };
+    }
     // File first, stdout second — a warm sandbox still holds the old script, which writes no file.
     const scanRaw = await sandbox.files
       .read(`${TOOLS_DIR}/last-scan.json`)
@@ -2393,13 +2412,16 @@ ${paintWaitJs('p')}
     }
 
     // Fallback: fresh standalone browser (clean session, but always works).
+    // The `.catch` is what makes the message below REACHABLE. Without it the SDK's own rejection on a
+    // non-zero exit escapes first, carrying a bare status line, and this crafted line — the one that
+    // names what the browser actually said — could never run.
     const result = await sandbox.commands.run(
       `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node ${TOOLS_DIR}/screenshot.js ${JSON.stringify(url)} ${vw} ${vh}`,
       { cwd: TOOLS_DIR, timeoutMs: 30_000 }
-    );
+    ).catch((err: unknown) => commandFailureResult(err));
 
     if (!result.stdout || result.exitCode !== 0) {
-      throw new Error(`Screenshot failed: ${result.stderr.slice(0, 300)}`);
+      throw new Error(`Screenshot failed: ${(commandLogTail(result, 4) || result.stderr).slice(0, 300)}`);
     }
 
     const b64 = await readShotBase64();

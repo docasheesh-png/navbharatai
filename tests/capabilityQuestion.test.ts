@@ -62,9 +62,17 @@ describe('a question that DOES name something to build keeps its intent but lose
     expect(got.confidence).toBe('low'); // ← the fix: HIGH would skip the reader entirely
   });
 
-  it('and the keyword answer still stands when the reader cannot run', async () => {
+  it('and when the reader cannot run, a QUESTION is answered rather than built', async () => {
+    // 🔴 CHANGED 2026-09-17 (admin: "simple question ke simple answer dene sikhao"). This used to pin
+    // `new_build` — the keyword verdict standing when the reader is down, so "nothing regresses". But
+    // for a message that READS AS A QUESTION the keyword verdict is exactly the guess the reader exists
+    // to check, and the two mistakes are not the same size: wrong-toward-chat is one message (the reply
+    // already offers to build), wrong-toward-build is a whole build nobody asked for.
     const verdict = await classifyIntentSmart('can you build me a todo app?', async () => { throw new Error('down'); });
-    expect(verdict).toBe('new_build');
+    expect(verdict).toBe('chat');
+    // A STATEMENT or ORDER with the reader down keeps the keyword verdict exactly as before — this is
+    // what keeps a plain edit an edit when the free provider is slow.
+    expect(await classifyIntentSmart('add a payment button', async () => { throw new Error('down'); })).toBe('new_build');
   });
 });
 

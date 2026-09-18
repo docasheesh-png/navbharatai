@@ -37,6 +37,7 @@ import { adminEmailList } from './adminEmails';
 import { resolveEmailConfig, sendAlertEmail } from './alertEmail';
 import { capacityExtraAlerts } from './publishCapacityAlerts';
 
+import { parseEnvNumber } from './envNumber';
 export const ALERT_STATE_COLLECTION = 'monitor_alert_state';
 export const ALERT_STATE_DOC = 'current';
 
@@ -347,8 +348,8 @@ export function sandboxSpikeMultiple(): number {
 
 /** Below this much spend in the window, a spike is not worth a notification. */
 export function sandboxSpikeMinUsd(): number {
-  const raw = Number(process.env.MONITOR_SANDBOX_SPIKE_MIN_USD);
-  return Number.isFinite(raw) && raw >= 0 ? raw : 1;
+  const raw = parseEnvNumber(process.env.MONITOR_SANDBOX_SPIKE_MIN_USD);
+  return raw !== null && raw >= 0 ? raw : 1;
 }
 
 export interface AlertSweepDeps {

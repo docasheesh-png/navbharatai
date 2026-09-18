@@ -142,13 +142,29 @@ describe('🔒 the wiring — every half of this fix, pinned where it lives', ()
     // first recorded in the learned-capability memo (`rememberStarvedWhileClamped`) so this model is
     // never clamped again in this process. The behaviour this case guards — throw, never return an
     // unusable turn — is unchanged, and the two lines are pinned together so neither can be dropped.
+    // ⚠️ Updated a THIRD time on 2026-09-17 (autopsy d98dae01): the call gained a fourth argument —
+    // the LANE's remaining clock, when that is what bounded the call rather than this engine's own
+    // cap. Without it the report blamed FLOOR_TIMEOUT_CAP_MS for a 2,314-token ceiling that the fast
+    // lane's 90 s plan cap had decided, sending the next autopsy to fix arithmetic that was already
+    // correct. The behaviour this case guards is STILL unchanged: throw, never return an unusable
+    // turn. Pinned whole, for the reason the note above gives.
     expect(runner).toContain('if (!budget.reasoningUnclamped) rememberStarvedWhileClamped(thinkingModel);');
-    expect(runner).toContain('throw starvedBudgetError(budget.maxTokens, budget.requested, budget.reasoningUnclamped);');
+    expect(runner).toContain(`throw starvedBudgetError(
+        budget.maxTokens,
+        budget.requested,
+        budget.reasoningUnclamped,
+        bound.source === 'deadline' ? timeoutMs : undefined,
+      );`);
     expect(runner).toContain('if (turnStarvedItsBudget(result)) {');
   });
 
   it('the chain retires the starved rung by MODEL, so sibling rungs and the backstop survive', () => {
-    expect(chain).toContain('(isModelUnavailableError(err) || isStarvedBudgetError(err)) && entry.modelId');
+    // ⚠️ Updated 2026-09-17 (autopsy 57875eb3): the starvation key moved from `${name}::${model}` to
+    // provider FAMILY + model (`starvedKeyFor`), because a 51-key pool re-proved one model's
+    // starvation key by key for 26 minutes. The property this case guards — retirement is by MODEL,
+    // never by the whole bench name — is unchanged: the family key still carries the model id.
+    expect(chain).toContain('if (isStarvedBudgetError(err)) return starvedKeyFor(entry);');
+    expect(chain).toContain('const starvedKeyFor = (entry: NamedRunner): string => `${entry.reportAs ?? entry.name}::${entry.modelId ?? \'\'}`;');
     expect(chain).toContain('isFatalProviderError(err) || isModelUnavailableError(err) || isStarvedBudgetError(err)');
   });
 

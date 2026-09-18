@@ -14,7 +14,7 @@ import { applyReportMark, type ReportTriage } from './reportTriage';
 import { getServerDb } from '../lib/serverDb';
 import { audit } from '../lib/audit';
 import { trimReportForStorage } from './DiagnosticsStore';
-import { type BuildDiagnosticsReport } from './BuildDiagnostics';
+import { outcomeCodeOf, severityOfOutcome, type BuildDiagnosticsReport } from './BuildDiagnostics';
 
 const COLLECTION = 'admin_build_reports';
 /** Keep the inbox bounded on read; the collection itself is admin-managed. */
@@ -133,6 +133,16 @@ export interface AdminBuildReportMeta {
   buildMs: number | null;
   rootCause: string | null;
   summary: string | null;
+  /**
+   * THE BUILD'S OWN `OUTCOME_*` CODE and the severity it was recorded at — the machine fact behind
+   * `rootCause`, projected here for the same reason `DiagnosticsStore.listAllDiagnostics` projects it
+   * (2026-09-17): the admin's "Top failure patterns" card classifies failures from THIS meta, and a
+   * classifier that has only the prose files a fully-built app as "the run ended before it finished"
+   * and a novel sentence as its own pattern. Absent on records written before this field existed —
+   * those classify by text, honestly, as before.
+   */
+  outcomeCode?: string | null;
+  outcomeSeverity?: string | null;
   /**
    * HOW THE BUILD'S OWN ETA HELD UP, projected into the meta so the admin list can count estimate
    * accuracy without fetching every full report — the same reasoning as `healCount` below.
@@ -365,6 +375,9 @@ export function buildAdminReportRecord(
       billedUsd: typeof trimmed.billing?.billedUsd === 'number' ? trimmed.billing.billedUsd : null,
       buildMs,
       rootCause: cap(trimmed.rootCause, 400),
+      // The machine fact behind the prose — read from the same issue list the report already carries.
+      outcomeCode: outcomeCodeOf(trimmed.issues) || null,
+      outcomeSeverity: severityOfOutcome(trimmed.issues),
       // Guarded field-by-field rather than spread: a legacy or malformed record must leave these
       // undefined ("not known"), never land a NaN that a later average would silently swallow.
       etaRatio: Number.isFinite(Number(trimmed.etaAccuracy?.ratio)) ? Number(trimmed.etaAccuracy?.ratio) : undefined,

@@ -950,17 +950,17 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                     <div className="flex gap-2 mt-2 flex-wrap">
                       <button
                         onClick={() => { void navigator.clipboard?.writeText(`${window.location.origin}/store/app/${a.id}`); }}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised hover:bg-raised text-[11px] text-body transition-colors"
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised hover:bg-raised-hover text-[11px] text-body transition-colors"
                       ><Link2 size={11} /> Copy link</button>
                       <button
                         onClick={() => setPlayingId(a.id)}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised hover:bg-raised text-[11px] text-body transition-colors"
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised hover:bg-raised-hover text-[11px] text-body transition-colors"
                       ><Play size={11} /> Open</button>
                       {a.requiresPassword ? (
                         <button
                           onClick={() => void webAppAction(a.id, { visibility: 'public' })}
                           disabled={webBusy === a.id}
-                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised hover:bg-raised disabled:opacity-40 text-[11px] text-body transition-colors"
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised hover:bg-raised-hover disabled:opacity-40 text-[11px] text-body transition-colors"
                         >Make public</button>
                       ) : (
                         <button
@@ -969,7 +969,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                             if (pw && pw.length >= 4) void webAppAction(a.id, { visibility: 'private', password: pw });
                           }}
                           disabled={webBusy === a.id}
-                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised hover:bg-raised disabled:opacity-40 text-[11px] text-body transition-colors"
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised hover:bg-raised-hover disabled:opacity-40 text-[11px] text-body transition-colors"
                         ><Lock size={11} /> Make private</button>
                       )}
                       {/* SELLING IS PARKED (admin 2026-08-15) — every app is free to remix for now.
@@ -1050,7 +1050,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                     <div className="flex gap-2 mt-2.5">
                       <button
                         onClick={() => setPlayingId(r.appId)}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-raised hover:bg-raised text-[11px] text-body transition-colors"
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-raised hover:bg-raised-hover text-[11px] text-body transition-colors"
                       ><Play size={11} /> See it</button>
                       <button
                         onClick={() => void decideWeb(r.appId, 'removed')}
@@ -1098,7 +1098,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                   <div className="flex gap-2 mt-2.5">
                     <button
                       onClick={() => setPlayingId(a.id)}
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-raised hover:bg-raised text-[11px] text-body transition-colors"
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-raised hover:bg-raised-hover text-[11px] text-body transition-colors"
                     ><Play size={11} /> Try it</button>
                     <button
                       onClick={() => void decideWeb(a.id, 'listed')}
@@ -1185,7 +1185,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                         <button
                           onClick={() => void decide(a.id, 'rejected')}
                           disabled={reviewing === a.id}
-                          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-raised hover:bg-raised text-xs font-semibold text-body disabled:opacity-40"
+                          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-raised hover:bg-raised-hover text-xs font-semibold text-body disabled:opacity-40"
                         >
                           <X size={12} /> Reject
                         </button>

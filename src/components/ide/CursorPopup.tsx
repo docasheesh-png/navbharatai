@@ -214,25 +214,25 @@ export const CursorPopup: React.FC<CursorPopupProps> = ({
         <div className="flex-1 grid grid-cols-5 gap-1">
           <button 
             onClick={() => handleAction('left')}
-            className="flex h-9 items-center justify-center bg-raised border border-line rounded-xl hover:bg-raised active:scale-90 transition-all text-faint hover:text-ink"
+            className="flex h-9 items-center justify-center bg-raised border border-line rounded-xl hover:bg-raised-hover active:scale-90 transition-all text-faint hover:text-ink"
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
           <button 
             onClick={() => handleAction('right')}
-            className="flex h-9 items-center justify-center bg-raised border border-line rounded-xl hover:bg-raised active:scale-90 transition-all text-faint hover:text-ink"
+            className="flex h-9 items-center justify-center bg-raised border border-line rounded-xl hover:bg-raised-hover active:scale-90 transition-all text-faint hover:text-ink"
           >
             <ArrowRight className="w-4 h-4" />
           </button>
           <button 
             onClick={() => handleAction('up')}
-            className="flex h-9 items-center justify-center bg-raised border border-line rounded-xl hover:bg-raised active:scale-90 transition-all text-faint hover:text-ink"
+            className="flex h-9 items-center justify-center bg-raised border border-line rounded-xl hover:bg-raised-hover active:scale-90 transition-all text-faint hover:text-ink"
           >
             <ArrowUp className="w-4 h-4" />
           </button>
           <button 
             onClick={() => handleAction('down')}
-            className="flex h-9 items-center justify-center bg-raised border border-line rounded-xl hover:bg-raised active:scale-90 transition-all text-faint hover:text-ink"
+            className="flex h-9 items-center justify-center bg-raised border border-line rounded-xl hover:bg-raised-hover active:scale-90 transition-all text-faint hover:text-ink"
           >
             <ArrowDown className="w-4 h-4" />
           </button>

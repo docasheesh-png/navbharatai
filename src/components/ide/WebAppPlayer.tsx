@@ -410,7 +410,7 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
           <div className="h-full flex items-center justify-center p-6 text-center">
             <div>
               <p className="text-sm text-body mb-3">{error}</p>
-              <button onClick={onClose} className="px-4 py-2 rounded-lg bg-raised hover:bg-raised text-sm text-ink transition-colors">Back to the store</button>
+              <button onClick={onClose} className="px-4 py-2 rounded-lg bg-raised hover:bg-raised-hover text-sm text-ink transition-colors">Back to the store</button>
             </div>
           </div>
         ) : (
